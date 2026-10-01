@@ -225,6 +225,37 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    * moment each item settles.
    */
   muted?: () => boolean;
+  /**
+   * The press's optimistic half: change the screen before the server answers.
+   *
+   * FB6, item 2 (README "Interactions & behavior": "optimistic Held/Killed with
+   * Undo until the server confirms"). A row that only changes when the round
+   * trip lands is the "line going back and forth" the owner opened this unit
+   * about, so a Hold or a Kill moves the row in the same paint as the press and
+   * the server's answer is a confirmation rather than the first sign of life.
+   *
+   * Whatever this returns is handed back to `rollback` if the press fails -- so
+   * the natural return is the previous state, in whatever shape the caller can
+   * put back. It runs inside React Query's `onMutate`, which is why the
+   * mutation's own `isPending` is already true by the time it runs: the button
+   * is disabled and the row has moved in the same commit.
+   *
+   * The one shape this must not take is "return the old value and let the hook
+   * guess what to do with it": a hook that both owns the change and knows how to
+   * undo it would have to know what the change was, and the screens disagree
+   * (Today holds lead rows, the Queue holds a windowed page of them). The
+   * caller's two callbacks are the whole contract.
+   */
+  optimistic?: (variables: Variables) => unknown;
+  /**
+   * Put back what `optimistic` changed, when the press did NOT take.
+   *
+   * Called for both ways a press fails -- a thrown call and an answer that
+   * refused with `{ok:false}` -- because from the editor's side they are the
+   * same thing: the row moved and the desk says it did not. `context` is
+   * whatever `optimistic` returned for this press.
+   */
+  rollback?: (context: unknown, variables: Variables) => void;
 };
 
 /**
@@ -235,7 +266,21 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
  * mean exactly what they meant. The only change a converted mutation sees is
  * that a failure now says why.
  */
-export function useDeskMutation<Data, Variables>(
+/**
+ * The caller's `optimistic` return value out of React Query's context wrapper.
+ *
+ * The wrapper exists because `onMutate` returning `undefined` and `onMutate`
+ * returning a caller's `undefined` are the same thing to React Query, and the
+ * rollback should be called either way -- a press that optimistically changed
+ * nothing still has nothing to put back, and a `rollback` that is skipped
+ * because a caller optimistically returned `undefined` would be a rule with an
+ * exception nobody could see.
+ */
+function contextOf(mutationContext: unknown): unknown {
+  return (mutationContext as { context?: unknown } | undefined)?.context;
+}
+
+export function useDeskMutation<Data, Variables = void>(
   options: DeskMutationOptions<Data, Variables>,
 ): UseMutationResult<Data, Error, Variables> {
   const optionsRef = useRef(options);
@@ -245,6 +290,21 @@ export function useDeskMutation<Data, Variables>(
 
   return useMutation<Data, Error, Variables>({
     mutationFn: (variables: Variables) => optionsRef.current.mutationFn(variables),
+    /*
+      THE OPTIMISTIC HALF (FB6). `onMutate` runs before the call and its return
+      value is React Query's `context`, handed to both `onSuccess` and `onError`
+      -- which is exactly the shape an optimist needs: the caller says what it
+      changed and gets the same handle back to undo it. A callback that throws
+      must not take the press down with it, so the failure is caught and the
+      press carries on with no context to roll back.
+    */
+    onMutate: async (variables: Variables) => {
+      try {
+        return { context: await optionsRef.current.optimistic?.(variables) };
+      } catch {
+        return { context: undefined };
+      }
+    },
     /*
       ASYNC ON PURPOSE, and react-query is what makes it work: it awaits
       `onSuccess` before it dispatches "success", so `isPending` stays true for
@@ -257,9 +317,16 @@ export function useDeskMutation<Data, Variables>(
       answers a rejection from `onSuccess` by calling `onError`, which would
       report the same failure a second time. One press, one sentence.
     */
-    onSuccess: async (data: Data, variables: Variables) => {
+    onSuccess: async (data: Data, variables: Variables, mutationContext: unknown) => {
       const refusal = deskAnswerFailure(data);
       if (refusal) {
+        /*
+          A REFUSAL IS A FAILED PRESS, and the row that already moved has to move
+          back. The desk's server functions answer `{ok:false, error}` far more
+          often than they throw, so a rollback wired only to `onError` would
+          leave a held row held on the screen while the desk said it was not.
+        */
+        optionsRef.current.rollback?.(contextOf(mutationContext), variables);
         if (!optionsRef.current.muted?.())
           deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
         return;
@@ -267,6 +334,11 @@ export function useDeskMutation<Data, Variables>(
       try {
         await optionsRef.current.after?.(data, variables);
       } catch (error) {
+        /*
+          NOT rolled back: the call itself took, so the row's new state is the
+          true one. What failed here is the follow-up (the invalidations), and
+          saying so is the whole of the report.
+        */
         if (!optionsRef.current.muted?.())
           deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
         return;
@@ -276,7 +348,8 @@ export function useDeskMutation<Data, Variables>(
         if (message) deskToast(message, { tone: "ok", undo });
       }
     },
-    onError: (error: Error) => {
+    onError: (error: Error, variables: Variables, mutationContext: unknown) => {
+      optionsRef.current.rollback?.(contextOf(mutationContext), variables);
       if (optionsRef.current.muted?.()) return;
       deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
     },

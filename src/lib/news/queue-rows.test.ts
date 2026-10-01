@@ -102,9 +102,15 @@ test("Open is every lead that is neither killed nor published, and Held is not i
     lead({ id: 4, status: "published" }),
   ];
   const open = queueSelect(rows, [], { filter: "open", section: "all", sort: "best", needle: "" });
+  /*
+    FB6, 7a. The case's own title said "and Held is not in it" while asserting
+    [1, 2] -- the held lead, in the tab that says it excludes it. The owner
+    reported exactly that as a bug on 2026-09-30, so the title was the intent
+    and the expectation was the defect.
+  */
   assert.deepEqual(
     open.map((l) => l.id),
-    [1, 2],
+    [1],
   );
 });
 
@@ -259,8 +265,13 @@ test("the pills count the whole list, not the page", () => {
   ];
   const counts = queueCounts(rows, PRINTED);
   assert.deepEqual(counts, {
-    // 1, 2, 3 and 6: a held lead is still open, a killed or printed one is not.
-    open: 4,
+    /*
+      FB6, owner report 7a: "Held leads appear under the Open filter/count on
+      Today/Queue -- they must not." This read 4 (the two held leads counted as
+      open work) and the pill printed it. Open is now 1 and 6 only, and the two
+      held leads are the Held tab's own number.
+    */
+    open: 2,
     held: 2,
     killed: 1,
     printed: 1,

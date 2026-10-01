@@ -49,6 +49,8 @@ export function LeadRowView({
   batchDisabled = false,
   onBatchSelect,
   roomy = false,
+  selected = false,
+  backPending = false,
   onHoldWithReason,
   onEdit,
   onDarkDesk,
@@ -78,6 +80,16 @@ export function LeadRowView({
   onDelete?: () => void;
   deleteSelected?: boolean;
   onDeleteSelect?: (selected: boolean) => void;
+  /**
+   * FB6, item 5: the Release/Bring-back press is in flight.
+   *
+   * `Release` was the report's clearest SILENT FAIL on this screen (Table B,
+   * Queue: "the only row-level way back for Held" -- "nothing" at 100 ms, no
+   * success, no error), and `Back` on a killed lead was the same and buried a
+   * level deep in the menu. Both are on the row now and both draw this, which
+   * the screen owns because the mutation is the screen's.
+   */
+  backPending?: boolean;
   onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
@@ -85,6 +97,15 @@ export function LeadRowView({
   batchDisabled?: boolean;
   onBatchSelect?: (selected: boolean) => void;
   roomy?: boolean;
+  /**
+   * FB6, item 4: the keyboard cursor is on this row.
+   *
+   * The Queue's J/K move a `.sel` down the table exactly as Today's do. The
+   * state comes in as a prop rather than being read off a lead id inside the
+   * row, because the cursor is the SCREEN's (an index into the rows on screen,
+   * clamped on every render) and the row has no idea what else is drawn.
+   */
+  selected?: boolean;
   /**
    * Redesign phase 2a (README "3. Queue": "More ▾ opens the lead menu"), then
    * unit BN's drawn order.
@@ -369,7 +390,8 @@ export function LeadRowView({
         "lead-row" +
         (lead.status === "killed" ? " dead" : "") +
         (roomy ? " roomy" : "") +
-        (deleteSelected ? " picked" : "")
+        (deleteSelected ? " picked" : "") +
+        (selected ? " sel" : "")
       }
     >
       {/*
@@ -496,13 +518,33 @@ export function LeadRowView({
       </span>
       <span className="queue-filed">{formatAge(lead.created_at)}</span>
       <div className="lead-actions row-acts queue-acts">
-        {closed ? null : held ? (
+        {/*
+          FB6, item 5: the way back belongs ON THE ROW.
+
+          A killed lead's only way back was "More ▾ → Back" -- one level deep,
+          in a menu, with "nothing" at 100 ms, no success and no error sentence
+          (FB0-Report Table B, Queue, "More ▾ Back (killed rows)": NO UNDO +
+          SILENT FAIL); the row's own action cell rendered `null` for it, so the
+          cell an editor's eye goes to was empty. It is "Bring back" beside the
+          row now, and the menu item stays where it was.
+
+          Published keeps the empty cell: a printed story is taken down from
+          Published, not from here, and a "Bring back" on it would promise
+          something this press does not do.
+        */}
+        {lead.status === "killed" ? (
           onBack ? (
-            <InkButton tone="quiet" small onClick={onBack}>
+            <InkButton tone="quiet" small pending={backPending} pendingLabel="Bringing it back…" onClick={onBack}>
+              Bring back
+            </InkButton>
+          ) : null
+        ) : held ? (
+          onBack ? (
+            <InkButton tone="quiet" small pending={backPending} pendingLabel="Releasing…" onClick={onBack}>
               Release
             </InkButton>
           ) : null
-        ) : (
+        ) : closed ? null : (
           <Link
             to="/desk/story/$leadId"
             params={{ leadId: String(lead.id) }}

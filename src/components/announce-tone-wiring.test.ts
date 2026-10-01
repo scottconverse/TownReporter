@@ -73,9 +73,26 @@ const SCAN = source("./daily-scan-settings.tsx");
 
 describe("a failure is never announced in the accent that means success", () => {
   it("tones the draft that did not start as an error", () => {
-    const startDraft = between(INDEX, "const startDraft = useMutation({", "KEYBOARD TRIAGE");
-    for (const args of callsSaying(startDraft, '"That draft did not start."'))
-      assert.match(args, /"err"/, `a failed draft start was announced as a success: ${args}`);
+    /*
+      FB6 moved this press off `announceToDesk` and onto `useDeskMutation`, so
+      its tone is no longer a second argument a call site can forget: the shared
+      family raises a failed press with `tone: "err"` unconditionally
+      (`desk-action.ts`, pinned by `scripts/fb5-desk-action.test.mjs` and by the
+      "Could not change that lead." case in `scripts/fb5-desk-wiring.test.mjs`).
+      What this file can still pin at the call site is the other half -- that
+      the press names what failed and hands a reason through.
+    */
+    const startDraft = between(INDEX, "const startDraft = useDeskMutation({", "KEYBOARD TRIAGE");
+    assert.match(
+      startDraft,
+      /failedLead: "Could not start that draft\. "/,
+      "the draft that did not start says nothing about what failed",
+    );
+    assert.match(
+      startDraft,
+      /useDeskMutation\(/,
+      "a plain useMutation here would report its failures through whatever the call site remembers to write",
+    );
   });
 
   it("tones the refused import as an error", () => {
@@ -100,7 +117,19 @@ describe("a failure is never announced in the accent that means success", () => 
   });
 
   it("leaves a finished press in the accent that means the next step", () => {
-    for (const args of callsSaying(INDEX, '"Draft queued — it is writing now."'))
-      assert.doesNotMatch(args, /"err"/, `a finished press was painted as a failure: ${args}`);
+    /*
+      FB6: the sentence is `startDraft`'s `done` now, drawn on the shared
+      family's success bar (which is `tone: "ok"` unless a caller says
+      otherwise), so the tone cannot be mistaken for a failure by construction.
+      The sentence itself is still pinned -- it is the editor's whole report
+      that the press took.
+    */
+    const startDraft = between(INDEX, "const startDraft = useDeskMutation({", "KEYBOARD TRIAGE");
+    assert.match(startDraft, /done: \(\) => "Draft queued — it is writing now\./);
+    assert.doesNotMatch(
+      startDraft,
+      /tone: "err"/,
+      "a finished press painted as a failure",
+    );
   });
 });
