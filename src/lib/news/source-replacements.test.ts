@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   beatsForSource,
+  candidateIsWatchedSource,
   candidateLabel,
   hostOf,
   isRefusedHost,
@@ -13,6 +14,7 @@ import {
   sitemapCandidates,
   titleFromUrl,
   type ReplacementCandidate,
+  type ReplacementVia,
 } from "./source-replacements.ts";
 
 /*
@@ -319,5 +321,48 @@ describe("the small helpers", () => {
       beats: ["planning"],
     };
     assert.equal(candidate.via, "sitemap");
+  });
+});
+
+/*
+  MEDIUM-1 (A-B8). "USE THIS INSTEAD" CAN NEVER FILE A SIBLING.
+
+  Every candidate the FREE panel produces is a `sibling` -- it is built from
+  the newsroom's own accepted sources -- and pressing "Use this instead" sends
+  that URL to the proposal door, which refuses any URL the newsroom already has
+  a row for (`insertProposedNewsroomSource`). So the button promised a
+  replacement it could never deliver, and the toast afterwards said the page
+  was already a source, which the editor could see before they pressed.
+
+  The panel asks this question before it draws anything, so the rule is here
+  rather than in JSX -- where it can be asserted.
+*/
+describe("what the replacement panel may offer (MEDIUM-1)", () => {
+  it("a sibling is a source the newsroom already watches, so there is nothing to file", () => {
+    assert.equal(
+      candidateIsWatchedSource({ via: "sibling" }),
+      true,
+      "siblingCandidates builds from the newsroom's own accepted rows",
+    );
+  });
+
+  it("every other way of finding a candidate is a page nobody has filed yet", () => {
+    for (const via of ["sitemap", "sitemap-index", "feed", "canonical", "moved"] as ReplacementVia[])
+      assert.equal(candidateIsWatchedSource({ via }), false, via);
+  });
+
+  it("keeps the press on exactly the candidates it could file", () => {
+    // The panel's candidates, as `rankCandidates` hands them over.
+    const offered = rankCandidates([
+      { url: "https://sibling.test/planning", via: "sibling" },
+      { url: "https://city.test/agendas", via: "sitemap" },
+    ]);
+    assert.deepEqual(
+      offered.map((c) => [c.url, candidateIsWatchedSource(c)]),
+      [
+        ["https://sibling.test/planning", true],
+        ["https://city.test/agendas", false],
+      ],
+    );
   });
 });

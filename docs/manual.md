@@ -256,11 +256,10 @@ membership at run time, so editing a pack never rewrites a scan already
 started, and a source that later stops being accepted drops out of the pack
 automatically. Running a pack does not change any section configuration.
 
-**How the reader fetches.** It identifies itself as `TownReporter/1.0`, makes one
-request at a time to any one host with a few seconds between them, and reads a
-site's `robots.txt` only to find its `Sitemap:` line — it does not treat
-`robots.txt` as permission, because it only ever reads pages an editor put on
-the watch list. A site that answers "come back later" or blocks the desk is
+**How the reader fetches.** It identifies itself as `TownReporter/1.0` and makes
+one request at a time to any one host with a few seconds between them. It reads
+only pages an editor put on the watch list, and does not fetch a site's
+`robots.txt` at all. A site that answers "come back later" or blocks the desk is
 recorded with the time it may next be asked and retried then, never hammered.
 
 **What completed runs report.** A completed scan records the path from selection

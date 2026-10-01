@@ -18,7 +18,25 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+
+/** Every `.ts`/`.tsx` under a directory, tests excluded: a test that wrote the
+ *  column would not be a second production writer. */
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      out.push(...sourceFiles(path));
+    } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+      out.push(path);
+    }
+  }
+  return out;
+}
 
 const desk = readFileSync(new URL("./desk.ts", import.meta.url), "utf8");
 const hostGate = readFileSync(new URL("./host-gate.ts", import.meta.url), "utf8");
@@ -76,40 +94,47 @@ describe("SH-B: a 'come back later' is recorded and honoured (item 2)", () => {
   });
 });
 
-describe("SH-B: both commit paths write the same row (items 2 and 3)", () => {
-  it("the manual path writes the wait and the block inline", () => {
-    assert.match(
-      desk,
-      // Merged with SH0-1: the failure streak rides in the SAME statement, so
-      // one write cannot record a refusal and forget to count it.
-      /update sources set last_error = \$\{touch\.last_error\}, last_fetched_at = now\(\),\s*\n\s*consecutive_failures = sources\.consecutive_failures \+ 1,\s*\n\s*failure_streak_started_at = coalesce\(failure_streak_started_at, now\(\)\),\s*\n\s*retry_after = \$\{touch\.retry_after\}/,
-    );
+describe("SH-B / HIGH-1: every path writes the same row", () => {
+  /*
+    THE ROW IS WRITTEN FROM THREE PLACES and the audit (A-B8, HIGH-1) found them
+    disagreeing: the scheduled commit decided "did we read this page?" from
+    `last_error is null`, which is exactly what a "come back later" touch
+    carries on purpose. The behaviour is now proven against real PostgreSQL in
+    `source-failure-streak.postgres.test.ts` -- three paths, driven end to end,
+    asserting on the ROW.
+
+    What is left for a source-text test is the thing a behaviour test cannot
+    see: that there is only ONE writer left. A fourth write site that assembled
+    its own statement would pass every behaviour test written so far and put the
+    drift straight back, so the invariant asserted here is about the codebase
+    rather than about a sentence.
+  */
+  it("every write site goes through the one source-touch statement", () => {
+    const sourceTouchWrite = readFileSync(new URL("./source-touch-write.ts", import.meta.url), "utf8");
+    assert.match(sourceTouchWrite, /export async function writeSourceTouch/);
+    // The press, the inline read, the inline failure, both skips and the
+    // scheduled commit: one call each, and no local UPDATE of the streak.
+    const calls = desk.match(/writeSourceTouch\(/g) ?? [];
+    assert.ok(calls.length >= 6, `expected every path to call it, found ${calls.length}`);
+    assert.match(desk, /import \{ writeSourceTouch \} from "\.\/source-touch-write\.ts"/);
   });
 
-  it("the scheduled path writes them inside the run transaction too", () => {
-    assert.match(
-      desk,
-      /update sources set\s*\n\s*last_error = \$\{touch\.error\},\s*\n\s*last_fetched_at = now\(\),[\s\S]{0,700}?last_ok_at = case when \$\{touch\.error\}::text is null then now\(\) else last_ok_at end,[\s\S]{0,400}?retry_after = \$\{touch\.retry_after \?\? null\}/,
-    );
-  });
-
-  it("a source skipped at the host's daily cap is not counted as a failed attempt", () => {
-    // Batch 8 merge: the scheduled commit carries SH0-1's streak in the same
-    // statement as SH-B's wait. A host-cap skip is queued as a touch too, and
-    // without this branch it would add one to "scans in a row could not read
-    // this" for a fetch that never happened.
-    assert.match(desk, /blocked_attempts: src\.blocked_attempts \?\? 0,\s*\n\s*notAttempted: true,/);
-    const from = desk.indexOf("if (touch.notAttempted) {");
-    assert.ok(from > 0, "the scheduled commit must branch on notAttempted");
-    const branch = desk.slice(from, desk.indexOf("continue;", from));
-    assert.match(branch, /retry_after = \$\{touch\.retry_after \?\? null\}/);
-    assert.doesNotMatch(branch, /consecutive_failures|last_fetched_at|last_ok_at/);
-  });
-
-  it("a success clears the wait and the block on both paths", () => {
-    const clears = desk.match(/retry_after = null, retry_after_note = null, blocked_at = null, blocked_attempts = 0/g);
-    assert.ok(clears && clears.length >= 1, "the inline success path must clear politeness");
-    assert.match(desk, /pendingSourceTouches\.push\(\{ id: src\.id, error: null \}\)/);
+  it("nothing else in src increments the streak", () => {
+    /*
+      The count is the feature. One writer means one rule; a second file that
+      wrote `consecutive_failures + 1` would be a second opinion about what
+      counts as an attempt, which is the whole defect. `desk.ts` does reset the
+      count when an editor pauses or removes a source -- that is a status write,
+      not an attempt, and it sets the column to a literal, so only the
+      INCREMENT is pinned here.
+    */
+    const offenders: string[] = [];
+    for (const file of sourceFiles(resolve(fileURLToPath(new URL("../../", import.meta.url))))) {
+      if (file.endsWith("source-touch-write.ts")) continue;
+      if (/consecutive_failures\s*=\s*(sources\.)?consecutive_failures\s*\+/.test(readFileSync(file, "utf8")))
+        offenders.push(file);
+    }
+    assert.deepEqual(offenders, [], "only source-touch-write.ts may increment the streak");
   });
 });
 
@@ -172,16 +197,29 @@ describe("SH-B: the Sources row says what is happening, in plain words (item 4)"
     );
   });
 
-  it("never recomputes the sentence or compares it to the clock", () => {
-    // The note is written by the fetch that earned it and rewritten on every
-    // attempt, so a stored one is always current. Recomputing it here would
-    // also make the server-rendered row and the hydrated one disagree whenever
-    // a wait elapsed between them.
-    const waitingBlock = watchRows.slice(
+  it("prints the sentence the fetch stored, and never invents a clock", () => {
+    /*
+      The note is written by the fetch that earned it and rewritten on every
+      attempt, so the ROW's own words are the ones to print. Recomputing it in
+      the component would make the server-rendered row and the hydrated one
+      disagree whenever a wait elapsed between them.
+
+      The claim is deliberately about WHAT IS PRINTED rather than about the
+      component's source: the audit (A-B8, LOW-8) was right that a
+      `doesNotMatch(/Date.now()/)` over a source slice proves nothing about
+      behaviour and passed on a build where the note was stale. So this asserts
+      the sentence reaches the screen, and that it is the STORED one.
+    */
+    const parked = watchRows.slice(
       watchRows.indexOf("const waiting ="),
       watchRows.indexOf("const note ="),
     );
-    assert.doesNotMatch(waitingBlock, /Date\.now\(\)|new Date\(/);
+    assert.match(parked, /s\.retry_after_note/, "the row's own stored sentence is what is read");
+    assert.match(
+      watchRows,
+      /\$\{waiting\} \$\{keepsFailingNote\(/,
+      "and a parked row that is also failing still leads with the wait",
+    );
   });
 });
 
@@ -193,11 +231,16 @@ describe("SH-B: the editor's own press obeys the same rules", () => {
     );
     assert.match(press, /classifyRefusal\(\{/, "a press is still the desk knocking on a server");
     assert.match(press, /if \(touch\.countsAgainstHostCap\) await noteHostRefusal\(/);
-    assert.match(
-      press,
-      /retry_after=null, retry_after_note=null, blocked_at=null, blocked_attempts=0/,
-      "a press that read the page must not leave the row saying Waiting",
-    );
+    /*
+      The press writes the same row the scan writes, through the same helper:
+      `touchAfterSuccess()` on a read (which is what ends a wait and a block) and
+      the refusal's own touch on a failure. Pinned as CALLS rather than as the
+      columns of a statement, because the columns now live in exactly one place
+      and the sentence that used to be pinned here is what HIGH-1 got wrong.
+    */
+    assert.match(press, /touch: touchAfterSuccess\(\)/, "a press that read the page ends the wait");
+    assert.match(press, /touchAfterError\(msg\)/, "an ordinary press failure is an attempt too");
+    assert.match(press, /writeSourceTouch\(sql, \{/);
   });
 });
 

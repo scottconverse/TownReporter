@@ -352,6 +352,25 @@ function rankOf(label: ReplacementLabel, host: string, officialHost?: string | n
 }
 
 /**
+ * IS THIS CANDIDATE ALREADY ONE OF THE SOURCES THE NEWSROOM WATCHES?
+ *
+ * Every candidate the free tier produces is a `sibling`, which is to say it was
+ * built out of this newsroom's own accepted rows (`siblingCandidates`). So the
+ * "Use this instead" press that used to be drawn beside each one could never
+ * file anything: it hands the URL to the proposal door, and that door refuses
+ * any URL the newsroom already has a row for -- accepted, dropped or already
+ * waiting -- because a page is not proposed twice.
+ *
+ * The press therefore stays only where pressing it can succeed; a sibling is
+ * information ("Already on your watch list") and nothing else (MEDIUM-1, A-B8).
+ * The rule lives here, in the pure module, rather than in the panel's JSX,
+ * where it can be asserted and where a second panel would have to find it.
+ */
+export function candidateIsWatchedSource(candidate: { via: ReplacementVia }): boolean {
+  return candidate.via === "sibling";
+}
+
+/**
  * The list the panel draws: refused, deduplicated, labelled, ordered.
  *
  * Order is by label first and by the caller's order inside a label, because

@@ -69,16 +69,147 @@ export const ALREADY_ON_FILE_MARKER = "(already on file)";
 const ON_FILE_SUFFIX = ` ${ALREADY_ON_FILE_MARKER}`;
 
 /**
+ * THE WORDS THAT NAME A DOCUMENT (MEDIUM-3, A-B8).
+ *
+ * A next step asks for a RECORD -- a licence, a report, minutes, an agenda, a
+ * permit. This is the vocabulary that says so. It is deliberately a list of
+ * document nouns rather than a model call: the question is whether the line is
+ * asking for a thing the file could hold, and that is a word question.
+ *
+ * A word that is not here is not a record: "Read the Colorado Shines notice
+ * board" is not asking for a document, and a step that asks for nothing in
+ * particular has nothing to be on file.
+ */
+const RECORD_NOUNS = new Set([
+  "agenda",
+  "agendas",
+  "application",
+  "applications",
+  "audit",
+  "audits",
+  "budget",
+  "budgets",
+  "certificate",
+  "certificates",
+  "complaint",
+  "complaints",
+  "contract",
+  "contracts",
+  "correspondence",
+  "document",
+  "documents",
+  "filing",
+  "filings",
+  "form",
+  "forms",
+  "inspection",
+  "inspections",
+  "invoice",
+  "invoices",
+  "licence",
+  "licences",
+  "license",
+  "licenses",
+  "log",
+  "logs",
+  "manual",
+  "manuals",
+  "minutes",
+  "notice",
+  "notices",
+  "ordinance",
+  "ordinances",
+  "order",
+  "orders",
+  "packet",
+  "packets",
+  "permit",
+  "permits",
+  "plan",
+  "plans",
+  "policy",
+  "policies",
+  "record",
+  "records",
+  "report",
+  "reports",
+  "resolution",
+  "resolutions",
+  "return",
+  "returns",
+  "ruling",
+  "rulings",
+  "statement",
+  "statements",
+  "study",
+  "studies",
+  "survey",
+  "surveys",
+  "transcript",
+  "transcripts",
+]);
+
+/** The singular of a record word, so "reports" on one side of the comparison
+ *  answers for "report" on the other. Crude on purpose: these words are a
+ *  closed list and the desk only ever compares them with each other. */
+function recordSingular(word: string): string {
+  if (word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+/** The record nouns a line asks for, as their singular forms. */
+function recordNounsIn(text: string): string[] {
+  const out = new Set<string>();
+  for (const token of text.split(/[^A-Za-z]+/)) {
+    if (!token) continue;
+    const lower = token.toLowerCase();
+    if (RECORD_NOUNS.has(lower)) out.add(recordSingular(lower));
+  }
+  return [...out];
+}
+
+/**
+ * A year, or a number long enough to be a record's own (a case number, a
+ * parcel). Short numbers are not distinctive -- "the 3 reports" is prose -- and
+ * anything longer is already a SPECIFIC, which the grounding pass above has
+ * checked.
+ */
+const RECORD_NUMBER = /\b\d{4,}\b/g;
+
+/** The years and long numbers in a line, as written. */
+function recordNumbersIn(text: string): string[] {
+  return text.match(RECORD_NUMBER) ?? [];
+}
+
+/**
  * Is this line asking for a record the file already has?
  *
- * Two conditions, and both are needed:
+ * THE MARKER SAYS "YOU HAVE THIS DOCUMENT", SO THE DOCUMENT IS WHAT MUST BE
+ * CHECKED (MEDIUM-3, A-B8). The old rule was "the step names at least one
+ * specific and every specific it names is grounded", and every specific the
+ * extractor can see is a NAME, an address, a date or a number -- never the
+ * record itself. So a capture that merely mentioned "Kid City USA Longmont"
+ * made "Request the 2025 inspection reports for Kid City USA Longmont" read as
+ * "(already on file)", and the editor skipped asking for a document the file
+ * does not hold. What had been established was that the NAME was on file.
  *
- *   - It names at least one specific. A next step that names nothing concrete
- *     ("interview the neighbours") is not asking for a record and gets no
- *     marker -- there is nothing to have on file.
- *   - Every specific it names is GROUNDED, i.e. some capture carries it. That
- *     is the whole test: `ungroundedSpecifics` returning nothing means the
- *     corpus already answers for every name, number and address in the line.
+ * Four conditions, and all of them are needed:
+ *
+ *   - It names something that says WHICH record -- a specific, or a year/long
+ *     number -- and every specific it names is GROUNDED.
+ *   - It names the RECORD it is asking for -- a word from `RECORD_NOUNS` --
+ *     and that word is on file too. A step that asks for no document gets no
+ *     marker, because there is nothing to have on file.
+ *   - Every year or long number it names is on file, so "the 2024 report" is
+ *     not marked by a file that holds the 2025 one.
+ *
+ * The first condition is a WEAKER anchor than it used to be, deliberately.
+ * It used to be `findSpecifics(text).length`, and the extractor does not treat
+ * "Kid City USA Longmont" -- an institution, not a person -- as a name, so a
+ * step that named only that could never be marked however much of the record
+ * the file held. A year is something to anchor on too, and it is exactly what
+ * the step in the incident anchors on.
  *
  * It is deliberately not a judgement about whether the step is worth doing.
  * "Read the licence record again" is legitimate work; what is not legitimate
@@ -87,8 +218,19 @@ const ON_FILE_SUFFIX = ` ${ALREADY_ON_FILE_MARKER}`;
 export function briefStepAlreadyOnFile(text: string, corpus: GroundingCorpus): boolean {
   if (!text.trim()) return false;
   if (text.includes(ALREADY_ON_FILE_MARKER)) return false;
-  if (!findSpecifics(text).length) return false;
-  return ungroundedSpecifics(text, corpus).length === 0;
+  const numbers = recordNumbersIn(text);
+  if (!findSpecifics(text).length && !numbers.length) return false;
+  if (ungroundedSpecifics(text, corpus).length) return false;
+  const haystack = normalisedCorpus(corpus);
+  const nouns = recordNounsIn(text);
+  if (!nouns.length) return false;
+  for (const noun of nouns) {
+    // Both forms, because a capture that holds "inspection reports" answers a
+    // step that asks for "the inspection report".
+    if (!containsTokens(haystack, noun) && !containsTokens(haystack, `${noun}s`)) return false;
+  }
+  for (const number of numbers) if (!containsTokens(haystack, number)) return false;
+  return true;
 }
 
 /**
