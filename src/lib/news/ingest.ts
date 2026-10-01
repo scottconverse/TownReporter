@@ -7,6 +7,8 @@ import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
 import { ingestPrimeGov, PrimeGovPortalError } from "./primegov.ts";
 import { FetchResponseRefusal, limitFor, readBodyCapped } from "./body-limit.ts";
+import { mustNotRetryImmediately, retryAfterFromHeaders } from "./fetch-politeness.ts";
+import type { FetchSchedule } from "./host-gate.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -31,12 +33,25 @@ export async function mapLimit<T, R>(
   return out;
 }
 
+/**
+ * One retry, for one bad moment -- and never for a refusal that was aimed at
+ * us.
+ *
+ * The 400 ms second attempt is right for a timeout or a 500: the host was
+ * having a bad moment and a single extra ask is not an imposition. It is wrong
+ * for a 429, where the site has explicitly told us to slow down, and for a
+ * 401/403, where the answer is not going to change in 400 ms -- in both cases
+ * the retry is a second entry in their log against us and it buys nothing.
+ * Those now fall straight through to the caller, which records the wait or the
+ * block instead of hammering (see `fetch-politeness.ts`).
+ */
 export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (/not fetchable|Invalid URL|Only http/i.test(msg)) throw err;
+    if (err instanceof IngestFetchError && mustNotRetryImmediately(err.status)) throw err;
     await new Promise((r) => setTimeout(r, 400));
     return fn();
   }
@@ -933,7 +948,39 @@ async function ingestDocumentRaw(
   }
 }
 
-export async function ingestUrl(raw: string): Promise<IngestResult> {
+/**
+ * A fetch that came back with a refusal the desk has an opinion about.
+ *
+ * The status and the `Retry-After` used to be thrown away at this boundary:
+ * `ingestUrl` reduced every unhappy response to the same `Fetch failed (403)`
+ * string, so the scan could not tell a site that had asked it to wait from one
+ * that had blocked it, and treated both as "Could not check". The message is
+ * kept byte-identical to what it always was -- the rows, the run receipt and
+ * the copy all read it -- and the two facts the desk now needs ride alongside
+ * it rather than inside it.
+ */
+export class IngestFetchError extends Error {
+  readonly status: number;
+  /** `Retry-After`, already turned into milliseconds from now; null when the
+   *  response did not carry a usable one. */
+  readonly retryAfterMs: number | null;
+  constructor(status: number, retryAfterMs: number | null) {
+    super(`Fetch failed (${status})`);
+    this.name = "IngestFetchError";
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export type IngestUrlOptions = {
+  /** Paces the request against the rest of the pass reading the same host. */
+  schedule?: FetchSchedule;
+  /** Read once, at the moment the response arrived, so a wait is measured from
+   *  the site's answer rather than from whenever the error is handled. */
+  now?: () => number;
+};
+
+export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Promise<IngestResult> {
   const url = await assertPublicHttpUrl(raw);
   const yt = await ingestYoutubeIfNeeded(url);
   if (yt) return { text: yt.text, titleHint: yt.title, extras: yt.extras ?? [] };
@@ -943,8 +990,14 @@ export async function ingestUrl(raw: string): Promise<IngestResult> {
   if (rd) return rd;
   const path = url.pathname.toLowerCase();
 
-  const res = await fetchPublicHttp(url);
-  if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
+  const res = await fetchPublicHttp(url, 4, undefined, options.schedule);
+  if (!res.ok) {
+    // Read the clock here, not when the error is caught: `Retry-After` is a
+    // wait measured from the site's answer, and a scan that handled the error
+    // a minute later must not hand the source a minute less of it.
+    const now = (options.now ?? Date.now)();
+    throw new IngestFetchError(res.status, retryAfterFromHeaders(res.headers, now));
+  }
   const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
   const capped = await readBodyCapped(res, limitFor(url.toString(), ctype));
   if (!capped.ok) {

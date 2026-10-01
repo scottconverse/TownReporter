@@ -1415,11 +1415,38 @@ function WatchRows({
         */
         const keeps = keepsFailing(s);
         const fresh = s.new_since_last_pass ?? 0;
+        /*
+          SH-B item 4: the row that is waiting.
+
+          Two states the editor could not previously tell apart from "we have
+          given up": a site that asked us to come back later, and a site that
+          has blocked us. Both are still on watch, both are parked until a
+          recorded time, and both say so in a sentence rather than a code --
+          "Asked us to come back at 3:40 PM — will retry then" / "Blocked us at
+          9:12 AM — trying again after 3:12 PM".
+
+          The sentence is read off `retry_after_note`, which the fetch wrote at
+          the moment the site answered. Nothing is recomputed here and nothing
+          compares against the clock, because the note is rewritten on every
+          attempt and cleared by a read that worked: it can never be stale.
+        */
+        const waiting = s.retry_after_note ?? null;
+        const blocked = waiting != null && s.blocked_at != null;
         const chip = paused
           ? { cls: "paused", label: "Paused" }
-          : keeps
-            ? { cls: "fail", label: "Keeps failing" }
-            : failed
+          : /*
+              Precedence, SH-B over SH0-3: a row the desk has parked says WHY it
+              is parked ("Waiting" / "Blocked") before it says "Keeps failing",
+              because the wait is the more useful fact -- the desk is coming
+              back at a recorded time. The streak still counts those attempts,
+              so a row that has been refused three times keeps its Delete press
+              and its replacement panel; only the word on the chip changes.
+            */
+            waiting != null
+            ? { cls: "wait", label: blocked ? "Blocked" : "Waiting" }
+            : keeps
+              ? { cls: "fail", label: "Keeps failing" }
+              : failed
               ? { cls: "fail", label: "Could not check" }
               : fresh > 0
                 ? { cls: "changed", label: "Changed" }
@@ -1428,14 +1455,23 @@ function WatchRows({
                   : { cls: "wait", label: "Not checked yet" };
         const note = paused
           ? "Paused · the scanner will not fetch it"
-          : keeps
-            ? keepsFailingNote({
-                count: s.consecutive_failures ?? 0,
-                lastError: s.last_error,
-                url: s.url,
-                firstFailedAt: s.failure_streak_started_at,
-              })
-            : failed
+          : waiting != null
+            ? keeps
+              ? // The wait is the reason, so the streak sentence drops its own
+                // "Last reason" clause rather than say the same thing twice.
+                `${waiting} ${keepsFailingNote({
+                  count: s.consecutive_failures ?? 0,
+                  firstFailedAt: s.failure_streak_started_at,
+                })}`
+              : waiting
+            : keeps
+              ? keepsFailingNote({
+                  count: s.consecutive_failures ?? 0,
+                  lastError: s.last_error,
+                  url: s.url,
+                  firstFailedAt: s.failure_streak_started_at,
+                })
+              : failed
               ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
               : fresh > 0
                 ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`

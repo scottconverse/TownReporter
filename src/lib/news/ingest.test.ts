@@ -469,3 +469,87 @@ describe("withRetry", () => {
     assert.equal(n, 2);
   });
 });
+
+/*
+  SH-B item 2: a refusal that was aimed at us is not retried.
+
+  The rule the owner asked for is "be polite and act like a human", and the one
+  place the desk was not was here: `withRetry`'s flat 400 ms second attempt ran
+  for every failure, including a 429 -- so a site that said "come back later"
+  got asked again before a person could have read the sentence, and the desk
+  recorded the site as broken. One request, then stop and record the wait.
+
+  The status and `Retry-After` survive the throw as well, because the scan has
+  to be able to tell "asked us to wait" from "blocked us" -- the two go on the
+  row as different sentences and different next-try times.
+*/
+describe("politeness: a refusal aimed at us is not hammered", () => {
+  const url = "https://example.com/news";
+
+  it("asks a 429ing host exactly once", async () => {
+    let calls = 0;
+    setFetchImplForTests(async () => {
+      calls += 1;
+      return new Response("Too many requests", { status: 429 });
+    });
+    try {
+      await assert.rejects(
+        () => withRetry(() => ingestUrl(url)),
+        /Fetch failed \(429\)/,
+      );
+      assert.equal(calls, 1, "the second ask is the one that gets us blocked");
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("carries the status and the site's Retry-After out of the fetch", async () => {
+    setFetchImplForTests(
+      async () => new Response("slow down", { status: 429, headers: { "retry-after": "120" } }),
+    );
+    try {
+      const err = await ingestUrl(url).then(
+        () => null,
+        (e: unknown) => e as { status?: number; retryAfterMs?: number | null },
+      );
+      assert.equal(err?.status, 429);
+      assert.equal(err?.retryAfterMs, 120_000);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("asks a 403ing host exactly once too", async () => {
+    let calls = 0;
+    setFetchImplForTests(async () => {
+      calls += 1;
+      return new Response("Access Denied", { status: 403 });
+    });
+    try {
+      await assert.rejects(
+        () => withRetry(() => ingestUrl(url)),
+        /Fetch failed \(403\)/,
+      );
+      assert.equal(calls, 1);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  it("still retries a 503 once -- a bad moment is not a rate limit", async () => {
+    let calls = 0;
+    setFetchImplForTests(async () => {
+      calls += 1;
+      return new Response("gateway down", { status: 503 });
+    });
+    try {
+      await assert.rejects(
+        () => withRetry(() => ingestUrl(url)),
+        /Fetch failed \(503\)/,
+      );
+      assert.equal(calls, 2);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+});
