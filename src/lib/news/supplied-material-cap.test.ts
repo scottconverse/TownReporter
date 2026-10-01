@@ -113,6 +113,20 @@ describe("capSuppliedMaterial", () => {
   });
 });
 
+describe("capSuppliedMaterial and surrogate pairs", () => {
+  it("never ends the kept text on half of an emoji", () => {
+    // 119,999 characters with no whitespace, then an emoji (two code units
+    // straddling the 120,000 limit), then more text.
+    const text = "a".repeat(SUPPLIED_MATERIAL_CAP - 1) + "\u{1F600}" + "b".repeat(50);
+    const cut = capSuppliedMaterial(text);
+    assert.equal(cut.cut, true);
+    const last = cut.text.charCodeAt(cut.text.length - 1);
+    assert.ok(!(last >= 0xd800 && last <= 0xdbff), "no lone high surrogate at the end");
+    assert.ok(cut.text.length <= SUPPLIED_MATERIAL_CAP);
+    assert.equal(cut.keptChars, cut.text.length);
+  });
+});
+
 describe("suppliedMaterialCapFor", () => {
   it("keeps the constant when the context is unknown", () => {
     assert.equal(suppliedMaterialCapFor(null), SUPPLIED_MATERIAL_CAP);

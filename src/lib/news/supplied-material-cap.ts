@@ -155,6 +155,16 @@ function lastSentenceEnd(text: string, from: number, to: number): number | null 
  * `BOUNDARY_LOOKBACK` characters of the cap, and trailing whitespace is
  * dropped from what is kept. The returned text NEVER exceeds the cap.
  */
+/**
+ * A cut can land between the two halves of a character outside the basic plane
+ * (an emoji). The kept text must not end on a lone high surrogate: some model
+ * APIs reject it. Found by the production auditor on 956a6688 (F1).
+ */
+function dropLoneHighSurrogate(text: string): string {
+  const last = text.charCodeAt(text.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? text.slice(0, -1) : text;
+}
+
 export function capSuppliedMaterial(
   text: string,
   cap: number = SUPPLIED_MATERIAL_CAP,
@@ -166,12 +176,12 @@ export function capSuppliedMaterial(
     return { text: source, cut: false, keptChars: totalChars, totalChars };
   }
   const floor = Math.max(0, limit - BOUNDARY_LOOKBACK);
-  const kept = source.slice(0, cutPoint(source, floor, limit)).replace(/\s+$/, "");
+  const kept = dropLoneHighSurrogate(source.slice(0, cutPoint(source, floor, limit))).replace(/\s+$/, "");
   /*
     A pathological head (whitespace all the way to the floor) could strip to
     nothing. Fall back to the raw slice rather than send an empty section.
   */
-  const keptText = kept.length ? kept : source.slice(0, limit);
+  const keptText = kept.length ? kept : dropLoneHighSurrogate(source.slice(0, limit));
   return {
     text: keptText,
     cut: true,
