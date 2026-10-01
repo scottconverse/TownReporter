@@ -824,9 +824,9 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     Grok"), and GR-C removed the provider and its transport outright, so an
     "explicit SuperGrok choice" is not a thing any build can make:
     `opinionModelChoice` does not accept the string, and the run falls to
-    Opinion's page default, Codex Sol (NOT to Automatic's first rung -- the
-    two are different facts since unit U29, and this pins the first one). What
-    this test still proves is the safety half -- a stored
+    Opinion's page default -- Automatic since unit U29b, which is also the
+    first rung that answers. What this test still proves is the safety half --
+    a stored
     `desk_jobs.model_choice` of "grok-oauth" cannot sneak into the OAuth pair
     through the orchestrator's custom branch; it normalises to a real choice
     and the editor is told why. `claudeRuntime`'s `runCustomPair` is the
@@ -837,8 +837,8 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     const events: string[] = [];
     assert.equal(
       opinionModelChoice("grok-oauth"),
-      "codex-frontier",
-      "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Codex Sol",
+      "auto",
+      "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Automatic",
     );
     assert.match(retiredModelChoiceNote("grok-oauth") ?? "", /has been removed/);
     const result = await orchestrateEditorial(
@@ -847,8 +847,12 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     );
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
-    assert.equal(result.modelChoice, "codex-frontier", "the run took Opinion's page default");
-    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+    assert.equal(
+      result.modelChoice,
+      "deepseek-flash",
+      "and the default walks the ladder, which starts on DeepSeek v4.1 Flash",
+    );
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 });
 

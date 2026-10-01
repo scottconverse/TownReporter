@@ -176,3 +176,33 @@ test("the story page tells the editor when the scan never chose the section", as
     "a printed story is past the decision; the notice belongs to the working draft",
   );
 });
+
+/*
+  Unit U29b: the Opinion desk opens on Automatic.
+
+  The owner's decision D18d ("use deepseek ... keep the picker regardless") only
+  reaches an editor who never opens the picker if the FIRST-LOAD choice is
+  Automatic -- a pinned model here would spend on the frontier model while the
+  ladder the owner chose sits one menu item away. The constant's own value is
+  pinned in src/lib/news/model-choice.test.ts; this pins the other half, that
+  the page takes its opening state from that constant rather than naming a
+  model of its own.
+*/
+test("the Opinion page opens on the shared Automatic default, not on a named model", async () => {
+  const src = await readFile(new URL("../src/routes/desk.opinion.tsx", import.meta.url), "utf8");
+  assert.match(
+    src,
+    /useState<OpinionModelChoice>\(DEFAULT_OPINION_MODEL\)/,
+    "the picker's first-load choice must come from DEFAULT_OPINION_MODEL",
+  );
+  assert.match(
+    src,
+    /useState<ModelEffort \| null>\(defaultModelEffort\(DEFAULT_OPINION_MODEL\)\)/,
+    "and so must the effort it starts with",
+  );
+  assert.doesNotMatch(
+    src,
+    /useState<OpinionModelChoice>\(["']/,
+    "a model named here would be a second default, and the one nobody edits",
+  );
+});

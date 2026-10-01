@@ -7,7 +7,11 @@ import {
   firstReadyOpinionRung,
   OPINION_MODEL_UNIVERSE,
 } from "./opinion-readiness.ts";
-import { modelChoiceLabel, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
+import {
+  DEFAULT_OPINION_MODEL,
+  modelChoiceLabel,
+  OPINION_AUTOMATIC_LADDER,
+} from "./model-choice.ts";
 import { ensureProviderSettingsSchema } from "./provider-settings.ts";
 
 async function withEnv<T>(changes: Record<string, string | undefined>, run: () => Promise<T>) {
@@ -263,6 +267,31 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     // is the run's business, not the row's.
     assert.equal(result.effectiveChoice, "auto");
     assert.deepEqual(probed, ["deepseek-flash"]);
+  });
+
+  /*
+    UNIT U29b -- THE PAGE DEFAULT CAN WRITE.
+
+    The Opinion page opens on Automatic and asks for readiness for exactly that
+    value, and the Write button is drawn from the answer. This is the desk the
+    owner's decision is about: Ollama answers and nothing else does, so before
+    U29b the page said "this desk cannot write yet" beside a working model.
+  */
+  it("a desk with only DeepSeek ready can write on the page's own default", async () => {
+    const probed: string[] = [];
+    const result = await checkOpinionReadiness(DEFAULT_OPINION_MODEL, {
+      findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+      probeCandidate: async (choice) => {
+        probed.push(choice);
+        return choice === "deepseek-flash"
+          ? { ok: true as const, label: "DeepSeek v4.1 Flash", choice }
+          : { ok: false as const, error: "Codex is not set up on this machine: open Codex and log in." };
+      },
+    });
+    assert.equal(result.ready, true, result.why);
+    assert.equal(result.why, "");
+    assert.equal(result.effectiveChoice, "auto", "and the queued request stays Automatic");
+    assert.deepEqual(probed, ["deepseek-flash"], "the first ready rung ends the walk");
   });
 
   it("Automatic falls through to Codex Sol when DeepSeek cannot answer", async () => {

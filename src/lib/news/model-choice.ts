@@ -139,10 +139,32 @@ export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 export const OPINION_AUTOMATIC_LADDER: readonly Exclude<OpinionModelChoice, "auto">[] =
   opinionAutomaticLadder().filter((id): id is AutomaticChoiceId => isAutomaticChoiceId(id));
 
-/* Opinion's picker opens on Codex Sol. That is the DEFAULT SELECTION, not
-   what Automatic walks -- an editor who wants what Automatic would do picks
-   Automatic itself. Unit U29 changed the ladder's order, not this. */
-export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
+/**
+ * What Opinion's picker opens on, and what an omitted or unreadable choice
+ * becomes: Automatic.
+ *
+ * Unit U29 (owner decision 2026-09-30) made DeepSeek v4.1 Flash Opinion's
+ * first rung; U29b then made it the DEFAULT, which is the other half of the
+ * same decision ("use deepseek ... keep the picker regardless"). It used to
+ * be a pinned Codex Sol, and that quietly made the owner's choice reach only
+ * the editors who opened the picker: an editor who pressed Write without
+ * touching it ran Sol, and on a desk whose Ollama answered but whose Codex
+ * was signed out, the page said "this desk cannot write yet" while a model
+ * that worked sat one menu item away.
+ *
+ * Automatic is the default on the other two surfaces that offer it -- Story
+ * (`desk.index.tsx`) and Scan (`desk.scan.tsx`) both open on "auto" -- so this
+ * is also the desk saying the same thing in the same way. The picker is
+ * unchanged and an editor's saved pick is honoured as it always was: this is
+ * only what a run does when nobody has said otherwise.
+ *
+ * It is read in three places, all of them "nobody has chosen": the Opinion
+ * page's initial state (`desk.opinion.tsx`), `opinionModelChoice`'s fallback
+ * for an id this build no longer offers, and the readiness/start server
+ * functions' validator when the client sends no choice at all
+ * (`opinion.ts`).
+ */
+export const DEFAULT_OPINION_MODEL = "auto" as const;
 /**
  * Dark Desk's Automatic ladder, which is Automatic's ladder (0.6.63, Unit Y
  * item 1).
@@ -226,6 +248,17 @@ export function effectiveStoryModelChoice(value: unknown): EffectiveStoryModelCh
   return value === "configured" ? "configured" : storyModelChoice(value);
 }
 
+/**
+ * Turn an untrusted stored string back into a choice Opinion may hold.
+ *
+ * A value Opinion's menu offers -- including the DeepSeek rung, which is the
+ * one entry that is both a name and a rung (unit U29) -- is kept exactly as
+ * stored. Anything else becomes `DEFAULT_OPINION_MODEL`, which since U29b is
+ * Automatic: the same answer Story and Dark give an unreadable choice, and
+ * the honest one, because Automatic is what the desk would have run had the
+ * editor never picked. It used to fall to a pinned Codex Sol, which meant a
+ * stored value nobody could read quietly spent on the frontier model.
+ */
 export function opinionModelChoice(value: unknown): OpinionModelChoice {
   if (isCustomModelChoice(value)) return value;
   return OPINION_MODEL_CHOICES.some((choice) => choice.value === value)

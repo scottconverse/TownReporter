@@ -856,7 +856,8 @@ Use **Add documents** or drop files into **Start with your documents**, paste so
 
 Choose **Automatic**, any named Codex or Claude model, **Local model**, or
 **DeepSeek v4.1 Flash**;
-saved custom connections are offered too. Codex Sol is selected by default.
+saved custom connections are offered too. Automatic is selected by default, so an
+editor who never opens the menu writes with the first ready rung.
 **Opinion's own Automatic** tries
 DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if the one before it
 is unavailable — that order belongs
@@ -1298,7 +1299,7 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Codex Sol; Automatic tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52: model and document boundaries
 

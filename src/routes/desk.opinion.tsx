@@ -59,6 +59,14 @@ function OpinionPage() {
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
+  /*
+    The first-load choice, and the effort that goes with it. Both come from
+    `DEFAULT_OPINION_MODEL`, which is Automatic since unit U29b (the owner's
+    "use deepseek" reached only the editors who opened the picker while this
+    was a pinned Codex Sol). An editor who picks something else this session
+    overrides it, and the run they queue carries what they picked -- this is
+    only the state before anyone has chosen.
+  */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
   const [openId, setOpenId] = useState<number | null>(null);

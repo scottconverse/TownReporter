@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DARK_AUTOMATIC_LADDER,
+  DEFAULT_OPINION_MODEL,
   effectiveStoryModelChoice,
   darkModelChoice,
   localModelOptionLabel,
@@ -186,6 +187,41 @@ describe("model choice contract", () => {
     assert.ok(!isOfferedForJob("ocr", "deepseek-flash"));
   });
 
+  /*
+    UNIT U29b -- OPINION OPENS ON AUTOMATIC.
+
+    The owner's decision D18d was "use deepseek ... keep the picker
+    regardless". Unit U29 made DeepSeek the ladder's first rung; U29b makes
+    Automatic the page's default, so the decision reaches the editor who never
+    touches the picker instead of only the one who opens it.
+
+    The other half of the same test is the half that must NOT change: an
+    editor's own saved choice is honoured exactly as it was.
+  */
+  it("defaults Opinion to Automatic, and still honours an editor's own pick", () => {
+    assert.equal(DEFAULT_OPINION_MODEL, "auto");
+    // "Nobody has chosen" -- an omitted field from the client, or a stored id
+    // this build cannot read -- means Automatic, not a pinned model.
+    assert.equal(opinionModelChoice(undefined), "auto");
+    assert.equal(opinionModelChoice(null), "auto");
+    assert.equal(opinionModelChoice(""), "auto");
+    assert.equal(opinionModelChoice("not-a-model"), "auto");
+    assert.equal(opinionModelChoice("qwen-local"), "auto", "the LM Studio rung is not an Opinion pick");
+    // ...and every real pick survives, including the rung Opinion names.
+    for (const choice of OPINION_MODEL_CHOICES) {
+      assert.equal(opinionModelChoice(choice.value), choice.value, `${choice.value} must load as itself`);
+    }
+    assert.equal(opinionModelChoice("codex-frontier"), "codex-frontier");
+    assert.equal(
+      modelChoiceLabel(opinionModelChoice("codex-frontier"), "opinion"),
+      "Codex Sol",
+      "a saved explicit Codex choice still loads as Codex",
+    );
+    // Story and Scan already default this way; Opinion agreeing is the point.
+    assert.equal(STORY_MODEL_CHOICES[0]?.value, "auto");
+    assert.equal(OPINION_MODEL_CHOICES[0]?.value, "auto");
+  });
+
   it("derives the forced batch list directly and excludes Automatic", () => {
     assert.deepEqual(
       FORCED_MODEL_CHOICES.map((choice) => choice.value),
@@ -225,7 +261,13 @@ describe("model choice contract", () => {
     */
     assert.equal(modelChoiceLabel("grok-oauth"), "Automatic");
     assert.equal(storyModelChoice("grok-oauth"), "auto");
-    assert.equal(opinionModelChoice("grok-oauth"), "codex-frontier");
+    /*
+      Unit U29b: all three normalisers now answer the same thing for a value
+      nobody can read. Opinion used to fall to a pinned Codex Sol, so a stored
+      id from an older build spent on the frontier model without anyone
+      choosing it; Automatic is what the desk would have run anyway.
+    */
+    assert.equal(opinionModelChoice("grok-oauth"), "auto");
     assert.equal(darkModelChoice("grok-oauth"), "auto");
     assert.equal(
       retiredModelChoiceNote("grok-oauth"),
@@ -264,18 +306,19 @@ describe("model choice contract", () => {
     assert.equal(rememberedStoryModelChoice("local-model", "editor"), "local-model");
   });
 
-  it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {
+  it("round-trips Opinion choices and defaults missing or invalid input to Automatic", () => {
     for (const value of [
       "auto",
       "claude-frontier",
       "codex-balanced",
       "codex-frontier",
       "local-model",
+      "deepseek-flash",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
     for (const invalid of ["local", "zen", "codex", "grok-oauth", undefined, null, {}]) {
-      assert.equal(opinionModelChoice(invalid), "codex-frontier");
+      assert.equal(opinionModelChoice(invalid), "auto");
     }
   });
 
