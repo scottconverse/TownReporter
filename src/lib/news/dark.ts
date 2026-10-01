@@ -48,11 +48,19 @@ import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
+  groundingCorpus,
   matchDeadEnds,
   researchLoop,
   resurfaceDeadEnds,
   runDueMonitors,
 } from "./investigate.ts";
+import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
+import {
+  markUngroundedSpecifics,
+  placeCorpus,
+  prepareCorpus,
+  type GroundingCorpus,
+} from "./dark-specific-grounding.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
 import { OCR_TOTAL_BUDGET_MS, pdfPageCount, productionOcr } from "./ocr.ts";
@@ -95,6 +103,8 @@ import {
   enqueueJob,
   findOpenJob,
   latestJob,
+  pctFor,
+  progressReporterFor,
   runLooksStalled,
   setJobModelChoice,
   setJobModelRuntime,
@@ -994,8 +1004,11 @@ export const listInvestigations = createServerFn({ method: "GET" })
       select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
         i.created_at, i.updated_at,
         coalesce((
+          -- Unit DD1, item 6: captures, and only captures. The editor's own
+          -- pasted tip is an editor:// row, and counting it here is what put
+          -- the rail one ahead of the file's own line. See dark-counters.ts.
           select count(*)::int from artifacts a
-          where a.investigation_id = i.id
+          where a.investigation_id = i.id and a.url not like 'editor://%'
         ), 0) as records,
         coalesce((
           select count(*)::int from frontier_items f
@@ -1146,6 +1159,18 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60
     `;
+    /*
+      Unit DD1, item 6. The sixty rows above are a page, not a fact about the
+      file, so the counts the editor is shown are asked for separately and over
+      the whole file -- the same query `listInvestigations` counts the rail row
+      with, so the two surfaces cannot say different things about one file.
+    */
+    const captureCountRows = await sql
+      .query<{ captures: number; readable: number }>(DIG_CAPTURE_COUNT_SQL, [owned(context), id])
+      .catch(() => [] as { captures: number; readable: number }[]);
+    const captureCounts = captureCountRows[0]
+      ? digCaptureCounts(captureCountRows[0])
+      : digCaptureCountsFromRows(artifacts);
     const entities = await sql<{ name: string; kind: string; why: string }>`
       select e.name, e.kind, e.why
       from investigation_entities ie
@@ -1355,6 +1380,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
       brief,
+      captureCounts,
       frontier,
       artifacts,
       entities,
@@ -1688,8 +1714,24 @@ export async function synthesizeSignals(
     };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
-  const summary = preserveBoundedAbsenceLanguage(parsed.editor_summary, pack).slice(0, 2000);
-  const gaps = (parsed.inventory_gaps ?? []).join("; ").slice(0, 800);
+  /*
+    Unit DD1, item 1: the case file is held to the grounding rule too.
+
+    The pass that files signals is the other door into durable state -- it
+    writes `dark_signals` and, through `summary`, `dark_runs.summary` -- and it
+    is the door the walkthrough's "The facility at 1749 Main Street
+    transitioned from a prior operator" came through. The corpus is the pack
+    this model was handed: the file's own captures and the lead it was opened
+    from (`buildDarkSynthesisPack`). A specific that is nowhere in it wears the
+    marker; nothing is deleted, because the editor still needs to see what the
+    model was reaching for. See dark-specific-grounding.ts.
+  */
+  const corpus = prepareCorpus(pack);
+  const summary = markUngroundedSpecifics(
+    preserveBoundedAbsenceLanguage(parsed.editor_summary, pack),
+    corpus,
+  ).slice(0, 2000);
+  const gaps = markUngroundedSpecifics((parsed.inventory_gaps ?? []).join("; "), corpus).slice(0, 800);
   const header = [
     summary,
     gaps ? `Gaps: ${gaps}` : "",
@@ -1714,7 +1756,18 @@ export async function synthesizeSignals(
       byte that is not printable. `storableText`, not `postgresText`: this is
       what the model wrote, not what a source said (see storable-text.ts).
     */
-    const name = storableText(String(sig.name ?? "")).trim();
+    /*
+      M1 of the pre-merge audit: `name` was the ONE prose field of this row that
+      was not held to the grounding rule -- every other field below goes through
+      `markUngroundedSpecifics`. It is also the field the verification lane
+      reads back and turns into four adversarial queries
+      (`adversarialQueries`), so a signal named "Operator transition at 1749
+      Main Street" was searched for verbatim one stage later: the walkthrough's
+      invented address, run against a provider, through the door the first fix
+      left open. The name is marked like everything else it sits beside, and
+      `adversarialSubject` takes the marker back off before it builds a query.
+    */
+    const name = storableText(markUngroundedSpecifics(String(sig.name ?? ""), corpus)).trim();
     if (!name) continue;
     if (isPoisonedSignal(sig)) continue;
     const strength = Math.min(15, Math.max(3, Number(sig.strength) || 3));
@@ -1745,13 +1798,15 @@ export async function synthesizeSignals(
         ${normalizePosture(sig.posture)},
         ${storableText(String(sig.type ?? "")).slice(0, 80)},
         ${strength}, ${confidence},
-        ${storableText(preserveBoundedAbsenceLanguage(sig.observation, pack)).slice(0, 4000)},
-        ${storableText(String(sig.pattern ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.linkage_map ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.alternatives ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.counter_narrative ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.what_would_kill ?? "")).slice(0, 2000)},
-        ${storableText(String(sig.pathway ?? "")).slice(0, 2000)},
+        ${storableText(
+          markUngroundedSpecifics(preserveBoundedAbsenceLanguage(sig.observation, pack), corpus),
+        ).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.pattern ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.linkage_map ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.alternatives ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.counter_narrative ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.what_would_kill ?? ""), corpus)).slice(0, 2000)},
+        ${storableText(markUngroundedSpecifics(String(sig.pathway ?? ""), corpus)).slice(0, 2000)},
         ${storableText(String(sig.privacy_review ?? "")).slice(0, 500)},
         ${handoff},
         ${"black-desk"},
@@ -2449,7 +2504,12 @@ export async function runCheckpointedDarkStages<
     error: string,
     stage: "research" | "synthesis",
   ) => Promise<{ next: EffectiveProviderChoice; label: string; switchedBecause: string } | null>;
-  setStage?: (stage: string) => Promise<unknown>;
+  /**
+   * FB1: carries the round's percentage alongside the stage sentence, so the
+   * research hop loop's "Researching hop 2/5" reaches the card as a real
+   * fraction rather than only as text. Optional, like `onStage` everywhere else.
+   */
+  setStage?: (stage: string, pct?: number | null) => Promise<unknown>;
 }) {
   let choice = opts.initialChoice;
   let switched = false;
@@ -2534,14 +2594,22 @@ export async function performArtifactOcrWork(
     `;
     if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
   };
-  const setOwnedStage = async (stage: string) => {
-    const owns = await sql<{ id: number }>`
-      update desk_jobs set stage = ${stage}, updated_at = now()
-      where id = ${job.id} and newsroom_id = ${job.newsroom_id}
-        and status = ${"running"} and claim_token = ${job.claim_token}
-      returning id
-    `;
-    if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
+  /*
+    FB1: this helper used to write `stage` and `updated_at` and nothing else, so
+    a PDF read that took ten minutes reported a sentence, never a step, never a
+    percentage and -- because `beat_at` was left alone -- never a heartbeat
+    either. Its card would have read "no activity for 1:14" through a batch that
+    was being read perfectly.
+
+    It now goes through the same `reportProgress` every other kind uses. The
+    ownership guard stays: the write still only lands while THIS execution holds
+    the claim, so a replaced worker cannot report progress onto its
+    replacement's row.
+  */
+  const ocrReport = progressReporterFor(job);
+  const setOwnedStage = async (stage: string, pct?: number | null) => {
+    await assertClaim();
+    await ocrReport(stage, pct);
   };
   await assertClaim();
   const bytes = new Uint8Array(Buffer.from(retained.body_b64, "base64"));
@@ -2560,7 +2628,7 @@ export async function performArtifactOcrWork(
   let totalPages = 0;
   let batches: OcrPageBatch[];
   if (request.mode === "complete") {
-    await setOwnedStage("Opening the retained PDF and counting its pages…");
+    await setOwnedStage("Opening the retained PDF");
     totalPages = await (deps.pageCount ?? pdfPageCount)(bytes);
     if (totalPages < 1) throw new Error("The retained PDF could not be opened to count its pages.");
     for (const page of retainedPages) {
@@ -2689,6 +2757,19 @@ export async function performArtifactOcrWork(
     return;
   }
 
+  /*
+    FB1: the percentage, in the one denominator that does not dip.
+
+    A whole-PDF read knows two counts -- the batch it is on and the pages it has
+    retained -- and they move at different rates, so a bar that switched between
+    them would jump backwards every time a batch finished. Pages is the honest
+    one (it is the thing the editor asked for: "how much of this PDF is read")
+    and batches is the fallback for a single-batch read, where `totalPages` is
+    not known because the job was asked for one page range rather than the file.
+  */
+  const ocrPct = (batchIndex: number) =>
+    totalPages > 0 ? pctFor(retainedPages.size, totalPages) : pctFor(batchIndex, batches.length);
+  await setOwnedStage("Reading the pages with a model", ocrPct(0));
   let accumulatedReason: string | null = null;
   let lastProvider = modelChoiceLabel(job.model_choice);
   for (let index = 0; index < batches.length; index++) {
@@ -2713,6 +2794,7 @@ export async function performArtifactOcrWork(
     }
     await setOwnedStage(
       `Reading batch ${index + 1} of ${batches.length} · PDF pages ${batch.start}-${batch.end} · ${retainedPages.size}${totalPages ? ` of ${totalPages}` : ""} already saved…`,
+      ocrPct(index),
     );
     const read = await waitForModel({
       jobId: job.id,
@@ -2758,7 +2840,8 @@ export async function performArtifactOcrWork(
       ].filter(Boolean).join(" ");
     }
     lastProvider = read.provider ?? lastProvider;
-    await setOwnedStage(`Saving PDF pages ${batch.start}-${batch.end} before continuing…`);
+    await setOwnedStage("Saving the pages", ocrPct(index));
+    await setOwnedStage(`Saving PDF pages ${batch.start}-${batch.end} before continuing…`, ocrPct(index));
     await deps.beforeCheckpoint?.();
     await saveBatch(
       batch,
@@ -2833,6 +2916,16 @@ export async function performDarkRound(job: DeskJob) {
       persistDarkRunUsage(runId, owned(context), usage, runBudget.stopReason);
     await saveUsage(runBudget.snapshot());
     const where = await readDarkPlace(owned(context)).catch(() => null);
+    /*
+      FB1, unit 2: the round's four arrivals.
+
+      `progressReporterFor` resolves each sentence against the stage list
+      `executeJob` seeded from JOB_STAGE_LISTS at claim, so "Researching the
+      file" below lights chip 0 rather than merely filling the "Now:" line.
+      Before this the round had no list at all: the whole dig drew an empty chip
+      row and a sliding bar.
+    */
+    const reportRound = progressReporterFor(job);
     const research = async (on: EffectiveProviderChoice) =>
       runDarkResearchWithRememberedChoice(id, on, {
         remember: rememberLastModelChoice,
@@ -2852,7 +2945,15 @@ export async function performDarkRound(job: DeskJob) {
           runBudget,
           researchReserveMs,
           onUsage: saveUsage,
-          onStage: (stage) => setJobStage(job.id, stage),
+          /*
+            FB1: the round's reporter, not `setJobStage`. The hop loop hands a
+            percentage out with each of its sentences ("Researching hop 2/5"),
+            and `setJobStage`'s signature is a sentence and nothing else -- a
+            bridge that dropped the second argument would leave the Dark Desk's
+            bar indeterminate for the whole dig, which is one of the two longest
+            jobs on the desk.
+          */
+          onStage: (stage, pct) => reportRound(stage, pct),
           reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
           // Unit U25, B4: the editor's Stop, read fresh at each hop and each
           // search. Before this a dig could only end at its own hop, time or
@@ -2864,6 +2965,7 @@ export async function performDarkRound(job: DeskJob) {
       });
     const synthesize = async (on: EffectiveProviderChoice) => {
       await throwIfJobCancelled(job.id);
+      await reportRound("Synthesizing signals", 45);
       await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
       return synthesizeSignals(
         context.userId,
@@ -2881,18 +2983,20 @@ export async function performDarkRound(job: DeskJob) {
       );
     };
 
+    await reportRound("Researching the file");
     const checkpointed = await runCheckpointedDarkStages({
       initialChoice: choice,
       research,
       synthesize,
       failOver: (error) => planDarkRoundFailover(job, error, { setStage: async () => undefined }),
-      setStage: (stage) => setJobStage(job.id, stage),
+      setStage: (stage, pct) => reportRound(stage, pct),
     });
     choice = checkpointed.choice;
     const { loop, synth } = checkpointed;
     const terminalFailure = terminalPlannerStartupFailure(loop, synth.error);
     if (terminalFailure) throw new Error(terminalFailure);
     // Stage 2, on the "Keep digging" path too.
+    await reportRound("Testing explanations", 65);
     const verifySummary = await runVerificationStage(
       context.userId,
       owned(context),
@@ -2903,7 +3007,7 @@ export async function performDarkRound(job: DeskJob) {
       snapshot.preferences,
       runBudget,
       saveUsage,
-      (stage) => setJobStage(job.id, stage),
+      (stage) => reportRound(stage),
       effortForChoice(choice, modelEffort),
       job,
     );
@@ -2945,6 +3049,7 @@ export async function performDarkRound(job: DeskJob) {
     */
     let briefError = "";
     try {
+      await reportRound("Writing editor brief", 85);
       const briefResult = await buildBrief(
         context.userId,
         owned(context),
@@ -2955,7 +3060,7 @@ export async function performDarkRound(job: DeskJob) {
         {
           budget: runBudget,
           onUsage: saveUsage,
-          onStage: (stage) => setJobStage(job.id, stage),
+          onStage: (stage) => reportRound(stage),
         },
         effortForChoice(choice, modelEffort),
       );
@@ -3712,6 +3817,51 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   });
 }
 
+/**
+ * Unit DD1, item 1: the editor brief, held to the grounding rule.
+ *
+ * The brief is the last model-written prose in the file and the first thing an
+ * editor reads -- "WHAT WOULD SETTLE IT", "DO THIS NEXT", the hypothesis on the
+ * line under the percentage. A specific that is nowhere in the file wears the
+ * marker rather than being handed to an editor as the next place to go.
+ * Measured on the Kid City USA file: the brief's "DO THIS NEXT" sent the editor
+ * to a street address no capture in the file carried.
+ *
+ * `corpus` is the FILE, not the prompt it was written from. That distinction is
+ * M6 of the pre-merge audit: handed the pack, the brief could find a specific
+ * in the pack's own "NAMES AND THINGS SEEN" -- a list of model-written
+ * `entities` rows -- and ground itself on the model's earlier guess. A caller
+ * that has only a string (the tests, and any future one) still gets the old
+ * behaviour; `buildBrief` passes the captures.
+ *
+ * Every string field of the brief, and nothing else: the numbers and the
+ * closed vocabularies (`verdict`, `evidence_status`) are not prose and cannot
+ * carry an invented specific.
+ */
+export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus): InvestigationBrief {
+  const prepared = typeof corpus === "string" ? prepareCorpus(corpus) : corpus;
+  const text = (value: string) => markUngroundedSpecifics(value, prepared);
+  const list = (values: string[]) => values.map(text);
+  return {
+    ...brief,
+    headline: text(brief.headline),
+    tldr: text(brief.tldr),
+    why_verdict: text(brief.why_verdict),
+    hypothesis: text(brief.hypothesis),
+    supports: list(brief.supports),
+    benign: text(brief.benign),
+    kills_it: text(brief.kills_it),
+    next: text(brief.next),
+    connections: list(brief.connections),
+    sections: {
+      record: text(brief.sections.record),
+      tested: text(brief.sections.tested),
+      open: text(brief.sections.open),
+      known: text(brief.sections.known),
+    },
+  };
+}
+
 export async function buildBrief(
   userId: string,
   newsroomId: number,
@@ -3789,8 +3939,37 @@ export async function buildBrief(
   }
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
-  const brief = parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus);
+  /*
+    M6 of the pre-merge audit: the corpus the brief is judged against is the
+    FILE, not the prompt.
+
+    `groundBrief` used to be handed `pack` -- the same string the model was
+    given -- and that pack's "NAMES AND THINGS SEEN" section is a list of
+    `entities` rows, written by the model and deliberately unmarked (an entity
+    name is the key the resolver merges on). So a brief could say "1749 Main
+    Street" and find it in the pack, one section above, and ground itself on its
+    own earlier guess. The captures are what the desk holds; the title is the
+    lead. Everything else in the pack is the model talking to itself.
+
+    A failed read falls back to the paper's own place and nothing else, and
+    never to the pack. A narrower corpus marks more, never less, and
+    over-marking is the honest error here.
+  */
+  const settings = await getPaperConfig(newsroomId).catch(() => null);
+  const briefPlace = {
+    city: settings?.city ?? null,
+    state: settings?.state ?? null,
+    county: null as string | null,
+  };
+  const briefCorpus = await groundingCorpus(id, newsroomId, briefPlace).catch(() =>
+    prepareCorpus("", placeCorpus(briefPlace)),
+  );
+  const brief = groundBrief(
+    parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus),
+    briefCorpus,
+  );
   if (!briefIsUseful(brief)) return { ok: false as const, error: "brief was empty" };
+
 
   await sql`
     insert into investigation_briefs (investigation_id, newsroom_id, brief_json, generated_at)
@@ -3879,7 +4058,18 @@ export async function performBriefWork(job: DeskJob) {
     job,
     await readProviderOverrides(newsroomId, "dark").catch(() => ({})),
   );
-  await setJobStage(job.id, "Writing editor brief");
+  /*
+    FB1: the brief's two arrivals, and the reason its bar is determinate at all.
+
+    A brief has no countable work inside it -- it assembles a pack out of the
+    file's own rows and then makes ONE model call with no denominator. What it
+    does have is two stages, so 0% until the call starts and 50% while it runs
+    is the honest reading: the editor sees the bar move from "reading" to
+    "writing" instead of a segment sliding back and forth. The completion writes
+    100 (the card fills on Done regardless of the stored number).
+  */
+  const report = progressReporterFor(job);
+  await report("Reading the file", pctFor(0, 2));
   let active = {
     modelChoice: effectiveStoryModelChoice(job.model_choice),
     modelEffort: savedJobEffort(job),
@@ -3915,6 +4105,7 @@ export async function performBriefWork(job: DeskJob) {
     active = attempted.snapshot;
     return attempted.result;
   };
+  await report("Writing editor brief", pctFor(1, 2));
   const result = await waitForModel({
     jobId: job.id,
     label: () => briefLabel,

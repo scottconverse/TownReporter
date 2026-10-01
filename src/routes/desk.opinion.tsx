@@ -5,6 +5,7 @@ import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { DeskJobCard } from "@/components/JobCard";
+import { invalidateDeskJobs } from "@/components/job-card-state";
 import { CopyButton } from "@/components/copy-button";
 import {
   deleteEditorial,
@@ -59,6 +60,14 @@ function OpinionPage() {
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
+  /*
+    The first-load choice, and the effort that goes with it. Both come from
+    `DEFAULT_OPINION_MODEL`, which is Automatic since unit U29b (the owner's
+    "use deepseek" reached only the editors who opened the picker while this
+    was a pinned Codex Sol). An editor who picks something else this session
+    overrides it, and the run they queue carries what they picked -- this is
+    only the state before anyone has chosen.
+  */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
   const [openId, setOpenId] = useState<number | null>(null);
@@ -186,6 +195,9 @@ function OpinionPage() {
       setRetryRequestId(undefined);
       setInfo("Writing. It fetches its own records first, so give it 10–40 minutes.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
+      // FB1: the editorial is a job too -- without this its card waits out the
+      // idle poll, and the Opinion screen shows a chip and a clock instead.
+      invalidateDeskJobs(qc);
     },
     onError: (err) => {
       const raw = err instanceof Error ? err.message : "That did not start.";

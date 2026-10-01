@@ -200,6 +200,71 @@ describe("what may be listed as a source on a lead", () => {
   });
 });
 
+/*
+  Unit B7R, item 2. The relevance test tokenized title + host + URL only, so a
+  real record behind an opaque address was refused for saying nothing about the
+  lead. A council packet titled "Agenda Packet" at
+  `longmontcolorado.gov/sites/default/files/packet.pdf` shares no term with the
+  lead in its title or its path -- and its text names the lead on the first
+  line. The capture the desk already made is the evidence.
+
+  The fixture addresses carry no date in them on purpose: the lead's own
+  "Oct. 2, 2026" is a token, and a URL with "2026" in its path would have
+  matched on the year alone and passed this test for the wrong reason.
+
+  THE MUTATION THAT MATTERS. Dropping `page.text` from the token set fails
+  "keeps the council packet whose own text is about the lead".
+*/
+describe("what the captured page itself says", () => {
+  it("keeps the council packet whose own text is about the lead", () => {
+    const packet = {
+      url: "https://longmontcolorado.gov/sites/default/files/packet.pdf",
+      title: "Agenda Packet",
+      fetchStatus: 200,
+      fetchOutcome: "fetched",
+      text: "Item 7: the conditional use permit for the Kid City USA daycare at 1941 Terry Street.",
+    };
+    assert.equal(leadSourceRefusalReason(packet, LEAD), null);
+    assert.deepEqual(usableLeadSources([packet], LEAD), [packet]);
+  });
+
+  it("reads only a bounded sample of a long page", () => {
+    const filler = "The council heard public comment on the annual budget. ".repeat(400);
+    const buried = {
+      url: "https://longmontcolorado.gov/sites/default/files/minutes.pdf",
+      title: "Minutes",
+      fetchStatus: 200,
+      fetchOutcome: "fetched",
+      // The daycare is named far past the sample the judge reads.
+      text: `${filler}Kid City USA daycare closing.`,
+    };
+    assert.ok(filler.length > 20_000, "the fixture has to exceed the sample");
+    assert.match(leadSourceRefusalReason(buried, LEAD)!, /about the lead/);
+  });
+
+  it("still refuses a courier page whose text is unrelated", () => {
+    const courier = {
+      url: "https://shipslide.com/courier-services/anaheim-ca",
+      title: "TOP Courier Services Anaheim, CA | FAST & RELIABLE TEAM",
+      fetchStatus: 200,
+      fetchOutcome: "fetched",
+      text: "Same-day courier delivery across Anaheim and Orange County. Call for a quote today.",
+    };
+    assert.match(leadSourceRefusalReason(courier, LEAD)!, /about the lead/);
+  });
+
+  it("still refuses a dictionary entry that carries the query word in its body", () => {
+    const entry = {
+      url: "https://www.merriam-webster.com/dictionary/closing",
+      title: "Closing Definition & Meaning",
+      fetchStatus: 200,
+      fetchOutcome: "fetched",
+      text: "closing: the end or conclusion of something. See synonyms for closing.",
+    };
+    assert.match(leadSourceRefusalReason(entry, LEAD)!, /dictionary entry/);
+  });
+});
+
 describe("material that comes back to the desk", () => {
   it("refuses a page whose only new evidence is its own address", () => {
     assert.match(

@@ -970,9 +970,8 @@ export async function grokChat(
      * (`--tools ""`) instead of merely denying an empty allow-list
      * (`--allowed-tools ""`, the default). See `claudeCodeChat`'s `noTools`
      * doc comment (ai-claude-code.server.ts) for why the difference
-     * matters. Only the Dark Desk's planner/synthesis/brief calls pass this
-     * through `grokChat`; Opinion's writing pass asks `claudeCodeChat` for
-     * it directly, because that call holds the private voice (SEC-3).
+     * matters. Only the Dark Desk's planner/synthesis/brief calls pass
+     * this — Story/Opinion/Scan and the editorial pair are unaffected.
      * No-op for every provider except claude-code.
      */
     noTools?: boolean;

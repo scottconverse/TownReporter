@@ -9,6 +9,18 @@ import {
 } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
+import {
+  groundPlan,
+  markUngroundedSpecifics,
+  normaliseForGrounding,
+  placeCorpus,
+  queryNamesUngroundedSpecific,
+  prepareCorpus,
+  stripUngroundedMarker,
+  UNGROUNDED_MARKER,
+  unmarkGroundedSpecifics,
+  type GroundingCorpus,
+} from "./dark-specific-grounding.ts";
 import { resurfaceRefusalReason } from "./result-quality.ts";
 import { readableCapture } from "./html-text.ts";
 import { darkPlannerFor } from "./dark-prompt.ts";
@@ -62,6 +74,13 @@ import {
   type ResearchActionReceipt,
 } from "./research-actions.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+/*
+  FB1: `pctFor` only -- the one clamp/divide-by-zero rule the whole app uses for
+  a percentage. Imported from jobs.ts rather than re-derived here so a hop that
+  reports 0/0 gets the same "no percentage" answer as an OCR batch with no pages
+  known yet.
+*/
+import { spanPct } from "./jobs.ts";
 import {
   queryFingerprint,
   remainingStrategies,
@@ -325,8 +344,14 @@ export type ResearchLoopOptions = {
    */
   researchReserveMs?: number;
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
-  /** Existing desk-job stage bridge; failures here must not fail research. */
-  onStage?: (stage: string) => Promise<unknown>;
+  /**
+   * Existing desk-job stage bridge; failures here must not fail research.
+   *
+   * FB1: the second argument is the round's percentage, as a number the bridge
+   * may ignore. It is optional so every existing caller -- and every test's
+   * stub -- keeps compiling and keeps working unchanged.
+   */
+  onStage?: (stage: string, pct?: number | null) => Promise<unknown>;
   /** Internal one-operation adapter marker; callers should not set this. */
   _responsiveOperation?: "search" | "read" | "follow";
 };
@@ -684,6 +709,14 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table artifact_versions add column if not exists taken_down_reason text`,
   `alter table artifact_versions add column if not exists taken_down_link_kept boolean not null default true`,
   `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
+  // Unit U30: which editorial request a capture was made for. Mirrors
+  // migrations/0114_editorial_research_captures.sql statement for statement;
+  // `schema-parity.test.ts` diffs this list against the migration-built schema
+  // and would report the difference if only one side had it. Written by the
+  // Opinion desk's research pass (./editorial-research.server.ts) and by
+  // nothing else, so every other capture path leaves it null.
+  `alter table capture_events add column if not exists editorial_request_id integer`,
+  `create index if not exists capture_events_editorial_request_idx on capture_events (editorial_request_id)`,
   `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
   `alter table entities add column if not exists newsroom_id integer not null default 1`,
   `alter table relationships add column if not exists newsroom_id integer not null default 1`,
@@ -2444,6 +2477,134 @@ export async function retrievePack(
   return compact(graph, PLANNER_GRAPH_CAP);
 }
 
+/**
+ * How much captured text this desk will hold in memory to judge one hop's
+ * specifics against. Generous: the whole point is that a specific a capture
+ * carries is not reported as invented, and a capture that has fallen off the
+ * end of a smaller budget would be exactly that mistake. See
+ * `dark-specific-grounding.ts` for what is done with it.
+ */
+export const GROUNDING_CORPUS_CAP = 400_000;
+
+/**
+ * What the desk actually holds, for the grounding rule.
+ *
+ * Unit DD1, item 1. The file's captures, in full; the investigation's own title
+ * and summary, which carry the editor's paste and the lead the file was opened
+ * from; the file's saved leads and hypotheses, MARKER-STRIPPED; and nothing
+ * that is an entity's own name (M6 of the pre-merge audit -- see `entityNames`).
+ *
+ * The rule the composition answers is "a specific is grounded by something the
+ * desk HOLDS, never by something the model said". The captures and the lead are
+ * the first kind. A saved lead is the second kind and is read back on purpose,
+ * so `prepareCorpus` takes out every specific it wears a marker on, whole. An
+ * entity name is the one model-written string that is never marked -- it is a
+ * key -- so it is kept out by name instead.
+ *
+ * Unreadable captures are left out for the same reason `retrievePack` leaves
+ * them out: a paywall notice or a nav shell is not text that may ground
+ * anything.
+ *
+ * `place` is the paper's own city, state and county, from its settings: the one
+ * thing that is ground truth without a capture, because the desk knows where it
+ * publishes from.
+ */
+export async function groundingCorpus(
+  investigationId: number,
+  newsroomId?: number,
+  place?: { city?: string | null; state?: string | null; county?: string | null },
+): Promise<GroundingCorpus> {
+  const sql = await getSql();
+  const room = newsroomId ?? (await investigationNewsroom(investigationId));
+  const head = await sql<{ title: string; summary: string }>`
+    select title, summary from investigations
+    where newsroom_id = ${room} and id = ${investigationId} limit 1
+  `;
+  const captures = await sql<{
+    title: string;
+    url: string;
+    full_text: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
+  }>`
+    select title, url, full_text, fetch_status, fetch_outcome from artifacts
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 120
+  `.catch(() => []);
+  /*
+    The file's own saved leads and hypotheses, and the reason they are here.
+
+    A dig's whole job is to follow what its earlier rounds wrote down -- that is
+    what `frontier_items` and `hypotheses` ARE -- so a specific those rows name
+    is a specific the file holds. Leaving them out would mean a company the desk
+    filed as a lead in round one could never be searched for in round two; it is
+    the property `investigate.loop.test.ts` pins as "a later editor on the same
+    file sees the hops".
+
+    They are safe to include because every one of them is MARKED when the model
+    wrote a specific nothing carried: `groundPlan` marks a planner's frontier
+    labels and hypotheses before `persistPlan` writes them, and `prepareCorpus`
+    strips the marked specific out whole. The ONE class of label that is
+    deliberately unmarked is the entity-derived one below -- see `entityNames`.
+
+    The file's title and summary carry the editor's paste and the lead the file
+    was opened from: the other thing a specific may legitimately come from.
+  */
+  const savedLeads = await sql<{ label: string; why: string; next_steps: string }>`
+    select label, why, next_steps from frontier_items
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 80
+  `.catch(() => []);
+  const savedHypotheses = await sql<{ body: string }>`
+    select body from hypotheses
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 40
+  `.catch(() => []);
+  /*
+    M6 of the pre-merge audit: the ENTITY NAMES, kept out.
+
+    `persistPlan` files an unresolved identity as a frontier item labelled with
+    the entity's own `name`, and that name is deliberately unmarked -- it is the
+    key the resolver merges on, so appending a marker to it would make "Jane
+    Smith (not in any capture yet)" a different person from "Jane Smith". That
+    is the one hole the marker-stripping above cannot close: the model returns
+    `{name: "1749 Main Street", kind: "address"}`, the row is written, and the
+    next hop reads the address back out of its own notes and calls it grounded.
+    The capture is the only thing that may ground an entity's name, so a
+    frontier item whose label IS an entity's name is left out of the corpus.
+    Everything else about the row stays: the editor still sees it.
+  */
+  const entityNames = await sql<{ name: string }>`
+    select name from entities where newsroom_id = ${room} order by id desc limit 400
+  `.catch(() => []);
+  const entityLabels = new Set(entityNames.map((entity) => normaliseForGrounding(entity.name)));
+  const parts: string[] = [];
+  const investigation = head[0];
+  if (investigation)
+    parts.push(`${investigation.title}\n${investigation.summary}`);
+  for (const lead of savedLeads) {
+    if (entityLabels.has(normaliseForGrounding(lead.label))) continue;
+    parts.push(`${lead.label}\n${lead.why}\n${lead.next_steps}`);
+  }
+  for (const hypothesis of savedHypotheses) parts.push(hypothesis.body);
+  for (const capture of captures) {
+    if (
+      readableCapture({
+        text: capture.full_text,
+        status: capture.fetch_status,
+        outcome: capture.fetch_outcome,
+        title: capture.title,
+      }).kind !== "ok"
+    )
+      continue;
+    parts.push(`${capture.title}\n${capture.url}\n${capture.full_text}`);
+  }
+  return prepareCorpus(
+    parts.join("\n\n").slice(0, GROUNDING_CORPUS_CAP),
+    place ? placeCorpus(place) : undefined,
+  );
+}
+
 export async function findEvidenceChunks(
   userId: string,
   investigationId: number,
@@ -2496,6 +2657,16 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   if (opts.executionMode === "responsive" && !opts._responsiveOperation) {
     return responsiveResearchLoop(opts, investigationTitle, place, newsroomId);
   }
+  /*
+    Unit DD1, item 1: what the desk holds, for the grounding rule. Seeded from
+    the file's own title so a hop that cannot read its captures still has the
+    lead's words to ground against, then refreshed at the top of every hop.
+  */
+  let corpus: GroundingCorpus = await groundingCorpus(
+    opts.investigationId,
+    newsroomId,
+    place,
+  ).catch(() => prepareCorpus(investigationTitle, placeCorpus(place)));
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   /*
@@ -2558,13 +2729,36 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   let consecutiveLowYieldHops = 0;
   let stopReason: DarkRunStopReason | null = null;
 
-  const setStage = async (stage: string) => {
+  const setStage = async (stage: string, pct?: number | null) => {
     try {
-      await opts.onStage?.(stage);
+      await opts.onStage?.(stage, pct);
     } catch {
       /* progress text is best-effort; durable research remains authoritative */
     }
   };
+  /*
+    FB1: a percentage for the round, from the only numbers research has.
+
+    Research is `hopsBudget` hops, each of them a handful of searches and up to
+    `fetchLimit` page reads -- so the honest fraction is "hops done, plus how far
+    through this hop" and NOT a per-hop 0→100 that would restart the bar five
+    times. The within-hop part is `done / total` over that hop's own step count,
+    capped at 1 so a hop that overruns its own budget cannot push the bar past
+    the next hop's start.
+
+    MAPPED INTO 0-40, NOT 0-100. Research is the first of the round's four
+    arrivals (see JOB_STAGE_LISTS.dark); synthesis, the review and the brief
+    come after it, and a bar that filled here would be promising the editor
+    something that has not happened yet. `performDarkRound` places the three
+    later arrivals at 45, 65 and 85 for the same reason.
+  */
+  const researchPct = (hop: number, done: number, total: number) =>
+    spanPct(
+      hop + (total > 0 ? Math.min(1, done / total) : 0),
+      hopsBudget,
+      0,
+      40,
+    );
 
   function canon(raw: string) {
     try {
@@ -2660,8 +2854,45 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     if (opts.runBudget && opts.runBudget.remainingMs() <= (opts.researchReserveMs ?? 0)) {
       break;
     }
-    await setStage(`Researching hop ${hop + 1}/${hopsBudget}`);
+    await setStage(`Researching hop ${hop + 1}/${hopsBudget}`, researchPct(hop, 0, 1));
+    // Re-read per hop, not once per run: the hop that just finished captured
+    // pages, and a specific those pages carry is grounded for the next hop.
+    // A failed read keeps the previous corpus rather than falling back to an
+    // empty one, which would mark every specific in the plan as invented.
+    corpus = await groundingCorpus(opts.investigationId, newsroomId, place).catch(() => corpus);
     const openFrontier = await readActiveFrontier();
+    /*
+      M3 of the audit: the marker is a statement about the file AT THE MOMENT
+      it was written, and a capture read since then can make it false. A stored
+      frontier label is text the next query is built from, and a label wearing
+      the marker -- quoted with the paper's own town around it -- is a phrase no
+      provider can match, so a hop whose label has been corroborated would
+      search for something that cannot exist.
+
+      Swept here, once per hop, where the fresh corpus and the open items are
+      both in hand. Only the items the new captures ground are rewritten; the
+      rest keep their marker, because for them the statement still stands.
+    */
+    for (const f of openFrontier) {
+      if (!f.label.includes(UNGROUNDED_MARKER) && !(f.next_steps ?? "").includes(UNGROUNDED_MARKER))
+        continue;
+      const label = unmarkGroundedSpecifics(f.label, corpus);
+      const nextSteps = unmarkGroundedSpecifics(f.next_steps ?? "", corpus);
+      if (label === f.label && nextSteps === (f.next_steps ?? "")) continue;
+      f.label = label;
+      f.next_steps = nextSteps;
+      /*
+        Best-effort: `frontier_items` carries a unique index on the deduped
+        label, so an unmarked label that another item already holds cannot be
+        written back. The hop still sees the unmarked text in memory, which is
+        what the queries are built from; the row keeps its marker until the
+        duplicate is resolved.
+      */
+      await sql`
+        update frontier_items set label = ${label}, next_steps = ${nextSteps}
+        where id = ${f.id} and newsroom_id = ${newsroomId}
+      `.catch(() => undefined);
+    }
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
     const preferenceContext = opts.preferences ? describeResearchWindow(opts.preferences).slice(0, 2_000) : "";
@@ -2719,6 +2950,27 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     }
     plan.frontier = boundedFrontierItems(plan.frontier, NEW_FRONTIER_PER_HOP);
 
+    /*
+      Unit DD1, item 1: hold the whole hop to the grounding rule before any of
+      it is written down.
+
+      This is the one place every durable thing a hop produces passes through --
+      the searches that will be run, the frontier items and hypotheses
+      `persistPlan` writes, the questions, and the summary that becomes
+      `investigations.summary` and the run record -- and it is downstream of
+      every way a plan can be produced (the model, the post-search selector, the
+      keyword fallback), so a caller that injects its own planner is held to the
+      same rule as production.
+
+      Measured on the live file: the planner wrote "1749 Main Street" into a
+      hypothesis, a frontier label, two questions and two searches, and no
+      capture in the file contained "1749" -- every source it did hold, the
+      post and the licensing record the same round captured included, gave the
+      real street number instead. See dark-specific-grounding.ts.
+    */
+    const grounding = groundPlan(plan, corpus);
+    plan = grounding.plan;
+
     // Say it out loud. A run that dug with the heuristic must not read like a
     // run that dug with the model.
     if (plan.planner_error) {
@@ -2757,7 +3009,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         continue;
       }
       let added = 0;
-      for (const q of (f.next_steps || "")
+      // M3: a stored query is text a provider is asked to match, so the
+      // marker a reader needs must not be in it. See `stripUngroundedMarker`.
+      for (const q of (stripUngroundedMarker(f.next_steps || ""))
         .split("|")
         .map((s) => s.trim())
         .filter(Boolean)) {
@@ -2782,7 +3036,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
       if (f.kind === "url") continue;
       const triedStrats = parseJsonArray(f.strategies_tried);
-      for (const s of remainingStrategies(f.kind, f.label, triedStrats, scope)) {
+      // M3: the label is stored text and may still wear the marker; a strategy
+      // query built from it would ask a provider for a phrase that cannot exist.
+      for (const s of remainingStrategies(f.kind, stripUngroundedMarker(f.label), triedStrats, scope)) {
         if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
         const q = s.query;
         if (
@@ -2834,16 +3090,60 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     const usable = [...withMinimums, ...fill].filter((q) => {
       const reason = junkQueryReason(q);
       if (reason) dropped.push(`${reason}: ${q.slice(0, 120)}`);
-      return !reason;
+      if (reason) return false;
+      /*
+        Unit DD1, item 1: and the same gate refuses a query that names a
+        specific no capture in this file carries.
+
+        It has to be HERE rather than only on `plan.searches`, because this is
+        the only filter every query passes through: the minimum-filled queries
+        are derived from the plan's own hypotheses, and a hypothesis that
+        reached this point wearing the marker would otherwise hand its invented
+        address straight back to a provider as a search term. `groundPlan` drops
+        the planner's own queries and marks the text; this drops whatever the
+        rest of the hop built out of it.
+      */
+      const invented = queryNamesUngroundedSpecific(q, corpus);
+      if (invented) {
+        grounding.droppedQueries.push({ query: q, named: invented });
+        return false;
+      }
+      return true;
     });
     const queries = usable
       .map((q) => storableText(queryWithResearchWindow(q, opts.preferences)))
       .filter((q) => !tried.has(queryFingerprint(q)))
       .slice(0, SEARCHES_PER_HOP);
+    /*
+      FB1: this hop's step count, for the round's percentage -- its searches
+      plus the pages it may read. Computed HERE, before the search loop, because
+      `fetchLimit` is not declared until the read loop below and a `const` read
+      before its declaration is a ReferenceError, not a zero.
+    */
+    const pctStepsThisHop = queries.length + (opts._responsiveOperation ? 1 : FETCHES_PER_HOP);
     if (dropped.length) {
       lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${dropped.length} query${
         dropped.length === 1 ? "" : "s"
       } that were not searches: ${[...new Set(dropped)].slice(0, 4).join("; ")}`;
+    }
+    /*
+      Say it out loud too, and say WHICH specific: a hop that searched less than
+      it planned must not read like a hop that had nothing to do, and the
+      editor's clue that the model believes something this file does not say is
+      the name of the thing it believes.
+
+      The note quotes the refused specific, and this note is durable text
+      itself, so what it quotes wears the same marker -- otherwise the run
+      record becomes the one place the invented address is written down as if
+      the desk believed it.
+    */
+    const namedDrop = [...new Set(grounding.droppedQueries.map((d) => d.named))].slice(0, 4);
+    if (namedDrop.length) {
+      const count = grounding.droppedQueries.length;
+      lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${count} ${
+        count === 1 ? "query" : "queries"
+      } naming something no capture in this file carries: ${namedDrop.join("; ")}`;
+      lastSummary = markUngroundedSpecifics(lastSummary, corpus);
     }
 
     /*
@@ -2876,7 +3176,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
-      await setStage(`Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`);
+      await setStage(
+        `Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`,
+        researchPct(hop, queryIndex + 1, pctStepsThisHop),
+      );
       tried.add(queryFingerprint(q));
       const attempt = await runSearch(q);
       if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
@@ -3061,7 +3364,15 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         for (const url of postSearchPlan?.fetch_urls.slice(0, FETCHES_PER_HOP) ?? []) {
           if (sanitizePublicUrls([url]).length) toFetch.add(url);
         }
-        if (postSearchPlan) await persistPlan(opts.userId, opts.investigationId, postSearchPlan, newsroomId);
+        // Unit DD1, item 1: the selector's plan is model output like any other
+        // and reaches the same columns. Grounded on the same corpus.
+        if (postSearchPlan)
+          await persistPlan(
+            opts.userId,
+            opts.investigationId,
+            groundPlan(postSearchPlan, corpus).plan,
+            newsroomId,
+          );
       } catch (err) {
         postSearchFailure = err instanceof Error ? err.message : "post-search selector failed";
         selectorFailures.push(postSearchFailure);
@@ -3081,6 +3392,19 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     let repeatedSourcesThisHop = 0;
     let newReadableSourcesThisHop = 0;
     while (fetchedThisHop.length < fetchLimit) {
+      /*
+        Unit DD1, item 3: the editor's Stop, between documents.
+
+        The hop boundary is two model calls and a handful of fetches long; the
+        search loop already asks between searches, but a hop whose searches are
+        done still had four page reads to go, and none of them asked. Measured
+        on the Kid City USA file, the press landed at 0:36 and the run ended at
+        2:17 -- 102 s of the editor's stop being real and invisible.
+
+        Throws, like every other reading of this seam: a stopped run must leave
+        the loop, and everything captured before the stop is already saved.
+      */
+      await opts.throwIfCancelled?.();
       const discovery = selectedReads[0] ?? (opts._responsiveOperation !== "search" && !searchSlotUsed
         ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
         : undefined);
@@ -3139,7 +3463,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
-      await setStage(`Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`);
+      await setStage(
+        `Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`,
+        researchPct(hop, queries.length + fetchedThisHop.length, pctStepsThisHop),
+      );
 
       await persistDiscovery(opts.userId, opts.investigationId, {
         kind: "url",
@@ -3614,7 +3941,17 @@ async function responsiveResearchLoop(
         evidence: finding.text,
         source_url: finding.evidenceUrl ?? "",
       }));
-      await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
+      // Unit DD1, item 1: the finish action's summary and findings are the
+      // model's own prose and go straight to `investigations.summary`,
+      // `pause_reason` and `claims`. Held to the same grounding rule as a
+      // batch hop's plan.
+      const groundedFinish = groundPlan(
+        plan,
+        await groundingCorpus(opts.investigationId, newsroomId).catch(() =>
+          prepareCorpus(investigationTitle),
+        ),
+      ).plan;
+      await persistPlan(opts.userId, opts.investigationId, groundedFinish, newsroomId);
       /*
         The model wrote `plan.summary`, and the receipt trail beside it carries
         excerpts of captured pages. Both reach `investigations.summary` -- and
@@ -3625,7 +3962,7 @@ async function responsiveResearchLoop(
         the run, read back as prose, not evidence whose bytes have to survive
         for a hash.
       */
-      summary = storableText(durableResponsiveSummary(plan.summary, receipts));
+      summary = storableText(durableResponsiveSummary(groundedFinish.summary, receipts));
       const counts = await responsiveCounts(opts.investigationId);
       await sql`update investigations set status = 'open', pause_reason = null, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
       return { ...counts, hops: aggregateHops, paused: false, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: decision, finished: true };

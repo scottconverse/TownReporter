@@ -106,8 +106,23 @@ test("the 0.6.60 record distinguishes its audited candidate from the released me
 test("the retired Opinion-only environment override is not advertised", () => {
   assert.doesNotMatch(read(".env.example"), /TOWNREPORTER_EDITORIAL_MODEL/);
   const modelChoice = read("src/lib/news/model-choice.ts");
-  assert.match(modelChoice, /DEFAULT_OPINION_MODEL\s*=\s*"codex-frontier"/);
-  assert.match(modelChoice, /OPINION_AUTOMATIC_LADDER\s*=\s*\["codex-frontier",\s*"claude-sonnet"\]/);
+  /*
+    Unit U29b: Opinion's page default is Automatic, so an editor who never
+    touches the picker writes with the first ready rung (DeepSeek, then Codex
+    Sol, then Claude Sonnet) rather than with a pinned frontier model. This
+    guard keeps the first-load path a DECISION -- a hardcoded model here would
+    make the ladder the owner chose reach only the editors who opened the menu.
+  */
+  assert.match(modelChoice, /DEFAULT_OPINION_MODEL\s*=\s*"auto"/);
+  /*
+    Unit U29 (owner decision 2026-09-30) replaced the typed-out
+    `["codex-frontier", "claude-sonnet"]` tuple with the registry's own
+    Opinion ladder -- "use deepseek ... don't hard code any of those". The
+    order now lives on `opinionLadderRank` in provider-registry.ts, and
+    `provider-registry.test.ts` pins the order itself; what this guard keeps
+    is that model-choice.ts DERIVES it instead of spelling it out again.
+  */
+  assert.match(modelChoice, /OPINION_AUTOMATIC_LADDER[^;]*opinionAutomaticLadder\(\)/);
 });
 
 /*

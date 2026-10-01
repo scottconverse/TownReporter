@@ -66,6 +66,22 @@ describe("meeting citation evidence in the claims panel", () => {
 
   it("says in one plain sentence when there is neither a finding nor a citation", () => {
     assert.match(panel, /no recorded findings and no transcript citations/);
-    assert.match(panel, /review\.rows\.length === 0 && !meetingEvidence/);
+    /*
+      FB6 item 8b (A2c-REPORT.md §6 C5). This condition used to be
+      `review.rows.length === 0` -- the REVIEW's rows -- while the list printed
+      directly under the sentence is built by `evidenceCheckRows` from the
+      review AND from the three rows the page holds itself (claims of absence,
+      names, style). Any of those can carry "! Needs review" with the review
+      empty, and that is exactly what the stand-in walkthrough photographed:
+      "there is nothing to review here" above "Evidence check ! Needs review".
+      The condition is the LIST's length now, so the sentence and the list it
+      sits above cannot disagree.
+    */
+    assert.match(panel, /review && listRows\.length === 0 && !meetingEvidence/);
+    assert.doesNotMatch(
+      panel,
+      /review\.rows\.length === 0 && !meetingEvidence/,
+      "the pane is denying in one line what the row below it asserts in the next",
+    );
   });
 });

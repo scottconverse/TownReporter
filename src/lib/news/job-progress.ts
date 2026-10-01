@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql } from "@/lib/db";
-import { deskMiddleware } from "./desk-auth";
+import { getSql } from "../db.ts";
+import { deskMiddleware } from "./desk-auth.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import {
   jobStages,
@@ -40,6 +40,16 @@ export type JobProgressView = {
   status: JobStatus;
   /** The card's bold line: what this job is doing, in the editor's words. */
   title: string;
+  /**
+   * The story's headline, for the two kinds whose subject IS a lead.
+   *
+   * Null for every other kind, deliberately: a scan's subject is a `scan_runs`
+   * id and an editorial's is an `editorial_requests` id, and printing whichever
+   * headline happened to share that number would be a plausible-looking wrong
+   * answer. The shell's Running box and Today's strips use this where they have
+   * it and fall back to `title` where they do not -- see `jobHeadline`.
+   */
+  headline: string | null;
   /** Resolved provider label ("Codex Sol", "Local model"), never "auto". */
   model: string;
   stages: string[] | null;
@@ -87,18 +97,64 @@ const TITLES: Partial<Record<JobKind, string>> = {
   draft: "Drafting story",
   reconcile: "Checking the draft against the evidence",
   "follow-up": "Running the check",
+  // FB1: the other seven. Until the one reader could see them, six of these
+  // kinds had no card anywhere in the product -- so no title was ever needed.
+  scan: "Scanning the watch list",
+  dark: "Digging the file",
+  editorial: "Writing an editorial",
+  brief: "Writing the editor brief",
+  "routine-notice": "Filing the routine edition",
+  "artifact-ocr": "Reading the PDF",
+  pull: "Pulling the public record",
+  "audio-transcribe": "Transcribing the audio",
 };
 
 const DONE_TEXT: Partial<Record<JobKind, string>> = {
   draft: "Your draft is ready",
   reconcile: "The evidence check is done",
   "follow-up": "The check is done",
+  scan: "The scan is done",
+  dark: "The round is done",
+  editorial: "The editorial is written",
+  brief: "The brief is written",
+  "routine-notice": "The routine edition is filed",
+  "artifact-ocr": "The PDF pages are read",
+  pull: "The pull is done",
+  "audio-transcribe": "The transcript is saved",
 };
 
 const OPEN_LABEL: Partial<Record<JobKind, string>> = {
   draft: "Open the draft",
   reconcile: "Open the checked draft",
   "follow-up": "Open the follow-up",
+  scan: "Open the scan",
+  dark: "Open the file",
+  editorial: "Open Opinion",
+  brief: "Open the file",
+  "routine-notice": "Open the routine desk",
+  "artifact-ocr": "Open the file",
+  pull: "Open the story",
+  "audio-transcribe": "Open the transcript",
+};
+
+/*
+  WHERE A FINISHED JOB'S "Open" GOES, for the kinds whose result is not a story
+  draft. A route the app already serves, or null -- `desk_jobs.result_href` (a
+  value the worker itself wrote) still wins over all of these, because the
+  worker is the only thing that knows where its own output landed.
+*/
+const RESULT_HREF: Partial<Record<JobKind, (subjectId: number) => string>> = {
+  scan: () => "/desk/scan",
+  dark: () => "/desk/dark",
+  "artifact-ocr": () => "/desk/dark",
+  editorial: () => "/desk/opinion",
+  // The transcript screen is keyed by the ARTIFACT, and this job's subject IS
+  // the audio artifact -- `performAudioTranscribeWork` refuses to run when the
+  // receipt's `audioArtifactId` and the subject disagree.
+  "audio-transcribe": (subjectId) => `/desk/transcript/${subjectId}`,
+  // Pull's result is a document under a story, and a `pull` job's subject is
+  // the job's own receipt rather than a lead, so there is no honest id to put
+  // in a URL here. Null: the card offers no Open button rather than a wrong one.
 };
 
 const ms = (value: string | null | undefined): number | null => {
@@ -118,7 +174,14 @@ const ms = (value: string | null | undefined): number | null => {
  */
 type ProgressShape = Omit<
   JobProgressView,
-  "leadId" | "title" | "doneText" | "openLabel" | "resultHref" | "resultDraftId" | "canRetry"
+  | "leadId"
+  | "title"
+  | "headline"
+  | "doneText"
+  | "openLabel"
+  | "resultHref"
+  | "resultDraftId"
+  | "canRetry"
 >;
 
 function progressShape(row: DeskJob, model: string): ProgressShape {
@@ -153,19 +216,28 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
  * waiting a round trip for the poll -- a story that is running must not lose
  * its progress bar for one frame because the card moved to a live query.
  */
-export function jobProgressView(row: DeskJob, leadId: number, draftId: number | null): JobProgressView {
+export function jobProgressView(
+  row: DeskJob,
+  leadId: number,
+  draftId: number | null,
+  headline: string | null = null,
+): JobProgressView {
   const kind = row.kind;
   return {
     ...progressShape(row, modelChoiceLabel(effectiveStoryModelChoice(row.model_choice))),
     leadId,
     title: TITLES[kind] ?? row.kind,
+    // Non-story kinds carry no headline, whatever the caller passed: their
+    // subject id is a run id, and the query above resolves a headline only for
+    // the two kinds whose subject is a lead.
+    headline: kind === "draft" || kind === "reconcile" ? headline : null,
     resultHref:
       row.result_href ??
       (kind === "draft" || kind === "reconcile"
         ? draftId
           ? `/desk/story/draft/${draftId}`
           : `/desk/story/${leadId}`
-        : null),
+        : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
     doneText: DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
@@ -205,6 +277,9 @@ export function followUpJobProgressView(row: DeskJob, model: string): JobProgres
     ...progressShape(row, model),
     leadId: 0,
     title: TITLES["follow-up"] ?? "Running the check",
+    /* A follow-up's subject is a `follow_ups` id, so there is no headline to
+       look up and none to show -- the card draws its title. */
+    headline: null,
     resultHref: null,
     resultDraftId: null,
     doneText: DONE_TEXT["follow-up"] ?? "The check is done",
@@ -282,38 +357,89 @@ export const listFollowUpJobProgress = createServerFn({ method: "GET" })
   });
 
 /**
- * The newsroom's recent story work, newest first.
+ * EVERY job the desk is running, every kind (FB1, unit 3).
  *
- * Deliberately small and unordered in the database: the desk shows at most a
- * handful of these at once, and every screen that uses it wants a different
- * slice (one lead, or everything running). Sorting and slicing on the client is
- * what keeps this one query rather than three, which is what "fed by one
- * `useDeskJobs()`" asks for.
+ * THE ONE READER. It replaces two narrow ones -- `listStoryJobProgress`
+ * (`kind in ('draft','reconcile')`) and the shell's `listRecentStoryWork`
+ * (`kind='draft'`) -- which between them meant six of the eleven kinds had no
+ * card surface anywhere in the product: a Scan, a Dark Desk round, a brief, a
+ * PDF read, a Pull, a transcription and a routine edition could all be running
+ * with nothing on any screen that said so.
+ *
+ * OPEN ROWS COME FIRST, then newest. The `limit` is not a detail: a newsroom
+ * with forty finished jobs behind it would otherwise page its own running scan
+ * out of the window, and the card the editor is looking for would vanish as the
+ * history grew. `order by (status in (...)) desc, id desc` is what makes the
+ * window a window on the OPEN work first, newest-first within each group.
  *
  * `finished` rows are included, not just open ones, because the card has to be
  * able to show Done and Failed -- a query that only ever returned running jobs
  * would make two of the design's three states unreachable.
+ *
+ * Deliberately small and unordered beyond that: every screen wants a different
+ * slice (one lead, one kind, everything open) and slices on the client, which
+ * is what keeps this one query rather than five.
  */
-export const listStoryJobProgress = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }): Promise<JobProgressView[]> => {
+export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[]> {
+  {
     const { ensureJobsSchema } = await import("./jobs.ts");
     await ensureJobsSchema();
     const sql = await getSql();
-    const newsroomId = context.newsroomId ?? 1;
-    const rows = await sql<DeskJob & { lead_id: number; draft_id: number | null }>`
+    const rows = await sql<
+      DeskJob & { lead_id: number; draft_id: number | null; headline: string | null }
+    >`
       select j.*, j.subject_id as lead_id,
+        /*
+          The drafts row first, the lead second, as two INDEPENDENT scalar
+          subqueries rather than one nested in the other. A lead whose draft
+          has not been written yet has no drafts row at all, so a coalesce
+          inside that subquery would never run: the subquery returns no rows
+          and the whole expression is NULL -- a job with a headline and no
+          headline to show, which is the bug this shape avoids.
+        */
+        case
+          when j.kind in ('draft', 'reconcile') then coalesce(
+            (
+              select nullif(d.headline, '') from drafts d
+              where d.lead_id = j.subject_id and d.newsroom_id = j.newsroom_id
+              order by d.updated_at desc, d.id desc limit 1
+            ),
+            (
+              select l.headline from leads l
+              where l.id = j.subject_id and l.newsroom_id = j.newsroom_id
+            )
+          )
+          else null
+        end as headline,
         (select d.id from drafts d
           where d.lead_id = j.subject_id and d.newsroom_id = j.newsroom_id
           order by d.updated_at desc, d.id desc limit 1) as draft_id
       from desk_jobs j
       where j.newsroom_id = ${newsroomId}
-        and j.kind in ('draft', 'reconcile')
-      order by j.id desc
-      limit 20
+      order by (j.status in ('queued', 'running')) desc, j.id desc
+      limit 30
     `;
-    return rows.map((row) => jobProgressView(row, row.lead_id, row.draft_id));
-  });
+    return rows.map((row) =>
+      jobProgressView(
+        row,
+        row.kind === "draft" || row.kind === "reconcile" ? row.subject_id : 0,
+        row.kind === "draft" || row.kind === "reconcile" ? row.draft_id : null,
+        row.headline,
+      ),
+    );
+  }
+}
+
+/*
+  The desk's one job query, as the desk calls it. The read above is a plain
+  exported function on purpose: a `createServerFn` handler needs a session and a
+  request, so a test could only reach it through a built server -- and "does
+  this reader return a scan" is a question about SQL, not about routing. The
+  test calls `readDeskJobs` directly against PGlite and against real Postgres.
+*/
+export const listDeskJobs = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(({ context }): Promise<JobProgressView[]> => readDeskJobs(context.newsroomId ?? 1));
 
 /**
  * The editor pressed Cancel. This only writes the flag: the worker is what

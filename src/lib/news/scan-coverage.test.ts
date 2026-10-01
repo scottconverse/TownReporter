@@ -111,6 +111,13 @@ describe("batched analysis replaces the single truncating pass (P0-5)", () => {
   it("builds bounded batches and merges their results", () => {
     assert.match(desk, /buildScanBatches\(\{ sources: batchSources \}\)/);
     assert.match(desk, /mergeScanBatchResults\(batchResults\)/);
-    assert.match(desk, /for \(const batch of batches\)/);
+    /*
+      FB1 changed the loop's shape: it is indexed now, because the batch number
+      is what the card reports as a percentage ("Reading the sources with a
+      model — batch 2 of 5"). The bounded-batch property this test exists for is
+      unchanged -- one model call per batch, merged at the end -- and the pin
+      follows the code rather than the other way round.
+    */
+    assert.match(desk, /for \(const \[batchIndex, batch\] of batches\.entries\(\)\)/);
   });
 });

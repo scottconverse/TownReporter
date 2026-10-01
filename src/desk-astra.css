@@ -2877,15 +2877,33 @@
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-  font-size: calc(14px * var(--ts));
   color: var(--fg2);
 }
-.desk-ltr.astra .astra-running-job b {
-  display: block;
+/*
+  THE BOX THE CARD SITS IN, AT RAIL WIDTH (FB1b, item 1).
+
+  The card brings its own border and padding, drawn for a full-width column; in
+  the rail that border is a second frame inside the box's yellow one and the
+  16px padding eats the width the title needs. So the rail draws the card flat:
+  no border, no fill, the page's own background, and only the accent rule on the
+  left -- which is the one part of the card's frame that carries meaning.
+*/
+.desk-ltr.astra .astra-running-job .job-card {
+  padding: 0;
+  border: none;
+  border-left: 3px solid var(--job-col, var(--a));
+  padding-left: 10px;
+  background: transparent;
+}
+/* 14px, the desk's floor -- `desk-min-font.test.mjs` fails any .desk-ltr rule
+   under it, and the rail is the one place the temptation to go smaller is
+   strongest. */
+.desk-ltr.astra .astra-running-job .job-card-title {
   font-size: calc(14px * var(--ts));
-  font-weight: 700;
-  color: var(--fg);
-  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .astra-running-job .job-card-actions .btn {
+  width: 100%;
+  justify-content: center;
 }
 
 /* BF3: the "Find anything" box and the footer's extra route links are gone
@@ -3083,7 +3101,18 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  min-width: 232px;
+  /* FB6, owner report 7c: 232px was measured against the drawn menu's own
+     rows and is too narrow for the widest one it can hold. The lead menu's
+     block rows carry a BUTTON (`Start an AI follow-up`, `Draft with a chosen
+     model`), and `.btn` is 14px bold with 12px of padding either side inside a
+     row that is already 16px in from each edge -- so the label ran out of width
+     and wrapped onto two lines, which is what the owner saw. 264px fits the
+     longest of them on one line at both text sizes; the block's own buttons are
+     `nowrap` (`.btn` has always been), so a narrower menu can no longer wrap the
+     words either -- it would only crowd them. The phone rule below drops this
+     to `min-width: 0` and lets the menu take the row's width, where a 390px
+     frame has ~342px to spend and the same label has room to spare. */
+  min-width: 264px;
   background: var(--bg);
   border: 2px solid var(--fg);
 }
@@ -3151,6 +3180,17 @@
 .desk-ltr.astra .more-menu .more-block .dup-kill-note,
 .desk-ltr.astra .more-menu .more-block .queue-draft-controls {
   margin: 0;
+}
+/* FB6, owner report 7c: "Start an AI follow-up" wrapped onto two lines in the
+   lead menu. The cause is not the menu's width alone -- `.btn` is
+   `white-space: normal` in this stylesheet (line 511, deliberately, so a button
+   in a narrow grid cell can wrap) -- so a menu ROW, which is a label rather than
+   a layout-filling control, has to say otherwise. Both halves are needed: the
+   label will not break here, and the menu is wide enough that it does not have
+   to. Nothing else in the menu is affected: the text rows are `.more-item`
+   buttons and always were one line. */
+.desk-ltr.astra .more-menu .more-block :is(.btn, .document-add-button) {
+  white-space: nowrap;
 }
 
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
@@ -3469,7 +3509,7 @@
   background: var(--fg);
   color: var(--bg);
 }
-.desk-ltr.astra .today-legend {
+.desk-ltr.astra :is(.today-legend, .queue-legend) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 16px;
@@ -3479,11 +3519,11 @@
   font-size: calc(14px * var(--ts));
   color: var(--fg2);
 }
-.desk-ltr.astra .today-legend-label {
+.desk-ltr.astra :is(.today-legend, .queue-legend) .today-legend-label {
   font-weight: 800;
   color: var(--fg);
 }
-.desk-ltr.astra .today-legend kbd {
+.desk-ltr.astra :is(.today-legend, .queue-legend) kbd {
   font: 800 calc(14px * var(--ts)) var(--fd);
   color: var(--fg);
 }
@@ -4057,6 +4097,39 @@
 .desk-ltr.astra .lead-list.roomy .lead-row.picked {
   background: var(--surface);
 }
+/* FB6, item 4: the keyboard cursor on the Queue's table.
+   Today's rows draw the cursor as `.today-lead.sel` -- a surface fill and a
+   4px inset bar in `--sel`, which is ink in light and gold in dark (the same
+   token the selected tab uses). The Queue's rows are the same rows in a
+   different box, so the cursor is the same statement, and the inset keeps the
+   lead text exactly where it was when the cursor moves down the list. */
+.desk-ltr.astra .lead-list.roomy .lead-row.sel {
+  background: var(--surface);
+  box-shadow: inset 4px 0 0 0 var(--sel);
+}
+/* FB6, item 3: the scan's card, under the press that started it, on both
+   screens. The same spacing the rails give their other blocks. */
+.desk-ltr.astra .wire-scan-card,
+.desk-ltr.astra .queue-scan-card {
+  margin-top: 10px;
+}
+/* FB6, item 2: the one-reason box a bulk Kill asks for, laid out like the bulk
+   Delete confirm it sits beside. */
+.desk-ltr.astra .queue-bulk-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: calc(14px * var(--ts));
+}
+.desk-ltr.astra .queue-bulk-reason input {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 2px solid var(--fg);
+  background: var(--bg);
+  color: var(--fg);
+  font: 500 calc(14px * var(--ts)) var(--fb);
+  min-width: 22rem;
+}
 .desk-ltr.astra .lead-list.roomy .lead-chips {
   display: flex;
   align-items: center;
@@ -4335,21 +4408,39 @@
   --job-col: var(--warn);
 }
 
+/*
+  THE HEAD, AND WHY IT IS A GRID (FB1b, items 1 and 4).
+
+  Title column, clock column. The title column is the one that may shrink
+  (`minmax(0, 1fr)` -- a bare `1fr` refuses to go below its content and the
+  clock gets pushed out of the box), and the clock is `auto` and never wraps.
+  In a flex row the two compete for space and the clock ends up inside the
+  title's last line; here the columns cannot overlap at any width.
+*/
 .desk-ltr.astra .job-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 10px;
 }
 .desk-ltr.astra .job-card-id {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
+  min-width: 0;
+}
+/* Title above, model below. Two lines, always -- never one run-on line. */
+.desk-ltr.astra .job-card-id-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 .desk-ltr.astra .job-card-dot {
   width: 12px;
   height: 12px;
   flex: none;
+  align-self: center;
   background: var(--job-col);
 }
 /* Only a running job pulses. A stalled one must look stopped, and a done or
@@ -4360,6 +4451,7 @@
 .desk-ltr.astra .job-card-title {
   font-size: calc(1rem * var(--ts));
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 .desk-ltr.astra .job-card-model {
   font-size: calc(0.875rem * var(--ts));
@@ -4370,6 +4462,35 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/*
+  THE COMPACT CARD: ONE LINE OF TITLE, IN THE NARROWEST COLUMN ON THE DESK.
+
+  The nav's Running box is about 190px of usable width inside its border and
+  padding, and the card that goes in it was drawn for a full-width column:
+  "Scanning the watch list" wrapped to three lines, pushed the clock around and
+  ran the model line together with it. Compact is the variant for exactly this
+  case, so the title gets one line with an ellipsis and everything else stacks
+  under it in the order the eye wants: title, model · %, bar, Now, actions.
+
+  `text-overflow` needs `overflow: hidden` AND a bounded box; the bounding is
+  `minmax(0, 1fr)` on the grid column above, which is why this rule is not
+  enough on its own.
+*/
+.desk-ltr.astra .job-card.compact .job-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.desk-ltr.astra .job-card.compact .job-card-model {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-ltr.astra .job-card.compact .job-card-id {
+  align-items: center;
 }
 
 .desk-ltr.astra .job-card-stages {
@@ -5339,6 +5460,24 @@
   background: var(--surface);
   border: 1px solid var(--line);
   min-width: 0;
+  /*
+    A CONFIG TOKEN IS ONE WORD, AND IT MUST NOT PUSH THE PAGE SIDEWAYS.
+
+    A panel's prose names the settings it is asking for, and a setting's name
+    has no break in it: U29's Opinion readiness notice says "start Ollama (or
+    set TOWNREPORTER_DEEPSEEK_BASE_URL to its address)", and that variable is
+    thirty characters the browser will not split. At 390px with Text: Large
+    the word is wider than the list item holding it, so the line ran past the
+    viewport and the whole desk scrolled sideways -- 5px, measured on CI's
+    fonts and invisible under the local ones (scripts/desk-uiux-walk.mjs,
+    case-18, Opinion).
+
+    `break-word`, not `anywhere`: it splits a word that cannot fit its line and
+    leaves every min-content width exactly where it was, so nothing else on the
+    desk re-wraps and no grid track changes size. It inherits, so one
+    declaration covers the panel's paragraphs, list items and help lines.
+  */
+  overflow-wrap: break-word;
 }
 .desk-ltr.astra .astra-panel.hot { border: 2px solid var(--a); }
 .desk-ltr.astra .astra-panel.plain { gap: 0; }

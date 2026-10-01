@@ -33,9 +33,13 @@ import { boilerplatePageReason } from "./result-quality.ts";
 import { storableText } from "./storable-text.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
 import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
+import { junkQueryReason } from "./extract.ts";
+import { queryNamesUngroundedSpecific } from "./dark-specific-grounding.ts";
+import { groundingCorpus } from "./investigate.ts";
 import {
   DARK_VERIFY_SYSTEM,
   adversarialQueries,
+  adversarialSourceRefusalReason,
   newsworthyDecision,
   readGates,
   readNewsworthiness,
@@ -145,6 +149,13 @@ export async function verifyRunSignals(opts: {
   const search: VerifySearchFn =
     opts.deps?.search ?? ((query: string) => defaultSearch(query, relevance));
   const allSearches: AdversarialRecord[] = [];
+  /*
+    Every query this round refused to run, with the rule that refused it. The
+    lane used to build this list and then drop it on the floor, so a round that
+    planned four searches per signal and ran none looked exactly like a round
+    that found nothing to search for. It is reported in the summary below.
+  */
+  const refusedQueries: string[] = [];
 
   const rows = await sql<Row>`
     select id, name, observation, pattern, alternatives, counter_narrative,
@@ -167,6 +178,19 @@ export async function verifyRunSignals(opts: {
         "Verification could not read the signals. No verification result was established; retry the round.",
     };
 
+  /*
+    M1 of the pre-merge audit: what this lane judges its own queries against.
+
+    Read once per round, not once per signal, and allowed to fail to null: a
+    database that cannot list its captures has not thereby made every specific
+    in the round invented, and dropping all four queries per signal on a
+    transient read error would turn a working round into a silent no-op. A null
+    corpus means the junk filter alone decides, exactly as it did before.
+  */
+  const grounding = await groundingCorpus(opts.investigationId, opts.newsroomId, opts.place).catch(
+    () => null,
+  );
+
   let verified = 0;
   let unverified = 0;
   let unsaved = 0;
@@ -178,10 +202,55 @@ export async function verifyRunSignals(opts: {
   signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
     const sig = selected[signalIndex]!;
     await opts.onStage?.(`Testing explanations for signal ${signalIndex + 1} of ${selected.length}`);
-    const plan = adversarialQueries(sig, opts.place, official).map((q) => ({
-      ...q,
-      query: queryWithResearchWindow(q.query, opts.preferences),
-    }));
+    /*
+      Unit DD1, item 2: the hop lane's junk filter, on this lane too.
+
+      A query this lane plans is one the APP runs, so it passes the same
+      `junkQueryReason` gate the hop planner's queries pass. The dropped ones
+      are said out loud in the round summary rather than silently skipped, the
+      way the hop loop says them.
+    */
+    /*
+      The window operators go on LAST, and that ordering is load-bearing.
+
+      `after:`/`before:` are the DESK's own words, and they carry dates the file
+      has no reason to hold -- "2026-06-09" is when this run started looking, not
+      something a capture says. Judged as if the model had written them, every
+      query in a lookback round would name an ungrounded date and be dropped,
+      which is a round that searches nothing and blames the model for it. The
+      hop lane applies them after its judgement for exactly this reason
+      (`investigate.ts`, the `usable` filter), and this lane now does too.
+    */
+    const droppedQueries: string[] = refusedQueries;
+    const plan = adversarialQueries(sig, opts.place, official)
+      .filter((q) => {
+        const reason = junkQueryReason(q.query);
+        if (reason) {
+          droppedQueries.push(`${reason}: ${q.query.slice(0, 120)}`);
+          return false;
+        }
+        /*
+          M1 of the pre-merge audit: the grounding rule, on this lane too.
+
+          The hop lane has run `queryNamesUngroundedSpecific` over every query it
+          runs since DD1, and this lane did not -- so a signal filed as
+          "Operator transition at 1749 Main Street" had that address run against
+          a provider four times one stage later. It is the walkthrough's exact
+          failure through the door the first fix left open, and the rule is the
+          same one: the corpus is the file's captures and the lead, and a query
+          naming a specific nothing there carries is not run.
+
+          The corpus is read once for the round, above, so a round does not pay
+          for a capture read per signal.
+        */
+        const invented = grounding ? queryNamesUngroundedSpecific(q.query, grounding) : null;
+        if (invented) {
+          droppedQueries.push(`names a specific no capture carries (${invented}): ${q.query.slice(0, 120)}`);
+          return false;
+        }
+        return true;
+      })
+      .map((q) => ({ ...q, query: queryWithResearchWindow(q.query, opts.preferences) }));
     const records: AdversarialRecord[] = [];
 
     const evidence: string[] = [];
@@ -233,9 +302,28 @@ export async function verifyRunSignals(opts: {
         came back on the question -- `relevance.decision === "degraded"` -- no
         URL is recorded at all: the query ran, and it did not get an answer.
       */
+      /*
+        Unit DD1, item 2: a page that is not a record does not get to answer the
+        query, and the run record says which rule refused it.
+
+        `boilerplatePageReason` names the dictionary, the app landing page and
+        the engine's own page; `adversarialSourceRefusalReason` adds the
+        reference works -- `en.wikipedia.org/wiki/Childcare` came back as "the
+        source" for four of the five verification signals on the Kid City USA
+        file, because the query named a childcare closure and the entry is
+        titled "Childcare".
+
+        When nothing survives, the query ran and got no answer: no URL is
+        recorded at all, and the outcome says so instead of showing the editor a
+        page nobody could have used.
+      */
+      // How many the provider returned, before any rule refused one -- the
+      // difference between "the search found nothing" and "the search found
+      // pages that are not records", which are two different facts.
+      const returned = hits.length;
       const refused: string[] = [];
       hits = hits.filter((h) => {
-        const why = boilerplatePageReason(h.url);
+        const why = boilerplatePageReason(h.url) ?? adversarialSourceRefusalReason(h.url);
         if (why) refused.push(`${why} (${h.url.slice(0, 120)})`);
         return !why;
       });
@@ -243,9 +331,9 @@ export async function verifyRunSignals(opts: {
       if (state.startsWith("SEARCH_SUCCESS")) {
         outcome = answered
           ? `${hits.length} result(s)${relevanceDecision === "relevant" ? "" : " (not assessed for relevance)"}`
-          : hits.length && relevanceDecision === "degraded"
-            ? `${hits.length} result(s), none matching the question (kept as candidates, not as an answer)`
-            : "no results found";
+          : returned && relevanceDecision === "degraded"
+            ? `${returned} result(s), none matching the question (kept as candidates, not as an answer)`
+            : "no independent source found";
       }
       if (refused.length)
         outcome = `${outcome}; refused ${refused.length}: ${[...new Set(refused)].slice(0, 3).join("; ")}`.slice(
@@ -464,8 +552,12 @@ export async function verifyRunSignals(opts: {
     .then((rows) => rows.length > 0)
     .catch(() => false);
 
+  const refused = [...new Set(refusedQueries)].slice(0, 4);
   const summary = rows.length
-    ? `Adversarial review: ${verified} of ${rows.length} eligible signal(s) completed the four-question protocol. Attempted ${selected.length} with ${allSearches.length} searches; ${unverified} remain protocol-incomplete (${failed} encountered failures). ${deferred} saved for a later review round.`
+    ? `Adversarial review: ${verified} of ${rows.length} eligible signal(s) completed the four-question protocol. Attempted ${selected.length} with ${allSearches.length} searches; ${unverified} remain protocol-incomplete (${failed} encountered failures). ${deferred} saved for a later review round.` +
+      (refusedQueries.length
+        ? ` ${refusedQueries.length} planned query/queries were not run: ${refused.join("; ")}`
+        : "")
     : "Adversarial review: no new signals to check this round.";
 
   return {

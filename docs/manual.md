@@ -462,11 +462,15 @@ paper's position rather than one writer's. Claims and sources run in an appendix
 at the end, where a reader who dislikes the piece can check them.
 
 Opinion shows Automatic, Codex Astra, Sol, Terra and Luna, Claude Fable, Opus,
-Sonnet and Haiku, Local model, plus saved custom connections. Codex Sol is selected by default. Opinion's own Automatic tries Codex Sol, then Claude Sonnet
-once if Codex is unavailable; that order belongs to Opinion. Stories, scans and
-Dark Desk walk the desk's own Automatic ladder instead — DeepSeek v4.1 Flash,
-then the local model on this computer when one is loaded, then Codex Terra.
-Explicit choices remain the requested first
+Sonnet and Haiku, Local model, DeepSeek v4.1 Flash, plus saved custom
+connections. **Automatic is selected by default**, so an editor who never
+touches the picker writes with the first ready rung; a saved explicit choice is
+honoured as it always was. Opinion's own Automatic tries
+**DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet** — DeepSeek first
+since 2026-09-30, and it is the one model the two ladders share: stories, scans
+and Dark Desk walk their own Automatic ladder, DeepSeek v4.1 Flash, then the
+local model on this computer when one is loaded, then Codex Terra. Explicit
+choices remain the requested first
 runtime and use the same technical-only unfinished-call retry. Claude Code
 and Codex both read the complete configured voice through their native instruction-file options. The page
 lists every missing voice, installation, or login prerequisite and stays
@@ -475,8 +479,9 @@ disabled while readiness is unknown.
 A successful process exit is not enough to file a piece. TownReporter rejects
 provider refusals, assistant notes, implausible headlines, and incomplete
 bodies before draft storage. A provider refusal or invalid delivery reports a
-failed run without creating a draft. Opinion's Automatic can move from Codex Sol
-to Claude Sonnet once; an explicit choice is tried first and can switch only for
+failed run without creating a draft. Opinion's Automatic can move from DeepSeek
+to Codex Sol and on to Claude Sonnet; an explicit choice is tried first and can
+switch only for
 a recognized technical failure. A failed row has no Read, Edit, or Publish
 action; a finished row shows the requested and actual model and effort. An
 unattended ladder never selects Opus, on any surface.
@@ -490,9 +495,26 @@ minutes** — two finished at 9m53s and 24m06s, and one was still going at 30.
 Those are observations, not a deadline: `EDITORIAL_TIMEOUT_MS` now applies to
 each research or writing pass, with a default of 45 minutes per pass. A pair
 can take about 90 minutes, excluding document intake. Opinion's Automatic can
-try a Claude Sonnet pair after Codex fails, so its total can be longer.
-Explicit Local model performs one writing call using the supplied material;
-it does not run the frontier research pass. The page shows a
+try a Codex Sol or Claude Sonnet pair after DeepSeek fails, so its total can be
+longer.
+**DeepSeek v4.1 Flash, Local model and saved connections are researched by the
+desk.** Those writers have no web tools of their own, so the desk does the
+searching and the reading for them, and the model holds the full voice file while
+it plans those searches and reads what came back — the voice is where the
+research protocol lives, so the desk hands it over rather than keeping it back.
+The desk reads the newsroom's own record first, in the order the protocol puts
+it: the city's PrimeGov agendas, packets and minutes (the PDFs, with OCR where a
+scanned packet needs it), the meeting transcripts this desk captured, and the
+pages it already holds. Research then runs until the protocol's stopping
+conditions are met — every load-bearing claim with two independent sources, at
+least two surprising facts with one from a local primary document — or until the
+safety ceiling, 30 minutes and 80 pages by default
+(`EDITORIAL_RESEARCH_CEILING_MS`, `EDITORIAL_RESEARCH_PAGE_CEILING`). The writing
+call that follows is still one call, from the voice as its system message, and it
+receives what the desk read with each record's address and the number of searches
+run and pages read. When the desk finds nothing usable for a piece it says so,
+and the editorial is still written from the
+material the editor supplied. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
 you publish one.
 
@@ -724,12 +746,14 @@ the registry is the canonical picker definition; provider adapters still impleme
 | **Write a story** (desk landing page) | files the lead, then the same Draft ladder above                                                                                                                                                                                                                         | Any named Codex or Claude model, Local model, or saved custom connection                                  |
 | Dark Desk synthesis and brief         | the one you pick beside **Keep digging**; Automatic behaves as it does for Draft, with one mid-run failover at the round level                                                                                                                                           | the one you picked                                                                                              |
 | Dark Desk **planner**                 | the one you pick                                                                                                                                                                                                                                                         | a cheaper model from the SAME provider: Haiku on Claude, Terra on either Codex, and your own model on a gateway |
-| **Opinion (editorials)**              | Default: Codex Sol. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
+| **Opinion (editorials)**              | Default selection: Automatic. Opinion's own Automatic — DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet — resolved to the first rung that answers before the run starts. Automatic and named choices use the same technical-only per-call retry during the active run; a restarted job may reread saved source material; refusals are terminal | The selected provider first, with a recorded technical switch when needed |
 
 **Opinion provider behavior.** An editorial uses the paper's configured voice
 and frontier research. Opinion's picker offers Automatic, all four named Codex
-models, all four named Claude models, Local model and custom connections. Opinion's Automatic tries Codex Sol
-then Claude Sonnet once when needed; the desk's own Automatic ladders for
+models, all four named Claude models, Local model, DeepSeek v4.1 Flash and
+custom connections. Opinion's Automatic tries DeepSeek v4.1 Flash, then Codex
+Sol, then Claude Sonnet once when needed (DeepSeek first since 2026-09-30; it is
+the one rung the two ladders share). The desk's own Automatic ladders for
 stories, scans and Dark Desk run DeepSeek v4.1 Flash, then the local model on this
 computer when one is loaded, then Codex Terra, and do not select Claude on their
 own. Explicit choices remain the requested
@@ -738,12 +762,16 @@ Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
 receives the voice through `--system-prompt-file`; Codex uses
 `model_instructions_file`. Both writing passes load the complete voice file
-and can research sources while writing. The editorial assignment is sent separately.
+and can research sources while writing: the voice file carries the research
+protocol, so the writer researches and writes in one run with it in hand. The
+editorial assignment is sent separately.
 Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
 and flagged for completion before publication. The
-explicit Local model path sends validated voice text as a system message to
-the selected model server. It uses supplied material without a separate
-research pass; the writing pack records that no gathering pass ran.
+DeepSeek rung and the explicit Local model path send validated voice text as a
+system message to their model server: they have no web tools of their own, so
+the desk runs the research pass for them — searching, opening and recording the
+pages — and the same voice governs the planning and the reading as much as the
+writing. The writing pack says how many searches ran and how many pages were read.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only within the
@@ -1418,7 +1446,7 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and DeepSeek is offered in Opinion's picker by name too. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and research with it in hand, since the voice file carries the research protocol; DeepSeek, the local model and saved connections have no web tools of their own, so the desk does the searching and reading for them and the same voice governs what it looks for. Research runs to the protocol's stopping conditions or the safety ceiling (30 minutes, 80 pages, configurable), not to a fixed search count. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 

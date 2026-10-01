@@ -190,12 +190,27 @@ export function useDeskAction<Result>(copy: DeskActionCopy<Result>): DeskAction<
 export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variables> & {
   mutationFn: (variables: Variables) => Promise<Data>;
   /**
-   * The press's own follow-up: the invalidations, the close, the navigate. It
-   * runs after the done toast, so a screen that is about to change says what
-   * happened before it changes. It does NOT run when the answer refused
-   * (`{ok:false}`): a refused press changed nothing, and a follow-up that
-   * assumed otherwise would be the desk inventing the outcome it just reported
-   * the absence of.
+   * The press's own follow-up: the invalidations, the close, the navigate.
+   *
+   * B7R, item 3. It is AWAITED, so the whole of it is part of the press: the
+   * button stays pending and the done toast is not raised until it settles.
+   * It used to be fired and forgotten (`void after(...)`), which let the press
+   * settle while the follow-up was still running -- the row read "Accept"
+   * again while the Sources screen was still filing the source under its
+   * sections -- and turned a follow-up that threw into an unhandled promise
+   * nobody reported. Success is now announced when the action is over, not
+   * when the first half of it is.
+   *
+   * A rejection here is reported through the same error toast as a failed
+   * call, carrying the real reason, because from the editor's side it is the
+   * same thing: the press did not finish. It is reported ONCE and then
+   * rethrown -- see `DeskFollowUpError` -- so the caller that awaits
+   * `mutateAsync` learns the press failed rather than carrying on as if it had
+   * finished (L5 of the batch-7 pre-merge audit).
+   *
+   * It does NOT run when the answer refused (`{ok:false}`): a refused press
+   * changed nothing, and a follow-up that assumed otherwise would be the desk
+   * inventing the outcome it just reported the absence of.
    */
   after?: (data: Data, variables: Variables) => void | Promise<void>;
   /**
@@ -213,7 +228,85 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    * moment each item settles.
    */
   muted?: () => boolean;
+  /**
+   * The press's optimistic half: change the screen before the server answers.
+   *
+   * FB6, item 2 (README "Interactions & behavior": "optimistic Held/Killed with
+   * Undo until the server confirms"). A row that only changes when the round
+   * trip lands is the "line going back and forth" the owner opened this unit
+   * about, so a Hold or a Kill moves the row in the same paint as the press and
+   * the server's answer is a confirmation rather than the first sign of life.
+   *
+   * Whatever this returns is handed back to `rollback` if the press fails -- so
+   * the natural return is the previous state, in whatever shape the caller can
+   * put back. It runs inside React Query's `onMutate`, which is why the
+   * mutation's own `isPending` is already true by the time it runs: the button
+   * is disabled and the row has moved in the same commit.
+   *
+   * The one shape this must not take is "return the old value and let the hook
+   * guess what to do with it": a hook that both owns the change and knows how to
+   * undo it would have to know what the change was, and the screens disagree
+   * (Today holds lead rows, the Queue holds a windowed page of them). The
+   * caller's two callbacks are the whole contract.
+   */
+  optimistic?: (variables: Variables) => unknown;
+  /**
+   * Put back what `optimistic` changed, when the press did NOT take.
+   *
+   * Called for both ways a press fails -- a thrown call and an answer that
+   * refused with `{ok:false}` -- because from the editor's side they are the
+   * same thing: the row moved and the desk says it did not. `context` is
+   * whatever `optimistic` returned for this press.
+   */
+  rollback?: (context: unknown, variables: Variables) => void;
 };
+
+/**
+ * A follow-up that failed AFTER its sentence was already shown.
+ *
+ * L5 of the batch-7 pre-merge audit. `onSuccess` catches the follow-up's
+ * rejection so it can report it once instead of twice — but catching it also
+ * made the mutation settle as a SUCCESS, and a press site that chains
+ * `await mutateAsync(...).then(close)` then closed the dialog, navigated away
+ * or re-enabled the row on a press that never finished. The answer the editor
+ * saw and the answer the caller saw disagreed.
+ *
+ * Rethrowing is what makes them agree: react-query answers a rejection out of
+ * `onSuccess` by dispatching "error" and rejecting the promise, so
+ * `mutateAsync` rejects and `mutate`'s own callers see the failure state. The
+ * wrapper exists so `onError` — which react-query calls on the way past — can
+ * recognise a failure whose toast has already been raised and stay quiet.
+ */
+export class DeskFollowUpError extends Error {
+  /**
+   * Read instead of `instanceof`.
+   *
+   * A class that extends `Error` loses its prototype when it is downlevelled --
+   * TypeScript's ES5 emit does `_super.call(this, message) || this`, and an
+   * `Error.call` returns a FRESH Error, so the value the caller holds is not an
+   * instance of this class at all. That is not hypothetical: this module is
+   * transpiled to ES5 by the desk's own DOM harness, where `instanceof` here is
+   * false and the identical failure gets reported twice. The flag is assigned in
+   * the constructor, so it survives every target.
+   */
+  readonly deskFollowUpReported = true as const;
+  constructor(
+    message: string,
+    readonly cause: unknown,
+  ) {
+    super(message);
+    this.name = "DeskFollowUpError";
+  }
+}
+
+/** Was this failure's sentence already shown? See `DeskFollowUpError`. */
+export function isReportedFollowUpFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { deskFollowUpReported?: unknown }).deskFollowUpReported === true
+  );
+}
 
 /**
  * The same rules around a React Query mutation.
@@ -223,7 +316,21 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
  * mean exactly what they meant. The only change a converted mutation sees is
  * that a failure now says why.
  */
-export function useDeskMutation<Data, Variables>(
+/**
+ * The caller's `optimistic` return value out of React Query's context wrapper.
+ *
+ * The wrapper exists because `onMutate` returning `undefined` and `onMutate`
+ * returning a caller's `undefined` are the same thing to React Query, and the
+ * rollback should be called either way -- a press that optimistically changed
+ * nothing still has nothing to put back, and a `rollback` that is skipped
+ * because a caller optimistically returned `undefined` would be a rule with an
+ * exception nobody could see.
+ */
+function contextOf(mutationContext: unknown): unknown {
+  return (mutationContext as { context?: unknown } | undefined)?.context;
+}
+
+export function useDeskMutation<Data, Variables = void>(
   options: DeskMutationOptions<Data, Variables>,
 ): UseMutationResult<Data, Error, Variables> {
   const optionsRef = useRef(options);
@@ -233,20 +340,75 @@ export function useDeskMutation<Data, Variables>(
 
   return useMutation<Data, Error, Variables>({
     mutationFn: (variables: Variables) => optionsRef.current.mutationFn(variables),
-    onSuccess: (data: Data, variables: Variables) => {
+    /*
+      THE OPTIMISTIC HALF (FB6). `onMutate` runs before the call and its return
+      value is React Query's `context`, handed to both `onSuccess` and `onError`
+      -- which is exactly the shape an optimist needs: the caller says what it
+      changed and gets the same handle back to undo it. A callback that throws
+      must not take the press down with it, so the failure is caught and the
+      press carries on with no context to roll back.
+    */
+    onMutate: async (variables: Variables) => {
+      try {
+        return { context: await optionsRef.current.optimistic?.(variables) };
+      } catch {
+        return { context: undefined };
+      }
+    },
+    /*
+      ASYNC ON PURPOSE, and react-query is what makes it work: it awaits
+      `onSuccess` before it dispatches "success", so `isPending` stays true for
+      the whole of the follow-up. Everything the editor reads as "this press is
+      still running" -- the disabled button, the pending label, the awaited
+      `mutateAsync` -- covers the follow-up too, and the done toast is raised
+      only once the action is actually over.
+
+      A follow-up that fails is caught HERE, reported once, and RETHROWN as a
+      `DeskFollowUpError`. The catch is what keeps it to one sentence —
+      react-query answers a rejection from `onSuccess` by calling `onError`,
+      which would report the same failure a second time — and `onError` below
+      recognises the wrapper and stays quiet. The rethrow is L5 of the
+      pre-merge audit: swallowing it settled the mutation as a SUCCESS, so a
+      caller awaiting `mutateAsync` carried on as though the press had
+      finished.
+    */
+    onSuccess: async (data: Data, variables: Variables, mutationContext: unknown) => {
       const refusal = deskAnswerFailure(data);
       if (refusal) {
+        /*
+          A REFUSAL IS A FAILED PRESS, and the row that already moved has to move
+          back. The desk's server functions answer `{ok:false, error}` far more
+          often than they throw, so a rollback wired only to `onError` would
+          leave a held row held on the screen while the desk said it was not.
+        */
+        optionsRef.current.rollback?.(contextOf(mutationContext), variables);
         if (!optionsRef.current.muted?.())
           deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
         return;
+      }
+      try {
+        await optionsRef.current.after?.(data, variables);
+      } catch (error) {
+        /*
+          NOT rolled back: the call itself took, so the row's new state is the
+          true one. What failed here is the follow-up (the invalidations), and
+          saying so is the whole of the report. Rethrown so `mutateAsync`
+          callers see the failure; `onError` recognises it and stays quiet.
+        */
+        const sentence = deskActionFailure(error, optionsRef.current);
+        if (!optionsRef.current.muted?.()) deskToast(sentence, { tone: "err" });
+        throw new DeskFollowUpError(sentence, error);
       }
       if (!optionsRef.current.muted?.()) {
         const { message, undo } = deskActionDone(data, variables, optionsRef.current);
         if (message) deskToast(message, { tone: "ok", undo });
       }
-      void optionsRef.current.after?.(data, variables);
     },
-    onError: (error: Error) => {
+    onError: (error: Error, variables: Variables, mutationContext: unknown) => {
+      // A follow-up failure: the call itself took, so the row keeps its new state
+      // and the catch above already said what failed.
+      if (isReportedFollowUpFailure(error)) return;
+      optionsRef.current.rollback?.(contextOf(mutationContext), variables);
       if (optionsRef.current.muted?.()) return;
       deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
     },

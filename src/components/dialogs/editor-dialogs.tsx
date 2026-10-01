@@ -1394,14 +1394,28 @@ export function NewStoryButton({ label = "New story", tone = "solid", disabled }
   );
 }
 
-export function AddLeadButton({ label = "Add a lead", tone = "ghost", disabled }: TriggerProps) {
+export function AddLeadButton({
+  label = "Add a lead",
+  tone = "ghost",
+  disabled,
+  onDone,
+}: TriggerProps & { onDone?: (note: string) => void }) {
   const [open, setOpen] = React.useState(false);
+  /*
+    FB6, owner report 7d. `AddLeadDialog` has always announced a filed lead to
+    its screen through `onDone`, and this wrapper -- the door the desk home and
+    the Queue both use -- dropped it on the floor. So a lead filed from here was
+    written to the database, announced in the toast, and then simply not on the
+    list it was filed from until a reload: the global `refetchOnWindowFocus:
+    false` (root.tsx) means nothing else was ever going to fetch it. The prop is
+    forwarded now, and both screens pass the invalidation.
+  */
   return (
     <>
       <InkButton tone={tone} disabled={disabled} onClick={() => setOpen(true)}>
         {label}
       </InkButton>
-      <AddLeadDialog open={open} onClose={() => setOpen(false)} />
+      <AddLeadDialog open={open} onClose={() => setOpen(false)} onDone={onDone} />
     </>
   );
 }

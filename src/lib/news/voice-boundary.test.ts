@@ -160,13 +160,17 @@ describe("the voice never becomes a command-line argument", () => {
 });
 
 /**
- * The two editorial passes are authorized separately, and never together.
+ * The editorial writer holds the voice AND the web tools, and the transport
+ * must let it (unit U31; owner decision D20, "go back to how it was").
  *
- * SEC-3: the gathering pass reads untrusted pages and holds no voice; the
- * writing pass holds the private voice and must hold no outbound tool, or a
- * page read during research could tell the writer to fetch a URL carrying the
- * voice out of the machine. Before the fix both Claude calls were given
- * `EDITORIAL_TOOLS`, so that pair of facts sat in one context.
+ * Units U12/U12b/c had forbidden that combination and pinned the forbidding
+ * here. The owner reversed the decision: the voice file CONTAINS the research
+ * protocol -- Stage L local record, packet/PDF/tape/parcel/CORA rules,
+ * triangulation, the surprise hunt, the local source ledger -- so a writer
+ * holding the voice without the tools cannot run the protocol it was told to
+ * run. SEC-3 is an owner-accepted risk, stated in SECURITY.md; what was a
+ * guard is now a fact about the transport, and these tests hold the restored
+ * fact rather than the removed rule.
  *
  * These are behavioural, not textual: they call the real exported function
  * with real option objects and check what it actually does, so they cannot
@@ -180,7 +184,7 @@ describe("the voice never becomes a command-line argument", () => {
  * against a recorded fake in editorial.test.ts; these cover the transport
  * side, where each authorization must still reach the CLI.
  */
-describe("the editorial voice never rides with web tools", () => {
+describe("the editorial voice rides with the web tools it needs", () => {
   const originalCliPath = process.env.CLAUDE_CLI_PATH;
   const originalClaudeCode = process.env.TOWNREPORTER_CLAUDE_CODE;
 
@@ -209,15 +213,25 @@ describe("the editorial voice never rides with web tools", () => {
     resetClaudeCliCache();
   });
 
-  /*
-    A test here used to assert that a call carrying the voice file AND web
-    tools reached CLI lookup, i.e. that the transport permits the exact
-    combination SEC-3 forbids. It is gone rather than inverted: the transport
-    still permits it by construction (the caller chooses its own options), and
-    the property that matters is that no production caller asks for it. That
-    is asserted where the pair is actually built -- see editorial.test.ts's
-    recorded-arguments tests -- rather than by a call with no caller.
-  */
+  it("allows voice plus research to reach CLI lookup, as it did before U12", async () => {
+    useMissingCli();
+    const result = await claudeCodeChat({
+      system: "",
+      systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
+      user: "Verify sources",
+      model: "claude-opus-5",
+      timeoutMs: 1_000,
+      allowedTools: ["WebSearch", "WebFetch"],
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(
+        result.error,
+        /Claude Code CLI not found/,
+        "must fail on CLI lookup, not on a voice-and-tools guard",
+      );
+    }
+  });
 
   it("still allows a tools-only call (the gathering pass) to reach CLI lookup", async () => {
     useMissingCli();
@@ -238,17 +252,14 @@ describe("the editorial voice never rides with web tools", () => {
     }
   });
 
-  it("still allows a voice-only call (the writing pass) to reach CLI lookup", async () => {
+  it("still allows a narrow, tool-only call to reach CLI lookup", async () => {
     useMissingCli();
     const result = await claudeCodeChat({
-      system: "",
-      systemPromptFile: join(tmpdir(), "irrelevant-voice-path.txt"),
-      user: "write the piece",
-      model: "claude-opus-5",
+      system: "research instructions",
+      user: "look into it",
+      model: "claude-haiku-4-5-20251001",
       timeoutMs: 1_000,
-      // The production shape of the writing pass: the voice, and no tool
-      // surface at all.
-      noTools: true,
+      allowedTools: ["WebSearch", "WebFetch"],
     });
     assert.equal(result.ok, false);
     if (!result.ok) {
@@ -260,29 +271,28 @@ describe("the editorial voice never rides with web tools", () => {
     }
   });
 
-  it("the gathering pass, and only the gathering pass, asks for the web tools", () => {
+  it("the writing call carries the voice path AND the web tools", () => {
     const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
     const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    const calls = code.match(/allowedTools:\s*EDITORIAL_TOOLS/g) ?? [];
-    assert.equal(
-      calls.length,
-      1,
-      "exactly one Claude call may hold the web tools, and it is the gathering pass",
-    );
-    // The call object closes at the next top-level `});` after the marker.
+    /*
+      Two production Claude calls in that file: the gathering pass and the
+      writer, and since U31 BOTH name the web tools. The property that matters
+      is on the writer -- the call that loads the voice by path -- so it is read
+      off that call's own slice rather than counted across the file.
+    */
     const writeCallStart = code.indexOf("systemPromptFile: found.voice.path");
-    assert.notEqual(writeCallStart, -1, "the writing-pass call must still pass the voice path");
+    assert.notEqual(writeCallStart, -1, "the writing call must still pass the voice path");
     const callEnd = code.indexOf("});", writeCallStart);
     const callSlice = code.slice(writeCallStart, callEnd === -1 ? undefined : callEnd);
-    assert.doesNotMatch(
-      callSlice,
-      /allowedTools/,
-      "the call holding the voice must not be offered a single tool",
-    );
     assert.match(
       callSlice,
+      /allowedTools:\s*EDITORIAL_TOOLS/,
+      "the writer holds the voice and the tools: the voice carries the research protocol",
+    );
+    assert.doesNotMatch(
+      callSlice,
       /noTools:\s*true/,
-      "the call holding the voice must hide the tool surface, not merely deny it",
+      "the writer's tool surface must not be hidden from it",
     );
   });
 });

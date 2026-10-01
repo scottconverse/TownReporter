@@ -157,15 +157,27 @@ import {
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
+import {
+  collectDupPairs,
+  runDupCheck,
+  DUP_CHECK_TIMEOUT_MS,
+  type DupCheckOutcome,
+  type DupCheckPrinted,
+} from "./dup-check.ts";
+import { readModelAssignments } from "./model-assignments-store.ts";
+import { resolveJobModel } from "./model-assignments.ts";
 import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
   enqueueJob,
+  countedStep,
   findOpenJob,
   kickJobs,
   latestJob,
+  PROGRESS_WRITE_MIN_MS,
   progressReporterFor,
   runLooksStalled,
+  spanPct,
   setJobFailoverNote,
   setJobModelChoice,
   setJobModelRuntime,
@@ -486,6 +498,14 @@ async function queryLeadRows(context: { newsroomId: number }) {
              order by d.updated_at desc,d.id desc limit 1)) as story_headline,
            l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
            l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+           -- U28: the duplicate check's verdict, so the row's "Looks already
+           -- printed" chip can carry the model's own sentence and can be
+           -- suppressed when the desk asked and the answer was no. All six
+           -- travel together: a chip gated on one of them without the target
+           -- slug beside it could not tell "not the same story" from "never
+           -- asked" (see printedDupChip in ./desk-copy.ts).
+           l.dup_ai_same, l.dup_ai_why, l.dup_ai_target,
+           l.dup_ai_printed_same, l.dup_ai_printed_why, l.dup_ai_printed_slug,
            -- Unit AK item 5: the Compare view shows both leads side by side
            -- without a second round trip, so the prior lead's why, sources,
            -- dates and kill record travel with the row.
@@ -793,6 +813,10 @@ export const getLead = createServerFn({ method: "GET" })
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
              l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- U28: the duplicate check's verdict, so the story page's chip
+             -- and its Compare view say the same thing the Queue row does.
+             l.dup_ai_same, l.dup_ai_why, l.dup_ai_target,
+             l.dup_ai_printed_same, l.dup_ai_printed_why, l.dup_ai_printed_slug,
              -- Unit AK item 5: the Compare view shows both leads side by side
              -- without a second round trip, so the prior lead's why, sources,
              -- dates and kill record travel with the row.
@@ -1280,6 +1304,53 @@ export type PerformScanWorkDeps = {
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
 };
 
+/**
+ * U28: the published stories a fresh lead can look like, in the shape the
+ * duplicate check reads (slug, headline, the dek the model is shown, topic,
+ * date).
+ *
+ * Deliberately NOT `queryPublishedRows`: that reader exists for screens and
+ * carries every article's body, its corrections and its meeting reviews, which
+ * is a great deal of text to move in order to ask about one headline. This is
+ * the narrow read, and it keeps that reader's order -- newest first -- because
+ * `nearDuplicate` returns the FIRST match in the list and the chip shown later
+ * must be the pair the desk asked about (see `printedDupChip`, which refuses a
+ * verdict recorded against a different slug).
+ */
+async function queryDupCheckPrinted(context: { newsroomId: number }): Promise<DupCheckPrinted[]> {
+  const sql = await getSql();
+  return sql<DupCheckPrinted>`
+    select slug, headline, dek, topic, published_at
+    from articles
+    where newsroom_id = ${owned(context)} and status = ${"published"}
+    order by published_at desc nulls last, id desc
+  `;
+}
+
+/**
+ * U28: the scan's audit line.
+ *
+ * The duplicate check's one consequence an editor could notice without asking
+ * for it is a "Possible duplicate · compare" LINK that is not there, on a pair
+ * the word rule had flagged. That is the right outcome when the desk's model
+ * read both and said they are not the same story, but "the desk decided
+ * something and said nothing" is the failure mode this repository keeps
+ * writing tests against, so the count goes in the run's own record and in the
+ * audit event. The clause is absent entirely when nothing was cleared, so the
+ * ordinary line reads exactly as it always has.
+ */
+function scanAuditDetail(
+  runId: number,
+  fetchedCount: number,
+  leadsCreated: number,
+  dupCheckCleared: number,
+): string {
+  const base = `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`;
+  return dupCheckCleared > 0
+    ? `${base}, ${dupCheckCleared} possible-duplicate link(s) cleared by the duplicate check`
+    : base;
+}
+
 /*
   Wrapped in createServerOnlyFn for the same reason performDraftWork is (see
   the comment above it): this file is reachable both statically, from client
@@ -1343,6 +1414,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
   const meetingChannels = paperConfig.youtubeChannels ?? [];
+  /*
+    FB1: the scan's first arrival, and the honest sentence even when the paper
+    has no channels configured -- the worker does look, finds nothing to look
+    at, and moves on. Before this the whole kind had no stage list at all, so
+    the run that spends the most money on the desk drew no chip row.
+  */
+  await reportStage("Checking for meeting material");
   if (meetingChannels.length > 0) {
     try {
       const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
@@ -1486,6 +1564,93 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   `;
   const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
 
+  /*
+    FB1, unit 1: the fetch pass is the scan's longest silence.
+
+    Up to two hundred pages, six at a time, and until this the whole pass
+    reported nothing at all -- not a stage, not a count, not a heartbeat. The
+    card could only say "Working…" for as long as it took, which on a real watch
+    list is minutes, and the run row in the database kept reading zero fetched
+    until the very end (see `noteSourceProgress`).
+
+    Two writes, deliberately: `reportStage` is the throttled job progress (the
+    card's bar and "Now:" line), and the run-row write below is what the Scan
+    and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
+  */
+  let attemptedCount = 0;
+  let lastLiveWriteAt = 0;
+  /*
+    THE LIVE RUN ROW.
+
+    The owner's complaint was that a working scan read "0 fetched · No sources
+    were fetched" -- `scanCountsLine`/`scanZeroWhy` off a row only written when
+    the run finishes. FB1b adds the scope to it: `sources_selected` is known
+    before the first fetch, and a row that says "2 fetched" without saying out
+    of how many is a count with no denominator. Everything here is a counter
+    this process already holds; nothing is recomputed and nothing is invented.
+
+    Throttled on the same clock as the card's counted write, and guarded on
+    `finished_at is null` so a receipt that has already settled is never
+    reopened. `force` is for the boundary writes -- the start of the pass and
+    the start of a batch -- where the whole point is that the row changes THEN,
+    not up to a second later.
+
+    AND ON THE CLAIM, like every other write to this row. A scan's worker is
+    fenced by `desk_jobs.claim_token` -- `lockManualScanClaim` is what the
+    receipt and the failure paths go through -- because a job whose lease was
+    reclaimed by a newer worker must not settle the run that worker now owns.
+    These counters are a write to that same row, and without the fence a
+    superseded worker keeps moving them under the replacement: the Scan page
+    counts down as often as up, on a run two processes are fetching for.
+
+    The fence is on the WRITE, not on the value, so a count this worker wrote
+    while it still held the claim stays on the row -- it was true when it was
+    written. What it must not do is write again after losing the claim.
+
+    A run with no claim token -- the older rows, and anything a test seeds --
+    is unfenced here, exactly as before.
+  */
+  const writeLiveRunRow = async (force = false) => {
+    const at = Date.now();
+    if (!force && at - lastLiveWriteAt < PROGRESS_WRITE_MIN_MS) return;
+    lastLiveWriteAt = at;
+    await sql`
+      update scan_runs
+      set sources_selected = ${sources.length},
+          sources_attempted = ${watchSlice.length},
+          sources_fetched = ${fetchedCount},
+          sources_failed = ${failedSources.length},
+          sources_analyzed = ${failureReceipt.sourcesAnalyzed},
+          model_batches_used = ${failureReceipt.modelBatchesUsed}
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+        and (
+          ${job.claim_token ?? null}::text is null
+          or exists (
+            select 1 from desk_jobs
+            where id = ${job.id} and newsroom_id = ${job.newsroom_id} and kind = 'scan'
+              and status = 'running' and claim_token = ${job.claim_token}
+          )
+        )
+    `.catch(() => undefined);
+  };
+  const noteSourceProgress = async () => {
+    attemptedCount += 1;
+    /*
+      The fetch is the scan's second arrival, so its count fills 5-55 of the
+      bar and not 0-100: the model batches and the filing come after it, and a
+      bar that filled the moment the last page was read would be lying about
+      the part of the scan that spends the money.
+    */
+    await reportStage(
+      countedStep("Reading sources", attemptedCount, watchSlice.length),
+      spanPct(attemptedCount, watchSlice.length, 5, 55),
+    );
+    await writeLiveRunRow();
+  };
+  // The scope, before a single page is read: "Running · reading sources — 0 of
+  // 14" is a different sentence from "0 fetched" with no denominator.
+  await writeLiveRunRow(true);
+  await reportStage("Reading the sources");
   await mapLimit(watchSlice, 6, async (src) => {
     await deps.scheduledGuard?.();
     try {
@@ -1530,6 +1695,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         extras,
         changed,
       });
+      await noteSourceProgress();
     } catch (err) {
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
@@ -1561,6 +1727,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             )
             .catch(() => undefined);
       }
+      // A source that failed was still a source read: the count moves for it
+      // too, or a watch list of dead links would look like no progress at all
+      // right up to the failure.
+      await noteSourceProgress();
     }
   });
 
@@ -1642,8 +1812,19 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const batchResults: import("./schema.ts").ParsedScanResult[] = [];
   let batchesFailed = 0;
   let lastBatchError: string | null = null;
-  for (const batch of batches) {
+  /*
+    The second countable pass. `buildScanBatches` has already split the fetched
+    text into bounded batches, so the model phase knows exactly how many calls
+    it is going to make -- which is the one place in a scan where a percentage
+    is a real fraction of the work rather than a guess.
+  */
+  await reportStage("Reading the sources with a model", 55);
+  for (const [batchIndex, batch] of batches.entries()) {
     await deps.scheduledGuard?.();
+    await reportStage(
+      countedStep("Reading the sources with a model", batchIndex + 1, batches.length),
+      spanPct(batchIndex + 1, batches.length, 55, 92),
+    );
     /*
       Between batch boundaries is where a scan can be stopped: the batches
       already read are committed, and stopping here leaves the job's real
@@ -1732,6 +1913,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     batchResults.push(parsed);
     failureReceipt.sourcesAnalyzed += batch.sources.length;
+    // The row moves phase: from "reading sources — k of n" to "reading the
+    // pages with a model", which is what the editor watching the history sees.
+    await writeLiveRunRow(true);
   }
 
   const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {
@@ -1821,6 +2005,125 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
 
+  /*
+    The leads this scan may match against.
+
+    `fileScanLeads` has always read this itself, inside the commit transaction.
+    U28 hoists it out for the same reason `getPaperPlace` above is read out
+    here: the duplicate check has to identify its borderline pairs BEFORE the
+    commit, and a model call inside `commitResults` would hold that transaction
+    open for as long as the model takes. On the dev desk's single PGlite
+    connection that is not a slow query, it is the whole desk.
+  */
+  const existingLeadsRaw = await sql<{
+    id: number;
+    status: string;
+    headline: string;
+    source_urls: string;
+    created_at: string;
+    why: string | null;
+    evidence: string | null;
+  }>`
+    select id, status, headline, source_urls, created_at, why, evidence
+    from leads
+    where newsroom_id = ${owned(context)}
+      and status <> 'published'
+      and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
+  `;
+  const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
+    id: l.id,
+    status: l.status,
+    headline: l.headline,
+    source_urls: parseLeadSourceUrls(l.source_urls),
+    created_at: l.created_at,
+    // Unit AK item 2: the killed lead's own words, so a strong match that
+    // brings new facts can be filed against it instead of discarded.
+    why: l.why,
+    evidence: l.evidence,
+  }));
+
+  /*
+    U28 (2026-09-30): the owner's "double check. worth it."
+
+    For the pairs the word rules can only rate BORDERLINE -- the matcher's
+    "possible" tier, and a "Looks already printed" chip candidate -- the desk
+    asks its own model one short question, once for the whole scan, batched:
+    are these the same news story? See ./dup-check.ts for what that decides
+    (a chip, and only a chip) and what it deliberately does not.
+
+    The model is the one this newsroom assigned to the `lead-score` job -- the
+    row the Models screen already draws as "Lead scoring & duplicates / Scores
+    leads, spots ≈ printed" -- resolved through the same order every other job
+    uses (`resolveJobModel`: an explicit pick, then the saved rows, then the
+    surface's default, which is Automatic and therefore the ladder's first rung,
+    DeepSeek v4.1 Flash). Nothing here hard-codes a provider, and the answer
+    records which model actually replied rather than which one was meant to.
+
+    The SCHEDULED scan is the one exception, and it is a transport fact rather
+    than a second policy: that lane is pinned to exactly one runtime
+    (`forcedChat`, daily-scan.server.ts), so the check runs on the model the
+    scan itself is already running on. There is no other transport available to
+    hand a per-job assignment to.
+
+    A failure here is never fatal and never moves a chip on its own: the
+    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
+    trace is a log line -- the operator asked for no noise about it.
+  */
+  let dupCheck: DupCheckOutcome | null = null;
+  try {
+    await throwIfJobCancelled(job.id);
+    /* A scan that found nothing has no pairs and no reason to read the
+     * published list -- the check costs one query and one model call per scan
+     * THAT NEEDS ONE, and not one query per scheduled scan. */
+    const printed = data.leads.length > 0 ? await queryDupCheckPrinted(context) : [];
+    const collected = collectDupPairs({
+      candidates: data.leads,
+      existing: existingLeads,
+      printed,
+      place: scanPlace,
+    });
+    if (collected.pairs.length > 0) {
+      /*
+        `scheduledCommit` is this function's own test for "am I the scheduled
+        lane" (it is what the commit below branches on), and the scheduled
+        lane's job row carries the exact choice its forced runtime is pinned
+        to (daily-scan.server.ts queues it with `model.modelChoice`), so
+        passing it back to that same runtime is a no-op rather than a
+        re-resolution.
+      */
+      const assigned = deps.scheduledCommit
+        ? String(job.model_choice)
+        : (
+            await resolveJobModel({
+              jobKey: "lead-score",
+              explicit: null,
+              assignments: await readModelAssignments(job.newsroom_id).catch(() => []),
+            })
+          ).providerId;
+      const dupChoice = assigned as EffectiveProviderChoice;
+      const dupTimeoutMs = Math.min(batchTimeoutMs(assigned), DUP_CHECK_TIMEOUT_MS);
+      dupCheck = await runDupCheck({
+        pairs: collected.pairs,
+        skipped: collected.skipped,
+        chat: async (system, user, maxTokens) => {
+          const got = await runChat(system, user, maxTokens, {
+            timeoutMs: dupTimeoutMs,
+            choice: dupChoice,
+            newsroomId: job.newsroom_id,
+          });
+          return got.ok
+            ? { ok: true as const, text: got.text, model: got.meta?.model ?? null }
+            : { ok: false as const, error: got.error };
+        },
+      });
+    }
+  } catch (error) {
+    // A check that could not run must not be able to change an answer: the
+    // word rule stands, exactly as it did before this unit (see dup-check.ts).
+    console.error("[scan] duplicate check could not run", error);
+  }
+  if (dupCheck?.failure) console.error(`[scan] run ${runId}: ${dupCheck.failure}`);
+
   const commitResults = async (writeSql: Sql) => {
     if (!deps.scheduledCommit && !(await lockManualScanClaim(writeSql, job)))
       throw new Error("Scan job claim was superseded; refusing stale result writes.");
@@ -1856,34 +2159,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       }
     }
 
-    // Loaded once, not fed to the AI: matching happens in code (findMatchingLead).
-    const existingLeadsRaw = await writeSql<{
-      id: number;
-      status: string;
-      headline: string;
-      source_urls: string;
-      created_at: string;
-      why: string | null;
-      evidence: string | null;
-    }>`
-      select id, status, headline, source_urls, created_at, why, evidence
-      from leads
-      where newsroom_id = ${owned(context)}
-        and status <> 'published'
-        and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
-    `;
-    const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
-      id: l.id,
-      status: l.status,
-      headline: l.headline,
-      source_urls: parseLeadSourceUrls(l.source_urls),
-      created_at: l.created_at,
-      // Unit AK item 2: the killed lead's own words, so a strong match that
-      // brings new facts can be filed against it instead of discarded.
-      why: l.why,
-      evidence: l.evidence,
-    }));
-
+    /*
+      `existingLeads` was read above, outside this transaction, because the
+      duplicate check needs it before the commit (see that read's own comment).
+      Matching still happens in code (findMatchingLead), never in the model.
+    */
     const {
       leadsCreated,
       resurfacedKilled,
@@ -1892,6 +2172,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
+      dupCheckCleared,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -1900,6 +2181,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       data.leads,
       existingLeads,
       scanPlace,
+      dupCheck,
     );
 
     let proposed = 0;
@@ -1995,15 +2277,23 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     if (deps.scheduledCommit) {
       await writeSql`
         insert into audit_events (user_id, action, detail, newsroom_id)
-        values (${context.userId}, 'scan', ${`run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`}, ${owned(context)})
+        values (${context.userId}, 'scan', ${scanAuditDetail(runId, fetchedCount, leadsCreated, dupCheckCleared)}, ${owned(context)})
       `;
     } else {
       await refreshManualScanClaim(writeSql, job);
     }
-    return { leadsCreated };
+    return { leadsCreated, dupCheckCleared };
   };
 
-  let committed: { leadsCreated: number };
+  /*
+    The last arrival, and the one that spends the most time in the database:
+    matching every returned lead against the existing ones, writing the new
+    leads, filing the proposed sources and recording the snapshots. It runs
+    inside one transaction, so nothing inside it can report -- the chip is what
+    the editor has for this stretch.
+  */
+  await reportStage("Filing the leads", 95);
+  let committed: { leadsCreated: number; dupCheckCleared: number };
   try {
     await deps.beforeScheduledCommit?.();
     committed = deps.scheduledCommit
@@ -2030,7 +2320,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     await audit(
       context.userId,
       "scan",
-      `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`,
+      scanAuditDetail(runId, fetchedCount, committed.leadsCreated, committed.dupCheckCleared),
       owned(context),
     );
   } catch (error) {
@@ -2110,7 +2400,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     argument is redundant here rather than ignored -- and it is the row, not the
     id, that carries the stage list.
   */
-  const reportStage = progressReporterFor(job);
+  /*
+    FB1: `stagePct` is on for the draft because its six arrivals are the only
+    counts a draft has. Its per-document sentences ("Interpreting notes.pdf:
+    part 2 of 7") and its failover notes are not arrivals and pass no
+    percentage, so the bar holds where the last arrival put it rather than
+    jumping around between packet boundaries.
+  */
+  const reportStage = progressReporterFor(job, { stagePct: true });
   const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
   const setFailoverNote = deps.setJobFailoverNote ?? setJobFailoverNote;
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
@@ -3003,45 +3300,20 @@ export const draftLead = createServerFn({ method: "POST" })
     });
   });
 
-/**
- * "Write a story" — the one-box path on the Desk landing page, mirroring
- * Opinion's single textarea instead of the Queue's four-field form. Any
- * editor may use it, exactly like `fileLead` and `draftLead`: it parses the
- * pasted text into a lead (see `write-story.ts`), files it with the full
- * text kept as Reporting notes scratch so the draft reads it as evidence,
- * then hands off to the same commit boundary Story uses so a provider
- * refusal comes back structured and nothing is spent.
- */
-export const listRecentStoryWork = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    const { ensureJobsSchema } = await import("./jobs.ts");
-    await ensureJobsSchema();
-    const sql = await getSql();
-    return sql<{
-      id: number;
-      lead_id: number;
-      headline: string;
-      status: string;
-      stage: string;
-      /*
-        `started_at` is read so the nav's Running box can show elapsed time
-        (redesign phase 2a, README "Shell for all desk screens"). It is set
-        when a worker claims the job and is null while the job is still queued,
-        so callers fall back to `updated_at` for the queued case. Read-only:
-        no column is added or changed here.
-      */
-      started_at: string | null;
-      updated_at: string;
-    }>`
-      select * from (
-        select distinct on (j.subject_id) j.id, j.subject_id as lead_id, coalesce((select nullif(d.headline, '') from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id order by d.updated_at desc,d.id desc limit 1), l.headline) as headline, j.status, j.stage, j.started_at, j.updated_at
-        from desk_jobs j join leads l on l.id=j.subject_id and l.newsroom_id=j.newsroom_id
-        where j.newsroom_id=${owned(context)} and j.kind='draft' and l.status in ('new','drafted','held')
-        order by j.subject_id,j.id desc
-      ) recent order by updated_at desc limit 5
-    `;
-  });
+/*
+  `listRecentStoryWork` USED TO LIVE HERE, and it is gone (FB1, unit 3).
+
+  It returned at most five `kind='draft'` rows joined to leads, and it was the
+  shell's Running box and Today's "In progress" strip. Three things were wrong
+  with it, and the report measured all three: it could not see ten of the eleven
+  kinds, so a running scan or dig showed no card anywhere; it drew the same rows
+  the phase 3 `desk_jobs` query was already polling, on a 5 s clock of its own;
+  and its `order by updated_at desc limit 5` meant a long-running draft could be
+  pushed out of the window by five recently-touched finished ones.
+
+  `listDeskJobs` in ./job-progress.ts is the replacement -- every kind, open
+  rows first, one reader for the whole desk -- and both callers now use it.
+*/
 
 /*
   The drafts screen's list (redesign phase 2a, README "4. Drafts").

@@ -1,5 +1,6 @@
 import { sanitizePublicUrls } from "./schema.ts";
 import { storableText } from "./storable-text.ts";
+import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
   matchStrength,
@@ -118,6 +119,28 @@ export type ScanAiLead = {
  * it is threaded to every matcher call below so this desk's region words are
  * its own (`getPaperPlace`, ./paper-settings.ts) and never the shipped
  * paper's. Omitted, the matcher uses the generic civic vocabulary only.
+ *
+ * Unit U28 (2026-09-30): `dupCheck` is the answer to the one question the
+ * matcher cannot settle -- see ./dup-check.ts, which asks the desk's model
+ * about every borderline pair in ONE batched call before this function runs.
+ * Two things change when it is present:
+ *
+ *   - a "possible" match the check says is NOT the same story is not linked at
+ *     all. The candidate files as a plain new lead, `possible_duplicate_of` and
+ *     `dup_kind` stay null, and the Queue draws no chip. This is the ONLY
+ *     behaviour in this function a verdict can remove, and it is a chip, not a
+ *     row: nothing here merges, kills or hides anything (the operator's binding
+ *     requirement, and dup-check.ts's header says the same).
+ *   - a verdict that says the two ARE the same story, or that clears the chip
+ *     against a published article, is recorded on the row it is about
+ *     (migration 0113) with the model's own sentence, so the Queue can say WHY.
+ *
+ * A verdict is applied only to the candidate index it was reached for, and only
+ * when the matcher this run agrees about who the other side is -- a stale or
+ * mismatched verdict is simply not found and the word rule stands. Omitting
+ * `dupCheck` is exactly the pre-U28 behaviour, which is what the check's own
+ * failure path relies on: a call that failed, timed out or answered unusably
+ * leaves this argument's decisions empty and files the scan by the word rule.
  */
 export async function fileScanLeads(
   sql: SqlTag,
@@ -127,6 +150,7 @@ export async function fileScanLeads(
   aiLeads: ScanAiLead[],
   existing: MatchCandidateLead[],
   place?: NewsroomPlace | null,
+  dupCheck?: DupCheckOutcome | null,
 ): Promise<{
   leadsCreated: number;
   resurfacedKilled: number;
@@ -154,6 +178,13 @@ export async function fileScanLeads(
    * instead of becoming a second row for one story. Not included in
    * `leadsCreated`. */
   mergedSameScan: number;
+  /** Unit U28: candidates the desk's duplicate check cleared -- the matcher
+   * rated the pair "possible", the model read both and said they are not the
+   * same story, so no `possible_duplicate_of` link and no chip. Counted
+   * separately from `possibleMatched` (which is links actually made) so the
+   * scan's own arithmetic still adds up: these file as plain new leads.
+   * Always 0 when no check ran. */
+  dupCheckCleared: number;
 }> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
@@ -161,13 +192,21 @@ export async function fileScanLeads(
   let possibleMatched = 0;
   let developingFiled = 0;
   let mergedSameScan = 0;
+  let dupCheckCleared = 0;
   let firstDiscardedHeadline: string | undefined;
   /* Leads THIS call inserted, newest last. A candidate is only ever merged
    * into one of these -- see sameStoryForMerge's doc comment for why a row an
    * editor has already seen is never touched. */
   const insertedThisRun: MatchCandidateLead[] = [];
+  /* Unit U28: this candidate's 0-based position in `aiLeads`, which is how the
+   * duplicate check keys its verdicts (dup-check.ts's `collectDupPairs` numbers
+   * the same list the same way). Counted at the top of the loop, before every
+   * `continue`, so a skipped or merged candidate cannot shift the numbering for
+   * the candidates after it. */
+  let candidateIndex = -1;
 
   for (const lead of aiLeads) {
+    candidateIndex += 1;
     /*
       Sanitize ONCE, at the top, and read from these locals for the rest of the
       loop -- matching included.
@@ -235,8 +274,12 @@ export async function fileScanLeads(
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
     let dupKind: "possible" | "developing" | null = null;
+    // The headline this candidate actually matched, kept for the verdict
+    // lookup below (`matched` itself does not outlive the block).
+    let matchedHeadline: string | null = null;
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
+      matchedHeadline = matched.headline;
       const strength = matchStrength(
         { headline, source_urls: candidateUrls },
         { headline: matched.headline, source_urls: matched.source_urls },
@@ -270,19 +313,75 @@ export async function fileScanLeads(
           continue;
         }
       } else {
-        // "possible" (or, defensively, a null that findMatchingLead's looser
-        // rule somehow disagreed with) -- file it, linked to the match, do
-        // NOT stamp the existing row.
-        possibleDuplicateOf = matchId;
-        if (matched.status === "killed") initialStatus = "held";
-        dupKind = "possible";
-        possibleMatched += 1;
+        /*
+          "possible" (or, defensively, a null that findMatchingLead's looser
+          rule somehow disagreed with) -- file it, linked to the match, do NOT
+          stamp the existing row.
+
+          U28: unless the desk's duplicate check read both and said they are
+          not the same story. Then the link is not made at all -- no
+          `possible_duplicate_of`, no `dup_kind`, no "Possible duplicate ·
+          compare" chip -- and the candidate files as the plain new lead the
+          words could not prove it was not. The row still records the verdict
+          and its sentence (below), so "why is this one not linked?" is
+          answerable from the row itself.
+
+          The verdict is looked up by THIS candidate's position AND the
+          matched lead's headline, so a verdict reached for a different pair
+          -- or for a target this run matched differently -- is not found, and
+          the word rule stands. See dup-check.ts.
+
+          L2 of the pre-merge audit: the headline half of that sentence was
+          stated in the comment and not done in the code. The map is keyed by
+          candidate index, and two candidates cannot collide, but the TARGET
+          can differ -- `collectDupPairs` records the headline it matched
+          against, and this loop matches independently. Comparing them is what
+          makes "the verdict is about the pair we are filing" a property of the
+          code rather than of the ordering.
+        */
+        const leadAnswer = dupCheck?.decisions.get(candidateIndex)?.lead ?? null;
+        const verdict =
+          leadAnswer && leadAnswer.headline === matched.headline ? leadAnswer.verdict : null;
+        if (verdict && !verdict.same) {
+          dupCheckCleared += 1;
+        } else {
+          possibleDuplicateOf = matchId;
+          if (matched.status === "killed") initialStatus = "held";
+          dupKind = "possible";
+          possibleMatched += 1;
+        }
       }
     }
 
+    /*
+      U28: the duplicate check's verdict on this candidate's borderline pairs,
+      if the desk asked about them. `decision` is undefined for every candidate
+      the check did not cover -- no borderline pair, past the pair cap, or a
+      scan whose check failed -- and then all eight columns stay null, which is
+      what leaves the word rule exactly as it was (see dup-check.ts's header:
+      "the desk did not ask" and "the model said no" must never be the same
+      stored value).
+
+      `dup_ai_target` is the headline of the lead the link's verdict is about,
+      written even when the verdict is what cleared the link, so the row keeps
+      its own answer to "not linked to what?".
+    */
+    const decision = dupCheck?.decisions.get(candidateIndex);
+    // L2 of the audit, the same guard the link above applies: a verdict for a
+    // target this run did not match is not this row's verdict, and recording it
+    // would put another pair's answer in `dup_ai_same`/`dup_ai_target`.
+    const leadAnswer = decision?.lead ?? null;
+    const leadVerdict = leadAnswer && leadAnswer.headline === matchedHeadline ? leadAnswer.verdict : null;
+    const printedVerdict = decision?.printed?.verdict ?? null;
+    const aiModel = decision ? (dupCheck?.model ?? null) : null;
+    const aiCheckedAt = decision ? new Date().toISOString() : null;
+
     const urls = JSON.stringify(candidateUrls);
     const inserted = await sql<{ id: number; status: string; headline: string }>`
-        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen, dup_kind)
+        insert into leads (user_id, newsroom_id, scan_run_id, headline, why, topic, source_urls, evidence, newsworthiness, status, possible_duplicate_of, topic_unchosen, dup_kind,
+          dup_ai_same, dup_ai_why, dup_ai_target,
+          dup_ai_printed_same, dup_ai_printed_why, dup_ai_printed_slug,
+          dup_ai_model, dup_ai_checked_at)
         values (
           ${context.userId}, ${newsroomId}, ${runId}, ${headline.slice(0, 180)},
           ${why.slice(0, 800)},
@@ -293,7 +392,15 @@ export async function fileScanLeads(
           ${initialStatus},
           ${possibleDuplicateOf},
           ${lead.topicUnchosen === true},
-          ${dupKind}
+          ${dupKind},
+          ${leadVerdict ? leadVerdict.same : null},
+          ${leadVerdict ? storableText(leadVerdict.why).slice(0, 400) || null : null},
+          ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : null},
+          ${printedVerdict ? printedVerdict.same : null},
+          ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : null},
+          ${decision?.printed?.slug ?? null},
+          ${aiModel ? storableText(aiModel).slice(0, 120) : null},
+          ${aiCheckedAt}
         )
         returning id, status, headline
       `;
@@ -320,6 +427,7 @@ export async function fileScanLeads(
     possibleMatched,
     developingFiled,
     mergedSameScan,
+    dupCheckCleared,
     firstDiscardedHeadline,
   };
 }

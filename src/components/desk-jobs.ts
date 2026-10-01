@@ -1,30 +1,23 @@
 import { useEffect, useState } from "react";
+import type { JobProgressView } from "@/lib/news/job-progress";
 
 /*
-  The desk's job vocabulary, in one place.
+  The desk's job display vocabulary, in one place.
 
-  A lead's draft is a `desk_jobs` row the desk already polls
-  (`["recent-story-work"]`, listRecentStoryWork in lib/news/desk.ts). Three
-  surfaces read the same row: the shell's Running box, Today's Running now and
-  the Drafts list. They have to agree about what a job is and how long it has
-  been running -- a shell that said "2:03" while the card next to it said
-  "2:05" is exactly the kind of small disagreement the redesign is meant to
-  remove, so the shape and the m:ss format live here and nowhere else.
+  THE JOB ROW ITSELF MOVED (FB1, unit 3). This module used to own `RunningJob`
+  -- the four fields `listRecentStoryWork` happened to return -- and an
+  `elapsedLabel(job, nowMs)` that formatted them. Both are gone with the reader
+  they were shaped for: every screen now draws the real `JobProgressView` from
+  the one `useDeskJobs()` query, and the card's own clock (m:ss, in JobCard.tsx)
+  is the format.
+
+  What is left is what more than one screen needs and nothing else owns: the
+  one-second ticker an elapsed time needs to be "now" rather than "when the
+  query answered", and the one-line name for a job.
 
   This is not a component module on purpose: react-refresh requires a file that
-  exports components to export components only, and the job card itself
-  (`JobSlot`) lives with the rest of the shell chrome in desk-chrome.tsx.
+  exports components to export components only.
 */
-
-/** One job as the shell's Running box and Today's Running now both show it. */
-export type RunningJob = {
-  id: number;
-  headline: string;
-  status: string;
-  stage: string;
-  started_at: string | null;
-  updated_at: string;
-};
 
 /**
  * Ticks once a second while `active`, so an elapsed time on screen is the
@@ -41,10 +34,16 @@ export function useNowMs(active: boolean): number {
   return now;
 }
 
-/** m:ss, the desk's elapsed format (README "Job card anatomy"). */
-export function elapsedLabel(job: RunningJob, nowMs: number): string {
-  const from = Date.parse(job.started_at ?? job.updated_at);
-  if (!Number.isFinite(from)) return "0:00";
-  const secs = Math.max(0, Math.floor((nowMs - from) / 1000));
-  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+/**
+ * What to call a job in one line. A story job is its headline; every other kind
+ * is its card title ("Scanning the watch list"), because the alternative --
+ * showing a scan's `scan_runs` id in the place a headline goes -- would read on
+ * the nav's Running box as a story nobody wrote.
+ *
+ * Null and blank both fall through to the title: `headline` is null for every
+ * kind whose subject is not a lead, and a lead whose headline is empty string
+ * is a lead the desk has not named yet, which is not a name to print.
+ */
+export function jobHeadline(job: Pick<JobProgressView, "headline" | "title">): string {
+  return job.headline?.trim() || job.title;
 }

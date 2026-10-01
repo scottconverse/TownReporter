@@ -16,7 +16,7 @@
  * the route applied it: the tab, then the search box, then the section select,
  * then the sort. Anything else changes which rows a page contains.
  */
-import { nearDuplicate, openLeads } from "./desk-copy.ts";
+import { printedDupChip, openLeads, type DupAiVerdictFields } from "./desk-copy.ts";
 import type { NewsroomPlace } from "./lead-match.ts";
 import { cleanListWindow, type ListFilterWindow } from "./list-window.ts";
 
@@ -43,8 +43,13 @@ export type QueueSort = (typeof QUEUE_SORTS)[number];
  */
 export const SECTION_MAX = 64;
 
-/** The facts about one lead this module reads. A lead carries twenty columns;
- *  these are the ones that decide where it lands. */
+/** The facts about one lead this module reads. A lead carries thirty columns;
+ *  these are the ones that decide where it lands.
+ *
+ *  U28: the duplicate check's columns ride along (see DupAiVerdictFields),
+ *  because "which leads are in the ≈ Printed tab" is decided by
+ *  `printedDupChip` -- the same chip the row draws -- and a tab that counted a
+ *  lead the chip refuses to chip would be the desk disagreeing with itself. */
 export type QueueLead = {
   id: number;
   status: string;
@@ -54,7 +59,7 @@ export type QueueLead = {
   newsworthiness: number | null;
   created_at: string;
   last_resurfaced_at?: string | null;
-};
+} & DupAiVerdictFields;
 
 /** A printed story, as `nearDuplicate` reads it. */
 export type QueuePrinted = {
@@ -103,19 +108,17 @@ export function queueMatchesSearch(lead: QueueLead, needle: string): boolean {
 }
 
 /** The leads the desk already matches to a piece that ran -- the "≈ Printed"
- *  tab. The same `nearDuplicate` the row's chip and "Kill as duplicate" use,
+ *  tab. The same `printedDupChip` the row's chip and "Kill as duplicate" use,
  *  and the same `place` this newsroom's matcher runs with: the tab's count and
  *  the chip on the row have to agree about what counts as one of the paper's
- *  own place names. */
+ *  own place names -- and, since U28, about which of those pairs the desk's
+ *  own duplicate check has cleared (see printedDupChip). */
 export function queuePrintedMatches<T extends QueueLead>(
   leads: readonly T[],
   printed: readonly QueuePrinted[],
   place?: NewsroomPlace | null,
 ): T[] {
-  return leads.filter(
-    (lead) =>
-      nearDuplicate({ headline: lead.headline, topic: lead.topic ?? undefined }, printed, place) !== null,
-  );
+  return leads.filter((lead) => printedDupChip(lead, printed, place) !== null);
 }
 
 export type QueueCounts = {

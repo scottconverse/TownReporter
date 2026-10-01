@@ -36,6 +36,8 @@ const fmt = (total: number) => {
 export function JobCard({
   job,
   compact,
+  title,
+  failoverNote = true,
   stallSeconds = 60,
   now,
   onCancel,
@@ -48,6 +50,35 @@ export function JobCard({
 }: {
   job: JobProgressView;
   compact?: boolean;
+  /**
+   * What to call this job HERE, when the card's own title is not the most
+   * useful one. The rail's Running box is the only caller: it has three rows of
+   * about 190px each and a story job's `title` is the kind's name ("Drafting
+   * story"), which is the same for every draft. It passes the story's headline
+   * instead -- see `jobHeadline`.
+   *
+   * It is a TITLE, not a second line: the card still draws exactly one, so the
+   * box cannot say the same thing twice (FB1b, item 1).
+   */
+  title?: string;
+  /**
+   * Whether this card prints the durable "Model switch: ..." sentence.
+   *
+   * True everywhere the card is the surface an editor is reading. False in the
+   * rail's Running box, which draws the SAME job the page under it already
+   * draws in full -- so an editor on the story workspace read the sentence
+   * twice at once, once in the nav and once in the job's own Draft progress
+   * card. `scripts/story-quota-failover-e2e.mjs` caught it: its `getByText`
+   * for "Model switch: This draft moved to Codex Terra because DeepSeek v4.1
+   * Flash reached its usage limit" matched two elements.
+   *
+   * The rail's job is the one the design gives it -- "each job's title with
+   * elapsed time and current stage" -- and a switch sentence is the job's own
+   * detail, not a second title. It is also the only card the editor cannot
+   * reach: every row there is a summary of a job whose full card is one press
+   * away, on the page that job belongs to.
+   */
+  failoverNote?: boolean;
   stallSeconds?: number;
   now?: number;
   onCancel?: () => void;
@@ -94,11 +125,25 @@ export function JobCard({
 
   return (
     <div className={`job-card${compact ? " compact" : ""} state-${col}`}>
+      {/*
+        THE HEAD IS TWO COLUMNS, AND THE TITLE OWNS ONE LINE (FB1b, item 4).
+
+        The title and the model used to be two inline children of one span, so
+        they ran together on a single line -- "Scanning the watch listDeepSeek
+        v4.1 Flash · 16%" -- with nothing between them but the font weight. They
+        are separate elements with their own line now: the title, then a muted
+        "model · pct".
+
+        The wrapper has its own class rather than being an anonymous span, so
+        the compact rules can bound it: in the nav the title is `nowrap` with an
+        ellipsis, which is what stops "Scanning the watch list" wrapping to
+        three lines and pushing into the clock.
+      */}
       <div className="job-card-head">
         <div className="job-card-id">
           <span className="job-card-dot" aria-hidden="true" />
-          <span>
-            <b className="job-card-title">{job.title}</b>
+          <span className="job-card-id-text">
+            <b className="job-card-title">{title ?? job.title}</b>
             <span className="job-card-model">
               {job.model}
               {job.pct != null && running ? ` · ${job.pct}%` : ""}
@@ -144,7 +189,9 @@ export function JobCard({
         {running && !stalled ? <span className="job-card-quiet">Last activity {fmt(quiet)} ago</span> : null}
       </div>
 
-      {job.failoverNote ? <p className="job-card-quiet">Model switch: {job.failoverNote}</p> : null}
+      {failoverNote && job.failoverNote ? (
+        <p className="job-card-quiet">Model switch: {job.failoverNote}</p>
+      ) : null}
 
       {job.cancelRequested && running ? (
         <p className="job-card-quiet" role="status" aria-live="polite">
@@ -229,11 +276,16 @@ export function JobCard({
 export function DeskJobCard({
   job,
   compact,
+  title,
+  failoverNote,
   onNavigate,
   viewLabel,
 }: {
   job: JobProgressView;
   compact?: boolean;
+  title?: string;
+  /** See `JobCard`: false only in the rail's Running box. */
+  failoverNote?: boolean;
   onNavigate?: (job: JobProgressView) => void;
   viewLabel?: string;
 }) {
@@ -262,6 +314,8 @@ export function DeskJobCard({
       <JobCard
         job={job}
         compact={compact}
+        title={title}
+        failoverNote={failoverNote}
         viewLabel={viewLabel}
         onView={go}
         onOpen={go}

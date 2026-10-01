@@ -259,6 +259,39 @@ export function darkJobActive(status: string | null | undefined): boolean {
   return status === "queued" || status === "running";
 }
 
+/**
+ * The sentence the desk owes an editor who presses Stop this dig.
+ *
+ * Unit DD1, item 3. The press only writes a flag; the worker reads it at its
+ * next step, and the step it is in can be a minute of model calls long. The
+ * walkthrough of 2026-09-30 measured 102 seconds of silence after the press
+ * with this sentence sitting unused in the code -- the file renders its notice
+ * only when nothing is running, which is the one moment it is not needed.
+ */
+export const DIG_STOP_ACK = "Stopped. The run ends at its next step and what it has found is kept.";
+
+/**
+ * The Stop control, in every state it can be in.
+ *
+ * `requested` is the editor's own press for the running job, held in the route
+ * until the job really ends. Without it the button reverts to "Stop this dig"
+ * the instant the server answers -- which is a second into a stop that takes a
+ * minute and a half -- and the desk reads as though the press did nothing.
+ */
+export function digStopControl(state: {
+  /** A dig job is in flight for the open file. */
+  running: boolean;
+  /** This editor has already pressed Stop for that job. */
+  requested: boolean;
+  /** The press is still travelling to the server. */
+  sending: boolean;
+}): { visible: boolean; label: string; disabled: boolean; line: string | null } {
+  if (!state.running) return { visible: false, label: "", disabled: true, line: null };
+  if (state.requested || state.sending)
+    return { visible: true, label: "Stopping…", disabled: true, line: DIG_STOP_ACK };
+  return { visible: true, label: "Stop this dig", disabled: false, line: null };
+}
+
 export function observedDarkJobFinished(
   observed: { investigationId: number; jobId: number } | null,
   investigationId: number | null,
@@ -289,18 +322,18 @@ export function progressLine(input: {
   }
   if (input.running || input.status === "investigating") {
     if (input.artifacts > 0 && round > 0) {
-      return `${input.artifacts} records on file. ${investigationRoundLabel(round, of)}…`;
+      return `${input.artifacts} captures on file. ${investigationRoundLabel(round, of)}…`;
     }
     if (round > 0) return `Still reading. ${investigationRoundLabel(round, of)}…`;
     if (input.searches > 0) return "Following names and documents mentioned in the records…";
-    if (input.artifacts > 0) return `${input.artifacts} records on file. Checking earlier copies…`;
+    if (input.artifacts > 0) return `${input.artifacts} captures on file. Checking earlier copies…`;
     if (input.claims > 0) return "Checking what the records actually say…";
     return "Checking earlier copies…";
   }
   if (input.status === "paused") {
     return "Finished this round. More still to open.";
   }
-  if (input.artifacts > 0) return `This round is done. ${input.artifacts} records on file.`;
+  if (input.artifacts > 0) return `This round is done. ${input.artifacts} captures on file.`;
   return "This round is done.";
 }
 
@@ -433,9 +466,24 @@ export function workingLeads<T extends { status: string }>(leads: readonly T[]):
   return leads.filter((l) => l.status !== "published");
 }
 
-/** Open work for the command center: not published, not killed. */
+/**
+ * Open work for the command center: not published, not killed, NOT HELD.
+ *
+ * FB6, owner report 2026-09-30 (7a): "Held leads appear under the Open
+ * filter/count on Today/Queue — they must not." They did, because this only
+ * excluded the two ways a lead LEAVES the desk and not the one way it is set
+ * aside: Hold is "not now", it has its own tab and its own count on both
+ * screens, and a lead sitting in Held is not work the desk is still doing. It
+ * was counted in "Open · N" on Today, in the Queue's Open tab and its badge,
+ * and — the visible half — drawn in both lists while held.
+ *
+ * Held is still ON the desk: `workingLeads` above keeps it, which is what the
+ * Held tab and Today's own Held segment read.
+ */
 export function openLeads<T extends { status: string }>(leads: readonly T[]): T[] {
-  return leads.filter((l) => l.status !== "killed" && l.status !== "published");
+  return leads.filter(
+    (l) => l.status !== "killed" && l.status !== "published" && l.status !== "held",
+  );
 }
 
 export function mergeFocusSelection(
@@ -1199,6 +1247,121 @@ export function scanZeroWhy(input: {
 }
 
 /**
+ * WHAT AN OPEN RUN'S ROW SAYS, in plain words (FB1b, item 2).
+ *
+ * THE DEFECT. A run that was still going was drawn with the FINISHED run's
+ * sentence -- `scanCoverageLine` over half-written counters -- so the Scan
+ * screen's own history read
+ *
+ *   Partial coverage: 0 selected · 2 fetched · 0 analyzed · 0 leads.
+ *   Nothing in the fetched pages crossed the filing bar.
+ *
+ * about a scan that had been running for thirty seconds. Every clause of that
+ * is a claim about the END of a run: "selected 0" was true of a column nothing
+ * writes until the receipt is settled, "0 analyzed" is true until the first
+ * batch returns, and "crossed the filing bar" is a verdict on a comparison
+ * nobody has made yet.
+ *
+ * THE RULE. A run that has not finished says it is running, and says only what
+ * is known NOW. The phase is read off the same live counters the worker writes
+ * as it goes (`noteSourceProgress` / the batch loop in desk.ts), and the
+ * sentence is deliberately one line: the editor is scanning the list for "is it
+ * still going", not reading a report.
+ *
+ * `selected` is the run's real scope from the moment the worker starts -- it is
+ * known before the first fetch, and it is written to the row then -- so this can
+ * say "of 14" straight away rather than counting up to it.
+ */
+export function scanRunningLine(run: {
+  sources_selected?: number | null;
+  sources_fetched?: number | null;
+  sources_failed?: number | null;
+  model_batches_used?: number | null;
+  sources_analyzed?: number | null;
+}): string {
+  const selected = run.sources_selected ?? 0;
+  const fetched = run.sources_fetched ?? 0;
+  const failed = run.sources_failed ?? 0;
+  /*
+    READ = FETCHED + FAILED, which is the same count the CARD shows: the scan
+    worker bumps its in-process counter for every source it finishes with,
+    success or failure. The two lines sit inches apart on the Sources screen, so
+    a row that said "2 of 14" beside a card that said "7 of 14" would be the
+    desk contradicting itself -- and it was, before this: the row printed
+    successes only.
+  */
+  const read = fetched + failed;
+  const batches = run.model_batches_used ?? 0;
+  const analyzed = run.sources_analyzed ?? 0;
+  /*
+    Three phases, in the order the worker walks them, each one a fact the run
+    row already carries:
+
+      reading the sources            -> sources are still being read
+      reading the pages with a model -> the first batch has been counted, or
+                                        every source has been read
+      starting up                    -> nothing written yet
+
+    "READ" IS FETCHED PLUS FAILED, and deliberately NOT `sources_attempted`.
+    That column is the run's SCOPE (`watchSlice.length`, written before the
+    first fetch and again in the receipt), so counting it as progress made a run
+    that had read nothing claim it was already past the fetch -- which is what
+    the first version of this did, and what the coordinator caught in the
+    screenshot ("Running · reading the pages with a model" over 2 of 14).
+
+    A source that failed was still read: a watch list of dead links has to show
+    the count moving, or the row says "0 of 14" for the whole pass.
+  */
+  if (batches > 0 || analyzed > 0) return "Running · reading the pages with a model";
+  if (selected > 0) {
+    if (read >= selected) return "Running · reading the pages with a model";
+    return `Running · reading sources — ${read} of ${selected}`;
+  }
+  if (read > 0) return `Running · reading sources — ${read} read so far`;
+  return "Running · starting up";
+}
+
+/**
+ * THE ONE LINE A RUN'S ROW CARRIES, whatever state it is in.
+ *
+ * Both screens that draw the scan history -- the Scan screen's own list and the
+ * Sources rail's "Previous scans" -- read this, so the two cannot describe one
+ * run two ways.
+ *
+ * STALLED COMES FIRST, and it is the one case where an open row is NOT
+ * running: `listScans` sets the flag when the run claims to be open but no live
+ * job is behind it, so the process that owned it is gone. A row that said
+ * "Running · reading sources — 3 of 14" about a dead worker would be the same
+ * class of lie as the finished-run verdict this function exists to remove.
+ */
+export function scanRowLine(run: {
+  finished_at: string | null;
+  error: string | null;
+  stalled?: boolean;
+  sources_selected?: number | null;
+  sources_attempted?: number | null;
+  sources_fetched: number;
+  sources_failed?: number | null;
+  sources_analyzed?: number | null;
+  model_batches_used?: number | null;
+  model_batches_failed?: number | null;
+  leads_created: number;
+  sources_proposed: number;
+  summary?: string | null;
+}): string {
+  if (run.stalled) return "Stalled with no result";
+  if (!run.finished_at && !run.error) return scanRunningLine(run);
+  return (
+    scanCoverageLine(run) ??
+    scanCountsLine({
+      sources_fetched: run.sources_fetched,
+      leads_created: run.leads_created,
+      sources_proposed: run.sources_proposed,
+    })
+  );
+}
+
+/**
  * The one sentence appended to a scan run's editor summary when the code
  * matcher (see `matchStrength` in `./lead-match.ts`) stamped leads or filed
  * a possible duplicate instead of quietly refiling/discarding them, so the
@@ -1391,7 +1554,48 @@ export function inviteMessage(input: {
   );
 }
 
-export type PrintedDup = { slug: string; publishedAt: string; note: string; headline: string };
+export type PrintedDup = {
+  slug: string;
+  publishedAt: string;
+  note: string;
+  headline: string;
+  /**
+   * U28 (2026-09-30): the duplicate check's own sentence for this pair, when
+   * the desk asked its model and the model said these two ARE the same story.
+   * Null for every chip the word rule earned on its own -- including every row
+   * filed before migration 0113 -- and the chip then reads exactly as it did
+   * before this unit. See `printedDupChip`.
+   */
+  aiWhy?: string | null;
+};
+
+/**
+ * What a lead's row says about the duplicate check, as the columns carry it
+ * (migration 0113; written by `fileScanLeads` from `runDupCheck`'s verdicts).
+ *
+ * Every field is nullable and null means "the desk did not ask", which is NOT
+ * the same as false: a scan whose check failed, timed out or ran past its pair
+ * budget stores nulls, and a null must leave the word rule exactly as it was.
+ * That is why `printedDupChip` below tests `=== false` rather than falsiness.
+ */
+export type DupAiVerdictFields = {
+  /** The verdict on the link to another lead (`possible_duplicate_of`). */
+  dup_ai_same?: boolean | null;
+  dup_ai_why?: string | null;
+  /** The headline that link's verdict was about; kept when the link is cleared. */
+  dup_ai_target?: string | null;
+  /** The verdict on the "looks already printed" chip. */
+  dup_ai_printed_same?: boolean | null;
+  dup_ai_printed_why?: string | null;
+  /** The published story that verdict was about; null for every other row. */
+  dup_ai_printed_slug?: string | null;
+};
+
+/** The one-line AI reason off a row, ready to show, or null. */
+export function dupAiReason(value: string | null | undefined): string | null {
+  const line = String(value ?? "").trim();
+  return line || null;
+}
 
 /**
  * "≈ PRINTED" false positives (real case, 2026-09-02): properNounOverlap
@@ -1435,7 +1639,14 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
-  published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
+  /**
+   * U28: `topic` is `string | null` rather than optional-string because the
+   * column it comes from is nullable -- the scan's duplicate check reads the
+   * published list with a narrow SELECT (desk.ts's `queryDupCheckPrinted`) and
+   * hands what Postgres returns straight through. Widening, not loosening:
+   * every comparison below already tests `!= null`.
+   */
+  published: readonly { slug: string; headline: string; topic?: string | null; published_at: string }[],
   place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
@@ -1453,6 +1664,48 @@ export function nearDuplicate(
   return null;
 }
 
+/**
+ * U28 (2026-09-30): the "Looks already printed" chip, with the desk's
+ * duplicate check applied -- the one way to ask "does this lead have a chip,
+ * and does the desk have anything more to say about it".
+ *
+ * The word rule still decides WHETHER a pair is borderline; the check only
+ * decides what the desk does about one. Three outcomes, and the third is the
+ * one that matters most:
+ *
+ *   - the model was not asked about this pair (no verdict stored, or a verdict
+ *     about a DIFFERENT published story): the chip is exactly what
+ *     `nearDuplicate` returned, with no reason line. This is every row filed
+ *     before 0113 and every scan whose check failed -- the word rule, unchanged.
+ *   - the model said no: NO chip. The pair was borderline enough to ask about
+ *     and the answer was that they are not the same story, so the desk stops
+ *     claiming they are.
+ *   - the model said yes: the chip stays, carrying the model's sentence, so an
+ *     editor reads "Looks already printed: <headline> — AI: same council vote,
+ *     same date." and can judge it without opening anything.
+ *
+ * The slug test is not belt-and-braces. `published` is re-read on every Queue
+ * load and the list changes; `nearDuplicate` returns the first match in that
+ * list, so a verdict recorded against one article must never gate a chip about
+ * another. A mismatch is "not asked", which is the safe direction.
+ *
+ * One function, so the Queue's row, its "≈ Printed" tab (`queuePrintedMatches`)
+ * and the Today screen cannot disagree about which leads are chipped.
+ */
+export function printedDupChip(
+  lead: { headline: string; topic?: string | null } & DupAiVerdictFields,
+  published: readonly { slug: string; headline: string; topic?: string | null; published_at: string }[],
+  place?: NewsroomPlace | null,
+): PrintedDup | null {
+  const dup = nearDuplicate({ headline: lead.headline, topic: lead.topic ?? undefined }, published, place);
+  if (!dup) return null;
+  if (lead.dup_ai_printed_slug !== dup.slug) return dup;
+  if (lead.dup_ai_printed_same === false) return null;
+  if (lead.dup_ai_printed_same !== true) return dup;
+  const aiWhy = dupAiReason(lead.dup_ai_printed_why);
+  return aiWhy ? { ...dup, aiWhy } : dup;
+}
+
 /*
  * Unit AK items 2, 4, 6 and 7 (2026-09-26): the words the desk uses about a
  * lead that may already be printed, and about a lead that was killed.
@@ -1464,11 +1717,20 @@ export function nearDuplicate(
  * dead end with a sentence that names the story and offers the next press.
  */
 
-/** Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
+/**
+ * Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
  * headline it thinks the lead matches, so an editor can judge it without
- * opening anything. */
-export function printedDuplicateLine(headline: string): string {
-  return `Looks already printed: ${headline.trim()}`;
+ * opening anything.
+ *
+ * U28: when the desk's duplicate check agreed the two are the same story, the
+ * model's own sentence rides along ("... — AI: same council vote, same date."),
+ * which is the difference between a chip an editor has to verify and one they
+ * can act on. Omitted (the word rule's own chip), the line is unchanged.
+ */
+export function printedDuplicateLine(headline: string, aiWhy?: string | null): string {
+  const line = `Looks already printed: ${headline.trim()}`;
+  const why = dupAiReason(aiWhy);
+  return why ? `${line} — AI: ${why}` : line;
 }
 
 /** Unit AK item 4: the reason recorded when an editor kills a lead as a

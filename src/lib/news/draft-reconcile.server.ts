@@ -58,7 +58,15 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     `progressReporterFor`. `deps.stage` stays the seam the adversarial tests
     inject, now one-argument, because the job id was always the same one.
   */
-  const stage = deps.stage ?? progressReporterFor(job);
+  /*
+    FB1: `stagePct` gives this worker the 0 / 50 the brief asks for, from the
+    two arrivals it has -- "Checking the saved draft against the evidence" and
+    "Reconciling the draft with the saved evidence" -- with 100 written by
+    `executeJob` when the job completes. Nothing else here can count: the model
+    call in the middle has no denominator, and a number invented for it would be
+    a lie the editor could catch by watching.
+  */
+  const stage = deps.stage ?? progressReporterFor(job, { stagePct: true });
   const sql = await getSql();
   const [member] = await sql<{user_id:string}>`select user_id from newsroom_members where newsroom_id=${job.newsroom_id} and user_id=${job.user_id} and role in ('owner','editor')`;
   if (!member) throw new Error("Draft reconciliation requires an active newsroom editor.");

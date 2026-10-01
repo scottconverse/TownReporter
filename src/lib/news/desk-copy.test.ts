@@ -53,6 +53,8 @@ import {
   parseFailedSources,
   failedSourcesLine,
   scanZeroWhy,
+  scanRowLine,
+  scanRunningLine,
   sourceErrorKind,
   sourceLineFromUrl,
   titlesOverlap,
@@ -509,9 +511,18 @@ describe("Worth a Look presentation", () => {
       { status: "published" },
     ];
     assert.equal(workingLeads(rows).length, 4);
-    assert.equal(openLeads(rows).length, 3);
+    /*
+      FB6, owner report 7a. This was 3 (held counted as open work). A held lead
+      is set aside, not being worked, and the owner could see it in the Open
+      count on both Today and the Queue.
+    */
+    assert.equal(openLeads(rows).length, 2);
     assert.ok(workingLeads(rows).every((l) => l.status !== "published"));
-    assert.ok(openLeads(rows).every((l) => l.status !== "published" && l.status !== "killed"));
+    assert.ok(
+      openLeads(rows).every(
+        (l) => l.status !== "published" && l.status !== "killed" && l.status !== "held",
+      ),
+    );
   });
 
   it("does not say run the first scan after a timed-out writing pass", () => {
@@ -2057,5 +2068,136 @@ describe("Unit AK: duplicate and kill wording", () => {
       killedAsDuplicateNote(scanned).includes(named),
       "the note after the kill names the same piece, trimmed the same way",
     );
+  });
+});
+
+describe("a scan run's row while it is still running (FB1b, item 2)", () => {
+  /*
+    THE DEFECT THIS PINS. Both scan histories drew an OPEN run with the
+    FINISHED run's sentence, off counters that only exist once the receipt is
+    settled:
+
+      Partial coverage: 0 selected · 2 fetched · 0 analyzed · 0 leads.
+      Nothing in the fetched pages crossed the filing bar.
+
+    -- three claims about the end of a run, rendered thirty seconds into it.
+    "0 selected" was a column nothing writes until the end, "0 analyzed" is
+    true until the first batch returns, and "crossed the filing bar" is a
+    verdict on a comparison nobody has made.
+
+    So this is written as a DENY list as well as an allow list: the strings that
+    must never appear on a running row are the ones the coordinator quoted back
+    from the screenshot, and the mutation this defends against is putting the
+    old expression back.
+  */
+  const FORBIDDEN = ["Partial coverage", "crossed the filing bar", "0 selected", "No sources were fetched"];
+
+  const openRun = (over: Record<string, unknown> = {}) => ({
+    finished_at: null,
+    error: null,
+    stalled: false,
+    sources_selected: 14,
+    sources_attempted: 0,
+    sources_fetched: 0,
+    sources_failed: 0,
+    sources_analyzed: 0,
+    model_batches_used: 0,
+    model_batches_failed: 0,
+    leads_created: 0,
+    sources_proposed: 0,
+    summary: null,
+    ...over,
+  });
+
+  it("says it is running, with the live count and the real scope", () => {
+    assert.equal(
+      scanRunningLine(openRun({ sources_fetched: 3 })),
+      "Running · reading sources — 3 of 14",
+    );
+    /*
+      A source that failed was still READ, and the count says so: a watch list
+      of dead links has to show the row moving, or it reads "0 of 14" for the
+      whole pass. It is also the SAME number the card beside it shows -- the
+      worker's per-source attempt count -- which is why a failure moves it.
+    */
+    assert.equal(
+      scanRunningLine(openRun({ sources_fetched: 2, sources_failed: 3 })),
+      "Running · reading sources — 5 of 14",
+    );
+    /*
+      THE SCOPE IS NOT PROGRESS. `sources_attempted` is the run's
+      `watchSlice.length`, written before the first fetch -- so a run that has
+      read nothing arrives with attempted === selected, and the first version of
+      this function counted that as "the fetch is over" and said "reading the
+      pages with a model" over 2 of 14 sources. That is the bug the coordinator
+      photographed, pinned here so it cannot come back.
+    */
+    assert.equal(
+      scanRunningLine(openRun({ sources_attempted: 14, sources_fetched: 2 })),
+      "Running · reading sources — 2 of 14",
+    );
+    // Before a single page is read the scope is already known, because the
+    // worker writes `sources_selected` before it fetches. "0 fetched" with no
+    // denominator was half the original complaint.
+    assert.equal(scanRunningLine(openRun()), "Running · reading sources — 0 of 14");
+    // Once the fetch is over, the row names the phase that is actually running.
+    assert.equal(
+      scanRunningLine(openRun({ sources_fetched: 12, sources_failed: 2 })),
+      "Running · reading the pages with a model",
+    );
+    assert.equal(
+      scanRunningLine(openRun({ sources_fetched: 14, model_batches_used: 1, sources_analyzed: 6 })),
+      "Running · reading the pages with a model",
+    );
+  });
+
+  it("never renders a finished run's verdict while the run is going", () => {
+    /*
+      Every phase of an open run, each one checked against the deny list. The
+      fetch phase is the interesting one: it carries `sources_selected` and
+      `sources_failed`, which are exactly the inputs `scanCoverageLine` turns
+      into "Partial coverage: …".
+    */
+    const phases = [
+      openRun(),
+      // Every one of these carries the FULL scope in `sources_attempted`, which
+      // is how the row actually looks mid-fetch -- see the note above.
+      openRun({ sources_attempted: 14, sources_fetched: 1 }),
+      openRun({ sources_attempted: 14, sources_fetched: 5, sources_failed: 1 }),
+      openRun({ sources_attempted: 14, sources_fetched: 14 }),
+      openRun({ sources_attempted: 14, sources_fetched: 14, model_batches_used: 2, sources_analyzed: 9 }),
+    ];
+    for (const run of phases) {
+      const line = scanRowLine(run);
+      for (const banned of FORBIDDEN) {
+        assert.ok(
+          !line.includes(banned),
+          `"${banned}" must not appear on a running row: ${line}`,
+        );
+      }
+      assert.match(line, /^Running · /, "a running row says it is running, first");
+    }
+  });
+
+  it("hands a finished run to the finished sentence, unchanged", () => {
+    const finished = openRun({
+      finished_at: "2026-09-30T17:00:00.000Z",
+      sources_attempted: 14,
+      sources_fetched: 12,
+      sources_failed: 2,
+      sources_analyzed: 12,
+      model_batches_used: 3,
+      leads_created: 0,
+      sources_proposed: 0,
+      summary: null,
+    });
+    const line = scanRowLine(finished);
+    assert.match(line, /^Partial coverage: 14 selected · 12 fetched · 2 failed/);
+    assert.doesNotMatch(line, /^Running/);
+    // A stalled run is neither running nor a result, and keeps its own words.
+    assert.equal(scanRowLine({ ...finished, finished_at: null, stalled: true }), "Stalled with no result");
+    // A failed run reads as the count line, with the reason on the page's own
+    // error row -- which is where `editorScanError` renders it.
+    assert.match(scanRowLine({ ...finished, finished_at: null, error: "Provider failure" }), /12 fetched/);
   });
 });

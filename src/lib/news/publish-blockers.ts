@@ -144,9 +144,22 @@ function empty(text: string): boolean {
  * A second list of controls that cannot be reached, counting down to a publish
  * that cannot happen, is the desk contradicting itself in the one place an
  * editor goes to find out what is left to do.
+ *
+ * FB6 item 8a, from the stand-in walkthrough (A2c-REPORT.md §6 C4): a story
+ * with NO DRAFT showed "4 things block Publish" -- "Write the headline", "Write
+ * the story", "Write a dek", "Pick a section" -- directly above the page's own
+ * "No draft yet". Four prep tasks is a checklist for a draft that does not
+ * exist, and it is the wrong list in the wrong order: with nothing written,
+ * every one of those rows is downstream of a single press. So the list is drawn
+ * only once there is a draft to prepare, and the pane says the one next step
+ * instead (see the route's no-draft pane).
+ *
+ * `hasDraft` is required rather than defaulted: a caller that forgets it would
+ * get the old behaviour back silently, which is exactly the bug.
  */
-export function showsPublishPrep(status: string): boolean {
-  return status !== "killed";
+export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
+  if (status === "killed") return false;
+  return hasDraft;
 }
 
 /**

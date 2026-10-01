@@ -1737,7 +1737,24 @@ export function FindingEvidenceReviewPanel({
       */}
       {meetingEvidence ? <TranscriptCitationEvidence evidence={meetingEvidence} /> : null}
 
-      {review && review.rows.length === 0 && !meetingEvidence ? (
+      {/*
+        FB6 item 8b, from the stand-in walkthrough (A2c-REPORT.md §6 C5): this
+        paragraph printed "there is nothing to review here" directly ABOVE the
+        list's own first row, "Evidence check ! Needs review".
+
+        The two panes were reading two different things. This one asked whether
+        the REVIEW had rows (`review.rows.length`), and the list under it is
+        built by `evidenceCheckRows` from three more sources the page holds
+        itself -- the claims of absence, the name row and the style row -- none
+        of which are `review.rows`. Any of those can carry a "! Needs review"
+        chip, so the pane could deny in one line what the row below it asserted
+        in the next.
+
+        The list is the source of truth here: `listRows` is exactly what is
+        drawn, so the sentence says "nothing to review" only when there is
+        nothing on the screen to review. One fact, one place, both panes.
+      */}
+      {review && listRows.length === 0 && !meetingEvidence ? (
         <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
           <p className="text-sm text-ink">
             This draft has no recorded findings and no transcript citations, so there is nothing to

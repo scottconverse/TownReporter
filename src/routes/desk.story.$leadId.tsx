@@ -807,16 +807,23 @@ function StoryPage() {
       }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      /*
+        B7R, item 4: two answers, two tones. A recorded acceptance is a finished
+        press and takes the accent; the refusal is a failure and takes the
+        danger edge, so the reason is never painted as the next step.
+      */
       announceToDesk(
         res.ok
           ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
           : res.error,
+        res.ok ? "ok" : "err",
       );
     },
     onError: (err) => {
       announceToDesk(
         editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
           "Could not record that acceptance.",
+        "err",
       );
     },
   });
@@ -2151,7 +2158,7 @@ function StoryPage() {
               second list of controls that cannot be reached is the desk
               contradicting itself.
             */}
-            {showsPublishPrep(data.lead.status) ? (
+            {showsPublishPrep(data.lead.status, Boolean(data.draft)) ? (
               <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
             ) : null}
             {data.draft ? (
@@ -2208,9 +2215,44 @@ function StoryPage() {
                 }}
               />
             ) : (
+              /*
+                FB6 item 8a (A2c-REPORT.md §6 C4). With no draft there is
+                exactly one thing to do, and it is not four prep rows: it is
+                writing the draft. This pane used to be one grey sentence
+                ("Checks appear after the first draft."), and above it sat the
+                publish-prep list offering "Write the headline / Write the
+                story / Write a dek / Pick a section" -- three of which point
+                at fields this page does not draw until there is something to
+                edit. One sentence, one press, and it is the SAME press as the
+                toolbar's (the same `draft` mutation, the same dialog-less
+                path a first draft takes).
+
+                A killed lead has no such press -- `performPublish` refuses it
+                and the page draws Reopen instead -- so it gets the sentence
+                with no button, rather than a control that cannot work.
+              */
               <section className="astra-evidence" aria-label="Evidence check">
                 <h2 className="astra-evidence-title">Evidence check</h2>
-                <p className="meta">Checks appear after the first draft.</p>
+                {locked || onPaper ? (
+                  <p className="meta">Checks appear after the first draft.</p>
+                ) : (
+                  <>
+                    <p className="meta">
+                      Nothing to check yet — there is no draft. Draft with AI writes a first pass
+                      from the lead and its sources; the checks run on it and their rows appear
+                      here.
+                    </p>
+                    <InkButton
+                      disabled={waiting || reconcileActive}
+                      onClick={() => {
+                        if (waiting) return;
+                        draft.mutate(undefined);
+                      }}
+                    >
+                      {waiting ? "Drafting…" : "Draft with AI"}
+                    </InkButton>
+                  </>
+                )}
               </section>
             )}
             {/*

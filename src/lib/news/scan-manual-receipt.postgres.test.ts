@@ -283,7 +283,27 @@ it(
     );
     assert.equal(staleRun.calls, 1, "stale worker reaches result commit after fetching and analysis");
     assert.equal(staleReceipt.finished_at, null, "stale worker must not settle the newer owner's run");
-    assert.equal(staleReceipt.sources_fetched, 0);
+    /*
+      TWO, NOT ZERO, AND NOT FROM THE RECEIPT (FB1b, item 2).
+
+      This read 0 while the receipt was the only writer of `scan_runs`: a
+      settled run was the only thing that could put a counter there. FB1b's
+      `writeLiveRunRow` writes the run's own counters WHILE IT RUNS -- that is
+      what makes the Scan screen's history move -- and this worker filled both
+      of this newsroom's accepted sources before the blocker above reclaimed
+      its lease. So the column carries the LAST LIVE COUNT it wrote while it
+      still held the claim, which is true and is not a settlement; the two
+      fixtures here are why it is 2 (the same arithmetic the successful run
+      above pins at 1, its own fixture being the only source that existed
+      then). What the fence must stop is everything after the reclaim, and
+      `finished_at` -- the column that says a run has ENDED -- is still null,
+      with `error` null and the snapshot transaction rolled back.
+    */
+    assert.equal(
+      staleReceipt.sources_fetched,
+      2,
+      "the stale worker's live count, written before its lease was reclaimed",
+    );
     assert.equal(staleReceipt.error, null);
     assert.equal(staleSnapshot.count, 0, "stale result transaction must roll back snapshot writes");
     assert.equal(staleJob.status, "running");

@@ -266,10 +266,28 @@ describe("U24: a killed lead is not on its way anywhere", () => {
     contradicting itself.
   */
   it("is the only status that hides the list", () => {
-    assert.equal(showsPublishPrep("killed"), false);
+    assert.equal(showsPublishPrep("killed", true), false);
     for (const status of ["new", "drafted", "held", "published"]) {
-      assert.equal(showsPublishPrep(status), true, `${status} leads still show their blockers`);
+      assert.equal(showsPublishPrep(status, true), true, `${status} leads still show their blockers`);
     }
+  });
+
+  /*
+    FB6 item 8a (A2c-REPORT.md §6 C4). A story with no draft showed "4 things
+    block Publish" with four enabled prep rows directly above the page's own
+    "No draft yet". Nothing to prepare is not the same as nothing blocking a
+    publish, and the countdown was for a press the editor cannot reach yet.
+  */
+  it("hides the list when there is no draft, whatever the status", () => {
+    for (const status of ["new", "drafted", "held", "published"]) {
+      assert.equal(
+        showsPublishPrep(status, false),
+        false,
+        `${status} with no draft must not show publish-prep work`,
+      );
+    }
+    assert.equal(showsPublishPrep("killed", false), false);
+    assert.equal(showsPublishPrep("new", true), true, "the list returns with the first draft");
   });
 
   it("agrees with the server that a killed lead cannot print at all", () => {

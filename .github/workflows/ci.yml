@@ -1563,6 +1563,45 @@ jobs:
           name: walk-every-control-evidence
           path: wec-evidence/
           if-no-files-found: ignore
+      # FB6: feedback on every action. The owner, 2026-09-30: "I need much
+      # better feedback on all actions everywhere ... a line going back and
+      # forth is just lazy." Eight presses on Today, the Queue and Drafts,
+      # photographed in the state the fix is about -- the PENDING frame, the
+      # OPTIMISTIC frame, the ROLLED-BACK frame -- because none of those is a
+      # string a render test can see: a pending state is a frame, and the
+      # rollback is a row that came back under a red bar.
+      #
+      # The failure in step 3 is produced by ABORTING the request at the
+      # browser. Every desk server function answers `{ok:true}` on that path --
+      # there is no input that makes `setLeadStatus` refuse -- and a walk may
+      # not edit the server to invent one.
+      #
+      # Step 6 carries its own sensitivity control: it puts the old 232px menu
+      # and the wrapping `.btn` back on the one element and requires the label
+      # to wrap again, so a green run is not a measurement that cannot see the
+      # bug it claims is absent.
+      #
+      # It shares this job because it is a self-booting walk like the two
+      # above: it starts the built server in its own process on its own port
+      # (8146) over its own in-memory PGlite, so it cannot see their desks and
+      # they cannot see its.
+      #
+      # FB6_SHOTS_DIR must be INSIDE the checkout: the walk puts it through
+      # `checkedOutputPath` with the repository as a permitted root. It is
+      # uploaded rather than left, because that is the evidence.
+      - name: Every press says what it is doing, and says so when it fails
+        env:
+          BETTER_AUTH_SECRET: ci-fb6-desk-feedback-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+          FB6_SHOTS_DIR: ${{ github.workspace }}/fb6-shots
+        run: node scripts/fb6-desk-feedback-walk.mjs
+      - name: Preserve the FB6 feedback evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fb6-desk-feedback-shots
+          path: fb6-shots/
+          if-no-files-found: ignore
 
   # AG: the Control page, walked the way the owner will use it (0.6.65). The
   # terminal menu is replaced by a local page on 127.0.0.1:3095 -- one line

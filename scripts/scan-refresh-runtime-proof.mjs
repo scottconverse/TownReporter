@@ -207,11 +207,25 @@ try {
   await page.getByRole("heading", { level: 1, name: "Scan", exact: true }).waitFor({ timeout: 30_000 });
   step("opened the Scan desk with an open run in place");
 
-  // The page polls every 2s while a row looks open. Give it two intervals.
-  const busy = page.locator("text=Fetching accepted sources, then one pass for leads");
+  /*
+    THE BUSY STATE, AS THE PAGE DRAWS IT NOW (FB6 item 3 / FB1b item 3).
+
+    This used to wait for one shimmering sentence -- "Fetching accepted
+    sources, then one pass for leads. Stay on this page." FB1b deleted it: the
+    page draws the scan's own JobCard in the Run scan panel instead, and the
+    press's own label carries the busy state. Both are asserted, because they
+    are two different rows: the card reads `desk_jobs`, and the label is derived
+    from the `scan_runs` row THIS walk finishes -- which is the merge the bug
+    broke. Waiting only on the card would pass even if the row merge were still
+    broken.
+  */
+  const runScanPress = page.getByRole("button", { name: "Run scan", exact: true });
+  const busy = page.getByRole("button", { name: "Scanning sources…", exact: true });
+  const scanCard = page.locator(".scan-job-card .job-card");
   await busy.waitFor({ timeout: 20_000 });
+  await scanCard.waitFor({ timeout: 20_000 });
   await page.screenshot({ path: join(evidenceDir, "1-open-run-busy.png"), fullPage: true });
-  step("page shows the busy state while the run is open");
+  step("page shows the busy state while the run is open (the press reads Scanning sources…, the card is drawn)");
 
   // Now finish that same row. Same id. This is the merge the bug broke.
   await database.query("update scan_runs set finished_at = now(), leads_created = 3, summary = 'runtime proof: finished run' where id = $1", [openId]);
@@ -221,6 +235,8 @@ try {
   // Under the old code the row is dropped on merge and the busy state never
   // clears. Assert it clears within a few refetch intervals.
   await busy.waitFor({ state: "detached", timeout: 30_000 });
+  await runScanPress.waitFor({ timeout: 30_000 });
+  await scanCard.waitFor({ state: "detached", timeout: 30_000 });
   await page.screenshot({ path: join(evidenceDir, "2-finished-run-no-busy.png"), fullPage: true });
   step("page stopped showing the busy state after the run finished (the fix)");
 

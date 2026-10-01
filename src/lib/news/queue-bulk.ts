@@ -102,14 +102,19 @@ function refusalIn(value: unknown): string | null {
 /**
  * The one sentence a finished bulk press shows.
  *
- * "Held 12." when it all landed, "Held 11. 1 failed: <reason>" when it did not.
- * `done: 0` reads "Held 0. 12 failed: <reason>" on purpose -- the verb is the
- * press the editor made, and the count and the reason are what they need to act
- * on. The first reason is carried, not every one: they are the same failure in
- * almost every case, and the Undo on the same toast is the action.
+ * "Held 4 leads." when it all landed, "Held 11. 1 failed: <reason>" when it did
+ * not. The noun is FB6's, and it is not decoration: "Held 4." under a table of
+ * rows reads as four of something the sentence never names, and the sentence is
+ * shown away from the rows it is about -- a toast at the bottom of the screen
+ * over a list that has already changed under it.
+ *
+ * `done: 0` reads "Held 0 leads. 12 failed: <reason>" on purpose -- the verb is
+ * the press the editor made, and the count and the reason are what they need to
+ * act on. The first reason is carried, not every one: they are the same failure
+ * in almost every case, and the Undo on the same toast is the action.
  */
 export function bulkStatusSummary(report: Pick<BulkStatusReport, "status" | "done" | "failures">): string {
-  const head = `${BULK_STATUS_PAST[report.status]} ${report.done}.`;
+  const head = `${BULK_STATUS_PAST[report.status]} ${report.done} lead${report.done === 1 ? "" : "s"}.`;
   if (report.failures.length === 0) return head;
   const failed = `${report.failures.length} failed`;
   const first = report.failures[0];

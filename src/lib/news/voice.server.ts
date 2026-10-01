@@ -153,12 +153,18 @@ export async function readVoiceTextForOpenAiCodex(): Promise<
 }
 
 /**
- * Read the validated voice for an explicit "Local model" Opinion pick.
+ * Read the validated voice for an OpenAI-compatible Opinion writer: the
+ * explicit "Local model" pick, and Automatic's DeepSeek v4.1 Flash rung
+ * (unit U29).
  *
- * A local server speaks the OpenAI-compatible chat-completions protocol
- * only -- there is no `--system-prompt-file` equivalent over HTTP -- so its
- * voice travels as an ordinary system-message string instead of a file path,
- * while the Claude and Codex writers load the file by path.
+ * A local/Ollama server speaks the OpenAI-compatible chat-completions
+ * protocol only -- there is no `--system-prompt-file` equivalent over HTTP --
+ * so its voice travels as an ordinary system-message string in the request
+ * body instead of as a file path, while the Claude and Codex writers load the
+ * file by path. The text is never an argument and never logged; the transport
+ * that receives it puts it in the `system` message and nowhere else (see
+ * ./ai.ts's OpenAI-compatible branch).
+ *
  * Destination-named for the same reason `readVoiceTextForOpenAiCodex`
  * is: so a future provider cannot inherit this authorization accidentally.
  */

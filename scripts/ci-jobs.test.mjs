@@ -45,6 +45,10 @@ const CLAIMERS = [
   "scripts/meeting-settings-e2e.mjs",
   "scripts/cp-desk-dialogs-walk.mjs",
   "scripts/walk-every-control-0681.mjs",
+  // FB6: the pending/optimistic/rolled-back states of Today, Queue and Drafts.
+  // It creates the first account and boots its own server, so it carries its
+  // own desk like the three above.
+  "scripts/fb6-desk-feedback-walk.mjs",
 ];
 
 /**

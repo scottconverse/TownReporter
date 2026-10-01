@@ -129,6 +129,15 @@ test("real queue and story projections carry persisted scanner provenance and im
   await pg.exec(
     await readFile(new URL("../../../migrations/0094_lead_kill_record.sql", import.meta.url), "utf8"),
   );
+  /*
+    Migration 0113 (U28): the same story once more. Both projections now select
+    the duplicate check's verdict (`l.dup_ai_same` and its five siblings), so a
+    table built without them reads as "column l.dup_ai_same does not exist" --
+    a missing migration, not a missing column in desk.ts.
+  */
+  await pg.exec(
+    await readFile(new URL("../../../migrations/0113_lead_dup_ai_check.sql", import.meta.url), "utf8"),
+  );
   try {
     for (const name of ["listLeads", "getLead"] as const) {
       const result = await pg.query<{ scan_run_id: number | null }>(

@@ -5,13 +5,19 @@ import { DraftBatchResult } from "@/components/draft-batch-result";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { DeskJobCard } from "@/components/JobCard";
+import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
+import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
+import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import {
   AddLeadButton,
   DarkFileDialog,
   HoldLeadDialog,
   NewStoryButton,
+  NewStoryDialog,
 } from "@/components/dialogs";
+import { announceOnly, announceToDesk } from "@/components/desk-chrome-utils";
 /*
   Unit BW, item 2: the drawn Kill dialog, imported from its own module rather
   than through the `@/components/dialogs` barrel, which re-exports
@@ -37,7 +43,7 @@ import {
   duplicateKillReason,
   editorActionError,
   mergeFocusSelection,
-  nearDuplicate,
+  printedDupChip,
   suggestFocusLeads,
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
@@ -101,6 +107,19 @@ function bulkSelectLabel(filter: QueueFilter): string {
  * The question is left blank on purpose: it is the one field only the editor
  * can answer, and it is what the drawing's dialog asks for first.
  */
+/**
+ * Is this lead one the Queue's row presses refuse?
+ *
+ * Hold, Kill and Edit all refuse a lead that has left the working set -- the
+ * server says so and the row does not offer them (`desk-leads.tsx` gates the
+ * menu on the same three) -- so the KEYS must not offer them either. A key that
+ * opens a dialog the desk would only refuse is worse than a key that does
+ * nothing, because it costs a press to find out.
+ */
+function closedOrHeld(lead: LeadRow): boolean {
+  return lead.status === "held" || lead.status === "killed" || lead.status === "published";
+}
+
 function darkPrefill(lead: LeadRow): { tip: string } {
   const source = parseUrlList(lead.source_urls)[0];
   return { tip: `${lead.headline}\n${source ?? `/desk/story/${lead.id}`}` };
@@ -122,14 +141,39 @@ function QueuePage() {
     the same server function and the same three invalidations -- so the two
     screens cannot disagree about what a scan updates.
   */
-  const scan = useMutation({
+  /*
+    FB6, item 3. FB0-Report Table B (Queue, ":646") calls this a LAZY BAR and a
+    SILENT FAIL: the label swapped to "Scanning…", the screen drew no card of
+    any kind, and a scan that refused to start reported nothing -- there was not
+    even a `Busy` line on this screen. It goes through the shared family now, so
+    a failure carries the server's reason, and the scan's own card appears under
+    the header press (below) from the same `["desk-jobs"]` the rest of the desk
+    reads.
+  */
+  const scan = useDeskMutation({
     mutationFn: () => runScan(),
-    onSuccess: () => {
+    after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // FB1: the card for the scan just queued. See invalidateDeskJobs.
+      invalidateDeskJobs(qc);
     },
+    pending: "Starting the scan…",
+    done: () => "The scan is running. Watch its stages under the button.",
+    failedLead: "Could not start the scan. ",
+    what: "start the scan",
   });
+  /*
+    The Queue's own read of the one job query, for the scan card under the
+    header and for nothing else -- every row-level job on this screen is drawn
+    by its own control.
+  */
+  const deskJobs = useDeskJobs();
+  const scanJob =
+    (deskJobs.data ?? []).find(
+      (row) => row.kind === "scan" && (row.status === "queued" || row.status === "running"),
+    ) ?? null;
   /*
     FB5: the Queue reaches this mutation from its rows, its bulk Hold and its
     bulk Kill, and every one of those paths reported nothing at all when the
@@ -144,6 +188,15 @@ function QueuePage() {
       killReason?: string;
       killReasonUrl?: string;
     }) => setLeadStatus({ data: input }),
+    /*
+      FB6, item 2 (README:484). The row moves in the same paint as the press and
+      moves back if the write does not take. `desk-lead-status.ts` owns the rule
+      and Today uses the same call, so the two screens cannot drift on what
+      "optimistic" means. It is also what makes the bulk strip's twelve
+      concurrent presses safe: the undo is per LEAD, not a snapshot of the whole
+      cache, so one failure cannot put back eleven successes.
+    */
+    ...leadStatusOptimistic(qc),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     /*
       M7: while a bulk press is fanning out over the selection, each lead's own
@@ -518,6 +571,10 @@ function QueuePage() {
         }));
       }
       void qc.invalidateQueries({ queryKey: ["leads"] });
+      // FB1: the Queue's own "Start N stories" and per-row redraft both land
+      // here. Without this the card for the draft just queued waits out the
+      // idle poll, which is what the report measured as "up to 30 s late".
+      invalidateDeskJobs(qc);
     },
     onError: (error, { leadId, fromBatch }) => {
       const text = error instanceof Error ? error.message : "That draft did not queue.";
@@ -564,6 +621,85 @@ function QueuePage() {
     unfiltered list and shows the wrong leads.
   */
   const shown = leads;
+  /*
+    THE TRIAGE KEYS (FB6, item 4; README "Interactions & behavior").
+
+    FB0-Report Table B, Queue, first row: "keyboard triage -- **missing
+    entirely** -- no `onKeyDown` in the file, against README:468". The rule is
+    `desk-triage.ts`, the same one Today binds, so J means the same thing on
+    both screens and the stand-downs (typing, modifiers) are the same too; "?"
+    is the shell's and is already bound on every desk screen.
+
+    `cursor` is an index into the rows ON SCREEN, and it is drawn as `.sel` on
+    the row the way Today's is. It is clamped on read rather than stored clamped,
+    so a row that leaves the list (a Hold drops it off the Open tab) cannot
+    leave the cursor pointing past the end.
+
+    WHAT EACH KEY DOES HERE, where the Queue differs from Today:
+      S   queues a draft for the selected lead, exactly as Today's S does --
+          the README's "S starts a story". The row's own visible "Start story"
+          is a LINK to the workbench, so Enter is that press and S is the one
+          that spends the model call. A held or killed lead cannot be drafted
+          (the backend's rule), so S says so instead of refusing at the wire.
+      U   puts a held or killed lead back. On an open lead there is nothing to
+          undo, and a status write that changed nothing would be a press with no
+          outcome -- so it says so rather than firing.
+  */
+  const [cursor, setCursor] = useState(0);
+  const [newStoryOpen, setNewStoryOpen] = useState(false);
+  useTriageKeys((action) => {
+    const lead = shown[movedIndex(cursor, 0, shown.length)];
+    const move = (next: number) => {
+      if (shown.length === 0) return;
+      const i = movedIndex(next, 0, shown.length);
+      setCursor(i);
+      announceOnly(`Selected: ${shown[i]!.headline}`);
+    };
+    switch (action.kind) {
+      case "move":
+        move(cursor + action.delta);
+        break;
+      case "start":
+        if (!lead) break;
+        if (lead.status === "held" || lead.status === "killed" || lead.status === "published") {
+          announceToDesk(`"${lead.headline}" cannot be drafted from ${lead.status}.`, "err");
+          break;
+        }
+        setDraftNotices((notices) => {
+          const next = { ...notices };
+          delete next[lead.id];
+          return next;
+        });
+        queueDraft.mutate({
+          leadId: lead.id,
+          modelChoice: "auto",
+          modelEffort: defaultModelEffort("auto"),
+        });
+        break;
+      case "hold":
+        if (lead && !closedOrHeld(lead)) setHoldFor(lead);
+        break;
+      case "kill":
+        if (lead && !closedOrHeld(lead)) setKillFor(lead);
+        break;
+      case "undo":
+        if (lead && (lead.status === "held" || lead.status === "killed")) {
+          setStatus.mutate({ id: lead.id, status: "new" });
+        } else {
+          announceOnly("Nothing to undo on that lead.");
+        }
+        break;
+      case "open":
+        if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
+        break;
+      case "new":
+        // Same press as Today's N: the drawn New-story dialog, not the legacy
+        // #file-lead form (which is a different form with different fields).
+        closePanel();
+        setNewStoryOpen(true);
+        break;
+    }
+  });
   /*
     The batch dialog's own pool, and the ONE thing on this screen that still
     needs every lead: `suggestFocusLeads` balances a suggested set across the
@@ -668,7 +804,11 @@ function QueuePage() {
     reported in one sentence under one id.
   */
   const bulkStatus = useMutation({
-    mutationFn: async (input: { ids: number[]; status: "held" | "killed" }) => {
+    mutationFn: async (input: {
+      ids: number[];
+      status: "held" | "killed";
+      killReason?: string;
+    }) => {
       /*
         The per-item toasts are suppressed for exactly as long as the batch is
         in flight: `setStatus` would otherwise speak once per lead, and this
@@ -677,7 +817,9 @@ function QueuePage() {
       bulkMuted.current = true;
       try {
         const settled = await Promise.allSettled(
-          input.ids.map((id) => setStatus.mutateAsync({ id, status: input.status })),
+          input.ids.map((id) =>
+            setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason }),
+          ),
         );
         return bulkStatusReport({
           status: input.status,
@@ -722,9 +864,26 @@ function QueuePage() {
       });
     },
   });
-  const bulkSetStatus = (status: "held" | "killed") => {
+  /**
+   * The one reason a bulk Kill writes on every lead it takes.
+   *
+   * FB6, item 2: "bulk Kill of more than one lead asks for one shared reason
+   * first". Killing four leads in one press is the one bulk action here that
+   * leaves no record of WHY, and a kill record with no reason is the thing the
+   * rest of this desk's kill path exists to avoid (the row's "Kill with a
+   * reason", the drawn dialog's own requirement). One reason written to four
+   * leads is a worse record than four separate ones, and a much better one than
+   * none -- so the strip asks once, for the batch, and the empty box is a real
+   * answer ("no reason"), which is the design's fast path.
+   */
+  const [bulkKillReason, setBulkKillReason] = useState<string | null>(null);
+  const bulkSetStatus = (status: "held" | "killed", reason?: string) => {
     const ids = selectedLeads.map((lead) => lead.id);
     if (ids.length === 0) return;
+    if (status === "killed" && reason !== undefined && reason.trim()) {
+      bulkStatus.mutate({ ids, status, killReason: reason.trim() });
+      return;
+    }
     bulkStatus.mutate({ ids, status });
   };
   const bulkBusy =
@@ -760,8 +919,14 @@ function QueuePage() {
       kicker="Every open lead"
       actions={
         <>
-          <InkButton tone="ghost" disabled={scan.isPending} onClick={() => scan.mutate()}>
-            {scan.isPending ? "Scanning…" : "Run scan now"}
+          <InkButton
+            tone="ghost"
+            disabled={scan.isPending}
+            pending={scan.isPending}
+            pendingLabel="Starting the scan…"
+            onClick={() => scan.mutate()}
+          >
+            Run scan now
           </InkButton>
           {/*
             Unit BN, item 3: the Queue's own "file a lead" control is the drawn
@@ -770,7 +935,18 @@ function QueuePage() {
             comment for why that door has to keep opening the form it opened
             before this unit.
           */}
-          <AddLeadButton />
+          {/*
+            FB6, owner report 7d: the same missing `onDone` as Today's mount --
+            a lead filed from the Queue's own toolbar did not appear on the
+            Queue until a reload, because the dialog told nobody and the query
+            client has `refetchOnWindowFocus: false`.
+          */}
+          <AddLeadButton
+            onDone={() => {
+              void qc.invalidateQueries({ queryKey: ["leads"] });
+              invalidateDeskJobs(qc);
+            }}
+          />
           <Link to="/desk" hash="story-composer" className="btn solid">
             + New story
           </Link>
@@ -873,6 +1049,33 @@ function QueuePage() {
         </div>
       </div>
 
+      {/*
+        FB6, item 3: the scan's own card, in place, under the press that started
+        it. The Queue used to give a scan nothing at all -- no stage, no count,
+        no elapsed clock, and no Cancel anywhere on this screen.
+      */}
+      {scanJob ? (
+        <div className="queue-scan-card">
+          <DeskJobCard job={scanJob} compact />
+        </div>
+      ) : null}
+
+      {/*
+        FB6, item 4: the triage keys, printed on the screen rather than only in
+        the "?" sheet -- README "Interactions & behavior". The words are Today's
+        own (`TRIAGE_LEGEND`), so the two lists teach the same keys.
+      */}
+      {shown.length > 0 ? (
+        <p className="queue-legend" aria-label="Keys for this list">
+          <span className="today-legend-label">Keyboard</span>
+          {TRIAGE_LEGEND.map(([key, what]) => (
+            <span key={key}>
+              <kbd>{key}</kbd> {what}
+            </span>
+          ))}
+        </p>
+      ) : null}
+
       {shown.length > 0 ? (
         <section
           className="queue-bulk-delete queue-bulk"
@@ -907,13 +1110,25 @@ function QueuePage() {
                   what the dialog is about to queue cannot drift from what the
                   bar said it would.
                 */}
+                {/*
+                  FB6, owner report 7b: this button could read "Start 0 stories"
+                  -- a press that would do nothing, labelled with a count of
+                  nothing, next to a selection that is entirely held, killed or
+                  printed. The count is left out when there is nothing to
+                  count, the button stands down, and the line below the bar
+                  (which was already there) says why.
+                */}
                 <InkButton
                   disabled={
                     startBatch.isPending || bulkDraftable.length === 0 || bulkDraftable.length > 5
                   }
-                  ariaLabel={`Start ${bulkDraftable.length} ${
-                    bulkDraftable.length === 1 ? "story" : "stories"
-                  } from the selected leads`}
+                  ariaLabel={
+                    bulkDraftable.length === 0
+                      ? "Nothing in this selection can be drafted"
+                      : `Start ${bulkDraftable.length} ${
+                          bulkDraftable.length === 1 ? "story" : "stories"
+                        } from the selected leads`
+                  }
                   onClick={() => {
                     setBatchNotice(null);
                     setBatchLeadIds(bulkDraftable.map((l) => l.id));
@@ -922,11 +1137,22 @@ function QueuePage() {
                 >
                   {startBatch.isPending
                     ? "Starting…"
-                    : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
+                    : bulkDraftable.length === 0
+                      ? "Start stories"
+                      : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
                 <InkButton
                   tone="quiet"
-                  disabled={setStatus.isPending}
+                  /*
+                    FB6, item 1: bulk Hold was `disabled` only and said nothing
+                    while it worked -- twelve leads went through one
+                    `Promise.allSettled` with no sign that anything was
+                    happening. It stands down and says what it is doing now, as
+                    does its sibling below.
+                  */
+                  disabled={bulkBusy}
+                  pending={bulkStatus.isPending && bulkStatus.variables?.status === "held"}
+                  pendingLabel="Holding…"
                   onClick={() => {
                     /*
                       Unit BN, item 3: "Bulk bar Hold uses the hold path." One
@@ -946,11 +1172,51 @@ function QueuePage() {
                 </InkButton>
                 <InkButton
                   tone="quiet-danger"
-                  disabled={setStatus.isPending}
-                  onClick={() => bulkSetStatus("killed")}
+                  disabled={bulkBusy}
+                  pending={bulkStatus.isPending && bulkStatus.variables?.status === "killed"}
+                  pendingLabel="Killing…"
+                  onClick={() => {
+                    /*
+                      FB6, item 2: several leads in one kill press asks ONCE for
+                      one reason they all carry. One lead keeps the row's own
+                      path (the drawn "Kill with a reason" dialog above), which
+                      is where a per-lead reason already lives.
+                    */
+                    if (selectedLeads.length > 1) setBulkKillReason("");
+                    else bulkSetStatus("killed");
+                  }}
                 >
                   Kill
                 </InkButton>
+                {bulkKillReason !== null ? (
+                  <div className="queue-bulk-delete-confirm">
+                    <label className="queue-bulk-reason">
+                      <span>
+                        Killing {selectedLeads.length} leads. Why? One reason is written on all of
+                        them.
+                      </span>
+                      <input
+                        value={bulkKillReason}
+                        onChange={(event) => setBulkKillReason(event.target.value)}
+                        placeholder="No reason — leave this empty"
+                        aria-label="Why these leads are being killed"
+                      />
+                    </label>
+                    <InkButton
+                      tone="danger"
+                      onClick={() => {
+                        const reason = bulkKillReason;
+                        setBulkKillReason(null);
+                        bulkSetStatus("killed", reason);
+                      }}
+                    >
+                      Yes, kill {selectedLeads.length}
+                    </InkButton>
+                    <InkButton tone="quiet" onClick={() => setBulkKillReason(null)}>
+                      Keep
+                    </InkButton>
+                  </div>
+                ) : null}
                 {confirmingBulkDelete ? (
                   <div className="queue-bulk-delete-confirm">
                     <span>
@@ -987,6 +1253,7 @@ function QueuePage() {
                     setSelectedDeleteLeadIds([]);
                     setConfirmingBulkDelete(false);
                     setBulkDeleteNotice("");
+                    setBulkKillReason(null);
                   }}
                 >
                   Clear
@@ -1113,16 +1380,25 @@ function QueuePage() {
             <span className="queue-head-acts">Actions</span>
           </div>
           <div className="lead-list roomy">
-            {shown.map((l) => {
+            {shown.map((l, index) => {
               // U26b: the same paper's place the server's counts and the scan's
-              // matcher use, so the chip and the "≈ Printed" tab agree.
-              const dupMatch = nearDuplicate(l, printed, PAPER);
+              // matcher use, so the chip and the "≈ Printed" tab agree. U28:
+              // the same `printedDupChip` the server's counts now use, so a
+              // pair the desk's duplicate check cleared is absent from the tab
+              // AND from the row -- one rule, not two.
+              const dupMatch = printedDupChip(l, printed, PAPER);
               return (
                 <LeadRowView
                   key={l.id}
                   lead={l}
                   dup={dupMatch}
                   roomy
+                  /*
+                    FB6, item 4: where J and K have put the cursor. The row is
+                    the same row; the class is the only difference, exactly as
+                    on Today.
+                  */
+                  selected={index === movedIndex(cursor, 0, shown.length)}
                   /*
                     BF3: the `more` array that used to sit here (Open the story
                     workbench / Hold this lead / Kill this lead / Put it back /
@@ -1145,6 +1421,12 @@ function QueuePage() {
                     reason" below.
                   */
                   onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
+                  /*
+                    FB6, item 5: the row's own Release / Bring back says what it
+                    is doing while it does it, and carries the failure sentence.
+                    The state is the screen's because the mutation is.
+                  */
+                  backPending={setStatus.isPending && setStatus.variables?.id === l.id}
                   onHoldWithReason={() => setHoldFor(l)}
                   onEdit={() => setEditFor(l)}
                   onDarkDesk={() => setDarkFor(l)}
@@ -1248,6 +1530,12 @@ function QueuePage() {
         `questions/BN.md` names the scripts and asks which door the hash should
         be.
       */}
+      {/*
+        FB6, item 4: the N key's destination on this screen, mounted once like
+        Today's -- the drawn New-story dialog, not the legacy #file-lead form.
+      */}
+      <NewStoryDialog open={newStoryOpen} onClose={() => setNewStoryOpen(false)} />
+
       <Dialog
         open={panel === "file-lead"}
         onClose={closePanel}
@@ -1572,7 +1860,15 @@ function QueuePage() {
           headline={holdFor.headline}
           open
           onClose={() => setHoldFor(null)}
-          onDone={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+          onDone={() => {
+            /*
+              FB6, item 2: the row moves the moment the dialog's write answers,
+              not one refetch later. There is nothing optimistic about waiting
+              for the round trip the dialog already completed.
+            */
+            moveLeadStatusNow(qc, holdFor.id, "held");
+            void qc.invalidateQueries({ queryKey: ["leads"] });
+          }}
         />
       ) : null}
       {darkFor ? (
@@ -1597,7 +1893,10 @@ function QueuePage() {
           onOpenChange={(open) => {
             if (!open) setKillFor(null);
           }}
-          onKilled={() => void qc.invalidateQueries({ queryKey: ["leads"] })}
+          onKilled={() => {
+            moveLeadStatusNow(qc, killFor.id, "killed");
+            void qc.invalidateQueries({ queryKey: ["leads"] });
+          }}
         />
       ) : null}
       {/*
