@@ -69,3 +69,7 @@ artifacts/**
 
 # Development-only fallback for generated aggregate Stats reports.
 /.townreporter-data/
+
+# Written at run time by the meeting-capture tests and the live desk; never source.
+meeting-capture/
+meeting-captions/
