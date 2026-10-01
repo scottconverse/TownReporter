@@ -1199,6 +1199,121 @@ export function scanZeroWhy(input: {
 }
 
 /**
+ * WHAT AN OPEN RUN'S ROW SAYS, in plain words (FB1b, item 2).
+ *
+ * THE DEFECT. A run that was still going was drawn with the FINISHED run's
+ * sentence -- `scanCoverageLine` over half-written counters -- so the Scan
+ * screen's own history read
+ *
+ *   Partial coverage: 0 selected · 2 fetched · 0 analyzed · 0 leads.
+ *   Nothing in the fetched pages crossed the filing bar.
+ *
+ * about a scan that had been running for thirty seconds. Every clause of that
+ * is a claim about the END of a run: "selected 0" was true of a column nothing
+ * writes until the receipt is settled, "0 analyzed" is true until the first
+ * batch returns, and "crossed the filing bar" is a verdict on a comparison
+ * nobody has made yet.
+ *
+ * THE RULE. A run that has not finished says it is running, and says only what
+ * is known NOW. The phase is read off the same live counters the worker writes
+ * as it goes (`noteSourceProgress` / the batch loop in desk.ts), and the
+ * sentence is deliberately one line: the editor is scanning the list for "is it
+ * still going", not reading a report.
+ *
+ * `selected` is the run's real scope from the moment the worker starts -- it is
+ * known before the first fetch, and it is written to the row then -- so this can
+ * say "of 14" straight away rather than counting up to it.
+ */
+export function scanRunningLine(run: {
+  sources_selected?: number | null;
+  sources_fetched?: number | null;
+  sources_failed?: number | null;
+  model_batches_used?: number | null;
+  sources_analyzed?: number | null;
+}): string {
+  const selected = run.sources_selected ?? 0;
+  const fetched = run.sources_fetched ?? 0;
+  const failed = run.sources_failed ?? 0;
+  /*
+    READ = FETCHED + FAILED, which is the same count the CARD shows: the scan
+    worker bumps its in-process counter for every source it finishes with,
+    success or failure. The two lines sit inches apart on the Sources screen, so
+    a row that said "2 of 14" beside a card that said "7 of 14" would be the
+    desk contradicting itself -- and it was, before this: the row printed
+    successes only.
+  */
+  const read = fetched + failed;
+  const batches = run.model_batches_used ?? 0;
+  const analyzed = run.sources_analyzed ?? 0;
+  /*
+    Three phases, in the order the worker walks them, each one a fact the run
+    row already carries:
+
+      reading the sources            -> sources are still being read
+      reading the pages with a model -> the first batch has been counted, or
+                                        every source has been read
+      starting up                    -> nothing written yet
+
+    "READ" IS FETCHED PLUS FAILED, and deliberately NOT `sources_attempted`.
+    That column is the run's SCOPE (`watchSlice.length`, written before the
+    first fetch and again in the receipt), so counting it as progress made a run
+    that had read nothing claim it was already past the fetch -- which is what
+    the first version of this did, and what the coordinator caught in the
+    screenshot ("Running · reading the pages with a model" over 2 of 14).
+
+    A source that failed was still read: a watch list of dead links has to show
+    the count moving, or the row says "0 of 14" for the whole pass.
+  */
+  if (batches > 0 || analyzed > 0) return "Running · reading the pages with a model";
+  if (selected > 0) {
+    if (read >= selected) return "Running · reading the pages with a model";
+    return `Running · reading sources — ${read} of ${selected}`;
+  }
+  if (read > 0) return `Running · reading sources — ${read} read so far`;
+  return "Running · starting up";
+}
+
+/**
+ * THE ONE LINE A RUN'S ROW CARRIES, whatever state it is in.
+ *
+ * Both screens that draw the scan history -- the Scan screen's own list and the
+ * Sources rail's "Previous scans" -- read this, so the two cannot describe one
+ * run two ways.
+ *
+ * STALLED COMES FIRST, and it is the one case where an open row is NOT
+ * running: `listScans` sets the flag when the run claims to be open but no live
+ * job is behind it, so the process that owned it is gone. A row that said
+ * "Running · reading sources — 3 of 14" about a dead worker would be the same
+ * class of lie as the finished-run verdict this function exists to remove.
+ */
+export function scanRowLine(run: {
+  finished_at: string | null;
+  error: string | null;
+  stalled?: boolean;
+  sources_selected?: number | null;
+  sources_attempted?: number | null;
+  sources_fetched: number;
+  sources_failed?: number | null;
+  sources_analyzed?: number | null;
+  model_batches_used?: number | null;
+  model_batches_failed?: number | null;
+  leads_created: number;
+  sources_proposed: number;
+  summary?: string | null;
+}): string {
+  if (run.stalled) return "Stalled with no result";
+  if (!run.finished_at && !run.error) return scanRunningLine(run);
+  return (
+    scanCoverageLine(run) ??
+    scanCountsLine({
+      sources_fetched: run.sources_fetched,
+      leads_created: run.leads_created,
+      sources_proposed: run.sources_proposed,
+    })
+  );
+}
+
+/**
  * The one sentence appended to a scan run's editor summary when the code
  * matcher (see `matchStrength` in `./lead-match.ts`) stamped leads or filed
  * a possible duplicate instead of quietly refiling/discarding them, so the

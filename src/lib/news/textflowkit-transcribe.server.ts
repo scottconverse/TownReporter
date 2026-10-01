@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { Sql } from "../db.ts";
-import { enqueueJob, findOpenJob, waitForModel, type DeskJob } from "./jobs.ts";
+import {
+  enqueueJob,
+  findOpenJob,
+  pctFor,
+  progressReporterFor,
+  waitForModel,
+  type DeskJob,
+} from "./jobs.ts";
 import { probeTextflowkit, transcribeAudioWithTextflowkit } from "./textflowkit-cli.server.ts";
 import { TEXTFLOWKIT_SOURCE_METHOD, resolveTextflowkitConfig } from "./textflowkit.ts";
 import type { CaptionCaptureResult } from "./meeting-capture-ytdlp.ts";
@@ -192,6 +199,24 @@ export async function performAudioTranscribeWork(job: DeskJob, deps: AudioTransc
   const capture = captureRows[0];
   if (!capture) throw new Error("The capture record for this meeting is gone; nothing was transcribed.");
 
+  /*
+    FB1, unit 2: the arrivals.
+
+    Before this the only thing this worker ever said was the ticker's "Waiting
+    on textflowkit · 312s" -- no stage, no chip, no step text. Its card had an
+    empty chip row for the whole transcode, which on this machine is the
+    longest single await in the app.
+
+    The percentage is stage-based and NOT chunk-based: textflowkit is one
+    external command with no progress channel, so there is no "chunk 3 of 9" to
+    read. Two of its three stages are therefore worth a real number only by
+    position, and the middle one runs for most of an hour at a fixed 33% -- see
+    `audio-transcribe` in JOB_STAGE_LISTS, and the note on the card's
+    indeterminate bar, which is what a duration-estimated bar would have to be
+    anyway.
+  */
+  const report = progressReporterFor(job);
+  await report("Checking the retained audio", pctFor(0, 3));
   const probe = await (deps.probe ?? probeTextflowkit)({ env });
   if (!probe.installed) {
     throw new Error(probe.detail ?? "textflowkit is not installed; the audio is kept and this can be retried after installing it.");
@@ -239,6 +264,7 @@ export async function performAudioTranscribeWork(job: DeskJob, deps: AudioTransc
       "Waiting on textflowkit · 312s" rather than offering a retry, and it reads
       `cancel_requested` so Cancel lands without waiting for the hour.
     */
+    await report("Transcribing the audio with textflowkit", pctFor(1, 3));
     const run = await waitForModel({
       jobId: job.id,
       label: "textflowkit",
@@ -256,6 +282,7 @@ export async function performAudioTranscribeWork(job: DeskJob, deps: AudioTransc
       throw new Error(run.reason);
     }
     await assertClaim();
+    await report("Saving the transcript", pctFor(2, 3));
 
     const ownerUserId = (await sql.query<{ user_id: string }>(
       "select user_id from newsroom_members where newsroom_id=$1 and role='owner' limit 1",

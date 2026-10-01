@@ -2877,15 +2877,33 @@
   margin-top: 8px;
   padding-top: 8px;
   border-top: 1px solid var(--line);
-  font-size: calc(14px * var(--ts));
   color: var(--fg2);
 }
-.desk-ltr.astra .astra-running-job b {
-  display: block;
+/*
+  THE BOX THE CARD SITS IN, AT RAIL WIDTH (FB1b, item 1).
+
+  The card brings its own border and padding, drawn for a full-width column; in
+  the rail that border is a second frame inside the box's yellow one and the
+  16px padding eats the width the title needs. So the rail draws the card flat:
+  no border, no fill, the page's own background, and only the accent rule on the
+  left -- which is the one part of the card's frame that carries meaning.
+*/
+.desk-ltr.astra .astra-running-job .job-card {
+  padding: 0;
+  border: none;
+  border-left: 3px solid var(--job-col, var(--a));
+  padding-left: 10px;
+  background: transparent;
+}
+/* 14px, the desk's floor -- `desk-min-font.test.mjs` fails any .desk-ltr rule
+   under it, and the rail is the one place the temptation to go smaller is
+   strongest. */
+.desk-ltr.astra .astra-running-job .job-card-title {
   font-size: calc(14px * var(--ts));
-  font-weight: 700;
-  color: var(--fg);
-  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .astra-running-job .job-card-actions .btn {
+  width: 100%;
+  justify-content: center;
 }
 
 /* BF3: the "Find anything" box and the footer's extra route links are gone
@@ -4335,21 +4353,39 @@
   --job-col: var(--warn);
 }
 
+/*
+  THE HEAD, AND WHY IT IS A GRID (FB1b, items 1 and 4).
+
+  Title column, clock column. The title column is the one that may shrink
+  (`minmax(0, 1fr)` -- a bare `1fr` refuses to go below its content and the
+  clock gets pushed out of the box), and the clock is `auto` and never wraps.
+  In a flex row the two compete for space and the clock ends up inside the
+  title's last line; here the columns cannot overlap at any width.
+*/
 .desk-ltr.astra .job-card-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 4px 10px;
 }
 .desk-ltr.astra .job-card-id {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 10px;
+  min-width: 0;
+}
+/* Title above, model below. Two lines, always -- never one run-on line. */
+.desk-ltr.astra .job-card-id-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 .desk-ltr.astra .job-card-dot {
   width: 12px;
   height: 12px;
   flex: none;
+  align-self: center;
   background: var(--job-col);
 }
 /* Only a running job pulses. A stalled one must look stopped, and a done or
@@ -4360,6 +4396,7 @@
 .desk-ltr.astra .job-card-title {
   font-size: calc(1rem * var(--ts));
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 .desk-ltr.astra .job-card-model {
   font-size: calc(0.875rem * var(--ts));
@@ -4370,6 +4407,35 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/*
+  THE COMPACT CARD: ONE LINE OF TITLE, IN THE NARROWEST COLUMN ON THE DESK.
+
+  The nav's Running box is about 190px of usable width inside its border and
+  padding, and the card that goes in it was drawn for a full-width column:
+  "Scanning the watch list" wrapped to three lines, pushed the clock around and
+  ran the model line together with it. Compact is the variant for exactly this
+  case, so the title gets one line with an ellipsis and everything else stacks
+  under it in the order the eye wants: title, model · %, bar, Now, actions.
+
+  `text-overflow` needs `overflow: hidden` AND a bounded box; the bounding is
+  `minmax(0, 1fr)` on the grid column above, which is why this rule is not
+  enough on its own.
+*/
+.desk-ltr.astra .job-card.compact .job-card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+}
+.desk-ltr.astra .job-card.compact .job-card-model {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-ltr.astra .job-card.compact .job-card-id {
+  align-items: center;
 }
 
 .desk-ltr.astra .job-card-stages {

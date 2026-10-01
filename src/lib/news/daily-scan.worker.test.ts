@@ -315,6 +315,21 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
     [run.id],
   );
   assert.equal(rejectedRun.finished_at, null);
+  /*
+    FB1: `sources_fetched` is 1, not 0, and that is the whole point of unit 1.
+
+    The scan worker now writes the count onto `scan_runs` AS IT FETCHES
+    (`noteSourceProgress` in desk.ts) instead of only in the receipt written
+    when the run settles. This run never settled -- the lease was lost and the
+    receipt was deliberately left alone, which the four assertions around this
+    one still pin -- but one source WAS read before that happened, and the row
+    now says so while the run is still open.
+
+    That is the defect the owner reported, stated as a test: a scan at work
+    used to read "0 fetched · No sources were fetched" because nothing wrote the
+    row until the end. The receipt's own authority is unchanged: leads_created,
+    sources_proposed and summary are all still untouched.
+  */
   assert.deepEqual(
     {
       sources_fetched: rejectedRun.sources_fetched,
@@ -322,7 +337,7 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
       sources_proposed: rejectedRun.sources_proposed,
       summary: rejectedRun.summary,
     },
-    { sources_fetched: 0, leads_created: 0, sources_proposed: 0, summary: null },
+    { sources_fetched: 1, leads_created: 0, sources_proposed: 0, summary: null },
   );
   const [rejectedReservation] = await sql.query<{ status: string }>(
     "select status from daily_scan_reservations where id=$1",

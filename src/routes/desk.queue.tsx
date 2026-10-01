@@ -5,6 +5,7 @@ import { DraftBatchResult } from "@/components/draft-batch-result";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { invalidateDeskJobs } from "@/components/job-card-state";
 import { LeadRowView, SEEN_AGAIN_EXPLAINER } from "@/components/desk-leads";
 import {
   AddLeadButton,
@@ -128,6 +129,8 @@ function QueuePage() {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // FB1: the card for the scan just queued. See invalidateDeskJobs.
+      invalidateDeskJobs(qc);
     },
   });
   /*
@@ -518,6 +521,10 @@ function QueuePage() {
         }));
       }
       void qc.invalidateQueries({ queryKey: ["leads"] });
+      // FB1: the Queue's own "Start N stories" and per-row redraft both land
+      // here. Without this the card for the draft just queued waits out the
+      // idle poll, which is what the report measured as "up to 30 s late".
+      invalidateDeskJobs(qc);
     },
     onError: (error, { leadId, fromBatch }) => {
       const text = error instanceof Error ? error.message : "That draft did not queue.";

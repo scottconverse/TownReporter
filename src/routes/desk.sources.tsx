@@ -22,12 +22,14 @@ import {
   dailyScheduleLabel,
   editorActionError,
   editorFetchError,
-  scanCountsLine,
+  scanRowLine,
   suggestedOriginLine,
 } from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
+import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
+import { DeskJobCard } from "@/components/JobCard";
 import type { SourceRow } from "@/lib/news/types";
 
 export const Route = createFileRoute("/desk/sources")({
@@ -160,6 +162,17 @@ function SourcesPage() {
     },
   });
   /*
+    THE RUNNING SCAN'S JOB ROW (FB1, unit 4). `scan_runs` is the run record and
+    the history; `desk_jobs` is where the stage list, the step, the percentage
+    and the heartbeat live, which is what the card draws. Same reader as every
+    other screen -- see `useDeskJobs`.
+  */
+  const deskJobs = useDeskJobs();
+  const scanJob =
+    (deskJobs.data ?? []).find(
+      (job) => job.kind === "scan" && (job.status === "queued" || job.status === "running"),
+    ) ?? null;
+  /*
     What the Daily scan panel's "Runs" and "Model" rows read (Unit
     CZ-long-lists).
 
@@ -204,6 +217,8 @@ function SourcesPage() {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // FB1: the card for the scan just queued. See invalidateDeskJobs.
+      invalidateDeskJobs(qc);
     },
     onError: (err) =>
       setScanNotice(err instanceof Error ? err.message : "Could not start that scan."),
@@ -702,6 +717,20 @@ function SourcesPage() {
                 {runScanNow.isPending ? "Starting…" : "Run scan now"}
               </InkButton>
             </div>
+            {/*
+              FB1b, item 3: THE RUNNING SCAN'S CARD, BESIDE THE BUTTON THAT
+              STARTED IT.
+
+              It was one panel further down, under "Previous scans", so the
+              press changed nothing in view. Same reader as everywhere else
+              (FB1, unit 3), so the bar, the chip row, the stall rule and Cancel
+              are the drawn card's and not a second rendering of the same row.
+            */}
+            {scanJob ? (
+              <div className="sources-scan-card">
+                <DeskJobCard job={scanJob} compact />
+              </div>
+            ) : null}
           </div>
           {/*
             Previous scans: five rows, and no link. The drawing draws the list
@@ -723,15 +752,26 @@ function SourcesPage() {
                     <span className="astra-log-t">
                       {run.started_at ? formatDateTime(run.started_at) : "—"}
                     </span>
-                    <span className="astra-row-meta">
-                      {run.error
-                        ? "Failed"
-                        : run.stalled
-                          ? "Stalled with no result"
-                          : run.finished_at
-                            ? scanCountsLine(run)
-                            : "Running now"}
-                    </span>
+                    {/*
+                      FB1, unit 4: A RUNNING ROW SHOWS ITS LIVE COUNT.
+
+                      It used to read the literal "Running now" for every open
+                      run, and the count only appeared once the run finished.
+                      Worse, the row was written ONLY on completion, so the
+                      moment a scan started the row said `0 fetched` -- and
+                      anything reading it through `scanCountsLine` /
+                      `scanZeroWhy` printed "0 fetched · No sources were
+                      fetched" about a scan that was hard at work. The scan
+                      worker now writes `sources_fetched` / `sources_attempted`
+                      as it goes (see `noteSourceProgress` in desk.ts), so the
+                      open row is a live count and this is where it shows.
+
+                      A run whose count is still zero says so in words that do
+                      not contradict themselves -- "Starting" rather than
+                      "0 fetched", and never "No sources were fetched" about a
+                      run that has not stopped trying.
+                    */}
+                    <span className="astra-row-meta">{scanRowLine(run)}</span>
                   </li>
                 ))}
               </ul>

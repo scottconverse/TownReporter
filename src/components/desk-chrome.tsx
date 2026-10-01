@@ -21,9 +21,12 @@ import { NewStoryDialog } from "@/components/dialogs";
 import { DeskToaster } from "@/components/desk-toaster";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
-import { elapsedLabel, useNowMs, type RunningJob } from "@/components/desk-jobs";
-import { listFollowUps, listLeads, listRecentStoryWork } from "@/lib/news/desk";
+import { jobHeadline } from "@/components/desk-jobs";
+import { DeskJobCard } from "@/components/JobCard";
+import { useDeskJobs } from "@/components/job-card-state";
+import { listFollowUps, listLeads } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
+import type { JobProgressView } from "@/lib/news/job-progress";
 
 /*
   THE NAV, IN THE REDESIGN'S ORDER AND THE REDESIGN'S WORDS.
@@ -172,9 +175,13 @@ export function DeskShell({
   /*
     THE RUNNING BOX'S DATA, and the nav's counts.
 
-    `["recent-story-work"]` is the key `/desk` already polls, so the shell and
-    the page share one in-flight request and one cache entry. `["leads"]` is
-    the key every desk page already uses for `listLeads()`.
+    FB1, unit 3: the box reads the ONE job query (`useDeskJobs`) rather than a
+    reader of its own. It used to read `listRecentStoryWork`, which filtered
+    `kind='draft'` -- so the nav's "Running · N" could not count a scan, a dig,
+    a brief, a PDF read, a transcription or a routine edition, and the report's
+    live walk found the box absent on all fourteen routes.
+
+    `["leads"]` is the key every desk page already uses for `listLeads()`.
 
     CY item 6 adds three more keys to that list, and this comment used to claim
     otherwise ("nothing new is fetched that a desk screen was not already
@@ -186,11 +193,7 @@ export function DeskShell({
     the counts on is on every desk screen. Nothing is written, and the keys are
     the existing ones, so an invalidation anywhere still refreshes them.
   */
-  const jobs = useQuery({
-    queryKey: ["recent-story-work"],
-    queryFn: () => listRecentStoryWork(),
-    refetchInterval: 5000,
-  });
+  const jobs = useDeskJobs();
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
   const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
   const followUps = useQuery({
@@ -203,7 +206,7 @@ export function DeskShell({
   });
   const running = (jobs.data ?? []).filter(
     (j) => j.status === "running" || j.status === "queued",
-  ) as RunningJob[];
+  );
   const allLeads = leads.data ?? [];
   /*
     THE FIVE DRAWN COUNTS, each one the number its own screen prints:
@@ -237,7 +240,6 @@ export function DeskShell({
       ? investigations.data.filter((r) => pileForStatus(r.status) === "desk").length
       : undefined,
   };
-  const nowMs = useNowMs(running.length > 0);
   useEffect(() => {
     setMenuOpen(false);
     if (!hash) window.scrollTo(0, 0);
@@ -315,7 +317,7 @@ export function DeskShell({
           shell still owns the one mount below, so both keep opening the same
           three tabs.
         */}
-        <RunningBox jobs={running} nowMs={nowMs} onNavigate={() => setMenuOpen(false)} />
+        <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
           the drawn nav is brand, running work, the section list and the
@@ -488,42 +490,53 @@ export function DeskShell({
  * 2px yellow border, a pulsing 10px yellow square, 'Running · N', and each
  * job's title with elapsed time and current stage. Clicking it goes to Today."
  *
- * It reads the same `listRecentStoryWork` query the desk already polls
- * (5s, the interval README "Interactions & behavior" sets for Today lists),
- * through the same query key as `/desk` — one request, two readers, no new
- * endpoint and nothing written.
+ * FB1, unit 3: each row is the DRAWN JobCard now, and the box counts every kind
+ * rather than only drafts. The spec asks for "each job's title with elapsed time
+ * and current stage" and the compact card is exactly that, plus the bar, the
+ * chip row, the stall rule and Cancel -- which the hand-rolled row this
+ * replaces could not show for any kind, including the draft it was written for.
  *
- * Elapsed is measured from `started_at` (set when a worker claims the job) and
- * falls back to `updated_at` while the job is still queued, so a queued row
- * counts from when it was filed rather than from 0:00 forever. The one-second
- * ticker only runs while something is running.
+ * It reads the one `useDeskJobs()` query the whole desk shares (2s while
+ * something is open, 30s when nothing is -- see `job-card-state.ts`), so the
+ * shell, Today, the story page and Drafts all draw the same row from the same
+ * request.
+ *
+ * The heading stays a link to Today, because that is what the drawing's box
+ * does; the cards inside it carry their own press.
  */
 function RunningBox({
   jobs,
-  nowMs,
   onNavigate,
 }: {
-  jobs: RunningJob[];
-  nowMs: number;
+  jobs: JobProgressView[];
   onNavigate: () => void;
 }) {
   if (!jobs.length) return null;
   return (
-    <Link to="/desk" className="astra-running" onClick={onNavigate}>
-      <b className="astra-running-head">
+    <div className="astra-running">
+      <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
         <span className="astra-running-dot" aria-hidden /> Running · {jobs.length}
-      </b>
+      </Link>
       {jobs.slice(0, 3).map((job) => (
-        <span className="astra-running-job" key={job.id}>
-          <b>{job.headline}</b>
-          <span>
-            {elapsedLabel(job, nowMs)} · {job.stage || "Waiting to start"}
-          </span>
-        </span>
+        <div className="astra-running-job" key={job.id}>
+          {/*
+            ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).
+
+            This used to draw the job's name as a bold line AND hand the same
+            job to the card, whose first line is its name again -- "Scanning the
+            watch list" twice in a row, then a title wrapping to three lines
+            underneath it. The card's own title is the one that stays: it is
+            single-line with an ellipsis in the compact variant, it carries the
+            clock on its own column, and it is the same element on every other
+            screen the card appears on.
+          */}
+          <DeskJobCard job={job} compact title={jobHeadline(job)} viewLabel="Open" />
+        </div>
       ))}
-    </Link>
+    </div>
   );
 }
+
 
 /**
  * The shortcut sheet behind "?" . Every line is a key the desk actually binds
@@ -1190,54 +1203,6 @@ export function Busy({ label }: { label: string }) {
     <div className="busy" role="status" aria-live="polite" aria-atomic="true">
       <div className="busy-rule" aria-hidden />
       <p className="busy-label">{label}</p>
-    </div>
-  );
-}
-
-/*
-  ===========================================================================
-  LANE-2 PLACEHOLDER — DRAFTS STILL DRAWS THIS; THE REAL CARD HAS LANDED.
-  ===========================================================================
-
-  The redesign draws a Job card (README "Job card anatomy"): title, model ·
-  effort, elapsed in m:ss, a stage list with a check for each finished stage and
-  a yellow fill on the current one, a progress bar, the current step, "Last
-  activity m:ss ago", and a state — Running / Stalled / Done / Failed, each with
-  its own actions. The compact variant (no stage list, 12px padding) is what
-  Drafts draws inline on a running row.
-
-  Lane 2 built that card and it has landed (`JobCard`, phase 3). Today's
-  "Running now" draws it now, and "In progress" draws its own `.today-card`
-  drafts (unit BF2, defects 3 and 5). What is left here is Drafts' running
-  rows, which still come through this stand-in: they hand it a `RunningJob`
-  and a clock (`nowMs`), while the card wants the `JobProgressView` that
-  `useDeskJobs()` returns, so swapping them is a change to how `/desk/drafts`
-  picks its jobs rather than a substituted body. Until someone does that,
-  Drafts keeps the stand-in -- a `RunningJob`'s title, elapsed time and
-  current `stage` text inside a dashed outline, so it can never be mistaken at
-  a glance for the drawn card, in a screenshot or in the code.
-
-  `data-job-slot` marks each one in the DOM so the stand-ins are countable.
-
-  It shows only what the desk already polls: no fake progress bar, no invented
-  stage list, no model name it was not given. A placeholder that fakes the
-  missing half would hide the fact that it is missing.
-*/
-export function JobSlot({
-  job,
-  nowMs,
-  compact = false,
-}: {
-  job: RunningJob;
-  nowMs: number;
-  compact?: boolean;
-}) {
-  return (
-    <div className={"job-slot" + (compact ? " job-slot-compact" : "")} data-job-slot="">
-      <b className="job-slot-title">{job.headline}</b>
-      <span className="job-slot-meta">
-        {elapsedLabel(job, nowMs)} · {job.stage || "Waiting to start"}
-      </span>
     </div>
   );
 }

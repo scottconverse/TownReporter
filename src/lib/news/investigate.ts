@@ -62,6 +62,13 @@ import {
   type ResearchActionReceipt,
 } from "./research-actions.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+/*
+  FB1: `pctFor` only -- the one clamp/divide-by-zero rule the whole app uses for
+  a percentage. Imported from jobs.ts rather than re-derived here so a hop that
+  reports 0/0 gets the same "no percentage" answer as an OCR batch with no pages
+  known yet.
+*/
+import { spanPct } from "./jobs.ts";
 import {
   queryFingerprint,
   remainingStrategies,
@@ -325,8 +332,14 @@ export type ResearchLoopOptions = {
    */
   researchReserveMs?: number;
   onUsage?: (usage: DarkRunUsageSnapshot) => Promise<unknown>;
-  /** Existing desk-job stage bridge; failures here must not fail research. */
-  onStage?: (stage: string) => Promise<unknown>;
+  /**
+   * Existing desk-job stage bridge; failures here must not fail research.
+   *
+   * FB1: the second argument is the round's percentage, as a number the bridge
+   * may ignore. It is optional so every existing caller -- and every test's
+   * stub -- keeps compiling and keeps working unchanged.
+   */
+  onStage?: (stage: string, pct?: number | null) => Promise<unknown>;
   /** Internal one-operation adapter marker; callers should not set this. */
   _responsiveOperation?: "search" | "read" | "follow";
 };
@@ -2558,13 +2571,36 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   let consecutiveLowYieldHops = 0;
   let stopReason: DarkRunStopReason | null = null;
 
-  const setStage = async (stage: string) => {
+  const setStage = async (stage: string, pct?: number | null) => {
     try {
-      await opts.onStage?.(stage);
+      await opts.onStage?.(stage, pct);
     } catch {
       /* progress text is best-effort; durable research remains authoritative */
     }
   };
+  /*
+    FB1: a percentage for the round, from the only numbers research has.
+
+    Research is `hopsBudget` hops, each of them a handful of searches and up to
+    `fetchLimit` page reads -- so the honest fraction is "hops done, plus how far
+    through this hop" and NOT a per-hop 0→100 that would restart the bar five
+    times. The within-hop part is `done / total` over that hop's own step count,
+    capped at 1 so a hop that overruns its own budget cannot push the bar past
+    the next hop's start.
+
+    MAPPED INTO 0-40, NOT 0-100. Research is the first of the round's four
+    arrivals (see JOB_STAGE_LISTS.dark); synthesis, the review and the brief
+    come after it, and a bar that filled here would be promising the editor
+    something that has not happened yet. `performDarkRound` places the three
+    later arrivals at 45, 65 and 85 for the same reason.
+  */
+  const researchPct = (hop: number, done: number, total: number) =>
+    spanPct(
+      hop + (total > 0 ? Math.min(1, done / total) : 0),
+      hopsBudget,
+      0,
+      40,
+    );
 
   function canon(raw: string) {
     try {
@@ -2660,7 +2696,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     if (opts.runBudget && opts.runBudget.remainingMs() <= (opts.researchReserveMs ?? 0)) {
       break;
     }
-    await setStage(`Researching hop ${hop + 1}/${hopsBudget}`);
+    await setStage(`Researching hop ${hop + 1}/${hopsBudget}`, researchPct(hop, 0, 1));
     const openFrontier = await readActiveFrontier();
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
@@ -2840,6 +2876,13 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       .map((q) => storableText(queryWithResearchWindow(q, opts.preferences)))
       .filter((q) => !tried.has(queryFingerprint(q)))
       .slice(0, SEARCHES_PER_HOP);
+    /*
+      FB1: this hop's step count, for the round's percentage -- its searches
+      plus the pages it may read. Computed HERE, before the search loop, because
+      `fetchLimit` is not declared until the read loop below and a `const` read
+      before its declaration is a ReferenceError, not a zero.
+    */
+    const pctStepsThisHop = queries.length + (opts._responsiveOperation ? 1 : FETCHES_PER_HOP);
     if (dropped.length) {
       lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${dropped.length} query${
         dropped.length === 1 ? "" : "s"
@@ -2876,7 +2919,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
-      await setStage(`Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`);
+      await setStage(
+        `Searching ${queryIndex + 1}/${queries.length} on hop ${hop + 1}`,
+        researchPct(hop, queryIndex + 1, pctStepsThisHop),
+      );
       tried.add(queryFingerprint(q));
       const attempt = await runSearch(q);
       if (opts.runBudget) await opts.onUsage?.(opts.runBudget.snapshot());
@@ -3139,7 +3185,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         stopReason = opts.runBudget.stopReason;
         break;
       }
-      await setStage(`Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`);
+      await setStage(
+        `Reading document ${fetchedThisHop.length}/${fetchLimit} on hop ${hop + 1}`,
+        researchPct(hop, queries.length + fetchedThisHop.length, pctStepsThisHop),
+      );
 
       await persistDiscovery(opts.userId, opts.investigationId, {
         kind: "url",

@@ -25,6 +25,7 @@ import {
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
+import { invalidateDeskJobs } from "@/components/job-card-state";
 import {
   blockedDigBannerText,
   editorError,
@@ -284,6 +285,13 @@ function DarkPage() {
     void qc.invalidateQueries({ queryKey: ["investigations"] });
     void qc.invalidateQueries({ queryKey: ["dark-runs"] });
     if (openId != null) void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+    /*
+      FB1: every press on this screen that starts a job -- Keep digging, Start
+      digging, Follow this lead, Write the brief, Read selected pages -- funnels
+      its refresh through here, so the Dark Desk's card appears at once instead
+      of on the next idle poll. Before this the screen had no card at all.
+    */
+    invalidateDeskJobs(qc);
   };
 
   const detailInvestigationId = detail.data?.investigation.id;

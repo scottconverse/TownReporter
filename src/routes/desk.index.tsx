@@ -1,6 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { DeskJobCard } from "@/components/JobCard";
-import { useDeskJobs } from "@/components/job-card-state";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
@@ -10,6 +9,8 @@ import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
+import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
+import type { JobProgressView } from "@/lib/news/job-progress";
 import {
   announceOnly,
   announceToDesk,
@@ -29,7 +30,6 @@ import {
   listFollowUpFindings,
   listFollowUps,
   listLeads,
-  listRecentStoryWork,
   listMemory,
   listPublishedDesk,
   listScans,
@@ -151,6 +151,53 @@ const TRIAGE_KEYS: [string, string][] = [
  */
 type PanelKey = "story-composer" | "paste-one-story" | null;
 
+/**
+ * Where a running job's own press goes, and what that press is called.
+ *
+ * Returned as `{ label, go }` rather than as a route string because the router
+ * is typed: `navigate({ to: "/desk/story/$leadId", params: {...} })` is checked
+ * by the compiler, and a `to` read out of a table would not be. The switch is
+ * exhaustive over the kinds that HAVE a screen; the four that do not (brief,
+ * OCR, pull, routine-notice) return null and the card draws no button at all,
+ * which is what `JobCard` does when `onView`/`onOpen` are undefined.
+ *
+ * `go` takes the job so the caller can hand it straight to `onNavigate`; the
+ * only kind that needs the row is the story one, whose destination is its lead.
+ */
+function openJob(
+  job: JobProgressView,
+  navigate: ReturnType<typeof useNavigate>,
+): { label: string; go: () => void } | null {
+  switch (job.kind) {
+    case "draft":
+      return {
+        label: "Open your story",
+        go: () =>
+          void navigate({ to: "/desk/story/$leadId", params: { leadId: String(job.leadId) } }),
+      };
+    case "reconcile":
+      return {
+        label: "Open the checked draft",
+        go: () =>
+          void navigate({ to: "/desk/story/$leadId", params: { leadId: String(job.leadId) } }),
+      };
+    case "scan":
+      return { label: "Open the scan", go: () => void navigate({ to: "/desk/scan" }) };
+    case "dark":
+      return { label: "Open the file", go: () => void navigate({ to: "/desk/dark" }) };
+    case "editorial":
+      return { label: "Open Opinion", go: () => void navigate({ to: "/desk/opinion" }) };
+    case "follow-up":
+      return { label: "Open the follow-up", go: () => void navigate({ to: "/desk/follow-ups" }) };
+    default:
+      // brief, artifact-ocr, pull, audio-transcribe, routine-notice: real jobs
+      // with no screen of their own. A button that guessed (or that went to the
+      // story page with a run id in place of a lead id) would be worse than no
+      // button -- see the same rule in `RESULT_HREF`, job-progress.ts.
+      return null;
+  }
+}
+
 function DeskHome() {
   const sectionQuery = useEditorSections();
   /*
@@ -183,11 +230,6 @@ function DeskHome() {
   }, [setupState.data, navigate]);
 
   const sources = useQuery({ queryKey: ["sources"], queryFn: () => listSources() });
-  const recentStories = useQuery({
-    queryKey: ["recent-story-work"],
-    queryFn: () => listRecentStoryWork(),
-    refetchInterval: 5000,
-  });
   /*
     THE GATE STATE, for Tonight's edition (README "1. Today": the checklist
     "reads the existing gate state"). Same query key as the Drafts screen, same
@@ -309,6 +351,10 @@ function DeskHome() {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void qc.invalidateQueries({ queryKey: ["sources"] });
+      // FB1: the card for the scan that was just queued. Without this the
+      // Running box and Running now wait out the 30 s idle poll, and the press
+      // looks like it did nothing.
+      invalidateDeskJobs(qc);
     },
   });
   const [darkErr, setDarkErr] = useState<string | null>(null);
@@ -487,7 +533,7 @@ function DeskHome() {
       setStoryNotice(null);
       void qc.invalidateQueries({ queryKey: ["leads"] });
       void navigate({ to: "/desk/story/$leadId", params: { leadId: String(res.leadId) } });
-      void qc.invalidateQueries({ queryKey: ["recent-story-work"] });
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
     },
     onError: (err) => {
       const raw = err instanceof Error ? err.message : "That did not file.";
@@ -617,10 +663,25 @@ function DeskHome() {
     checks. The four step numbers on the strip and the lists below them are the
     same numbers, so the page cannot say two things at once.
   */
+  /*
+    THE ONE JOB QUERY (FB1, unit 3).
+
+    Today used to read TWO job queries: this one for "Running now", and
+    `listRecentStoryWork` (`kind='draft'`) for the "In progress" strip below.
+    They polled the same rows on different clocks and drew them two ways, and
+    between them they could not see a scan, a dig, a brief, a PDF read, a
+    transcription or a routine edition at all.
+
+    Now there is one request and two views of it: `liveJobs` (open jobs of every
+    kind) and `inProgress` (the draft and reconcile work this page's strip has
+    always shown). Both are slices of `deskJobs.data`, so a card on this page
+    can never disagree with the card in the nav beside it.
+  */
+  const deskJobs = useDeskJobs();
   const draftRows = drafts.data ?? [];
   const nowMs = useNowMs(
     draftRows.some((r) => r.job_status === "running" || r.job_status === "queued") ||
-      Boolean(recentStories.data?.some((s) => s.status === "running" || s.status === "queued")),
+      Boolean(deskJobs.data?.some((s) => s.status === "running" || s.status === "queued")),
   );
   const draftStates: DeskDraftState[] = draftRows.map((row) =>
     deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
@@ -629,15 +690,21 @@ function DeskHome() {
   const readyToCheck = draftStates.filter((s) => s.needsYou).length;
   const readyToPrint = draftStates.filter((s) => s.key === "ready").length;
   /*
-    Running now, off the phase 3 desk-jobs query: one poll for the whole
-    screen, so three cards cost one request per tick rather than three. Open
-    jobs only -- a job that has stopped is not running, and the drafts grid
-    below is where a stopped job's story is looked at.
+    Running now: open jobs, every kind, newest first. Open jobs only -- a job
+    that has stopped is not running, and the drafts grid below is where a
+    stopped job's story is looked at.
   */
-  const deskJobs = useDeskJobs();
   const liveJobs = (deskJobs.data ?? [])
     .filter((row) => row.status === "queued" || row.status === "running")
     .slice(0, 3);
+  /*
+    The strip's five rows: the story work, in the list's own order. This is what
+    `listRecentStoryWork` returned -- one row per lead, newest first, five of
+    them -- read off the shared query instead of a reader of its own.
+  */
+  const inProgress = (deskJobs.data ?? [])
+    .filter((row) => row.leadId > 0 && (row.kind === "draft" || row.kind === "reconcile"))
+    .slice(0, 5);
   const today = formatDate(new Date(nowMs));
   const newToday = allLeads.filter((l) => formatDate(l.created_at) === today).length;
   const heldCount = allLeads.filter((l) => l.status === "held").length;
@@ -752,7 +819,7 @@ function DeskHome() {
           (res && "error" in res && res.error) || "That draft did not start.",
           "err",
         );
-      void qc.invalidateQueries({ queryKey: ["recent-story-work"] });
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
     },
     onError: (err) =>
@@ -1052,20 +1119,29 @@ function DeskHome() {
             }
           />
           <div className="today-running">
-            {liveJobs.map((job) => (
-              <DeskJobCard
-                key={job.id}
-                job={job}
-                compact
-                viewLabel="Open your story"
-                onNavigate={(row) =>
-                  void navigate({
-                    to: "/desk/story/$leadId",
-                    params: { leadId: String(row.leadId) },
-                  })
-                }
-              />
-            ))}
+            {liveJobs.map((job) => {
+              /*
+                FB1, unit 3: EVERY KIND LANDS ON ITS OWN SCREEN.
+
+                The strip used to draw drafts only, so "Open your story" was
+                true of everything it could show. Now that it draws all eleven
+                kinds, that press has to be the job's own destination: a scan's
+                `leadId` is 0 (its subject is a `scan_runs` row), and navigating
+                with it would open whichever story happens to have that id --
+                or nothing at all. A kind with no screen of its own gets no
+                button, which is what `openJob` returning null means.
+              */
+              const open = openJob(job, navigate);
+              return (
+                <DeskJobCard
+                  key={job.id}
+                  job={job}
+                  compact
+                  viewLabel={open?.label}
+                  onNavigate={open ? open.go : undefined}
+                />
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -1170,7 +1246,7 @@ function DeskHome() {
           <section className="recent-story-work in-progress" aria-label="In progress">
             <SecHead
               title="In progress"
-              count={(recentStories.data ?? []).length}
+              count={inProgress.length}
               sub="Nothing here prints until you press Publish."
               aside={
                 <Link to="/desk/drafts" className="np-link">
@@ -1178,26 +1254,32 @@ function DeskHome() {
                 </Link>
               }
             />
-            {recentStories.isError ? (
+            {deskJobs.isError ? (
               <p role="alert">
                 Recent drafts could not load.{" "}
-                <button type="button" className="btn" onClick={() => void recentStories.refetch()}>
+                <button type="button" className="btn" onClick={() => void deskJobs.refetch()}>
                   Try again
                 </button>
               </p>
-            ) : recentStories.isPending ? (
+            ) : deskJobs.isPending ? (
               <p role="status">Loading your drafts…</p>
-            ) : !recentStories.data?.length ? (
+            ) : !inProgress.length ? (
               <p>No drafts started yet. Add your sources below to begin.</p>
             ) : (
               <div className="today-cards">
-                {recentStories.data.map((story) => (
+                {inProgress.map((story) => (
                   /*
                   The drawn card carries the stage in its 4px top rule: yellow
                   while the desk is writing, ink once the draft is ready to
                   edit, line for everything else (queued, or stopped with a
                   reason). The stage is also in words, because the rule alone
                   is a color and the desk never says a state in color only.
+
+                  FB1: this reads the one desk-jobs query now. The rows are the
+                  same rows (one per lead, the story kinds) -- only the reader
+                  changed, so the strip and the card above it cannot disagree.
+                  The headline falls back to the card title for a job whose
+                  drafts row has not been written yet.
                 */
                   <article
                     className={
@@ -1222,10 +1304,10 @@ function DeskHome() {
                     <h3 className="today-card-hl">
                       <Link
                         to="/desk/story/$leadId"
-                        params={{ leadId: String(story.lead_id) }}
+                        params={{ leadId: String(story.leadId) }}
                         className="hl-link"
                       >
-                        {story.headline}
+                        {story.headline?.trim() || story.title}
                       </Link>
                     </h3>
                     <p className="meta">
@@ -1233,7 +1315,7 @@ function DeskHome() {
                         ? "Draft saved. Review it before publishing."
                         : story.status === "failed"
                           ? "Open the story to see what stopped and resume."
-                          : story.stage || "Waiting to start"}
+                          : story.step || "Waiting to start"}
                     </p>
                     {/*
                     One press, not two: the drawn card's "next action and
@@ -1242,7 +1324,7 @@ function DeskHome() {
                   */}
                     <Link
                       to="/desk/story/$leadId"
-                      params={{ leadId: String(story.lead_id) }}
+                      params={{ leadId: String(story.leadId) }}
                       className="btn"
                     >
                       {story.status === "running" || story.status === "queued"

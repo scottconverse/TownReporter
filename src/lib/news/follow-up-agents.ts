@@ -39,6 +39,7 @@ import {
   JOB_CANCELLED_REASON,
   JOB_PAUSED_REASON,
   JobCancelledError,
+  pctFor,
   progressReporterFor,
   throwIfJobCancelled,
   waitForModel,
@@ -125,7 +126,12 @@ export type FollowUpAgentDeps = {
    * supplies (it is the only layer that knows the job id).
    */
   model?: <T>(label: string, run: () => Promise<T>) => Promise<T>;
-  step?: (step: string) => Promise<void>;
+  /**
+   * FB1: the second argument is how far through the run's units the agent is.
+   * Optional, so the three agents and every test stub that pass a one-argument
+   * function keep working unchanged.
+   */
+  step?: (step: string, pct?: number | null) => Promise<void>;
   throwIfCancelled?: () => Promise<void>;
   budget?: DarkRunBudget;
 };
@@ -252,12 +258,17 @@ export async function runRecheckAgent(
   const failures: string[] = [];
   const checkedHosts: string[] = [];
 
-  for (const url of input.targets) {
+  for (const [targetIndex, url] of input.targets.entries()) {
     if (deps.budget && !deps.budget.consumeDocumentRead()) {
       failures.push("the run reached its document-read limit");
       break;
     }
-    await deps.step?.(`Checking ${hostOf(url)}`);
+    // FB1: the run's units, counted. A re-check over four saved pages used to
+    // report the same motionless bar whichever page it was on.
+    await deps.step?.(
+      `Checking ${hostOf(url)}`,
+      pctFor(targetIndex, input.targets.length),
+    );
     /*
       THE LAST BOUNDARY BEFORE THE ONE WRITE THAT OUTLIVES THE RUN. Every other
       thing a re-check does dies with the run; `createPageWatchFor` is different
@@ -546,7 +557,7 @@ export async function runAgendaAgent(
   const failures: string[] = [];
   let quiet: Partial<FollowUpFinding> | null = null;
 
-  for (const target of input.targets) {
+  for (const [targetIndex, target] of input.targets.entries()) {
     let origin: string;
     try {
       const parsed = new URL(target);
@@ -560,7 +571,10 @@ export async function runAgendaAgent(
       continue;
     }
     await deps.throwIfCancelled?.();
-    await deps.step?.(`Reading the ${hostOf(origin)} portal`);
+    await deps.step?.(
+      `Reading the ${hostOf(origin)} portal`,
+      pctFor(targetIndex, input.targets.length),
+    );
     if (deps.budget && !deps.budget.consumeDocumentRead()) {
       failures.push("the run reached its document-read limit");
       break;

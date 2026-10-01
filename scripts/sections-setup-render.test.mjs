@@ -134,10 +134,10 @@ const deskCopyStub = inlineModule(`
 const deskServerStub = inlineModule(`
   export async function listLeads() { return []; }
   /*
-    Redesign phase 2a: the shell's Running box reads the same
-    ["recent-story-work"] query the desk already polls for its job cards.
+    FB1 unit 3: the shell's Running box reads the one desk-jobs query now,
+    through @/components/job-card-state; nothing here needs a server reader.
   */
-  export async function listRecentStoryWork() { return []; }
+  export async function listDeskJobs() { return []; }
   /*
     CY item 6 added the nav's Opinion, Follow-ups and Dark Desk counts to the
     shell. This render is about the page below the shell, not the counts, so
@@ -241,6 +241,17 @@ const DESK_CHROME_IMPORTS = {
 
   "@/components/desk-toaster": deskToasterStub,
   "@/components/desk-jobs": deskJobsUrl,
+  /*
+    FB1 units 3-4: the shell's Running box draws the real card from the one job
+    query, so both specifiers have to resolve for desk-chrome.tsx to load.
+    Nothing here starts or renders a job.
+  */
+  "@/components/JobCard": inlineModule(
+    "export function DeskJobCard() { return null; } export function JobCard() { return null; }",
+  ),
+  "@/components/job-card-state": inlineModule(
+    "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
+  ),
   "@/lib/appearance-context": appearanceContextStub,
   /*
     Redesign phase 2a: the shell's shortcut sheet ("?") is the phase 0 Dialog
