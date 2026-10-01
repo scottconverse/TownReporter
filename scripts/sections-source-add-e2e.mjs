@@ -115,6 +115,24 @@ const rowForUrl = (url) =>
     .filter({ has: page.locator(`a[href="${url}"]`) })
     .or(page.locator("tr.lead-tr, .astra-row.src", { hasText: url }));
 
+/**
+ * Switch the Sources list to one group and wait for THAT group's page.
+ *
+ * The list keeps the tab that was on screen while the next tab's page loads
+ * (`placeholderData: keepPreviousData`, CZ-long-lists part 1d) and draws one
+ * group at a time, so an instant after the press the PREVIOUS tab's rows are
+ * under the NEW tab's heading -- pressing "Rejected" shows the On-watch row for
+ * a moment, and a row assertion made then passes against a row that is not on
+ * that list at all. The group's own count only arrives with the new page, so
+ * that is what this waits for.
+ */
+async function openSourceGroup(label, count) {
+  await page.getByRole("button", { name: new RegExp(`^${label} · `) }).click();
+  await page
+    .getByRole("button", { name: `${label} · ${count}`, exact: true })
+    .waitFor({ timeout: 45_000 });
+}
+
 async function ownTheDesk() {
   await page.goto(`${base}/login`, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /Create the desk|Editor sign-in/ }).waitFor();
@@ -354,12 +372,13 @@ async function theSourcesPageAddsThroughTheDialog() {
   const row = rowForUrl(secondUrl).first();
   // The drawn On watch row keeps two buttons on its single line and puts
   // Remove one click deeper, under "More ▾"; the tables still say "Drop".
+  // FB7, item 1 made it two presses -- the first arms it and draws its own way
+  // out, "Keep", so the press that removes is "Yes, remove".
   await row.locator("details.row-more > summary").click();
-  await row
-    .locator(".row-more-panel")
-    .getByRole("button", { name: "Remove", exact: true })
-    .click();
-  await page.getByRole("button", { name: /^Rejected / }).click();
+  const more = row.locator(".row-more-panel");
+  await more.getByRole("button", { name: "Remove", exact: true }).click();
+  await more.getByRole("button", { name: "Yes, remove", exact: true }).click();
+  await openSourceGroup("Rejected", 1);
   // Rejected is the table the row lands in after Remove, so the same lookup
   // finds it there (and only there -- the URL is on one list at a time).
   const rejected = rowForUrl(secondUrl).first();
