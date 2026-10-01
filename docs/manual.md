@@ -497,11 +497,15 @@ each research or writing pass, with a default of 45 minutes per pass. A pair
 can take about 90 minutes, excluding document intake. Opinion's Automatic can
 try a Codex Sol or Claude Sonnet pair after DeepSeek fails, so its total can be
 longer.
-**DeepSeek v4.1 Flash and Local model perform one writing call using the
-supplied material**; neither runs the frontier research pass, because neither
-has web search or page-fetch tools. The job's stage line and the writing pack
-both record that no gathering pass ran, and the piece is written from the
-documents the editor supplied. The page shows a
+**DeepSeek v4.1 Flash, Local model and saved connections are researched by the
+desk.** Those writers have no web tools of their own, so the desk searches and
+reads for them first — up to two rounds of queries, six searches and eight pages
+— and records every page it opens. The writing call that follows is one call,
+still from the voice as its system message and still with no tools, but it now
+receives what the desk captured with each page's address, and the pack says how
+many searches ran and how many pages were read. When the desk finds nothing
+usable for a piece it says so, and the editorial is still written from the
+material the editor supplied. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
 you publish one.
 
@@ -753,9 +757,10 @@ and can research sources while writing. The editorial assignment is sent separat
 Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
 and flagged for completion before publication. The
 DeepSeek rung and the explicit Local model path send validated voice text as a
-system message to their model server: they have no web tools, so they write in
-one call from the supplied material without a separate research pass, and the
-job's stage line and the writing pack both record that no gathering pass ran.
+system message to their model server: they have no web tools of their own, so
+the desk runs the research pass for them — searching, opening and recording the
+pages — before the one writing call, and the writing pack says how many searches
+ran and how many pages were read.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only within the
@@ -1430,7 +1435,7 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and DeepSeek is offered in Opinion's picker by name too. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing; DeepSeek and the local model have no web tools, so they write in one call from the supplied material and the run records that no gathering pass ran. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and DeepSeek is offered in Opinion's picker by name too. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing; DeepSeek, the local model and saved connections have no web tools of their own, so the desk searches and reads for them first and the writing call that follows is one call that receives what the desk captured. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 

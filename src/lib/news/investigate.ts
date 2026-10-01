@@ -684,6 +684,14 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table artifact_versions add column if not exists taken_down_reason text`,
   `alter table artifact_versions add column if not exists taken_down_link_kept boolean not null default true`,
   `alter table artifact_versions add column if not exists newsroom_id integer not null default 1`,
+  // Unit U30: which editorial request a capture was made for. Mirrors
+  // migrations/0113_editorial_research_captures.sql statement for statement;
+  // `schema-parity.test.ts` diffs this list against the migration-built schema
+  // and would report the difference if only one side had it. Written by the
+  // Opinion desk's research pass (./editorial-research.server.ts) and by
+  // nothing else, so every other capture path leaves it null.
+  `alter table capture_events add column if not exists editorial_request_id integer`,
+  `create index if not exists capture_events_editorial_request_idx on capture_events (editorial_request_id)`,
   `alter table frontier_items add column if not exists newsroom_id integer not null default 1`,
   `alter table entities add column if not exists newsroom_id integer not null default 1`,
   `alter table relationships add column if not exists newsroom_id integer not null default 1`,

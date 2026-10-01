@@ -153,23 +153,25 @@ describe("model choice contract", () => {
 
   /*
     Unit U29: the editor is told BEFORE the run that a DeepSeek editorial is
-    written in one call from the material they supplied. The sentence is read
-    from the same registry answer the two-pass flow dispatches on
+    written in one call from the material they supplied. Unit U30 kept the
+    "no web search of its own" half and replaced the "no gathering pass ran"
+    half: the desk now researches for it, and the sentence says so. The
+    sentence is read from the same registry answer the pair dispatch turns on
     (`providerRunsToolPass`), so it cannot describe a flow the desk does not
     run.
   */
-  it("says a no-web-tools pick writes in one call, and says it only where that is true", () => {
+  it("says a no-web-tools pick is researched by the desk, and says it only where that is true", () => {
     const help = modelChoiceHelp("deepseek-flash", "opinion");
-    assert.match(help, /no web search/);
-    assert.match(help, /one call from the material you supply/);
-    assert.match(help, /no gathering pass runs/);
+    assert.match(help, /no web search of its own/);
+    assert.match(help, /the desk searches and reads the sources for it/);
+    assert.doesNotMatch(help, /no gathering pass runs/, "the desk researches for this writer now");
 
-    // The two CLIs DO run a gathering pass, so their help says nothing of the
-    // sort -- read from their registry kind, not from a list of ids.
+    // The two CLIs DO run their own gathering pass, so their help says nothing
+    // of the sort -- read from their registry kind, not from a list of ids.
     for (const choice of ["claude-frontier", "codex-frontier"] as const) {
       const cliHelp = modelChoiceHelp(choice, "opinion");
       assert.match(cliHelp, /Prefers/);
-      assert.doesNotMatch(cliHelp, /no gathering pass runs/, `${choice} runs a gathering pass`);
+      assert.doesNotMatch(cliHelp, /the desk searches and reads the sources for it/, choice);
     }
   });
 

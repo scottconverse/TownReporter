@@ -42,6 +42,18 @@ export type WriteEditorialInput = {
   requestedModelEffort?: ModelEffort | null;
   /** Present only for a queued Opinion job whose filing must complete atomically. */
   completion?: { requestId: number; jobId: number };
+  /**
+   * The queued job's own stage reporter, when this piece is one (unit U30).
+   *
+   * `performEditorialWork` binds it to `progressReporterFor(job)`, the FB1
+   * shape: one sentence moves the card's "Now:" line AND lights the stage chip
+   * the sentence names. The writer cannot build that itself -- it is handed an
+   * id, not the job row the stage list was read off -- so the reporter is
+   * threaded down here rather than looked up again. Absent in a direct call
+   * (a test, an inline write), where the desk pass reports through
+   * `setJobStage` or not at all.
+   */
+  onStage?: (stage: string) => Promise<void>;
 };
 
 export type EffectiveOpinionModelChoice = Exclude<OpinionModelChoice, "auto">;
@@ -83,12 +95,15 @@ export type EditorialOrchestrationRuntime = {
    *
    * A local/Ollama/llama.cpp server has no research-tool loop the way the
    * Claude Code CLI does (see EDITORIAL_TOOLS), so there is no gathering pass
-   * to run and this is one call, not two: it writes straight from the
-   * material the editor supplied, with the voice as the system instructions.
-   * The writing pack records that no gathering pass ran, and the desk says so
-   * on the run. Required (not optional) so a local pick can never silently
-   * fall through to `runClaudePair` -- see the Opinion routing fix, audit
-   * finding "Opinion 'Local model' pick silently uses Claude".
+   * for THE MODEL to run. Since unit U30 there is still research: the DESK runs
+   * its own bounded pass first (searching, opening and capturing pages through
+   * the Dark Desk's machinery -- see ./editorial-research.server.ts), the same
+   * no-tool provider plans the queries and reads the captures back as findings,
+   * and this pair then makes the one writing call it always made: the voice as
+   * the system instructions, no tools, from the desk's record with every
+   * capture's URL and id in it. Required (not optional) so a local pick can
+   * never silently fall through to `runClaudePair` -- see the Opinion routing
+   * fix, audit finding "Opinion 'Local model' pick silently uses Claude".
    */
   runLocalPair: (context: {
     input: WriteEditorialInput;

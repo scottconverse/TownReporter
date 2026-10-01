@@ -366,6 +366,12 @@ Rules the app enforces, not conventions:
 - For explicit Local model, TownReporter reads the validated file and sends
   its text as a system message to the selected model server. It does not enter
   command-line arguments. Saved custom connections similarly receive the voice through their selected API endpoint.
+- A writer with no web tools — explicit Local model, DeepSeek v4.1 Flash, a
+  saved custom connection — is researched by the desk before it writes. The desk
+  searches, opens and records pages itself (bounded: two rounds of queries, six
+  searches, eight pages), the model reads those captures back as findings, and
+  only then is the voice sent, as the system message of the one writing call.
+  The research calls never receive the voice.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything

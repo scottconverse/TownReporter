@@ -13,6 +13,9 @@ import {
   stripOpinionPrefix,
 } from "./editorial.ts";
 import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
+import { DESK_PLANNER_INSTRUCTIONS, DESK_READER_INSTRUCTIONS } from "./editorial.ts";
+import { DESK_RESEARCH_STAGE } from "./editorial-research.server.ts";
+import { JobCancelledError } from "./jobs.ts";
 import { opinionModelChoice, retiredModelChoiceNote } from "./model-choice.ts";
 import { writeEditorial } from "./editorial.server.ts";
 import { VOICE_ENV } from "./voice.server.ts";
@@ -1010,29 +1013,176 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
   });
 
   /*
-    UNIT U29 -- THE DEEPSEEK PAIR IS ONE CALL, AND THE REQUEST SAYS SO.
+    UNIT U29 + U30 -- THE DEEPSEEK PAIR: THE DESK RESEARCHES, THEN ONE WRITING
+    CALL WITH THE VOICE AND NO TOOLS.
 
     DeepSeek v4.1 Flash is reached over Ollama's OpenAI-compatible HTTP face,
     which has no WebSearch/WebFetch tool loop at all, so there is no gathering
-    pass to give the web tools to. That makes the SEC-3 property hold by
-    construction rather than by remembering: the ONE call this pair makes
-    carries the voice as its system message and asks for no tool surface,
-    because the transport has none to ask for.
+    pass to give the web tools to -- which is what makes SEC-3 hold by
+    construction rather than by remembering. Unit U29 stopped there and wrote
+    the piece unresearched. Unit U30 keeps the shape and adds the research: the
+    desk searches, opens and captures the pages through its own machinery, this
+    same no-tool model plans the queries and reads the captures back, and only
+    then does the voice reach a call.
 
-    What the editor is owed instead is the truth about it: the writing pack
-    tells the model that no gathering pass ran, so the piece is written from
-    the material they supplied and cannot pretend a page was opened.
+    Every call the piece makes arrives at ONE recorder here, on the same
+    `grokChat` seam the writing call uses, which is the only way the SEC-3
+    property can be asserted rather than assumed: the two calls that saw public
+    pages must not contain the voice, and the one call that holds the voice must
+    have no tools and no web. A re-added `allowedTools` on the writing call, or
+    a voice handed to the planner, fails here.
   */
-  it("DeepSeek: one writing call, the voice as system text, no tools, no gathering pass", async () => {
+  it("DeepSeek: the desk researches first, then one writing call with the voice and no tools", async () => {
     const voiceText = "the operator's editorial voice, in prose. ".repeat(30);
     type LocalCallOptions = Parameters<typeof import("./ai.ts").grokChat>[3];
     const calls: { system: string; user: string; maxTokens: number | undefined; opts: LocalCallOptions }[] = [];
+    const stages: string[] = [];
+    const searched: string[] = [];
     const result = await writeEditorial(
-      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        sourceText: "The editor's own notes on the levy.",
+        onStage: async (stage) => {
+          stages.push(stage);
+        },
+      },
       {
         grokChat: async (system, user, maxTokens, opts) => {
           calls.push({ system, user, maxTokens, opts });
+          // Which research call this is, read off its own system prompt -- the
+          // same thing production dispatches on. The writing call is stopped,
+          // so the orchestration ends at the pair and files nothing.
+          if (system === DESK_PLANNER_INSTRUCTIONS) {
+            return { ok: true, text: '{"queries": ["rail district levy"]}' };
+          }
+          if (system === DESK_READER_INSTRUCTIONS) {
+            return {
+              ok: true,
+              text: `The levy is four tenths of a cent — ${CAPTURED_URL} (from the desk's capture).`,
+            };
+          }
           return STOPPED;
+        },
+        deskResearch: deskSeams(searched),
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the run at the writing call");
+    /*
+      Two planning calls, one reading call, one writing call. The second hop
+      plans -- its pack carries what the first hop captured -- and its only
+      query is one the desk has already asked, so the hop spends no search.
+    */
+    const plans = calls.filter((call) => call.system === DESK_PLANNER_INSTRUCTIONS);
+    const reads = calls.filter((call) => call.system === DESK_READER_INSTRUCTIONS);
+    const writings = calls.filter((call) => call.system === voiceText);
+    assert.deepEqual(
+      [calls.length, plans.length, reads.length, writings.length],
+      [4, 2, 1, 1],
+      `every call the piece made: ${calls.map((c) => c.system.slice(0, 40)).join(" | ")}`,
+    );
+    const writing = writings[0]!;
+
+    // SEC-3, both directions.
+    for (const research of [...plans, ...reads]) {
+      assert.doesNotMatch(research.system, /editorial voice, in prose/, "the research pass never holds the voice");
+      assert.doesNotMatch(research.user, /editorial voice, in prose/, "the research pass never holds the voice");
+    }
+    assert.equal(writing.system, voiceText, "the voice travels as the system message of the ONE writing call");
+    assert.equal(writing.opts?.choice, "deepseek-flash", "and it is sent to the rung the ladder named");
+    assert.equal(
+      (writing.opts as { localModel?: unknown } | undefined)?.localModel,
+      undefined,
+      "a rung carries its endpoint in the registry; no local-model override is invented for it",
+    );
+    assert.equal(
+      (writing.opts as { noTools?: unknown } | undefined)?.noTools,
+      undefined,
+      "the writing call holds the voice: it has no tool surface to hide on this transport",
+    );
+
+    // The pack says what research ran, with the capture the appendix will cite.
+    assert.match(writing.user, /the desk searched 1 time and read 1 page/);
+    assert.match(writing.user, /\[capture:7\]/, "the captured source carries its capture id");
+    assert.match(writing.user, new RegExp(CAPTURED_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(writing.user, /The editor's own notes on the levy/, "the supplied material still travels");
+    assert.doesNotMatch(writing.user, /NO GATHERING PASS RAN/, "the desk researched this piece");
+    assert.doesNotMatch(
+      writing.user,
+      /by a separate pass that searched and opened public sources/,
+      "and the pack must not claim the model's own gathering pass either",
+    );
+
+    // The run says what it is doing, in the words the job's stage list carries.
+    assert.equal(searched.length, 1, "the desk ran the one query the planner returned");
+    assert.ok(stages.includes(DESK_RESEARCH_STAGE), `stages: ${stages.join(" | ")}`);
+    assert.equal(stages[stages.length - 1], "Writing the editorial");
+  });
+
+  /*
+    The U25 Stop seam, reached from the writer. A job the editor cancelled
+    during research must end cancelled with nothing written -- not with a
+    "found nothing" piece, and not by walking the ladder onto another provider.
+  */
+  it("Stop during the desk's research ends the job cancelled and writes nothing", async () => {
+    const calls: string[] = [];
+    await assert.rejects(
+      () =>
+        writeEditorial(
+          {
+            ...ORCHESTRATION_INPUT,
+            modelChoice: "deepseek-flash",
+            completion: { requestId: 5, jobId: 6 },
+            onStage: async () => {},
+          },
+          {
+            grokChat: async () => {
+              calls.push("model");
+              return { ok: true, text: '{"queries": ["rail district levy"]}' };
+            },
+            deskResearch: {
+              ...deskSeams([]),
+              throwIfCancelled: async () => {
+                throw new JobCancelledError();
+              },
+            },
+            claudeCodeChat: mustNotRun("Claude"),
+            codexChat: mustNotRun("Codex"),
+          },
+        ),
+      (error: unknown) => error instanceof JobCancelledError,
+    );
+    assert.deepEqual(calls, [], "no planning call, no reading call, and no writing call");
+  });
+
+  /*
+    "If research finds nothing usable, say so honestly and still write from
+    supplied material." The piece is still owed to the editor: the desk's empty
+    result is a sentence in the pack, not a failed run.
+  */
+  it("writes anyway, and says so, when the desk finds nothing usable", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const result = await writeEditorial(
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        sourceText: "The editor's own notes on the levy.",
+        onStage: async () => {},
+      },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          if (system === DESK_PLANNER_INSTRUCTIONS) {
+            return { ok: true, text: '{"queries": ["rail district levy"]}' };
+          }
+          return STOPPED;
+        },
+        deskResearch: {
+          ...deskSeams([]),
+          search: async () => ({ hits: [], decision: "not-evaluated" }),
         },
         claudeCodeChat: mustNotRun("Claude"),
         codexChat: mustNotRun("Codex"),
@@ -1040,38 +1190,84 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
     );
 
     assert.equal(result.ok, false, "the fake stopped the run at the writing call");
-    assert.equal(calls.length, 1, "a model with no web tools makes exactly one call");
-    const [writing] = calls;
-    assert.equal(
-      writing!.system,
-      voiceText,
-      "the voice travels as the system message -- the same text findVoiceFile validated",
+    const writes = calls.filter((call) => call.system.startsWith("the operator's editorial voice"));
+    assert.equal(writes.length, 1, "the piece is still written, exactly once");
+    assert.ok(
+      !calls.some((call) => call.system === DESK_READER_INSTRUCTIONS),
+      "no reading call: there was nothing captured to read",
     );
-    assert.equal(
-      writing!.opts?.choice,
-      "deepseek-flash",
-      "and it is sent to the rung the ladder named, not to the editor's local pick",
+    const writing = writes[0]!;
+    assert.match(writing.user, /the desk searched 1 time and read 0 pages/);
+    assert.match(writing.user, /The desk found NOTHING USABLE for this piece/);
+    assert.match(writing.user, /The editor's own notes on the levy/, "the piece is written from what it has");
+    assert.doesNotMatch(writing.user, /NO GATHERING PASS RAN/);
+  });
+
+  /*
+    A saved connection is an OpenAI-compatible endpoint, so it has no tool loop
+    either and gets the same desk pass. Before U30 its writing pack fell through
+    to the TWO-PASS wording -- "by a separate pass that searched and opened
+    public sources before you" -- which was never true of a custom connection.
+  */
+  it("a custom connection gets the desk's research too, and an honest pack", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const custom = "custom:9ce9a944-f444-4a69-8927-7c7705c07a35";
+    const result = await writeEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: custom, onStage: async () => {} },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          if (system === DESK_PLANNER_INSTRUCTIONS) {
+            return { ok: true, text: '{"queries": ["rail district levy"]}' };
+          }
+          if (system === DESK_READER_INSTRUCTIONS) return { ok: true, text: `Levy — ${CAPTURED_URL}` };
+          return STOPPED;
+        },
+        deskResearch: deskSeams([]),
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
     );
-    assert.equal(
-      (writing!.opts as { localModel?: unknown } | undefined)?.localModel,
-      undefined,
-      "a rung carries its endpoint in the registry; no local-model override is invented for it",
+
+    assert.equal(result.ok, false);
+    const writes = calls.filter((call) => !call.system.startsWith("You are ")
+      && call.system !== DESK_PLANNER_INSTRUCTIONS);
+    assert.equal(writes.length, 1, "the desk researches for a custom connection as well");
+    assert.ok(
+      calls.some((call) => call.system === DESK_READER_INSTRUCTIONS),
+      "and the captures it read reach the writing call",
     );
-    assert.equal(
-      (writing!.opts as { noTools?: unknown } | undefined)?.noTools,
-      undefined,
-      "there is no tool surface to hide: the OpenAI-compatible transport sends none",
-    );
-    assert.match(
-      writing!.user,
-      /NO GATHERING PASS RAN/,
-      "the pack records that nothing was searched or fetched for this piece",
-    );
-    assert.match(writing!.user, /Cite only what appears in the material above/);
-    assert.doesNotMatch(
-      writing!.user,
-      /by a separate pass that searched and opened public sources/,
-      "and it must not claim a gathering pass that never ran",
-    );
+    const writing = writes[0]!;
+    assert.match(writing.user, /the desk searched 1 time and read 1 page/);
+    assert.doesNotMatch(writing.user, /by a separate pass that searched and opened public sources/);
   });
 });
+
+/** The page the fake desk opens, so the assertions can name one URL. */
+const CAPTURED_URL = "https://leg.colorado.gov/bills/SB21-238";
+
+/**
+ * The desk pass's outside world, faked: a search provider, one page, and a
+ * capture write. The two model calls are deliberately NOT faked here -- they
+ * arrive through the same `grokChat` seam the writing call uses, which is what
+ * lets the tests above assert SEC-3 over every call the piece makes.
+ */
+function deskSeams(searched: string[]): import("./editorial-research.server.ts").DeskResearchDeps {
+  return {
+    readWindow: async () => null,
+    search: async (query) => {
+      searched.push(query);
+      return { hits: [{ title: "SB21-238", url: CAPTURED_URL, snippet: "" }], decision: "relevant" };
+    },
+    fetch: async (url) => ({
+      ok: true,
+      status: 200,
+      outcome: "fetched",
+      title: "SB21-238",
+      text: `The bill text the desk captured from ${url}, which is long enough to be an article body.`,
+      pages: [],
+      extractionMethod: "html",
+    }),
+    capture: async () => ({ captureEventId: 7, versionId: 9 }),
+  };
+}

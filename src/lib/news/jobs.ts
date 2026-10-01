@@ -1068,6 +1068,26 @@ export const JOB_STAGE_LISTS: Partial<Record<JobKind, readonly string[]>> = {
     "Now:" line without moving the chip, exactly as the draft's do.
   */
   "follow-up": ["Running the check", "Recording the result"],
+  /*
+    The Opinion job's four arrivals, in the order `performEditorialWork` walks
+    them: it hands the queued request to the writer ("Researching the
+    editorial"), the writer's desk pass announces itself ("Researching with the
+    desk", unit U30), the writing call follows ("Writing the editorial"), and
+    filing ends at the name check ("Checking names and spellings").
+
+    The second phrase is only written by a writer whose provider has NO web
+    tools -- the subscription writers run their own gathering pass inside the
+    "Researching" stage instead, so their chip row goes 1 -> 3. That is a
+    skipped chip and not a contradiction: each phrase here is a sentence the
+    worker really writes, so the "Now:" line never disagrees with the chip row,
+    which is the property this table exists to keep.
+  */
+  editorial: [
+    "Researching the editorial",
+    "Researching with the desk",
+    "Writing the editorial",
+    "Checking names and spellings",
+  ],
   draft: [
     "Opening source material",
     "Looking for primary sources",
@@ -1109,7 +1129,7 @@ export function stageIndexFor(
  * boundaries having to know its own position in a list.
  */
 export function progressReporterFor(
-  job: DeskJob,
+  job: Pick<DeskJob, "id" | "stages_json">,
 ): (step: string) => Promise<void> {
   return (step) => reportProgress(job.id, { step, stageIndex: stageIndexFor(job, step) });
 }

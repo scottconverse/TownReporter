@@ -867,7 +867,7 @@ DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
 then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
-A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
+A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options. DeepSeek v4.1 Flash, **Local model** and saved connections have no web tools of their own, so the desk researches for them: it plans queries, searches, opens and records pages with the same machinery the Dark Desk uses, then the model reads those captures back as findings. The writing call is still one call, with the voice as its system message and no tools; the material it receives carries each captured page's address and the number of searches run and pages read, and says so plainly when the desk found nothing usable. The desk's share of the run is bounded — two rounds of queries, six searches, eight pages — and **Cancel** stops it at any point before the piece is written.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
@@ -917,8 +917,10 @@ prompt sit under the piece there, marked _does not print_.
 Earlier measured runs took **ten to forty minutes**; that is an observation,
 not a deadline. The current research and writing passes each have a default
 45-minute ceiling. The Claude pair can therefore take about 90 minutes.
-Explicit Local model makes one writing call using the supplied material; it
-does not run the frontier research pass. The row
+An explicit Local model, DeepSeek v4.1 Flash or saved connection makes one
+writing call, and the desk's own research pass runs before it inside the
+"Researching with the desk" stage — it is small and bounded, not the frontier
+research pass. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
 

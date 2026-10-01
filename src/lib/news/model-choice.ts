@@ -424,15 +424,20 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   }
   if (selected.value !== "auto") {
     /*
-      Unit U29: an editorial written by a model with no web tools is written in
-      ONE call from the material the editor supplied -- so the picker says that
-      before the run starts, not after. Read from the same registry answer the
-      two-pass flow dispatches on (`providerRunsToolPass`), so the sentence and
-      the behavior cannot drift. "Local model" has already returned above with
-      its own wording; this is the DeepSeek rung and anything like it.
+      Unit U29 said a model with no web tools writes in ONE call from the
+      material the editor supplied, and the picker said so before the run.
+      Unit U30 kept the one writing call and took the "unresearched" half away:
+      the desk runs its own bounded research pass first (searching, opening and
+      capturing pages through the Dark Desk's machinery) and the same no-tool
+      provider plans its queries and reads its captures back. So the sentence
+      the editor reads now describes research that happens, rather than its
+      absence. Read from the same registry answer the pair dispatch turns on
+      (`providerRunsToolPass`), so sentence and behaviour cannot drift. "Local
+      model" has already returned above with its own wording; this is the
+      DeepSeek rung and anything like it.
     */
     if (scope === "opinion" && !providerRunsToolPass(providerEntry(selected.value))) {
-      return `Prefers ${selected.label} for this run. It has no web search, so the editorial is written in one call from the material you supply and no gathering pass runs. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
+      return `Prefers ${selected.label} for this run. It has no web search of its own, so the desk searches and reads the sources for it before the editorial is written. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
     }
     return `Prefers ${selected.label} for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
   }
