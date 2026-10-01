@@ -41,6 +41,23 @@
   still there, in the log file, if the promotion itself is killed while the
   child is running.
 
+  ...AND A KILLED CHILD MUST NOT LOOK LIKE A SUCCESSFUL ONE. The same trap has
+  a second door: a child killed before it writes that line leaves nothing to
+  read, and a runner that defaulted its exit code to 0 would call that step
+  done. Here a missing line means $null, which means "it did not reach its
+  end", which every caller already treats as a failure -- and
+  scripts\promote-step-runner.test.mjs kills a child on purpose to hold that.
+
+  A HUNG STEP IS ALSO A WAY TO KEEP THE PAPER DOWN. The marker watchdog.ps1
+  stands down for is capped at 30 minutes; an npm step that never returns
+  would outlive the cap, the watchdog would start the app on a half-written
+  tree, and nobody would have been told. So every child has a time limit
+  (Get-PromoteChildTimeoutSeconds -- 20 minutes for npm ci and for the build,
+  which is the step that runs the migrations). Past it the child's PROCESS
+  TREE is killed by PID -- never by image name, on a machine where the paper
+  and the development copy are both node.exe -- and the step fails the
+  ordinary way.
+
   ASCII only: Windows PowerShell 5.1 reads a BOM-less UTF-8 file as ANSI.
 #>
 
@@ -200,8 +217,71 @@ function Get-PromoteRecoveryCommand {
 }
 
 <#
+  How long a step is allowed to take, in seconds. 0 means no limit.
+
+  `deps` and `build` are the two that can hang for a reason that has nothing to
+  do with this script -- a registry that has stopped answering, a bundler
+  waiting on something that will never arrive -- and they are the two that
+  leave the paper down while they do it. Twenty minutes is roughly ten times
+  the longest either has taken on this machine, so it is a backstop, not a
+  budget: a step that reaches it has stopped, not slowed down.
+
+  The number also has to stay under the watchdog's 30-minute stand-down (see
+  the header of ops\promote.ps1), because past that the watchdog stops waiting
+  politely and starts the app on whatever is on disk -- which, half way through
+  a build, is not a build.
+
+  Read through a function rather than written at each call site so a test can
+  ask what the limit is, and so the two places that use it cannot drift.
+#>
+function Get-PromoteChildTimeoutSeconds {
+  param([Parameter(Mandatory = $true)][string]$Step)
+  switch ($Step) {
+    'deps' { return 1200 }
+    'build' { return 1200 }
+    default { return 0 }
+  }
+}
+
+<#
+  How long the started app is given to answer on its port.
+
+  The ceiling asked for is five minutes; this install already waits one, which
+  is shorter, so it keeps it. Named here because the wait appears in three
+  places in ops\promote.ps1 and a paper that is merely slow to boot must not
+  turn into a rollback in one of them and not the others.
+#>
+function Get-PromoteHealthTimeoutSeconds {
+  return 60
+}
+
+<#
+  Kill a process and everything under it, by PID.
+
+  /T for the tree: the child this script starts is cmd.exe running the wrapper,
+  which runs npm.cmd, which runs node -- and it is node, three levels down,
+  that is actually stuck. Killing only the process we started would leave the
+  install running with nobody waiting for it.
+
+  /PID, never /IM. On this machine the live paper, the development copy and
+  every test are node.exe; "kill all node" is the one command that would turn
+  a stuck build into an outage.
+
+  Through cmd.exe with the output sent to nul, so nothing it writes can reach a
+  PowerShell stream: `2>&1` on a native command TERMINATES a script whose
+  preference is Stop in Windows PowerShell 5.1 -- the 2026-09-25 logon task
+  died on exactly that (see ops\start-townreporter.ps1).
+#>
+function Stop-PromoteProcessTree {
+  param([Parameter(Mandatory = $true)][int]$ProcessId)
+  $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+  if (-not (Test-Path $taskkill)) { $taskkill = 'taskkill.exe' }
+  & cmd.exe /d /c "`"$taskkill`" /PID $ProcessId /T /F >nul 2>nul"
+}
+
+<#
   Run one long step as a detached child and wait for it. Returns
-  @{ ExitCode; Seconds; OutFile; ErrFile; Completed }.
+  @{ ExitCode; Seconds; OutFile; ErrFile; Completed; Pid; TimedOut }.
 
   ExitCode is the child's REAL code, read from the PROMOTE_EXIT line the child
   wrote into its own stdout -- see the header for why $process.ExitCode cannot
@@ -218,9 +298,14 @@ function Invoke-PromoteChild {
     [Parameter(Mandatory = $true)]$Log,
     [Parameter(Mandatory = $true)][string]$Step,
     [Parameter(Mandatory = $true)][string]$Command,
-    [string]$WorkingDirectory = ""
+    [string]$WorkingDirectory = "",
+    # -1 means "ask Get-PromoteChildTimeoutSeconds for this step". 0 means no
+    # limit. Anything else is taken as given -- which is how a test gets a
+    # two-second limit instead of twenty minutes.
+    [int]$TimeoutSeconds = -1
   )
   if (-not $WorkingDirectory) { $WorkingDirectory = $Log.App }
+  if ($TimeoutSeconds -lt 0) { $TimeoutSeconds = Get-PromoteChildTimeoutSeconds -Step $Step }
 
   $base    = Join-Path $Log.Dir "promote-$($Log.Stamp)-$Step"
   $wrapper = "$base.cmd"
@@ -267,24 +352,32 @@ function Invoke-PromoteChild {
       ExitCode  = $null
       Seconds   = ((Get-Date) - $started).TotalSeconds
       Completed = $false
+      TimedOut  = $false
+      Pid       = $null
       OutFile   = $outFile
       ErrFile   = $errFile
     }
   }
   Write-PromoteLog $Log "step=$Step child pid $($proc.Id)"
 
-  try { $proc.WaitForExit() } catch { }
+  $wait = Wait-PromoteChildProcess -Process $proc -TimeoutSeconds $TimeoutSeconds
+  $hitLimit = ($wait -eq 'timeout')
 
-  # Belt and braces, because the cost of being wrong here is asymmetric: a step
-  # wrongly called failed takes the previous build back over one that worked.
-  # If the wait could not be trusted, watch the process itself rather than
-  # concluding from a file that is not there yet.
-  for ($i = 0; $i -lt 60 -and (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Seconds 1 }
+  if ($hitLimit) {
+    # The tree, by PID: node is three levels down, and killing only the
+    # process we started would leave a build running with nobody waiting.
+    Stop-PromoteProcessTree -ProcessId $proc.Id
+    Write-PromoteLog $Log "step=$Step TIMED OUT after $($TimeoutSeconds)s -- killed PID $($proc.Id) and its children. If this step is genuinely that slow, raise its limit in Get-PromoteChildTimeoutSeconds (ops\lib-promote.ps1)."
+  }
 
   $seconds = ((Get-Date) - $started).TotalSeconds
 
   # The last PROMOTE_EXIT= line wins: the child's own output comes before it.
   # -Tail keeps a chatty npm install from being read into memory in full.
+  #
+  # Read even after a timeout, and believed: the line is written by the child
+  # immediately before it exits, so a child that reached the deadline with its
+  # work already done still gets the credit, and the kill above was a no-op.
   $code = $null
   if (Test-Path $outFile) {
     foreach ($line in @(Get-Content -Path $outFile -Tail 25 -ErrorAction SilentlyContinue)) {
@@ -303,8 +396,46 @@ function Invoke-PromoteChild {
     ExitCode  = $code
     Seconds   = $seconds
     Completed = ($null -ne $code)
+    # True only when the limit is why the step failed. A child that finished
+    # just as the deadline arrived is not a timed-out step.
+    TimedOut  = ($hitLimit -and ($null -eq $code))
+    Pid       = $proc.Id
     OutFile   = $outFile
     ErrFile   = $errFile
+  }
+}
+
+<#
+  Wait for a started child, with a limit. Returns 'exited' or 'timeout'.
+
+  WaitForExit is the fast path, but a single return value is not something to
+  bet the paper on: if it cannot be trusted, this asks the process itself
+  rather than concluding from a log file that is not written yet. Getting that
+  wrong in the other direction is just as bad -- a step wrongly called failed
+  puts the previous build back over one that worked -- so both answers have to
+  agree that the process is gone.
+#>
+function Wait-PromoteChildProcess {
+  param(
+    [Parameter(Mandatory = $true)]$Process,
+    [int]$TimeoutSeconds = 0
+  )
+  $deadline = $null
+  if ($TimeoutSeconds -gt 0) { $deadline = (Get-Date).AddSeconds($TimeoutSeconds) }
+  while ($true) {
+    $slice = 1000
+    if ($deadline) {
+      $left = ($deadline - (Get-Date)).TotalMilliseconds
+      if ($left -le 0) { return 'timeout' }
+      if ($left -lt 1000) { $slice = [int]$left }
+    }
+    $exited = $false
+    try { $exited = [bool]$Process.WaitForExit($slice) } catch { }
+    if ($exited) { return 'exited' }
+    if (-not (Get-Process -Id $Process.Id -ErrorAction SilentlyContinue)) { return 'exited' }
+    # Only reached when WaitForExit did not block for us. Keeps a host where it
+    # returns immediately from turning this into a hot loop.
+    if ($slice -ge 1000) { Start-Sleep -Milliseconds 100 }
   }
 }
 
@@ -435,20 +566,115 @@ function Resolve-PromotePreviousBuild {
 }
 
 <#
+  The migration the database is at, when it can be named.
+
+  Two sources, in the order this unit's brief asks for them:
+
+    1. the migrate step's own output, which lives inside the build's log -- its
+       "[migrate] applied <name>" lines are the database saying what it did;
+    2. the newest .sql in this checkout's migrations\ directory, which is what
+       a migration that ran to completion leaves the database at.
+
+  Returns $null rather than a guess when neither is there. A promotion that
+  names the wrong migration is worse than one that admits it does not know: the
+  sentence this feeds is read by somebody deciding whether an old build can
+  keep serving against a newer database.
+#>
+function Get-PromoteAppliedMigrationName {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$BuildOutput = ""
+  )
+  if ($BuildOutput -and (Test-Path $BuildOutput)) {
+    $last = $null
+    foreach ($line in @(Get-Content -Path $BuildOutput -Tail 200 -ErrorAction SilentlyContinue)) {
+      $m = [regex]::Match("$line", '^\[migrate\] applied (.+?)\s*$')
+      if ($m.Success) { $last = $m.Groups[1].Value.Trim() }
+    }
+    if ($last) { return $last }
+  }
+  $files = @(Get-ChildItem -Path (Join-Path $App "migrations") -Filter '*.sql' -File -ErrorAction SilentlyContinue |
+    Sort-Object -Property Name)
+  if ($files.Count -gt 0) { return $files[$files.Count - 1].Name }
+  return $null
+}
+
+<#
+  Did the build get as far as the migration?
+
+  `npm run build` is `vite build && patch-ssr-exports && copy-runtime-assets &&
+  npm run db:migrate`, so a build that died at the bundler never touched the
+  database, and a build that died at the migration did. Its own output is the
+  only place that distinction survives; anything else is a guess dressed up as
+  a fact.
+#>
+function Test-PromoteMigrateRan {
+  param([string]$BuildOutput = "")
+  if (-not $BuildOutput -or -not (Test-Path $BuildOutput)) { return $false }
+  foreach ($line in @(Get-Content -Path $BuildOutput -Tail 200 -ErrorAction SilentlyContinue)) {
+    if ("$line" -match '^\[migrate\]') { return $true }
+  }
+  return $false
+}
+
+<#
+  What to say about the database when the previous build goes back.
+
+  Putting the old build back after `npm run build` has already run db:migrate
+  leaves the database NEWER than the build that is now serving it. That is a
+  state the operator has to be told about rather than left to discover: a build
+  whose queries still name a table or column a migration dropped does not fail
+  loudly, it answers wrongly.
+
+    MigrationsRan = 'none'  -- the build never reached the migration. Nothing
+                               to say; returns "" and the caller uses the plain
+                               sentence.
+    MigrationsRan = 'maybe' -- it did reach it and did not finish, so what the
+                               database is at is not knowable from here. Says
+                               so, rather than naming a migration.
+    MigrationsRan = 'yes'   -- it finished. Names the migration it finished at,
+                               or falls back to saying it may have run.
+
+  Capitalised, because this is also the first sentence of the message the
+  operator reads when the promotion stops.
+#>
+function Get-PromoteFallbackSentence {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
+    [string]$BuildOutput = ""
+  )
+  if ($MigrationsRan -eq 'none') { return "" }
+  $tail = "if this build reads a table or column a migration removed, tell the developer before continuing"
+  $name = $null
+  if ($MigrationsRan -eq 'yes') { $name = Get-PromoteAppliedMigrationName -App $App -BuildOutput $BuildOutput }
+  if ($name) {
+    return "The paper is back on the OLD version, but the database was already migrated to $name; $tail. The promote did NOT complete."
+  }
+  return "The paper is back on the OLD version, but migrations may have run; $tail. The promote did NOT complete."
+}
+
+<#
   Put the previous build back and start it. $StartTheApp is the caller's "start
   the app and tell me whether it answers" -- a scriptblock so this can be
   driven by a fake in a test while the ordering that matters stays here.
 
   Returns $true only when the paper is answering afterwards. Everything is
   written to the log as it happens, because "the promote fell back" is exactly
-  the kind of thing that needs to still be readable the next morning.
+  the kind of thing that needs to still be readable the next morning -- and
+  because how far the database got is part of what happened.
+
+  -MigrationsRan defaults to 'none': a caller that has not said anything about
+  the database gets the plain sentence, never an invented one.
 #>
 function Invoke-PromoteFallback {
   param(
     [Parameter(Mandatory = $true)]$Log,
     [Parameter(Mandatory = $true)][string]$App,
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
-    [string]$Previous = ""
+    [string]$Previous = "",
+    [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
+    [string]$BuildOutput = ""
   )
   $resolved = Resolve-PromotePreviousBuild -App $App -Previous $Previous
   if (-not (Restore-PromotePreviousBuild -App $App -Previous $resolved)) {
@@ -457,7 +683,13 @@ function Invoke-PromoteFallback {
   }
   Write-PromoteLog $Log "the build from before has been put back at .output"
   Write-PromoteLog $Log "starting the OLD version, so the paper is not left down"
-  return [bool](& $StartTheApp)
+  $started = [bool](& $StartTheApp)
+  if ($started) {
+    $sentence = Get-PromoteFallbackSentence -App $App -MigrationsRan $MigrationsRan -BuildOutput $BuildOutput
+    if (-not $sentence) { $sentence = "the paper is back on the OLD version. The promote did NOT complete." }
+    Write-PromoteLog $Log $sentence
+  }
+  return $started
 }
 
 <#
@@ -480,11 +712,13 @@ function Invoke-PromoteBuild {
     [Parameter(Mandatory = $true)][string]$App,
     [Parameter(Mandatory = $true)][string]$Command,
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
-    [string]$Previous = ""
+    [string]$Previous = "",
+    [int]$TimeoutSeconds = -1
   )
   # `npm run build` is `vite build && ... && npm run db:migrate` (package.json),
   # so this step migrates the database too. It is named in the log for that
-  # reason: it is why this step runs with the server down.
+  # reason: it is why this step runs with the server down, and it is why the
+  # sentence below can turn up when this step goes wrong.
   Add-PromoteStep -Log $Log -Name 'build' -Detail "$Command (this also runs the schema migration)"
 
   $previous = Save-PromotePreviousBuild -App $App
@@ -494,7 +728,7 @@ function Invoke-PromoteBuild {
     Write-PromoteLog $Log "there is no built output here to fall back to; a build that does not work would leave the paper down"
   }
 
-  $child = Invoke-PromoteChild -Log $Log -Step 'build' -Command $Command
+  $child = Invoke-PromoteChild -Log $Log -Step 'build' -Command $Command -TimeoutSeconds $TimeoutSeconds
   if ($child.ExitCode -eq 0) {
     Complete-PromoteStep -Log $Log -Name 'build' -Seconds $child.Seconds -Detail "$Command exit 0"
     return [pscustomobject]@{
@@ -509,13 +743,27 @@ function Invoke-PromoteBuild {
     }
   }
 
-  $code = if ($null -eq $child.ExitCode) { "it did not reach its end, so there is no exit code" } else { "exit $($child.ExitCode)" }
-  $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $previous
-  $failure = "$Command did not succeed ($code) and there was no previous build to put back. The paper is still down."
-  if ($paperUp) {
-    Write-PromoteLog $Log "the paper is back on the OLD version. The promote did NOT complete."
-    $failure = "$Command did not succeed ($code). The paper is back on the OLD version; the promote did not complete."
+  $code = if ($child.TimedOut) {
+    "it ran past its $(Get-PromoteChildTimeoutSeconds -Step 'build')-second limit and was stopped"
+  } elseif ($null -eq $child.ExitCode) {
+    "it did not reach its end, so there is no exit code"
+  } else {
+    "exit $($child.ExitCode)"
   }
+  # Did this build get as far as the migration before it died? Only the build's
+  # own output can answer that -- see Test-PromoteMigrateRan.
+  $migrations = if (Test-PromoteMigrateRan -BuildOutput $child.OutFile) { 'maybe' } else { 'none' }
+  $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $previous -MigrationsRan $migrations -BuildOutput $child.OutFile
+
+  $outcome = "The paper is still down."
+  if ($paperUp) {
+    $outcome = Get-PromoteFallbackSentence -App $App -MigrationsRan $migrations -BuildOutput $child.OutFile
+    if (-not $outcome) { $outcome = "The paper is back on the OLD version; the promote did not complete." }
+  }
+  $failure = "$Command did not succeed ($code). $outcome"
+  # The step's own FAILED line, written here rather than by the caller's
+  # failure path, so this step is recorded exactly once whichever path it took.
+  Fail-PromoteStep -Log $Log -Name 'build' -Detail $failure
 
   return [pscustomobject]@{
     Ok       = $false

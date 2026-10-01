@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -37,26 +38,66 @@ const windowsOnly = { skip: !onWindows ? "the promotion step runner is Windows P
  */
 
 /**
- * A fake `npm`. `ci` always succeeds; `run build` in FAKE_NPM_MODE=buildfail
- * deletes .output -- which is what a build that dies part way through leaves
- * behind -- and exits 1.
+ * A fake `npm`, in four modes:
+ *
+ *   (unset)      ci, and anything else -- succeeds.
+ *   buildfail    deletes .output (what a build that dies part way through
+ *                leaves behind) and exits 1, having never reached the
+ *                migration.
+ *   migratefail  reaches the migration -- its own "[migrate] applied ..." line
+ *                is in the output -- and then exits 1.
+ *   hang         never returns, which is the step a promotion cannot afford:
+ *                the paper is down while it runs.
  *
  * Written without parenthesised blocks on purpose: a batch `if (...)` block
  * parses its whole body up front, and this file has enough ways to go wrong
  * already.
  */
-const FAKE_NPM = [
-  "@echo off",
-  "if not \"%FAKE_NPM_MODE%\"==\"buildfail\" goto ok",
-  "echo [fake npm] vite build starting",
-  "rmdir /s /q .output",
-  "echo [fake npm] the build exploded 1>&2",
-  "exit /b 1",
-  ":ok",
-  "echo [fake npm] %*",
-  "exit /b 0",
+function fakeNpm(hangChildPath) {
+  return [
+    "@echo off",
+    "if \"%FAKE_NPM_MODE%\"==\"hang\" goto hang",
+    "if \"%FAKE_NPM_MODE%\"==\"migratefail\" goto migratefail",
+    "if not \"%FAKE_NPM_MODE%\"==\"buildfail\" goto ok",
+    "echo [fake npm] vite build starting",
+    "rmdir /s /q .output",
+    "echo [fake npm] the build exploded 1>&2",
+    "exit /b 1",
+    ":hang",
+    "echo [fake npm] hanging on purpose",
+    `node "${hangChildPath}" 60000`,
+    "exit /b 0",
+    ":migratefail",
+    "echo [fake npm] the bundle is built",
+    "echo [migrate] applied 0116_source_retry_after.sql",
+    "echo [fake npm] the next migration exploded 1>&2",
+    "exit /b 1",
+    ":ok",
+    "echo [fake npm] %*",
+    "exit /b 0",
+    "",
+  ].join("\r\n");
+}
+
+/**
+ * A child that will not finish on its own, and says so out loud.
+ *
+ * It writes its own PID the moment it starts, so a test can ask the operating
+ * system whether it is still there rather than believing a log line; and it
+ * writes a second file only if it ever reaches its end, so "was it actually
+ * killed, or did it just take a while" is answerable too.
+ */
+const HANG_CHILD = [
+  'import { writeFileSync } from "node:fs";',
+  "const ms = Number(process.argv[2] ?? 60000);",
+  "const t0 = Date.now();",
+  'writeFileSync("hang-child-pid.txt", String(process.pid));',
+  "setTimeout(() => {",
+  '  writeFileSync("hang-child-survived.txt", `survived ${Date.now() - t0}ms\\n`);',
+  "  process.exit(0);",
+  "}, ms);",
   "",
-].join("\r\n");
+].join("\n");
 
 /**
  * The stand-in for npm at its chattiest: half a kilobyte ten times a second
@@ -88,11 +129,18 @@ function makeInstall() {
   mkdirSync(join(app, ".output", "server"), { recursive: true });
   writeFileSync(join(app, ".output", "server", "index.mjs"), "// the build that was running\n");
   writeFileSync(join(app, ".output", "server", "version.txt"), "old");
+  // The migrations a real checkout carries. Two, so the newest can be told
+  // apart from the one a build's own output names.
+  mkdirSync(join(app, "migrations"), { recursive: true });
+  writeFileSync(join(app, "migrations", "0116_source_retry_after.sql"), "-- a migration\n");
+  writeFileSync(join(app, "migrations", "0117_source_replaces.sql"), "-- a later migration\n");
   const fakes = join(root, "fakes");
   mkdirSync(fakes, { recursive: true });
-  writeFileSync(join(fakes, "npm.cmd"), FAKE_NPM);
+  const hangChild = join(root, "hang-child.mjs");
+  writeFileSync(join(fakes, "npm.cmd"), fakeNpm(hangChild));
   writeFileSync(join(root, "slow-child.mjs"), SLOW_CHILD);
-  return { root, app, fakes };
+  writeFileSync(hangChild, HANG_CHILD);
+  return { root, app, fakes, hangChild };
 }
 
 function psLiteral(path) {
@@ -121,10 +169,11 @@ function writeHarness(install, name, body) {
   return file;
 }
 
-function runPowerShell(file, { timeout = 120_000, onSpawn } = {}) {
+function runPowerShell(file, { timeout = 120_000, onSpawn, env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", file], {
       cwd: ROOT,
+      env: env ? { ...process.env, ...env } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -175,6 +224,69 @@ function newestLog(app) {
 /** The sibling file a step's own output went to, named the way the log names it. */
 function stepOutputFile(app, step) {
   return join(app, "logs", basename(newestLog(app)).replace(/\.log$/, "") + `-${step}.out.log`);
+}
+
+/**
+ * Wait for a pattern to appear in a file a running harness is writing.
+ *
+ * The harnesses in this file log the PID of the process they started before
+ * they wait on it, which is what lets a test kill that process the way the
+ * machine's own tooling would -- from outside, without asking the script.
+ */
+async function waitForMatch(path, pattern, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const m = read(path).match(pattern);
+    if (m) return m;
+    await sleep(100);
+  }
+  throw new Error(`${path} never matched ${pattern} within ${timeoutMs}ms; it holds:\n${read(path)}`);
+}
+
+/** Is a PID still running? Asked of the operating system, not of a log. */
+function isRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntilDead(pid, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isRunning(pid)) return true;
+    await sleep(100);
+  }
+  return !isRunning(pid);
+}
+
+/** Kill a process and its children, the way the runner has to: by PID. */
+function killTree(pid) {
+  execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: "ignore" });
+}
+
+/**
+ * Tear an install down, without letting the teardown hide the failure.
+ *
+ * A test that fails while a fake child is still running leaves that child
+ * holding its log file open, and Windows will not delete a directory out from
+ * under it. Deleting anyway throws from the `finally`, and a throw there
+ * REPLACES the assertion error -- so the run reports "EBUSY" instead of the
+ * thing that actually went wrong. Killing the child first, then retrying the
+ * delete, keeps the real failure on screen.
+ */
+function cleanup(install) {
+  const pid = Number(read(join(install.app, "hang-child-pid.txt")).trim());
+  if (Number.isFinite(pid) && pid > 0 && isRunning(pid)) {
+    try {
+      killTree(pid);
+    } catch {
+      // best effort: the test has already failed, and this is only tidying
+    }
+  }
+  rmSync(install.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 // --- always: the script is wired the way the tests below assume -------------
@@ -264,7 +376,7 @@ test("every step lands in the log with its command, its exit code and its durati
     assert.match(childOutput, /\[fake npm\] ci/, "npm's stdout is not in the file the log names");
     assert.match(childOutput, /PROMOTE_EXIT=0/, "the child did not record its own exit code in its output");
   } finally {
-    rmSync(install.root, { recursive: true, force: true });
+    cleanup(install);
   }
 });
 
@@ -313,7 +425,7 @@ test("a 20-second child survives its launcher's stdout pipe being closed", windo
     assert.match(text, /step=deps child: node .* exit 0 \(/, "the log has no exit code for the long child");
     assert.match(text, /step=deps ok \(/, "the deps step never completed");
   } finally {
-    rmSync(install.root, { recursive: true, force: true });
+    cleanup(install);
   }
 });
 
@@ -370,7 +482,7 @@ test("a build that fails after the stop leaves the paper on the OLD build and re
       "the failed build's stderr was not kept",
     );
   } finally {
-    rmSync(install.root, { recursive: true, force: true });
+    cleanup(install);
   }
 });
 
@@ -428,4 +540,292 @@ test("a leftover marker leads to the resume path, and says which step to carry o
     rmSync(failed.root, { recursive: true, force: true });
     rmSync(finished.root, { recursive: true, force: true });
   }
+});
+
+// --- a child killed before it says how it ended ------------------------------
+
+test(
+  "a child killed before it writes its exit code fails the step and puts the old build back",
+  windowsOnly,
+  async () => {
+    const install = makeInstall();
+    try {
+      const versionFile = join(install.app, ".output", "server", "version.txt");
+      const startedFile = join(install.app, "started.txt");
+      const logPath = join(install.app, "logs", "promote-20260104-000000.log");
+
+      // Shaped like ops\promote.ps1's own call, with a build that never
+      // returns. Nothing here kills it: the TEST does, from outside, the way
+      // the shell tool that took the paper down three times did.
+      const harness = writeHarness(install, "child-killed.ps1", [
+        "function Start-TheApp {",
+        `  $version = Get-Content -Path ${psLiteral(versionFile)} -Raw`,
+        `  Set-Content -Path ${psLiteral(startedFile)} -Value $version.Trim() -Encoding ASCII`,
+        "  return $true",
+        "}",
+        "$env:FAKE_NPM_MODE = 'hang'",
+        "$log = New-PromoteLog -App $app -Stamp '20260104-000000'",
+        "$res = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp }",
+        `Set-Content -Path (Join-Path $app 'result.txt') -Value "ok=$($res.Ok);exit=$($res.ExitCode);fallback=$($res.Fallback);paperUp=$($res.PaperUp)" -Encoding ASCII`,
+      ]);
+
+      const run = runPowerShell(harness, { timeout: 90_000 });
+      const [, pid] = await waitForMatch(logPath, /step=build child pid (\d+)/);
+      killTree(Number(pid));
+
+      const { code } = await run;
+      assert.equal(code, 0, "the harness itself did not finish");
+
+      // The child never reached its end, so there is no exit code -- NOT a zero.
+      // A runner that defaulted to 0 would call this build a success and leave
+      // a half-written tree being served.
+      assert.equal(
+        read(join(install.app, "result.txt")).trim(),
+        "ok=False;exit=;fallback=True;paperUp=True",
+        "a killed child was not treated as a failed step",
+      );
+      assert.equal(read(startedFile).trim(), "old", "the app was started on something other than the OLD build");
+      assert.equal(read(versionFile).trim(), "old", ".output was not put back after the step failed");
+
+      const text = read(newestLog(install.app));
+      assert.match(text, /step=build FAILED: .*did not reach its end/, "the step is not recorded as FAILED in the log");
+      assert.match(text, /the paper is back on the OLD version/, "the log does not say which version the paper is on");
+    } finally {
+      cleanup(install);
+    }
+  },
+);
+
+// --- a step that never returns ----------------------------------------------
+
+test("a step past its time limit is killed by PID; a step inside its limit is left alone", windowsOnly, async () => {
+  const over = makeInstall();
+  const under = makeInstall();
+  try {
+    // Over the limit: a real node process that would run for a minute, given
+    // two seconds. The PID it reports is checked against the operating system,
+    // not against the log -- a log line saying "killed" proves nothing.
+    const overHarness = writeHarness(over, "timeout-over.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260105-000000'",
+      `$r = Invoke-PromoteChild -Log $log -Step 'deps' -Command ${psLiteral(`node "${over.hangChild}" 60000`)} -TimeoutSeconds 2`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "exit=$($r.ExitCode);completed=$($r.Completed);timedOut=$($r.TimedOut);pid=$($r.Pid)" -Encoding ASCII`,
+    ]);
+    const started = Date.now();
+    await runPowerShell(overHarness, { timeout: 90_000 });
+    const elapsed = Date.now() - started;
+
+    assert.equal(
+      read(join(over.app, "result.txt")).trim().replace(/pid=\d+$/, "pid=<its own>"),
+      "exit=;completed=False;timedOut=True;pid=<its own>",
+      "a step past its limit was not reported as a timed-out failure",
+    );
+    const overText = read(newestLog(over.app));
+    assert.match(
+      overText,
+      /step=deps TIMED OUT after 2s -- killed PID \d+ and its children/,
+      "the timeout and the PID are not in the log",
+    );
+
+    // The kill reached the actual work: node, three levels down, is gone. The
+    // runner started cmd.exe, which ran npm.cmd, which ran node.
+    //
+    // This pair is the assertion that matters, and it comes before the timing
+    // one on purpose. A log line saying "killed" proves nothing; a runner that
+    // logs the timeout and does not kill anything would still pass everything
+    // above. Both halves are needed: "is it gone" catches a kill that never
+    // happened, and "did it reach its own end" catches one that happened after
+    // the child had already finished anyway.
+    const childPid = Number(read(join(over.app, "hang-child-pid.txt")).trim());
+    assert.ok(childPid > 0, "the fake npm never got as far as running the child");
+    assert.ok(await waitUntilDead(childPid), `PID ${childPid} is still running: the process tree was not killed`);
+    assert.equal(
+      read(join(over.app, "hang-child-survived.txt")),
+      "",
+      "the child reached its own end, so it was never actually killed -- only reported as timed out",
+    );
+    assert.ok(elapsed < 30_000, `the limit did not stop the step; the harness took ${elapsed}ms`);
+
+    // Under the limit: same shape, and none of it happens.
+    const underHarness = writeHarness(under, "timeout-under.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260106-000000'",
+      `$r = Invoke-PromoteChild -Log $log -Step 'deps' -Command ${psLiteral(`node "${under.hangChild}" 1500`)} -TimeoutSeconds 30`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "exit=$($r.ExitCode);completed=$($r.Completed);timedOut=$($r.TimedOut)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(underHarness, { timeout: 90_000 });
+
+    assert.equal(
+      read(join(under.app, "result.txt")).trim(),
+      "exit=0;completed=True;timedOut=False",
+      "a step that finished inside its limit was treated as a timeout",
+    );
+    assert.notEqual(read(join(under.app, "hang-child-survived.txt")), "", "the child under the limit did not get to finish");
+    assert.doesNotMatch(read(newestLog(under.app)), /TIMED OUT/, "a step inside its limit was logged as timed out");
+  } finally {
+    rmSync(over.root, { recursive: true, force: true });
+    rmSync(under.root, { recursive: true, force: true });
+  }
+});
+
+// --- what the database is at, when the old build goes back -------------------
+
+test(
+  "putting the old build back says what the database is at, and stays quiet when it did not move",
+  windowsOnly,
+  async () => {
+    const install = makeInstall();
+    try {
+      // What a build that reached the migration leaves in its own output. It
+      // names 0116; the newest file in migrations\ is 0117 -- so which source
+      // answered is visible in the result.
+      const buildOutput = join(install.root, "build.out.log");
+      writeFileSync(buildOutput, "[fake npm] the bundle is built\n[migrate] applied 0116_source_retry_after.sql\n");
+
+      const harness = writeHarness(install, "fallback-note.ps1", [
+        "function Start-TheApp { return $true }",
+        // Each fallback consumes .output-previous, so the install is put back
+        // the way it was before the next one.
+        "function Stage-Previous {",
+        "  Remove-Item (Join-Path $app '.output') -Recurse -Force -ErrorAction SilentlyContinue",
+        "  Remove-Item (Join-Path $app '.output-previous') -Recurse -Force -ErrorAction SilentlyContinue",
+        "  New-Item -ItemType Directory -Force -Path (Join-Path $app '.output\\server') | Out-Null",
+        "  Set-Content -Path (Join-Path $app '.output\\server\\index.mjs') -Value '// the old build' -Encoding ASCII",
+        "  Copy-Item -Path (Join-Path $app '.output') -Destination (Join-Path $app '.output-previous') -Recurse -Force",
+        "}",
+        "$log = New-PromoteLog -App $app -Stamp '20260107-000000'",
+        "Stage-Previous",
+        "$before = Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp }",
+        "Stage-Previous",
+        "$named = Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp } -MigrationsRan 'yes' -BuildOutput $env:PROMOTE_TEST_BUILD_OUTPUT",
+        "Stage-Previous",
+        "$fromDirectory = Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp } -MigrationsRan 'yes'",
+        "Stage-Previous",
+        "$maybe = Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp } -MigrationsRan 'maybe'",
+        `Set-Content -Path (Join-Path $app 'result.txt') -Value "before=$before;named=$named;fromDirectory=$fromDirectory;maybe=$maybe" -Encoding ASCII`,
+      ]);
+
+      await runPowerShell(harness, { env: { PROMOTE_TEST_BUILD_OUTPUT: buildOutput } });
+
+      assert.equal(
+        read(join(install.app, "result.txt")).trim(),
+        "before=True;named=True;fromDirectory=True;maybe=True",
+        "a fallback stopped starting the old build",
+      );
+
+      const text = read(newestLog(install.app));
+      const count = (re) => (text.match(re) ?? []).length;
+
+      assert.equal(count(/the database was already migrated to /g), 2, "the migration the database is at was not named exactly twice");
+      assert.equal(
+        count(/the database was already migrated to 0116_source_retry_after\.sql/g),
+        1,
+        "the migrate step's own output was not used when it was there",
+      );
+      assert.equal(
+        count(/the database was already migrated to 0117_source_replaces\.sql/g),
+        1,
+        "the newest migration in the directory was not used as the fallback answer",
+      );
+      assert.equal(count(/but migrations may have run/g), 1, "a fallback that cannot name the migration did not say so");
+      assert.equal(
+        count(/the paper is back on the OLD version\. The promote did NOT complete\./g),
+        1,
+        "the plain sentence was not used for the one fallback with no migration to report",
+      );
+      assert.match(
+        text,
+        /if this build reads a table or column a migration removed, tell the developer before continuing/,
+        "the note does not tell the operator what to do about it",
+      );
+    } finally {
+      cleanup(install);
+    }
+  },
+);
+
+test(
+  "a build that died at the migration says migrations may have run; one that died before it says nothing",
+  windowsOnly,
+  async () => {
+    const migrated = makeInstall();
+    const bundler = makeInstall();
+    try {
+      // Same failing build twice. The only difference is how far the build's
+      // own output says it got.
+      const harnessFor = (install, name, mode, stamp) =>
+        writeHarness(install, name, [
+          `$env:FAKE_NPM_MODE = '${mode}'`,
+          `$log = New-PromoteLog -App $app -Stamp '${stamp}'`,
+          "$res = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { return $true }",
+          `Set-Content -Path (Join-Path $app 'result.txt') -Value "ok=$($res.Ok);fallback=$($res.Fallback)" -Encoding ASCII`,
+        ]);
+
+      await runPowerShell(harnessFor(migrated, "build-migratefail.ps1", "migratefail", "20260108-000000"));
+      await runPowerShell(harnessFor(bundler, "build-buildfail.ps1", "buildfail", "20260109-000000"));
+
+      assert.equal(read(join(migrated.app, "result.txt")).trim(), "ok=False;fallback=True", "the failing build did not fall back");
+      assert.equal(read(join(bundler.app, "result.txt")).trim(), "ok=False;fallback=True", "the failing build did not fall back");
+
+      const migratedText = read(newestLog(migrated.app));
+      assert.match(
+        migratedText,
+        /The paper is back on the OLD version, but migrations may have run; if this build reads a table or column a migration removed, tell the developer before continuing/,
+        "a build that died at the migration did not warn that the database may have moved on",
+      );
+      assert.match(migratedText, /step=build FAILED/, "the step is not recorded as FAILED in the log");
+
+      // The step's own start line names the migration on purpose (it is why the
+      // build runs with the server down), so this asks about the note, not the
+      // word.
+      const bundlerText = read(newestLog(bundler.app));
+      assert.doesNotMatch(
+        bundlerText,
+        /migrations may have run|the database was already migrated to/,
+        "a build that never reached the migration still warned about the database",
+      );
+      assert.match(bundlerText, /step=build FAILED/, "the step is not recorded as FAILED in the log");
+    } finally {
+      rmSync(migrated.root, { recursive: true, force: true });
+      rmSync(bundler.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("the built-in limits are the ones the operator is told about", windowsOnly, async () => {
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "limits.ps1", [
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "deps=$(Get-PromoteChildTimeoutSeconds -Step 'deps');build=$(Get-PromoteChildTimeoutSeconds -Step 'build');verify=$(Get-PromoteChildTimeoutSeconds -Step 'verify');health=$(Get-PromoteHealthTimeoutSeconds)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+    assert.equal(
+      read(join(install.app, "result.txt")).trim(),
+      // Twenty minutes for each of the two long steps -- under the watchdog's
+      // 30-minute stand-down, so a hung step fails the promotion before the
+      // watchdog can start the app on a half-written tree. One minute for the
+      // health wait, which is what this install has always used and is shorter
+      // than the five it is allowed.
+      "deps=1200;build=1200;verify=0;health=60",
+      "the step limits changed without the operator-facing docs changing with them",
+    );
+  } finally {
+    cleanup(install);
+  }
+});
+
+test("promote.ps1 tells the fallback what it knows about the database", () => {
+  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+
+  // Step 8's fallback runs after the build step finished -- this run's or the
+  // resumed one's -- and the build step ends in db:migrate, so the database is
+  // on the new schema while the old build serves it. This has to say 'yes' and
+  // carry the build's own output, or the note never appears where it matters.
+  assert.match(
+    src,
+    /Invoke-PromoteFallback[^\n]*-MigrationsRan 'yes' -BuildOutput \$buildOutputFile/,
+    "the fallback after a failed health check no longer says the database was migrated",
+  );
+  // The build's own failure path must NOT claim to know: it died part way, so
+  // Invoke-PromoteBuild asks the build's output how far it got.
+  assert.match(src, /\$buildOutputFile = \$built\.OutFile/, "the build's output is not kept for the fallback that follows it");
+  assert.match(src, /Get-PromoteHealthTimeoutSeconds/, "the health wait is back to a bare number in promote.ps1");
 });

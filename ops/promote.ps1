@@ -36,6 +36,15 @@
   promote did not complete. A paper serving yesterday's build beats a paper
   serving nothing.
 
+  AND IT SAYS WHAT THAT OLD BUILD IS NOW SITTING ON. `npm run build` ends in
+  `npm run db:migrate` (package.json), so putting the old build back can leave
+  a database that has already moved on underneath it -- and a page reading a
+  table or column a migration changed answers wrongly rather than failing. The
+  same message therefore carries the migration the database is at, when that
+  can be established (from the migrate step's own output, or from the newest
+  file in migrations\), and "migrations may have run" when it cannot. See
+  Get-PromoteFallbackSentence in ops\lib-promote.ps1.
+
   WHY THE BUILD IS STILL INSIDE THE STOP-THE-APP WINDOW.
 
   Unit PR1 asked for the build to move in front of the stop, into a side
@@ -244,10 +253,17 @@ function Skip-Step([string]$name) {
   Start whatever is in .output now and wait for it to answer. Returns $true
   only when the paper really is answering, so nobody writes "the paper is
   back" about a process that never came up.
+
+  The wait is bounded (Get-PromoteHealthTimeoutSeconds), because this is the
+  other place a promotion can sit and hold the paper down: the start script
+  itself is not detached, and a Postgres still in crash recovery is the
+  documented reason it can take a while. It is a wait, not a give-up -- see
+  the note on the marker's 30-minute cap in ops\lib-promote.ps1.
 #>
 function Start-TheApp {
   & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "start-townreporter.ps1")
-  for ($i = 0; $i -lt 60 -and -not (Test-PromotePaperUp -Port ([int]$port)); $i++) {
+  $healthSeconds = Get-PromoteHealthTimeoutSeconds
+  for ($i = 0; $i -lt $healthSeconds -and -not (Test-PromotePaperUp -Port ([int]$port)); $i++) {
     Start-Sleep -Seconds 1
   }
   return (Test-PromotePaperUp -Port ([int]$port))
@@ -636,7 +652,13 @@ if (Skip-Step 'deps') {
     Say "the lockfile changed; installing dependencies"
     $r = Invoke-PromoteChild -Log $log -Step 'deps' -Command 'npm ci'
     if ($r.ExitCode -ne 0) {
-      $code = if ($null -eq $r.ExitCode) { "it did not reach its end, so there is no exit code" } else { "exit $($r.ExitCode)" }
+      $code = if ($r.TimedOut) {
+        "it ran past its $(Get-PromoteChildTimeoutSeconds -Step 'deps')-second limit and was stopped"
+      } elseif ($null -eq $r.ExitCode) {
+        "it did not reach its end, so there is no exit code"
+      } else {
+        "exit $($r.ExitCode)"
+      }
       Die "npm ci did not succeed ($code). The paper is still down. Its output is in $($r.OutFile)" 'deps' "Read that file, fix the install, then re-run this script with -Resume to carry on from here. The backup is at $backupNote"
     }
     Complete-PromoteStep -Log $log -Name 'deps' -Seconds $r.Seconds -Detail "npm ci exit 0"
@@ -660,6 +682,11 @@ if (Skip-Step 'deps') {
   rather than a hopeful sentence in a log.
 #>
 $previousBuild = $null
+# The step's own stdout, kept for step 8: if that step has to put the old build
+# back, what the database is at is read out of this file. On a resumed run the
+# build did not happen here, and the answer comes from the migrations directory
+# instead -- see Get-PromoteAppliedMigrationName.
+$buildOutputFile = $null
 if (Skip-Step 'build') {
   # A resumed run past this point already has a build it liked, and the run it
   # resumed left the one before THAT at .output-previous -- which is what a
@@ -670,9 +697,13 @@ if (Skip-Step 'build') {
     Say "building"
     $built = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp } -Previous $previousBuild
     if ($built.Previous) { $previousBuild = $built.Previous }
+    if ($built.OutFile) { $buildOutputFile = $built.OutFile }
     if (-not $built.Ok) {
       Say "the build did not succeed"
-      Die "$($built.Failure) The build's output is in $($built.OutFile)" 'build' "Read that file, fix the build, then run this script again (without -Resume: the checkout is already at origin/main). The backup is at $backupNote"
+      # No step name: Invoke-PromoteBuild has already written this step's FAILED
+      # line into the log, carrying the same sentence, and a second one would
+      # make a reader think the step failed twice.
+      Die "$($built.Failure) The build's output is in $($built.OutFile)" '' "Read that file, fix the build, then run this script again (without -Resume: the checkout is already at origin/main). The backup is at $backupNote"
     }
   } else {
     Add-PromoteStep -Log $log -Name 'build' -Detail "npm run build (this also runs the schema migration)"
@@ -695,11 +726,20 @@ if (Skip-Step 'start') {
         "the paper is up" and "the promote worked" are different sentences.
       #>
       Say "the new build did not come up on port $port"
-      Write-PromoteLog $log "the new build was started but nothing answered on port $port within 60s"
-      if (Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp } -Previous $previousBuild) {
-        Write-PromoteLog $log "the paper is back on the OLD version. The promote did NOT complete."
-        Say "the paper is back on the OLD version. The promote did NOT complete."
-        Die "The new build did not answer on port $port. The paper is back on the OLD version; the promote did not complete." 'start' "Read logs\townreporter.log for why the new build did not start. The backup is at $backupNote"
+      Write-PromoteLog $log "the new build was started but nothing answered on port $port within $(Get-PromoteHealthTimeoutSeconds)s"
+      <#
+        MigrationsRan 'yes': getting here means the build step finished, this
+        run or the one this run resumed -- and the build step ends in
+        `npm run db:migrate`. So the database is at the newest migration this
+        checkout knows about, while the build going back on is the older one.
+        Invoke-PromoteFallback logs that sentence; the message below repeats it
+        so the operator sees it without opening the log.
+      #>
+      if (Invoke-PromoteFallback -Log $log -App $app -StartTheApp { Start-TheApp } -Previous $previousBuild -MigrationsRan 'yes' -BuildOutput $buildOutputFile) {
+        $sentence = Get-PromoteFallbackSentence -App $app -MigrationsRan 'yes' -BuildOutput $buildOutputFile
+        if (-not $sentence) { $sentence = "The paper is back on the OLD version; the promote did not complete." }
+        Say $sentence
+        Die "The new build did not answer on port $port. $sentence" 'start' "Read logs\townreporter.log for why the new build did not start. The backup is at $backupNote"
       }
       Die "The new build did not answer on port $port, and there was no previous build to put back." 'start' "Read logs\townreporter.log for why it did not start. The backup is at $backupNote"
     }
