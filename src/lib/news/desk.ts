@@ -284,6 +284,12 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
   const sql = await getSql();
   return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
+             -- the row can say "Keeps failing" rather than repeating the last
+             -- reason for ever. last_ok_at is the only column in this schema
+             -- that answers "when did this last READ" -- last_fetched_at moves
+             -- on a failed attempt too.
+             consecutive_failures, failure_streak_started_at, last_ok_at,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
@@ -446,11 +452,22 @@ export const setSourceStatus = createServerFn({ method: "POST" })
       off a null check.
     */
     const decided = data.status === "accepted" || data.status === "rejected";
+    /*
+      SH0-1: the failure streak DIES with the status it was recorded under.
+
+      A paused row must never read "Keeps failing" -- the desk has stopped
+      trying, so the sentence would be false -- and a source the editor removed
+      and put back is being judged afresh, not continuing a streak that a
+      different decision interrupted. Clearing it here is what makes both of
+      those true by construction rather than by a guard somewhere downstream.
+    */
     await sql`
       update sources set
         status = ${data.status},
         reviewed_at = case when ${decided} then now() else null end,
-        review_note = case when ${decided} then review_note else null end
+        review_note = case when ${decided} then review_note else null end,
+        consecutive_failures = 0,
+        failure_streak_started_at = null
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
@@ -1251,8 +1268,14 @@ export async function performCheckOneSource(
     const bundle = await withRetry(() => ingestUrl(src.url));
     const text = postgresText(bundle.text);
     if (!text.trim()) throw new Error("Page had almost no readable text");
+    /*
+      SH0-1: the manual check is an ATTEMPT like any other, so it moves the
+      streak the same way the scan does -- one code path per outcome, and this
+      is the second of them. A press that reads the page ends the streak; a
+      press that fails extends it by one, exactly as the scanner would have.
+    */
     await sql.query(
-      "update sources set last_fetched_at=now(), last_error=null where id=$1 and newsroom_id=$2",
+      "update sources set last_fetched_at=now(), last_error=null, consecutive_failures=0, failure_streak_started_at=null, last_ok_at=now() where id=$1 and newsroom_id=$2",
       [sourceId, owned(context)],
     );
     return {
@@ -1265,7 +1288,10 @@ export async function performCheckOneSource(
   } catch (err) {
     const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
     await sql.query(
-      "update sources set last_error=$1, last_fetched_at=now() where id=$2 and newsroom_id=$3",
+      `update sources set last_error=$1, last_fetched_at=now(),
+         consecutive_failures = sources.consecutive_failures + 1,
+         failure_streak_started_at = coalesce(failure_streak_started_at, now())
+       where id=$2 and newsroom_id=$3`,
       [msg, sourceId, owned(context)],
     );
     return {
@@ -1680,8 +1706,16 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const changed = hash !== src.last_hash;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
       else
+        /*
+          SH0-1: the streak is written in the SAME statement that clears
+          `last_error`, on both commit paths, because a success is the only
+          thing that can end a streak and a second statement could be skipped
+          without anything noticing. `last_ok_at` is new information -- see
+          0115 -- and this is its one writer.
+        */
         await sql`
-        update sources set last_fetched_at = now(), last_error = null
+        update sources set last_fetched_at = now(), last_error = null,
+          consecutive_failures = 0, failure_streak_started_at = null, last_ok_at = now()
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       pendingHashes.push({ id: src.id, hash, text, changed });
@@ -1701,8 +1735,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
       else
+        /*
+          SH0-1: the count is carried by the DATABASE, not read-then-written by
+          this process -- six sources are in flight at once and two attempts at
+          the same row must not both read the same number. The streak's start is
+          `coalesce`d so the second failure in a row does not move it: "first
+          failed <date>" must name the first.
+        */
         await sql`
-        update sources set last_error = ${msg}, last_fetched_at = now()
+        update sources set last_error = ${msg}, last_fetched_at = now(),
+          consecutive_failures = sources.consecutive_failures + 1,
+          failure_streak_started_at = coalesce(failure_streak_started_at, now())
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
@@ -2134,8 +2177,23 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
     if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
     for (const touch of pendingSourceTouches) {
+      /*
+        SH0-1: the SCHEDULED scan's half of the streak, and it is a separate
+        statement from the inline path's for the reason `scan-coverage.test.ts`
+        exists -- a source touch committed here once went without something the
+        inline write had. `touch.error` is null on the sources this pass read
+        and a message on the ones it could not, so the one statement carries
+        both outcomes and the two paths cannot disagree.
+      */
       await writeSql`
-        update sources set last_error = ${touch.error}, last_fetched_at = now()
+        update sources set
+          last_error = ${touch.error},
+          last_fetched_at = now(),
+          consecutive_failures = case when ${touch.error}::text is null then 0
+            else sources.consecutive_failures + 1 end,
+          failure_streak_started_at = case when ${touch.error}::text is null then null
+            else coalesce(failure_streak_started_at, now()) end,
+          last_ok_at = case when ${touch.error}::text is null then now() else last_ok_at end
         where id = ${touch.id} and newsroom_id = ${owned(context)}
       `;
     }

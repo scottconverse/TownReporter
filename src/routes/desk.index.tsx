@@ -75,6 +75,7 @@ import {
   editorStatus,
   flakyFailureCopy,
   followUpsRailCopy,
+  keepsFailingNote,
   openLeads,
   parseFailedSources,
   printedDupChip,
@@ -93,6 +94,7 @@ import {
   deskDraftState,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
@@ -642,6 +644,29 @@ function DeskHome() {
     .map((s) => {
       const failure = failReasonFor(s);
       if (failure) {
+        /*
+          SH0-3, on the desk home. THE LABEL IS THE ONLY THING THAT CHANGES --
+          no fifth state, no re-sort: a source that keeps failing is a source
+          that could not be checked, so it keeps `rank: 0` and the same place
+          at the top of the wire it has always had. What the editor gains is
+          the word "Keeps" and the two facts behind it, which is the whole
+          difference between "the last pass had a bad minute" and "this has
+          been true for four days".
+        */
+        if (keepsFailing(s)) {
+          return {
+            s,
+            tone: "fail",
+            label: "Keeps failing",
+            note: keepsFailingNote({
+              count: s.consecutive_failures ?? 0,
+              lastError: s.last_error,
+              url: s.url,
+              firstFailedAt: s.failure_streak_started_at,
+            }),
+            rank: 0,
+          };
+        }
         return { s, tone: "fail", label: "Could not check", note: failure, rank: 0 };
       }
       if (citedCount.has(s.id)) {

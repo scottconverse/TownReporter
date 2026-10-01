@@ -940,6 +940,48 @@ export function editorFetchError(raw: string | null | undefined, url?: string | 
   return plainEditorText(t);
 }
 
+/**
+ * THE "KEEPS FAILING" SENTENCE, in the editor's words (SH0-2).
+ *
+ * It says three things and no more: HOW MANY times in a row, WHY the last one
+ * failed (the plain reason, through `editorFetchError`, never the raw message),
+ * and WHEN the run of failures began -- because "since Tuesday" is the part
+ * that tells the editor whether to wait or to act.
+ *
+ * WHAT IT DELIBERATELY DOES NOT SAY:
+ *
+ *  - It never says the site is broken, dead, or blocked. The desk knows one
+ *    thing -- that WE could not read the page -- and the cause can be our own
+ *    parser, a login wall, or a quiet DNS blip. "Could not read this" is the
+ *    whole of what was observed.
+ *  - It never counts scans the desk did not attempt. The count comes from the
+ *    row, which only moves on an attempt (`KEEPS_FAILING_AFTER`, source-rows).
+ *  - It never names a place, a city or a paper: the same sentence is read by
+ *    every install, and the source's own name and address are on the row
+ *    around it.
+ *
+ * The date is the house short form (`killRecordLine`'s), and a missing or
+ * unparseable `firstFailedAt` drops the clause rather than printing "Invalid
+ * Date" or inventing a day.
+ */
+export function keepsFailingNote(input: {
+  count: number;
+  lastError?: string | null;
+  url?: string | null;
+  firstFailedAt?: string | null;
+}): string {
+  const count = Math.max(0, Math.floor(input.count));
+  const times = `${count} scan${count === 1 ? "" : "s"} in a row could not read this.`;
+  const reason = editorFetchError(input.lastError, input.url);
+  const withReason = reason ? `${times} Last reason: ${reason}` : times;
+  const at = input.firstFailedAt ? new Date(input.firstFailedAt) : null;
+  const when =
+    at && !Number.isNaN(at.getTime())
+      ? at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : null;
+  return when ? `${withReason} First failed ${when}.` : withReason;
+}
+
 export function workingQueueEmptyCopy(input: {
   publishedCount: number;
   lastScan?: { leads_created: number; sources_fetched: number; error: string | null } | null;

@@ -9,6 +9,16 @@ export type SourceRow = {
   last_fetched_at: string | null;
   last_error: string | null;
   /*
+    The failure streak (migration 0115, unit SH0-1): how many scans in a row
+    could not read this source, when that run of failures began, and when it
+    last read successfully. Optional for the same reason as the block below --
+    a reader that selects only the watch-list columns has no answer rather than
+    a wrong one, and `keepsFailing` reads a missing count as zero.
+  */
+  consecutive_failures?: number | null;
+  failure_streak_started_at?: string | null;
+  last_ok_at?: string | null;
+  /*
     Why this source was suggested, who suggested it, and where it came from
     (migration 0097). Optional because most readers of this type select only
     the watch-list columns, and because every row proposed before 0.6.70 has

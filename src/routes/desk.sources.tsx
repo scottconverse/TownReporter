@@ -22,9 +22,11 @@ import {
   dailyScheduleLabel,
   editorActionError,
   editorFetchError,
+  keepsFailingNote,
   scanRowLine,
   suggestedOriginLine,
 } from "@/lib/news/desk-copy";
+import { keepsFailing } from "@/lib/news/source-rows";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
@@ -1249,25 +1251,43 @@ function WatchRows({
       {rows.map((s) => {
         const paused = s.status === "paused";
         const failed = s.last_error != null;
+        /*
+          SH0-3: the flag the whole unit exists for. `keepsFailing` is the
+          predicate (SH0-2) and it already refuses a paused row, so this is the
+          same "the desk tried three times and could not read it" the note
+          below spells out. It does NOT replace the failure state -- a row that
+          has failed once still says "Could not check" -- and it draws nothing
+          new on the desk: the same chip, a stronger word.
+        */
+        const keeps = keepsFailing(s);
         const fresh = s.new_since_last_pass ?? 0;
         const chip = paused
           ? { cls: "paused", label: "Paused" }
-          : failed
-            ? { cls: "fail", label: "Could not check" }
-            : fresh > 0
-              ? { cls: "changed", label: "Changed" }
-              : s.last_fetched_at
-                ? { cls: "same", label: "✓ No change" }
-                : { cls: "wait", label: "Not checked yet" };
+          : keeps
+            ? { cls: "fail", label: "Keeps failing" }
+            : failed
+              ? { cls: "fail", label: "Could not check" }
+              : fresh > 0
+                ? { cls: "changed", label: "Changed" }
+                : s.last_fetched_at
+                  ? { cls: "same", label: "✓ No change" }
+                  : { cls: "wait", label: "Not checked yet" };
         const note = paused
           ? "Paused · the scanner will not fetch it"
-          : failed
-            ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
-            : fresh > 0
-              ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
-              : s.last_fetched_at
-                ? `Checked ${formatDateTime(s.last_fetched_at)}`
-                : "Added, not fetched yet";
+          : keeps
+            ? keepsFailingNote({
+                count: s.consecutive_failures ?? 0,
+                lastError: s.last_error,
+                url: s.url,
+                firstFailedAt: s.failure_streak_started_at,
+              })
+            : failed
+              ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
+              : fresh > 0
+                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+                : s.last_fetched_at
+                  ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                  : "Added, not fetched yet";
         const checking = checkingId === s.id;
         const result = checkResult?.id === s.id ? checkResult : null;
         const kills = killCounts?.get(s.id);
@@ -1331,31 +1351,65 @@ function WatchRows({
                     <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
                       Pause
                     </InkButton>
-                    {/*
-                    Remove, one click deeper.
+                    {keeps ? (
+                      /*
+                        SH0-3 / owner addendum item 1: a row that keeps failing
+                        offers the two things an editor actually wants, ONE
+                        PRESS EACH -- Pause (already above) and Delete.
 
-                    BJ3 item 1: three 44px buttons at their natural width came
-                    to 292px of the 598px the column has at 1280. The grid's
-                    third track is `auto`, so it sized to that 292px max-content
-                    and the `1fr` name track starved to 79px -- the BJ2 finding
-                    (every name one word per line, the url printed over the
-                    chip). The drawing puts two buttons on an active row, so
-                    Remove is drawn here as the same `row-more` disclosure the
-                    other desks use: still one tab stop, still one click away,
-                    and the row keeps the width for its name.
-                  */}
-                    <details className="row-more">
-                      <summary className="btn quiet">More ▾</summary>
-                      <div className="row-more-panel">
-                        <button
-                          type="button"
-                          className="btn quiet"
-                          onClick={() => onStatus(s.id, "rejected")}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    </details>
+                        Delete is drawn as a plain button here rather than
+                        behind the "More ▾" disclosure every other active row
+                        uses, because the whole point of the flag is that this
+                        row has been waiting. It asks ONE question first, and
+                        the question names what goes: the source, and the watch
+                        list it leaves. Nothing is autosaved, nothing was
+                        paused or removed behind the editor's back -- the
+                        addendum is explicit that the desk flags and the editor
+                        acts.
+                      */
+                      <InkButton
+                        tone="quiet"
+                        disabled={checking}
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              `Delete “${s.title}”? The desk stops fetching ${hostLabel(s.url)} and this source comes off the watch list. Pages already saved from it stay in the newsroom.`,
+                            )
+                          )
+                            return;
+                          onStatus(s.id, "rejected");
+                        }}
+                      >
+                        Delete
+                      </InkButton>
+                    ) : (
+                      /*
+                        Remove, one click deeper.
+
+                        BJ3 item 1: three 44px buttons at their natural width
+                        came to 292px of the 598px the column has at 1280. The
+                        grid's third track is `auto`, so it sized to that 292px
+                        max-content and the `1fr` name track starved to 79px --
+                        the BJ2 finding (every name one word per line, the url
+                        printed over the chip). The drawing puts two buttons on
+                        an active row, so Remove is drawn here as the same
+                        `row-more` disclosure the other desks use: still one
+                        tab stop, still one click away, and the row keeps the
+                        width for its name.
+                      */
+                      <details className="row-more">
+                        <summary className="btn quiet">More ▾</summary>
+                        <div className="row-more-panel">
+                          <button
+                            type="button"
+                            className="btn quiet"
+                            onClick={() => onStatus(s.id, "rejected")}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      </details>
+                    )}
                   </>
                 )}
               </div>

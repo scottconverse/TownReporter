@@ -36,6 +36,7 @@ import {
   darkJobActive,
   observedDarkJobFinished,
   investigationStopKind,
+  keepsFailingNote,
   kindFromSourceUrl,
   tierFromKind,
   topicFromText,
@@ -2199,5 +2200,68 @@ describe("a scan run's row while it is still running (FB1b, item 2)", () => {
     // A failed run reads as the count line, with the reason on the page's own
     // error row -- which is where `editorScanError` renders it.
     assert.match(scanRowLine({ ...finished, finished_at: null, error: "Provider failure" }), /12 fetched/);
+  });
+});
+
+/*
+  ── SH0-2: THE "KEEPS FAILING" SENTENCE ──────────────────────────────────────
+*/
+describe("keepsFailingNote", () => {
+  const BASE = {
+    count: 3,
+    lastError: "404 not found",
+    url: "https://example.test/feed",
+    firstFailedAt: "2026-09-28T14:00:00.000Z",
+  };
+
+  it("says how many, why and since when", () => {
+    const line = keepsFailingNote(BASE);
+    assert.match(line, /^3 scans in a row could not read this\./);
+    assert.match(line, /Last reason: That page is gone or empty\./);
+    assert.match(line, /First failed \w{3} \d{1,2}, \d{4}\.$/);
+  });
+
+  it("never says the site is broken, blocked or dead", () => {
+    // The desk knows one thing -- that WE could not read the page -- and the
+    // cause can be its own parser, a login wall or a DNS blip.
+    const line = keepsFailingNote({ ...BASE, lastError: "403 forbidden" });
+    assert.doesNotMatch(line, /broken|blocked|dead|offline/i);
+    assert.match(line, /could not read this/);
+  });
+
+  it("uses the plain reason, never the raw fetch message", () => {
+    const line = keepsFailingNote({ ...BASE, lastError: "Fetch failed: getaddrinfo ENOTFOUND x" });
+    assert.doesNotMatch(line, /ENOTFOUND|getaddrinfo/);
+    assert.match(line, /That address could not be found\./);
+  });
+
+  it("drops the date clause rather than inventing one", () => {
+    assert.equal(
+      keepsFailingNote({ ...BASE, firstFailedAt: null }),
+      "3 scans in a row could not read this. Last reason: That page is gone or empty.",
+    );
+    assert.equal(
+      keepsFailingNote({ ...BASE, firstFailedAt: "not a date" }),
+      "3 scans in a row could not read this. Last reason: That page is gone or empty.",
+    );
+  });
+
+  it("still reads as a sentence when the last error is gone", () => {
+    assert.equal(
+      keepsFailingNote({ count: 4, lastError: null, firstFailedAt: null }),
+      "4 scans in a row could not read this.",
+    );
+  });
+
+  it("counts one scan as one scan", () => {
+    // Below the threshold the row never shows this, but the sentence must not
+    // be ungrammatical if it ever does.
+    assert.match(keepsFailingNote({ count: 1 }), /^1 scan in a row/);
+  });
+
+  it("names no place, paper or city", () => {
+    // Every install reads this sentence; the source's own name and address are
+    // on the row around it.
+    assert.doesNotMatch(keepsFailingNote(BASE), /Longmont|Colorado|Times-Call|Leader/i);
   });
 });
