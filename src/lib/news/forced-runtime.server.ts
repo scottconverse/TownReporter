@@ -20,8 +20,19 @@ export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | AutomaticRu
 /* A retired id is excluded as well as `local-model`: `RetiredProviderId` is a
    NAME with no entry and no transport behind it (GR-C removed Grok/xAI), so it
    can never be the choice a CLI-transport snapshot names. Written against the
-   type rather than the string, so this file names no retired provider. */
-type CliProviderChoice = Exclude<PickerProviderId, "local-model" | RetiredProviderId>;
+   type rather than the string, so this file names no retired provider.
+
+   `AutomaticRungId` is excluded too, and it has to be said rather than
+   inherited: unit U29 put `deepseek-flash` in `PICKER_PROVIDER_IDS` (Opinion's
+   menu offers it by name), so "in the picker list" no longer means "a runtime
+   an editor could have named for a batch". This type is the CLI half of a
+   named snapshot, and a rung is never a CLI runtime -- it is an Ollama
+   endpoint. Rungs keep their own snapshot variant, `AutomaticRungSnapshot`,
+   which only the run path may read. */
+type CliProviderChoice = Exclude<
+  PickerProviderId,
+  "local-model" | RetiredProviderId | AutomaticRungId
+>;
 /** One rung of Automatic's ladder, minus the internal "configured" entry. */
 type LadderChoice = Exclude<ProviderId, "configured">;
 /**

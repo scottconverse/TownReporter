@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getSql } from "../db.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
-import { checkOpinionReadiness, OPINION_MODEL_UNIVERSE } from "./opinion-readiness.ts";
-import { OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
+import {
+  checkOpinionReadiness,
+  firstReadyOpinionRung,
+  OPINION_MODEL_UNIVERSE,
+} from "./opinion-readiness.ts";
+import { modelChoiceLabel, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
 import { ensureProviderSettingsSchema } from "./provider-settings.ts";
 
 async function withEnv<T>(changes: Record<string, string | undefined>, run: () => Promise<T>) {
@@ -32,22 +36,36 @@ async function withEnv<T>(changes: Record<string, string | undefined>, run: () =
   had written a draft with DeepSeek. The sentence was true of Opinion and read
   as true of the whole desk, because nothing in it said which models it was
   talking about. These tests hold the fix: the message names Opinion's own
-  models, says what is missing for each, and says out loud that the desk's
-  story writer is not one of them.
+  models, in the order Opinion tries them, and says what is missing for each.
 
-  THE CHOICE THIS PINS, and why it is the copy and not the ladder: adding a
-  local or DeepSeek rung to Opinion's Automatic would make the paper's own
-  voice whatever casual model the wire happens to use, and the split is a
-  written product decision (`OPINION_AUTOMATIC_LADDER`'s own comment,
-  `.env.example`: "Opinion's Automatic is a different ladder and takes none of
-  these"). The defect was the message, so the message is what changed.
+  U24's own choice was to change the COPY and leave the ladder alone. Unit U29
+  (owner decision 2026-09-30) then changed the ladder too -- Opinion's
+  Automatic now starts on DeepSeek v4.1 Flash -- so the sentence that said
+  "the desk's story writer is not used for Opinion" would now be false. The
+  tests below pin the sentence that replaced it, rung by rung, in order.
 */
 describe("U24: Opinion says which models it writes with", () => {
-  it("names Automatic's own two, and says the desk's story writer is not one of them", () => {
+  it("names Automatic's own three, in the order Automatic walks them", () => {
+    assert.match(OPINION_MODEL_UNIVERSE, /DeepSeek/);
     assert.match(OPINION_MODEL_UNIVERSE, /Codex/);
     assert.match(OPINION_MODEL_UNIVERSE, /Claude/);
-    assert.match(OPINION_MODEL_UNIVERSE, /desk's story writer/i);
-    assert.match(OPINION_MODEL_UNIVERSE, /not used for Opinion/);
+    // The order in the sentence is the ladder's order, not a sentence someone
+    // typed once: DeepSeek first, then Codex Sol, then Claude Sonnet.
+    const deepseek = OPINION_MODEL_UNIVERSE.indexOf("DeepSeek");
+    const codex = OPINION_MODEL_UNIVERSE.indexOf("Codex");
+    const claude = OPINION_MODEL_UNIVERSE.indexOf("Claude");
+    assert.ok(
+      deepseek > -1 && deepseek < codex && codex < claude,
+      `the sentence must name the rungs in ladder order, got: ${OPINION_MODEL_UNIVERSE}`,
+    );
+    for (const rung of OPINION_AUTOMATIC_LADDER) {
+      assert.ok(
+        OPINION_MODEL_UNIVERSE.includes(modelChoiceLabel(rung)),
+        `the sentence must name every rung it means: ${rung}`,
+      );
+    }
+    // The one true thing that replaced U24's "a different list" sentence.
+    assert.match(OPINION_MODEL_UNIVERSE, /DeepSeek is also the model the desk's story writer drafts with/);
   });
 
   /*
@@ -84,13 +102,62 @@ describe("U24: Opinion says which models it writes with", () => {
       }),
     );
     assert.equal(result.ready, false);
-    assert.match(result.why, /Opinion's Automatic writes with Codex Sol, then Claude Sonnet/);
-    assert.match(result.why, /not used for Opinion/);
+    assert.match(
+      result.why,
+      /Opinion's Automatic writes with DeepSeek v4\.1 Flash, then Codex Sol, then Claude Sonnet/,
+    );
     /* The generic sentence that started this is gone from what the editor reads. */
     assert.doesNotMatch(result.why, /No model is set up yet/);
     /* And each rung Automatic walked says what is missing for itself. */
+    assert.match(result.why, /Opinion can write with DeepSeek v4\.1 Flash/);
     assert.match(result.why, /Opinion can write with Codex Sol/);
     assert.match(result.why, /Opinion can write with Claude, and Claude Code is not signed in/);
+  });
+
+  /*
+    Unit U29: a readiness sentence per state, each one true of the state it is
+    shown in. The DeepSeek rung is an Ollama endpoint rather than a login, so
+    it gets its own line -- the generic copy names Claude Code and Codex logins
+    and neither is what is missing when this rung cannot answer.
+  */
+  it("explains the DeepSeek rung in its own words, and does not send the editor to a login", async () => {
+    const result = await withEnv({}, () =>
+      checkOpinionReadiness("deepseek-flash", {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        probeCandidate: async () => ({
+          ok: false as const,
+          error:
+            "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
+        }),
+      }),
+    );
+    assert.equal(result.ready, false);
+    assert.match(result.why, /Opinion can write with DeepSeek v4\.1 Flash/);
+    assert.match(result.why, /start Ollama|TOWNREPORTER_DEEPSEEK_BASE_URL/);
+    assert.doesNotMatch(result.why, /open Claude Code|Codex on this machine and log in/);
+    // A DeepSeek pick is not silently rewritten into the page default, and it
+    // is an explicit pick, so the other rungs are not listed at it.
+    assert.equal(result.effectiveChoice, "deepseek-flash");
+    assert.doesNotMatch(result.why, /Opinion's Automatic writes with/);
+  });
+
+  it("keeps a generic failure that is not about setup exactly as the provider said it", async () => {
+    const result = await withEnv({}, () =>
+      checkOpinionReadiness("deepseek-flash", {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        probeCandidate: async () => ({
+          ok: false as const,
+          error: "Ollama is unreachable. Check that it is running and that this machine is online.",
+        }),
+      }),
+    );
+    assert.equal(result.ready, false);
+    assert.match(result.why, /Ollama is unreachable/);
+    assert.doesNotMatch(
+      result.why,
+      /Opinion can write with DeepSeek/,
+      "a failure that is already specific must pass through untouched",
+    );
   });
 
   it("does not list the other models to an editor who picked one on purpose", async () => {
@@ -109,8 +176,34 @@ describe("U24: Opinion says which models it writes with", () => {
     assert.doesNotMatch(result.why, /Automatic writes with Codex Sol, then Claude Sonnet/);
   });
 
-  it("walks exactly the two rungs it names in that order", () => {
-    assert.deepEqual([...OPINION_AUTOMATIC_LADDER], ["codex-frontier", "claude-sonnet"]);
+  it("walks exactly the three rungs it names, in that order", () => {
+    assert.deepEqual(
+      [...OPINION_AUTOMATIC_LADDER],
+      ["deepseek-flash", "codex-frontier", "claude-sonnet"],
+    );
+  });
+
+  /*
+    Unit U29: which rung a RUN starts on. `firstReadyOpinionRung` is what
+    `performEditorialWork` asks before it begins an Automatic editorial, and
+    the reason it exists is that the head of this ladder is now an Ollama
+    endpoint a given machine may not have -- starting on it blindly would
+    begin every Automatic piece on a rung that cannot answer.
+  */
+  it("resolves Automatic to the first rung that answers, in ladder order", async () => {
+    const asked: string[] = [];
+    const resolved = await firstReadyOpinionRung(async (choice) => {
+      asked.push(choice);
+      return { ok: choice === "codex-frontier" };
+    });
+    assert.equal(resolved, "codex-frontier");
+    assert.deepEqual(asked, ["deepseek-flash", "codex-frontier"]);
+
+    const none = await firstReadyOpinionRung(async () => ({ ok: false }));
+    assert.equal(none, null, "nothing ready is reported as nothing ready, not as a guess");
+
+    const first = await firstReadyOpinionRung(async () => ({ ok: true }));
+    assert.equal(first, "deepseek-flash", "a ready DeepSeek is where an Automatic editoral starts");
   });
 });
 
@@ -156,18 +249,36 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     }
   });
 
-  it("Automatic accepts Codex Sol first without probing the Claude fallback", async () => {
+  it("Automatic starts on DeepSeek and does not probe the rungs behind it", async () => {
     const probed: string[] = [];
     const result = await checkOpinionReadiness("auto", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
       probeCandidate: async (choice) => {
         probed.push(choice);
-        return { ok: true as const, label: "Codex Sol", choice };
+        return { ok: true as const, label: "DeepSeek v4.1 Flash", choice };
+      },
+    });
+    assert.equal(result.ready, true);
+    // Automatic stays Automatic on the queued request; the rung it resolved to
+    // is the run's business, not the row's.
+    assert.equal(result.effectiveChoice, "auto");
+    assert.deepEqual(probed, ["deepseek-flash"]);
+  });
+
+  it("Automatic falls through to Codex Sol when DeepSeek cannot answer", async () => {
+    const probed: string[] = [];
+    const result = await checkOpinionReadiness("auto", {
+      findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+      probeCandidate: async (choice) => {
+        probed.push(choice);
+        return choice === "deepseek-flash"
+          ? { ok: false as const, error: "Ollama is unreachable. Check that it is running." }
+          : { ok: true as const, label: "Codex Sol", choice };
       },
     });
     assert.equal(result.ready, true);
     assert.equal(result.effectiveChoice, "auto");
-    assert.deepEqual(probed, ["codex-frontier"]);
+    assert.deepEqual(probed, ["deepseek-flash", "codex-frontier"]);
   });
 
   it("a provider auth failure is reported as-is and probes nothing else", async () => {

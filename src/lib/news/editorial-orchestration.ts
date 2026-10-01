@@ -11,7 +11,7 @@ import {
   OPINION_AUTOMATIC_LADDER,
   type OpinionModelChoice,
 } from "./model-choice.ts";
-import { providerEntry, type ModelEffort } from "./provider-registry.ts";
+import { providerEntry, providerRunsToolPass, type ModelEffort } from "./provider-registry.ts";
 import {
   automaticFailoverReason,
   type AutomaticFailoverReason,
@@ -78,12 +78,17 @@ export type EditorialOrchestrationRuntime = {
     researchPack: string;
   }) => Promise<ChatResult>;
   /**
-   * The Local model pair. A local server has no research-tool loop the way
-   * the Claude Code CLI does (see EDITORIAL_TOOLS), so this is one call, not
-   * two: it writes straight from `researchPack` and the voice text. Required
-   * (not optional) so a local-model pick can never silently fall through to
-   * `runClaudePair` -- see the Opinion routing fix, audit finding
-   * "Opinion 'Local model' pick silently uses Claude".
+   * The one-pass pair, for every OpenAI-compatible writer: the "Local model"
+   * pick, and (unit U29) Automatic's DeepSeek v4.1 Flash rung.
+   *
+   * A local/Ollama/llama.cpp server has no research-tool loop the way the
+   * Claude Code CLI does (see EDITORIAL_TOOLS), so there is no gathering pass
+   * to run and this is one call, not two: it writes straight from the
+   * material the editor supplied, with the voice as the system instructions.
+   * The writing pack records that no gathering pass ran, and the desk says so
+   * on the run. Required (not optional) so a local pick can never silently
+   * fall through to `runClaudePair` -- see the Opinion routing fix, audit
+   * finding "Opinion 'Local model' pick silently uses Claude".
    */
   runLocalPair: (context: {
     input: WriteEditorialInput;
@@ -199,22 +204,33 @@ export async function orchestrateEditorial(
     askedFor: input.askedFor,
   });
 
-  /* Automatic tries the subscription ladder in order. An explicit choice is
-     preferred; only a classified technical failure may move it to the same
+  /* Automatic tries the ladder in order. An explicit choice is preferred;
+     only a classified technical failure may move it to the same
      ready-provider ladder. Provider refusals always stop. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
     const candidateInput = { ...input, modelChoice: candidate };
     if (isCustomModelChoice(candidate)) {
       return runtime.runCustomPair({ input: candidateInput, found, researchPack });
     }
-    if (providerEntry(candidate)?.kind === "codex") {
+    /*
+      Which pair a candidate runs on is read from the REGISTRY, not from its
+      id (unit U29). `providerRunsToolPass` is the question the two-pass flow
+      turns on: a provider with a WebSearch/WebFetch loop gets the Claude or
+      Codex pair (gathering pass first, then the writing pass); one without
+      -- the "Local model" pick and Automatic's DeepSeek v4.1 Flash rung, both
+      Ollama / llama.cpp endpoints -- has no gathering pass to run, so it gets
+      the ONE-PASS pair. A local entry added to the ladder later inherits that
+      behavior without this function being touched.
+    */
+    const entry = providerEntry(candidate);
+    if (entry?.kind === "codex") {
       return runtime.runCodexPair
         ? runtime.runCodexPair({ input: candidateInput, found, researchPack })
         : { ok: false, error: "Codex is unavailable." };
     }
-    return candidate === "local-model"
-      ? runtime.runLocalPair({ input: candidateInput, found, researchPack })
-      : runtime.runClaudePair({ input: candidateInput, found, researchPack });
+    return providerRunsToolPass(entry)
+      ? runtime.runClaudePair({ input: candidateInput, found, researchPack })
+      : runtime.runLocalPair({ input: candidateInput, found, researchPack });
   };
 
   const requested = opinionModelChoice(input.modelChoice);

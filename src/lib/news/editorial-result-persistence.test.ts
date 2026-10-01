@@ -177,8 +177,8 @@ describe("Automatic Opinion provider persistence", () => {
           readEditorialDocuments,
           documentProbe: async (choice) => ({
             ok: true as const,
-            label: choice === "codex-frontier" ? "Codex Sol" : "Claude Sonnet",
-            choice: choice as "codex-frontier" | "claude-sonnet",
+            label: choice === "deepseek-flash" ? "DeepSeek v4.1 Flash" : choice === "codex-frontier" ? "Codex Sol" : "Claude Sonnet",
+            choice: choice as "deepseek-flash" | "codex-frontier" | "claude-sonnet",
           }),
           documentChat: async (_system, _user, _tokens, options) => {
             const choice = String(options?.choice);
@@ -187,14 +187,21 @@ describe("Automatic Opinion provider persistence", () => {
           },
           writeEditorial: async () => assert.fail("writing must not start without the retained document reading"),
         }),
-        /claude-sonnet reading unavailable/,
+        /codex-frontier reading unavailable/,
       );
-      assert.deepEqual(choices, ["codex-frontier", "claude-sonnet"]);
+      /*
+        Unit U29: the reading pass starts on the first rung of Opinion's
+        Automatic ladder that answers -- DeepSeek v4.1 Flash, since this fake
+        probe says every rung is ready -- and moves one rung (the failover
+        seam allows exactly one hop per attempt) to Codex Sol before the
+        failure is terminal.
+      */
+      assert.deepEqual(choices, ["deepseek-flash", "codex-frontier"]);
       const [stored] = await sql<{ error: string; finished: boolean; subject: string }>`
         select error,(finished_at is not null) as finished,subject from editorial_requests where id=${request.id}
       `;
       assert.equal(stored?.finished, true);
-      assert.match(stored?.error ?? "", /claude-sonnet reading unavailable/);
+      assert.match(stored?.error ?? "", /codex-frontier reading unavailable/);
       assert.equal(stored?.subject, "Keep local history public");
     } finally { await cleanCompletionFixture(sql, userId); }
   });

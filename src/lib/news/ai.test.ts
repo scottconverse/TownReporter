@@ -1646,3 +1646,88 @@ describe("the planner model respects the provider", () => {
     );
   });
 });
+
+/*
+  UNIT U29 -- THE OPINION WRITING CALL ON THE DEEPSEEK RUNG.
+
+  Opinion's Automatic starts on DeepSeek v4.1 Flash, and this is the wire the
+  writing pass sends when it does. Three properties, all of them the reason
+  this path is a ONE-PASS pair rather than a pair:
+
+   - the voice travels as the request's `system` message and nowhere else;
+   - there is no tool surface at all (no `tools`, no allow-list), because an
+     OpenAI-compatible endpoint has none to offer -- which is what makes SEC-3
+     hold by construction on this path;
+   - the call goes to the RUNG's own endpoint, never to whatever LLM_BASE_URL
+     the operator pointed the desk's local pick at.
+*/
+describe("the DeepSeek rung's writing call", () => {
+  const VOICE = "the operator's editorial voice, in prose.";
+  const RUNG_BASE = "http://127.0.0.1:11434/v1";
+
+  it("sends the voice as the system message, with no tool surface, to the rung's own endpoint", async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    globalThis.fetch = async (input, init) => {
+      requests.push({
+        url: String(input),
+        body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+      });
+      return new Response(
+        JSON.stringify({
+          model: "deepseek-v4.1-flash:cloud",
+          choices: [{ message: { content: "an editorial" } }],
+        }),
+        { status: 200 },
+      );
+    };
+    try {
+      await withEnvAsync(
+        {
+          TOWNREPORTER_DEEPSEEK_BASE_URL: RUNG_BASE,
+          // A DIFFERENT endpoint for the desk's own local pick, so a call that
+          // read this one would be visible rather than silent.
+          LLM_BASE_URL: "http://127.0.0.1:9999/v1",
+          LLM_MODEL: "some-other-model",
+          TOWNREPORTER_CLAUDE_CODE: "0",
+          TOWNREPORTER_CODEX: "0",
+        },
+        async () => {
+          const result = await grokChat(VOICE, "the writing pack", 4_000, {
+            choice: "deepseek-flash",
+          });
+          assert.equal(result.ok, true, result.ok ? "" : result.error);
+        },
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(requests.length, 1, "one writing call, not a pair");
+    const [request] = requests;
+    assert.equal(
+      request!.url,
+      `${RUNG_BASE}/chat/completions`,
+      "the rung carries its own endpoint; it must never read LLM_BASE_URL",
+    );
+    assert.equal(request!.body.model, "deepseek-v4.1-flash:cloud");
+    assert.deepEqual(
+      request!.body.messages,
+      [
+        { role: "system", content: VOICE },
+        { role: "user", content: "the writing pack" },
+      ],
+      "the voice is the system message, and there is nothing before it",
+    );
+    assert.equal(
+      "tools" in request!.body,
+      false,
+      "an OpenAI-compatible endpoint has no tool surface: nothing may be offered one",
+    );
+    assert.equal(
+      request!.body.reasoning_effort,
+      "none",
+      "the rung's Off default is sent explicitly, or Ollama re-enables thinking",
+    );
+  });
+});

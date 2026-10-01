@@ -126,7 +126,7 @@ The following is the low-level configured-provider resolution. Story, Scan and D
 | --- | --------------------------------------------- | --------------------------------------------------------------------------- |
 | 1   | `LLM_BASE_URL` or `LLM_API_KEY` + `LLM_MODEL` | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | 2   | `ANTHROPIC_API_KEY`                           | credentials for selected Claude models; Claude Sonnet is the last rung of Opinion's Automatic only |
-| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer (whichever one LM Studio has loaded), then Codex Terra; Opinion walks Codex Sol, then Claude Sonnet |
+| 3   | _nothing_                                     | stories, scans and Dark Desk walk the Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer (whichever one LM Studio has loaded), then Codex Terra; Opinion walks DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet |
 
 There is no fourth rung. Grok (xAI) was removed as a provider: `XAI_API_KEY`
 is ignored, the SuperGrok sign-in is gone, and an install that still sets the
@@ -287,9 +287,12 @@ pages, transcripts and documents as evidence, never as instructions to expand
 the reporting task.
 
 Opinion displays Automatic, all named Codex and Claude models, Local model,
-plus saved custom connections. Codex Sol is selected by default. **Opinion's own
-Automatic** tries Codex Sol, then Claude Sonnet once if Codex is unavailable.
-That is the Opinion ladder only. Stories, scans and Dark Desk walk the desk's
+plus DeepSeek v4.1 Flash and saved custom connections. Codex Sol is selected by
+default. **Opinion's own
+Automatic** tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if
+the one before it is unavailable.
+That is the Opinion ladder only, and DeepSeek is the one rung it shares with the
+desk's own ladder. Stories, scans and Dark Desk walk the desk's
 own Automatic ladder: DeepSeek v4.1 Flash, then the local model on this computer
 (whichever one LM Studio has loaded), then Codex Terra. Claude Sonnet is a hand pick on those
 surfaces. Explicit choices remain the requested first
@@ -809,7 +812,7 @@ TownReporter/
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Opinion's Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Codex Sol; Opinion's Automatic tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 operator notes
 

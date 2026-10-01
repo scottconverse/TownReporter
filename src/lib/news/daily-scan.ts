@@ -5,6 +5,7 @@ import { getPaperConfig } from "./paper-settings.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import {
   PICKER_PROVIDER_IDS,
+  isAutomaticRungId,
   modelEffort,
   type AutomaticRungId,
   type ModelEffort,
@@ -95,7 +96,16 @@ function validDailyScanRuntime(value: string): value is DailyScanRuntime {
   return (
     value === "auto" ||
     isCustomModelChoice(value) ||
-    PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number])
+    /*
+      Unit U29: a rung is still not a runtime an editor may store, and it now
+      has to be said rather than inherited from the picker list. `deepseek-flash`
+      is in `PICKER_PROVIDER_IDS` because Opinion's model menu offers it by
+      name, so "in the picker list" no longer means "selectable for a scan" --
+      which is what this guard means, and what its declared type
+      (`DailyScanRuntime`, rungs excluded) has always meant.
+    */
+    (!isAutomaticRungId(value) &&
+      PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number]))
   );
 }
 

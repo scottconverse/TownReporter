@@ -107,7 +107,15 @@ test("the retired Opinion-only environment override is not advertised", () => {
   assert.doesNotMatch(read(".env.example"), /TOWNREPORTER_EDITORIAL_MODEL/);
   const modelChoice = read("src/lib/news/model-choice.ts");
   assert.match(modelChoice, /DEFAULT_OPINION_MODEL\s*=\s*"codex-frontier"/);
-  assert.match(modelChoice, /OPINION_AUTOMATIC_LADDER\s*=\s*\["codex-frontier",\s*"claude-sonnet"\]/);
+  /*
+    Unit U29 (owner decision 2026-09-30) replaced the typed-out
+    `["codex-frontier", "claude-sonnet"]` tuple with the registry's own
+    Opinion ladder -- "use deepseek ... don't hard code any of those". The
+    order now lives on `opinionLadderRank` in provider-registry.ts, and
+    `provider-registry.test.ts` pins the order itself; what this guard keeps
+    is that model-choice.ts DERIVES it instead of spelling it out again.
+  */
+  assert.match(modelChoice, /OPINION_AUTOMATIC_LADDER[^;]*opinionAutomaticLadder\(\)/);
 });
 
 /*

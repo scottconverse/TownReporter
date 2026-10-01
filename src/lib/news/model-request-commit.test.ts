@@ -407,8 +407,11 @@ describe("authenticated Codex commit boundary", () => {
     let opinionEnqueueCalls = 0;
     let opinionSchemaCalls = 0;
     let opinionSqlCalls = 0;
-    // Opinion is Claude-only, so its expiry is Claude's, and its explicit
-    // choice is the one choice the picker still offers.
+    /*
+      An explicit Claude Opus pick, which Opinion offers but its Automatic
+      ladder never reaches on its own -- so the forward walk here is the whole
+      ladder: DeepSeek v4.1 Flash (unit U29), Codex Sol, Claude Sonnet.
+    */
     const opinionExpired = await commitOpinionForAuthenticatedEditor(
       {
         context: { userId, newsroomId: editor.newsroomId },
@@ -440,7 +443,12 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(opinionExpired.ok, false);
     if (opinionExpired.ok) assert.fail("expired Opinion OAuth must refuse");
     assert.match(opinionExpired.error, /Claude Code needs you to sign in again/i);
-    assert.deepEqual(opinionCandidates, ["claude-frontier", "codex-frontier", "claude-sonnet"]);
+    assert.deepEqual(opinionCandidates, [
+      "claude-frontier",
+      "deepseek-flash",
+      "codex-frontier",
+      "claude-sonnet",
+    ]);
     assert.equal(opinionSchemaCalls, 0);
     assert.equal(opinionSqlCalls, 0);
     assert.equal(opinionEnqueueCalls, 0);

@@ -32,19 +32,29 @@ import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover
 import { nameCheckText, type NameCheck } from "./name-check.ts";
 import { officialDomains } from "./absence-gate.ts";
 import { opinionFallbackRuntimeReceipt } from "./opinion-runtime-receipt.ts";
+import { firstReadyOpinionRung } from "./opinion-readiness.ts";
 import { pinnedLocalModelForJob } from "./job-local-model.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
 /** Research supplies leads; the writer files an editorial with claims and
  * sources from the record research returned. The gathering pass is the only
- * Claude call that gets the web tools (`EDITORIAL_TOOLS`); the writing call
- * gets none, because it is the one call whose context holds the private voice
- * file AND text gathered from untrusted pages — and an outbound fetch tool
+ * call that gets the web tools (`EDITORIAL_TOOLS`); the writing call gets
+ * none, because it is the one call whose context holds the private voice file
+ * AND text gathered from untrusted pages — and an outbound fetch tool
  * reachable from that context would let a hostile page read the voice out
  * through a URL (SEC-3). Research is where web access belongs: it never sees
  * the voice. Both CLIs load the complete voice by file path, never as prompt
- * text in argv or application logs. */
+ * text in argv or application logs.
+ *
+ * There is also a ONE-PASS pair, for the writers with no tool loop at all:
+ * the "Local model" pick and Automatic's DeepSeek v4.1 Flash rung, which
+ * speak the OpenAI-compatible protocol over HTTP. It makes a single writing
+ * call — the voice as the system message, never an argument — and writes from
+ * the material the editor supplied, with the writing pack and the job's stage
+ * both recording that no gathering pass ran (unit U29). Which pair a
+ * candidate takes is read from the registry entry's `kind`, not from its id;
+ * see `orchestrateEditorial`'s `runPair`. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -122,6 +132,14 @@ export async function ensureEditorialSchema() {
 export type EditorialWriterDeps = {
   claudeCodeChat?: typeof claudeCodeChat;
   codexChat?: typeof import("./ai-codex.server.ts").codexChat;
+  /**
+   * Test seam for the one-pass OpenAI-compatible transport (the Local model
+   * pick and Automatic's DeepSeek v4.1 Flash rung). It is the call that
+   * carries the private voice as its system message, so a test can assert
+   * that shape -- voice as system text, no tools, the rung's own endpoint --
+   * without a socket or a spend.
+   */
+  grokChat?: typeof grokChat;
   /**
    * Test seam: the availability answer the Claude pair reads before it spends
    * anything. Production asks the operator's own switch through
@@ -251,32 +269,70 @@ export async function writeEditorial(
       });
     },
     /*
-      The Local model pair. Unlike the Claude Code CLI, a local server has no
-      WebSearch/WebFetch tool loop to run a separate gathering pass with (see
-      EDITORIAL_TOOLS), so this is one call: it writes straight from the
-      editor's own pointers via `buildWritingPack({ research: "" })`, which
-      renders the honest "the gathering pass found nothing usable" note
-      rather than pretending research happened. It has no `--system-prompt-
-      file` equivalent either, so the voice travels as an ordinary system
-      string through `readVoiceTextForLocalModel` -- the same destination-
-      named-authorization idea voice.server.ts's other text export used for a
-      withdrawn provider path, scoped to this one call site.
+      The one-pass pair: every OpenAI-compatible writer Opinion's ladder can
+      land on -- the "Local model" pick, and Automatic's DeepSeek v4.1 Flash
+      rung (unit U29). Unlike the Claude Code CLI, an Ollama / llama.cpp
+      server has no WebSearch/WebFetch tool loop to run a separate gathering
+      pass with (see EDITORIAL_TOOLS), so this is ONE call: it writes straight
+      from the material the editor supplied, and the writing pack says so
+      ("NO GATHERING PASS RAN") rather than pretending a research pass
+      happened. It has no `--system-prompt-file` equivalent either, so the
+      voice travels as an ordinary system string through
+      `readVoiceTextForLocalModel` -- the same destination-named-authorization
+      idea voice.server.ts's other text export used for a withdrawn provider
+      path, scoped to this one call site. The voice is never an argument and
+      is never logged; it goes in the request body's system message.
+
+      Which endpoint and model: the registry entry decides. "Local model"
+      carries the editor's own per-newsroom server/model pick (see
+      ./provider-settings.ts's `resolveLocalModelChoice`), while a rung such
+      as DeepSeek carries its endpoint in the registry (`rungGateway`), so it
+      never reads LLM_BASE_URL and cannot be sent to the editor's local pick
+      by accident.
     */
     runLocalPair: async ({ input: editorialInput }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
-      const { grokChat } = await import("./ai.ts");
+      const choice = opinionModelChoice(editorialInput.modelChoice);
+      const entry = providerEntry(choice);
+      if (!entry || (entry.kind !== "local" && entry.kind !== "openai")) {
+        // Unreachable through `runPair`, which dispatches on the same field --
+        // but a runtime assembled by hand must not silently write on Claude.
+        return { ok: false, error: "The selected local model is unavailable." };
+      }
+      const isLocalPick = entry.id === "local-model";
       // Same per-newsroom "which local server/model" pick every other
       // surface honours (Story, Scan, Dark Desk) -- see
       // ./provider-settings.ts's `resolveLocalModelChoice`. Failure here
       // (no database, discovery unreachable) falls back to the env-only
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
-      const localModel = editorialInput.localModel ?? await import("./provider-settings.ts")
-        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
-        .then((r) => r.override)
-        .catch(() => undefined);
-      return grokChat(
+      const localModel = isLocalPick
+        ? editorialInput.localModel ?? await import("./provider-settings.ts")
+          .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
+          .then((r) => r.override)
+          .catch(() => undefined)
+        : undefined;
+      // The exact model this call is sent to, which is what an effort level
+      // is validated against: the resolved local pick, or the rung's own
+      // registry model (DeepSeek v4.1 Flash declares off/low/high/max).
+      const exactModel = isLocalPick ? localModel?.id : providerModel(entry);
+      /*
+        The run says out loud what it is doing, on the row the editor is
+        watching: one writing call, no gathering pass. Nothing else on this
+        path would tell them -- there is no second pass to notice the absence
+        of -- and "it wrote from what I gave it" is exactly the fact a reader
+        of the finished piece needs. The writing pack says the same thing to
+        the model itself (see `buildWritingPack`'s `gatheringPass`).
+      */
+      if (editorialInput.completion) {
+        await setJobStage(
+          editorialInput.completion.jobId,
+          "Writing the editorial — no gathering pass ran: this model has no web tools",
+        );
+      }
+      const { grokChat } = await import("./ai.ts");
+      return (deps.grokChat ?? grokChat)(
         voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
@@ -284,17 +340,14 @@ export async function writeEditorial(
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
           research: editorialInput.sourceText ?? "",
+          gatheringPass: false,
         }),
         4_000,
         {
           timeoutMs: editorialTimeoutMs(),
-          choice: "local-model",
-          localModel,
-          reasoningEffort: modelEffort(
-            "local-model",
-            editorialInput.modelEffort,
-            localModel?.id,
-          ),
+          choice,
+          ...(localModel ? { localModel } : {}),
+          reasoningEffort: modelEffort(choice, editorialInput.modelEffort, exactModel),
         },
       );
     },
@@ -736,7 +789,40 @@ export async function performEditorialWork(
     jobReceipt.requestedEffort ?? jobReceipt.modelEffort,
   );
   const currentChoice = opinionModelChoice(req.model_choice);
-  let activeChoice = (currentChoice === "auto" ? OPINION_AUTOMATIC_LADDER[0] : currentChoice) as EffectiveOpinionModelChoice;
+  /* The one probe this job uses, for the ladder walk below and for the
+     document pass's own routing -- so a queued local model is verified
+     against the same endpoint both places ask about. */
+  const probeOpinion = (choice?: string) =>
+    (deps.documentProbe ?? probeProvider)(
+      choice,
+      job.newsroom_id,
+      undefined,
+      "opinion",
+      queuedLocalModel ?? undefined,
+    );
+  /*
+    Which rung an Automatic request starts on.
+
+    `OPINION_AUTOMATIC_LADDER[0]` used to be right by construction: rank 1 was
+    Codex Sol, a subscription the editor has been told to sign in to. Unit U29
+    put DeepSeek v4.1 Flash -- an Ollama endpoint this machine may simply not
+    have -- at the head of that ladder, and the first thing this job does with
+    its start choice is PROBE it (the document pass below). A desk with no
+    Ollama server would begin every Automatic editorial on a rung that cannot
+    answer.
+
+    So Automatic is RESOLVED here, the way every other surface resolves it:
+    walk the ladder in registry order and start on the first rung that
+    answers. When none does, the head is kept and the document pass reports
+    the probe's own reason -- the same sentence the editor saw at commit time,
+    rather than a new one invented here.
+  */
+  const resolvedRung =
+    currentChoice === "auto"
+      ? await firstReadyOpinionRung((rung) => probeOpinion(rung))
+      : null;
+  let activeChoice: EffectiveOpinionModelChoice =
+    resolvedRung ?? (currentChoice === "auto" ? OPINION_AUTOMATIC_LADDER[0]! : currentChoice);
   let activeEffort = modelEffort(activeChoice, jobReceipt.modelEffort);
   try {
     documentEvidence = await readEditorialDocuments(
@@ -750,7 +836,7 @@ export async function performEditorialWork(
           modelEffort: activeEffort,
           source: requestedChoice === "auto" ? "auto" : (job.model_choice_source ?? "editor"),
           ladder: OPINION_AUTOMATIC_LADDER,
-          probe: (choice) => (deps.documentProbe ?? probeProvider)(choice, job.newsroom_id, undefined, "opinion", queuedLocalModel ?? undefined),
+          probe: probeOpinion,
           localModel: queuedLocalModel ?? undefined,
           chat: deps.documentChat,
           onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {

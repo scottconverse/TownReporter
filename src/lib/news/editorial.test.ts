@@ -414,13 +414,16 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
       events.push("codex");
       return reply;
     },
-    // Poison pill: Automatic and an explicit "claude-frontier" pick must
-    // never reach for the local pair. See audit finding "Opinion 'Local
-    // model' pick silently uses Claude" -- the fix for that bug runs in the
-    // opposite direction too, and this guards it.
+    /*
+      Unit U29: the one-pass pair is no longer a poison pill here. It is the
+      pair Automatic starts on -- DeepSeek v4.1 Flash is Opinion's first rung,
+      and it is dispatched to this one because its registry kind is "local" --
+      so a test that leaves it out would only prove the ladder never reached
+      its own head.
+    */
     async runLocalPair() {
       events.push("local");
-      throw new Error("Automatic/claude-frontier must never run the Local model pair");
+      return reply;
     },
     async runCustomPair() {
       events.push("custom");
@@ -509,7 +512,17 @@ function customRuntime(events: string[], reply: EditorialChatResult) {
 }
 
 describe("Opinion routes the exact selected cloud model", () => {
-  it("Automatic runs Codex Sol first and files without spending Claude", async () => {
+  /*
+    UNIT U29 -- AUTOMATIC STARTS ON DEEPSEEK.
+
+    The owner's decision of 2026-09-30 ("use deepseek ... deepseek is the best
+    model at the lowest price we have") made DeepSeek v4.1 Flash Opinion's
+    first rung. It is dispatched to the ONE-PASS pair rather than the Claude
+    or Codex pair because its provider has no web-tool loop
+    (`providerRunsToolPass`), which is what this pins: the id in the ladder,
+    and the transport that id actually reaches.
+  */
+  it("Automatic runs DeepSeek v4.1 Flash first and files without spending Claude", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -518,8 +531,26 @@ describe("Opinion routes the exact selected cloud model", () => {
     );
     assert.equal(result.ok, true);
     if (!result.ok) assert.fail((result as { error: string }).error);
-    assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+    assert.equal(result.modelChoice, "deepseek-flash");
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
+  });
+
+  it("an explicit DeepSeek choice runs the one-pass pair, and never Claude or Codex", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "deepseek-flash");
+      events.push("local");
+      return { ok: true, text: DELIVERED };
+    };
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      runtime,
+    );
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
+    if (result.ok) assert.equal(result.modelChoice, "deepseek-flash");
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 
   it("an explicit Claude choice does the same", async () => {
@@ -601,7 +632,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.deepEqual(events, []);
   });
 
-  it("reports the Claude failure and files nothing", async () => {
+  it("reports every rung's failure and files nothing when none of them can run", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -610,7 +641,9 @@ describe("Opinion routes the exact selected cloud model", () => {
     );
     assert.equal(result.ok, false);
     if (result.ok) assert.fail("filed on a failed pair");
+    assert.match((result as { error: string }).error, /No automatic Opinion provider/);
     assert.match((result as { error: string }).error, /Claude is unavailable/);
+    assert.deepEqual(events, ["voice:locate", "local", "codex", "claude"]);
     assert.equal(events.includes("file"), false);
   });
 
@@ -648,10 +681,23 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.equal(events.includes("file"), true);
   });
 
-  it("Automatic falls back to Claude Sonnet after a Codex quota failure", async () => {
+  /*
+    UNIT U29 -- THE ORDER, AND THE FALL-THROUGH.
+
+    Automatic walks Opinion's ladder in registry order and moves on only after
+    a technical failure: DeepSeek v4.1 Flash, then Codex Sol, then Claude
+    Sonnet. Each hop is asserted with the model the pair was actually handed,
+    so a reordered or shortened ladder fails here rather than in production.
+  */
+  it("Automatic falls through DeepSeek, then Codex, to Claude Sonnet on technical failures", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "deepseek-flash", "Automatic starts on DeepSeek");
+      events.push("local");
+      return { ok: false, error: "429 Ollama Cloud session limit" };
+    };
     runtime.runCodexPair = async ({ input }) => {
       assert.equal(input.modelChoice, "codex-frontier");
       events.push("codex");
@@ -665,20 +711,20 @@ describe("Opinion routes the exact selected cloud model", () => {
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (result.ok) assert.equal(result.modelChoice, "claude-sonnet");
-    assert.deepEqual(events, ["voice:locate", "codex", "claude", "file"]);
+    assert.deepEqual(events, ["voice:locate", "local", "codex", "claude", "file"]);
   });
 
   it("Automatic does not use another provider to bypass a refusal", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
-    runtime.runCodexPair = async () => {
-      events.push("codex");
-      return { ok: false, error: "Codex declined this request: I cannot write this editorial." };
+    runtime.runLocalPair = async () => {
+      events.push("local");
+      return { ok: false, error: "DeepSeek declined this request: I cannot write this editorial." };
     };
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, false);
-    assert.deepEqual(events, ["voice:locate", "codex"]);
+    assert.deepEqual(events, ["voice:locate", "local"]);
     if (!result.ok) assert.match((result as { error: string }).error, /declined this request/i);
   });
 });
@@ -732,7 +778,13 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, ["voice:locate", "local", "codex", "file"]);
+    /*
+      The ladder an explicit pick moves along is Opinion's whole ladder with
+      that pick first, which since unit U29 holds DeepSeek v4.1 Flash ahead of
+      Codex Sol. It is the second "local" here: the same one-pass pair, a
+      different registry entry (the DeepSeek rung), and it fails too.
+    */
+    assert.deepEqual(events, ["voice:locate", "local", "local", "codex", "file"]);
   });
 
   it("does not file a local-model refusal as an editorial", async () => {
@@ -772,11 +824,13 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     Grok"), and GR-C removed the provider and its transport outright, so an
     "explicit SuperGrok choice" is not a thing any build can make:
     `opinionModelChoice` does not accept the string, and the run falls to
-    Opinion's Automatic ladder (Codex Sol first). What this test still proves
-    is the safety half -- a stored `desk_jobs.model_choice` of "grok-oauth"
-    cannot sneak into the OAuth pair through the orchestrator's custom branch;
-    it normalises to Automatic and the editor is told why.
-    `claudeRuntime`'s `runCustomPair` is the poison pill here.
+    Opinion's page default, Codex Sol (NOT to Automatic's first rung -- the
+    two are different facts since unit U29, and this pins the first one). What
+    this test still proves is the safety half -- a stored
+    `desk_jobs.model_choice` of "grok-oauth" cannot sneak into the OAuth pair
+    through the orchestrator's custom branch; it normalises to a real choice
+    and the editor is told why. `claudeRuntime`'s `runCustomPair` is the
+    poison pill here.
   */
   it("falls a stored SuperGrok choice back to Opinion's default instead of a removed transport", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
@@ -793,7 +847,7 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     );
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
-    assert.equal(result.modelChoice, "codex-frontier", "the run took Automatic's first rung");
+    assert.equal(result.modelChoice, "codex-frontier", "the run took Opinion's page default");
     assert.deepEqual(events, ["voice:locate", "codex", "file"]);
   });
 });
@@ -948,6 +1002,72 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
       writing.webSearch,
       undefined,
       "the writing pass holds the voice: it must not be able to search or fetch",
+    );
+  });
+
+  /*
+    UNIT U29 -- THE DEEPSEEK PAIR IS ONE CALL, AND THE REQUEST SAYS SO.
+
+    DeepSeek v4.1 Flash is reached over Ollama's OpenAI-compatible HTTP face,
+    which has no WebSearch/WebFetch tool loop at all, so there is no gathering
+    pass to give the web tools to. That makes the SEC-3 property hold by
+    construction rather than by remembering: the ONE call this pair makes
+    carries the voice as its system message and asks for no tool surface,
+    because the transport has none to ask for.
+
+    What the editor is owed instead is the truth about it: the writing pack
+    tells the model that no gathering pass ran, so the piece is written from
+    the material they supplied and cannot pretend a page was opened.
+  */
+  it("DeepSeek: one writing call, the voice as system text, no tools, no gathering pass", async () => {
+    const voiceText = "the operator's editorial voice, in prose. ".repeat(30);
+    type LocalCallOptions = Parameters<typeof import("./ai.ts").grokChat>[3];
+    const calls: { system: string; user: string; maxTokens: number | undefined; opts: LocalCallOptions }[] = [];
+    const result = await writeEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      {
+        grokChat: async (system, user, maxTokens, opts) => {
+          calls.push({ system, user, maxTokens, opts });
+          return STOPPED;
+        },
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the run at the writing call");
+    assert.equal(calls.length, 1, "a model with no web tools makes exactly one call");
+    const [writing] = calls;
+    assert.equal(
+      writing!.system,
+      voiceText,
+      "the voice travels as the system message -- the same text findVoiceFile validated",
+    );
+    assert.equal(
+      writing!.opts?.choice,
+      "deepseek-flash",
+      "and it is sent to the rung the ladder named, not to the editor's local pick",
+    );
+    assert.equal(
+      (writing!.opts as { localModel?: unknown } | undefined)?.localModel,
+      undefined,
+      "a rung carries its endpoint in the registry; no local-model override is invented for it",
+    );
+    assert.equal(
+      (writing!.opts as { noTools?: unknown } | undefined)?.noTools,
+      undefined,
+      "there is no tool surface to hide: the OpenAI-compatible transport sends none",
+    );
+    assert.match(
+      writing!.user,
+      /NO GATHERING PASS RAN/,
+      "the pack records that nothing was searched or fetched for this piece",
+    );
+    assert.match(writing!.user, /Cite only what appears in the material above/);
+    assert.doesNotMatch(
+      writing!.user,
+      /by a separate pass that searched and opened public sources/,
+      "and it must not claim a gathering pass that never ran",
     );
   });
 });

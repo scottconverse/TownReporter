@@ -16,10 +16,12 @@ import {
   defaultModelEffort,
   modelEffort,
   modelEffortsFor,
+  opinionAutomaticLadder,
   plannerModelFor,
   providerEnabled,
   providerEntry,
   providerModel,
+  providerRunsToolPass,
   providersFor,
   validateProviderSeconds,
   type ProviderSurface,
@@ -197,14 +199,33 @@ describe("the provider registry is the one description of a writing model", () =
       so a retired id is now a NAME with nothing behind it, and asserting it
       against the registry would be asserting the thing that was deleted.
       The loop below states what is true of it instead.
+
+      Unit U29 (owner decision 2026-09-30): `deepseek-flash` is in BOTH lists.
+      It is Automatic's first rung on every surface -- which is why the desk
+      resolves it rather than a picker -- and Opinion's menu offers it by name.
+      The two lists therefore overlap by exactly that one id, which is what
+      the set comparison below and the explicit assertion after it pin.
     */
     assert.deepEqual(
       [...ids].sort(),
-      [...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS].sort(),
+      [...new Set([...PICKER_PROVIDER_IDS, ...INTERNAL_PROVIDER_IDS])].sort(),
       "the picker list and the internal list must name exactly the registry's entries",
     );
-    // An INTERNAL id is one no picker offers; that is what makes it internal.
+    const inBothLists = PICKER_PROVIDER_IDS.filter((id) =>
+      (INTERNAL_PROVIDER_IDS as readonly string[]).includes(id),
+    );
+    assert.deepEqual(
+      inBothLists,
+      ["deepseek-flash"],
+      "an id the desk resolves on its own AND a menu offers is a deliberate exception, not a habit",
+    );
+    /*
+      An INTERNAL id is one no picker offers -- the configured gateway and the
+      LM Studio rung, plus the one exception above, whose menu is asserted at
+      the entry itself.
+    */
     for (const id of INTERNAL_PROVIDER_IDS) {
+      if ((PICKER_PROVIDER_IDS as readonly string[]).includes(id)) continue;
       const entry = providerEntry(id)!;
       assert.ok(
         SURFACES.every((surface) => !entry.offeredFor[surface]),
@@ -237,12 +258,30 @@ describe("the provider registry is the one description of a writing model", () =
         "claude-sonnet",
         "claude-haiku",
         "local-model",
+        // Unit U29: the owner's 2026-09-30 decision made DeepSeek v4.1 Flash
+        // Opinion's first Automatic rung, and "keep the picker regardless" is
+        // why it is a NAME in Opinion's menu as well.
+        "deepseek-flash",
       ],
     );
-    // Everything Opinion offers, Story and Dark offer too.
+    /*
+      Everything Opinion offers, Story and Dark offer too -- with the one
+      exception the owner asked for, and it is not an Opinion-only capability:
+      DeepSeek is the first rung of the DESK's ladder, so Story, Scan and Dark
+      Desk already run it. They reach it through Automatic; Opinion's menu also
+      names it. Nothing Story or Dark can do is missing from Opinion.
+    */
     for (const entry of providersFor("opinion")) {
+      if (entry.id === "deepseek-flash") continue;
       assert.ok(entry.offeredFor.story && entry.offeredFor.dark);
     }
+    const deepseek = providerEntry("deepseek-flash")!;
+    assert.deepEqual(
+      SURFACES.filter((surface) => deepseek.offeredFor[surface]),
+      ["opinion"],
+      "the DeepSeek rung is nameable on Opinion and nowhere else",
+    );
+    assert.ok(automaticLadder().includes("deepseek-flash"), "and it is the desk's first rung too");
   });
 
   it("gives Dark Desk the same providers Story has -- every model that drafts can dig", () => {
@@ -275,9 +314,55 @@ describe("the Automatic ladder is derived, not typed out", () => {
     );
   });
 
+  it("orders Opinion's own Automatic with DeepSeek first, then Codex Sol, then Sonnet", () => {
+    /*
+      Unit U29, the owner's decision of 2026-09-30 ("use deepseek ... deepseek
+      is the best model at the lowest price we have"). Read from the registry's
+      `opinionLadderRank`, so this order is DATA: dropping DeepSeek's rank from
+      its entry -- or changing a rank -- fails here rather than shipping a
+      picker sentence, a readiness line and a failover list that describe an
+      order the desk does not walk.
+    */
+    assert.deepEqual(opinionAutomaticLadder(), [
+      "deepseek-flash",
+      "codex-frontier",
+      "claude-sonnet",
+    ]);
+    for (const id of opinionAutomaticLadder()) {
+      assert.ok(providerEntry(id), `Opinion's ladder names ${id}, which is not in the registry`);
+    }
+    // Opinion's ladder is its own: the LM Studio rung and the configured
+    // gateway are on neither, and Codex Terra is a hand pick here.
+    assert.ok(!opinionAutomaticLadder().includes("qwen-local"));
+    assert.ok(!opinionAutomaticLadder().includes("configured"));
+    assert.ok(!opinionAutomaticLadder().includes("codex-balanced"));
+    // Its first rung is the desk's first rung -- the one model both ladders
+    // research and draft with.
+    assert.equal(opinionAutomaticLadder()[0], automaticLadder()[0]);
+  });
+
   it("asks a rung that must already be loaded before Automatic may use it", () => {
     assert.equal(providerEntry("qwen-local")!.requiresLoadedLocalModel, true);
     assert.equal(providerEntry("deepseek-flash")!.requiresLoadedLocalModel, undefined);
+  });
+
+  /*
+    Unit U29: whether a provider can run a tool-using research pass is a fact
+    about its TRANSPORT, so it is answered once, here, and read by both the
+    two-pass Opinion flow and the picker's help sentence.
+  */
+  it("says which providers can run a tool-using research pass", () => {
+    for (const id of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku", "codex-astra", "codex-frontier", "codex-balanced", "codex-luna"] as const) {
+      assert.equal(providerRunsToolPass(providerEntry(id)), true, `${id} has a web-tool loop`);
+    }
+    for (const id of ["local-model", "deepseek-flash", "qwen-local", "configured"] as const) {
+      assert.equal(
+        providerRunsToolPass(providerEntry(id)),
+        false,
+        `${id} speaks OpenAI-compatible HTTP: there is no tool surface to give it`,
+      );
+    }
+    assert.equal(providerRunsToolPass(null), false, "an unknown id has no transport at all");
   });
 
   it("leaves the frontier model, the gateway and the retired id out of the ladder", () => {

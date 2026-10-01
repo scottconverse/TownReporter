@@ -854,11 +854,14 @@ Where the paper says what it thinks.
 
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
-Choose **Automatic**, any named Codex or Claude model, or **Local model**;
+Choose **Automatic**, any named Codex or Claude model, **Local model**, or
+**DeepSeek v4.1 Flash**;
 saved custom connections are offered too. Codex Sol is selected by default.
 **Opinion's own Automatic** tries
-Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
-to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
+DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if the one before it
+is unavailable — that order belongs
+to Opinion, and DeepSeek is a named pick there as well. Stories, scans and Dark
+Desk walk the desk's own Automatic ladder:
 DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
 then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
@@ -899,7 +902,8 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Opinion's Automatic can move from Codex Sol to Claude Sonnet once. A named
+Opinion's Automatic can move from DeepSeek v4.1 Flash to Codex Sol and on to
+Claude Sonnet once. A named
 choice is tried
 first and the same technical-only unfinished-call rule applies. A finished row
 names the requested and actual model and effort. Opus is never selected by an
@@ -1294,7 +1298,7 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Codex Sol; Automatic tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52: model and document boundaries
 
