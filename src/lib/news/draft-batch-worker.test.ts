@@ -513,3 +513,69 @@ it("a corrupt persisted runtime fails closed before report work", async () => {
   );
   assert.equal(reportCalls, 0);
 });
+
+it("a Cancel already on the row stops the draft before the report spends anything", async () => {
+  /*
+    B8B item 2. The draft kind had no Cancel check of its own: `waitForModel`
+    polls while the report runs, but nothing asked on the way IN, so a Cancel
+    pressed on a claimed draft still spent four model calls before the first
+    tick could notice.
+
+    THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+    before the report in `performDraftWork` and this fails on the first assert
+    -- `reportAndDraft` runs, and the row ends as whatever the report made of
+    it rather than as the editor's own reason.
+  */
+  const { sql, job } = await fixture(99210);
+  await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+  let reportCalls = 0;
+  await assert.rejects(
+    performDraftWork(job, {
+      reportAndDraft: async () => {
+        reportCalls += 1;
+        return reported;
+      },
+      setJobStage: async () => undefined,
+    }),
+    /Cancelled by the editor/,
+    "the row ends with the editor's reason, not a silent finish",
+  );
+  assert.equal(reportCalls, 0, "and no model budget was spent");
+});
+
+it("a Cancel that lands during the report stops the repair and the write", async () => {
+  /*
+    The other half: the style repair is a fifth model call that had no check
+    anywhere near it, and the write that follows it is the draft the editor
+    would have been shown. A Cancel that arrived during the report must end at
+    this boundary -- before the repair, before the write.
+
+    THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+    between the report and `repairDraftStyle` and the rejection is not the
+    cancellation, the repair chat adapters are spent, and a draft is written.
+  */
+  const { sql, job } = await fixture(99211);
+  let repairCalls = 0;
+  const adapter = async () => {
+    repairCalls += 1;
+    return { ok: true as const, text: "repaired" };
+  };
+  await assert.rejects(
+    performDraftWork(job, {
+      reportAndDraft: async () => {
+        // The editor's press arrives while the four model calls are running.
+        await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+        return reported;
+      },
+      batchChatAdapters: { claude: adapter, codex: adapter, local: adapter },
+      setJobStage: async () => undefined,
+    }),
+    /Cancelled by the editor/,
+  );
+  assert.equal(repairCalls, 0, "the fifth model call was not spent");
+  const [drafts] = await sql.query<{ n: number }>(
+    "select count(*)::int n from drafts where newsroom_id=$1",
+    [job.newsroom_id],
+  );
+  assert.equal(drafts?.n, 0, "and no draft was written for a run the editor stopped");
+});

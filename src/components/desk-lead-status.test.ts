@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { patchLeadsData, shiftTabCounts, statusIn } from "./desk-lead-status.ts";
+import { leadsViewFor, patchLeadsData, shiftTabCounts, statusIn } from "./desk-lead-status.ts";
 
 /**
  * The optimistic row, as a pure rule (unit FB6, item 2).
@@ -71,6 +71,93 @@ describe("patching one lead's status into a cached list", () => {
   it("does not invent a row for a lead the cache has never held", () => {
     const rows = [{ id: 1, status: "new" }];
     assert.deepEqual(patchLeadsData(rows, 99, "held", undefined), rows);
+  });
+});
+
+/**
+ * B8B item 1: the Queue's tabs are filtered on the SERVER, so the cached list
+ * for the Open tab is a list of open leads. Changing a row's status inside it
+ * leaves a held lead drawing under Open until the refetch lands -- the row the
+ * owner watched go back and forth. A list that knows which tab it is showing
+ * can be told the row no longer qualifies for it.
+ *
+ * THE MUTATION THAT MATTERS: make `leadsViewFor` answer with no filter (or drop
+ * the `patch` argument at the two call sites) and every case below that expects
+ * a row to LEAVE or ARRIVE fails while the status-only cases still pass.
+ */
+describe("a list showing a tab takes the row in and out of it", () => {
+  const openPage = () =>
+    page(
+      [
+        { id: 1, status: "new" },
+        { id: 2, status: "new" },
+      ],
+      { open: 2, held: 0, killed: 0, all: 2 },
+    );
+
+  it("takes a held lead out of the Open tab's rows, not just its status", () => {
+    const out = patchLeadsData(openPage(), 1, "held", "new", { filter: "open" }) as {
+      rows: { id: number }[];
+      total: number;
+      counts: Record<string, number>;
+    };
+    assert.deepEqual(
+      out.rows.map((row) => row.id),
+      [2],
+      "the row the tab no longer matches is gone from it",
+    );
+    assert.equal(out.total, 1, "and the tab's own total follows it down");
+    assert.equal(out.counts.open, 1);
+    assert.equal(out.counts.held, 1);
+  });
+
+  it("puts it into the Held tab it is arriving in", () => {
+    const out = patchLeadsData(
+      page([{ id: 9, status: "held" }], { open: 2, held: 1, killed: 0, all: 3 }),
+      1,
+      "held",
+      "new",
+      { filter: "held", incoming: { id: 1, headline: "A", status: "new" } },
+    ) as { rows: { id: number; status: string }[]; total: number; counts: Record<string, number> };
+    assert.deepEqual(
+      out.rows.map((row) => row.id),
+      [1, 9],
+      "the copy handed over is the row the list never held",
+    );
+    assert.equal(out.rows[0]!.status, "held", "already carrying the status it arrived with");
+    assert.equal(out.total, 2);
+    assert.equal(out.counts.held, 2);
+    assert.equal(out.counts.open, 1);
+  });
+
+  it("never invents a row in a list that is not showing a tab", () => {
+    // Today's `listLeads()` array and the Queue's batch pool are not filtered
+    // by status, so a move cannot take a row out of one -- nor put one in.
+    const rows = [{ id: 2, status: "new" }];
+    assert.deepEqual(patchLeadsData(rows, 1, "held", undefined), rows);
+    assert.deepEqual(patchLeadsData(rows, 1, "held", undefined, { filter: undefined }), rows);
+  });
+
+  it("leaves `all` and `printed` alone: neither is a status", () => {
+    const all = page([{ id: 1, status: "new" }], { open: 1, held: 0, killed: 0, all: 1 });
+    const out = patchLeadsData(all, 1, "held", "new", { filter: undefined }) as {
+      rows: { status: string }[];
+    };
+    assert.equal(out.rows[0]!.status, "held", "the row is still listed, wearing its new status");
+    assert.equal(out.rows.length, 1, "and still counted in a list that counts everything");
+  });
+
+  it("reads the tab, and only a tab, off the Queue's own key", () => {
+    assert.equal(leadsViewFor(["leads", "open", "all", "best", "", 25]).filter, "open");
+    assert.equal(leadsViewFor(["leads", "killed", "all", "best", "", 25]).filter, "killed");
+    assert.equal(leadsViewFor(["leads", "held", "all", "best", "", 25]).filter, "held");
+    assert.equal(leadsViewFor(["leads"]).filter, undefined, "Today's whole list is not a tab");
+    assert.equal(leadsViewFor(["leads", "batch-pool"]).filter, undefined);
+    assert.equal(
+      leadsViewFor(["leads", "printed", "all", "best", "", 25]).filter,
+      undefined,
+      "printed is a duplicate match, not a status",
+    );
   });
 });
 

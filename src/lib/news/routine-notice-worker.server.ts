@@ -5,6 +5,8 @@ import {
   ensureJobsSchema,
   progressReporterFor,
   spanPct,
+  throwIfJobCancelled,
+  waitForModel,
   type DeskJob,
 } from "./jobs.ts";
 import { ensureRoutineNoticeAutomationSchema } from "./routine-notice-automation.ts";
@@ -214,20 +216,46 @@ export async function performRoutineNoticeWorkWith(
   await report("Reading the routine sources", spanPct(0, sources.length, 0, 60));
   for (const [sourceIndex, source] of sources.entries()) {
     await assertRoutineRunCanContinue(job, run);
+    /*
+      B8B item 2: two things this loop did not do.
+
+      CANCEL. `assertRoutineRunCanContinue` is about AUTHORITY -- the claim, the
+      automation revision, a paused policy, an owner who left -- and never about
+      the editor's Cancel, so a Cancel pressed while a routine edition was
+      reading twelve sources was not noticed until the loop happened to end.
+      `throwIfJobCancelled` is the desk's own act, at the source boundary.
+
+      HEARTBEAT. `report` speaks once per source, so the card was honest BETWEEN
+      sources and silent DURING one -- and a single `check` is a real network
+      read that can run past `JOB_STALL_SECONDS`, which is long enough for the
+      card to call a healthy edition "stalled" and offer a Retry. `waitForModel`
+      is the same ticker every model-calling worker uses: it beats while the
+      read is in flight (so the row never goes quiet) and it reads Cancel on the
+      same tick (so a Cancel lands mid-fetch rather than at the next source).
+
+      Its label is the counted step, so the ticker's "Waiting on …" sentence
+      names the source being read rather than a model that is not involved.
+    */
+    await throwIfJobCancelled(job.id);
     await report(
       countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
       spanPct(sourceIndex + 1, sources.length, 0, 60),
     );
-    const result = await check(
-      { userId: run.actor, newsroomId: run.newsroom_id },
-      {
-        requestId: crypto.randomUUID(),
-        sourceId: source.source_id,
-        sourceUrl: source.source_url,
-        formatKey: source.format_key,
-        expectedPolicyRevision: run.policy_revision,
-      },
-    );
+    const result = await waitForModel({
+      jobId: job.id,
+      label: () => countedStep("Reading the routine sources", sourceIndex + 1, sources.length),
+      run: () =>
+        check(
+          { userId: run.actor, newsroomId: run.newsroom_id },
+          {
+            requestId: crypto.randomUUID(),
+            sourceId: source.source_id,
+            sourceUrl: source.source_url,
+            formatKey: source.format_key,
+            expectedPolicyRevision: run.policy_revision,
+          },
+        ),
+    });
     groups.push(result.check);
   }
   await deps.beforeCommit?.();

@@ -2890,6 +2890,18 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
   /*
+    B8B item 2: the draft kind had no Cancel check of its own.
+
+    `waitForModel` below polls `cancel_requested` while the report runs, but
+    nothing checked it on the way IN, so a Cancel pressed on a draft that had
+    already been claimed still spent four model calls before the first tick
+    could notice -- and `repairDraftStyle` below is a fifth call with no check
+    anywhere near it. Both are boundaries the desk can afford to ask at: the
+    work between them is a model call, and the answer is a sentence rather than
+    a bill.
+  */
+  await throwIfJobCancelled(job.id);
+  /*
     The single longest await in the app: one call covering report.ts's plan,
     write, verify and sourcing passes, four sequential model calls that
     routinely run past the 60s stall window. Without the ticker the card would
@@ -2906,6 +2918,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       }),
   });
   if ("error" in reported) throw new Error(reported.error);
+  /*
+    The boundary between the report and the style repair, and the second half of
+    B8B item 2's draft fix. A Cancel that arrived during the four model calls
+    above is read here, before the fifth is spent and before anything is
+    written: the honest end for a cancelled draft is no draft, with the editor's
+    reason on the row, not a repaired one they never asked for.
+  */
+  await throwIfJobCancelled(job.id);
 
   /*
     THE STYLE AUDIT, BEFORE ANYTHING IS WRITTEN.

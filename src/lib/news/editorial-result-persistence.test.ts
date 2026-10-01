@@ -522,3 +522,88 @@ describe("Opinion completion commit", () => {
     }
   });
 });
+
+describe("B8B item 2: the Opinion desk reads the editor's Cancel", () => {
+  it("stops before the rung probe and the document reading when the Cancel is already on the row", async () => {
+    /*
+      THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+      before `resolvedRung` in `performEditorialWork` and this fails on the
+      first assert -- the probe is spent on a piece the editor stopped.
+    */
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-cancel");
+    const request = await insertRequest(sql, { userId, modelChoice: "auto" });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+    try {
+      await assert.rejects(
+        performEditorialWork(job, {
+          documentProbe: async () => assert.fail("a cancelled piece must not probe a provider"),
+          readEditorialDocuments: async () => assert.fail("nor read the editor's uploads"),
+          writeEditorial: async () => assert.fail("nor write a piece"),
+        }),
+        /Cancelled by the editor/,
+        "the row ends with the editor's own reason",
+      );
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
+  it("stops before the write when the Cancel lands while the uploads are being read", async () => {
+    /*
+      The second boundary: a Cancel that arrives during the reading pass must be
+      read before the write, because the write is the one outcome an editor who
+      cancelled cannot undo.
+
+      THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+      between `setJobStage("Researching the editorial")` and the `waitForModel`
+      write and this fails -- the write runs.
+    */
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    await ensureStoryDocuments(sql);
+    const userId = uniqueUser("opinion-cancel-reading");
+    const request = await insertRequest(sql, { userId, modelChoice: "auto" });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    await sql.query(
+      "insert into story_documents(id,newsroom_id,user_id,editorial_request_id,filename,mime,original) values($1,1,$2,$3,'cancelled.txt','text/plain',$4)",
+      [`opinion-cancel-doc-${Date.now()}`, userId, request.id, Buffer.from("Evidence for the cancelled piece.")],
+    );
+    try {
+      await assert.rejects(
+        performEditorialWork(job, {
+          documentProbe: async (choice) => ({
+            ok: true as const,
+            label: "Test model",
+            choice: choice as "deepseek-flash" | "codex-frontier" | "claude-sonnet",
+          }),
+          readEditorialDocuments: async () => {
+            // The editor's press arrives while the uploads are being read.
+            await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+            return "saved document evidence";
+          },
+          writeEditorial: async () => assert.fail("the write must not start after a Cancel"),
+        }),
+        /Cancelled by the editor/,
+      );
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+});

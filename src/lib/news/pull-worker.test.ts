@@ -107,6 +107,36 @@ describe("durable Pull pipeline", () => {
     assert.equal(result.counters.documentsSaved, 0);
   });
 
+  it("cancels a claim Pull at the boundary, before it opens the page", async () => {
+    /*
+      B8B item 2. A claim's Pull names one page and finishes, so "the next
+      durable boundary" is the moment before the fetch -- and that moment was
+      the one boundary the pipeline did not check. An editor's Cancel arriving
+      here was answered by opening the page anyway.
+
+      THE MUTATION THAT MATTERS: delete `await deps.assertNotCancelled?.()` from
+      the `receipt.sourceUrl` branch of `pull.server.ts` and this case fails on
+      the first assert -- `ingest` runs, and the run completes instead of
+      ending cancelled.
+    */
+    const claim = receipt();
+    claim.sourceUrl = "https://longmontcolorado.gov/record";
+    await assert.rejects(
+      runPullPipeline(claim, {
+        search: async () => assert.fail("a claim Pull runs no search"),
+        ingest: async () => assert.fail("a cancelled claim Pull must not open the page"),
+        stopRequested: async () => false,
+        assertNotCancelled: async () => {
+          throw new Error("Cancelled by the editor.");
+        },
+        saveDocument: async () => assert.fail("nothing is saved after a cancel"),
+        saveReceipt: async () => undefined,
+      }),
+      /Cancelled by the editor/,
+      "the desk's own reason leaves the pipeline rather than becoming a failure line",
+    );
+  });
+
   it("continues from checkpoint indexes without repeating completed documents", async () => {
     const prior = {
       title: "Already saved",

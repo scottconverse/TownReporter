@@ -2997,20 +2997,42 @@ export async function performDarkRound(job: DeskJob) {
     if (terminalFailure) throw new Error(terminalFailure);
     // Stage 2, on the "Keep digging" path too.
     await reportRound("Testing explanations", 65);
-    const verifySummary = await runVerificationStage(
-      context.userId,
-      owned(context),
-      runId,
-      id,
-      choice,
-      overrides,
-      snapshot.preferences,
-      runBudget,
-      saveUsage,
-      (stage) => reportRound(stage),
-      effortForChoice(choice, modelEffort),
-      job,
-    );
+    /*
+      B8B item 2: the round's longest single call, under the ticker.
+
+      The hop loop asks about Cancel between hops and between searches (DD1),
+      and this stage has its own boundary check below -- but the check reads
+      Cancel once, BEFORE the call, and this is the one call in a round that is
+      routinely minutes long and is not part of the hop loop. An editor
+      watching the dig sat on "Testing explanations" with no beat for that whole
+      stretch, which is long enough for the card to call a healthy round
+      stalled, and a Cancel pressed a second after the check waited for the call
+      to finish to be read.
+
+      `waitForModel` is the same ticker every model-calling worker uses: it
+      beats while the verification runs, so the row never goes quiet, and it
+      polls Cancel on the same tick, so the editor's Stop lands inside the call
+      rather than after it.
+    */
+    const verifySummary = await waitForModel({
+      jobId: job.id,
+      label: () => modelChoiceLabel(choice),
+      run: () =>
+        runVerificationStage(
+          context.userId,
+          owned(context),
+          runId,
+          id,
+          choice,
+          overrides,
+          snapshot.preferences,
+          runBudget,
+          saveUsage,
+          (stage) => reportRound(stage),
+          effortForChoice(choice, modelEffort),
+          job,
+        ),
+    });
     // Stage 2 is the longest single model call of the round and it is not part
     // of the hop loop, so it needs its own boundary check.
     await throwIfJobCancelled(job.id);
@@ -4105,6 +4127,16 @@ export async function performBriefWork(job: DeskJob) {
     active = attempted.snapshot;
     return attempted.result;
   };
+  /*
+    B8B item 2: the brief's own boundary check.
+
+    `waitForModel` below polls Cancel while the brief is being built, but
+    nothing read it on the way in: a brief the editor had already stopped still
+    assembled its whole pack and opened its model call before the first tick
+    (twelve seconds later) could notice. The check is before the stage line, so
+    a cancelled brief never moves the bar either.
+  */
+  await throwIfJobCancelled(job.id);
   await report("Writing editor brief", pctFor(1, 2));
   const result = await waitForModel({
     jobId: job.id,

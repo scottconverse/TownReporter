@@ -1024,6 +1024,18 @@ export async function performEditorialWork(
     the probe's own reason -- the same sentence the editor saw at commit time,
     rather than a new one invented here.
   */
+  /*
+    B8B item 2: the Opinion desk's own boundary check.
+
+    `writeEditorial` reads Cancel at each research hop (U30's `throwIfCancelled`),
+    and the write below runs under `waitForModel`, which polls it -- but
+    `performEditorialWork` itself never asked, so a Cancel pressed on a piece
+    that had been claimed still spent the rung probe and the whole document
+    reading pass before anything noticed. This is the boundary before the first
+    of those: the probe at `resolvedRung`, which is a real call to a real
+    provider.
+  */
+  await throwIfJobCancelled(job.id);
   const resolvedRung =
     currentChoice === "auto"
       ? await firstReadyOpinionRung((rung) => probeOpinion(rung))
@@ -1071,6 +1083,14 @@ export async function performEditorialWork(
     throw readingFailure;
   }
   await setJobStage(job.id, "Researching the editorial");
+  /*
+    The second half of B8B item 2's editorial fix: the boundary between the
+    document reading pass and the write. A Cancel that arrived while the uploads
+    were being read is read here, so the desk does not answer "stop" with a
+    written piece -- which is the one outcome an editor who cancelled cannot
+    undo.
+  */
+  await throwIfJobCancelled(job.id);
   const result = await waitForModel({
     jobId: job.id,
     // `activeChoice` is reassigned by the reading pass's switch handler above,
