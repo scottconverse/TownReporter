@@ -11,6 +11,13 @@ import {
   stripUngroundedNotes,
 } from "./dark-specific-grounding.ts";
 import { ensureDarkSchema, queueInvestigationFor, sendDarkSignalToQueueFor } from "./dark.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// The handoff writes a `leads` row, and that table comes from the migrations,
+// not from a runtime ensure-helper. The default suite gets them from the
+// preload; the real-Postgres lane runs this file without it, so the fixture
+// asks for them itself (the same way `dark-grounding-audit.test.ts` does).
+await applyMigrationsToTestPglite();
 
 /**
  * N3 of the batch-7 re-audit: THE MARKER NEVER LEAVES THE DARK DESK.
