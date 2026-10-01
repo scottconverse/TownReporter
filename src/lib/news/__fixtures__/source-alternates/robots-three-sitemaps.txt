@@ -1,0 +1,9 @@
+# robots.txt for example.test
+User-agent: *
+Disallow: /admin/
+# A comment that mentions a sitemap: https://example.test/not-a-declaration.xml
+
+Sitemap: https://example.test/sitemap.xml
+Sitemap: https://example.test/agendas-sitemap.xml
+sitemap:   https://example.test/budget-sitemap.xml
+Sitemap: https://example.test/fourth-sitemap.xml
