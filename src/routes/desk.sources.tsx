@@ -30,6 +30,7 @@ import {
   suggestedOriginLine,
 } from "@/lib/news/desk-copy";
 import { keepsFailing } from "@/lib/news/source-rows";
+import { candidateIsWatchedSource } from "@/lib/news/source-replacements";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
@@ -1422,8 +1423,10 @@ function WatchRows({
           given up": a site that asked us to come back later, and a site that
           has blocked us. Both are still on watch, both are parked until a
           recorded time, and both say so in a sentence rather than a code --
-          "Asked us to come back at 3:40 PM — will retry then" / "Blocked us at
-          9:12 AM — trying again after 3:12 PM".
+          "Asked us to come back at 3:40 PM — will retry then" when the site
+          named a time (MEDIUM-4: "Was busy at 3:10 PM — trying again after
+          3:40 PM" when it did not and the wait is the desk's own) / "Blocked
+          us at 9:12 AM — trying again after 3:12 PM".
 
           The sentence is read off `retry_after_note`, which the fetch wrote at
           the moment the site answered. Nothing is recomputed here and nothing
@@ -1761,25 +1764,33 @@ function ReplacementPanel({ source }: { source: SourceRow }) {
               <div key={candidate.url} className="astra-row-meta">
                 <span>{candidate.title ?? candidate.url}</span>{" "}
                 <span className="astra-chip">{candidate.label}</span>{" "}
-                <span>
-                  {candidate.via === "sibling" ? "Already on your watch list" : ""}
-                </span>
-                <span className="row-acts">
-                  <InkButton
-                    tone="quiet"
-                    disabled={file.isPending}
-                    onClick={() => file.mutate({ url: candidate.url, title: candidate.title ?? undefined })}
-                  >
-                    Use this instead
-                  </InkButton>
-                  <InkButton
-                    tone="quiet"
-                    disabled={file.isPending}
-                    onClick={() => setDismissed((was) => [...was, candidate.url])}
-                  >
-                    Not now
-                  </InkButton>
-                </span>
+                {/*
+                  MEDIUM-1 (A-B8): a sibling IS one of the newsroom's accepted
+                  sources, so the proposal door would refuse the URL this press
+                  sent -- it could never file anything, and the toast afterwards
+                  said so. The row says what is true and offers nothing to
+                  press. The press stays on the candidates where it can succeed.
+                */}
+                {candidateIsWatchedSource(candidate) ? (
+                  <span>Already on your watch list</span>
+                ) : (
+                  <span className="row-acts">
+                    <InkButton
+                      tone="quiet"
+                      disabled={file.isPending}
+                      onClick={() => file.mutate({ url: candidate.url, title: candidate.title ?? undefined })}
+                    >
+                      Use this instead
+                    </InkButton>
+                    <InkButton
+                      tone="quiet"
+                      disabled={file.isPending}
+                      onClick={() => setDismissed((was) => [...was, candidate.url])}
+                    >
+                      Not now
+                    </InkButton>
+                  </span>
+                )}
               </div>
             ))
           ) : (

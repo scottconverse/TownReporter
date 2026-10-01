@@ -28,6 +28,64 @@ const CORPUS = prepareCorpus(
   ].join("\n"),
 );
 
+/*
+  MEDIUM-3 (A-B8). THE MARKER USED TO PROVE THE WRONG THING.
+
+  Its rule was "the step names at least one specific and everything it names is
+  in the file", and every specific it can see is a NAME, a date, an address or a
+  number. So a capture that merely mentioned "Kid City USA Longmont" made
+  "Request the 2025 inspection reports for Kid City USA Longmont" read as
+  "(already on file)" -- telling the editor to skip asking for a document the
+  file does not hold. What was established was that the NAME is on file.
+
+  So the step must also name the RECORD it is asking for, and that noun and any
+  year it names must be on file too. These two corpora differ in exactly one
+  way -- whether a capture holds the inspection report -- and the marker must
+  follow.
+*/
+const NAME_ONLY = prepareCorpus(
+  "Kid City USA Longmont is a childcare centre in Longmont, Colorado.",
+);
+const REPORT_ON_FILE = prepareCorpus(
+  [
+    "Kid City USA Longmont is a childcare centre in Longmont, Colorado.",
+    "The 2025 inspection report for Kid City USA Longmont found two violations.",
+  ].join("\n"),
+);
+const REPORT_STEP = "Request the 2025 inspection reports for Kid City USA Longmont.";
+
+describe("the marker follows the RECORD, not the name (MEDIUM-3)", () => {
+  it("says nothing when only the facility's name is on file", () => {
+    assert.equal(briefStepAlreadyOnFile(REPORT_STEP, NAME_ONLY), false);
+    assert.equal(markAlreadyOnFile(REPORT_STEP, NAME_ONLY), REPORT_STEP, "byte-for-byte unchanged");
+  });
+
+  it("marks the step when a capture really does hold the 2025 inspection report", () => {
+    assert.equal(briefStepAlreadyOnFile(REPORT_STEP, REPORT_ON_FILE), true);
+    assert.equal(
+      markAlreadyOnFile(REPORT_STEP, REPORT_ON_FILE),
+      `${REPORT_STEP} ${ALREADY_ON_FILE_MARKER}`,
+    );
+  });
+
+  it("says nothing when the record is on file for another year", () => {
+    // The report is there; the one the step asks for is not. "Inspection
+    // report" being somewhere in the file does not answer a question about
+    // 2024.
+    const corpus = prepareCorpus(
+      "The 2025 inspection report for Kid City USA Longmont found two violations.",
+    );
+    const step = "Request the 2024 inspection reports for Kid City USA Longmont.";
+    assert.equal(briefStepAlreadyOnFile(step, corpus), false);
+    assert.equal(markAlreadyOnFile(step, corpus), step);
+  });
+
+  it("says nothing when the name and the year are on file but the step asks for a different record", () => {
+    const step = "Request the 2025 fire safety certificates for Kid City USA Longmont.";
+    assert.equal(briefStepAlreadyOnFile(step, REPORT_ON_FILE), false);
+  });
+});
+
 describe("a next step that asks for what is on file says so", () => {
   it("marks a step whose record the file already carries", () => {
     const step = "Read the Colorado Shines licensing record for Kid City USA Longmont.";

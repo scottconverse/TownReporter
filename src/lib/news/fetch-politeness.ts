@@ -29,6 +29,20 @@ export const BLOCKED_STATUSES = [401, 403] as const;
 export const COME_BACK_DEFAULT_MS = 30 * 60_000;
 
 /**
+ * The longest wait a site may ask for, and the longest the desk will record.
+ *
+ * A day, because a wait is a promise about when the desk comes back and every
+ * other backoff in this module tops out there (`BLOCKED_BACKOFF_MS`). A header
+ * that says "come back in 99999999999999 seconds" is either a broken proxy or a
+ * site saying "not today", and turning it into a date centuries away would park
+ * a source until someone pressed Check -- the silent stop this whole feature
+ * exists to prevent. It would also, past the Date maximum, produce an Invalid
+ * Date that throws on the way into the database and takes the whole scan with
+ * it (LOW-1, A-B8).
+ */
+export const RETRY_AFTER_MAX_MS = 24 * 60 * 60_000;
+
+/**
  * The wait added after the 1st, 2nd and 3rd block in a row: nothing extra the
  * first time -- it has already waited for the per-host gap and the next pass
  * is naturally later -- then 6 hours, then a day. The list is the rule;
@@ -87,15 +101,24 @@ export function looksLikeBotWall(body: string): boolean {
  * the same impatience with a longer name. A date in the past reads as "now";
  * a nonsense value reads as no answer at all, so the caller uses its default
  * rather than a number nobody meant.
+ *
+ * EVERY BRANCH RETURNS A READABLE NUMBER OF MILLISECONDS, and that is a
+ * correctness rule rather than tidiness (LOW-1, A-B8). A negative number is
+ * not an answer any more than "soon" is -- RFC 9110's delay-seconds is a
+ * non-negative integer -- so it reads as no answer, and `-5` cannot be mistaken
+ * for a date. Everything readable is clamped to `RETRY_AFTER_MAX_MS`, so a
+ * header no arithmetic should trust cannot become an Invalid Date, a wait of
+ * centuries, or a thrown statement inside the scan's per-source catch.
  */
 export function parseRetryAfter(value: string | null | undefined, nowMs: number): number | null {
   if (value == null) return null;
   const raw = value.trim();
   if (!raw) return null;
-  if (/^\d+$/.test(raw)) return Number(raw) * 1000;
+  if (/^-/.test(raw)) return null;
+  if (/^\d+$/.test(raw)) return Math.min(Number(raw) * 1000, RETRY_AFTER_MAX_MS);
   const at = Date.parse(raw);
   if (Number.isNaN(at)) return null;
-  return Math.max(0, at - nowMs);
+  return Math.min(Math.max(0, at - nowMs), RETRY_AFTER_MAX_MS);
 }
 
 /** Read `Retry-After` off a response's headers, if it is there and readable. */
@@ -126,12 +149,27 @@ export function classifyRefusal(input: {
     (status != null && (COME_BACK_LATER_STATUSES as readonly number[]).includes(status)) ||
     (input.body ? looksLikeRateLimitPage(input.body) : false);
   if (comeBackLater) {
-    const wait = Math.max(retryAfterMs ?? COME_BACK_DEFAULT_MS, 1);
+    /*
+      DID THE SITE ASK, OR DID THE DESK DECIDE?
+
+      A `Retry-After` is the site saying when to come back. A bare 429 or 503
+      says nothing of the kind -- it is the desk that chose
+      `COME_BACK_DEFAULT_MS` -- and printing "Asked us to come back at 3:40 PM"
+      for it puts words in a server's mouth that never spoke (MEDIUM-4, A-B8).
+      The two cases get different sentences, and which one applies is decided
+      HERE, once, where the header is still in hand.
+    */
+    const asked = retryAfterMs != null;
+    const wait = Math.min(
+      Math.max(retryAfterMs ?? COME_BACK_DEFAULT_MS, 1),
+      RETRY_AFTER_MAX_MS,
+    );
+    const at = nowMs + wait;
     return {
       kind: "come-back-later",
       status: status ?? null,
-      retryAtMs: nowMs + wait,
-      note: `Asked us to come back at ${clockSentence(nowMs + wait)}`,
+      retryAtMs: at,
+      note: asked ? retryAfterSentence(at) : busySentence(nowMs, at),
     };
   }
   const blocked =
@@ -214,6 +252,24 @@ export function retryAfterSentence(retryAfterIso: string | Date | number): strin
   return `Asked us to come back at ${clockSentence(at)} — will retry then`;
 }
 
+/**
+ * The Sources row's sentence when NOBODY asked: the site was busy or down and
+ * the wait is the desk's own default.
+ *
+ * "Asked us to come back at 3:40 PM" is a promise about what the site said, and
+ * a bare 503 said nothing at all -- it is the desk that picked the half hour.
+ * The honest sentence names both ends: when the desk knocked and failed, and
+ * when it will knock again (MEDIUM-4, A-B8). It still says in words that the
+ * desk IS coming back -- "trying again after 3:40 PM" -- because the failure
+ * this feature exists to prevent is a source that stops being read quietly.
+ */
+export function busySentence(busyAtIso: string | Date | number, nextTryIso: string | Date | number): string {
+  const busyAt = toMs(busyAtIso);
+  const nextTry = toMs(nextTryIso);
+  if (busyAt == null || nextTry == null) return "Was busy — trying again later";
+  return `Was busy at ${clockSentence(busyAt)} — trying again after ${clockSentence(nextTry)}`;
+}
+
 /** The Sources row's sentence for a blocked row: "Blocked us at 9:12 AM --
  *  trying again after 3:12 PM". */
 export function blockedSentence(
@@ -250,15 +306,44 @@ export function dailyCapSentence(): string {
 }
 
 /**
+ * WHAT HAPPENED TO ONE SOURCE, in one word (HIGH-1, A-B8).
+ *
+ * This is the ONLY thing a source-row write is allowed to branch on. Before it
+ * existed, the scheduled commit decided "did we read this page?" from
+ * `last_error is null` -- and a "come back later" touch has `last_error: null`
+ * on purpose (`touchAfterFailure`), so a 429 on the unattended scan was written
+ * as a SUCCESS: streak wiped, `last_ok_at` stamped, a read that never happened.
+ * The inline scan and the Check press counted the same event as a failure. One
+ * event, two answers, and the two paths disagreed on the row.
+ *
+ *  - `read`    -- the page was fetched and read. Ends the streak, stamps
+ *                 `last_ok_at`, clears any wait and any block.
+ *  - `wait`    -- the site said "come back later" (429/503). An ATTEMPT: it
+ *                 moves the streak by one and leaves `last_ok_at` alone, but it
+ *                 is not a failure, so `last_error` stays empty.
+ *  - `blocked` -- the site refused the desk (401/403). An attempt like `wait`,
+ *                 with a `last_error` the editor should see.
+ *  - `failed`  -- an ordinary failure (404, timeout, empty page). An attempt
+ *                 with the failure's own message.
+ *  - `skipped` -- the desk deliberately did NOT knock (the row was parked by an
+ *                 earlier wait, or its host has spent the day's allowance).
+ *                 Nothing moves: no streak, no `last_fetched_at`, no
+ *                 `last_ok_at`, no `last_error` for a fetch that never happened.
+ */
+export type SourceOutcome = "read" | "wait" | "blocked" | "failed" | "skipped";
+
+/**
  * The columns a `sources` row should carry after one attempt.
  *
  * Written as one value rather than as loose arguments because every field is
- * decided together and the two commit paths of a scan (the manual one that
- * writes inline, and the scheduled one that queues touches and writes them
- * inside the run transaction) must produce byte-identical rows. The scan that
- * forgot one path is the incident `scan-coverage.test.ts` exists to prevent.
+ * decided together and the three write paths of a source row (the inline scan,
+ * the scheduled scan's queued commit, and the editor's Check press) must
+ * produce byte-identical rows. The scan that forgot one path is the incident
+ * `scan-coverage.test.ts` exists to prevent.
  */
 export type SourceTouch = {
+  /** What happened, and the only thing the write may branch on. */
+  outcome: SourceOutcome;
   /** When the desk may ask again; null means "ask whenever the pass comes". */
   retry_after: Date | null;
   /** The plain sentence the Sources row prints while parked. */
@@ -279,12 +364,45 @@ export type SourceTouch = {
 /** A successful read: everything a refusal wrote comes back off the row. */
 export function touchAfterSuccess(): SourceTouch {
   return {
+    outcome: "read",
     retry_after: null,
     retry_after_note: null,
     blocked_at: null,
     blocked_attempts: 0,
     last_error: null,
     countsAgainstHostCap: false,
+  };
+}
+
+/**
+ * An attempt that failed for an ordinary reason -- a 404, a timeout, a page
+ * with no readable text. Not a refusal the desk has a politeness rule for, so
+ * the politeness columns are cleared exactly as a success clears them, and only
+ * `last_error` carries the failure's own words.
+ *
+ * It exists so the call sites state an OUTCOME rather than assembling one:
+ * `{ ...touchAfterSuccess(), last_error: msg }` is a failure that cannot say
+ * so, and the whole of HIGH-1 is a write path that had to guess.
+ */
+export function touchAfterError(message: string): SourceTouch {
+  return { ...touchAfterSuccess(), outcome: "failed", last_error: message };
+}
+
+/**
+ * A source the pass deliberately did not knock on. It carries the wait and the
+ * sentence to store and nothing else -- `writeSourceTouch` writes only those two
+ * columns for it, so the streak, `last_fetched_at` and `last_ok_at` are left
+ * exactly as the last real attempt left them.
+ */
+export function touchAfterSkip(input: {
+  retryAfter: Date | null;
+  note: string | null;
+}): SourceTouch {
+  return {
+    ...touchAfterSuccess(),
+    outcome: "skipped",
+    retry_after: input.retryAfter,
+    retry_after_note: input.note,
   };
 }
 
@@ -316,8 +434,11 @@ export function touchAfterFailure(input: {
   if (refusal.kind === "come-back-later") {
     const at = new Date(refusal.retryAtMs);
     return {
+      outcome: "wait",
       retry_after: at,
-      retry_after_note: retryAfterSentence(at),
+      /* The sentence `classifyRefusal` already decided -- it is the one place
+         that knows whether the site gave a time or the desk chose the wait. */
+      retry_after_note: refusal.note,
       blocked_at: null,
       blocked_attempts: 0,
       last_error: null,
@@ -329,6 +450,7 @@ export function touchAfterFailure(input: {
   const startedAt = blockedAt ?? nowMs;
   const nextTry = nowMs + blockedBackoffMs(attempts);
   return {
+    outcome: "blocked",
     retry_after: new Date(nextTry),
     retry_after_note: blockedSentence(startedAt, nextTry),
     blocked_at: new Date(startedAt),

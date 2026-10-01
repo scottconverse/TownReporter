@@ -28,10 +28,13 @@ import {
   isParked,
   looksLikeRateLimitPage,
   parseRetryAfter,
+  RETRY_AFTER_MAX_MS,
   retryAfterFromHeaders,
   retryAfterSentence,
   skipThisPass,
+  touchAfterError,
   touchAfterFailure,
+  touchAfterSkip,
   touchAfterSuccess,
 } from "./fetch-politeness.ts";
 
@@ -55,6 +58,46 @@ test("Retry-After is read off response headers", () => {
   assert.equal(retryAfterFromHeaders(new Headers(), NOW), null);
 });
 
+/*
+  LOW-1 (A-B8). Every branch of the parser must produce a wait the desk can
+  actually keep. A header nobody can act on used to become `new Date(huge)` --
+  an Invalid Date, which threw on the way into the database INSIDE the scan's
+  per-source catch, failing the whole pass -- or, for a date in the year 9999,
+  a source parked for centuries with the Check press as the only way back.
+*/
+test("an unreadable or absurd Retry-After becomes a wait the desk can keep", () => {
+  // The cap: a day, which is as long as any other backoff in this module.
+  assert.equal(parseRetryAfter("99999999999999", NOW), RETRY_AFTER_MAX_MS);
+  assert.equal(
+    parseRetryAfter("Fri, 01 Oct 9999 21:12:00 GMT", NOW),
+    RETRY_AFTER_MAX_MS,
+    "a date centuries away is a site saying 'not today', not a park until 9999",
+  );
+  assert.equal(parseRetryAfter("86400", NOW), RETRY_AFTER_MAX_MS, "exactly a day is allowed");
+  assert.ok(parseRetryAfter("86401", NOW)! <= RETRY_AFTER_MAX_MS);
+  // A negative number says nothing -- RFC 9110's delay-seconds is a
+  // non-negative integer -- so it is no answer, and the caller's default stands.
+  assert.equal(parseRetryAfter("-5", NOW), null);
+  assert.equal(parseRetryAfter("-1.5", NOW), null, "and it cannot be mistaken for a date");
+  assert.equal(parseRetryAfter("soon", NOW), null);
+  // Nothing that is readable may be an Invalid Date when it becomes one.
+  for (const value of ["0", "1", "99999999999999", "Fri, 01 Oct 9999 21:12:00 GMT", "abc"]) {
+    const wait = parseRetryAfter(value, NOW);
+    if (wait == null) continue;
+    assert.ok(
+      Number.isFinite(new Date(NOW + wait).getTime()),
+      `${value} must not produce an Invalid Date`,
+    );
+  }
+});
+
+test("classifyRefusal clamps a wait it was handed directly", () => {
+  // The header is not the only door into the desk's arithmetic.
+  const refusal = classifyRefusal({ status: 429, retryAfterMs: 9.99e16, nowMs: NOW });
+  assert.equal(refusal?.retryAtMs, NOW + RETRY_AFTER_MAX_MS);
+  assert.ok(Number.isFinite(new Date(refusal!.retryAtMs).getTime()));
+});
+
 test("a 429 with Retry-After parks the source until then, and says so", () => {
   const refusal = classifyRefusal({ status: 429, retryAfterMs: 600_000, nowMs: NOW });
   assert.equal(refusal?.kind, "come-back-later");
@@ -66,6 +109,28 @@ test("a 503 with no Retry-After still parks the source, for the default wait", (
   const refusal = classifyRefusal({ status: 503, nowMs: NOW });
   assert.equal(refusal?.kind, "come-back-later");
   assert.equal(refusal?.retryAtMs, NOW + COME_BACK_DEFAULT_MS);
+});
+
+/*
+  MEDIUM-4 (A-B8). "Asked us to come back at 3:40 PM" is a claim about what the
+  SITE said. A bare 429 or 503 said nothing of the kind -- the desk picked the
+  half hour -- and the row that printed it was putting words in a server's
+  mouth. When the header IS there, the old sentence is exactly right and stays.
+*/
+test("only a site that sent a time is said to have asked us to come back", () => {
+  const asked = classifyRefusal({ status: 429, retryAfterMs: 600_000, nowMs: NOW });
+  assert.match(asked!.note, /^Asked us to come back at /);
+
+  const busy = classifyRefusal({ status: 503, retryAfterMs: null, nowMs: NOW });
+  assert.equal(
+    busy!.note,
+    `Was busy at ${clockSentence(NOW)} — trying again after ${clockSentence(NOW + COME_BACK_DEFAULT_MS)}`,
+    "the desk's own default names both ends: when it knocked, and when it tries again",
+  );
+  assert.doesNotMatch(busy!.note, /Asked us/, "nobody asked");
+  for (const sentence of [asked!.note, busy!.note]) {
+    assert.doesNotMatch(sentence, /429|503|HTTP|Retry-After|status/i, sentence);
+  }
 });
 
 test("a rate-limit page served with a 200 is still a come-back-later", () => {
@@ -190,11 +255,60 @@ test("a block backs off further each time it is confirmed", () => {
 
 test("a successful read clears the wait, the block and the run of them", () => {
   const touch = touchAfterSuccess();
+  assert.equal(touch.outcome, "read");
   assert.equal(touch.retry_after, null);
   assert.equal(touch.retry_after_note, null);
   assert.equal(touch.blocked_at, null);
   assert.equal(touch.blocked_attempts, 0);
   assert.equal(touch.last_error, null);
+});
+
+/*
+  HIGH-1 (A-B8). The outcome is the word the row's write branches on, so every
+  kind of attempt has to carry the right one -- including the ordinary failure
+  and the deliberate skip, which used to be assembled at the call site out of
+  whatever columns happened to be to hand.
+*/
+test("every kind of attempt says which kind it is", () => {
+  assert.equal(touchAfterSuccess().outcome, "read");
+  assert.equal(
+    touchAfterFailure({
+      refusal: classifyRefusal({ status: 429, nowMs: NOW })!,
+      nowMs: NOW,
+    }).outcome,
+    "wait",
+  );
+  assert.equal(
+    touchAfterFailure({
+      refusal: classifyRefusal({ status: 403, nowMs: NOW })!,
+      nowMs: NOW,
+    }).outcome,
+    "blocked",
+  );
+  const failed = touchAfterError("Fetch failed (404)");
+  assert.equal(failed.outcome, "failed");
+  assert.equal(failed.last_error, "Fetch failed (404)");
+  assert.equal(failed.retry_after, null, "an ordinary failure is not a wait");
+
+  const skipped = touchAfterSkip({ retryAfter: new Date(NOW + 1000), note: "Tried 4 times today" });
+  assert.equal(skipped.outcome, "skipped");
+  assert.equal(skipped.retry_after_note, "Tried 4 times today");
+  assert.equal(skipped.last_error, null, "a fetch that never happened has no reason to report");
+});
+
+test("a wait stored on the row is the sentence classifyRefusal chose", () => {
+  // One sentence, decided once, where the header is still in hand -- the row
+  // must not be able to say "Asked us" for a site that said nothing.
+  const asked = touchAfterFailure({
+    refusal: classifyRefusal({ status: 429, retryAfterMs: 600_000, nowMs: NOW })!,
+    nowMs: NOW,
+  });
+  assert.equal(asked.retry_after_note, classifyRefusal({ status: 429, retryAfterMs: 600_000, nowMs: NOW })!.note);
+  const busy = touchAfterFailure({
+    refusal: classifyRefusal({ status: 503, nowMs: NOW })!,
+    nowMs: NOW,
+  });
+  assert.match(busy.retry_after_note!, /^Was busy at /);
 });
 
 test("a parked source is skipped by the pass before its time and fetched after", () => {

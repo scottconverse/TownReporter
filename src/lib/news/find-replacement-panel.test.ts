@@ -115,6 +115,33 @@ describe("the panel itself (SH0-10)", () => {
     assert.doesNotMatch(PANEL, /"Official record"/, "the panel must not spell the label itself");
   });
 
+  it("offers the press only where pressing it can file something (MEDIUM-1)", () => {
+    /*
+      Every candidate the FREE panel draws is a sibling -- built from the
+      newsroom's own accepted sources -- and the proposal door refuses a URL the
+      newsroom already has a row for. So "Use this instead" on a sibling could
+      never file anything, and the toast afterwards said the page was already a
+      source, which the editor could see before they pressed.
+
+      The rule itself is `candidateIsWatchedSource` and is tested on its own in
+      `source-replacements.test.ts`; what is pinned here is that the PANEL asks
+      it, and that the two arms are what they claim: a sibling says what is true
+      and has nothing to press, everything else keeps the press.
+    */
+    const row = PANEL.slice(PANEL.indexOf("candidates.map((candidate) => ("));
+    assert.ok(row, "the candidate row must be findable");
+    assert.match(row, /candidateIsWatchedSource\(candidate\)/);
+    const watchedAt = row.indexOf("<span>Already on your watch list</span>");
+    const pressAt = row.indexOf('<span className="row-acts">');
+    assert.ok(watchedAt > 0 && pressAt > watchedAt, "the two arms, watched first");
+    assert.doesNotMatch(
+      row.slice(watchedAt, pressAt),
+      /InkButton|<button/,
+      "an already-watched suggestion has nothing to press",
+    );
+    assert.match(row.slice(pressAt), /Use this instead/, "and the press is kept where it can file");
+  });
+
   it("says the honest thing when the beat has no other source", () => {
     assert.match(PANEL, /may be the only one the newsroom watches/);
   });

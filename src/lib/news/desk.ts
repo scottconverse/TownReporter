@@ -22,10 +22,13 @@ import {
   classifyRefusal,
   dailyCapSentence,
   skipThisPass,
+  touchAfterError,
   touchAfterFailure,
+  touchAfterSkip,
   touchAfterSuccess,
   type SourceTouch,
 } from "./fetch-politeness.ts";
+import { writeSourceTouch } from "./source-touch-write.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
 import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
@@ -308,10 +311,12 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
              -- on a failed attempt too.
              consecutive_failures, failure_streak_started_at, last_ok_at,
              -- SH-B: the wait or the block, and the plain sentence the row
-             -- prints while it is parked ("Asked us to come back at 3:40 PM —
-             -- will retry then"). Read here because the Sources row is where
-             -- the editor has to be able to see that the desk has not simply
-             -- given up on a source they chose.
+             -- prints while it is parked -- "Asked us to come back at 3:40 PM —
+             -- will retry then" when the site gave a time, "Was busy at
+             -- 3:10 PM — trying again after 3:40 PM" when it did not and the
+             -- wait is the desk's own. Read here because the Sources row is
+             -- where the editor has to be able to see that the desk has not
+             -- simply given up on a source they chose.
              retry_after, retry_after_note, blocked_at, blocked_attempts,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
@@ -1424,11 +1429,16 @@ export async function performCheckOneSource(
       would keep saying "Waiting" -- the chip and the note are drawn from these
       columns, and a successful read that left them behind would make the press
       look like it had done nothing.
+
+      HIGH-1 (A-B8): all three write sites go through `writeSourceTouch` now,
+      so a press, an inline scan and the scheduled scan's queued commit cannot
+      drift apart on what a read or a refusal does to a row.
     */
-    await sql.query(
-      "update sources set last_fetched_at=now(), last_error=null, consecutive_failures=0, failure_streak_started_at=null, last_ok_at=now(), retry_after=null, retry_after_note=null, blocked_at=null, blocked_attempts=0 where id=$1 and newsroom_id=$2",
-      [sourceId, owned(context)],
-    );
+    await writeSourceTouch(sql, {
+      id: sourceId,
+      newsroomId: owned(context),
+      touch: touchAfterSuccess(),
+    });
     return {
       ok: true as const,
       url: src.url,
@@ -1458,24 +1468,13 @@ export async function performCheckOneSource(
           previousBlockedAttempts: src.blocked_attempts,
           nowMs: Date.now(),
         })
-      : { ...touchAfterSuccess(), last_error: msg };
+      : touchAfterError(msg);
     if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
-    await sql.query(
-      `update sources set last_error=$1, last_fetched_at=now(),
-         consecutive_failures = sources.consecutive_failures + 1,
-         failure_streak_started_at = coalesce(failure_streak_started_at, now()),
-         retry_after=$4, retry_after_note=$5, blocked_at=$6, blocked_attempts=$7
-       where id=$2 and newsroom_id=$3`,
-      [
-        touch.last_error,
-        sourceId,
-        owned(context),
-        touch.retry_after,
-        touch.retry_after_note,
-        touch.blocked_at,
-        touch.blocked_attempts,
-      ],
-    );
+    await writeSourceTouch(sql, {
+      id: sourceId,
+      newsroomId: owned(context),
+      touch,
+    });
     return {
       ok: false as const,
       url: src.url,
@@ -1813,18 +1812,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     feature and a row must not depend on which kind of scan touched it. This is
     the mistake `scan-coverage.test.ts` exists to catch.
   */
-  const pendingSourceTouches: {
-    id: number;
-    error: string | null;
-    retry_after?: Date | null;
-    retry_after_note?: string | null;
-    blocked_at?: Date | null;
-    blocked_attempts?: number;
-    /** True for a source the pass deliberately did NOT knock on (its host is at
-     *  the day's cap). It records the wait and nothing else: the failure streak
-     *  (SH0-1) counts attempts, and a fetch that never happened is not one. */
-    notAttempted?: true;
-  }[] = [];
+  /*
+    HIGH-1 (A-B8): the queue carries a whole `SourceTouch`, `outcome` included,
+    and `writeSourceTouch` branches on that word. It used to carry a loose
+    `error` and the scheduled commit read "did we read it?" off `error is null`
+    -- true for a "come back later" touch, so the unattended scan wrote a 429 as
+    a successful read. A touch that has to state its own outcome cannot be
+    mistaken for the other kind of touch.
+  */
+  const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
@@ -1958,8 +1954,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         numbers (a row cut by `SCAN_WATCH_CAP` reads the same way). Reporting a
         source the desk deliberately did not knock on as "attempted" would put
         a fetch in the record that never happened.
+
+        But the PROGRESS count moves (LOW-3, A-B8): the bar counts the sources
+        the pass got through, and a parked row is one of them. Without this the
+        card stopped at "199 of 201" whenever anything was parked and then
+        jumped at the end -- a count that stops short reads as a scan that is
+        still going.
       */
       skippedThisPass += 1;
+      await noteSourceProgress();
       return;
     }
     /*
@@ -1974,22 +1977,16 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (host && (await hostAtDailyCap(sql, owned(context), host))) {
         const until = startOfTomorrow(nowMs);
         const note = dailyCapSentence();
-        if (deps.scheduledCommit)
-          pendingSourceTouches.push({
-            id: src.id,
-            error: note,
-            retry_after: until,
-            retry_after_note: note,
-            blocked_at: src.blocked_at ? new Date(src.blocked_at) : null,
-            blocked_attempts: src.blocked_attempts ?? 0,
-            notAttempted: true,
-          });
+        /* One `skipped` touch on both paths: the wait and its sentence, and no
+           `last_error` -- the desk never asked this source for anything, so it
+           has nothing to report about it (LOW-2), and the "Tried 4 times today"
+           sentence is about the host anyway. */
+        const touch = touchAfterSkip({ retryAfter: until, note });
+        if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
         else
-          await sql`
-            update sources set retry_after = ${until}, retry_after_note = ${note}, last_error = ${note}
-            where id = ${src.id} and newsroom_id = ${owned(context)}
-          `;
+          await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
         skippedThisPass += 1;
+        await noteSourceProgress();
         return;
       }
     }
@@ -2018,22 +2015,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const text = extraBits.length ? `${sourceText}\n\n${extraBits.join("\n\n")}` : sourceText;
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
-      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
+      /*
+        SH0-1: the streak is written in the SAME statement that clears
+        `last_error`, on both commit paths, because a success is the only thing
+        that can end a streak and a second statement could be skipped without
+        anything noticing. `last_ok_at` is new information -- see 0115 -- and
+        this is its one writer (HIGH-1: literally one, `writeSourceTouch`, on
+        all three paths).
+      */
+      const readTouch = touchAfterSuccess();
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch: readTouch });
       else
-        /*
-          SH0-1: the streak is written in the SAME statement that clears
-          `last_error`, on both commit paths, because a success is the only
-          thing that can end a streak and a second statement could be skipped
-          without anything noticing. `last_ok_at` is new information -- see
-          0115 -- and this is its one writer.
-        */
-        await sql`
-        update sources set last_fetched_at = now(), last_error = null,
-          consecutive_failures = 0, failure_streak_started_at = null, last_ok_at = now(),
-          -- SH-B: a read that worked is the end of any wait and any block.
-          retry_after = null, retry_after_note = null, blocked_at = null, blocked_attempts = 0
-        where id = ${src.id} and newsroom_id = ${owned(context)}
-      `;
+        await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch: readTouch });
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       failureReceipt.sourcesFetched = fetchedCount;
@@ -2072,33 +2065,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             previousBlockedAttempts: src.blocked_attempts,
             nowMs,
           })
-        : { ...touchAfterSuccess(), last_error: msg };
+        : touchAfterError(msg);
       if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
-      if (deps.scheduledCommit)
-        pendingSourceTouches.push({
-          id: src.id,
-          error: touch.last_error,
-          retry_after: touch.retry_after,
-          retry_after_note: touch.retry_after_note,
-          blocked_at: touch.blocked_at,
-          blocked_attempts: touch.blocked_attempts,
-        });
-      else
-        /*
-          SH0-1: the count is carried by the DATABASE, not read-then-written by
-          this process -- six sources are in flight at once and two attempts at
-          the same row must not both read the same number. The streak's start is
-          `coalesce`d so the second failure in a row does not move it: "first
-          failed <date>" must name the first.
-        */
-        await sql`
-        update sources set last_error = ${touch.last_error}, last_fetched_at = now(),
-          consecutive_failures = sources.consecutive_failures + 1,
-          failure_streak_started_at = coalesce(failure_streak_started_at, now()),
-          retry_after = ${touch.retry_after}, retry_after_note = ${touch.retry_after_note},
-          blocked_at = ${touch.blocked_at}, blocked_attempts = ${touch.blocked_attempts}
-        where id = ${src.id} and newsroom_id = ${owned(context)}
-      `;
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
+      else await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
       failureReceipt.sourcesFailed = failedSources.length;
       failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
@@ -2535,44 +2505,27 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       for update
     `;
     if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
-    for (const touch of pendingSourceTouches) {
-      if (touch.notAttempted) {
-        // The same three columns the inline path writes for a host at its
-        // daily cap -- no streak and no fetch time: nothing was fetched.
-        await writeSql`
-          update sources set retry_after = ${touch.retry_after ?? null},
-            retry_after_note = ${touch.retry_after_note ?? null}, last_error = ${touch.error}
-          where id = ${touch.id} and newsroom_id = ${owned(context)}
-        `;
-        continue;
-      }
-      /*
-        SH0-1: the SCHEDULED scan's half of the streak, and it is a separate
-        statement from the inline path's for the reason `scan-coverage.test.ts`
-        exists -- a source touch committed here once went without something the
-        inline write had. `touch.error` is null on the sources this pass read
-        and a message on the ones it could not, so the one statement carries
-        both outcomes and the two paths cannot disagree.
-      */
-      await writeSql`
-        update sources set
-          last_error = ${touch.error},
-          last_fetched_at = now(),
-          consecutive_failures = case when ${touch.error}::text is null then 0
-            else sources.consecutive_failures + 1 end,
-          failure_streak_started_at = case when ${touch.error}::text is null then null
-            else coalesce(failure_streak_started_at, now()) end,
-          last_ok_at = case when ${touch.error}::text is null then now() else last_ok_at end,
-          -- SH-B: a success touch carries no politeness fields at all, and
-          -- clearing them is exactly right for it: a read that worked ends any
-          -- wait and any block. A refusal touch carries what
-          -- touchAfterFailure decided.
-          retry_after = ${touch.retry_after ?? null},
-          retry_after_note = ${touch.retry_after_note ?? null},
-          blocked_at = ${touch.blocked_at ?? null},
-          blocked_attempts = ${touch.blocked_attempts ?? 0}
-        where id = ${touch.id} and newsroom_id = ${owned(context)}
-      `;
+    /*
+      HIGH-1 (A-B8): the SCHEDULED scan's half of the streak.
+
+      This statement used to decide "did we read this page?" from
+      `touch.error is null`, and that was wrong: a "come back later" touch
+      carries a null error on purpose (the site did not fail us), so a 429 on an
+      unattended scan was committed as a successful read -- streak wiped,
+      `last_ok_at` stamped -- while the inline scan and the editor's press
+      counted the same event as a failure. The unattended scan is the main path
+      in production, so the source that escalates to "Keeps failing" on a manual
+      scan never escalated on the real one.
+
+      Now both paths call `writeSourceTouch`, which branches on the outcome the
+      touch carries. One rule, three write sites, and nothing left to drift.
+    */
+    for (const queued of pendingSourceTouches) {
+      await writeSourceTouch(writeSql, {
+        id: queued.id,
+        newsroomId: owned(context),
+        touch: queued.touch,
+      });
     }
     for (const gone of pendingDisappeared) {
       await writeSql`

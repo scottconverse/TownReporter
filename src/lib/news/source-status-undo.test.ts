@@ -75,9 +75,37 @@ describe("Delete pack asks twice and can be put back", () => {
   const scan = read("../../routes/desk.scan.tsx");
 
   it("does not delete on the first press", () => {
-    assert.match(scan, /setConfirmDelete\(true\)/, "the first press only arms");
+    assert.match(scan, /setConfirmDelete\(packId\)/, "the first press only arms");
     assert.match(scan, /"Yes, delete the pack"/, "and says so on the second");
     assert.match(scan, />\s*Keep\s*</, "with a way not to");
+  });
+
+  it("arms the pack it was opened for, and nothing else (LOW-9)", () => {
+    /*
+      The armed state used to be a bare boolean. Arm pack A, switch the picker
+      to pack B, press "Yes, delete the pack" -- and B was deleted under a
+      prompt the editor opened for A. The state is the pack's own id now, the
+      picker disarms when it moves, and the confirming press re-checks that the
+      id it is holding is the one on screen.
+    */
+    assert.match(
+      scan,
+      /const \[confirmDelete, setConfirmDelete\] = useState<number \| null>\(null\)/,
+      "the armed state names a pack",
+    );
+    assert.match(
+      scan,
+      /const armed = confirmDelete !== null && confirmDelete === packId;/,
+      "and the confirm is drawn only for the pack it was opened for",
+    );
+    const select = scan.slice(scan.indexOf("Saved pack"), scan.indexOf("Rename…"));
+    assert.match(select, /setConfirmDelete\(null\)/, "moving the picker closes the confirm");
+    assert.match(scan, /\{armed \? \(/, "the confirm is gated on the pack, not on truthiness");
+    assert.match(
+      scan,
+      /if \(!packId \|\| !p \|\| confirmDelete !== packId\) \{/,
+      "and the second press refuses a pack it was not opened for",
+    );
   });
 
   it("remembers the pack before it goes, so the Undo can rebuild it", () => {

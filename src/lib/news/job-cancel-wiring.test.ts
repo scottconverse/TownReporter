@@ -58,8 +58,22 @@ const PINS: { kind: string; file: string; pattern: RegExp; what: string }[] = [
   {
     kind: "routine-notice",
     file: "routine-notice-worker.server.ts",
-    pattern: /await throwIfJobCancelled\(job\.id\);/,
-    what: "the source loop reads the editor's Cancel at the boundary",
+    /*
+      ANCHORED TO THE LOOP, deliberately (A-B8, tests item 3). A bare
+      `/await throwIfJobCancelled\(job\.id\);/` is satisfied by any occurrence
+      anywhere in the file, so it could not fail on the edit it exists to
+      catch: the day somebody adds a second cancel check earlier in the worker,
+      the pin would stay green with this boundary gone. What is pinned is the
+      ORDER inside the source loop -- authority, then Cancel, then the counted
+      report -- which is the thing the audit found missing.
+
+      The behaviour is proved by running, too: `routine-notice-automation.test.
+      ts` "an editor's Cancel ends a routine edition at the source boundary,
+      before the next read", whose own documented mutation is deleting this
+      line. The pin is the cheap second net.
+    */
+    pattern: /for \(const \[sourceIndex, source\] of sources\.entries\(\)\)[\s\S]{0,2000}?await throwIfJobCancelled\(job\.id\);[\s\S]{0,200}?await report\(/,
+    what: "the source loop reads the editor's Cancel at the boundary, before it reports the next read",
   },
   {
     kind: "routine-notice",

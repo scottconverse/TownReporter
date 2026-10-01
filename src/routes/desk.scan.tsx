@@ -582,7 +582,16 @@ function CustomSourcePicker(props: {
     list the pack has just been removed from.
   */
   const lastDeletedPack = useRef<{ name: string; sourceIds: number[] } | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
+  /*
+    LOW-9 (A-B8): the armed state is the PACK'S OWN ID, not a boolean. Arm pack
+    A, switch the picker to pack B, press "Yes, delete the pack" -- and with a
+    boolean it deleted B under a prompt the editor had opened for A. The
+    confirming press re-checks that the id it is holding is the one on screen
+    (below), and the picker clears it when it moves. The Sources screen's
+    `confirmRemove` is the same shape for the same reason.
+  */
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const armed = confirmDelete !== null && confirmDelete === packId;
   const deletePack = useDeskAction<unknown>({
     pending: "Deleting…",
     done: () => "Pack deleted: the saved set is gone from this list.",
@@ -638,6 +647,9 @@ function CustomSourcePicker(props: {
             onChange={(e) => {
               const id = e.target.value ? Number(e.target.value) : null;
               setPackId(id);
+              /* The confirm belongs to the pack it was opened for; moving the
+                 picker closes it rather than re-aiming it (LOW-9). */
+              setConfirmDelete(null);
               if (id) {
                 const p = packs.find((x) => x.id === id);
                 if (p) setPickedIds([...p.sourceIds]);
@@ -673,7 +685,7 @@ function CustomSourcePicker(props: {
               confirming press, from the pack still in `packs`, so the Undo has
               the name and the ids to rebuild it with.
             */}
-            {confirmDelete ? (
+            {armed ? (
               <>
                 <button
                   type="button"
@@ -681,13 +693,25 @@ function CustomSourcePicker(props: {
                   disabled={disabled || deletePack.isPending}
                   aria-busy={deletePack.isPending || undefined}
                   onClick={() => {
+                    /*
+                      The id is re-checked against the picker before anything
+                      is read or deleted: an arm that outlived its pack must
+                      not take a different one (LOW-9).
+
+                      Deliberately NOT disarmed here either. Disarming first
+                      turned the button back into "Delete pack" in the same
+                      paint, so the pending label this action draws was never
+                      visible -- the mistake the Sources screen's RemoveAction
+                      documents at its own call site. The confirm clears itself
+                      when the pack leaves the list, which is what a successful
+                      delete does.
+                    */
                     const p = packs.find((x) => x.id === packId);
-                    if (!packId || !p) {
-                      setConfirmDelete(false);
+                    if (!packId || !p || confirmDelete !== packId) {
+                      setConfirmDelete(null);
                       return;
                     }
                     lastDeletedPack.current = { name: p.name, sourceIds: [...p.sourceIds] };
-                    setConfirmDelete(false);
                     void deletePack.run(() => del.mutateAsync(packId));
                   }}
                 >
@@ -697,7 +721,7 @@ function CustomSourcePicker(props: {
                   type="button"
                   className="btn quiet"
                   disabled={deletePack.isPending}
-                  onClick={() => setConfirmDelete(false)}
+                  onClick={() => setConfirmDelete(null)}
                 >
                   Keep
                 </button>
@@ -707,7 +731,7 @@ function CustomSourcePicker(props: {
                 type="button"
                 className="btn danger"
                 disabled={disabled || deletePack.isPending}
-                onClick={() => setConfirmDelete(true)}
+                onClick={() => setConfirmDelete(packId)}
               >
                 Delete pack
               </button>
