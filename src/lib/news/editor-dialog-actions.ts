@@ -24,6 +24,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import {
   addLeadInput,
   chooseHeadlineInput,
+  findReplacementInput,
   findSourcesInput,
   holdLeadInput,
   sourceKillPatternInput,
@@ -35,6 +36,7 @@ import {
   editorDialogDeps,
   performAddLead,
   performChooseHeadline,
+  performFindReplacement,
   performFindSources,
   performHoldLead,
   performSourceKillPattern,
@@ -101,6 +103,28 @@ export const findSources = createServerFn({ method: "POST" })
       {
         topic: data.topic,
         scope: data.scope,
+        modelChoice: data.modelChoice,
+        modelEffort: data.modelEffort as ModelEffort | null | undefined,
+      },
+      deps(),
+    ),
+  );
+
+/**
+ * "Find a replacement" (SH0-9). Same shape as `findSources` above, and for the
+ * same reason: the shell parses and hands over, and every rule about what may
+ * be proposed lives on the far side of the one door.
+ */
+export const findReplacement = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => findReplacementInput.parse(input))
+  .handler(({ context, data }) =>
+    performFindReplacement(
+      { userId: context.userId, newsroomId: owned(context) },
+      {
+        sourceId: data.sourceId,
+        url: data.url,
+        title: data.title,
         modelChoice: data.modelChoice,
         modelEffort: data.modelEffort as ModelEffort | null | undefined,
       },

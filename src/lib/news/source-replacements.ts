@@ -33,6 +33,44 @@
  */
 import { looksLikeDocumentPath } from "./source-alternates.ts";
 
+/**
+ * WHAT THE AI TIER IS ASKED FOR, in one line, built from the beat.
+ *
+ * The existing "Ask AI to find sources" takes free text, so the beat has to
+ * become text: the section NAMES the source is filed under, then the source's
+ * own title, which is the thing the editor is trying to replace. A source with
+ * no beat falls back to its title alone rather than to an invented topic --
+ * "find me sources for Planning" and "find me sources like the one that broke"
+ * are different questions and only one of them should be guessed at.
+ *
+ * The cap is the desk's own topic bound (`LIMITS.leadWhy` is what the dialog's
+ * input schema allows), so a long title cannot build a prompt the schema would
+ * have refused had the editor typed it.
+ */
+export const REPLACEMENT_TOPIC_MAX = 400;
+
+export function replacementTopic(input: {
+  /** The beats from `beatsForSource` -- section KEYS. */
+  beats?: readonly string[] | null;
+  /** The newsroom's sections, so a key can be said as its name. */
+  knownSections?: readonly { key: string; name: string }[];
+  title?: string | null;
+}): string {
+  const names: string[] = [];
+  for (const beat of input.beats ?? []) {
+    const key = String(beat ?? "").trim();
+    if (!key) continue;
+    const named = (input.knownSections ?? []).find((s) => s.key === key)?.name;
+    const spoken = String(named ?? key).trim();
+    if (spoken && !names.includes(spoken)) names.push(spoken);
+  }
+  const title = String(input.title ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const parts = names.length ? [...names, title].filter(Boolean) : [title].filter(Boolean);
+  return parts.join(" — ").slice(0, REPLACEMENT_TOPIC_MAX);
+}
+
 /** The three words an editor judges a candidate by. */
 export const OFFICIAL_RECORD = "Official record";
 export const JOURNALISM = "Journalism";

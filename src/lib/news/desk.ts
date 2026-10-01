@@ -29,6 +29,13 @@ import { reportAndDraft } from "./report";
 import { cleanListWindow, takeWindow } from "./list-window.ts";
 import { cleanQueueWindow, queueCounts, queueNeedle, queueSelect } from "./queue-rows.ts";
 import { cleanSourceWindow, selectSourceRows, sourceCounts } from "./source-rows.ts";
+import { cityOfficialHost } from "./research-scope.ts";
+import {
+  beatsForSource,
+  hostOf,
+  rankCandidates,
+  siblingCandidates,
+} from "./source-replacements.ts";
 import {
   DESK_DRAFT_FILTERS,
   deskDraftFilterCounts,
@@ -436,6 +443,119 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
     }
     return { ok: true as const, added, total: rows.length, byTier };
   });
+
+/**
+ * The free tier of "Find a replacement" (SH0-10): what the panel draws before
+ * the editor spends anything.
+ *
+ * ONE READ, NO FETCHES, NO MODEL. The candidates are the other sources the
+ * desk already watches on the same beat -- so this costs the newsroom a query
+ * it is already paying for, and it cannot hammer a host that just refused us.
+ * The beat is resolved by `beatsForSource`, the same function the AI tier seeds
+ * its topic from, so the two halves of the panel cannot describe the source
+ * differently.
+ *
+ * THE REFUSALS ARE THE RANKER'S, NOT A COPY. `rankCandidates` drops the
+ * newsroom's legally dropped hosts and orders the paper's own record first; the
+ * query below only gathers the rows to rank. The dropped hosts are read as URLs
+ * because that is what the column holds.
+ */
+export async function performReplacementCandidates(
+  context: { userId: string; newsroomId?: number },
+  sourceId: number,
+): Promise<{
+  beats: string[];
+  beatNames: string[];
+  candidates: ReturnType<typeof rankCandidates>;
+}> {
+  const sql = await getSql();
+  const newsroomId = owned(context);
+  const [source] = await sql.query<{
+    id: number;
+    title: string | null;
+    proposed_section: string | null;
+  }>("select id,title,proposed_section from sources where id=$1 and newsroom_id=$2", [
+    sourceId,
+    newsroomId,
+  ]);
+  if (!source) return { beats: [], beatNames: [], candidates: [] };
+
+  const filed = await sql.query<{ section_key: string }>(
+    "select section_key from section_sources where newsroom_id=$1 and source_id=$2",
+    [newsroomId, sourceId],
+  );
+  const sections = await sql.query<{ key: string; name: string }>(
+    "select key,name from newsroom_sections where newsroom_id=$1 and visible=true order by position asc",
+    [newsroomId],
+  );
+  const beats = beatsForSource({
+    sections: filed.map((row) => row.section_key),
+    proposedSection: source.proposed_section,
+    title: source.title,
+    knownSections: sections,
+  });
+
+  /*
+    Every other accepted source with the sections it is filed under. One query
+    with a left join, so a source filed under nothing still comes back -- it is
+    simply never a sibling, and the panel is right to leave it out.
+  */
+  const peers = await sql.query<{
+    id: number;
+    url: string;
+    title: string | null;
+    kind: string | null;
+    sections: string[] | null;
+  }>(
+    `select s.id, s.url, s.title, s.kind,
+            coalesce(array_agg(ss.section_key) filter (where ss.section_key is not null), '{}') as sections
+       from sources s
+       left join section_sources ss on ss.newsroom_id = s.newsroom_id and ss.source_id = s.id
+      where s.newsroom_id = $1 and s.status = 'accepted' and s.id <> $2
+      group by s.id, s.url, s.title, s.kind
+      order by s.id asc`,
+    [newsroomId, sourceId],
+  );
+  const dropped = await sql.query<{ url: string }>(
+    "select url from sources where newsroom_id=$1 and status='dropped'",
+    [newsroomId],
+  );
+  const [place] = await sql.query<{ city: string | null; state: string | null }>(
+    "select city,state from paper_settings where newsroom_id=$1",
+    [newsroomId],
+  );
+  /*
+    The paper's OWN official host, from the sources it already holds -- the
+    city it is in decides which of them that is, never a name written here.
+  */
+  const officialHost = cityOfficialHost(
+    place?.city ?? "",
+    peers.filter((p) => p.kind === "official").map((p) => p.url),
+    place?.state ?? "",
+  );
+
+  const siblings = siblingCandidates(
+    peers.map((p) => ({
+      id: p.id,
+      url: p.url,
+      title: p.title,
+      kind: p.kind,
+      sections: p.sections ?? [],
+    })),
+    { sourceId, beats },
+  );
+  const candidates = rankCandidates(siblings, {
+    officialHost,
+    droppedHosts: dropped.map((row) => hostOf(row.url) ?? ""),
+  });
+  const nameOf = new Map(sections.map((s) => [s.key, s.name]));
+  return { beats, beatNames: beats.map((key) => nameOf.get(key) ?? key), candidates };
+}
+
+export const replacementCandidates = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((sourceId: unknown) => rowId.parse(sourceId))
+  .handler(async ({ context, data: sourceId }) => performReplacementCandidates(context, sourceId));
 
 export const setSourceStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

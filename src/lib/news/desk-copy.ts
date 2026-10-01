@@ -1946,6 +1946,14 @@ export function suggestedByLabel(by: string | null | undefined): string {
       return "the Dark Desk";
     case "editor":
       return "an editor";
+    /*
+      SH0-9: the source-health path. Without a case here the value falls to
+      "not recorded", and the editor cannot tell a suggestion the desk made
+      while trying to fix a broken source from one nobody can account for --
+      which is the one thing this field exists to answer.
+    */
+    case "desk":
+      return "the source health check";
     default:
       return "not recorded";
   }

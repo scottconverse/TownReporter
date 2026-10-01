@@ -9,10 +9,12 @@ import {
   listScans,
   checkOneSource,
   listSourcesPage,
+  replacementCandidates,
   reviewSuggestedSources,
   runScan,
   setSourceStatus,
 } from "@/lib/news/desk";
+import { findReplacement } from "@/lib/news/editor-dialog-actions";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import { myDesk } from "@/lib/news/claim";
@@ -1430,9 +1432,143 @@ function WatchRows({
                 <SourceKillPattern sourceId={s.id} />
               </div>
             ) : null}
+            {/*
+              SH0-10: "Find a replacement", and ONLY on a row that keeps
+              failing. The panel is the one place in this feature a model may be
+              asked for anything, so it is drawn where the editor has already
+              been told the source is a problem -- never on a row that is fine.
+            */}
+            {keeps ? (
+              <div className="astra-kill">
+                <ReplacementPanel source={s} />
+              </div>
+            ) : null}
           </Fragment>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * "FIND A REPLACEMENT" (SH0-10), under a row that keeps failing.
+ *
+ * TWO PRESSES, PRICED DIFFERENTLY, AND THE EDITOR IS TOLD WHICH IS WHICH.
+ *
+ *   - The list at the top costs NOTHING: it is one read of sources the desk
+ *     already watches on the same beat (`replacementCandidates`), so nothing
+ *     is fetched and the site that just refused us is not asked again.
+ *   - The button at the bottom says **Uses one model call** before it is
+ *     pressed, and it is the only thing in this feature that spends anything.
+ *
+ * Every candidate carries **Use this instead** (files a suggestion for the
+ * editor to approve -- it never accepts anything) and **Not now** (drops it
+ * from this panel only; nothing is written). The rows come back through
+ * `useDeskMutation`, so a press that fails says why.
+ *
+ * WHAT IT SAYS WHEN IT FINDS NOTHING, AND WHY THAT MATTERS. For most newsrooms
+ * the true answer to "what else covers Planning?" is "Planning has only this
+ * one source", which is a fact worth knowing rather than a failure -- so the
+ * panel says exactly that instead of showing a spinner that resolves to
+ * nothing.
+ */
+function ReplacementPanel({ source }: { source: SourceRow }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const found = useQuery({
+    queryKey: ["replacement-candidates", source.id],
+    queryFn: () => replacementCandidates({ data: source.id }),
+    enabled: open,
+  });
+  const file = useDeskMutation({
+    mutationFn: (input: { url?: string; title?: string }) =>
+      findReplacement({
+        data: {
+          sourceId: source.id,
+          ...(input.url ? { url: input.url, title: input.title } : {}),
+        },
+      }),
+    pending: "Filing…",
+    done: (result) =>
+      result.ok
+        ? result.proposed > 0
+          ? "Added to Suggested sources. Nothing is fetched until you accept it."
+          : (result.notice ?? "Nothing was added.")
+        : (result.error ?? "That did not work."),
+    failedLead: "Could not file that suggestion. ",
+    after: async () => {
+      await qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  const beats = found.data?.beatNames ?? [];
+  const candidates = (found.data?.candidates ?? []).filter((c) => !dismissed.includes(c.url));
+
+  return (
+    <div className="row-more-panel">
+      <p className="astra-row-meta">
+        <b>Find a replacement.</b>{" "}
+        {beats.length
+          ? `This source is filed under ${beats.join(", ")}.`
+          : "The desk could not tell what this source was for."}
+      </p>
+
+      {!open ? (
+        <InkButton tone="quiet" onClick={() => setOpen(true)}>
+          Find a replacement
+        </InkButton>
+      ) : found.isPending ? (
+        <p className="astra-row-meta" role="status">
+          Looking at what else you already watch…
+        </p>
+      ) : found.isError ? (
+        <p className="astra-row-meta" role="status">
+          The desk could not read the watch list just now. Nothing was changed.
+        </p>
+      ) : (
+        <>
+          {candidates.length ? (
+            candidates.map((candidate) => (
+              <div key={candidate.url} className="astra-row-meta">
+                <span>{candidate.title ?? candidate.url}</span>{" "}
+                <span className="astra-chip">{candidate.label}</span>{" "}
+                <span>
+                  {candidate.via === "sibling" ? "Already on your watch list" : ""}
+                </span>
+                <span className="row-acts">
+                  <InkButton
+                    tone="quiet"
+                    disabled={file.isPending}
+                    onClick={() => file.mutate({ url: candidate.url, title: candidate.title ?? undefined })}
+                  >
+                    Use this instead
+                  </InkButton>
+                  <InkButton
+                    tone="quiet"
+                    disabled={file.isPending}
+                    onClick={() => setDismissed((was) => [...was, candidate.url])}
+                  >
+                    Not now
+                  </InkButton>
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="astra-row-meta">
+              {beats.length
+                ? `No other source is filed under ${beats.join(", ")}. This may be the only one the newsroom watches.`
+                : "No other source shares a beat with this one."}
+            </p>
+          )}
+          <p className="astra-row-meta">
+            <InkButton tone="quiet" disabled={file.isPending} onClick={() => file.mutate({})}>
+              {file.isPending ? "Asking the model…" : "Ask AI to look further"}
+            </InkButton>{" "}
+            Uses one model call. We have not checked whether any of these is free to read.
+          </p>
+        </>
+      )}
     </div>
   );
 }

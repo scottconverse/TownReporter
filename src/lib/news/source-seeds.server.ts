@@ -81,8 +81,24 @@ export async function saveAcceptedNewsroomSource(input: {
   });
 }
 
-/** Who found a suggested source. See migrations/0097 for why this is text. */
-export type ProposedBy = "scan" | "research" | "dark" | "editor";
+/**
+ * Who found a suggested source. See migrations/0097 for why this is text.
+ *
+ * `desk` is the source-health path (SH0-9): the desk, on the editor's press,
+ * looked for another way into a site it cannot read. It is a fifth value on a
+ * text column rather than a migration, exactly as 0097 intended -- but the
+ * Sources screen's "Suggested by" filter has to name it, or the row reads "Not
+ * recorded" and the editor cannot tell a health suggestion from an old one.
+ */
+export type ProposedBy = "scan" | "research" | "dark" | "editor" | "desk";
+
+/**
+ * How a replacement was found (migration 0117). Four different claims, kept
+ * apart because the editor judges them differently: a feed the page declares
+ * about itself, a line the publisher put in `robots.txt`, the address a page
+ * says it has moved to, and the address a page says is canonical.
+ */
+export type ProposedVia = "feed" | "sitemap" | "moved" | "canonical";
 
 /** The model's reason, capped the way the scan schema caps it (schema.ts). */
 const REASON_MAX = 400;
@@ -99,6 +115,14 @@ export async function insertProposedNewsroomSource(sql: Sql, input: {
   scanRunId?: number | null;
   leadId?: number | null;
   section?: string | null;
+  /*
+    SH0-9: the source this suggestion would stand in for, and how it was
+    found. Both optional and both defaulting to null, so every existing caller
+    keeps the behaviour it had -- and so a suggestion that is NOT a replacement
+    says so with a null rather than with a made-up id.
+  */
+  replacesSourceId?: number | null;
+  via?: ProposedVia | null;
 }): Promise<boolean> {
   // A suggestion has to name a page something could actually be fetched from.
   // The identity is the duplicate guard's unit, and a URL with no identity is
@@ -183,10 +207,12 @@ export async function insertProposedNewsroomSource(sql: Sql, input: {
   const scanRunId = input.scanRunId ?? null;
   const leadId = input.leadId ?? null;
   const section = storableText(input.section ?? "").trim().slice(0, SECTION_MAX) || null;
+  const replaces = Number.isFinite(input.replacesSourceId) ? Number(input.replacesSourceId) : null;
+  const via = storableText(input.via ?? "").trim().slice(0, SECTION_MAX) || null;
 
   const rows = await sql<{ id: number }>`
-    insert into sources(user_id,newsroom_id,url,title,kind,tier,status,proposed_reason,proposed_by,proposed_scan_run_id,proposed_lead_id,proposed_section)
-    select ${input.userId},${input.newsroomId},${input.url},${title},'discovered','unclassified','proposed',${reason},${by},${scanRunId},${leadId},${section}
+    insert into sources(user_id,newsroom_id,url,title,kind,tier,status,proposed_reason,proposed_by,proposed_scan_run_id,proposed_lead_id,proposed_section,proposed_replaces_source_id,proposed_via)
+    select ${input.userId},${input.newsroomId},${input.url},${title},'discovered','unclassified','proposed',${reason},${by},${scanRunId},${leadId},${section},${replaces},${via}
     where not exists (select 1 from sources where newsroom_id=${input.newsroomId} and url=${input.url})
     on conflict(user_id,newsroom_id,url) do nothing
     returning id
