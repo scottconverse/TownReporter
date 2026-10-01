@@ -6,6 +6,7 @@ import {
   DESK_RESEARCH_PAGE_CEILING_DEFAULT,
   DESK_RESEARCH_STAGE,
   boundedDeskQueries,
+  collectLocalRecords,
   deskResearchCeilingMs,
   deskResearchPageCeiling,
   parseDeskPlan,
@@ -18,6 +19,7 @@ import {
 } from "./editorial-research.server.ts";
 import { DESK_FINDINGS_ASK, DESK_PLAN_ASK, DESK_STOPPING_CONDITIONS } from "./editorial.ts";
 import { JobCancelledError } from "./jobs.ts";
+import type { Sql } from "../db.ts";
 
 /*
   UNIT U30 + U31 -- the desk-run research pass, exercised without a socket, a
@@ -255,6 +257,141 @@ describe("the ceiling is a safety net, not a research budget", () => {
 
     assert.equal(out.stopReason, "time-ceiling");
     assert.ok(recorded.stages.some((s) => /the research time ceiling was reached/.test(s)));
+  });
+
+  /*
+    L1 of the batch-7 pre-merge audit: the ceiling was tested per hop and per
+    query, and a query's own page reads sat inside that. Four hits, each with
+    its own fetch timeout, is the ceiling spent in a loop that never asked.
+
+    THE MUTATION: deleting the clock check from the hit loop makes this read all
+    three pages and report the model's stop instead of the ceiling.
+  */
+  it("checks the clock between the pages of ONE query, not only between queries", async () => {
+    const recorded = recorder();
+    let clock = 0;
+    const out = await runDeskResearch(
+      INPUT,
+      healthyDeps(
+        recorded,
+        {
+          ceilingMs: 60_000,
+          now: () => new Date(clock),
+          search: async (query) => {
+            recorded.searches.push(query);
+            return {
+              hits: [1, 2, 3].map((n) => ({
+                title: `Levy record ${n}`,
+                url: `https://longmontcolorado.gov/levy-${n}`,
+                snippet: "",
+              })),
+              decision: "relevant" as const,
+            };
+          },
+          // Time is spent READING, which is where a slow day's minutes go.
+          fetch: async (url) => {
+            recorded.fetched.push(url);
+            clock += 40_000;
+            return {
+              ok: true,
+              status: 200,
+              outcome: "fetched",
+              title: `Page at ${url}`,
+              text: READABLE_BODY,
+              pages: [],
+              extractionMethod: "html",
+            };
+          },
+        },
+        999,
+      ),
+    );
+
+    assert.equal(out.stopReason, "time-ceiling");
+    assert.equal(
+      recorded.fetched.length,
+      2,
+      `the third page was read after the ceiling had already passed: ${recorded.fetched.join(" | ")}`,
+    );
+    assert.ok(recorded.stages.some((s) => /the research time ceiling was reached/.test(s)));
+  });
+
+  /*
+    The other half of L1: the PrimeGov packet loop, inside `collectLocalRecords`.
+
+    Nothing here opens a socket: `io.readPortal` is the portal seam (the real
+    reader resolves a public hostname, so a test cannot reach it offline), and
+    the packet reads go through the injected `fetchPage`, which is where this
+    test spends the clock. Two meetings qualify, one document each; without the
+    check the desk reads both packets and the ceiling is discovered one page
+    late.
+  */
+  it("stops reading PrimeGov packets for ONE query when the clock has run out", async () => {
+    const meeting = (id: number, title: string) => ({
+      id,
+      title,
+      date: "Aug 25, 2026",
+      dateTime: "2026-08-25T19:00:00",
+      time: "07:00 PM",
+      location: "",
+      documentList: [{ id, templateId: 16375, compileOutputType: 1, templateName: "Packet", link: null }],
+    });
+    const clock = { at: 0 };
+    const fetched: string[] = [];
+    const reading: DeskReading[] = [];
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>() =>
+      [{ url: "https://boulder.primegov.com/public/portal" }] as T[];
+
+    const out = await collectLocalRecords(
+      {
+        userId: "editor-1",
+        newsroomId: 7,
+        subject: "Levy district",
+        officialHosts: [],
+        pageCeiling: DESK_RESEARCH_PAGE_CEILING_DEFAULT,
+      },
+      {
+        fetchPage: async (url) => {
+          fetched.push(url);
+          // One packet's read spends the whole thirty minutes: the next meeting
+          // must not be opened at all.
+          clock.at += 60_000;
+          return {
+            ok: true,
+            status: 200,
+            outcome: "fetched",
+            title: `Page at ${url}`,
+            text: READABLE_BODY,
+            pages: [],
+            extractionMethod: "html",
+          };
+        },
+        capture: async () => ({ captureEventId: 1, versionId: 2 }),
+        reading,
+        onStage: async () => undefined,
+        throwIfCancelled: async () => undefined,
+        expired: () => clock.at >= 60_000,
+        readPortal: async () => ({
+          ok: true,
+          status: 0,
+          failure: null,
+          meetings: [
+            meeting(3700, "Levy district council session"),
+            meeting(3701, "Levy district board session"),
+          ],
+        }),
+        sql,
+      },
+    );
+
+    // One note, for the portal the desk actually read, naming both meetings.
+    assert.match(out.notes, /OWN PORTAL \(PrimeGov, https:\/\/boulder\.primegov\.com\): 2 meetings/);
+    assert.equal(
+      fetched.length,
+      1,
+      `a packet was read after the ceiling had passed: ${fetched.join(" | ")}`,
+    );
   });
 
   it("has generous, configurable defaults and refuses a typo", () => {

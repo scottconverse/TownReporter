@@ -48,13 +48,19 @@ import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
+  groundingCorpus,
   matchDeadEnds,
   researchLoop,
   resurfaceDeadEnds,
   runDueMonitors,
 } from "./investigate.ts";
 import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
-import { markUngroundedSpecifics, prepareCorpus } from "./dark-specific-grounding.ts";
+import {
+  markUngroundedSpecifics,
+  placeCorpus,
+  prepareCorpus,
+  type GroundingCorpus,
+} from "./dark-specific-grounding.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
 import { OCR_TOTAL_BUDGET_MS, pdfPageCount, productionOcr } from "./ocr.ts";
@@ -1750,7 +1756,18 @@ export async function synthesizeSignals(
       byte that is not printable. `storableText`, not `postgresText`: this is
       what the model wrote, not what a source said (see storable-text.ts).
     */
-    const name = storableText(String(sig.name ?? "")).trim();
+    /*
+      M1 of the pre-merge audit: `name` was the ONE prose field of this row that
+      was not held to the grounding rule -- every other field below goes through
+      `markUngroundedSpecifics`. It is also the field the verification lane
+      reads back and turns into four adversarial queries
+      (`adversarialQueries`), so a signal named "Operator transition at 1749
+      Main Street" was searched for verbatim one stage later: the walkthrough's
+      invented address, run against a provider, through the door the first fix
+      left open. The name is marked like everything else it sits beside, and
+      `adversarialSubject` takes the marker back off before it builds a query.
+    */
+    const name = storableText(markUngroundedSpecifics(String(sig.name ?? ""), corpus)).trim();
     if (!name) continue;
     if (isPoisonedSignal(sig)) continue;
     const strength = Math.min(15, Math.max(3, Number(sig.strength) || 3));
@@ -3805,19 +3822,25 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
  *
  * The brief is the last model-written prose in the file and the first thing an
  * editor reads -- "WHAT WOULD SETTLE IT", "DO THIS NEXT", the hypothesis on the
- * line under the percentage. It is written from the same pack as everything
- * else `buildDarkBriefPromptPack` assembles, so a specific that is nowhere in
- * that pack wears the marker rather than being handed to an editor as the next
- * place to go. Measured on the Kid City USA file: the brief's "DO THIS NEXT"
- * sent the editor to a street address no capture in the file carried.
+ * line under the percentage. A specific that is nowhere in the file wears the
+ * marker rather than being handed to an editor as the next place to go.
+ * Measured on the Kid City USA file: the brief's "DO THIS NEXT" sent the editor
+ * to a street address no capture in the file carried.
+ *
+ * `corpus` is the FILE, not the prompt it was written from. That distinction is
+ * M6 of the pre-merge audit: handed the pack, the brief could find a specific
+ * in the pack's own "NAMES AND THINGS SEEN" -- a list of model-written
+ * `entities` rows -- and ground itself on the model's earlier guess. A caller
+ * that has only a string (the tests, and any future one) still gets the old
+ * behaviour; `buildBrief` passes the captures.
  *
  * Every string field of the brief, and nothing else: the numbers and the
  * closed vocabularies (`verdict`, `evidence_status`) are not prose and cannot
  * carry an invented specific.
  */
-export function groundBrief(brief: InvestigationBrief, pack: string): InvestigationBrief {
-  const corpus = prepareCorpus(pack);
-  const text = (value: string) => markUngroundedSpecifics(value, corpus);
+export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus): InvestigationBrief {
+  const prepared = typeof corpus === "string" ? prepareCorpus(corpus) : corpus;
+  const text = (value: string) => markUngroundedSpecifics(value, prepared);
   const list = (values: string[]) => values.map(text);
   return {
     ...brief,
@@ -3916,9 +3939,34 @@ export async function buildBrief(
   }
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
+  /*
+    M6 of the pre-merge audit: the corpus the brief is judged against is the
+    FILE, not the prompt.
+
+    `groundBrief` used to be handed `pack` -- the same string the model was
+    given -- and that pack's "NAMES AND THINGS SEEN" section is a list of
+    `entities` rows, written by the model and deliberately unmarked (an entity
+    name is the key the resolver merges on). So a brief could say "1749 Main
+    Street" and find it in the pack, one section above, and ground itself on its
+    own earlier guess. The captures are what the desk holds; the title is the
+    lead. Everything else in the pack is the model talking to itself.
+
+    A failed read falls back to the paper's own place and nothing else, and
+    never to the pack. A narrower corpus marks more, never less, and
+    over-marking is the honest error here.
+  */
+  const settings = await getPaperConfig(newsroomId).catch(() => null);
+  const briefPlace = {
+    city: settings?.city ?? null,
+    state: settings?.state ?? null,
+    county: null as string | null,
+  };
+  const briefCorpus = await groundingCorpus(id, newsroomId, briefPlace).catch(() =>
+    prepareCorpus("", placeCorpus(briefPlace)),
+  );
   const brief = groundBrief(
     parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus),
-    pack,
+    briefCorpus,
   );
   if (!briefIsUseful(brief)) return { ok: false as const, error: "brief was empty" };
 

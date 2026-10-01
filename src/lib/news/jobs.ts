@@ -518,10 +518,20 @@ export async function setJobStage(id: number, stage: string) {
     chip, and what keeps a counted step ("Reading batch 2 of 7") from moving the
     bar backwards.
 
-    The `~ '^\s*\['` guard is because `stages_json` is text: casting a
-    non-array to jsonb raises, and while this app is the only writer, a
-    malformed value must cost a chip row rather than fail the stage boundary
-    that was trying to report.
+    The guard is because `stages_json` is text: casting a non-array to jsonb
+    raises, and while this app is the only writer, a malformed value must cost a
+    chip row rather than fail the stage boundary that was trying to report.
+
+    It is written as `left(ltrim(stages_json), 1) = '['` and NOT as a regular
+    expression, which is a correctness requirement rather than a style choice.
+    This argument is a JS tagged template: the tag in `src/lib/db.ts` rebuilds
+    the statement from the COOKED strings, and in a template literal `\s` cooks
+    to `s` while `\[` cooks to `[`. The previous guard, `stages_json ~ '^\s*\['`,
+    therefore reached Postgres as `'^s*['` -- an invalid regular expression --
+    and every call on a row with a stage list threw 2201B instead of reporting.
+    `executeJob` seeds a list at claim, so that was every claimed job. A
+    backslash anywhere in a tagged template here is the same trap; see the
+    audit note in `src/lib/news/job-stage-write.test.ts`.
 
     A worker that holds its own row should still use `progressReporterFor(job)`:
     it resolves the index without a subquery and carries `pct` with it.
@@ -531,7 +541,7 @@ export async function setJobStage(id: number, stage: string) {
     set stage = ${stage},
         updated_at = now(),
         stage_index = case
-          when stages_json is not null and stages_json ~ '^\s*\['
+          when stages_json is not null and left(ltrim(stages_json), 1) = '['
             then coalesce((
               select t.ordinality - 1
               from jsonb_array_elements_text(stages_json::jsonb) with ordinality as t(label, ordinality)

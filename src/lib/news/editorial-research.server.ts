@@ -67,7 +67,12 @@ import { readableCapture } from "./html-text.ts";
 import { ingestDocument, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
 import { primeGovOriginForNewsroom } from "./primegov-source.ts";
-import { compiledDocumentUrl, preferredDocuments, readPrimeGovPortal } from "./primegov.ts";
+import {
+  compiledDocumentUrl,
+  preferredDocuments,
+  readPrimeGovPortal,
+  type PrimeGovPortalRead,
+} from "./primegov.ts";
 import { queryTokens } from "./retrieve.ts";
 import { boilerplatePageReason } from "./result-quality.ts";
 import { searchWithFallback, type SearchRelevanceAssessment, type WebHit } from "./search-web.ts";
@@ -487,8 +492,13 @@ function subjectScore(text: string, tokens: string[]): number {
  * captures is the ordinary case for a paper that has just been set up; the
  * phase then contributes its notes and no reading, and the web search carries
  * the run.
+ *
+ * Exported for the L1 test of the pre-merge audit: `DeskResearchDeps.localRecords`
+ * is the seam the rest of the tests use, so the production reader -- the one
+ * whose packet loop needed the clock -- had no test at all. `io.expired` is what
+ * that test drives.
  */
-async function collectLocalRecords(
+export async function collectLocalRecords(
   input: {
     userId: string;
     newsroomId: number;
@@ -503,9 +513,28 @@ async function collectLocalRecords(
     reading: DeskReading[];
     onStage: (stage: string) => Promise<void>;
     throwIfCancelled: () => Promise<void>;
+    /**
+     * L1 of the pre-merge audit: has the run's thirty minutes run out?
+     *
+     * The ceiling used to be tested per hop and per query, and the PrimeGov
+     * packet reads sit inside a single query's work -- four meetings, one
+     * compiled PDF each, and a scanned one is OCR'd rather than skipped. A slow
+     * portal could therefore spend the whole ceiling here and hand the outer
+     * loop a reading list it had already overshot. Asked per page, the same way
+     * the web read loop asks it.
+     */
+    expired: () => boolean;
+    /**
+     * The portal itself, injectable for the same reason every other outside
+     * world here is: the real one validates and resolves a public hostname, so
+     * a test of the packet loop cannot reach it without a network. Production
+     * never passes this.
+     */
+    readPortal?: (origin: string) => Promise<PrimeGovPortalRead>;
     sql: Sql;
   },
 ): Promise<DeskLocalRecords> {
+  const readPortal = io.readPortal ?? readPrimeGovPortal;
   const tokens = subjectTokens(input.subject, input.askedFor);
   const notes: string[] = [];
   let portalOrigin: string | null = null;
@@ -520,7 +549,7 @@ async function collectLocalRecords(
   }
   if (portalOrigin) {
     try {
-      const read = await readPrimeGovPortal(portalOrigin);
+      const read = await readPortal(portalOrigin);
       if (read.ok || read.meetings.length) {
         const chosen = read.meetings
           .map((meeting) => ({ meeting, score: subjectScore(meeting.title, tokens) }))
@@ -542,9 +571,11 @@ async function collectLocalRecords(
         // condition asks for.
         for (const { meeting } of chosen) {
           if (io.reading.length >= input.pageCeiling) break;
+          if (io.expired()) break;
           await io.throwIfCancelled();
           for (const doc of preferredDocuments(meeting).slice(0, 1)) {
             if (io.reading.length >= input.pageCeiling) break;
+            if (io.expired()) break;
             const url = compiledDocumentUrl(portalOrigin, doc);
             if (boilerplatePageReason(url)) continue;
             const readPage = await readAndCapture(url, doc.templateName || meeting.title, {
@@ -901,7 +932,15 @@ export async function runDeskResearch(
             officialHosts: input.paper?.officialHosts ?? [],
             pageCeiling,
           },
-          { fetchPage, capture, reading, onStage, throwIfCancelled, sql: await sql() },
+          {
+            fetchPage,
+            capture,
+            reading,
+            onStage,
+            throwIfCancelled,
+            expired: () => nowMs() - startedAt >= ceilingMs,
+            sql: await sql(),
+          },
         );
   } catch (error) {
     if (error instanceof Error && error.name === "JobCancelledError") throw error;
@@ -1033,6 +1072,17 @@ export async function runDeskResearch(
       for (const hit of attempt.hits) {
         if (reading.length >= pageCeiling) {
           hitCeiling = "page-ceiling";
+          break;
+        }
+        /*
+          L1 of the pre-merge audit: the clock, per PAGE and not only per
+          query. One query's hit list is up to a handful of fetches, each with
+          its own timeout, and on a slow day that is the ceiling spent inside a
+          loop that never asked. Same variable as the page ceiling above, so the
+          two loop levels unwind together.
+        */
+        if (nowMs() - startedAt >= ceilingMs) {
+          hitCeiling = "time-ceiling";
           break;
         }
         // The same refusal list the dig runs (`searchWithFallback` applies it

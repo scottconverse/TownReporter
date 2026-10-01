@@ -109,6 +109,41 @@ export function Probe({ mutationFn, after, done, failedLead }) {
     { "@/components/desk-action": deskActionUrl },
   )
 );
+/*
+  L5 of the batch-7 pre-merge audit, and this probe is the caller it is about: a
+  press site that AWAITS the mutation and then does something -- closes the
+  dialog, navigates, clears a selection. The swallow made that caller run its
+  follow-up on a press that had failed.
+*/
+const awaited = await import(
+  transpileToUrl(
+    `
+import { createElement as h } from "react";
+import { useDeskMutation } from "@/components/desk-action";
+export function AwaitedProbe({ mutationFn, after, onSettled }) {
+  const mutation = useDeskMutation({
+    mutationFn,
+    pending: "Saving…",
+    done: () => "Accepted.",
+    failedLead: "Could not change that source. ",
+    after,
+  });
+  return h("button", {
+    type: "button",
+    "data-pending": String(mutation.isPending),
+    onClick: () => {
+      mutation.mutateAsync({ id: 7 }).then(
+        () => onSettled("resolved"),
+        () => onSettled("rejected"),
+      );
+    },
+  }, "Accept");
+}
+`,
+    "b7r-awaited-probe.tsx",
+    { "@/components/desk-action": deskActionUrl },
+  )
+);
 
 /* --------------------------------------------------------------- the rigs */
 
@@ -314,6 +349,59 @@ test("the follow-up does not run when the desk refused the press", async () => {
   await until(() => sonner.shown.length === 1, "the refusal toast");
   assert.equal(ran, 0, "a refused press changed nothing, so there is nothing to follow up");
   assert.equal(toneOf(sonner.shown[0]), "err");
+});
+
+test("L5: a caller awaiting the press learns the follow-up failed", async () => {
+  const outcomes = [];
+  const { client } = probeElement({});
+  const page = await mount(
+    React.createElement(
+      QueryClientProvider,
+      { client },
+      React.createElement(awaited.AwaitedProbe, {
+        mutationFn: async () => ({ ok: true }),
+        after: async () => {
+          throw new Error("The sections did not save.");
+        },
+        onSettled: (outcome) => outcomes.push(outcome),
+      }),
+    ),
+    client,
+  );
+
+  await page.click();
+  await until(() => outcomes.length === 1, "the awaited press to settle");
+  await settle();
+  assert.deepEqual(outcomes, ["rejected"], "mutateAsync resolved a press whose follow-up failed");
+  // One press, one sentence: the rejection is reported by the catch that
+  // rethrows it, and react-query's own error path must not say it again.
+  assert.equal(sonner.shown.length, 1, "expected one toast, saw " + sonner.shown.length);
+  assert.equal(toneOf(sonner.shown[0]), "err");
+  assert.match(toastText(sonner.shown[0]), /The sections did not save\./);
+  assert.deepEqual(unhandled, [], "the rejection was left unhandled");
+  await until(() => pending(page) === "false", "the press to finish");
+});
+
+test("L5: a caller awaiting a press that worked still resolves", async () => {
+  const outcomes = [];
+  const { client } = probeElement({});
+  const page = await mount(
+    React.createElement(
+      QueryClientProvider,
+      { client },
+      React.createElement(awaited.AwaitedProbe, {
+        mutationFn: async () => ({ ok: true }),
+        after: async () => undefined,
+        onSettled: (outcome) => outcomes.push(outcome),
+      }),
+    ),
+    client,
+  );
+
+  await page.click();
+  await until(() => outcomes.length === 1, "the awaited press to settle");
+  assert.deepEqual(outcomes, ["resolved"]);
+  assert.equal(toneOf(sonner.shown[0]), "ok");
 });
 
 test("the module under test is the real one", () => {

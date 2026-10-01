@@ -274,8 +274,12 @@ export async function fileScanLeads(
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
     let dupKind: "possible" | "developing" | null = null;
+    // The headline this candidate actually matched, kept for the verdict
+    // lookup below (`matched` itself does not outlive the block).
+    let matchedHeadline: string | null = null;
     if (matchId != null) {
       const matched = existing.find((l) => l.id === matchId)!;
+      matchedHeadline = matched.headline;
       const strength = matchStrength(
         { headline, source_urls: candidateUrls },
         { headline: matched.headline, source_urls: matched.source_urls },
@@ -322,12 +326,22 @@ export async function fileScanLeads(
           and its sentence (below), so "why is this one not linked?" is
           answerable from the row itself.
 
-          The verdict is looked up by THIS candidate's position and the
+          The verdict is looked up by THIS candidate's position AND the
           matched lead's headline, so a verdict reached for a different pair
           -- or for a target this run matched differently -- is not found, and
           the word rule stands. See dup-check.ts.
+
+          L2 of the pre-merge audit: the headline half of that sentence was
+          stated in the comment and not done in the code. The map is keyed by
+          candidate index, and two candidates cannot collide, but the TARGET
+          can differ -- `collectDupPairs` records the headline it matched
+          against, and this loop matches independently. Comparing them is what
+          makes "the verdict is about the pair we are filing" a property of the
+          code rather than of the ordering.
         */
-        const verdict = dupCheck?.decisions.get(candidateIndex)?.lead?.verdict ?? null;
+        const leadAnswer = dupCheck?.decisions.get(candidateIndex)?.lead ?? null;
+        const verdict =
+          leadAnswer && leadAnswer.headline === matched.headline ? leadAnswer.verdict : null;
         if (verdict && !verdict.same) {
           dupCheckCleared += 1;
         } else {
@@ -353,7 +367,11 @@ export async function fileScanLeads(
       its own answer to "not linked to what?".
     */
     const decision = dupCheck?.decisions.get(candidateIndex);
-    const leadVerdict = decision?.lead?.verdict ?? null;
+    // L2 of the audit, the same guard the link above applies: a verdict for a
+    // target this run did not match is not this row's verdict, and recording it
+    // would put another pair's answer in `dup_ai_same`/`dup_ai_target`.
+    const leadAnswer = decision?.lead ?? null;
+    const leadVerdict = leadAnswer && leadAnswer.headline === matchedHeadline ? leadAnswer.verdict : null;
     const printedVerdict = decision?.printed?.verdict ?? null;
     const aiModel = decision ? (dupCheck?.model ?? null) : null;
     const aiCheckedAt = decision ? new Date().toISOString() : null;
@@ -377,7 +395,7 @@ export async function fileScanLeads(
           ${dupKind},
           ${leadVerdict ? leadVerdict.same : null},
           ${leadVerdict ? storableText(leadVerdict.why).slice(0, 400) || null : null},
-          ${decision?.lead?.headline ?? null},
+          ${leadVerdict ? storableText(leadAnswer!.headline).slice(0, 180) || null : null},
           ${printedVerdict ? printedVerdict.same : null},
           ${printedVerdict ? storableText(printedVerdict.why).slice(0, 400) || null : null},
           ${decision?.printed?.slug ?? null},

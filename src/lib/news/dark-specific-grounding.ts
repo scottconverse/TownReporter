@@ -47,6 +47,30 @@ import type { HopPlan } from "./investigate.ts";
 /** The visible marker. Quoted in the editor handbook; do not reword silently. */
 export const UNGROUNDED_MARKER = "(not in any capture yet)";
 
+/** `text` with a trailing marker and the space before it taken back off. */
+const MARKER_SUFFIX = ` ${UNGROUNDED_MARKER}`;
+
+/**
+ * The same string with every marker taken out, and nothing else touched.
+ *
+ * The marker is a note to a READER. It is not part of a name, a URL or a search
+ * term, and three places must not carry it:
+ *
+ *   - a query built from stored text. `"Front Range Municipal Solutions LLC
+ *     (not in any capture yet)" Longmont` asks a provider for an exact phrase
+ *     that cannot exist, so the search returns nothing and the hop reads as low
+ *     yield when it was the app that broke it.
+ *   - a URL label. A frontier item whose label is
+ *     `https://…/View/123456 (not in any capture yet)/Agenda.pdf` is a URL the
+ *     fetcher cannot reach -- see `groundPlan`, which never marks a URL at all.
+ *   - the marker's own words. "capture" and "yet" are not content words and
+ *     must not become search terms in a subject built out of marked prose.
+ */
+export function stripUngroundedMarker(text: string): string {
+  if (!text.includes(UNGROUNDED_MARKER)) return text;
+  return text.split(MARKER_SUFFIX).join("");
+}
+
 /** Suffix and month spellings that mean the same thing when they are compared. */
 const CANONICAL_WORD: Record<string, string> = {
   st: "street",
@@ -99,6 +123,56 @@ const NOT_A_NAME = new Set([
   "what", "which", "who", "whom", "whose", "why", "how", "yes", "ok", "okay",
 ]);
 
+/**
+ * Words that say a capitalised run is an INSTITUTION rather than a person.
+ *
+ * A two-word run of capital letters is what English does to a great many things
+ * that are not people: a statute ("Colorado Open Records Act"), a public body
+ * ("Secretary of State", "Boulder County Public Health"), a form ("Public
+ * Records Request"). Marking those as invented PERSONS is worse than useless --
+ * it drops the first-hop query that names a state agency, and it renders the
+ * editor "Does the Colorado Secretary (not in any capture yet) of State list
+ * ...", which reads as the desk doubting a government department exists.
+ *
+ * This list is generic: no place name is in it, because a paper's own town and
+ * state are the paper's to know (see `GroundingCorpus.place`) and a
+ * neighbourhood's name must never be hard-coded here.
+ */
+const INSTITUTION_WORD = new Set([
+  "act", "administration", "agency", "assembly", "attorney", "authority", "board", "bureau",
+  "cabinet", "city", "clerk", "code", "college", "commission", "committee", "congress",
+  "council", "county", "court", "department", "district", "division", "federal", "governor",
+  "mayor", "ministry", "national", "office", "ordinance", "planning", "police", "program",
+  "project", "public", "records", "request", "school", "secretary", "senate", "sheriff",
+  "state", "statute", "superintendent", "treasurer", "university",
+]);
+
+/**
+ * The word a sentence opens with, which swallows the next capitalised run:
+ * "Search Colorado Secretary of State" is an instruction, and "Search Colorado
+ * Secretary" is not a person. Only the FIRST word is judged -- a verb in the
+ * middle of a run ("Grand Junction Works") is left to `INSTITUTION_WORD`.
+ *
+ * Matched on the stem as well as the word, because the run that reaches here is
+ * the one the sentence actually wrote: `Searched Colorado Shines` came back as
+ * a name until "searched" was read as "search".
+ */
+const SENTENCE_OPENER = new Set([
+  "search", "find", "check", "look", "review", "investigate", "pull", "call", "contact",
+  "verify", "confirm", "ask", "see", "read", "visit", "open", "does", "do", "did", "is",
+  "was", "were", "has", "have", "had", "can", "could", "should", "will", "would", "are",
+  "get", "use", "try", "follow", "query", "compare", "trace", "run", "list", "add",
+]);
+
+/** "searched" is "search" with a suffix, and opens a sentence just the same. */
+function isSentenceOpener(word: string): boolean {
+  if (SENTENCE_OPENER.has(word)) return true;
+  for (const suffix of ["ed", "es", "ing", "s"]) {
+    if (word.endsWith(suffix) && SENTENCE_OPENER.has(word.slice(0, -suffix.length))) return true;
+  }
+  return false;
+}
+
 export type SpecificKind = "address" | "amount" | "date" | "identifier" | "name";
 
 export type Specific = {
@@ -134,34 +208,196 @@ const LETTERED_DOCKET = /\b[A-Z]{1,4}-\d{2,4}-\d{1,6}\b/g;
 const NAME_RUN = /\b\p{Lu}[\p{L}'’.]*\s+\p{Lu}[\p{L}'’.]*(?:\s+\p{Lu}[\p{L}'’.]*){0,2}\b/gu;
 
 /**
- * Fold a string to the form two spellings of the same specific agree on:
- * case, punctuation and the abbreviations in `CANONICAL_WORD`.
+ * Words that are the same in both spellings of a street address, and may be
+ * dropped when they sit right after the house number. "1941 N. Terry Street"
+ * and "1941 Terry Street" are one place; "West Virginia" is not "Virginia".
+ */
+const DIRECTIONAL = new Set([
+  "n", "s", "e", "w", "ne", "nw", "se", "sw",
+  "north", "south", "east", "west", "northeast", "northwest", "southeast", "southwest",
+]);
+
+/** The scale word in an amount, as the number of decimal places it shifts. */
+const AMOUNT_SCALE: Record<string, number> = {
+  thousand: 3,
+  million: 6,
+  billion: 9,
+  trillion: 12,
+};
+
+const MONTH_INDEX: Record<string, number> = {
+  january: 1, jan: 1, february: 2, feb: 2, march: 3, mar: 3, april: 4, apr: 4,
+  may: 5, june: 6, jun: 6, july: 7, jul: 7, august: 8, aug: 8,
+  september: 9, sept: 9, sep: 9, october: 10, oct: 10, november: 11, nov: 11,
+  december: 12, dec: 12,
+};
+
+/*
+  The three spellings of a date, and the one of an amount, are matched on the
+  ALREADY-LOWERCASED text: this runs after `.toLowerCase()`, so the month names
+  below are lower case on purpose.
+*/
+const AMOUNT_IN_TEXT = /\$\s?(\d[\d,]*)(?:\.(\d+))?\s*(thousand|million|billion|trillion)?\b/g;
+const MONTH_DATE_IN_TEXT =
+  /\b(january|february|march|april|may|june|july|august|september|sept|sep|october|november|december|jan|feb|mar|apr|jun|jul|aug|oct|nov|dec)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/g;
+const ISO_DATE_IN_TEXT = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+const SLASH_DATE_IN_TEXT = /\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/g;
+
+const pad2 = (value: number) => String(value).padStart(2, "0");
+
+/**
+ * `$1.2 million` and `$1,200,000` are the same amount written two ways, and
+ * `$200,000` is not -- which is the whole point, because a dropped digit in a
+ * street number or an amount is the error class this module exists for.
+ *
+ * The shift is done on the DIGITS rather than with floating point: `1.2 * 1e6`
+ * is 1200000.0000000002 in JS, and a rule whose answer depends on that is a
+ * rule that grounds `$1.2 million` against `$1,200,000` on some days and not
+ * others.
+ */
+function canonicalAmount(digits: string, fraction: string | undefined, scale: string | undefined): string {
+  const whole = digits.replace(/,/g, "");
+  const shift = AMOUNT_SCALE[scale ?? ""] ?? 0;
+  let frac = fraction ?? "";
+  let shifted = whole;
+  if (frac) {
+    const moved = Math.min(shift, frac.length);
+    shifted = whole + frac.slice(0, moved);
+    frac = frac.slice(moved);
+    shifted += "0".repeat(shift - moved);
+  } else {
+    shifted += "0".repeat(shift);
+  }
+  const leading = shifted.replace(/^0+(?=\d)/, "");
+  const tail = frac.replace(/0+$/, "");
+  return tail ? `amt${leading}.${tail}` : `amt${leading}`;
+}
+
+/*
+  No separators: the punctuation strip below would take the hyphens back out
+  and leave three tokens, which is a weaker key than one. `date20261002`.
+*/
+function canonicalDate(year: number, month: number, day: number): string {
+  return `date${year}${pad2(month)}${pad2(day)}`;
+}
+
+/**
+ * Fold a string to the form two spellings of the same specific agree on.
+ *
+ * Four things are folded, each one a false positive or a false negative the
+ * pre-merge audit found:
+ *
+ *   1. CASE AND PUNCTUATION, and the street-suffix abbreviations in
+ *      `CANONICAL_WORD`: "1941 Terry St" is "1941 Terry Street".
+ *   2. AMOUNTS, to one token: "$1.2 million" and "$1,200,000" both become
+ *      `amt1200000`, and "$200,000" becomes `amt200000` -- which is NOT inside
+ *      it, because the comparison is on whole tokens (see below).
+ *   3. DATES, to one token: "October 2nd, 2026", "Oct. 2, 2026", "2026-10-02"
+ *      and "10/2/2026" all become `date2026-10-02`.
+ *   4. A DIRECTIONAL prefix right after a house number: "1941 N. Terry Street"
+ *      is "1941 Terry Street". Only there -- "West Virginia" keeps its West.
+ *
+ * The result is a space-separated token string that is compared on TOKEN
+ * BOUNDARIES, not as a substring. `String.includes` alone grounds "$200,000"
+ * with "$1,200,000" (the digits "200 000" really are inside "1 200 000") and
+ * "941 Terry Street" with "1941 Terry Street" -- the exact "digit dropped from
+ * the number" failure the rule is for.
  */
 export function normaliseForGrounding(text: string): string {
-  return text
-    .normalize("NFKC")
-    .toLowerCase()
+  let out = text.normalize("NFKC").toLowerCase();
+  out = out.replace(AMOUNT_IN_TEXT, (_m, digits: string, fraction?: string, scale?: string) =>
+    ` ${canonicalAmount(digits, fraction, scale)} `,
+  );
+  out = out.replace(ISO_DATE_IN_TEXT, (_m, y: string, mo: string, d: string) =>
+    ` ${canonicalDate(Number(y), Number(mo), Number(d))} `,
+  );
+  out = out.replace(SLASH_DATE_IN_TEXT, (_m, mo: string, d: string, y: string) =>
+    ` ${canonicalDate(y.length === 2 ? 2000 + Number(y) : Number(y), Number(mo), Number(d))} `,
+  );
+  out = out.replace(MONTH_DATE_IN_TEXT, (_m, month: string, d: string, y: string) =>
+    ` ${canonicalDate(Number(y), MONTH_INDEX[month] ?? 1, Number(d))} `,
+  );
+  const words = out
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
     .split(" ")
-    .map((word) => CANONICAL_WORD[word] ?? word)
-    .join(" ");
+    .filter(Boolean)
+    .map((word) => CANONICAL_WORD[word] ?? word);
+  const kept: string[] = [];
+  for (const word of words) {
+    const previous = kept[kept.length - 1];
+    if (DIRECTIONAL.has(word) && previous !== undefined && /^\d+$/.test(previous)) continue;
+    kept.push(word);
+  }
+  return kept.join(" ");
 }
 
 /**
  * A corpus folded once, for the callers that judge hundreds of strings against
  * the same captures (one hop's plan is every one of its fields).
+ *
+ * `place` is the paper's OWN city, state and county, read from the newsroom's
+ * settings and never written into this module. A name run made only of those
+ * words -- "Longmont Colorado", the paper's town and the paper's state -- is
+ * grounded by definition: the desk knows where it publishes from, and a rule
+ * that asked a capture to prove the town's own name would drop every first-hop
+ * query a state agency is scoped to. It is not a free pass for a run built
+ * around a place: "Doe Longmont" is still an ungrounded person, because the
+ * surname is not a place word.
  */
-export type GroundingCorpus = string | { readonly normalised: string };
+export type GroundingCorpus = string | {
+  readonly normalised: string;
+  readonly place?: readonly string[];
+};
 
-export function prepareCorpus(text: string): GroundingCorpus {
-  return { normalised: normaliseForGrounding(stripMarkedSpecifics(text)) };
+export function prepareCorpus(text: string, place?: readonly string[]): GroundingCorpus {
+  return {
+    normalised: normaliseForGrounding(stripMarkedSpecifics(text)),
+    /*
+      Folded to WORDS, not to phrases: the comparison asks whether every word of
+      a name run is a place word, and "Grand Junction" has to answer for "Grand"
+      and for "Junction" separately or a paper there could never name its own
+      city in a two-word run.
+    */
+    place: place?.length
+      ? [...new Set(place.flatMap((part) => normaliseForGrounding(part).split(" ")).filter(Boolean))]
+      : undefined,
+  };
 }
 
 function normalisedCorpus(corpus: GroundingCorpus): string {
   return typeof corpus === "string"
     ? normaliseForGrounding(stripMarkedSpecifics(corpus))
     : corpus.normalised;
+}
+
+/** The paper's own place words, folded, for a corpus that carries them. */
+function placeWords(corpus: GroundingCorpus): readonly string[] {
+  return typeof corpus === "string" ? [] : (corpus.place ?? []);
+}
+
+/**
+ * Compare on TOKEN BOUNDARIES, by padding both sides with the space that
+ * separates tokens. A plain substring test is what let "$200,000" be grounded
+ * by "$1,200,000" and "941 Terry Street" by "1941 Terry Street".
+ */
+function containsTokens(haystack: string, needle: string): boolean {
+  if (!needle) return true;
+  return ` ${haystack} `.includes(` ${needle} `);
+}
+
+/**
+ * The paper's place, as a corpus part on its own, so a caller that has the
+ * settings and not the captures can still say where the paper publishes from.
+ */
+export function placeCorpus(place: {
+  city?: string | null;
+  state?: string | null;
+  county?: string | null;
+}): readonly string[] {
+  return [place.city, place.state, place.county]
+    .map((part) => (part ?? "").trim())
+    .filter(Boolean);
 }
 
 /**
@@ -176,8 +412,13 @@ function normalisedCorpus(corpus: GroundingCorpus): string {
  *
  * Removing the whole span rather than the four words of the marker is the
  * point: what must not be in the corpus is the specific.
+ *
+ * Exported for the second caller with the same need: the verification lane
+ * builds search queries out of a signal's own name, and a marked specific in
+ * that name must be gone from the query, not merely marked. See M1 of the
+ * pre-merge audit.
  */
-function stripMarkedSpecifics(text: string): string {
+export function stripMarkedSpecifics(text: string): string {
   if (!text.includes(UNGROUNDED_MARKER)) return text;
   const spans = findSpecifics(text).filter((specific) =>
     text.startsWith(` ${UNGROUNDED_MARKER}`, specific.index + specific.text.length),
@@ -196,7 +437,7 @@ function stripMarkedSpecifics(text: string): string {
 export function isSpecificGrounded(specific: string, corpus: GroundingCorpus): boolean {
   const needle = normaliseForGrounding(specific);
   if (!needle) return true;
-  return normalisedCorpus(corpus).includes(needle);
+  return containsTokens(normalisedCorpus(corpus), needle);
 }
 
 /**
@@ -223,12 +464,16 @@ export function specificIsGrounded(
   if (isSpecificGrounded(specific.text, corpus)) return true;
   if (specific.kind !== "name") return false;
   const words = normaliseForGrounding(specific.text).split(" ").filter(Boolean);
+  const place = placeWords(corpus);
+  // The paper's own town and state, and nothing else: "Longmont Colorado" is
+  // grounded, "Doe Longmont" is not. See `GroundingCorpus`.
+  if (words.length > 0 && place.length > 0 && words.every((word) => place.includes(word))) return true;
   if (words.length < 3) return false;
   const haystack = normalisedCorpus(corpus);
   for (let start = 0; start < words.length - 1; start++) {
     for (let end = start + 2; end <= words.length; end++) {
       if (end - start === words.length) continue;
-      if (haystack.includes(words.slice(start, end).join(" "))) return true;
+      if (containsTokens(haystack, words.slice(start, end).join(" "))) return true;
     }
   }
   return false;
@@ -246,13 +491,69 @@ function collects(re: RegExp, text: string, kind: SpecificKind, out: Match[]): v
   }
 }
 
-function isNameRun(raw: string): boolean {
-  const words = raw
+function runWords(raw: string): string[] {
+  return raw
     .split(/\s+/)
     .map((word) => word.replace(/[.'’]/g, "").toLowerCase())
     .filter(Boolean);
+}
+
+function isNameRun(raw: string): boolean {
+  const words = runWords(raw);
   if (words.length < 2) return false;
   return words.some((word) => !NOT_A_NAME.has(word));
+}
+
+/**
+ * Is this capitalised run a PERSON, which is the only name this rule is about?
+ *
+ * It has to be asked, because `isNameRun` answers "is this a run of capitalised
+ * words that is not merely a sentence", and English capitalises agencies,
+ * statutes, forms, months and the verb a sentence opens with in exactly the
+ * same way. A run that names an institution is not an invented person and must
+ * not be marked as one: the failure the audit found was
+ * `Longmont Colorado business license`, `Colorado Open Records Act request`,
+ * `Boulder County Public Health`, `Public Records Request` and
+ * `Search Colorado Secretary of State` all read as invented people, so their
+ * queries were dropped and the hop looked low-yield when it was the rule that
+ * was wrong.
+ *
+ * What is left is the given-surname shape: two or more capitalised words, none
+ * of them an institution word, not opening with a sentence's verb. The paper's
+ * own town and state are handled where the corpus is (see `GroundingCorpus`),
+ * because this function has no settings to read.
+ */
+function isPersonNameRun(raw: string): boolean {
+  const words = runWords(raw);
+  if (words.length < 2) return false;
+  if (!words.some((word) => !NOT_A_NAME.has(word))) return false;
+  if (words.some((word) => INSTITUTION_WORD.has(word))) return false;
+  if (isSentenceOpener(words[0]!)) return false;
+  return true;
+}
+
+/**
+ * A capitalised run that walks over a full stop is two sentences, not one name:
+ * `Searched Colorado Shines. Zip 80501 applies.` came back as the single run
+ * "Colorado Shines. Zip", so the editor was shown a marker after "Zip" with no
+ * way to tell which of the two names was the one nothing carried.
+ *
+ * An INITIAL is not a sentence end -- "Gregory P. Halloran" is one name -- so a
+ * period only cuts when the token before it is a word of two letters or more
+ * and carries no period of its own. "P." and "U.S." therefore survive, and
+ * "Shines." does not.
+ */
+function cutAtSentenceEnd(match: Match): Match {
+  const text = match.text;
+  for (let at = text.indexOf("."); at !== -1; at = text.indexOf(".", at + 1)) {
+    if (!/\s/.test(text[at + 1] ?? "")) continue;
+    const before = text.slice(0, at);
+    const token = before.slice(before.search(/\S+$/));
+    const bare = token.replace(/\.+$/, "");
+    if (bare.length < 2 || bare.includes(".")) continue;
+    return { ...match, text: before, end: match.index + before.length };
+  }
+  return match;
 }
 
 /**
@@ -302,11 +603,19 @@ export function findSpecifics(text: string): Specific[] {
   collects(DOCKET, text, "identifier", found);
   collects(LETTERED_DOCKET, text, "identifier", found);
   for (const m of text.matchAll(NAME_RUN)) {
-    if (m.index === undefined || !isNameRun(m[0])) continue;
-    found.push({ kind: "name", text: m[0], index: m.index, end: m.index + m[0].length });
+    if (m.index === undefined) continue;
+    const whole: Match = { kind: "name", text: m[0], index: m.index, end: m.index + m[0].length };
+    // Cut the sentence end BEFORE anything else is trimmed: once the run is
+    // "Colorado Shines. Zip" the period is interior and no later trim sees it.
+    const oneSentence = cutAtSentenceEnd(whole);
+    if (!isNameRun(oneSentence.text) || !isPersonNameRun(oneSentence.text)) continue;
+    found.push(oneSentence);
   }
   const trimmed = found
     .map((m) => (m.kind === "name" ? trimLeadingGrammar(trimTrailingPunctuation(m)) : trimTrailingPunctuation(m)))
+    // A run's first word can be grammar -- "The Colorado Shines record" -- and
+    // trimming it can reveal that what is left is an institution after all.
+    .map((m) => (m.kind === "name" && m.text && !isPersonNameRun(m.text) ? { ...m, text: "" } : m))
     .filter((m) => m.text);
   trimmed.sort((a, b) => a.index - b.index || b.end - a.end);
   /*
@@ -353,6 +662,38 @@ function alreadyMarked(text: string, end: number): boolean {
 }
 
 /**
+ * Every URL, path-like token and email address in the text, as spans.
+ *
+ * A specific inside one of these is not a specific: `…/View/123456/Agenda.pdf`
+ * carries a five-digit number, and an amount or a date can sit in a query
+ * string. The marker cannot go inside one -- a URL with
+ * `(not in any capture yet)` spliced into its path is a URL the fetcher cannot
+ * reach, and the page the editor was promised is never read. These tokens are
+ * judged WHOLE, elsewhere, or not at all.
+ */
+const URL_TOKEN = /(?:[a-z][a-z0-9+.-]*:\/\/|\bwww\.)[^\s<>"'`]+|[\w.+-]+@[\w-]+\.[\w.-]+/giu;
+
+function urlSpans(text: string): { start: number; end: number }[] {
+  const spans: { start: number; end: number }[] = [];
+  URL_TOKEN.lastIndex = 0;
+  for (const m of text.matchAll(URL_TOKEN)) {
+    if (m.index === undefined) continue;
+    const token = m[0].replace(/[.,;:)\]}'"]+$/, "");
+    spans.push({ start: m.index, end: m.index + token.length });
+  }
+  return spans;
+}
+
+function insideUrl(spans: { start: number; end: number }[], start: number, end: number): boolean {
+  return spans.some((span) => start < span.end && end > span.start);
+}
+
+/** Is this one label a URL (or a path), which is never edited, only kept whole? */
+export function isUrlLike(text: string): boolean {
+  return /^\s*(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i.test(text);
+}
+
+/**
  * The same text with every ungrounded specific marked in place.
  *
  * Byte-for-byte unchanged when everything in it is grounded, which is the
@@ -360,8 +701,12 @@ function alreadyMarked(text: string, end: number): boolean {
  */
 export function markUngroundedSpecifics(text: string, corpus: GroundingCorpus): string {
   if (!text) return text;
+  const spans = urlSpans(text);
   const pending = findSpecifics(text).filter(
-    (specific) => !specificIsGrounded(specific, corpus) && !alreadyMarked(text, specific.index + specific.text.length),
+    (specific) =>
+      !specificIsGrounded(specific, corpus) &&
+      !alreadyMarked(text, specific.index + specific.text.length) &&
+      !insideUrl(spans, specific.index, specific.index + specific.text.length),
   );
   if (!pending.length) return text;
   let out = text;
@@ -387,6 +732,32 @@ export function queryNamesUngroundedSpecific(query: string, corpus: GroundingCor
 /** True when a model-written string may be written down or searched for as it stands. */
 export function isDurableTextGrounded(text: string, corpus: GroundingCorpus): boolean {
   return ungroundedSpecifics(text, corpus).length === 0;
+}
+
+/**
+ * The same string with the marker taken off the specifics a LATER capture has
+ * since corroborated, and left on the ones still nothing carries.
+ *
+ * The marker is a statement about the file at the moment it was written: "no
+ * capture here carries this". A hop that later reads the licensing record makes
+ * that statement false, and a stale marker is not a harmless relic -- it is a
+ * sentence the editor reads that the file no longer supports, and (M3 of the
+ * audit) it is text a search query gets built out of. Grounded specifics lose
+ * the marker; the rest keep it.
+ */
+export function unmarkGroundedSpecifics(text: string, corpus: GroundingCorpus): string {
+  if (!text.includes(UNGROUNDED_MARKER)) return text;
+  const marked = findSpecifics(text).filter((specific) =>
+    text.startsWith(MARKER_SUFFIX, specific.index + specific.text.length),
+  );
+  let out = text;
+  for (let i = marked.length - 1; i >= 0; i--) {
+    const specific = marked[i]!;
+    if (!specificIsGrounded(specific, corpus)) continue;
+    const end = specific.index + specific.text.length;
+    out = `${out.slice(0, end)}${out.slice(end + MARKER_SUFFIX.length)}`;
+  }
+  return out;
 }
 
 /**
@@ -442,7 +813,18 @@ export function groundPlan(
   }
   for (const claim of out.claims) claim.text = ground(claim.text);
   for (const item of out.frontier) {
-    item.label = ground(item.label);
+    /*
+      A URL LABEL IS NEVER GROUNDED, because grounding it breaks it.
+      `persistPlan` files a frontier item whose label IS the address of the
+      document to read, and `investigate.ts` hands that label straight to the
+      fetcher. A council packet's URL carries a five-digit document id, and
+      LONG_NUMBER matches it -- so the marker was spliced into the middle of the
+      path and the dig spent the hop fetching a URL that cannot exist.
+      `boundedFrontierItems` validates these labels BEFORE `groundPlan` runs, so
+      nothing downstream re-checks one. `why` is prose and is still marked --
+      that is where the editor reads what the model was reaching for.
+    */
+    if (!isUrlLike(item.label)) item.label = ground(item.label);
     item.why = ground(item.why);
     item.queries = groundQueryList(item.queries ?? []);
   }

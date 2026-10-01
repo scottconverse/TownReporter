@@ -607,3 +607,35 @@ describe("gate claims live in the reporting notes as checkboxes", () => {
     assert.ok(notes.todo[0]!.queries!.every((q) => q.hit === false));
   });
 });
+
+/*
+  L6 of the batch-7 pre-merge audit. The "U.S." rule continued into ANY
+  capitalised word that is not itself a sentence opener, so a place name
+  followed by an ordinary subject merged two sentences into one -- and an
+  absence rewrite then replaced both clauses as a unit, which is a rewrite of
+  something the story did not say.
+
+  THE MUTATION: restoring `return !(capitalised && SENTENCE_OPENERS.has(lower))`
+  merges the first case below back into one sentence.
+*/
+describe("splitSentences: a country abbreviation, and where the name ends", () => {
+  it("splits when the word after 'U.S.' is a new sentence's subject", () => {
+    const text = "He moved to the U.S. Colorado officials said nothing.";
+    assert.deepEqual(splitSentences(text).map((s) => s.trim()), [
+      "He moved to the U.S.",
+      "Colorado officials said nothing.",
+    ]);
+    assert.equal(splitSentences(text).join(""), text, "a split must not lose a character");
+  });
+
+  it("keeps a proper name the abbreviation introduced together", () => {
+    for (const text of [
+      "The U.S. Department of Agriculture answered.",
+      "The U.S. Supreme Court agreed Monday.",
+      "The U.S. Army Corps of Engineers owns it.",
+    ]) {
+      assert.equal(splitSentences(text).length, 1, `split a name in two: ${text}`);
+      assert.equal(splitSentences(text).join(""), text);
+    }
+  });
+});
