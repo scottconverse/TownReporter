@@ -87,7 +87,7 @@ describe("the desk home says it too, and only the word changes (SH0-3)", () => {
 describe("Pause and Delete are the editor's presses (owner addendum item 1)", () => {
   it("a keeps-failing row offers Pause and Delete, one press each", () => {
     const acts = between(sourcesScreen, "const keeps = keepsFailing(s);", "</Fragment>");
-    assert.match(acts, /onStatus\(s\.id, "paused"\)[\s\S]*?>\s*Pause\s*</, "Pause stays");
+    assert.match(acts, /onStatus\(s\.id, "paused"\)[\s\S]*?(>\s*Pause\s*<|: "Pause"\})/, "Pause stays");
     assert.match(acts, /keeps \? \([\s\S]*?>\s*Delete\s*</, "Delete is drawn on the flagged row");
   });
 
@@ -102,7 +102,7 @@ describe("Pause and Delete are the editor's presses (owner addendum item 1)", ()
 
   it("Delete uses the existing removal path rather than a new one", () => {
     const del = between(sourcesScreen, "keeps ? (", ") : (");
-    assert.match(del, /onStatus\(s\.id, "rejected"\)/, "the same press the row's Remove already made");
+    assert.match(del, /onStatus\(s\.id, "rejected"(, s\.status)?\)/, "the same press the row's Remove already made");
     assert.ok(
       !/setSourceStatus|useMutation|new InkButton/.test(del),
       "no new server function and no new mutation: the existing press, one click closer",

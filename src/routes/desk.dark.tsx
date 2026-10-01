@@ -54,7 +54,6 @@ import {
   redditPostStateLabel,
   redditResultHeadline,
   stalledRunCopy,
-  worthItemOnDesk,
   worthItemOnDeskLine,
   worthItemOnDeskReason,
 } from "@/lib/news/desk-copy";
