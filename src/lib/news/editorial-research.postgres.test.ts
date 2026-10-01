@@ -69,7 +69,7 @@ if (probe.ok) {
     sql = await db.getSql();
 
     // The migrations the app itself applies -- including
-    // 0113_editorial_research_captures.sql, the column this file is about.
+    // 0114_editorial_research_captures.sql, the column this file is about.
     const migrationDir = resolve(process.cwd(), "migrations");
     for (const name of readdirSync(migrationDir)
       .filter((name) => /^\d+.*\.sql$/.test(name))
@@ -94,7 +94,7 @@ after(async () => {
  * The desk's outside world, faked; its capture write is the REAL one.
  *
  * `runDeskResearch`'s `capture` is deliberately absent, so the run reaches
- * `rememberCapture`, the artifact tables and migrations/0113 -- which is the
+ * `rememberCapture`, the artifact tables and migrations/0114 -- which is the
  * whole point of running this file at all.
  */
 function deskInput(
@@ -107,6 +107,7 @@ function deskInput(
       newsroomId: 1,
       subject: "Front Range Passenger Rail sales tax",
       askedFor: "Whether a second district is needed",
+      voice: "THE EDITORIAL VOICE, with the research protocol in it.",
       researchPack: "SUBJECT: Front Range Passenger Rail sales tax",
       paper: { city: "Longmont", state: "Colorado", officialDomains: ["longmontcolorado.gov"] },
       requestId,
@@ -114,7 +115,10 @@ function deskInput(
     {
       readWindow: async () => null,
       onStage: async () => {},
-      plan: async () => ({ ok: true, text: '{"queries": ["rail district levy"]}' }),
+      // The model stops after its one round, so the run is one search and one
+      // page -- the ceiling is not what ends it.
+      plan: async () => ({ ok: true, text: '{"queries": ["rail district levy"], "stop": true}' }),
+      localRecords: async () => ({ notes: "", reading: [] }),
       search: async () => ({
         hits: [{ title: "SB21-238", url: CAPTURED_URL, snippet: "" }],
         decision: "relevant",

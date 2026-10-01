@@ -498,13 +498,22 @@ can take about 90 minutes, excluding document intake. Opinion's Automatic can
 try a Codex Sol or Claude Sonnet pair after DeepSeek fails, so its total can be
 longer.
 **DeepSeek v4.1 Flash, Local model and saved connections are researched by the
-desk.** Those writers have no web tools of their own, so the desk searches and
-reads for them first — up to two rounds of queries, six searches and eight pages
-— and records every page it opens. The writing call that follows is one call,
-still from the voice as its system message and still with no tools, but it now
-receives what the desk captured with each page's address, and the pack says how
-many searches ran and how many pages were read. When the desk finds nothing
-usable for a piece it says so, and the editorial is still written from the
+desk.** Those writers have no web tools of their own, so the desk does the
+searching and the reading for them, and the model holds the full voice file while
+it plans those searches and reads what came back — the voice is where the
+research protocol lives, so the desk hands it over rather than keeping it back.
+The desk reads the newsroom's own record first, in the order the protocol puts
+it: the city's PrimeGov agendas, packets and minutes (the PDFs, with OCR where a
+scanned packet needs it), the meeting transcripts this desk captured, and the
+pages it already holds. Research then runs until the protocol's stopping
+conditions are met — every load-bearing claim with two independent sources, at
+least two surprising facts with one from a local primary document — or until the
+safety ceiling, 30 minutes and 80 pages by default
+(`EDITORIAL_RESEARCH_CEILING_MS`, `EDITORIAL_RESEARCH_PAGE_CEILING`). The writing
+call that follows is still one call, from the voice as its system message, and it
+receives what the desk read with each record's address and the number of searches
+run and pages read. When the desk finds nothing usable for a piece it says so,
+and the editorial is still written from the
 material the editor supplied. The page shows a
 running clock and checks every twenty seconds. Editorials remain drafts until
 you publish one.
@@ -753,14 +762,16 @@ Local Qwen entry were removed from every picker 2026-09-02; 0.6.10
 brought a generic local pick back.) Claude Code
 receives the voice through `--system-prompt-file`; Codex uses
 `model_instructions_file`. Both writing passes load the complete voice file
-and can research sources while writing. The editorial assignment is sent separately.
+and can research sources while writing: the voice file carries the research
+protocol, so the writer researches and writes in one run with it in hand. The
+editorial assignment is sent separately.
 Every op-ed requires a claims-and-sources appendix. An incomplete draft is retained
 and flagged for completion before publication. The
 DeepSeek rung and the explicit Local model path send validated voice text as a
 system message to their model server: they have no web tools of their own, so
 the desk runs the research pass for them — searching, opening and recording the
-pages — before the one writing call, and the writing pack says how many searches
-ran and how many pages were read.
+pages — and the same voice governs the planning and the reading as much as the
+writing. The writing pack says how many searches ran and how many pages were read.
 
 **The planner split.** Planning on Haiku costs about a quarter of planning on
 Opus for the same output, so the desk substitutes it — but only within the
@@ -1435,7 +1446,7 @@ Up to 20 files, 100 MB each. Large files upload in 4 MB parts. The full original
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and DeepSeek is offered in Opinion's picker by name too. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing; DeepSeek, the local model and saved connections have no web tools of their own, so the desk searches and reads for them first and the writing call that follows is one call that receives what the desk captured. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion's picker opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and DeepSeek is offered in Opinion's picker by name too. Stories, scans and Dark Desk walk the desk's own Automatic ladder — DeepSeek v4.1 Flash, then the local model on this computer when one is loaded, then Codex Terra — and Claude is a hand pick there. Both subscription writers read the complete configured voice using native instruction-file options and research with it in hand, since the voice file carries the research protocol; DeepSeek, the local model and saved connections have no web tools of their own, so the desk does the searching and reading for them and the same voice governs what it looks for. Research runs to the protocol's stopping conditions or the safety ceiling (30 minutes, 80 pages, configurable), not to a fixed search count. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52 notes
 

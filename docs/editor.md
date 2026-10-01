@@ -867,7 +867,7 @@ DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
 then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
-A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options. DeepSeek v4.1 Flash, **Local model** and saved connections have no web tools of their own, so the desk researches for them: it plans queries, searches, opens and records pages with the same machinery the Dark Desk uses, then the model reads those captures back as findings. The writing call is still one call, with the voice as its system message and no tools; the material it receives carries each captured page's address and the number of searches run and pages read, and says so plainly when the desk found nothing usable. The desk's share of the run is bounded — two rounds of queries, six searches, eight pages — and **Cancel** stops it at any point before the piece is written.
+A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options, and they research and write with it in hand — the voice file holds the research protocol (local record, packet and tape rules, triangulation, the surprise hunt), so the writer that follows it needs both the file and the tools in the same run. DeepSeek v4.1 Flash, **Local model** and saved connections have no web tools of their own, so the desk fetches for them — and the model holds the same voice while it plans those searches and reads what came back, so the protocol governs the research and not only the writing. The desk reads the newsroom's own record first, in the protocol's order: the city's PrimeGov agendas, packets and minutes (PDFs, with OCR for a scanned packet), the meeting transcripts this desk captured, and the pages it already holds. Research then runs to the protocol's stopping conditions — every load-bearing claim doubly sourced, two surprising facts with one from a local primary document — rather than to a fixed number of searches, with a safety ceiling of 30 minutes and 80 pages (`EDITORIAL_RESEARCH_CEILING_MS`, `EDITORIAL_RESEARCH_PAGE_CEILING`) and **Cancel** stopping it at any point before the piece is written.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
@@ -919,8 +919,11 @@ not a deadline. The current research and writing passes each have a default
 45-minute ceiling. The Claude pair can therefore take about 90 minutes.
 An explicit Local model, DeepSeek v4.1 Flash or saved connection makes one
 writing call, and the desk's own research pass runs before it inside the
-"Researching with the desk" stage — it is small and bounded, not the frontier
-research pass. The row
+"Researching with the desk" stage. That pass is the desk's, not the frontier
+research engine, but it is not a token look either: it runs to the protocol's
+stopping conditions, so a piece that needs a dozen searches gets them, and it
+stops for the editor at any hop. Its ceiling is 30 minutes and 80 pages by
+default, under this 45-minute per-pass clock. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
 

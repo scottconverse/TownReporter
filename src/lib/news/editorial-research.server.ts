@@ -1,34 +1,33 @@
 /**
  * The desk-run research pass, for the Opinion writers that have no web tools.
  *
- * UNIT U30. Opinion's Automatic starts on DeepSeek v4.1 Flash, and its picker
- * offers the local model and the newsroom's saved connections. All three speak
- * the OpenAI-compatible protocol, which has no WebSearch/WebFetch tool loop on
- * the wire (see `providerRunsToolPass`), so the two-pass flow the subscription
- * writers use cannot run for them: there is no second pass to give the web
- * tools to. Unit U29 answered that by writing in one call from the material the
- * editor supplied and recording "no gathering pass ran" — honest, and a piece
- * that was never researched.
+ * UNIT U30 built this; UNIT U31 changed its shape twice over.
  *
- * This module is the other half. The desk does the searching, the fetching and
- * the capturing; the model only plans the queries and reads what the desk
- * captured. That keeps SEC-3 intact in both directions:
+ * U30: Opinion's Automatic starts on DeepSeek v4.1 Flash, and its picker offers
+ * the local model and the newsroom's saved connections. All three speak the
+ * OpenAI-compatible protocol, which has no WebSearch/WebFetch tool loop on the
+ * wire (see `providerRunsToolPass`), so the two-pass flow the subscription
+ * writers use cannot run for them -- there is no second pass to give the web
+ * tools to. The desk does the searching, the fetching and the capturing, and
+ * the model only plans and reads.
  *
- *   - the research calls here never hold the private voice. Their system text
- *     is `DESK_PLANNER_INSTRUCTIONS` / `DESK_READER_INSTRUCTIONS`, and the
- *     packs they are handed are the desk's material and captured public pages;
- *   - the writing call still gets no tools of any kind, because its transport
- *     has none. Nothing about this pass changes that call's shape.
+ * U31 (owner decision D20, "go back to how it was"): the model HOLDS THE VOICE
+ * FILE while it does both. The voice contains the research protocol -- Stage L
+ * local record, packet/PDF/tape/parcel/CORA rules, triangulation, the surprise
+ * hunt, the local source ledger -- so a model planning searches without it is
+ * planning without the protocol it is supposed to follow. The same decision
+ * removed the fixed small budget: research now runs until the protocol's own
+ * stopping conditions are met, as far as the desk can judge them, with a
+ * generous safety ceiling instead of a research budget.
  *
  * WHY THIS IS NOT `researchLoop` ITSELF. `researchLoop` is the Dark Desk's
  * engine and it is written against an investigation: `investigationNewsroom`
  * (investigate.ts) throws "Investigation not found in this newsroom" before it
  * runs a hop, and a round writes `frontier_items`, `search_log` and
- * investigation-scoped `artifacts` rows. An editorial is not an investigation —
+ * investigation-scoped `artifacts` rows. An editorial is not an investigation --
  * filing one would put the Opinion desk's research into the Dark Desk's files
  * and its frontier, and give every editorial a file the editor never opened.
- * So this pass reuses the Dark Desk's machinery rather than its driver, which
- * is what the pieces below are:
+ * So this pass reuses the Dark Desk's machinery rather than its driver:
  *
  *   searchWithFallback + the relevance contract   ./search-web.ts
  *   junkQueryReason                               ./extract.ts
@@ -36,13 +35,15 @@
  *   readableCapture                               ./html-text.ts
  *   rememberCapture (the artifact tables)         ./investigate.ts
  *   the newsroom's research window                ./dark-preferences.ts
- *   official domains / the paper's place          ./absence-paper.ts
+ *   the newsroom's official hosts, and its own
+ *   PrimeGov portal and captured transcripts      ./primegov.ts, ./absence-gate.ts
+ *   PDF and transcript reads                      ./ingest.ts
  *   onStage + `throwIfCancelled` (the U25 seam)   ./jobs.ts
  *
  * The capture write is the same one `checkEditorialNames` already makes for an
  * editorial's own name check: `investigationId: null`, `triggerKind:
  * "editorial"`, `autoWatch: false`. `capture_events.editorial_request_id`
- * (migrations/0113) is what makes the pages a given editorial was written from
+ * (migrations/0114) is what makes the pages a given editorial was written from
  * readable back from the request that produced it.
  *
  * No schema is created at runtime here. New schema in this repository lives in
@@ -52,58 +53,73 @@
  * pass writes is guaranteed to exist before any request reaches it.
  */
 
-import { getSql } from "../db.ts";
+import { getSql, type Sql } from "../db.ts";
 import {
   resolveResearchPreferences,
   queryWithResearchWindow,
   type ResearchSnapshot,
 } from "./dark-preferences.ts";
-import {
-  DESK_PLANNER_INSTRUCTIONS,
-  DESK_READER_INSTRUCTIONS,
-  buildDeskFindingsPack,
-  buildDeskPlanPack,
-  type DeskCapture,
-} from "./editorial.ts";
+import type { DeskCapture } from "./editorial.ts";
+import { buildDeskFindingsPack, buildDeskPlanPack } from "./editorial.ts";
 import { junkQueryReason } from "./extract.ts";
 import { sha256 } from "./fetch-url.ts";
 import { readableCapture } from "./html-text.ts";
 import { ingestDocument, type PdfPage } from "./ingest.ts";
 import { rememberCapture } from "./investigate.ts";
+import { primeGovOriginForNewsroom } from "./primegov-source.ts";
+import { compiledDocumentUrl, preferredDocuments, readPrimeGovPortal } from "./primegov.ts";
+import { queryTokens } from "./retrieve.ts";
 import { boilerplatePageReason } from "./result-quality.ts";
 import { searchWithFallback, type SearchRelevanceAssessment, type WebHit } from "./search-web.ts";
 
 /*
   ---------------------------------------------------------------------------
-  The budget
+  The ceiling
   ---------------------------------------------------------------------------
 
-  Small on purpose, and the numbers are the whole of the argument. Dark Desk
-  rounds are unbounded work on an open file; this is a piece of writing the
-  editor is waiting on, and the editorial's own timeout is already generous
-  because the VOICE decides how much to go and read. A no-tool writer has no
-  such appetite to budget for, so the desk takes a fixed, small look:
+  U31 removed the fixed budget (2 hops, 3 queries a hop, 6 searches, 8 pages).
+  What replaced it is not "unbounded": it is the protocol's own stopping
+  conditions, judged by the model that holds the protocol, plus a generous
+  safety ceiling for the case where that judgement never comes.
 
-    2 hops         one round of searches, then one round that chases what the
-                   first did not settle
-    3 queries/hop  six searches at most, which is what the budget allows whole
-    8 pages        read and captured at most, across both hops
+  The two are different things and the difference is the whole design:
 
-  A hop is model-planned, so 2 hops is also the model-call ceiling for
-  planning: at most three research model calls (plan, plan, read) before the
-  writing call. Past that the marginal page stops paying for itself, and the
-  honest thing for an editorial's claims-and-sources appendix is a short list of
-  pages the desk actually read over a long list it skimmed.
+    - the STOPPING CONDITIONS are the research protocol's, and they are the
+      reason to stop. The desk states them to the model and the model answers
+      `stop` with a reason -- the desk cannot judge "every load-bearing claim
+      has two independent sources" itself, because that is a judgement about
+      the piece, not about the pages;
+    - the CEILING is a safety net for a model that never says stop, a provider
+      that hangs, or a subject with no bottom. Nothing about a piece that hits
+      it is good: the run stops, says which ceiling it hit, and the writer is
+      told how much was read.
+
+  Both are configurable, because a slower box or a bigger paper genuinely needs
+  more: `EDITORIAL_RESEARCH_CEILING_MS` (default 30 minutes, floored at a
+  minute) and `EDITORIAL_RESEARCH_PAGE_CEILING` (default 80 pages, floored at
+  one). The default clock sits under the editorial's own per-pass timeout so
+  the writing call still has room; see `editorialTimeoutMs` in
+  ./editorial.server.ts.
 */
-export const DESK_RESEARCH_HOPS = 2;
-export const DESK_RESEARCH_SEARCHES = 6;
-export const DESK_QUERIES_PER_HOP = 3;
-export const DESK_RESEARCH_PAGES = 8;
+export const DESK_RESEARCH_CEILING_DEFAULT_MS = 1_800_000;
+export const DESK_RESEARCH_PAGE_CEILING_DEFAULT = 80;
+
+/**
+ * A structural backstop, NOT a research budget.
+ *
+ * Every hop makes at least one model call, so a planner that answers with an
+ * empty query list every time would spin until the clock ran out -- and each
+ * spin costs a call. This bounds the loop itself. It is deliberately far above
+ * any real run (a hop is a planning call plus its searches; the protocol's own
+ * stopping conditions end a real piece long before this), and it is not what
+ * `EDITORIAL_RESEARCH_*` tunes.
+ */
+export const DESK_RESEARCH_HOP_BACKSTOP = 16;
 
 /** How much of one captured page the reading call is shown. */
 export const DESK_PAGE_TEXT_CAP = 6_000;
 /** How much captured text the reading call is shown in total, in page order. */
-export const DESK_TOTAL_TEXT_CAP = 48_000;
+export const DESK_TOTAL_TEXT_CAP = 120_000;
 
 /**
  * The arrival sentence, and it is spelled here so the job's stage list and this
@@ -149,11 +165,53 @@ export type DeskCaptureFn = (page: {
   extractionMethod: string;
 }) => Promise<{ captureEventId: number | null; versionId: number | null }>;
 
-/** One no-tool model call: a system instruction and a pack, nothing else. */
+/** One model call: the voice as its instructions, and a pack to answer. */
 export type DeskModelFn = (
   system: string,
   user: string,
 ) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+
+/** What a planning call answers: queries to run, and whether to stop. */
+export type DeskPlan = {
+  queries: string[];
+  /** The model's own judgement against the protocol's stopping conditions. */
+  stop: boolean;
+  /** Why it stopped, or what is still unsettled. Shown on the run. */
+  reason: string;
+};
+
+/**
+ * One thing the desk read, from wherever it came.
+ *
+ * U31 made the reading set heterogeneous on purpose: the protocol's first stage
+ * is the LOCAL record, and a captured meeting transcript or the city's own
+ * portal catalogue is not a web page with a capture id. `url` is what a reader
+ * could open (the video for a transcript), and `locator` is where inside it.
+ */
+export type DeskReading = {
+  kind: "page" | "portal" | "packet" | "transcript" | "capture";
+  title: string;
+  url: string | null;
+  captureEventId: number | null;
+  versionId: number | null;
+  /** Where inside the record, when it is not the whole thing (a transcript clock). */
+  locator: string | null;
+  text: string;
+};
+
+export type DeskLocalRecords = {
+  /** The newsroom's own record, in words, for every planning pack. */
+  notes: string;
+  /** What the desk read out of it, before any general web search. */
+  reading: DeskReading[];
+};
+
+export type DeskLocalRecordsFn = (input: {
+  newsroomId: number;
+  subject: string;
+  askedFor?: string;
+  officialHosts: string[];
+}) => Promise<DeskLocalRecords>;
 
 export type DeskResearchDeps = {
   search?: DeskSearchFn;
@@ -161,6 +219,12 @@ export type DeskResearchDeps = {
   capture?: DeskCaptureFn;
   plan?: DeskModelFn;
   read?: DeskModelFn;
+  /**
+   * The newsroom's own record -- its PrimeGov portal, its captured meeting
+   * transcripts, the pages it has already captured -- read BEFORE any general
+   * web search, because that is the order the protocol puts them in.
+   */
+  localRecords?: DeskLocalRecordsFn;
   /**
    * The editor's research window for this newsroom, or null when they have
    * never set one. Null is not "no preferences": it is the honest answer that
@@ -172,6 +236,9 @@ export type DeskResearchDeps = {
   throwIfCancelled?: () => Promise<void>;
   onStage?: (stage: string) => Promise<void>;
   now?: () => Date;
+  /** Test seams for the ceiling; production reads the environment once. */
+  ceilingMs?: number;
+  pageCeiling?: number;
 };
 
 export type DeskResearchInput = {
@@ -179,6 +246,17 @@ export type DeskResearchInput = {
   newsroomId: number;
   subject: string;
   askedFor?: string;
+  /**
+   * The operator's editorial voice file, in full (unit U31).
+   *
+   * It is the SYSTEM PROMPT of both research calls. The voice contains the
+   * research protocol this pass exists to run, so the planning and the reading
+   * are governed by it exactly as the writing call is -- which is the whole of
+   * owner decision D20. `writeEditorial` reads it through
+   * `readVoiceTextForLocalModel` once and hands the same text to all three
+   * calls; it is never an argument and never logged.
+   */
+  voice: string;
   /** The desk material pack the two-pass flow already builds for this piece. */
   researchPack: string;
   /**
@@ -202,6 +280,15 @@ export type DeskResearchInput = {
   requestId?: number | null;
 };
 
+/** Why the desk stopped, in words the run can show. */
+export type DeskStopReason =
+  | "protocol-satisfied"
+  | "planner-failed"
+  | "no-more-queries"
+  | "time-ceiling"
+  | "page-ceiling"
+  | "hop-backstop";
+
 export type DeskResearchOutcome = {
   /** The reading pass's findings, for the writing pack. "" when there are none. */
   findings: string;
@@ -210,9 +297,26 @@ export type DeskResearchOutcome = {
   captures: DeskCapture[];
   /** The editor's research window in words, when one applied to this run. */
   window: string | null;
+  /** Why the run stopped, and the model's reason when it gave one. */
+  stopReason: DeskStopReason;
+  stopDetail: string | null;
   /** Why nothing usable was found, or null when something was. */
   nothingFoundReason: string | null;
 };
+
+/** The clock, floored at a minute so a typo cannot make every run stop at once. */
+export function deskResearchCeilingMs(): number {
+  const raw = process.env.EDITORIAL_RESEARCH_CEILING_MS?.trim();
+  const parsed = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 60_000 ? parsed : DESK_RESEARCH_CEILING_DEFAULT_MS;
+}
+
+/** The page ceiling, floored at one so a typo cannot forbid every read. */
+export function deskResearchPageCeiling(): number {
+  const raw = process.env.EDITORIAL_RESEARCH_PAGE_CEILING?.trim();
+  const parsed = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 1 ? parsed : DESK_RESEARCH_PAGE_CEILING_DEFAULT;
+}
 
 /**
  * The editor's search-date preference, read from the newsroom's own settings.
@@ -286,18 +390,58 @@ export function parseDeskQueries(raw: string): string[] {
 }
 
 /**
- * The queries one hop will actually run: usable, bounded, windowed, and not
- * already asked. `junkQueryReason` decides what is usable -- the same rule the
- * dig's fallback path uses, and the reason the desk does not spend one of its
- * six searches on a page title or a scraped fragment.
+ * The whole planning answer: the queries AND the model's own stopping decision.
+ *
+ * U31 turned the plan into a decision, not just a query list. A model holding
+ * the protocol is the only thing in this system that can judge "every
+ * load-bearing claim has two independent sources" -- that is a judgement about
+ * the piece -- so the loop asks it, every hop, and stops when it says stop.
+ * `stop` absent reads as false: a model that answered only queries wants
+ * another hop, and the ceiling is what bounds that.
+ */
+export function parseDeskPlan(raw: string): DeskPlan {
+  const text = String(raw ?? "").replace(/```(?:json)?/gi, "");
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  let stop = false;
+  let reason = "";
+  let queries: string[] = [];
+  if (start >= 0 && end > start) {
+    try {
+      const parsed = JSON.parse(text.slice(start, end + 1)) as {
+        queries?: unknown;
+        stop?: unknown;
+        reason?: unknown;
+      };
+      stop = parsed.stop === true || parsed.stop === "true";
+      reason = typeof parsed.reason === "string" ? parsed.reason.replace(/\s+/g, " ").trim() : "";
+      if (Array.isArray(parsed.queries)) {
+        queries = parsed.queries.filter((q): q is string => typeof q === "string");
+      }
+    } catch {
+      /* the tolerant query reader below still gets the queries out */
+    }
+  }
+  if (!queries.length) queries = parseDeskQueries(text);
+  return { queries, stop, reason: reason.slice(0, 400) };
+}
+
+/**
+ * The queries one hop will actually run: usable, windowed, and not already
+ * asked. `junkQueryReason` decides what is usable -- the same rule the dig's
+ * fallback path uses, and the reason the desk does not spend a search on a page
+ * title or a scraped fragment.
+ *
+ * There is no cap here any more (U31 removed the six-search budget). What
+ * bounds a hop is the ceiling the loop checks between searches, not a count
+ * this function imposes.
  */
 export function boundedDeskQueries(
   raw: readonly string[],
-  input: { tried: Set<string>; cap: number; window?: ResearchSnapshot | null },
+  input: { tried: Set<string>; window?: ResearchSnapshot | null },
 ): string[] {
   const out: string[] = [];
   for (const candidate of raw) {
-    if (out.length >= input.cap) break;
     const clean = candidate.replace(/\s+/g, " ").trim();
     if (!clean || junkQueryReason(clean)) continue;
     const key = clean.toLowerCase();
@@ -313,32 +457,342 @@ function windowWords(window: ResearchSnapshot): string {
   return `${window.startDate} through ${window.endDate}`;
 }
 
+/** Subject tokens, for choosing which of the newsroom's own records matter. */
+function subjectTokens(subject: string, askedFor?: string): string[] {
+  const tokens = [...queryTokens(subject), ...queryTokens(askedFor ?? "")]
+    .map((token) => token.toLowerCase())
+    .filter((token) => token.length > 3);
+  return [...new Set(tokens)];
+}
+
+/** How well a piece of text answers this subject, 0 when it does not. */
+function subjectScore(text: string, tokens: string[]): number {
+  if (!tokens.length) return 0;
+  const lowered = text.toLowerCase();
+  return tokens.reduce((score, token) => score + (lowered.includes(token) ? 1 : 0), 0);
+}
+
+/**
+ * The newsroom's own record, read before any general web search.
+ *
+ * The protocol's first stage is the local record, and the desk's version of it
+ * is what this newsroom already has: the city's PrimeGov portal (agendas,
+ * packets, minutes -- the PDFs, read here, which is also where OCR happens), the
+ * meeting transcripts the desk captured, and any page it already captured for
+ * this beat. All of it is newsroom-scoped reads and the same `fetchPage` /
+ * `capture` seams everything else uses, so a test fakes it exactly like the
+ * rest of the pass.
+ *
+ * Nothing here is fatal. A newsroom with no portal, no transcripts and no
+ * captures is the ordinary case for a paper that has just been set up; the
+ * phase then contributes its notes and no reading, and the web search carries
+ * the run.
+ */
+async function collectLocalRecords(
+  input: {
+    userId: string;
+    newsroomId: number;
+    subject: string;
+    askedFor?: string;
+    officialHosts: string[];
+    pageCeiling: number;
+  },
+  io: {
+    fetchPage: DeskFetchFn;
+    capture: DeskCaptureFn;
+    reading: DeskReading[];
+    onStage: (stage: string) => Promise<void>;
+    throwIfCancelled: () => Promise<void>;
+    sql: Sql;
+  },
+): Promise<DeskLocalRecords> {
+  const tokens = subjectTokens(input.subject, input.askedFor);
+  const notes: string[] = [];
+  let portalOrigin: string | null = null;
+
+  await io.onStage(`${DESK_RESEARCH_STAGE}: checking the newsroom's own record`);
+
+  // 1. The city's PrimeGov portal: agendas, packets, minutes.
+  try {
+    portalOrigin = await primeGovOriginForNewsroom(io.sql, input.newsroomId);
+  } catch {
+    portalOrigin = null; // no sources table yet, or an unreadable one
+  }
+  if (portalOrigin) {
+    try {
+      const read = await readPrimeGovPortal(portalOrigin);
+      if (read.ok || read.meetings.length) {
+        const chosen = read.meetings
+          .map((meeting) => ({ meeting, score: subjectScore(meeting.title, tokens) }))
+          .filter((row) => row.score > 0)
+          .sort((a, b) => b.score - a.score || (a.meeting.dateTime < b.meeting.dateTime ? 1 : -1))
+          .slice(0, 4);
+        notes.push(
+          `THE CITY'S OWN PORTAL (PrimeGov, ${portalOrigin}): ${read.meetings.length} meetings on file` +
+            (read.failure ? ` (PARTIAL: ${read.failure})` : "") +
+            (chosen.length
+              ? `. Meetings that name this subject: ${chosen
+                  .map((row) => `${row.meeting.date} ${row.meeting.title}`)
+                  .join("; ")}`
+              : ". No meeting title names this subject."),
+        );
+        // The packets and minutes themselves, read here: these are PDFs, and a
+        // scanned one is transcribed rather than skipped, because a local
+        // primary document is exactly what the protocol's second stopping
+        // condition asks for.
+        for (const { meeting } of chosen) {
+          if (io.reading.length >= input.pageCeiling) break;
+          await io.throwIfCancelled();
+          for (const doc of preferredDocuments(meeting).slice(0, 1)) {
+            if (io.reading.length >= input.pageCeiling) break;
+            const url = compiledDocumentUrl(portalOrigin, doc);
+            if (boilerplatePageReason(url)) continue;
+            const readPage = await readAndCapture(url, doc.templateName || meeting.title, {
+              ...io,
+              kind: "packet",
+            });
+            if (readPage) io.reading.push(readPage);
+          }
+        }
+      }
+    } catch {
+      // A portal that cannot be read is a note, not a failed run.
+      notes.push(`THE CITY'S OWN PORTAL (PrimeGov, ${portalOrigin}): could not be read for this piece.`);
+    }
+  }
+
+  // 2. The meeting transcripts this desk captured, matched on the subject.
+  try {
+    const artifacts = await io.sql<{ id: number; video_id: string }>`
+      select id, video_id from meeting_transcript_artifacts
+      where newsroom_id = ${input.newsroomId} and artifact_type = 'transcript'
+      order by id desc limit 3
+    `;
+    if (artifacts.length) {
+      const ids = artifacts.map((row) => row.id);
+      const videoByArtifact = new Map(artifacts.map((row) => [row.id, row.video_id]));
+      const segments = await io.sql<{
+        artifact_id: number;
+        segment_index: number;
+        start_seconds: number | string;
+        excerpt: string;
+      }>`
+        select artifact_id, segment_index, start_seconds, excerpt
+        from meeting_transcript_segments
+        where artifact_id = any(${ids}::int[])
+        order by artifact_id desc, segment_index asc
+        limit 600
+      `;
+      const matched = segments
+        .map((segment) => ({ segment, score: subjectScore(segment.excerpt, tokens) }))
+        .filter((row) => row.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
+      if (matched.length) {
+        notes.push(
+          `CAPTURED MEETING TRANSCRIPTS (${artifacts.length} on file, ${matched.length} passages naming this subject).`,
+        );
+        const videoId = videoByArtifact.get(matched[0]!.segment.artifact_id) ?? "";
+        io.reading.push({
+          kind: "transcript",
+          title: `Captured meeting transcript ${videoId}`,
+          url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : null,
+          captureEventId: null,
+          versionId: null,
+          // The transcript is already the newsroom's own record, so what
+          // identifies the passages is the clock, not a stored page.
+          locator: `${clock(Number(matched[0]!.segment.start_seconds))} (segment ${matched[0]!.segment.segment_index})`,
+          text: matched
+            .map(
+              (row) =>
+                `[${clock(Number(row.segment.start_seconds))}; segment ${row.segment.segment_index}] ${row.segment.excerpt}`,
+            )
+            .join("\n"),
+        });
+      } else {
+        notes.push(`CAPTURED MEETING TRANSCRIPTS: ${artifacts.length} on file, none naming this subject.`);
+      }
+    }
+  } catch {
+    // No meeting tables in this database, or no transcripts captured.
+  }
+
+  // 3. What this desk already captured that bears on the subject.
+  try {
+    const rows = await io.sql<{
+      url: string;
+      title: string;
+      full_text: string;
+      capture_event_id: number | null;
+      version_id: number | null;
+      fetch_status: number | null;
+      fetch_outcome: string | null;
+    }>`
+      select av.url, av.title, av.full_text, av.fetch_status, av.fetch_outcome,
+             av.id as version_id, a.capture_event_id
+      from artifact_versions av
+      left join artifacts a on a.version_id = av.id and a.newsroom_id = av.newsroom_id
+      where av.newsroom_id = ${input.newsroomId}
+      order by av.id desc limit 60
+    `;
+    const picked = rows
+      .map((row) => ({ row, score: subjectScore(`${row.title} ${row.full_text.slice(0, 2000)}`, tokens) }))
+      .filter(({ row, score }) => {
+        if (score <= 0) return false;
+        if (boilerplatePageReason(row.url)) return false;
+        return (
+          readableCapture({
+            text: row.full_text,
+            status: row.fetch_status,
+            outcome: row.fetch_outcome,
+            title: row.title,
+          }).kind === "ok"
+        );
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6);
+    if (picked.length) {
+      notes.push(
+        `PAGES THIS DESK ALREADY CAPTURED on this subject: ${picked
+          .map(({ row }) => `${row.title || row.url} (${row.url})`)
+          .join("; ")}`,
+      );
+      for (const { row } of picked) {
+        io.reading.push({
+          kind: "capture",
+          title: row.title || row.url,
+          url: row.url,
+          captureEventId: row.capture_event_id ?? null,
+          versionId: row.version_id ?? null,
+          locator: null,
+          text: readableCapture({
+            text: row.full_text,
+            status: row.fetch_status,
+            outcome: row.fetch_outcome,
+            title: row.title,
+          }).body,
+        });
+      }
+    }
+  } catch {
+    // No artifact tables yet.
+  }
+
+  if (input.officialHosts.length) {
+    notes.push(
+      `THE PAPER'S OWN OFFICIAL HOSTS: ${input.officialHosts.join(", ")}. Search these before the open web.`,
+    );
+  }
+
+  return { notes: notes.join("\n"), reading: io.reading };
+}
+
+/** A transcript clock, the same `hh:mm:ss` shape the meeting desk prints. */
+function clock(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "00:00:00";
+  const total = Math.floor(seconds);
+  const h = String(Math.floor(total / 3600)).padStart(2, "0");
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+  const s = String(total % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
+
+/**
+ * Open one page and record it: the fetch, the readability bar the Dark Desk
+ * holds captures to (`retrievePack`, Dark Desk F6), and the capture write.
+ * Returns null for anything the desk will not stand behind.
+ */
+async function readAndCapture(
+  url: string,
+  fallbackTitle: string,
+  io: {
+    fetchPage: DeskFetchFn;
+    capture: DeskCaptureFn;
+    throwIfCancelled: () => Promise<void>;
+    kind: DeskReading["kind"];
+  },
+): Promise<DeskReading | null> {
+  await io.throwIfCancelled();
+  let page: DeskFetchedPage;
+  try {
+    page = await io.fetchPage(url);
+  } catch {
+    return null;
+  }
+  const readable = readableCapture({
+    text: page?.text ?? "",
+    extractionMethod: page?.extractionMethod,
+    status: page?.status,
+    outcome: page?.outcome,
+    title: page?.title,
+  });
+  // A blocked page is a paywall notice or an error shell, not evidence: the
+  // same bar `retrievePack` holds captures to before a model reads them.
+  if (!page?.ok || readable.kind !== "ok") return null;
+  const title = page.title || fallbackTitle || url;
+  try {
+    const record = await io.capture({
+      url,
+      title,
+      text: page.text,
+      status: page.status,
+      outcome: page.outcome,
+      pages: page.pages ?? [],
+      extractionMethod: page.extractionMethod ?? "",
+    });
+    return {
+      kind: io.kind,
+      title,
+      url,
+      captureEventId: record.captureEventId,
+      versionId: record.versionId,
+      locator: null,
+      text: readable.body.slice(0, DESK_PAGE_TEXT_CAP),
+    };
+  } catch {
+    // A page the desk cannot record is a page it cannot stand behind: dropped
+    // rather than cited from a copy nobody can open.
+    return null;
+  }
+}
+
 /**
  * The desk's research pass. Never throws for a research failure: a search
  * provider that answers nothing, a page that will not open, a planner that
- * returns prose -- each of those is a smaller `captures` list and an honest
- * "found nothing usable" in the writing pack, because the piece still has to be
+ * returns prose -- each of those is a smaller reading set and an honest "found
+ * nothing usable" in the writing pack, because the piece still has to be
  * written from what the editor supplied.
  *
  * It DOES throw when the editor pressed Stop: `throwIfCancelled` is the U25
  * seam and it throws `JobCancelledError`, which has to leave this loop rather
- * than be mistaken for a run that finished with nothing.
+ * than be mistaken for a run that finished.
  */
 export async function runDeskResearch(
   input: DeskResearchInput,
   deps: DeskResearchDeps = {},
 ): Promise<DeskResearchOutcome> {
-  const now = deps.now?.() ?? new Date();
+  const startedAt = (deps.now?.() ?? new Date()).getTime();
+  const nowMs = () => (deps.now?.() ?? new Date()).getTime();
+  const ceilingMs = deps.ceilingMs ?? deskResearchCeilingMs();
+  const pageCeiling = deps.pageCeiling ?? deskResearchPageCeiling();
   const onStage = deps.onStage ?? (async () => {});
   const throwIfCancelled = deps.throwIfCancelled ?? (async () => {});
   const officialDomains = [
     ...new Set([...(input.paper?.officialHosts ?? []), ...(input.paper?.officialDomains ?? [])]),
   ];
   const localityStopwords = [input.paper?.city ?? "", input.paper?.state ?? ""].filter(Boolean);
+  /*
+    Opened on first use, not on entry: a run whose search, fetch, capture and
+    local-record readers are all faked never touches a database at all, which is
+    what keeps the hermetic tests hermetic (and what stops them standing up a
+    PGlite they have no use for).
+  */
+  let sqlCache: Sql | null = null;
+  const sql = async () => (sqlCache ??= await getSql());
 
   const window = deps.readWindow
     ? await deps.readWindow(input.newsroomId)
-    : await defaultReadWindow(input.newsroomId, now);
+    : await defaultReadWindow(input.newsroomId, await Promise.resolve(new Date(startedAt)));
 
   const search: DeskSearchFn =
     deps.search ??
@@ -357,15 +811,19 @@ export async function runDeskResearch(
   const fetchPage: DeskFetchFn =
     deps.fetch ??
     ((url) =>
-      // `allowModelOcr: false`: a PDF the desk cannot read natively is skipped,
-      // not transcribed. The budget above is pages read, and a hidden OCR model
-      // call per scanned PDF is spending the editor never asked for.
-      ingestDocument(url, { allowModelOcr: false }));
+      /*
+        OCR is ALLOWED here, unlike the pull reader's `allowModelOcr: false`.
+        `--` The protocol's local-record stage is packets, minutes and tapes,
+        and a scanned packet the desk refuses to read is a local primary
+        document it cannot cite; `beforeModelCall` is the Stop seam reaching
+        the OCR path, so a cancelled run does not finish transcribing a packet
+        nobody will read.
+      */
+      ingestDocument(url, { allowModelOcr: true, beforeModelCall: throwIfCancelled }));
 
   const capture: DeskCaptureFn = deps.capture ?? (async (page) => {
-    const sql = await getSql();
     const record = await rememberCapture({
-      sql,
+      sql: await sql(),
       userId: input.userId,
       newsroomId: input.newsroomId,
       // An editorial is not an investigation: no file, no frontier, and the
@@ -387,13 +845,14 @@ export async function runDeskResearch(
     });
     /*
       The link back to the request that caused this capture
-      (`capture_events.editorial_request_id`, migrations/0113). It is a
+      (`capture_events.editorial_request_id`, migrations/0114). It is a
       separate statement because `rememberCapture` is the Dark Desk's own write
       and takes no argument for it -- and because a capture written by any other
       path must keep the column null.
     */
     if (input.requestId != null) {
-      await sql`
+      const db = await sql();
+      await db`
         update capture_events set editorial_request_id = ${input.requestId}
         where id = ${record.captureEventId} and editorial_request_id is null
       `;
@@ -401,44 +860,165 @@ export async function runDeskResearch(
     return { captureEventId: record.captureEventId, versionId: record.versionId };
   });
 
-  const captures: (DeskCapture & { text: string })[] = [];
+  const reading: DeskReading[] = [];
   const tried = new Set<string>();
   const degraded: string[] = [];
   let searches = 0;
+  let stopReason: DeskStopReason = "no-more-queries";
+  let stopDetail: string | null = null;
+  /*
+    A ceiling reached INNERMOST has to unwind two loops. It is tracked here
+    rather than read back off `stopReason`, because that is the one place the
+    loops can agree on without the compiler's own narrowing of a `let` that is
+    only assigned inside them getting in the way.
+  */
+  let hitCeiling: DeskStopReason | null = null;
 
   // The arrival, once, in the exact words the job's stage list carries.
   await onStage(DESK_RESEARCH_STAGE);
 
-  for (let hop = 1; hop <= DESK_RESEARCH_HOPS; hop++) {
-    if (searches >= DESK_RESEARCH_SEARCHES || captures.length >= DESK_RESEARCH_PAGES) break;
+  /*
+    THE LOCAL RECORD FIRST, in the protocol's own order. A paper's own portal,
+    its captured tapes and the pages it already holds are the records a
+    local-news editorial is built on, and they are read before any general web
+    search rather than after it.
+  */
+  let local: DeskLocalRecords = { notes: "", reading: [] };
+  try {
+    local = deps.localRecords
+      ? await deps.localRecords({
+          newsroomId: input.newsroomId,
+          subject: input.subject,
+          askedFor: input.askedFor,
+          officialHosts: input.paper?.officialHosts ?? [],
+        })
+      : await collectLocalRecords(
+          {
+            userId: input.userId,
+            newsroomId: input.newsroomId,
+            subject: input.subject,
+            askedFor: input.askedFor,
+            officialHosts: input.paper?.officialHosts ?? [],
+            pageCeiling,
+          },
+          { fetchPage, capture, reading, onStage, throwIfCancelled, sql: await sql() },
+        );
+  } catch (error) {
+    if (error instanceof Error && error.name === "JobCancelledError") throw error;
+    local = { notes: "", reading: [] };
+  }
+  // The faked path fills `reading` through its return value, not the array.
+  if (deps.localRecords) reading.push(...local.reading);
+
+  /*
+    THE PAPER'S OWN OFFICIAL HOSTS, before the open web.
+
+    The last of the protocol's local-record steps and the one that is a search
+    rather than a read: the city's own site is where the record lives when the
+    desk has not already captured it, so the desk searches it directly instead
+    of waiting for the model to think of it. One scoped search per host, run
+    before any query the model names -- "official hosts before general web
+    search", in that order and in the run's own record.
+  */
+  const subjectWords = queryTokens(`${input.subject} ${input.askedFor ?? ""}`).slice(0, 6).join(" ");
+  for (const host of (input.paper?.officialHosts ?? []).slice(0, 2)) {
+    if (!subjectWords) break;
+    if (reading.length >= pageCeiling) {
+      hitCeiling = "page-ceiling";
+      break;
+    }
+    if (nowMs() - startedAt >= ceilingMs) {
+      hitCeiling = "time-ceiling";
+      break;
+    }
     await throwIfCancelled();
+    const query = window
+      ? queryWithResearchWindow(`site:${host} ${subjectWords}`, window)
+      : `site:${host} ${subjectWords}`;
+    if (junkQueryReason(query)) continue;
+    tried.add(query.toLowerCase());
+    searches += 1;
+    await onStage(`${DESK_RESEARCH_STAGE}: search ${searches} on the paper's own site`);
+    let scoped: DeskSearchAttempt;
+    try {
+      scoped = await search(query);
+    } catch {
+      continue;
+    }
+    for (const hit of scoped.hits) {
+      if (reading.length >= pageCeiling) {
+        hitCeiling = "page-ceiling";
+        break;
+      }
+      if (boilerplatePageReason(hit.url)) continue;
+      const readPage = await readAndCapture(hit.url, hit.title, {
+        fetchPage,
+        capture,
+        throwIfCancelled,
+        kind: "page",
+      });
+      if (readPage) reading.push(readPage);
+    }
+    if (hitCeiling) break;
+  }
 
-    const planned = await deps.plan?.(
-      DESK_PLANNER_INSTRUCTIONS,
-      buildDeskPlanPack({
-        researchPack: input.researchPack,
-        hop,
-        hops: DESK_RESEARCH_HOPS,
-        tried: [...tried],
-        captured: captures.map((c) => ({ title: c.title, url: c.url })),
-        officialDomains,
-        window: window ? windowWords(window) : null,
-      }),
+  for (let hop = 1; hop <= DESK_RESEARCH_HOP_BACKSTOP; hop++) {
+    if (hitCeiling) {
+      stopReason = hitCeiling;
+      break;
+    }
+    await throwIfCancelled();
+    if (reading.length >= pageCeiling) {
+      stopReason = "page-ceiling";
+      break;
+    }
+    if (nowMs() - startedAt >= ceilingMs) {
+      stopReason = "time-ceiling";
+      break;
+    }
+
+    const planned = deps.plan
+      ? await deps.plan(
+          input.voice,
+          buildDeskPlanPack({
+            researchPack: input.researchPack,
+            localNotes: local.notes,
+            hop,
+            tried: [...tried],
+            read: reading.map((r) => ({ title: r.title, url: r.url })),
+            officialDomains,
+            window: window ? windowWords(window) : null,
+          }),
+        )
+      : null;
+    if (!planned) {
+      stopReason = "planner-failed";
+      break;
+    }
+    if (!planned.ok) {
+      stopReason = "planner-failed";
+      stopDetail = planned.error;
+      break;
+    }
+
+    const plan = parseDeskPlan(planned.text);
+    const queries = boundedDeskQueries(plan.queries, { tried, window });
+    await onStage(
+      `${DESK_RESEARCH_STAGE}: ${reading.length} read, searching ${queries.length} more (round ${hop})`,
     );
-    if (!planned || !planned.ok) break;
-
-    const queries = boundedDeskQueries(parseDeskQueries(planned.text), {
-      tried,
-      cap: Math.min(DESK_QUERIES_PER_HOP, DESK_RESEARCH_SEARCHES - searches),
-      window,
-    });
-    if (!queries.length) break;
 
     for (const query of queries) {
-      if (searches >= DESK_RESEARCH_SEARCHES || captures.length >= DESK_RESEARCH_PAGES) break;
       await throwIfCancelled();
+      if (reading.length >= pageCeiling) {
+        hitCeiling = "page-ceiling";
+        break;
+      }
+      if (nowMs() - startedAt >= ceilingMs) {
+        hitCeiling = "time-ceiling";
+        break;
+      }
       searches += 1;
-      await onStage(`${DESK_RESEARCH_STAGE}: search ${searches} of ${DESK_RESEARCH_SEARCHES}`);
+      await onStage(`${DESK_RESEARCH_STAGE}: search ${searches}`);
 
       let attempt: DeskSearchAttempt;
       try {
@@ -451,106 +1031,124 @@ export async function runDeskResearch(
       if (attempt.decision === "degraded" && attempt.reason) degraded.push(attempt.reason);
 
       for (const hit of attempt.hits) {
-        if (captures.length >= DESK_RESEARCH_PAGES) break;
+        if (reading.length >= pageCeiling) {
+          hitCeiling = "page-ceiling";
+          break;
+        }
         // The same refusal list the dig runs (`searchWithFallback` applies it
         // to provider hits already; an injected or gateway search may not).
         if (boilerplatePageReason(hit.url)) continue;
-        await throwIfCancelled();
-
-        let page: DeskFetchedPage;
-        try {
-          page = await fetchPage(hit.url);
-        } catch {
-          continue;
-        }
-        // A blocked page is a paywall notice or an error shell, not evidence:
-        // the same bar `retrievePack` holds captures to before a model reads
-        // them (Dark Desk F6).
-        const readable = readableCapture({
-          text: page?.text ?? "",
-          extractionMethod: page?.extractionMethod,
-          status: page?.status,
-          outcome: page?.outcome,
-          title: page?.title,
+        await onStage(`${DESK_RESEARCH_STAGE}: reading page ${reading.length + 1}`);
+        const readPage = await readAndCapture(hit.url, hit.title, {
+          fetchPage,
+          capture,
+          throwIfCancelled,
+          kind: "page",
         });
-        if (!page?.ok || readable.kind !== "ok") continue;
-
-        await onStage(
-          `${DESK_RESEARCH_STAGE}: reading ${captures.length + 1} of ${DESK_RESEARCH_PAGES}`,
-        );
-        try {
-          const record = await capture({
-            url: hit.url,
-            title: page.title || hit.title || hit.url,
-            text: page.text,
-            status: page.status,
-            outcome: page.outcome,
-            pages: page.pages ?? [],
-            extractionMethod: page.extractionMethod ?? "",
-          });
-          captures.push({
-            url: hit.url,
-            title: page.title || hit.title || hit.url,
-            captureEventId: record.captureEventId,
-            versionId: record.versionId,
-            text: readable.body.slice(0, DESK_PAGE_TEXT_CAP),
-          });
-        } catch {
-          // A page the desk cannot record is a page it cannot stand behind:
-          // dropped rather than cited from a copy nobody can open.
-          continue;
-        }
+        if (readPage) reading.push(readPage);
       }
+      if (hitCeiling) break;
+    }
+
+    if (hitCeiling) {
+      stopReason = hitCeiling;
+      break;
+    }
+
+    /*
+      THE MODEL'S OWN STOPPING DECISION, and the reason U31 exists. The protocol
+      says when research is finished -- every load-bearing claim doubly sourced,
+      two surprising facts with one local primary document -- and the model
+      holding that protocol is the only thing here that can judge it.
+    */
+    if (plan.stop) {
+      stopReason = "protocol-satisfied";
+      stopDetail = plan.reason || null;
+      break;
+    }
+    if (!queries.length) {
+      stopReason = "no-more-queries";
+      stopDetail = plan.reason || null;
+      break;
+    }
+    if (hop === DESK_RESEARCH_HOP_BACKSTOP) {
+      stopReason = "hop-backstop";
+      break;
     }
   }
 
   await throwIfCancelled();
 
   /*
-    The reading pass. It gets the captures and nothing else, and it is the only
-    research call that sees page text -- which is exactly why the voice is not
-    in it (see `DESK_READER_INSTRUCTIONS`).
+    The reading pass. It holds the voice too, and the captures and local records
+    are all it has: the desk fetched the pages, so the model reads them.
   */
   let findings = "";
-  if (captures.length && deps.read) {
-    const budgeted: typeof captures = [];
+  if (reading.length && deps.read) {
+    const budgeted: DeskReading[] = [];
     let used = 0;
-    for (const capture of captures) {
+    for (const item of reading) {
       if (used >= DESK_TOTAL_TEXT_CAP) break;
-      const text = capture.text.slice(0, Math.min(DESK_PAGE_TEXT_CAP, DESK_TOTAL_TEXT_CAP - used));
+      const text = item.text.slice(0, Math.min(DESK_PAGE_TEXT_CAP, DESK_TOTAL_TEXT_CAP - used));
       used += text.length;
-      budgeted.push({ ...capture, text });
+      budgeted.push({ ...item, text });
     }
     const read = await deps.read(
-      DESK_READER_INSTRUCTIONS,
-      buildDeskFindingsPack({ subject: input.subject, askedFor: input.askedFor, captures: budgeted }),
+      input.voice,
+      buildDeskFindingsPack({ subject: input.subject, askedFor: input.askedFor, reading: budgeted }),
     );
     findings = read.ok ? read.text.trim() : "";
   }
 
-  const reason = nothingFound(captures.length, searches, degraded);
+  const reason = nothingFound(reading.length, searches, degraded);
   /*
-    Say it on the row the editor is watching. A piece with a thin appendix is
-    otherwise indistinguishable from a desk that never looked, and the writing
-    pack's own "nothing usable" sentence goes to the model, not to them. The
+    Say what happened on the row the editor is watching. A piece with a thin
+    appendix is otherwise indistinguishable from a desk that never looked, and
+    the writing pack's own sentence goes to the model, not to them. The
     sentence is a detail, not an arrival: the chip stays where the desk pass put
     it.
   */
-  if (reason) await onStage(`${DESK_RESEARCH_STAGE}: nothing usable was found for this piece`);
+  await onStage(
+    `${DESK_RESEARCH_STAGE}: stopped — ${stopSentence(stopReason, searches, reading.length)}`,
+  );
 
   return {
     findings,
     searches,
-    pages: captures.length,
-    captures: captures.map(({ url, title, captureEventId, versionId }) => ({
-      url,
+    pages: reading.length,
+    captures: reading.map(({ kind, url, title, captureEventId, versionId, locator }) => ({
+      ...(kind === "transcript" ? { locator } : {}),
+      url: url ?? "",
       title,
       captureEventId,
       versionId,
     })),
     window: window ? windowWords(window) : null,
+    stopReason,
+    stopDetail,
     nothingFoundReason: reason,
   };
+}
+
+/** The stop reason in one clause, for the run's stage line. */
+export function stopSentence(reason: DeskStopReason, searches: number, pages: number): string {
+  const counted = `${searches} ${searches === 1 ? "search" : "searches"}, ${pages} ${
+    pages === 1 ? "page" : "pages"
+  }`;
+  switch (reason) {
+    case "protocol-satisfied":
+      return `the protocol's stopping conditions were met (${counted})`;
+    case "time-ceiling":
+      return `the research time ceiling was reached (${counted})`;
+    case "page-ceiling":
+      return `the page ceiling was reached (${counted})`;
+    case "planner-failed":
+      return `the planner could not answer (${counted})`;
+    case "hop-backstop":
+      return `the run's own backstop was reached (${counted})`;
+    default:
+      return `no further usable search was planned (${counted})`;
+  }
 }
 
 /**

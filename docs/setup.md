@@ -362,16 +362,17 @@ Rules the app enforces, not conventions:
 - The path must be absolute. A relative path is refused.
 - A path **inside this repository** is refused. The voice is meant to stay out
   of version control.
-- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. Research runs as its own step before writing; the writing call gets no web search and no other tools, so the pass holding the voice cannot reach the network.
+- Claude uses its native system-prompt-file option; Codex uses `model_instructions_file`. Both read the complete validated file. The assignment and retained evidence are separate input. The writer researches and writes with the voice in hand: the voice file carries the research protocol, so it holds the web tools as well as the file in one run. That combination is an accepted risk, stated in SECURITY.md.
 - For explicit Local model, TownReporter reads the validated file and sends
   its text as a system message to the selected model server. It does not enter
   command-line arguments. Saved custom connections similarly receive the voice through their selected API endpoint.
 - A writer with no web tools — explicit Local model, DeepSeek v4.1 Flash, a
-  saved custom connection — is researched by the desk before it writes. The desk
-  searches, opens and records pages itself (bounded: two rounds of queries, six
-  searches, eight pages), the model reads those captures back as findings, and
-  only then is the voice sent, as the system message of the one writing call.
-  The research calls never receive the voice.
+  saved custom connection — is fetched for by the desk. The same voice text is
+  the system message of the research calls too, so the protocol governs what the
+  desk is asked to look for; the desk reads the newsroom's own record first, then
+  searches, and runs to the protocol's stopping conditions under a safety ceiling
+  (30 minutes, 80 pages, configurable through `EDITORIAL_RESEARCH_CEILING_MS` and
+  `EDITORIAL_RESEARCH_PAGE_CEILING`) rather than to a fixed search count.
 - A path long enough to look like an inlined prompt is refused outright.
 
 Without the variable, the Opinion desk says so and spends nothing. Everything
