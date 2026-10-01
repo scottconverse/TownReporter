@@ -965,7 +965,28 @@ async function main() {
   /* Same remount as the draft edit above: the pending decision re-renders the
      list, and its rows come back shut. */
   await openShutReviewDisclosures();
-  if (!(await firstFinding.getByRole("button", { name: "Save judgment" }).isDisabled()))
+  /*
+    The lock is waited for, not sampled, and the claim is unchanged: the
+    judgments must be off while the keep/remove decision is in flight, and if
+    they never turn off this fails on the line below, 5 seconds later.
+
+    The request being in flight is a fact about the network; `disabled={busy}`
+    is a fact about React, committed on the next frame. Sampling between the two
+    is a race this walk used to win by accident -- every server function call
+    ran a client middleware that awaited a dynamic `import()` before the POST
+    left the browser, and that latency pushed the request behind the commit.
+    GR-B (`1dcc586b`, the Grok preview removal) deleted the middleware as dead
+    preview machinery, so the POST now leaves inside the click handler: measured
+    2026-09-30 on this build, the decision is intercepted at page-clock 187ms
+    and the panel locks at 200ms, which made this walk fail deterministically
+    on a correct desk.
+  */
+  const judgmentControls = firstFinding.getByRole("button", { name: "Save judgment" });
+  const judgmentLockDeadline = Date.now() + 5_000;
+  while (!(await judgmentControls.isDisabled()) && Date.now() < judgmentLockDeadline) {
+    await page.waitForTimeout(25);
+  }
+  if (!(await judgmentControls.isDisabled()))
     throw new Error("pending keep/remove evidence decision left finding judgments enabled");
   const refreshedReviewAfterDecision = page.waitForResponse(
     async (response) => {

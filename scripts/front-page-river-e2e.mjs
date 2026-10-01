@@ -584,6 +584,26 @@ async function theArchiveCarriesTheRestOfThePaper() {
   const printedOnTheFrontPage = await page.locator("body").innerText();
   await page.getByRole("link", { name: "All stories" }).first().click();
   await page.locator(".listing").waitFor({ timeout: 30_000 });
+  /*
+    The count is read once the archive has settled, not the instant the listing
+    paints -- measured, 2026-09-30: the listing, "Loading stories…" and
+    "40 stories" all land inside 23ms of the click (the route's loader fetches
+    the listing, the query mounts on that same data and immediately refetches
+    it because `initialData` carries no freshness), so a single read raced the
+    refetch and this walk failed in CI on a machine slower than the one it was
+    written on. Waiting for the number first, and asserting the number after,
+    keeps the claim exactly as strong: an archive that never prints its count
+    still fails here, 30 seconds later, on the line below.
+  */
+  await page
+    .waitForFunction(
+      () => /\d+ stor(y|ies)/.test(document.querySelector(".resultcount")?.textContent ?? ""),
+      undefined,
+      { timeout: 30_000 },
+    )
+    .catch(() => {
+      /* the assertion below reports what it actually said */
+    });
   const count = await page.getByRole("status").innerText();
   if (!count.includes(String(SEEDED)))
     throw new Error(`the archive says "${count.trim()}", expected all ${SEEDED} published stories`);

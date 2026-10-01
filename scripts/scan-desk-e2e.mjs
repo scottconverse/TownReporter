@@ -801,15 +801,36 @@ async function routineNoticePermissionsJourney(context, observePage) {
   const pauseControl = otherPanel.getByRole("checkbox", {
     name: "Pause routine notice permissions",
   });
-  if (!(await pauseControl.isDisabled()))
-    throw new Error("pause stayed editable while its save was pending");
   const revokeControls = otherPanel.getByRole("button", {
     name: "Revoke saved permission",
     exact: true,
   });
-  if (!(await revokeControls.first().isDisabled())) {
-    throw new Error("revoke stayed editable while its save was pending");
-  }
+  /*
+    The lock is waited for, not sampled, and the claim is unchanged: the panel
+    must be locked while its save is in flight, and if it never locks these two
+    assertions fail exactly as before.
+
+    Why the wait. The save's request is in flight (this walk holds it), which is
+    a fact about the network; the panel's `save.isPending` render is a fact
+    about React, and React commits it on the next frame. Sampling the DOM in
+    between is a race this walk used to win by accident: every server function
+    call used to run a client middleware that awaited a dynamic `import()`
+    before the POST left the browser, and that latency put the request behind
+    the commit. GR-B (`1dcc586b`, the Grok preview removal) deleted that
+    middleware as dead preview machinery, and the POST now leaves inside the
+    click handler -- measured 2026-09-30 in the built app: request intercepted
+    at page-clock 187ms, panel locked at 200ms, so this walk failed
+    deterministically on a correct desk. Same panel, same rule, one frame.
+  */
+  const lockedWithin = async (control, message) => {
+    const deadline = Date.now() + 5_000;
+    while (!(await control.isDisabled()) && Date.now() < deadline) {
+      await other.waitForTimeout(25);
+    }
+    if (!(await control.isDisabled())) throw new Error(message);
+  };
+  await lockedWithin(pauseControl, "pause stayed editable while its save was pending");
+  await lockedWithin(revokeControls.first(), "revoke stayed editable while its save was pending");
   releaseDelayedRoutineSave();
   await otherPanel.getByText(/Permissions saved\. Permissions alone/).waitFor();
   await other.unroute("**/*");
