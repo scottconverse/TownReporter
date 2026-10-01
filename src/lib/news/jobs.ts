@@ -1217,16 +1217,6 @@ export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
   */
   brief: ["Reading the file", "Writing editor brief"],
   /*
-    The editorial is the slow one, and these are the three things it does in
-    order: research the piece, write it, check the names. The document-reader
-    sentences (`Interpreting notes.pdf: part 2 of 7`) move the step line.
-  */
-  editorial: [
-    "Researching the editorial",
-    "Writing the editorial",
-    "Checking names and spellings",
-  ],
-  /*
     The retained-PDF read: open it and count the pages, read them a batch at a
     time, save. `Reading batch 1 of 8 · PDF pages 1-6 · 0 of 47 already saved…`
     stays the step line inside the second chip.
