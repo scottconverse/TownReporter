@@ -3,13 +3,7 @@ import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { chromium } from "playwright";
 import { checkedOutputPath, checkedUrl } from "./browser-guard.mjs";
-import { computeBrandWarnings } from "./brand-check.mjs";
-import {
-  authInvariantWarnings,
-  buildAuthEnabled,
-  compareAuthInvariant,
-  probeDevAuthEnabled,
-} from "./check-auth-invariant.mjs";
+import { probeSignInPage, signInWarnings } from "./check-auth-invariant.mjs";
 import {
   baselineComparison,
   bodyTextPrefix,
@@ -140,16 +134,11 @@ try {
     };
   }
 
-  const brandWarnings = computeBrandWarnings({ hasCanvas: viewports.desktop.hasCanvas });
-  // Only a dev server answers /__app-env, so smoking the built output reads as
-  // indeterminate — report a divergence, never the absence of an observation.
-  const authWarnings = authInvariantWarnings(
-    compareAuthInvariant({
-      devAuthEnabled: await probeDevAuthEnabled(url),
-      buildAuthEnabled: buildAuthEnabled(),
-    }),
-  );
-  const verdict = { url, viewports, brandWarnings, authWarnings, verdictFile: outJson };
+  // The sign-in probe is the same observation on a dev server and on a built
+  // one, so this smoke asserts it on whatever it was pointed at: an editor
+  // reaching /login gets a form. A 200 on the route is not a substitute.
+  const authWarnings = signInWarnings(await probeSignInPage(await browser.newPage(), url));
+  const verdict = { url, viewports, authWarnings, verdictFile: outJson };
   if (baselineRequested) {
     const { divergesFromBaseline, reasons } = compareAgainstBaseline(verdict);
     verdict.divergesFromBaseline = divergesFromBaseline;
@@ -158,7 +147,7 @@ try {
 
   writeFileSync(outJson, JSON.stringify(verdict, null, 2));
   console.log(JSON.stringify(verdict, null, 2));
-  for (const w of [...brandWarnings, ...authWarnings]) console.error(w);
+  for (const w of authWarnings) console.error(w);
   // Set the code rather than aborting the process so the `finally` browser
   // teardown always runs (agents typically smoke twice per turn; leaking
   // Chromium accumulates across retries).

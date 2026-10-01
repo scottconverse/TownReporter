@@ -4,26 +4,21 @@ src/routeTree.gen.ts text eol=lf
 
 # Release-archive contents (`git archive`, used by scripts/package-windows.mjs).
 #
-# This repository was scaffolded inside the Grok App Builder sandbox and still
-# carries that sandbox's material: the agent contract (AGENTS.md, which points
-# at AGENTS.project.md), the skill trees, references and status files under
-# .grok/, the dated handoffs, the audit reports under artifacts/, and the
-# sandbox's own startup.sh. That material stays in the source repository as
-# history, but it is not the product -- none of it belongs in the Windows ZIP a
-# publisher downloads. `export-ignore` is read by `git archive`, so the
-# exclusions are what actually keeps the scaffold out of the release; see
-# scripts/release-archive-contents.test.mjs.
+# This repository was scaffolded inside the Grok App Builder sandbox. The
+# sandbox's own material -- the agent contract (AGENTS.md, AGENTS.project.md),
+# the .grok/ skill trees, its startup.sh and the preview host bridge -- was
+# deleted outright (see scripts/no-grok-scaffold.test.mjs). What remains here
+# is material that is kept as history but is not the product: the dated
+# handoffs and the audit reports under artifacts/. `export-ignore` is read by
+# `git archive`, so these exclusions are what keeps that history out of the
+# Windows ZIP a publisher downloads; see scripts/release-archive-contents.test.mjs.
 #
 # Each directory needs both lines. In .gitattributes a directory pattern does
 # not recurse into the directory's contents, and a contents-only pattern
 # (`dir/**`) still leaves `git archive --format=tar` emitting the bare `dir/`
 # entry.
-.grok export-ignore
-.grok/** export-ignore
 artifacts export-ignore
 artifacts/** export-ignore
-AGENTS.md export-ignore
-AGENTS.project.md export-ignore
 # The dated and session handoffs only. HANDOFF-NEXT-AGENT.md is the current
 # takeover handoff and is linked from live documentation (SELF-HOSTING.md,
 # docs/dark-desk.md, docs/releases/), so it ships. docs/archive/HANDOFF-0.4.3.md
@@ -31,4 +26,3 @@ AGENTS.project.md export-ignore
 /HANDOFF-2026-*.md export-ignore
 /HANDOFF-SESSION-*.md export-ignore
 /HANDOFF-BUILD-LIST.md export-ignore
-startup.sh export-ignore

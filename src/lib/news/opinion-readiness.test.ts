@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { getSql } from "../db.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
-import { checkOpinionReadiness } from "./opinion-readiness.ts";
+import { checkOpinionReadiness, OPINION_MODEL_UNIVERSE } from "./opinion-readiness.ts";
+import { OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
 import { ensureProviderSettingsSchema } from "./provider-settings.ts";
 
 async function withEnv<T>(changes: Record<string, string | undefined>, run: () => Promise<T>) {
@@ -21,6 +22,97 @@ async function withEnv<T>(changes: Record<string, string | undefined>, run: () =
     }
   }
 }
+
+/*
+  UNIT U24 -- THE OPINION DESK SAYS WHOSE MODELS IT MEANS.
+
+  The stand-in editorial day: /desk/opinion read "AI is not available. No model
+  is set up yet: open Claude Code or Codex on this machine and log in, or set
+  LLM_BASE_URL for an OpenAI-compatible gateway" minutes after the story desk
+  had written a draft with DeepSeek. The sentence was true of Opinion and read
+  as true of the whole desk, because nothing in it said which models it was
+  talking about. These tests hold the fix: the message names Opinion's own
+  models, says what is missing for each, and says out loud that the desk's
+  story writer is not one of them.
+
+  THE CHOICE THIS PINS, and why it is the copy and not the ladder: adding a
+  local or DeepSeek rung to Opinion's Automatic would make the paper's own
+  voice whatever casual model the wire happens to use, and the split is a
+  written product decision (`OPINION_AUTOMATIC_LADDER`'s own comment,
+  `.env.example`: "Opinion's Automatic is a different ladder and takes none of
+  these"). The defect was the message, so the message is what changed.
+*/
+describe("U24: Opinion says which models it writes with", () => {
+  it("names Automatic's own two, and says the desk's story writer is not one of them", () => {
+    assert.match(OPINION_MODEL_UNIVERSE, /Codex/);
+    assert.match(OPINION_MODEL_UNIVERSE, /Claude/);
+    assert.match(OPINION_MODEL_UNIVERSE, /desk's story writer/i);
+    assert.match(OPINION_MODEL_UNIVERSE, /not used for Opinion/);
+  });
+
+  /*
+    UNIT U24b -- THE OTHER TWO ARE CHOICES, NOT MISSING PIECES.
+
+    U24's first sentence listed four paths and said none of them was set up.
+    That was too broad in the other direction: a local model and a saved
+    connection are EXPLICIT PICKS (`OPINION_MODEL_CHOICES`), never walked by
+    Automatic, so "a local model is not set up" reads as a verdict on a path
+    this failure never tried. What the editor needs is Automatic's own two
+    named, and the other two offered as what they are.
+  */
+  it("offers the local model and the saved connection as picks, not as failures", () => {
+    const picks = OPINION_MODEL_UNIVERSE.slice(OPINION_MODEL_UNIVERSE.indexOf("pick by name"));
+    assert.ok(picks.length > 0, "the sentence must offer the two explicit picks");
+    assert.match(picks, /local model/);
+    assert.match(picks, /saved connection/);
+    assert.doesNotMatch(
+      picks,
+      /not set up|none of them|no model/i,
+      "a path Automatic never walks must not be reported as missing",
+    );
+  });
+
+  it("says it on the page when Automatic finds nothing", async () => {
+    const result = await withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () =>
+      checkOpinionReadiness("auto", {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        probeCandidate: async () => ({
+          ok: false as const,
+          error:
+            "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
+        }),
+      }),
+    );
+    assert.equal(result.ready, false);
+    assert.match(result.why, /Opinion's Automatic writes with Codex Sol, then Claude Sonnet/);
+    assert.match(result.why, /not used for Opinion/);
+    /* The generic sentence that started this is gone from what the editor reads. */
+    assert.doesNotMatch(result.why, /No model is set up yet/);
+    /* And each rung Automatic walked says what is missing for itself. */
+    assert.match(result.why, /Opinion can write with Codex Sol/);
+    assert.match(result.why, /Opinion can write with Claude, and Claude Code is not signed in/);
+  });
+
+  it("does not list the other models to an editor who picked one on purpose", async () => {
+    const result = await withEnv({}, () =>
+      checkOpinionReadiness("claude-sonnet", {
+        findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
+        probeCandidate: async () => ({
+          ok: false as const,
+          error:
+            "AI is not available. No model is set up yet: open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL for an OpenAI-compatible gateway.",
+        }),
+      }),
+    );
+    assert.equal(result.ready, false);
+    assert.match(result.why, /Opinion can write with Claude/);
+    assert.doesNotMatch(result.why, /Automatic writes with Codex Sol, then Claude Sonnet/);
+  });
+
+  it("walks exactly the two rungs it names in that order", () => {
+    assert.deepEqual([...OPINION_AUTOMATIC_LADDER], ["codex-frontier", "claude-sonnet"]);
+  });
+});
 
 describe("Opinion provider readiness", { concurrency: false }, () => {
   it("probes an explicitly selected custom connection in its newsroom", async () => {

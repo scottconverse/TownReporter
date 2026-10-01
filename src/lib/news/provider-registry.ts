@@ -47,7 +47,6 @@ export type ProviderKind =
   | "codex"
   | "openai"
   | "anthropic"
-  | "xai-oauth"
   | "local";
 
 /** The four places this desk asks a model for something. */
@@ -101,17 +100,24 @@ export const PICKER_PROVIDER_IDS = [
 ] as const;
 
 /*
-  Registered, still transport-real, offered nowhere.
+  Ids a menu used to offer, which a stored row may still hold.
 
-  0.6.63 (Unit Y item 4) took `grok-oauth` out of every picker and out of
-  Automatic at the owner's standing instruction, but did NOT touch the
-  `xai-oauth` transport its entry describes. A newsroom, a `desk_jobs` row, a
-  draft batch or a page-watch row that stored the string must still type-check,
-  still resolve that transport, and still be able to write the value back; what
-  must change is only that no menu offers it. Hence the split between this list
-  and `PickerProviderId` below: `offeredFor: NO_SURFACE` and `providersFor()`
-  keep it out of the menus, `isAutomaticChoiceId` keeps it out of Automatic,
-  and the union still admits it.
+  `grok-oauth` is the whole list. It has been through two stages: 0.6.63
+  (Unit Y item 4) took it out of every picker and out of Automatic at the
+  owner's standing instruction, and GR-C removed Grok (xAI) as a provider
+  entirely -- the SuperGrok connection, its transport and its registry entry
+  are gone.
+
+  What remains is deliberately only a NAME. A newsroom, a `desk_jobs` row, a
+  draft batch, a page-watch row or a `model_assignments` row written by an
+  older build can still hold this string, and such a row must keep loading
+  without error. So the id stays in this list -- which is what keeps it
+  admitted into `ProviderId` and therefore keeps every stored-value reader
+  compiling and running -- while `providerEntry()` answers null for it,
+  `providersFor()` can never offer it, and `isAutomaticChoiceId` refuses it,
+  so it normalises to Automatic with a visible note (see ./model-choice.ts's
+  `retiredModelChoiceNote`). There is no transport behind it any more: a job
+  that stored it runs on Automatic's ladder, which is the honest outcome.
 */
 export const RETIRED_PROVIDER_IDS = ["grok-oauth"] as const;
 export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
@@ -147,10 +153,9 @@ export function isAutomaticRungId(id: unknown): id is AutomaticRungId {
  *
  * Every id a menu can produce, plus Automatic's own rungs -- but NOT
  * `configured` (resolved separately by `effectiveStoryModelChoice`) and NOT
- * `grok-oauth`, which is registered for its transport's sake and no longer a
- * choice anyone can make. This is the function a stored choice of Grok falls
- * through: it returns false, `storyModelChoice` answers "auto", and the run
- * goes to the ladder.
+ * `grok-oauth`, which is a retired name with no entry behind it. This is the
+ * function a stored choice of Grok falls through: it returns false,
+ * `storyModelChoice` answers "auto", and the run goes to the ladder.
  */
 export function isAutomaticChoiceId(id: unknown): id is AutomaticChoiceId {
   return (
@@ -327,7 +332,6 @@ export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
   codex: { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
-  "xai-oauth": { wallMs: 420_000, callMs: 180_000, reserveMs: 180_000 },
   // A measured four-hour council-meeting draft takes about 20 minutes across
   // nine local-model calls. Forty minutes is a bounded whole-pipeline guard;
   // the ceiling for any one answer remains ten minutes.
@@ -530,33 +534,6 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     enabled: () => notSwitchedOff("TOWNREPORTER_CLAUDE_CODE"),
     offSwitchEnv: "TOWNREPORTER_CLAUDE_CODE",
     offeredFor: EVERY_SURFACE,
-  },
-  {
-    id: "grok-oauth",
-    label: "Grok (SuperGrok)",
-    detail: "TownReporter OAuth · selected account model",
-    // The select's own line: 42 characters of detail became 60 in the option
-    // text, which no picker on a phone can show. The OAuth sentence stays in
-    // `detail`, so the help line and the option's title still say it.
-    optionDetail: "account model",
-    kind: "xai-oauth",
-    model: "grok-4.6",
-    envOverrides: {},
-    budget: KIND_BUDGETS["xai-oauth"],
-    enabled: () => notSwitchedOff("TOWNREPORTER_GROK_OAUTH"),
-    offSwitchEnv: "TOWNREPORTER_GROK_OAUTH",
-    /*
-      RETIRED from every picker and from Automatic (0.6.63, Unit Y item 4;
-      the owner's standing instruction is "REMOVE Grok"). The entry itself
-      stays: `xai-oauth` is the transport the Server page's SuperGrok sign-in
-      card reads, and sign-in/auth is explicitly NOT part of this change --
-      nothing under src/lib/auth/ imports this module or this id at all.
-      `offeredFor` is all-false, so no picker, no batch list and no Server
-      "writing models" row can offer it, and `isAutomaticChoiceId` refuses
-      it, so a stored choice of it normalises to Automatic with a note
-      (see ./model-choice.ts's `retiredModelChoiceNote`).
-    */
-    offeredFor: NO_SURFACE,
   },
   {
     id: "local-model",
@@ -763,7 +740,6 @@ const ASTRA_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh",
 const CODEX_56_EFFORTS: readonly ModelEffort[] = ["none", "low", "medium", "high", "xhigh", "max"];
 export const CLAUDE_CLI_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
-const GROK_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high"];
 const QWEN_3_8_EFFORTS: readonly ModelEffort[] = ["none"];
 const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 
@@ -825,7 +801,6 @@ export function modelEffortsFor(
   if (entry.efforts) return entry.efforts;
   if (entry.kind === "codex") return modelEffortsForModel(providerModel(entry));
   if (entry.kind === "claude-code") return CLAUDE_CLI_EFFORTS;
-  if (entry.kind === "xai-oauth") return GROK_EFFORTS;
   if (entry.kind === "local" || entry.kind === "openai") {
     return openAiCompatibleModelEfforts(exactModel);
   }

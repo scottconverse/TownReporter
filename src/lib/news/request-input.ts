@@ -655,9 +655,9 @@ export function cleanConnectionEnabled(raw: unknown): { id: string; enabled: boo
   afterwards, so a sign-up POST of any size was deserialised in full.
 
   The handler cannot be imported by a plain node test -- it reaches
-  `@/lib/auth/server`, which `--experimental-strip-types` rejects (see
-  grok-federation.test.ts:38-44) -- so the cap and its predicate live here,
-  where that decision can be stated and tested.
+  `@/lib/auth/server`, which `--experimental-strip-types` rejects because it
+  pulls in `pg` and server-only Better Auth internals -- so the cap and its
+  predicate live here, where that decision can be stated and tested.
 
   256 KB is roughly a thousand times the largest real auth body (a sign-up is
   a name, an address and a password, a few hundred bytes). It is generous on
@@ -807,6 +807,24 @@ export function cleanOrRaw<T>(schema: z.ZodType): (raw: unknown) => T {
 
 /** `String(v ?? "")`: junk already became "", so an oversize token does too. */
 export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
+
+/**
+ * "Publish anyway — I accept these claims are unreviewed" (unit U24b).
+ *
+ * `evidenceToken` is the REVIEW's own token -- `FindingEvidenceReview.evidenceToken`,
+ * which the Checks pane holds and every judgment save already sends back. It
+ * WRAPS the draft evidence token (it is that token plus each finding's
+ * reference binding), so it is sized by the same generous ceiling and for the
+ * same reason: a token the desk itself handed out must never come back as
+ * `too_big`, which is the 2026-09-25 walk's own bug. Absent means a stale
+ * client, and the server refuses an acceptance that carries no review to
+ * compare against; it is `.default("")` rather than `.optional()` so the
+ * refusal is a sentence about the review, not a schema dump.
+ */
+export const acceptUnreviewedClaimsInput = z.object({
+  leadId: rowId,
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
+});
 export const claimEmail = z.string().max(LIMITS.email).catch("");
 /**
  * Unit CJ (0.6.80): the first-owner setup code, typed with or without

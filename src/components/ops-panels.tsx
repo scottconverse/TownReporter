@@ -58,7 +58,6 @@ import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorActionError, inviteMessage } from "@/lib/news/desk-copy";
 import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
-import { XaiOauthConnection } from "@/components/xai-oauth-connection";
 import { ProviderStatusCard } from "@/components/provider-status-card";
 import { Chip } from "@/components/status-chip";
 
@@ -534,8 +533,7 @@ export function WritingModelsPanel({
    */
   const gatewayRows = (times.data ?? []).filter(
     (row) =>
-      !["claude-code", "anthropic", "codex", "xai-oauth"].includes(row.kind) &&
-      row.availableOnThisMachine,
+      !["claude-code", "anthropic", "codex"].includes(row.kind) && row.availableOnThisMachine,
   );
 
   /*
@@ -627,7 +625,6 @@ export function WritingModelsPanel({
       */}
       {isOwner ? (
         <>
-          <XaiOauthConnection onNote={setNote} />
           {/*
             Providers with no sign-in row of their own.
 
@@ -1009,7 +1006,7 @@ export function DarkDeskCounty() {
       const msg =
         editorActionError(e instanceof Error ? e.message : "", "save the county") ?? "That did not save.";
       setErr(msg);
-      announceToDesk("County did not save.");
+      announceToDesk("County did not save.", "err");
     },
   });
 

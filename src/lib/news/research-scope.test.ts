@@ -235,6 +235,57 @@ describe("research scope", () => {
     assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official" }]), null);
   });
 
+  it("reads a hyphenated label as the city's name, not as a different host", () => {
+    /*
+      A DNS label cannot carry the space in "St. Louis" or the comma in a
+      written-out state, so hosts join the parts with a hyphen: `stlouis-mo.gov`,
+      `salem-or.gov`, `salem-oregon.gov`. The hyphen is punctuation the label had
+      to lose, not part of the name, and reading it as part of the name refused
+      the city's own site -- no `site:` operator at all for those papers.
+    */
+    assert.equal(cityOfficialHost("St. Louis", ["stlouis-mo.gov"], "Missouri"), "stlouis-mo.gov");
+    assert.equal(cityOfficialHost("Salem", ["salem-or.gov"], "Oregon"), "salem-or.gov");
+    assert.equal(cityOfficialHost("Salem", ["salem-oregon.gov"], "Oregon"), "salem-oregon.gov");
+    // The state's name or code still has to be the newsroom's own.
+    assert.equal(cityOfficialHost("Salem", ["salem-or.gov"], "Colorado"), null);
+    assert.equal(cityOfficialHost("Salem", ["salem-oregon.gov"], "Colorado"), null);
+    assert.equal(cityOfficialHost("St. Louis", ["stlouis-mo.gov"]), null, "no state, no two-letter answer");
+    // A hyphen cannot manufacture a match out of a neighbouring jurisdiction.
+    assert.equal(cityOfficialHost("Longmont", ["not-longmont-news.us"]), null);
+    assert.equal(cityOfficialHost("Longmont", ["longmont-county.gov"]), null);
+    // The plain name still beats a state-qualified one.
+    assert.equal(
+      cityOfficialHost("St. Louis", ["stlouis-mo.gov", "st-louis.gov"], "Missouri"),
+      "st-louis.gov",
+    );
+  });
+
+  it("will not read a neighbouring state's `.us` address as this paper's city", () => {
+    /*
+      `boulder.ny.us` is registered under New York's own `ny.us`, and its
+      registrable label is `boulder`. The city's name being there is the whole
+      disguise: a Colorado paper that took it would write
+      `site:boulder.ny.us` into every research query -- a different Boulder's
+      government address, presented as its own.
+    */
+    assert.equal(cityOfficialHost("Boulder", ["boulder.ny.us"], "Colorado"), null);
+    assert.equal(cityOfficialHost("Boulder", ["boulder.ny.us"], "CO"), null);
+    // The same address in its own state is the city's own, and so is a
+    // newsroom that has not said what state it is in.
+    assert.equal(cityOfficialHost("Boulder", ["boulder.ny.us"], "New York"), "boulder.ny.us");
+    assert.equal(cityOfficialHost("Boulder", ["boulder.ny.us"]), "boulder.ny.us");
+    // Longmont's older city address is still the city's own in Colorado, and a
+    // state name spelled out ("Colorado"/"CO") reads the same either way.
+    assert.equal(officialSiteHost("Longmont", [{ url: "https://ci.longmont.co.us/", kind: "official" }], "CO"), "ci.longmont.co.us");
+    assert.equal(officialSiteHost("Longmont", [{ url: "https://ci.longmont.co.us/", kind: "official" }], "Colorado"), "ci.longmont.co.us");
+    assert.equal(officialSiteHost("Longmont", [{ url: "https://ci.longmont.co.us/", kind: "official" }], "Oregon"), null);
+    // A state-scoped `.us` beside the right one does not veto it.
+    assert.equal(
+      cityOfficialHost("Longmont", ["longmont.or.us", "ci.longmont.co.us"], "CO"),
+      "ci.longmont.co.us",
+    );
+  });
+
   it("defaults to nothing at all when the configuration answers nothing", () => {
     const bare = researchScopeOf({ city: "", state: "", seedSources: [] });
     assert.deepEqual(bare, NO_RESEARCH_SCOPE);

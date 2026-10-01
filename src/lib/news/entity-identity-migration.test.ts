@@ -16,7 +16,10 @@ test("identity migration preserves historical rows and permits the same user's p
     )?.[0];
     assert.ok(ddl);
     await pg.exec(ddl);
-    await sql.query(`alter table ${table} add column newsroom_id integer not null default 1`);
+    // U18a-1: `migrations/*.sql` -- including 0044, which adds this column --
+    // is applied before this file loads, so the pre-0044 state this test
+    // rebuilds from 0007 needs the guard the real migration uses.
+    await sql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
   }
   await sql`insert into entity_aliases(user_id,canonical,alias,evidence) values ('shared','vendor llc','Vendor Inc','Historical evidence'),('collaborator','vendor llc','Vendor Inc','Other editor evidence')`;
   await sql`insert into entity_matches(user_id,left_canonical,right_canonical,evidence) values ('shared','vendor inc','vendor llc','Historical match'),('collaborator','vendor inc','vendor llc','Other editor match')`;

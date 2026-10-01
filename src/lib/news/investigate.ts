@@ -2,13 +2,14 @@ import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import {
   grokChat,
-  parseJsonBlock,
+  parseJsonBlockSalvage,
   plannerModel,
   providerBudget,
   type EffectiveProviderChoice,
 } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
+import { resurfaceRefusalReason } from "./result-quality.ts";
 import { readableCapture } from "./html-text.ts";
 import { darkPlannerFor } from "./dark-prompt.ts";
 import { enforceSearchMinimums, tierForQuery, tierForUrl, type Place } from "./dark-gates.ts";
@@ -20,6 +21,7 @@ import {
   extractMeetingInstant,
   extractReferences,
   heuristicPlan as heuristicFromText,
+  junkQueryReason,
   leadHoursBefore,
   nthWeekday,
   structureSnapshot,
@@ -75,6 +77,28 @@ export const NEW_FRONTIER_PER_HOP = 8;
 export const OPEN_FRONTIER_CAP = 24;
 /** Matches grokPlanner's provider input ceiling; keep important context inside it. */
 export const PLANNER_INPUT_CAP = 24_000;
+
+/**
+ * The planner's own output ceiling, and the reason this is a named constant.
+ *
+ * `DARK_PLANNER` asks for eleven fields -- searches, fetch_urls, entities,
+ * relationships, hypotheses, claims, frontier, anomalies, dead_ends, questions,
+ * stop and a summary -- over a 24,000-character pack. 2,200 tokens is not
+ * enough for that on any provider, and it is nowhere near enough for a
+ * thinking model, which spends part of the same budget on `reasoning_content`
+ * before the JSON starts.
+ *
+ * Measured on the Kid City USA dig (2026-09-30, DeepSeek v4.1 Flash through
+ * Ollama): `completion_tokens` of exactly 2,200 -- this cap, hit dead on -- on
+ * all five planning hops and both post-search selection calls. The replies
+ * were cut off mid-object, `parseJsonBlock` could read nothing, and every hop
+ * reported "the plan had no next step" while running the keyword fallback.
+ *
+ * `parseJsonBlockSalvage` now recovers what a truncated reply did contain, and
+ * `grokPlanner` names the cap when it is hit; this is the size that stops a
+ * plan of the shape the prompt asks for from hitting it at all.
+ */
+export const PLANNER_OUTPUT_TOKENS = 8_000;
 const PLANNER_GRAPH_CAP = 16_000;
 const PLANNER_ARTIFACT_CAP = 6_000;
 const PLANNER_HISTORY_CAP = 700;
@@ -275,6 +299,16 @@ export type ResearchLoopOptions = {
   officialDomains?: string[];
   pressDomains?: string[];
   preferences?: import("./dark-preferences.ts").ResearchSnapshot;
+  /**
+   * The editor's Stop, asked at every boundary a run can be stopped on.
+   *
+   * Unit U25, B4. Same seam shape as `onStage` and `runBudget`: the Dark Desk
+   * passes `() => throwIfJobCancelled(job.id)` (see `performDarkRound`), and a
+   * caller that passes nothing -- every existing test -- runs exactly as
+   * before. It must THROW, not return a flag: a stopped run has to leave the
+   * hop loop, not look like a run that finished.
+   */
+  throwIfCancelled?: () => Promise<void>;
   /** Explicit opt-in; omission preserves the original batch loop. */
   executionMode?: "batch" | "responsive";
   /** Responsive model-decision cap, clamped to 1..24. Default 6. */
@@ -906,12 +940,44 @@ function numOrUndef(v: unknown): number | undefined {
 export function parsePlan(raw: unknown): HopPlan {
   const plan = emptyPlan();
   if (!raw || typeof raw !== "object") return plan;
-  const o = raw as Record<string, unknown>;
-  plan.searches = Array.isArray(o.searches) ? o.searches.map(String).slice(0, 8) : [];
-  plan.fetch_urls = sanitizePublicUrls(o.fetch_urls).slice(0, 10);
+  /*
+    Unit U25, B2: read the plan the model actually wrote, not only the shape the
+    prompt asked for.
+
+    A truncated reply can leave an inner array as the whole value (`searches`
+    being the first list in the schema, most often), and a model that answered
+    one hop's plan as a one-element list of plans is not wrong enough to throw
+    away. Both are unwrapped rather than treated as "no plan".
+
+    The next-step fields are read under the names a model reaches for when it
+    is not following the schema to the letter -- the observed replies that
+    produced searches under `queries`, `next_searches` or `search` were all
+    reported as "the plan had no next step" while carrying a usable plan.
+  */
+  const unwrapped = Array.isArray(raw)
+    ? (raw.find((entry) => entry && typeof entry === "object" && !Array.isArray(entry)) ?? null)
+    : ((raw as Record<string, unknown>).plan && typeof (raw as Record<string, unknown>).plan === "object"
+        ? (raw as Record<string, unknown>).plan
+        : raw);
+  if (!unwrapped || typeof unwrapped !== "object") return plan;
+  const o = unwrapped as Record<string, unknown>;
+  const firstList = (...keys: string[]): unknown[] => {
+    for (const key of keys) if (Array.isArray(o[key])) return o[key] as unknown[];
+    return [];
+  };
+  const searches = firstList("searches", "next_searches", "search_queries", "queries", "search");
+  plan.searches = searches
+    .map((entry) =>
+      typeof entry === "string" ? entry : String((entry as { query?: unknown })?.query ?? ""),
+    )
+    .filter(Boolean)
+    .slice(0, 8);
+  plan.fetch_urls = sanitizePublicUrls(firstList("fetch_urls", "fetch_url", "fetch", "urls")).slice(0, 10);
   plan.stop = Boolean(o.stop);
-  plan.summary = String(o.summary ?? "").slice(0, 2000);
-  plan.questions = Array.isArray(o.questions) ? o.questions.map(String).slice(0, 12) : [];
+  plan.summary = String(o.summary ?? o.editor_summary ?? "").slice(0, 2000);
+  plan.questions = firstList("questions", "open_questions")
+    .map(String)
+    .slice(0, 12);
   const arr = <T>(key: string) => (Array.isArray(o[key]) ? (o[key] as T[]) : []);
   for (const e of arr<Record<string, unknown>>("entities")) {
     if (e?.name)
@@ -1063,7 +1129,7 @@ export async function grokPlanner(
     return { ...emptyPlan(), planner_error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
-  const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), 2200, {
+  const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), PLANNER_OUTPUT_TOKENS, {
     timeoutMs: Math.max(1, Math.min(callMs, runBudget?.remainingMs() ?? callMs)),
     model: plannerModel(choice),
     choice,
@@ -1102,9 +1168,28 @@ export async function grokPlanner(
       : { city: "", state: "", officialHost: null };
     return { ...heuristicPlan(pack, new Set(), scope), planner_error: why };
   }
-  const parsed = parsePlan(parseJsonBlock<unknown>(ai.text));
+  const parsed = parsePlan(parseJsonBlockSalvage<unknown>(ai.text));
   if (!parsed.searches.length && !parsed.fetch_urls.length) {
-    return { ...parsed, planner_error: "model replied but the plan had no next step" };
+    /*
+      Say WHY there was no next step, because the two reasons need different
+      fixes and read identically otherwise.
+
+      `completion_tokens === the cap` is the provider telling us it stopped the
+      model mid-sentence: the reply had a plan in it and we could not see the
+      end of it. That is a budget problem, and the wording says so. Anything
+      else is the model genuinely writing no searches, which is a prompt
+      problem. Measured on the Kid City USA run (2026-09-30): 2,200 output
+      tokens -- exactly `PLANNER_OUTPUT_TOKENS` then -- on five of five hops.
+    */
+    const meta = "meta" in ai ? ai.meta : undefined;
+    const capped =
+      typeof meta?.outputTokens === "number" && meta.outputTokens >= PLANNER_OUTPUT_TOKENS;
+    return {
+      ...parsed,
+      planner_error: capped
+        ? `model reply hit the ${PLANNER_OUTPUT_TOKENS}-token output cap mid-plan and no next step survived it`
+        : "model replied but the plan had no next step",
+    };
   }
   return parsed;
 }
@@ -1335,7 +1420,23 @@ export async function persistDiscovery(
     // Both are echoed into the UPDATE below, so they are cleaned on the way in
     // rather than trusted.
     const priorEv = storableText(row.evidence ?? "").trim();
-    const newEvidence = incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120));
+    /*
+      Unit U25, C1: a page coming round again is not a finding about the page.
+
+      The reopen path hands this the re-discovered page's own URL as its
+      "evidence" (see the leftover-URL branch and the attachment branch below),
+      and "≥8 characters and not seen before" called that materially new. That
+      is how a Jetdelivery page, two courier sites, a dictionary page and
+      Englishfortheplanet came back to the front page as "New material. Nobody
+      has opened it yet." after the dig had already read and parked them.
+      `resurfaceRefusalReason` names the rule; a refusal leaves the item parked.
+    */
+    const resurfaceRefused = resurfaceRefusalReason({
+      url: /^https?:\/\//i.test(label) ? label : incoming,
+      evidence: incoming,
+    });
+    const newEvidence =
+      incoming.length >= 8 && !priorEv.includes(incoming.slice(0, 120)) && resurfaceRefused === null;
     const parked = ["exhausted", "dead-end", "resolved", "deferred"].includes(row.status);
     if (parked && newEvidence) {
       const merged = `${priorEv}\n${incoming}`.trim().slice(0, 2000);
@@ -1651,21 +1752,32 @@ export async function rememberCapture(opts: {
     Only a page whose content actually changed mints a new hash, and therefore a
     new version, which this takedown never covered.
 
-    `taken_down_at` is read best-effort: on a database older than
-    migrations/0110 the column does not exist, and a database that cannot
-    record a takedown has none to honour.
+    `for share`, the same lock the Dark Desk's page read takes (dark.ts,
+    U11b3): this read and the takedown's `for update` are the two sides of one
+    race. A plain select reads `taken_down_at` as null, a takedown then purges
+    every text column of the version, and the writes below put this fetch's page
+    back into the tables the purge had just cleared -- the evidence page saying
+    the excerpt was removed while the database holds it again. Under `for share`,
+    whichever of the two arrives first finishes first, so a capture that arrives
+    second sees the marker and writes no text.
+
+    The read is no longer wrapped in a try/catch for a missing column. The
+    column is ensured twice over -- `INVESTIGATE_SCHEMA_STATEMENTS` below
+    mirrors migrations/0110 statement for statement, and every database this
+    runs against has been migrated -- so the catch could only ever fire on a
+    database that cannot record a takedown and, since `rememberCapture` runs
+    inside the caller's transaction (desk.ts's draft capture passes one), would
+    not have rescued anything: a failed statement aborts the transaction, and
+    every write after it fails with a confusing error instead of this one.
   */
   let takenDown = false;
   if (versionId) {
-    try {
-      const [state] = await sql<{ taken_down_at: string | null }>`
-        select taken_down_at::text as taken_down_at from artifact_versions
-        where id = ${versionId} and newsroom_id = ${newsroomId}
-      `;
-      takenDown = Boolean(state?.taken_down_at);
-    } catch {
-      /* the column arrives with 0110; no takedown can predate it */
-    }
+    const [state] = await sql<{ taken_down_at: string | null }>`
+      select taken_down_at::text as taken_down_at from artifact_versions
+      where id = ${versionId} and newsroom_id = ${newsroomId}
+      for share
+    `;
+    takenDown = Boolean(state?.taken_down_at);
   }
   if (versionId && !takenDown && (createdVersion || !existing[0]) && fullText) {
     const already = await sql<{ c: number }>`
@@ -2526,6 +2638,15 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   }
 
   hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
+    /*
+      Unit U25, B4: the editor's Stop, at the one place a run can be stopped
+      without losing anything. A hop is two model calls and a handful of
+      fetches; between hops the file is consistent, so this is where the
+      question is asked. It throws rather than breaking, because a stopped run
+      must not read like a finished one -- see `performDarkRound`, which writes
+      the honest summary before letting the throw through.
+    */
+    await opts.throwIfCancelled?.();
     if (opts.runBudget?.remainingMs() === 0) {
       stopReason = opts.runBudget.stopReason ?? "elapsed-time-limit";
       break;
@@ -2567,7 +2688,29 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         opts.onUsage,
         opts.reasoningEffort,
       );
-      const heur = heuristicPlan(graph, tried, scope);
+      /*
+        Unit U25, B2: what the keyword fallback is allowed to read.
+
+        It used to be handed `graph` -- the whole retrieved pack, captured page
+        text and scraped titles included -- and derived its searches from that.
+        That is where `"Under - Paducah, KY 42001 - Menu, Reviews, Hours &amp;
+        Contact — https://restaurantjump" <the paper's city>` and `"UNDER
+        Definition &amp; Meaning - Merriam-Webster — https://merriam-webster"
+        <the paper's city>` came from: the fallback was searching for the pages
+        it had already fetched, site names, dashes and all.
+
+        The fallback runs when the planner could not, which is the moment the
+        desk knows least. It now reads the lead itself: the investigation's own
+        headline, the records already on the open frontier, and the paper's own
+        city, state and county. Never a captured page, never a URL.
+      */
+      const leadRecords = openFrontier
+        .filter((f) => f.kind !== "url" && f.kind !== "reference")
+        .map((f) => f.label);
+      const leadContext = [investigationTitle, ...leadRecords, place.city, place.state, place.county ?? ""]
+        .filter(Boolean)
+        .join(". ");
+      const heur = heuristicPlan(leadContext, tried, scope);
       plan = grok.searches.length || grok.fetch_urls.length ? grok : heur;
       if (grok.planner_error) plan.planner_error = grok.planner_error;
       if (!plan.searches.length && heur.searches.length) plan.searches = heur.searches;
@@ -2670,7 +2813,38 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       plan.hypotheses.map((h) => h.text).filter(Boolean),
       place,
     ).filter((q) => !tried.has(queryFingerprint(q)));
-    const queries = [...withMinimums, ...fill].map((q) => queryWithResearchWindow(q, opts.preferences)).filter((q) => !tried.has(queryFingerprint(q))).slice(0, SEARCHES_PER_HOP);
+    /*
+      Unit U25, B2: the last gate before a provider sees a query, and the only
+      one every query passes through -- planner-written, frontier-derived,
+      minimum-filled and fallback alike. `junkQueryReason` names the rule it
+      broke, and the run file records what was dropped so a dig that searched
+      less than it planned says so instead of looking like it had nothing to do.
+
+      The window operators are applied AFTER the judgement: `after:`/`before:`
+      are the desk's own, and appending them first would let a query's own
+      address or title text hide behind a date.
+
+      Sanitized here too (U22), at the one place the hop's query list is
+      assembled: the query reaches three `text` columns -- `query`,
+      `query_fingerprint` (which only lowercases, so it keeps whatever byte it
+      was given) and the strategy key -- plus the dedup set that outlives the
+      hop, so `storableText` goes on before the text is copied anywhere.
+    */
+    const dropped: string[] = [];
+    const usable = [...withMinimums, ...fill].filter((q) => {
+      const reason = junkQueryReason(q);
+      if (reason) dropped.push(`${reason}: ${q.slice(0, 120)}`);
+      return !reason;
+    });
+    const queries = usable
+      .map((q) => storableText(queryWithResearchWindow(q, opts.preferences)))
+      .filter((q) => !tried.has(queryFingerprint(q)))
+      .slice(0, SEARCHES_PER_HOP);
+    if (dropped.length) {
+      lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${dropped.length} query${
+        dropped.length === 1 ? "" : "s"
+      } that were not searches: ${[...new Set(dropped)].slice(0, 4).join("; ")}`;
+    }
 
     /*
       A provider startup failure is not a research hop when its fallback
@@ -2695,6 +2869,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
 
     for (let queryIndex = 0; queryIndex < queries.length; queryIndex++) {
       const q = queries[queryIndex]!;
+      // Between searches: the same boundary rule, at a finer grain, because one
+      // hop of a deep dig is several provider calls long.
+      await opts.throwIfCancelled?.();
       if (opts.runBudget && !opts.runBudget.consumeSearch()) {
         stopReason = opts.runBudget.stopReason;
         break;
@@ -3438,7 +3615,17 @@ async function responsiveResearchLoop(
         source_url: finding.evidenceUrl ?? "",
       }));
       await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
-      summary = durableResponsiveSummary(plan.summary, receipts);
+      /*
+        The model wrote `plan.summary`, and the receipt trail beside it carries
+        excerpts of captured pages. Both reach `investigations.summary` -- and
+        the pause below writes the same string into `pause_reason`. A U+0000 in
+        either fails the UPDATE and takes the round's remaining bookkeeping with
+        it, after every other write in the pass has already happened.
+        `storableText`, not `postgresText`: this is the desk's own account of
+        the run, read back as prose, not evidence whose bytes have to survive
+        for a hash.
+      */
+      summary = storableText(durableResponsiveSummary(plan.summary, receipts));
       const counts = await responsiveCounts(opts.investigationId);
       await sql`update investigations set status = 'open', pause_reason = null, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
       return { ...counts, hops: aggregateHops, paused: false, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: decision, finished: true };
@@ -3525,7 +3712,9 @@ async function responsiveResearchLoop(
   }
 
   const counts = await responsiveCounts(opts.investigationId);
-  summary = durableResponsiveSummary(summary || `Responsive research reached its decision limit ${limit} without an explicit finish.`, receipts);
+  // Sanitized here rather than at each write: the same string goes into
+  // `summary` and `pause_reason`, and it is returned to the caller.
+  summary = storableText(durableResponsiveSummary(summary || `Responsive research reached its decision limit ${limit} without an explicit finish.`, receipts));
   await sql`update investigations set status = 'paused', pause_reason = ${summary}, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
   return { ...counts, hops: aggregateHops, paused: true, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: receipts.length, finished: false };
 }
@@ -3747,8 +3936,25 @@ async function persistPlan(
     select canonical, name from entities where newsroom_id = ${newsroomId}
   `;
   for (const e of plan.entities) {
-    const resolved = resolveEntityName(e.name, known);
-    const key = identityKey(e.name);
+    /*
+      The model's own words, and all three are `text` columns: `name`, `kind`
+      and `why` go into `entities`, the same `why` into `entity_aliases` and
+      `entity_matches`, and both `name` and `why` again into the two frontier
+      items filed when the identity is unresolved. One U+0000 in any of them
+      fails the statement it reaches -- and the try/catch around the insert
+      below cannot rescue it: on a database that is already in a transaction
+      (every plan write in a pass is), a failed statement aborts the
+      transaction, so the recovery inserts fail too and the whole round dies
+      with the encoding error.
+
+      Sanitized once, at the top, so that the key this loop dedupes on, the row
+      it writes and the frontier label it files are all the same string.
+    */
+    const name = storableText(e.name);
+    const kind = storableText(e.kind);
+    const why = storableText(e.why);
+    const resolved = resolveEntityName(name, known);
+    const key = identityKey(name);
     if (!key) continue;
     const merge = isConfirmedSame(resolved.verdict) && resolved.canonical === key;
     const c = merge ? resolved.canonical : key;
@@ -3756,7 +3962,7 @@ async function persistPlan(
     try {
       const created = await sql<{ id: number }>`
         insert into entities (user_id, newsroom_id, canonical, name, kind, why)
-        values (${userId}, ${newsroomId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+        values (${userId}, ${newsroomId}, ${c}, ${name.slice(0, 200)}, ${kind.slice(0, 40)}, ${why.slice(0, 800)})
         on conflict (newsroom_id, canonical) do update set why = excluded.why
         returning id
       `;
@@ -3765,13 +3971,13 @@ async function persistPlan(
       try {
         const created = await sql<{ id: number }>`
           insert into entities (user_id, newsroom_id, canonical, name, kind, why)
-          values (${userId}, ${newsroomId}, ${c}, ${e.name.slice(0, 200)}, ${e.kind.slice(0, 40)}, ${e.why.slice(0, 800)})
+          values (${userId}, ${newsroomId}, ${c}, ${name.slice(0, 200)}, ${kind.slice(0, 40)}, ${why.slice(0, 800)})
           returning id
         `;
         entityId = created[0]?.id ?? null;
       } catch {
         await sql`
-          update entities set why = ${e.why.slice(0, 800)}
+          update entities set why = ${why.slice(0, 800)}
           where newsroom_id = ${newsroomId} and canonical = ${c}
         `;
         const found = await sql<{ id: number }>`
@@ -3789,8 +3995,8 @@ async function persistPlan(
         select version_id, capture_event_id, url from artifacts
         where investigation_id = ${investigationId}
           and (
-            lower(full_text) like ${"%" + e.name.toLowerCase().slice(0, 80) + "%"}
-            or lower(title) like ${"%" + e.name.toLowerCase().slice(0, 80) + "%"}
+            lower(full_text) like ${"%" + name.toLowerCase().slice(0, 80) + "%"}
+            or lower(title) like ${"%" + name.toLowerCase().slice(0, 80) + "%"}
           )
         order by id desc limit 1
       `;
@@ -3830,7 +4036,7 @@ async function persistPlan(
       try {
         await sql`
           insert into entity_aliases (user_id, newsroom_id, canonical, alias, verdict, evidence)
-          values (${userId}, ${newsroomId}, ${resolved.canonical}, ${e.name.slice(0, 200)}, ${verdict}, ${e.why.slice(0, 400)})
+          values (${userId}, ${newsroomId}, ${resolved.canonical}, ${name.slice(0, 200)}, ${verdict}, ${why.slice(0, 400)})
           on conflict (newsroom_id, user_id, canonical, alias) do update set verdict = excluded.verdict
         `;
       } catch {
@@ -3840,30 +4046,30 @@ async function persistPlan(
       try {
         await sql`
           insert into entity_matches (user_id, newsroom_id, left_canonical, right_canonical, verdict, evidence, investigation_id)
-          values (${userId}, ${newsroomId}, ${left}, ${right}, ${verdict}, ${e.why.slice(0, 400)}, ${investigationId})
+          values (${userId}, ${newsroomId}, ${left}, ${right}, ${verdict}, ${why.slice(0, 400)}, ${investigationId})
           on conflict (newsroom_id, user_id, left_canonical, right_canonical) do update set verdict = excluded.verdict
         `;
       } catch {
         /* match already recorded */
       }
       await persistDiscovery(userId, investigationId, {
-        kind: e.kind || "unknown",
-        label: e.name,
+        kind: kind || "unknown",
+        label: name,
         why: `Unresolved identity vs ${resolved.matched} (${verdict}) — keep both possibilities alive`,
-        evidence: e.why,
+        evidence: why,
         priority: 8,
-        query: `"${e.name}" ${(await getPaperConfig(newsroomId)).city}`,
+        query: `"${name}" ${(await getPaperConfig(newsroomId)).city}`,
       });
       await persistDiscovery(userId, investigationId, {
-        kind: e.kind || "unknown",
+        kind: kind || "unknown",
         label: resolved.matched,
-        why: `Unresolved identity vs ${e.name} (${verdict}) — keep both possibilities alive`,
-        evidence: e.why,
+        why: `Unresolved identity vs ${name} (${verdict}) — keep both possibilities alive`,
+        evidence: why,
         priority: 8,
         query: `"${resolved.matched}" ${(await getPaperConfig(newsroomId)).city}`,
       });
     }
-    known.push({ canonical: c, name: e.name });
+    known.push({ canonical: c, name });
   }
   for (const r of plan.relationships) {
     const prov = await resolveProvenance(
@@ -4012,10 +4218,17 @@ async function persistPlan(
     });
   }
   for (const a of plan.anomalies) {
+    /*
+      Both `kind` and `summary` are the model's words in `text` columns. There
+      is no try/catch here at all: a U+0000 fails the INSERT outright, and the
+      pass's transaction with it.
+    */
+    const kind = storableText(a.kind);
+    const summary = storableText(a.summary);
     await sql`
       insert into anomalies (user_id, newsroom_id, investigation_id, kind, summary, url, details)
       values (
-        ${userId}, ${newsroomId}, ${investigationId}, ${a.kind.slice(0, 40)}, ${a.summary.slice(0, 1000)},
+        ${userId}, ${newsroomId}, ${investigationId}, ${kind.slice(0, 40)}, ${summary.slice(0, 1000)},
         ${a.url ?? null}, ${""}
       )
     `;
@@ -4027,9 +4240,24 @@ async function persistPlan(
       where ie.investigation_id = ${investigationId}
       limit 40
     `;
-    const blob = [d.hypothesis, ...entNames.map((n) => n.name)].join(", ").slice(0, 2000);
-    const hypothesisVal = d.hypothesis.slice(0, 1000);
-    const reasonVal = d.reason.slice(0, 2000);
+    /*
+      The hypothesis and the reason are the model's words, and they are written
+      more than once each: into the `dead_ends` row and its dedup key, into the
+      `transition_note` of the hypothesis row they close, and into the frontier
+      item filed for them (or into `markFrontier`, when the path closes). One
+      U+0000 fails whichever statement it reaches first.
+
+      Sanitized HERE, at the top, and not at each statement, because the
+      `body = ...` lookup below has to compare the string the hypotheses loop
+      above actually stored. That loop writes the SANITIZED body, so a lookup
+      with the model's raw text would match no row at all -- the dead end would
+      be recorded and the hypothesis it belongs to would stay open, silently.
+    */
+    const hypothesis = storableText(d.hypothesis);
+    const reason = storableText(d.reason);
+    const blob = [hypothesis, ...entNames.map((n) => n.name)].join(", ").slice(0, 2000);
+    const hypothesisVal = hypothesis.slice(0, 1000);
+    const reasonVal = reason.slice(0, 2000);
     const dedupKey = hypothesisVal.toLowerCase().trim();
     /*
       Dark Desk F4: the model re-asserting the same dead end every hop used
@@ -4066,7 +4294,7 @@ async function persistPlan(
       confirmation = Number(inserted[0]?.confirmation_count ?? 1);
       settled = inserted[0]?.settled === true;
     }
-    const { norm: deadEndNorm } = frontierDedupKey("hypothesis", d.hypothesis);
+    const { norm: deadEndNorm } = frontierDedupKey("hypothesis", hypothesis);
     const trail = await sql<{ status: string }>`
       select status from frontier_items
       where investigation_id = ${investigationId}
@@ -4085,13 +4313,13 @@ async function persistPlan(
       `;
     }
     if (mayClose) {
-      await markFrontier(userId, investigationId, d.hypothesis, "dead-end", d.reason);
+      await markFrontier(userId, investigationId, hypothesis, "dead-end", reason);
     } else {
       await persistDiscovery(userId, investigationId, {
         kind: "hypothesis",
-        label: d.hypothesis,
-        why: `Possible dead end reported ${confirmation} of ${DEAD_END_CONFIRMATION_CAP} times. Keep testing before closing it: ${d.reason}`,
-        evidence: d.reason,
+        label: hypothesis,
+        why: `Possible dead end reported ${confirmation} of ${DEAD_END_CONFIRMATION_CAP} times. Keep testing before closing it: ${reason}`,
+        evidence: reason,
         priority: 8,
       });
     }
@@ -4099,10 +4327,10 @@ async function persistPlan(
       update hypotheses
       set status = ${mayClose ? "dead-end" : "open"},
           transition_note = ${mayClose
-            ? d.reason.slice(0, 800)
-            : `Possible dead end ${confirmation}/${DEAD_END_CONFIRMATION_CAP}; retained for further testing. ${d.reason}`.slice(0, 800)}
+            ? reason.slice(0, 800)
+            : `Possible dead end ${confirmation}/${DEAD_END_CONFIRMATION_CAP}; retained for further testing. ${reason}`.slice(0, 800)}
       where investigation_id = ${investigationId}
-        and body = ${d.hypothesis.slice(0, 2000)}
+        and body = ${hypothesis.slice(0, 2000)}
     `;
   }
 }

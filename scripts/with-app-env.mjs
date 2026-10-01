@@ -1,20 +1,11 @@
 #!/usr/bin/env node
 /**
- * Run a command with `.grok/app-env.json` merged into its environment.
+ * Run a command with this workspace's `.env` merged into its environment.
  *
- * `dev`, `build` and `preview` all route through this wrapper, so the dev
- * server, the built bundle and the preview server can never disagree about
- * `VITE_AUTH_ENABLED` — a divergence that only shows up as a built-output
- * mismatch long after the fact. Anything that starts Vite directly bypasses it.
- *
- * Only `VITE_`-prefixed keys are honored: the file is a build flag carrier, not
- * a secret store, and only `VITE_` vars reach the browser anyway. A real
- * `process.env` entry always wins, so an explicit override still works.
- *
- * That precedence also means the file governs this workspace only. A deployed
- * build runs with the provider's project env, where the deployer sets
- * `VITE_AUTH_ENABLED` itself (today unconditionally `"true"`), so the deployed
- * flag is the platform's, not this file's.
+ * `dev`, `build`, `preview` and `db:migrate` all route through this wrapper, so
+ * the dev server, the built bundle and the preview server resolve `VITE_*`
+ * flags from one place. A real `process.env` entry always wins, so an explicit
+ * override still works.
  *
  * Vite picks the values up because `loadEnv` prefix-matches entries already in
  * `process.env`, which is why the merge has to happen before Vite starts.
@@ -26,15 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { safeTestEnvironment } from "./test-environment.mjs";
 
-export const APP_ENV_REL_PATH = ".grok/app-env.json";
-
-const VITE_PREFIX = "VITE_";
-
-/**
- * Parse an app-env document, keeping only `VITE_`-prefixed string entries.
- * Anything unparseable is an empty environment — a workspace without the file
- * must behave exactly like today (auth on, no overrides).
- */
+/** Parse a `.env` document. */
 export function parseDotEnv(text) {
   const env = {};
   for (const raw of text.split(/\n/)) {
@@ -63,35 +46,25 @@ export function readDotEnv(root) {
   }
 }
 
-export function parseAppEnv(text) {
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return {};
-  }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-  const env = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    if (!key.startsWith(VITE_PREFIX)) continue;
-    if (typeof value !== "string") continue;
-    env[key] = value;
-  }
-  return env;
-}
+/**
+ * What an install needs to be told when it still carries an xAI key.
+ *
+ * GR-C removed Grok (xAI) as a provider: the SuperGrok connection, its
+ * transport and the `XAI_API_KEY` fallback are all gone. An operator who set
+ * only `XAI_API_KEY` therefore loses their writing model and falls to the next
+ * rung of the ladder -- which, on a machine with nothing else configured, is
+ * no provider at all. That is a real behavioural change and it must not be a
+ * silent one: this is the sentence the desk prints at start-up.
+ *
+ * Pure, and separate from the printing, so `with-app-env.test.mjs` can assert
+ * the wording and the trigger without spawning a server.
+ */
+export const XAI_REMOVED_WARNING =
+  "Grok (xAI) is no longer supported; XAI_API_KEY is ignored. Choose another model on the Models screen.";
 
-/** The app env recorded under `root`, or `{}` when the file is absent. */
-export function readAppEnv(root) {
-  try {
-    return parseAppEnv(readFileSync(join(root, APP_ENV_REL_PATH), "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-/** File values under the process environment: an explicit override wins. */
-export function mergeAppEnv(appEnv, processEnv) {
-  return { ...appEnv, ...processEnv };
+/** The warning this environment needs, or null when it needs none. */
+export function xaiRemovedWarning(env = process.env) {
+  return env.XAI_API_KEY || env.GROK_API_KEY ? XAI_REMOVED_WARNING : null;
 }
 
 /**
@@ -163,10 +136,11 @@ function main(argv) {
     console.error("usage: node scripts/with-app-env.mjs <command> [args…]");
     process.exit(2);
   }
-  const inheritedEnv = mergeAppEnv(readAppEnv(projectRoot()), {
+  // `.env` values under the process environment: an explicit override wins.
+  const inheritedEnv = {
     ...readDotEnv(projectRoot()),
     ...process.env,
-  });
+  };
   const directNodeTest = isDirectNodeTestInvocation(command, args);
   // `test:live-model` is an explicit paid-provider entry point. Keep that
   // opt-in, while still preventing a checkout or parent database from
@@ -201,6 +175,19 @@ function main(argv) {
   } else {
     console.log("[with-app-env] DATABASE_URL unset -- PGLite in-memory");
   }
+  /*
+    Say the xAI removal out loud, on the same start-up line this wrapper already
+    uses for the database it resolved.
+
+    stdout, NOT stderr, for the same measured reason as the line above: the
+    production start script pipes this command with 2>&1 under
+    $ErrorActionPreference = "Stop", where one byte of native stderr is a
+    terminating error -- the stderr version of the DATABASE_URL line stopped
+    the start script after migrate and took the live paper down to a 502.
+    A warning that cannot be printed is a warning that does not exist.
+  */
+  const xaiWarning = xaiRemovedWarning(env);
+  if (xaiWarning) console.log(`[with-app-env] WARNING: ${xaiWarning}`);
   // `node` is this very runtime — use its real path rather than a PATH lookup.
   // Avoids the shell entirely (and its DEP0190 warning on every run).
   const resolved = command === "node" ? process.execPath : command;

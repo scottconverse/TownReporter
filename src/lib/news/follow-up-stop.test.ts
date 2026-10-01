@@ -1,6 +1,6 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getPglite, getSql } from "../db.ts";
+import { getSql } from "../db.ts";
 import {
   ensureFollowUpsSchema,
   parseFinding,
@@ -29,6 +29,7 @@ import {
   type DeskJob,
 } from "./jobs.ts";
 import { parseNotes } from "./notes.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { listPageWatchesFor } from "./page-watch.ts";
 import {
   performListFollowUpWatchNotices,
@@ -61,6 +62,13 @@ import type { SearchAttempt, WebHit } from "./search-web.ts";
  * claim here is about a row. Nothing leaves the process: the search provider,
  * the judge and the page reader are fakes.
  */
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when the
+// ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 const EDITOR = "stop-editor";
 
@@ -162,12 +170,14 @@ async function withJobWork<T>(
 }
 
 before(async () => {
-  const { readFile } = await import("node:fs/promises");
   const sql = await getSql();
-  // The real base newsroom schema; Node lacks Vite's migration glob.
-  await (
-    await getPglite()
-  ).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+  // The real base newsroom schema comes from `migrations/*.sql`, applied to
+  // this database before the file loads (see
+  // src/lib/test-support/pglite-migrations.ts). The hand replay of 0002 that
+  // stood in for Node's missing Vite migration glob is gone, as it is in
+  // follow-up-agents.test.ts and follow-up-scheduler.test.ts: 0002's seed
+  // `insert into articles` is unguarded, so running it a second time against
+  // an already-migrated database dies on `articles_slug_key`.
   for (const table of ["sources", "articles", "leads", "drafts", "scan_runs"])
     await sql.query("alter table " + table + " add column if not exists newsroom_id integer not null default 1");
   await sql.query("alter table leads add column if not exists notes_json text not null default '{}'");

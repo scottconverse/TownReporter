@@ -25,7 +25,11 @@ it("synthesis uses only its newsroom's context and configured city", async () =>
   await sql`insert into paper_settings(newsroom_id,city,state) values (77,'Centennial','Colorado')`;
   await sql`insert into sources(user_id,newsroom_id,title,url) values ('scope',1,'OTHER_SECRET','https://other.example'),('scope',77,'OWN_SOURCE','https://own.example')`;
   await sql`insert into leads(user_id,newsroom_id,headline,why) values ('scope',1,'OTHER_SECRET_LEAD','private'),('scope',77,'OWN_LEAD','own')`;
-  await sql`insert into articles(user_id,newsroom_id,slug,headline,body,topic) values ('scope',1,'other','OTHER_SECRET_ARTICLE','x','x'),('scope',77,'own','OWN_ARTICLE','x','x')`;
+  // U18a-1: the topic was 'x', which 0045's `articles_resolve_section`
+  // trigger refuses -- a story cannot file under a section its newsroom does
+  // not have. The topic is not what this test is about (it reads which
+  // newsroom's rows reach a brief), so it uses a real one.
+  await sql`insert into articles(user_id,newsroom_id,slug,headline,body,topic) values ('scope',1,'other','OTHER_SECRET_ARTICLE','x','council'),('scope',77,'own','OWN_ARTICLE','x','council')`;
   await sql`insert into beat_memory(user_id,newsroom_id,entity,last_angle) values ('scope',1,'OTHER_SECRET_MEMORY','private'),('scope',77,'OWN_MEMORY','own')`;
   const inv = (
     await sql<{

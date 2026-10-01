@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { before, test } from "node:test";
 import assert from "node:assert/strict";
-import { getSql, getPglite } from "../db.ts";
+import { getSql } from "../db.ts";
 import { ensureDarkSchema } from "./dark.ts";
 import {
   readDarkSettingsFor,
@@ -9,6 +8,14 @@ import {
   snapshotDarkSettingsFor,
 } from "./dark-preferences.server.ts";
 import { validateResearchPreferences } from "./dark-preferences.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 test("room preferences preserve county/dials and a saved round snapshot survives later edits", async () => {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -161,11 +168,15 @@ test("the real continued-round worker keeps its snapshot when settings change mi
   }
 });
 
+// The base newsroom schema comes from `migrations/*.sql`, applied to the test
+// database before this file loads (U18a-1,
+// src/lib/test-support/pglite-migrations.ts). This hook used to replay
+// migrations/0002_newsroom.sql by hand because Node had no Vite migration
+// glob; replaying it now would only re-run its unguarded welcome-article seed
+// insert against the row it already wrote. The `newsroom_id` columns arrive
+// with 0012.
 before(async () => {
   const sql = await getSql();
-  await (
-    await getPglite()
-  ).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
   for (const table of ["sources", "articles", "leads", "drafts", "scan_runs", "beat_memory"])
     await sql.query(
       "alter table " + table + " add column if not exists newsroom_id integer not null default 1",

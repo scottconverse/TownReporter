@@ -335,7 +335,11 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.deepEqual(JSON.parse(drafts[1]!.research_json), { importedText: true });
 
     // Nothing publishes: an imported story leaves the desk only via Publish.
-    const [published] = await sql.query("select count(*)::int as n from articles") as { n: number }[];
+    // U18a-1: scoped to this test's newsroom -- `articles` is the real table
+    // now, and it also holds the welcome article migrations/0002 seeds.
+    const [published] = await sql.query(
+      "select count(*)::int as n from articles where newsroom_id=91",
+    ) as { n: number }[];
     assert.equal(published!.n, 0);
     assert.equal(seen.length, 1);
     assert.equal(seen[0]!.leadId, leads[0]!.id);
@@ -472,7 +476,9 @@ describe("captureCitedPages: the existing capture path, best effort", () => {
   it("stores a fetched page against the lead, and leaves no document for a page that would not load", async () => {
     const sql = await ensureSchema();
     const [lead] = await sql.query(
-      "insert into leads (newsroom_id,user_id,headline,origin) values (94,'editor','Cited', 'import') returning id",
+      // U18a-1: `leads` is the real table now, so `why` -- which it declares
+      // `not null` -- has to be supplied here.
+      "insert into leads (newsroom_id,user_id,headline,why,origin) values (94,'editor','Cited','Fixture','import') returning id",
     ) as { id: number }[];
     const result = await captureCitedPages(
       { userId: "editor", newsroomId: 94 },

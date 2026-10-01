@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { assertSameSiteRequest, CrossSiteRequestError } from "./isolation.server.ts";
 
 /**
- * `assertSameSiteRequest` is the sibling-tenant CSRF guard: apps on
- * `*.grok.me` are same-site to each other but mutually untrusted, and a
+ * `assertSameSiteRequest` is the sibling-tenant CSRF guard: two apps on the
+ * same parent domain are same-site to each other but mutually untrusted, and a
  * `SameSite=Lax` cookie rides along on same-site subrequests. This is the
  * only thing standing between a scripted request from a malicious sibling
  * and this app's session cookie -- see the docstring on `isolation.server.ts`
@@ -68,10 +68,10 @@ describe("assertSameSiteRequest", () => {
   });
 
   /**
-   * The attack this file exists for: a sibling app on another `*.grok.me`
-   * subdomain is "same-site" to this one under the Fetch Metadata spec, so a
-   * naive check that only distinguishes same-site from cross-site would let
-   * it through. This must still be blocked.
+   * The attack this file exists for: a sibling app on another subdomain of the
+   * same parent domain is "same-site" to this one under the Fetch Metadata
+   * spec, so a naive check that only distinguishes same-site from cross-site
+   * would let it through. This must still be blocked.
    */
   it("blocks a scripted same-site request from a sibling app", () => {
     assert.equal(verdict({ "sec-fetch-site": "same-site", "sec-fetch-mode": "cors" }, "POST"), "block");

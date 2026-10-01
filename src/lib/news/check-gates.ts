@@ -36,6 +36,7 @@
  * places and cannot be loaded by `node --experimental-strip-types`, so a rule
  * living inside one is only ever tested through a running server.
  */
+import { claimCount } from "./evidence-check-list.ts";
 import { readNameCheck } from "./name-check.ts";
 
 /**
@@ -64,16 +65,48 @@ export type CheckFacts = {
   /** Is there a draft row at all? */
   hasDraft: boolean;
   /**
-   * Did the evidence check RUN on this draft?
+   * Is there a PASS on this draft's evidence -- a person's decision, or the
+   * reconciliation stamp a completed "Check draft against evidence" run
+   * leaves? (`recordedChecks`.)
    *
-   * Two records answer yes, and either is enough: a person's decision on the
-   * review (`evidenceReview.decision`), or the stamp a completed "Check draft
-   * against evidence" run leaves behind (`evidenceReconciledAt`, see
-   * `recordedChecks`). It says nothing about whether the answer still covers
-   * the text -- `evidenceOutstanding` and `evidenceRequired` are read first and
-   * win over it.
+   * THIS IS THE RECORD AND NOTHING ELSE, and unit U24b is why. U24 briefly
+   * widened it to "a check ran at all", which put `✓ Evidence checked` and
+   * "All checks done." on a draft whose findings were all `Could not check`
+   * or judged `contradicts`, with the pane below showing exactly those rows.
+   * A green chip is a claim about an ANSWER; the run happening is not the
+   * answer, and it is `evidenceRan`'s job to say so.
+   *
+   * It says nothing about whether the answer still covers the text --
+   * `evidenceOutstanding` and `evidenceRequired` are read first and win over
+   * it.
    */
   evidenceChecked: boolean;
+  /**
+   * Did the evidence check RUN on this draft, decided or not? (unit U24b.)
+   *
+   * The run's own output is a record of the RUN: findings and claims the
+   * evidence pass wrote, a claim of absence the gate raised, or either of the
+   * two pass records above (`evidence-check-state.ts`, `EvidenceCheckState.ran`).
+   * It is read for WORDING ONLY -- to tell `○ Evidence check not run` from
+   * "a check ran and nobody has decided it yet" -- and it must never make a
+   * chip `done`, because "it ran" is not "it passed".
+   */
+  evidenceRan: boolean;
+  /**
+   * Claims from the evidence check that no person has judged yet (unit U24).
+   *
+   * The count is `claimsNeedingReview` over the resolved review
+   * (`evidence-check-state.ts`) -- the same rows the Checks pane chips
+   * `! Needs review`. It is here so this bar and that pane cannot say
+   * different things about the same draft, which is exactly what happened on
+   * the stand-in editorial day: `○ Evidence check not run` on the bar, seven
+   * `! Needs review` rows in the pane, three inches apart.
+   *
+   * A page that has not resolved the review (the desk home's list row, which
+   * projects the memo and nothing else) passes 0 and keeps the record-only
+   * reading it has always had.
+   */
+  evidenceToReview: number;
   /** An evidence check ran and is still waiting on a person's decision. */
   evidenceRequired: boolean;
   /**
@@ -198,6 +231,20 @@ export function deskRowChecks(row: {
        two records the workbench does -- U9c: it used to ignore this one and
        call a checked draft "not run". */
     evidenceChecked: Boolean(row.evidence_decision) || Boolean(row.evidence_checked_at),
+    /*
+      The row's projection carries no findings, so the only "it ran" it can see
+      is the same pass record -- see the note on `evidenceToReview` below.
+    */
+    evidenceRan: Boolean(row.evidence_decision) || Boolean(row.evidence_checked_at),
+    /*
+      Unit U24: the desk home's list row is a projection of the draft's MEMO
+      (`drafts.research_json`), and the review's rows are not in it -- findings
+      live in `found_note`, which that query deliberately does not drag across
+      the wire. So this screen keeps the record-only reading it has always had
+      rather than guessing a count it cannot see; the story workbench, which
+      resolves the review, is where the claims are counted.
+    */
+    evidenceToReview: 0,
     evidenceRequired: row.evidence_required,
     evidenceOutstanding: false,
     namesUnresolved: row.names_unresolved,
@@ -228,14 +275,49 @@ const namesWord = (n: number) => `${n} name${n === 1 ? "" : "s"}`;
  * The evidence chip.
  *
  * Warning first, in the order the editor meets it: something outstanding (the
- * text moved on, a claim is unticked, a check is running) then a check that ran
- * and has not been decided. Only a recorded decision is a pass.
+ * text moved on, a claim is unticked, a check is running), then the rows the
+ * pane is asking a person to deal with, then a check that ran and nobody has
+ * decided, and only then -- on a recorded answer -- the green.
+ *
+ * THE GREEN IS THE LAST THING, AND IT IS ONLY EVER A RECORD. Unit U24b: a chip
+ * that went green on "a check ran" printed `✓ Evidence checked` and "All checks
+ * done." over a pane full of `Could not check` and `! Needs review` rows. Three
+ * states that are NOT a pass, and each now says which it is:
+ *
+ *   - `! Evidence to check`          something put the check back in the pile
+ *   - `! N claims need review`       the pane is asking a person to judge rows
+ *   - `! Evidence check not decided` it ran, and no person has answered it
+ *   - `○ Evidence check not run`     nothing has ever been run against this text
  */
 export function evidenceChip(facts: CheckFacts): CheckChip {
   if (facts.evidenceOutstanding || facts.evidenceRequired) {
     return { text: "! Evidence to check", tone: "warn", done: false };
   }
+  /*
+    Unit U24: a check that ran and left claims no person has judged is not "not
+    run" and is not a pass. The desk said `○ Evidence check not run` here for
+    exactly this state, while the Checks pane listed the seven claims it was
+    talking about. The count is the pane's own `! Needs review` count, so the
+    chip and the rows under it now name the same work.
+  */
+  if (facts.evidenceToReview > 0) {
+    const n = facts.evidenceToReview;
+    return {
+      text: `! ${claimCount(n)} ${n === 1 ? "needs" : "need"} review`,
+      tone: "warn",
+      done: false,
+    };
+  }
   if (facts.evidenceChecked) return { text: "✓ Evidence checked", tone: "ok", done: true };
+  /*
+    Unit U24b: it ran and nobody answered it. Not a pass (`done: false`, so the
+    Check stage stays open and "All checks done." is out of reach), and not a
+    denial either -- `○ Evidence check not run` over a pane that says "checked
+    against 2 captures" is the contradiction U24 was raised to fix.
+  */
+  if (facts.evidenceRan) {
+    return { text: "! Evidence check not decided", tone: "warn", done: false };
+  }
   return { text: "○ Evidence check not run", tone: "quiet", done: false };
 }
 
@@ -313,7 +395,17 @@ export function publishBarNote(facts: CheckFacts): string {
   const names = namesChip(facts);
   if (evidence.done && names.done) return "All checks done.";
 
-  const evidenceRan = facts.evidenceChecked || facts.evidenceRequired;
+  /* Unit U24: claims waiting on a person are a record that the check RAN, so
+     they are counted on the ran side of every branch below -- otherwise this
+     sentence would say "No evidence check ran on this draft" beside a chip
+     counting seven claims it left. U24b put the same fact where it belongs
+     (`evidenceRan`) and this reads it; the three older terms stay so a caller
+     that sets only a pass record still reads as "ran". */
+  const evidenceRan =
+    facts.evidenceRan ||
+    facts.evidenceChecked ||
+    facts.evidenceRequired ||
+    facts.evidenceToReview > 0;
   const namesRan = nameCheckRan(facts);
   if (!evidenceRan && !namesRan) {
     return "Nothing blocks Publish. No evidence or name check ran on this draft.";
@@ -327,7 +419,12 @@ export function publishBarNote(facts: CheckFacts): string {
 
   const said: string[] = [];
   if (!evidence.done) {
-    said.push(evidenceRan ? "the evidence check is not confirmed" : "no evidence check ran");
+    const n = facts.evidenceToReview;
+    if (n > 0) {
+      said.push(`${claimCount(n)} from the evidence check ${n === 1 ? "is" : "are"} unreviewed`);
+    } else {
+      said.push(evidenceRan ? "the evidence check is not confirmed" : "no evidence check ran");
+    }
   }
   if (!names.done) {
     const n = namesToReview(facts);

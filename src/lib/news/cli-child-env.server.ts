@@ -3,9 +3,10 @@
 
   `spawn(..., { env: { ...process.env } })` handed every child the whole server
   environment: `BETTER_AUTH_SECRET`, `DATABASE_URL` with the paper's
-  credentials in it, every configured provider key, the Grok client secret. A
-  drafting CLI needs none of that, and an agent CLI is a program that reads its
-  own environment while its input includes text fetched from the open web.
+  credentials in it, every configured provider key, every stored model
+  connection. A drafting CLI needs none of that, and an agent CLI is a program
+  that reads its own environment while its input includes text fetched from the
+  open web.
 
   So a child gets a named allow-list instead of a copy of everything. What the
   listed names have in common is that a CLI cannot work without them: how to

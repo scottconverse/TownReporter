@@ -104,17 +104,11 @@ export type CodexConfig = {
   label: string;
 };
 
-export type XaiOauthConfig = {
-  model: string;
-  label: string;
-};
-
 /** The desk speaks to exactly one of these per call. */
 export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
-  | ({ kind: "xai-oauth" } & XaiOauthConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -134,18 +128,6 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     modelId: string;
     apiKey: string | null;
   }>;
-  /** Test-only seam for the server-owned SuperGrok OAuth connection. */
-  resolveXaiOauth?: (newsroomId: number) => Promise<{ modelId: string; label?: string }>;
-  /** Test-only seam proving an explicit SuperGrok pick reaches only OAuth inference. */
-  xaiChat?: (input: {
-    newsroomId: number;
-    system?: string;
-    user: string;
-    maxTokens?: number;
-    model?: string;
-    timeoutMs?: number;
-    reasoningEffort?: ModelEffort | null;
-  }) => Promise<{ text: string }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
   /**
@@ -303,24 +285,19 @@ export function rungLocalModel(choice: string | undefined | null): LocalModelOve
   return gateway ? { baseUrl: gateway.baseUrl, id: gateway.model } : null;
 }
 
-function xaiGateway(): LlmConfig | null {
-  const xai = env("XAI_API_KEY") ?? env("GROK_API_KEY");
-  if (!xai) return null;
-  return {
-    apiKey: xai,
-    baseUrl: trimSlash(env("XAI_BASE_URL") || "https://api.x.ai/v1"),
-    model: env("XAI_MODEL") || "grok-4.5",
-    label: "xAI",
-  };
-}
-
 /**
- * The OpenAI-compatible leg only. Unchanged contract: an explicitly named
- * gateway wins, otherwise Grok. Claude is resolved separately because it is
- * NOT an OpenAI-compatible endpoint — see `resolveAnthropic`.
+ * The OpenAI-compatible leg only: the gateway the operator named. Claude is
+ * resolved separately because it is NOT an OpenAI-compatible endpoint — see
+ * `resolveAnthropic`.
+ *
+ * This used to fall back to an xAI (`XAI_API_KEY`) gateway. Grok was removed
+ * as a provider entirely (GR-C), so there is no second rung here: with no
+ * LLM_BASE_URL/LLM_API_KEY there is no OpenAI-compatible provider at all, and
+ * the caller falls to the Claude ladder. An operator who still wants that
+ * endpoint can point a generic custom connection at it — that feature stays.
  */
 export function resolveLlm(): LlmConfig | null {
-  return customGateway() ?? xaiGateway();
+  return customGateway();
 }
 
 /**
@@ -363,8 +340,7 @@ export function resolveClaudeCode(): ClaudeCodeConfig | null {
  * Claude is the default brain, and it prefers the operator's existing Claude
  * Code login over an API key — this desk is run by someone who does not keep
  * API keys. An explicitly configured gateway still wins, so a local model on
- * the box can take over without touching code; Grok stays as the last fallback
- * for an existing XAI_API_KEY.
+ * the box can take over without touching code.
  */
 function explicitProvider(
   choice: StoryModelChoice,
@@ -413,10 +389,6 @@ function explicitProvider(
 
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
-  if (entry.kind === "xai-oauth") {
-    return { kind: "xai-oauth", model, label: entry.label };
-  }
-
   if (entry.kind === "openai") {
     const llm = customGateway();
     return llm ? { kind: "openai", ...llm } : null;
@@ -462,49 +434,11 @@ export function resolveProvider(
   if (claude) return { kind: "anthropic", ...claude };
   const cli = resolveClaudeCode();
   if (cli) return { kind: "claude-code", ...cli };
-  const xai = xaiGateway();
-  if (xai) return { kind: "openai", ...xai };
   return null;
 }
 
 type CustomProviderResolution =
   { ok: true; provider: Extract<Provider, { kind: "openai" }> } | { ok: false; error: string };
-
-type XaiOauthProviderResolution =
-  { ok: true; provider: Extract<Provider, { kind: "xai-oauth" }> } | { ok: false; error: string };
-
-async function resolveXaiOauthProvider(
-  newsroomId: number | undefined,
-  injected?: GrokChatAdapters["resolveXaiOauth"],
-): Promise<XaiOauthProviderResolution> {
-  if (!Number.isInteger(newsroomId) || newsroomId == null) {
-    return {
-      ok: false,
-      error:
-        "The selected SuperGrok connection cannot be resolved without its newsroom. Choose another model; TownReporter will not fall back automatically.",
-    };
-  }
-  try {
-    const resolve = injected ?? (await import("./xai-oauth.server.ts")).resolveXaiOauthConnection;
-    const connection = await resolve(newsroomId);
-    return {
-      ok: true,
-      provider: {
-        kind: "xai-oauth",
-        model: connection.modelId,
-        label: connection.label ?? "Grok (SuperGrok)",
-      },
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      error:
-        error instanceof Error && error.message
-          ? error.message
-          : "SuperGrok is unavailable. Connect it on Server, or choose another model. TownReporter will not fall back automatically.",
-    };
-  }
-}
 
 /**
  * Resolve a stored custom connection only at the server call boundary. The
@@ -766,7 +700,7 @@ export async function probeProvider(
   newsroomId?: number,
   adapters?: Pick<
     GrokChatAdapters,
-    "resolveCustom" | "resolveLocal" | "resolveXaiOauth" | "resolveLocalCatalog"
+    "resolveCustom" | "resolveLocal" | "resolveLocalCatalog"
   >,
   scope?: "story" | "scan" | "opinion" | "dark" | "forced",
   exactLocalModel?: LocalModelOverride,
@@ -778,24 +712,6 @@ export async function probeProvider(
       allowManualModelWhenCatalogUnsupported: true,
     });
     return result.ok ? { ...result, choice } : result;
-  }
-  if (choice === "grok-oauth") {
-    const resolved = await resolveXaiOauthProvider(newsroomId, adapters?.resolveXaiOauth);
-    if (!resolved.ok) return resolved;
-    try {
-      if (!adapters?.resolveXaiOauth) {
-        await (await import("./xai-oauth.server.ts")).refreshXaiOauthModels(newsroomId!);
-      }
-      return { ok: true, label: resolved.provider.label, choice: "grok-oauth" };
-    } catch (error) {
-      return {
-        ok: false,
-        error:
-          error instanceof Error && error.message
-            ? error.message
-            : "SuperGrok could not verify its account models.",
-      };
-    }
   }
   /*
     0.6.63 (Unit Y item 2), at the rung itself.
@@ -1122,16 +1038,9 @@ export async function grokChat(
       ? await resolveCustomProvider(opts.choice, opts.newsroomId, adapters?.resolveCustom)
       : null;
   if (custom && !custom.ok) return custom;
-  const xai =
-    opts?.choice === "grok-oauth"
-      ? await resolveXaiOauthProvider(opts.newsroomId, adapters?.resolveXaiOauth)
-      : null;
-  if (xai && !xai.ok) return xai;
   const provider = custom?.ok
     ? custom.provider
-    : xai?.ok
-      ? xai.provider
-      : resolveProvider(opts?.choice, opts?.localModel, rungModel);
+    : resolveProvider(opts?.choice, opts?.localModel, rungModel);
   if (!provider) return { ok: false, error: GROK_UNAVAILABLE };
 
   const timeoutMs = opts?.timeoutMs ?? 45_000;
@@ -1168,25 +1077,6 @@ export async function grokChat(
   if (provider.kind === "codex") {
     const { codexChat } = await import("./ai-codex.server.ts");
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
-  }
-  if (provider.kind === "xai-oauth") {
-    if (!Number.isInteger(opts?.newsroomId) || opts?.newsroomId == null) {
-      return {
-        ok: false,
-        error: "SuperGrok requires an authenticated newsroom. Choose another model.",
-      };
-    }
-    const xaiChat = adapters?.xaiChat ?? (await import("./xai-oauth.server.ts")).xaiOauthChat;
-    const result = await xaiChat({
-      newsroomId: opts.newsroomId,
-      system,
-      user,
-      maxTokens,
-      model,
-      timeoutMs,
-      reasoningEffort: opts?.reasoningEffort,
-    });
-    return { ok: true, text: result.text };
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
@@ -1576,6 +1466,156 @@ export function parseJsonBlock<T>(raw: string): T | null {
       return null;
     }
   }
+}
+
+/**
+ * Where a reply stopped being JSON, and what was still open there.
+ *
+ * `safe` holds the offsets just past a complete value, with the bracket stack
+ * that was open at that offset. Cutting at one of them and closing the stack
+ * turns a truncated reply back into valid JSON, losing only the unfinished
+ * tail -- which is the difference between a hop that plans and a hop that
+ * silently falls back to keyword matching.
+ */
+type JsonCutPoints = { safe: { at: number; stack: string[] }[]; openStack: string[]; inString: boolean };
+
+function jsonCutPoints(body: string): JsonCutPoints {
+  const safe: { at: number; stack: string[] }[] = [];
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  /** A bare `123`, `true`, `false` or `null` in progress, with where it began. */
+  let bare = "";
+  let bareStart = -1;
+  const endBare = () => {
+    if (bareStart >= 0 && /^-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?$|^(?:true|false|null)$/.test(bare))
+      safe.push({ at: bareStart + bare.length, stack: [...stack] });
+    bare = "";
+    bareStart = -1;
+  };
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        safe.push({ at: i + 1, stack: [...stack] });
+      }
+      continue;
+    }
+    if (ch === '"') {
+      endBare();
+      inString = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      endBare();
+      stack.push(ch);
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      endBare();
+      stack.pop();
+      safe.push({ at: i + 1, stack: [...stack] });
+      continue;
+    }
+    if (ch.trim() === "" || ch === "," || ch === ":") {
+      endBare();
+      continue;
+    }
+    if (bareStart < 0) bareStart = i;
+    bare += ch;
+  }
+  endBare();
+  return { safe, openStack: stack, inString };
+}
+
+/**
+ * The JSON object a reply was writing when it ran out of output tokens.
+ *
+ * A thinking model handed a 2,200-token ceiling for an eleven-field plan
+ * spends it mid-object and the reply arrives unterminated. `parseJsonBlock`
+ * cannot read that at all -- `lastIndexOf("}")` lands on some inner object, or
+ * on nothing -- so the planner looked like a model that "replied but had no
+ * next step" while its `searches` array sat complete in the truncated text.
+ *
+ * Measured: `dark_runs.usage_ledger_json` for the Kid City USA run of
+ * 2026-09-30 records `completion_tokens` of exactly 2,200 -- the planner's own
+ * cap -- on all five planning hops and both post-search selection calls.
+ *
+ * The strict parse is tried first, so a reply that is already good JSON is
+ * never touched. Only then does this walk the reply, remember every offset
+ * just past a complete value, and try to close the brackets from the last one
+ * backwards. Bracket *and* string aware, so a `{` inside a quoted sentence
+ * never counts as structure.
+ */
+export function parseJsonBlockSalvage<T>(raw: string): T | null {
+  const strict = parseJsonBlock<T>(raw);
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = (fenced?.[1] ?? raw).trim();
+  const start = candidate.indexOf("{");
+  const arrayStart = candidate.indexOf("[");
+  /*
+    A reply that OPENED an object but never closed it is the trap here.
+
+    `parseJsonBlock` takes `lastIndexOf("}")`, which is -1 when the closing
+    brace was cut off, so it falls through to `lastIndexOf("]")` and hands back
+    whichever inner array happened to be the last one to close -- the planner's
+    `searches` list, most often. `parsePlan` then reads an array, finds no
+    `searches` key on it, and returns an empty plan, which is precisely the
+    "model replied but the plan had no next step" this function exists to fix.
+  */
+  const opensObject = start >= 0 && (arrayStart < 0 || start < arrayStart);
+  if (strict !== null && !(opensObject && Array.isArray(strict))) return strict;
+  if (start < 0) return strict;
+  const body = candidate.slice(start);
+  const { safe, openStack, inString } = jsonCutPoints(body);
+
+  const close = (stack: string[]) =>
+    stack
+      .slice()
+      .reverse()
+      .map((open) => (open === "{" ? "}" : "]"))
+      .join("");
+  const read = (prefix: string, stack: string[]) => {
+    // A cut can land just after `,` or `:` when the unfinished element was a
+    // value we could not see; neither is legal immediately before a close.
+    const trimmed = prefix.replace(/[\s,]*$/, "");
+    // An unterminated string is still usable as a value: close the quote.
+    const text = inString && !/"$/.test(trimmed) ? `${trimmed}"` : trimmed;
+    try {
+      return JSON.parse(`${text}${close(stack)}`) as T;
+    } catch {
+      return null;
+    }
+  };
+  /*
+    M4 of the batch-6 pre-merge audit. Closing the open quote is only right when
+    the string being written is the VALUE OF A TOP-LEVEL FIELD -- `summary`,
+    which is prose the model writes last and which the desk can still read. The
+    moment the cut lands anywhere deeper the string is an ITEM: a `fetch_urls`
+    entry, a claim, a query. Closing it there does not recover the model's last
+    thought, it invents one -- `"https://www.longmontcolorado.gov/agen` comes
+    back as a real address the dig will fetch, and a cut claim comes back as a
+    claim. An item that was never finished is dropped, not completed with
+    whatever the cap happened to leave.
+
+    `openStack` is exactly `["{"]` when the reply is inside the root object and
+    in no nested array or object, which is that one case.
+  */
+  if (inString && openStack.length === 1 && openStack[0] === "{") {
+    const closed = read(body, openStack);
+    if (closed !== null) return closed;
+  }
+  for (let i = safe.length - 1; i >= 0; i--) {
+    const cut = safe[i]!;
+    const closed = read(body.slice(0, cut.at), cut.stack);
+    if (closed !== null) return closed;
+  }
+  // Salvage found nothing better; the strict reader's answer -- even the inner
+  // array -- is still more than the caller would otherwise get.
+  return strict;
 }
 
 /**

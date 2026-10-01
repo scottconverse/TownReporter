@@ -165,9 +165,38 @@ const appearanceContextStub = inlineModule(`
   export function useHydrated() { return false; }
 `);
 
+/*
+  FB5: `desk-chrome-utils.ts` reaches for the desk's toast now -- announceToDesk
+  draws the visible bar as well as speaking into `#desk-announcer`. Nothing the
+  markup below asserts is about toasts, so the module is stubbed shut here the
+  same way every other specifier in this file is: what is under test is the
+  markup that renders, not what the desk says while it renders it.
+*/
+const deskToastStub = moduleUrl(
+  `export function deskToast() {}
+export function deskToastHostMounted() { return false; }`,
+  "desk-toast-stub.ts",
+);
+const deskToasterStub = moduleUrl(
+  `export function DeskToaster() { return null; }`,
+  "desk-toaster-stub.ts",
+);
+
 const deskChromeUtilsUrl = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
+  { "@/components/desk-toast": deskToastStub },
+);
+
+/*
+  Unit U24: the nav list and the active-item rule moved out of desk-chrome.tsx
+  into src/lib/desk-nav.ts, so a test can read them. It imports nothing, so the
+  REAL module compiles here and the shell this file renders draws the real nav
+  rather than a stand-in that would keep passing if the shell stopped using it.
+*/
+const deskNavUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
+  "desk-nav.ts",
 );
 
 /*
@@ -207,7 +236,10 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/news/follow-up-copy": inlineModule(
     "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
   ),
+  "@/lib/desk-nav": deskNavUrl,
   "@/components/desk-chrome-utils": deskChromeUtilsUrl,
+
+  "@/components/desk-toaster": deskToasterStub,
   "@/components/desk-jobs": deskJobsUrl,
   "@/lib/appearance-context": appearanceContextStub,
   /*

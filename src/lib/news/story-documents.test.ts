@@ -4,6 +4,25 @@ import { getSql } from "../db.ts";
 import { documentChunks, documentKind, validateDocumentText } from "./story-document-text.ts";
 import { extractStoryDocument } from "./story-documents.server.ts";
 import { readFileSync } from "node:fs";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+/*
+  U18a-1, and the file U18a-4 broke: this fixture needs the migrated schema.
+  `scripts/run-tests-safe.mjs` applies `migrations/*.sql` before the file loads;
+  the postgres-integration runner runs the same file WITHOUT that preload, so
+  the fixture asks for it itself -- through the one shared applier, which does
+  nothing at all when the ledger is already full and applies the whole set when
+  it is empty.
+
+  It did not ask, and `story_documents.reading_key` is what that cost. The
+  column used to be created by this module's own runtime DDL, so a fixture that
+  built its schema from `ensureStoryDocuments` had it; U18a-4 moved the column
+  into `migrations/0111_story_documents_reading_key.sql`, and every read path
+  selects it -- so the four redraft tests below failed in the
+  postgres-integration lane and nowhere else, on a database whose
+  `story_documents` was built by the runtime helper alone.
+*/
+await applyMigrationsToTestPglite();
 
 before(async () => {
   const sql = await getSql();

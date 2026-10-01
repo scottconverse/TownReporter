@@ -72,11 +72,6 @@ export type EditorContext = {
   newsroomId: number;
 };
 
-export function isGrokPreviewHost(host: string | undefined | null): boolean {
-  const h = (host ?? "").toLowerCase();
-  return h === "grok.me" || h.endsWith(".grok.me") || h.endsWith(".grok-sandbox.com");
-}
-
 export const ONE_OWNER_INDEX = "newsroom_members_one_owner";
 
 function errText(err: unknown): string {

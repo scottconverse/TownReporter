@@ -204,7 +204,7 @@ export async function orchestrateEditorial(
      ready-provider ladder. Provider refusals always stop. */
   const runPair = async (candidate: EffectiveOpinionModelChoice): Promise<ChatResult> => {
     const candidateInput = { ...input, modelChoice: candidate };
-    if (isCustomModelChoice(candidate) || providerEntry(candidate)?.kind === "xai-oauth") {
+    if (isCustomModelChoice(candidate)) {
       return runtime.runCustomPair({ input: candidateInput, found, researchPack });
     }
     if (providerEntry(candidate)?.kind === "codex") {

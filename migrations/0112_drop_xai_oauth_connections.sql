@@ -1,0 +1,19 @@
+-- GR-C: Grok (xAI) was removed as a provider.
+--
+-- `xai_oauth_connections` held one row per newsroom for the SuperGrok
+-- device-code OAuth connection: the encrypted credential, the in-flight login
+-- state and the account's discovered model ids. The connection, its transport
+-- and the code that read this table are all gone, so the table goes with them.
+--
+-- Nothing else references it: no foreign key points at it, the credential was
+-- encrypted with the same server secret as a saved Custom AI key (which lives
+-- in `custom_ai_connections` and is untouched), and the removal is deliberate
+-- -- a newsroom that signed in to SuperGrok loses that sign-in, which is the
+-- point of the change. The Models screen told owners so with a Remove button
+-- before this migration lands.
+--
+-- A newsroom whose `model_assignments.provider_id` or `desk_jobs.model_choice`
+-- still holds the string `grok-oauth` is unaffected by this migration: those
+-- rows keep loading, and the desk normalises the retired id to Automatic with
+-- a visible note (see src/lib/news/model-choice.ts's `retiredModelChoiceNote`).
+drop table if exists xai_oauth_connections;

@@ -1,3 +1,5 @@
+import { deskToast, deskToastHostMounted, type DeskTone } from "@/components/desk-toast";
+
 /**
  * Builds the DeskShell class list from the theme and text-size preferences.
  * Kept outside the React component module so render checks can test it
@@ -25,8 +27,43 @@ export const inputClass =
   "border border-rule bg-paper px-3 py-2 text-sm text-ink focus:border-ink focus:outline-2 focus:outline-offset-2 focus:outline-[var(--fg,var(--color-ink))] min-h-11";
 export const areaClass = inputClass;
 
-/** Speaks through the always-mounted desk live region for screen readers. */
-export function announceToDesk(text: string): void {
+/**
+ * Says what a press did — visibly, and exactly once.
+ *
+ * This used to be the sr-only half only: the sentence went into
+ * `#desk-announcer` and a sighted editor saw nothing at all (FB0-REPORT.md R3,
+ * the owner's "much better feedback on all actions everywhere"). Now it shows
+ * the desk's toast as well, so all ~50 existing callers gained the visible half
+ * without one of them being rewritten.
+ *
+ * Exactly once, though, and that is why the branch is here rather than both
+ * calls being made: sonner's toast container is itself a polite live region
+ * (`aria-live="polite"`), so a toast IS an announcement. Writing
+ * `#desk-announcer` as well would have every one of those callers speak twice.
+ * The sr-only region keeps its job as the fallback for anything announcing
+ * where no toast host is mounted.
+ *
+ * `tone` defaults to "ok" because most of these sentences report a finished
+ * press. A caller whose sentence is a refusal or a failure passes "err", so a
+ * failure is never painted in the accent colour that means "the next step".
+ */
+export function announceToDesk(text: string, tone: DeskTone = "ok"): void {
+  if (typeof document === "undefined") return;
+  if (deskToastHostMounted()) {
+    deskToast(text, { tone });
+    return;
+  }
+  announceOnly(text);
+}
+
+/**
+ * Speaks without drawing anything.
+ *
+ * For announcements that are not the outcome of a press — the Today screen's
+ * J/K cursor move, which fires on every arrow key — where a toast per keystroke
+ * would be noise, not feedback.
+ */
+export function announceOnly(text: string): void {
   if (typeof document === "undefined") return;
   const el = document.getElementById("desk-announcer");
   if (el) el.textContent = text;

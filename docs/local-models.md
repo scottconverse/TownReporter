@@ -94,7 +94,7 @@ left for context, so it was not tested.
 
 ## What the newsroom actually spends model calls on
 
-Eight distinct jobs, one entry point (`grokChat`) for seven of them.
+Eight distinct jobs, one entry point for seven of them.
 
 | Job                  | Output cap | Fires                   | Local?                                     |
 | -------------------- | ---------- | ----------------------- | ------------------------------------------ |
@@ -468,8 +468,8 @@ A council packet with no text layer — a fax-quality scan of a paper agenda —
 cannot be read by extracting text that was never stored in the file. This
 desk renders the PDF pages in numeric order and asks a vision-capable provider
 to transcribe pages without usable text (`src/lib/news/ocr.ts`). Codex and
-Claude provide vision paths when their prerequisites are met. Grok (SuperGrok)
-is text-only for this path. OCR starts with the model selected for the run and,
+Claude provide vision paths when their prerequisites are met. A text-only
+provider is refused for this path with the reason stated. OCR starts with the model selected for the run and,
 after a recognized technical failure, can try the next ready vision-capable
 cloud runtime. **Unattended OCR has its own order, and it is not the writing
 ladder:** Codex Terra, then Claude, then a local model marked `· vision`. The

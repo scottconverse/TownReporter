@@ -28,8 +28,17 @@ import type { ProvenanceItem } from "./findings.ts";
  *
  * A URL that cannot be parsed is its own identity, which is what it was before
  * this existed.
+ *
+ * NOT `sourceIdentity`. `url-guard.ts` exports a function of that name, and it
+ * answers a different question: the same host-plus-path, or null for anything
+ * that is not a fetchable public page. This one never refuses -- a URL it cannot
+ * parse is its own identity, because a reader is looking at a printed list and
+ * something has to appear in it. Two exports under one name meant an import
+ * decided which rule you got, and the reader's list is exactly where the
+ * stricter reading (null for a source that would vanish from the list) would
+ * have been silently wrong.
  */
-export function sourceIdentity(url: string): string {
+export function readerSourceKey(url: string): string {
   try {
     return canonicalPublicUrl(url);
   } catch {
@@ -55,11 +64,11 @@ export function readerProvenanceItems(
   recorded: readonly ProvenanceItem[],
   sources: readonly string[],
 ): ProvenanceItem[] {
-  const named = new Set(recorded.map((item) => sourceIdentity(item.url)).filter(Boolean));
+  const named = new Set(recorded.map((item) => readerSourceKey(item.url)).filter(Boolean));
   return [
     ...recorded,
     ...sources
-      .filter((url) => !named.has(sourceIdentity(url)))
+      .filter((url) => !named.has(readerSourceKey(url)))
       .map((url) => ({
         title: url,
         organization: "",

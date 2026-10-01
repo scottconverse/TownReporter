@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { getSql } from "../db.ts";
 import type { Sql } from "../db.ts";
 import type { Editorial } from "./editorial.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   ensureEditorialRequestSchema,
   ensureEditorialSchema,
@@ -13,6 +14,12 @@ import { enqueueJob, ensureJobsSchema, findOpenJob } from "./jobs.ts";
 import { persistEditorialSuccess } from "./editorial-result-persistence.ts";
 import { ensureStoryDocuments, readEditorialDocuments } from "./story-documents.server.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
+// migrations/*.sql before the file loads; the postgres-integration runner runs
+// the same file WITHOUT that preload, so the fixture asks for it itself --
+// through the one shared applier, which does nothing at all when the ledger is
+// already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 const TEST_EDITORIAL: Editorial = {
   headline: "Keep local history public",
@@ -101,6 +108,12 @@ describe("Automatic Opinion provider persistence", () => {
       newsroom_id integer not null, scope text not null, base_url text not null, model_id text not null,
       updated_at timestamptz not null default now(), primary key(newsroom_id,scope)
     )`);
+    // U18a-1: `newsroom_local_model_choices.newsroom_id` is a real foreign key
+    // into `newsrooms` now, so this test's own room needs its row.
+    await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict (id) do nothing", [
+      newsroomId,
+      `Test room ${newsroomId}`,
+    ]);
     await sql.query("insert into newsroom_local_model_choices(newsroom_id,scope,base_url,model_id) values($1,'opinion',$2,$3)", [newsroomId, changed.baseUrl, changed.id]);
     await enqueueJob({
       userId,

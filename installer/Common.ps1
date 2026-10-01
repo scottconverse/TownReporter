@@ -256,7 +256,18 @@ function Archive-StaleAppProcessState([string]$StateFile) {
 function Set-AppEnvironment {
   # Clear inherited database/provider/ops options. The explicit provider file is the only override.
   foreach ($item in @(Get-ChildItem Env:)) {
-    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|XAI_|CLAUDE_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
+    # XAI_ was scrubbed here while Grok (xAI) was a provider. It no longer is:
+    # the app reads no XAI_* variable at all, so there is nothing to scrub, and
+    # this list deliberately leaves XAI_API_KEY/GROK_API_KEY in the environment
+    # untouched.
+    #
+    # WHO TELLS THE OPERATOR. `scripts/with-app-env.mjs` prints the removal
+    # warning, and this installer's start path does NOT go through it: Start.ps1
+    # runs `node .output\server\index.mjs` directly, with the server's stdout and
+    # stderr redirected into app.out.log/app.err.log -- so nothing about an
+    # ignored XAI_API_KEY would ever reach the screen. Start.ps1 prints its own
+    # warning for the inherited case; the providers.json case is reported below.
+    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|CLAUDE_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
   }
   $env:DATABASE_URL = "postgresql://townreporter:$($config.DatabasePassword)@127.0.0.1:$($config.PgPort)/townreporter"
   $env:BETTER_AUTH_SECRET = $config.AuthSecret
@@ -271,8 +282,20 @@ function Set-AppEnvironment {
   $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataRoot 'browsers'
   $providerFile = Join-Path $DataRoot 'providers.json'
   if (Test-Path -LiteralPath $providerFile) {
+    # TownReporter removed Grok (xAI) as a provider, so a providers.json that
+    # still names its key is a leftover from an older install. It is admitted
+    # and DROPPED with a warning, never refused: this file is hand-edited, and
+    # an install that dies on a stale line leaves the operator with a start that
+    # fails and no way forward but editing JSON by hand -- for a line the app
+    # would have ignored anyway. A name the desk has never heard of still
+    # throws, because that is a typo and not a migration.
+    $removedProviderKeys = @('XAI_API_KEY', 'GROK_API_KEY')
     foreach ($property in (Get-Content -LiteralPath $providerFile -Raw | ConvertFrom-Json).PSObject.Properties) {
-      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|XAI_API_KEY|CLAUDE_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
+      if ($removedProviderKeys -contains $property.Name) {
+        Write-Warning "Ignoring $($property.Name) in providers.json: TownReporter no longer uses Grok (xAI), and reads no XAI_* setting. Remove the line to silence this."
+        continue
+      }
+      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|CLAUDE_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
       [Environment]::SetEnvironmentVariable($property.Name, [string]$property.Value, 'Process')
     }
   }

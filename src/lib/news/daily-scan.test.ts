@@ -15,6 +15,14 @@ import { planAutomaticFailover } from "./automatic-failover.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
 import { readFileSync } from "node:fs";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 describe("daily scan wall clock", () => {
   it("moves a skipped spring-forward time to the first valid instant after the gap", () => {
@@ -159,11 +167,25 @@ describe("daily scan request validation", () => {
 const POLICY_TABLE =
   "create table if not exists daily_scan_policies(newsroom_id integer primary key,enabled boolean not null,paused boolean not null,pause_reason text,local_time text not null,runtime text not null,model_effort text,source_cap integer not null,selected_source_ids jsonb not null,revision integer not null,updated_at timestamptz,configured_by_user_id text not null)";
 
+/*
+  U18a-1: `daily_scan_policies` is the real table now -- `migrations/*.sql` is
+  applied before this file loads -- so its `newsroom_id` is a real foreign key
+  into `newsrooms`, and a test room needs its row before a policy can be
+  written for it.
+*/
+async function ensureNewsroomRow(sql: Awaited<ReturnType<typeof getSql>>, newsroomId: number) {
+  await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict (id) do nothing", [
+    newsroomId,
+    `Test room ${newsroomId}`,
+  ]);
+}
+
 describe("daily scan policy compare-and-swap", () => {
   it("accepts sequential current revisions and rejects a stale revision", async () => {
     const sql = await getSql();
     await sql.query(POLICY_TABLE);
     const newsroomId = 88001;
+    await ensureNewsroomRow(sql, newsroomId);
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
     const input = {
       enabled: false,
@@ -239,6 +261,7 @@ describe("daily scan pause on a desk that never saved a schedule", () => {
     const sql = await getSql();
     await sql.query(POLICY_TABLE);
     const newsroomId = 88002;
+    await ensureNewsroomRow(sql, newsroomId);
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
 
     assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, true, 0), true);
@@ -268,6 +291,7 @@ describe("daily scan pause on a desk that never saved a schedule", () => {
     const sql = await getSql();
     await sql.query(POLICY_TABLE);
     const newsroomId = 88003;
+    await ensureNewsroomRow(sql, newsroomId);
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
     /* The desk is not paused, so resuming asks for the state it already has. */
     assert.equal(await setDailyScanPaused(sql, newsroomId, OWNER, false, 0), true);
@@ -287,6 +311,7 @@ describe("daily scan pause on a desk that never saved a schedule", () => {
     const sql = await getSql();
     await sql.query(POLICY_TABLE);
     const newsroomId = 88004;
+    await ensureNewsroomRow(sql, newsroomId);
     await sql.query("delete from daily_scan_policies where newsroom_id=$1", [newsroomId]);
     await sql.query(
       "insert into daily_scan_policies(newsroom_id,enabled,paused,local_time,runtime,source_cap,selected_source_ids,revision,configured_by_user_id) values($1,true,false,'07:00','codex-terra',12,'[]'::jsonb,5,'other-window')",

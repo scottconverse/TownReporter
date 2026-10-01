@@ -103,9 +103,9 @@ export function cleanDraftBatchInput(
       ok: false,
       code: "invalid-input",
       /*
-        0.6.63 (Unit Y item 4): Grok is gone from every picker, so a refusal
-        that names it as a thing to choose would be advertising a model the
-        batch dialog cannot offer.
+        0.6.63 (Unit Y item 4): Grok is gone from every picker -- and GR-C
+        removed the provider itself -- so a refusal that names it as a thing
+        to choose would be advertising a model the batch dialog cannot offer.
       */
       error: "Choose one named Codex, Claude, Local, or saved Custom AI model for this batch.",
     };

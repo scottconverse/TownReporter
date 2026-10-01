@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
-import { before, beforeEach, test } from "node:test";
-import { getPglite, getSql } from "../db.ts";
+import { beforeEach, test } from "node:test";
+import { getSql } from "../db.ts";
 import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import {
   ensureRoutineNoticePolicySchema,
@@ -20,15 +19,22 @@ import {
   performRoutineNoticeWorkWith,
   tickRoutineNoticeEditions,
 } from "./routine-notice-worker.server.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 const room = 9650,
   owner = "routine-beta-owner",
   runNow = new Date("2026-09-08T13:00:00Z");
-before(async () => {
-  const pg = await getPglite();
-  for (const file of (await readdir(new URL("../../../migrations/", import.meta.url))).filter((name) => name.endsWith(".sql")).sort())
-    await pg.exec(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
-});
+// The database is migrated before this file loads (U18a-1,
+// src/lib/test-support/pglite-migrations.ts). This used to replay every
+// migration by hand, which is now a second application: several carry
+// unguarded seed inserts and collide with the rows the first pass wrote.
 beforeEach(async () => {
   const sql = await getSql();
   await sql.query(

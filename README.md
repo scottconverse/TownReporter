@@ -109,7 +109,6 @@ Everything below is for whoever installs, runs or changes the software. If you e
 | Editors, with screenshots and no code                      | [docs/editor.md](docs/editor.md)                                                                |
 | Operators (clone, env, Postgres, models, city swap)        | [docs/setup.md](docs/setup.md)                                                                  |
 | Add and use a named AI API connection                       | [docs/custom-ai-connections.md](docs/custom-ai-connections.md)                                  |
-| Connect a SuperGrok subscription directly                  | [docs/grok-oauth.md](docs/grok-oauth.md)                                                        |
 | Dark Desk UI contract                                      | [docs/dark-desk-editor.md](docs/dark-desk-editor.md)                                            |
 | Local models, measured on real prompts                     | [docs/local-models.md](docs/local-models.md)                                                    |
 | Marketing / GitHub Pages landing                           | [docs/index.html](docs/index.html) · [live page](https://scottconverse.github.io/TownReporter/) |
@@ -255,7 +254,10 @@ For **Automatic**, a configured gateway is tried first; named choices in Story, 
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; Story Automatic tries this gateway first    |
 | `ANTHROPIC_API_KEY`                             | credentials for selected Claude models or the final Sonnet retry            |
 | _nothing_                                       | stories, scans and Dark Desk walk the Automatic ladder above (DeepSeek → the loaded local model → Codex Terra); Opinion walks Codex Sol → Claude Sonnet |
-| `XAI_API_KEY`                                   | Grok                                                                        |
+
+There is no `XAI_API_KEY` rung: Grok (xAI) was removed as a provider, the key is
+ignored, and an install that still sets it is told so once at start-up. A saved
+Custom AI connection reaches any OpenAI-compatible endpoint you want.
 
 The CLI is slower than an API — it reloads a fixed preamble per call, so a draft takes minutes rather than seconds. Time budgets adjust on their own.
 
@@ -291,9 +293,9 @@ LLM_MODEL=claude-sonnet-4-5
 ```
 
 If `LLM_BASE_URL` is set — or `LLM_API_KEY` and `LLM_MODEL` are both set —
-that configured gateway wins over Grok for configured-provider features and is
-Story Automatic's preferred first runtime. Recognized technical failure can
-move only the unfinished call; a content refusal remains terminal.
+that configured gateway is the configured provider and is Story Automatic's
+preferred first runtime. Recognized technical failure can move only the
+unfinished call; a content refusal remains terminal.
 
 For a per-run, editor-selected endpoint instead of changing the configured
 provider, use **Server → Add your own AI API**. Save a name, base URL, optional
@@ -320,7 +322,7 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 ## Sign-in
 
 - **Self-host:** on an unclaimed desk, the first account must enter the one-time setup code; the sign-in form identifies its location. After that account owns the desk. Generate and securely save owner recovery codes from **Server → Recovery codes** before you need them. If you lose the password, use **Lost your password? Use a recovery code** on the sign-in screen; an unused code supplies a one-time temporary password to sign in with and then change. This is not an email password-reset service. **Give up the desk** unclaims it; the next owner must enter the setup code required for an unclaimed desk. It is not password recovery.
-- **This grok.me preview:** Google / X via Grok’s broker (those buttons only show on `*.grok.me`).
+- Email and password on `/login` is the only door, on every host. There is no broker and no third-party sign-in.
 - Local with no login at all: `VITE_AUTH_ENABLED=false`. Do not do that on a public host.
 
 ---
@@ -354,18 +356,18 @@ DATABASE_URL=postgres://user:pass@host:5432/townreporter
 | `/feed`                                      | RSS                                                                                                                       |
 | `/login`                                     | Create account / sign in                                                                                                  |
 
-`AGENTS.md`, `AGENTS.project.md`, `.grok/`, and the dated `HANDOFF-*.md` session
-records at the repo root are not TownReporter documentation — they are the
-build-tool contract, the skill trees and the personal handoff notes from the
-App Builder sandbox this repo was originally scaffolded with. They stay in this
-repository as history and are excluded from every release archive
-(`.gitattributes` marks them `export-ignore`), so an installed copy never
-carries them. (`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from
-`SELF-HOSTING.md` and the release guides, and does ship.) They carry nothing at
-runtime either: `.grok/app-env.json` holds no `VITE_`-prefixed keys, and
-`scripts/with-app-env.mjs` keeps only those, treating a missing file as an
-empty environment. If you are here to understand the newspaper, start at the
-top of this file, not there.
+The dated `HANDOFF-*.md` session records at the repo root are not TownReporter
+documentation — they are personal handoff notes from the App Builder sandbox
+this repo was originally scaffolded with. They stay in this repository as
+history and are excluded from every release archive (`.gitattributes` marks
+them `export-ignore`), so an installed copy never carries them.
+(`HANDOFF-NEXT-AGENT.md` is the current handoff, is linked from
+`SELF-HOSTING.md` and the release guides, and does ship.) The sandbox's own
+material — its agent contract (`AGENTS.md`, `AGENTS.project.md`), the `.grok/`
+skill trees, its `startup.sh` and its preview host bridge — has been deleted
+outright, and `scripts/no-grok-scaffold.test.mjs` fails if any of it comes
+back. If you are here to understand the newspaper, start at the top of this
+file, not in the handoffs.
 
 ---
 
@@ -390,8 +392,8 @@ No. Story drafting can use a signed-in Codex/Claude CLI, or a configured
 Claude key, or point `LLM_BASE_URL` at an OpenAI-compatible endpoint. That
 configured gateway becomes Story Automatic's preferred first runtime and remains
 the configured first runtime for Scan and Dark Desk. Recognized technical
-failures can move only the unfinished call; refusals stop. `XAI_API_KEY` still runs Grok for
-configured-provider features.
+failures can move only the unfinished call; refusals stop. Grok (xAI) is no
+longer a provider: `XAI_API_KEY` is ignored, with a start-up warning saying so.
 
 **Are YouTube captions the official record?**
 No. Captions are a map of the tape. Minutes and the packet are the official record. Names in captions are often wrong. Dark Desk is told this; drafts still need a human check.

@@ -24,6 +24,19 @@ These live outside `scripts/`, so they are NOT discovered by
 `scripts/` only) and are NOT covered by the orphan test above. A file moved
 back into `scripts/` must be wired into a CI job in the same change.
 
+Their relative imports are written for `scripts/`, not for `scripts/archive/`,
+and moving one back is the only way they resolve again. Seven of them import
+`./browser-guard.mjs`, which stayed in `scripts/` (`bn2-probe.mjs`,
+`desk-route-regression.mjs`, `model-picker-fit-e2e.mjs`,
+`preview-thumbnail.mjs`, `pull-progress-e2e.mjs`, `readability-0.6.2-e2e.mjs`,
+`story-model-controls-e2e.mjs`), and several import the app's own modules as
+`../src/...` (`codex-reporting-boundary-proof.mjs`, `file-editorial-from-json.mjs`,
+`golden-score.mjs`, `sweep-claims.mjs`), which from here would be
+`../../src/...`. Neither is a reason to keep them here, and neither import was
+rewritten when they moved: a path that resolves only after the file is put
+back makes the move visible rather than half-done. Fix the paths as part of
+moving one back, not before.
+
 The proofs and reports under `docs/` and `artifacts/` that name these paths
 still name them as they were when they were written. They are records of what
 was done, so they have not been rewritten to point here.
@@ -42,7 +55,6 @@ was done, so they have not been rewritten to point here.
 | `meeting-activity-e2e.mjs` | Unit N-3's proof, run against the operator's own database: it asserts a specific artifact SHA-256, a 6-1 council tally and a named council member, none of which anything in the tree seeds. Also writes `work/n3-rendered.txt` -- `work/` does not exist. |
 | `meeting-manual-run-e2e.mjs` | Unit N-2's proof. Presses "Run meetings now", which performs a REAL YouTube capture (it reads back stored caption hashes for real video ids) with 600-second waits, and defaults its storage root to `C:/Users/.../townreporter-reliability-0651/work/n2-storage`. |
 | `model-picker-fit-e2e.mjs` | Unit P item 7's measurement of whether option text fits its select. Needs a server you started and writes to `../model-picker-fit` outside the checkout. |
-| `preview-thumbnail.mjs` | A capture tool for the external `SandboxInternal.CapturePreviewThumbnail` service, which invokes it by path. **If that harness is still live, update its path to `scripts/archive/preview-thumbnail.mjs`.** Nothing in this tree calls it. |
 | `pull-progress-e2e.mjs` | Pull's real editor path, which is a REAL public web search: it asserts on "Mechanical web search and document extraction" results and on source URLs saved into Pulled notes. A walk that depends on the live web is not a CI guard. |
 | `readability-0.6.2-e2e.mjs` | The 0.6.2 readability pass's before/after screenshots. `READABILITY_LABEL` names the output and the "before" run is a separate invocation against pre-fix source via git stash. Its subject -- the desk's token pairs, including `.chip.st-killed` -- is now guarded in CI by `scripts/contrast-audit.mjs`, and its rendered-state claim by `publish-blockers-walk.mjs`. |
 | `stage-03efb7b-calendar-check.mjs` | Asserts `DATABASE_URL` is exactly the copied staging database `townreporter_stage_03efb7b_20260911`, then WRITES to it (unpauses a policy). A one-off check against a named staging copy; by construction it can run nowhere else. |

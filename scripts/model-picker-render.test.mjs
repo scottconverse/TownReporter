@@ -113,6 +113,17 @@ export const saveLocalModelFn = async () => ({ ok: true });
 const availabilityStubUrl = `data:text/javascript;base64,${Buffer.from(availabilityStubSrc).toString("base64")}`;
 const availabilityStub = await import(availabilityStubUrl);
 
+/*
+  FB5: model-picker.tsx used to carry a private copy of `announceToDesk` and now
+  imports the desk's one, so this specifier has to resolve. It is stubbed with
+  the picker's other server functions -- the markup under test never calls it.
+*/
+const deskChromeUtilsStubUrl = moduleUrl(
+  `export function announceToDesk() {}
+export function announceOnly() {}`,
+  "desk-chrome-utils-stub.ts",
+);
+
 const { ModelPicker } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
@@ -127,6 +138,8 @@ const { ModelPicker } = await import(
       "@/lib/news/custom-ai-settings": availabilityStubUrl,
       "@/lib/news/claim": availabilityStubUrl,
       "@tanstack/react-query": availabilityStubUrl,
+
+      "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
@@ -366,12 +379,11 @@ test("disabled and deleted custom picks remain visible without selecting Automat
 });
 
 /*
-  0.6.63 (Unit Y item 4). The owner's standing instruction is "REMOVE Grok".
-  The registry keeps the entry only because `xai-oauth` still describes the
-  transport the Server page's sign-in card reads (see RETIRED_PROVIDER_IDS in
-  src/lib/news/provider-registry.ts), so the retirement is only real if the
-  MENUS show it: no surface's option list may offer it, and no rendered option
-  may carry the retired value.
+  0.6.63 (Unit Y item 4) took Grok out of every picker; GR-C removed the
+  provider and its transport entirely (`grok-oauth` has no registry entry at
+  all now, see RETIRED_PROVIDER_IDS in src/lib/news/provider-registry.ts), so
+  the retirement is only real if the MENUS show it: no surface's option list
+  may offer it, and no rendered option may carry the retired value.
 */
 test("no picker surface offers SuperGrok", () => {
   for (const scope of ["story", "scan", "opinion", "dark", "forced"]) {
@@ -393,7 +405,7 @@ test("no picker surface offers SuperGrok", () => {
   and its help has to say why, in the one sentence model-choice.ts owns.
 */
 const RETIRED_NOTE =
-  "SuperGrok is no longer offered as a writing model, so this falls back to Automatic. SuperGrok sign-in is unaffected.";
+  "Grok (SuperGrok) has been removed from TownReporter, so this falls back to Automatic. Choose another model on the Models screen.";
 
 function matchesRetiredNote(html) {
   assert.ok(

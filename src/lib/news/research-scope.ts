@@ -148,27 +148,37 @@ const BORROWED_SUFFIXES = new Set([
 ]);
 
 /**
- * The label a `.gov` or `.us` host is registered under, or "" when the host has
- * no registrable label to read.
+ * The label a `.gov` or `.us` host is registered under, and the state that
+ * registration names, or `""`/null when the host has no registrable label to
+ * read.
  *
  * `.gov` registers the name immediately left of it: `longmontcolorado` in
  * `longmontcolorado.gov`. `.us` names a state on the way in -- `longmont.co.us`
  * is registered under the state's own `co.us` suffix -- so a state code sitting
  * immediately left of `.us` is part of the suffix, not the name.
  *
+ * The state is returned rather than dropped because it is the host's own claim
+ * about where it is, and `cityOfficialHost` has to be able to check it against
+ * the newsroom's: `boulder.ny.us` is a New York registration whose label reads
+ * `boulder`, and reading it as this paper's Boulder is the same mistake as
+ * taking the county for the city.
+ *
  * This is what refuses `longmontcolorado.gov.evil.us`: the label where the
  * city's name would have to be is `evil`, and the city's name is only a label
  * of the attacker's own subdomain.
  */
-function registrableLabel(host: string): string {
+function registrableLabel(host: string): { label: string; stateScope: string | null } {
   const labels = host.split(".");
-  if (labels.length < 2) return "";
+  if (labels.length < 2) return { label: "", stateScope: null };
   const stateScoped =
     labels[labels.length - 1] === "us" &&
     labels.length >= 3 &&
-    STATE_CODE_SET.has(labels[labels.length - 2]);
+    STATE_CODE_SET.has(labels[labels.length - 2]!);
   const index = labels.length - (stateScoped ? 3 : 2);
-  return index >= 0 ? labels[index] : "";
+  return {
+    label: index >= 0 ? labels[index]! : "",
+    stateScope: stateScoped ? labels[labels.length - 2]! : null,
+  };
 }
 
 /**
@@ -179,13 +189,23 @@ function registrableLabel(host: string): string {
  * rewritten for. So the label has to BE the city: `boulder`, `bouldercolorado`,
  * `boulderco` (Colorado only), `cityofboulder`, `bouldercity`; and it has to be
  * the whole registrable label, so `notlongmont-news.us` is nobody.
+ *
+ * Hyphens are how a host writes a name the city spells with a space or a dot,
+ * and they are stripped on both sides of the comparison: `stlouis-mo.gov` for
+ * St. Louis, `salem-or.gov` and `salem-oregon.gov` for Salem, Oregon. The
+ * hyphen is punctuation the DNS label cannot carry, not part of the name -- so
+ * `palo-alto.gov` reads the same as `paloalto.gov`. Nothing else is stripped:
+ * a label that is not the city's name with hyphens removed is still not the
+ * city, and a hyphen cannot manufacture a match (`not-longmont-news.us` is
+ * `notlongmontnews`, which does not start with `longmont`).
  */
 function isCityLabel(label: string, slug: string, state: string): boolean {
-  if (!label) return false;
-  if (label === slug) return true;
-  if (label === `cityof${slug}` || label === `${slug}city`) return true;
-  if (!label.startsWith(slug)) return false;
-  const rest = label.slice(slug.length);
+  const bare = label.replace(/-/g, "");
+  if (!bare) return false;
+  if (bare === slug) return true;
+  if (bare === `cityof${slug}` || bare === `${slug}city`) return true;
+  if (!bare.startsWith(slug)) return false;
+  const rest = bare.slice(slug.length);
   const code = stateCode(state);
   // "boulderco.gov" is Boulder County in one reading and Boulder, Colorado in
   // another. Only the newsroom's own state can tell them apart.
@@ -235,7 +255,8 @@ function isCityLabel(label: string, slug: string, state: string): boolean {
  * ambiguous label: `boulderco.gov` is read as the city only in Colorado, and as
  * the county's anywhere else. It is optional -- `<slug><statename>` identifies
  * itself without it -- and it is the only reason a two-letter `<slug><st>` is
- * ever accepted.
+ * ever accepted. It also has to agree with a `.us` host's own state: a
+ * `boulder.ny.us` is New York's registration, not this paper's Boulder.
  *
  * No match is a real answer, and the callers' answer is to write no `site:`
  * operator at all: a `site:` naming a neighbouring town, a county, a state or
@@ -254,16 +275,31 @@ export function cityOfficialHost(
 ): string | null {
   const slug = citySlug(city);
   if (slug.length < 4) return null;
+  const code = stateCode(state);
   let best: string | null = null;
   let bestIsExact = false;
   for (const raw of hosts) {
     const host = String(raw ?? "").trim().replace(/^www\./i, "").toLowerCase();
     if (!host || !/\.(gov|us)$/.test(host)) continue;
-    const label = registrableLabel(host);
+    const { label, stateScope } = registrableLabel(host);
+    /*
+      A `.us` address names its own state on the way in (`boulder.ny.us` is
+      registered under New York's `ny.us`), and a newsroom in Colorado has no
+      business reading that as its Boulder -- the city's name there sits in a
+      New York registration, which is somebody else's host however it is
+      spelled. Refused rather than down-weighted, because the wrong state is
+      not a weaker answer; it is a different city's address.
+
+      The host's claim stands unopposed when the paper has not said what state
+      it is in, exactly as `<slug><state name>` does: with nothing to compare
+      against, the host that names its own state is the more specific reading.
+    */
+    if (stateScope && code && stateScope !== code) continue;
     if (!isCityLabel(label, slug, state)) continue;
     // An exact city label wins over every other candidate, wherever it sits in
-    // the list; otherwise the first acceptable candidate keeps it.
-    const exact = label === slug;
+    // the list; otherwise the first acceptable candidate keeps it. Hyphens are
+    // not part of the name, so `st-louis.gov` is as exact as `stlouis.gov`.
+    const exact = label.replace(/-/g, "") === slug;
     if (best !== null && (bestIsExact || !exact)) continue;
     best = host;
     bestIsExact = exact;

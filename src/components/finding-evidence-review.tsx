@@ -30,6 +30,10 @@ import {
   type EvidenceListRow,
 } from "@/lib/news/evidence-check-list";
 import type { DraftAuditFinding } from "@/lib/news/draft-audit";
+import {
+  reviewEvidenceCheckState,
+  type EvidenceCheckReport,
+} from "@/lib/news/evidence-check-state";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { NameCheck } from "@/lib/news/name-check";
 import type { NoteTodo } from "@/lib/news/notes";
@@ -537,6 +541,26 @@ export type EvidenceListInputs = {
   compareLabel: string;
   onCompare: () => void;
   onStylePress: () => void;
+  /**
+   * Is there a recorded evidence decision or reconciliation stamp on this
+   * draft's memo? The page reads it off `recordedChecks`; the panel cannot,
+   * because the memo is not part of the review.
+   */
+  evidenceRecorded: boolean;
+  /**
+   * The one answer this panel's list and the page's publish bar both read
+   * (unit U24), plus the review's own identity (unit U24b).
+   *
+   * The panel is the only thing holding the resolved review, so it is the only
+   * thing that can count the rows waiting on a person -- and the only thing
+   * that holds the review's `evidenceToken`, which the acceptance press has to
+   * carry so the server can refuse one recorded against a review that has
+   * moved. It reports both up rather than letting the page compute a second
+   * answer from the memo: the bar, the chips, the blocker and the rows below
+   * them are then readings of a single value, which is what U24 is for. Stable
+   * callers only: the page passes a `useCallback`.
+   */
+  onEvidenceState?: (report: EvidenceCheckReport) => void;
 };
 
 export function FindingEvidenceReviewPanel({
@@ -546,6 +570,7 @@ export function FindingEvidenceReviewPanel({
   meetingEvidence = null,
   disabled = false,
   isOwner = false,
+  takeDownDisabled = disabled,
   list,
 }: {
   leadId: number;
@@ -554,6 +579,22 @@ export function FindingEvidenceReviewPanel({
   /** The draft's transcript citations, when it has any. See `TranscriptCitationEvidence`. */
   meetingEvidence?: DraftMeetingEvidence | null;
   disabled?: boolean;
+  /**
+   * Whether the owner's takedown press may be used. Defaults to `disabled`.
+   *
+   * Unit U25: these two must be able to disagree, and the story page is where
+   * they do. `disabled` locks the whole panel while the story is on paper --
+   * judgments bind to a draft, and a published story has none -- but the
+   * takedown is the one control that a published story still needs: the
+   * captures with public pages at `/evidence/:versionId` are the ones a
+   * publisher's complaint is about, and the page's own confirm copy promises
+   * that "published citations still resolve — to a notice instead of an
+   * excerpt". Passing `onPaper` into `disabled` alone left the press rendered,
+   * greyed, and unusable on every claim of every published story, so no editor
+   * could ever produce a public removal notice. See `docs/manual.md`'s
+   * "Taking down one captured excerpt (owner workflow)".
+   */
+  takeDownDisabled?: boolean;
   /**
    * Whether this editor is the newsroom's owner (unit U11b).
    *
@@ -888,11 +929,52 @@ export function FindingEvidenceReviewPanel({
     ends on. Here the form sits where the claim it judges sits.
   */
   /*
-    The drawn line under "Evidence check". Every piece of it comes from the
-    review this panel owns, so the list and the judgments can never disagree
-    about how many captures the check ran against.
+    ── ONE ANSWER, TWO READERS (UNIT U24) ────────────────────────────────────
+
+    The state of the evidence check on this draft, from the review this panel
+    resolved plus the one fact only the page holds (whether a decision or a
+    reconciliation stamp is on the memo). The ran line below reads it, the rows
+    under it are what it counts, and `list.onEvidenceState` carries it to the
+    page's publish bar, chips and blockers -- so the sentence three inches above
+    this list and the list itself cannot describe different runs, which they
+    did on the stand-in editorial day.
+
+    Reported from an effect keyed on the two values, not on the object: the
+    page's state setter is stable, and re-reporting an equal state on every
+    render would loop.
+  */
+  const evidenceState = reviewEvidenceCheckState({
+    review,
+    recorded: list.evidenceRecorded,
+    openClaims: list.openClaims.length,
+  });
+  const reportEvidenceState = list.onEvidenceState;
+  /*
+    The values, destructured, so the effect's dependencies are the things that
+    changed rather than the object they arrived in -- and so a re-render with
+    the same state reports nothing.
+  */
+  const {
+    ran: evidenceRan,
+    toReview: evidenceToReview,
+    contradicted: evidenceContradicted,
+  } = evidenceState;
+  const evidenceTokenSeen = review?.evidenceToken ?? null;
+  useEffect(() => {
+    reportEvidenceState?.({
+      ran: evidenceRan,
+      toReview: evidenceToReview,
+      contradicted: evidenceContradicted,
+      evidenceToken: evidenceTokenSeen,
+    });
+  }, [reportEvidenceState, evidenceRan, evidenceToReview, evidenceContradicted, evidenceTokenSeen]);
+
+  /*
+    The drawn line under "Evidence check": the review's own record, read
+    through the shared state so it cannot describe a run the bar above denies.
   */
   const ranLine = evidenceRanLine({
+    state: evidenceState,
     checkedAt: list.checkedAt,
     modelLabel: list.modelLabel,
     captures: review
@@ -1606,7 +1688,7 @@ export function FindingEvidenceReviewPanel({
                     <InkButton
                       tone="danger"
                       small
-                      disabled={disabled}
+                      disabled={takeDownDisabled}
                       onClick={() => {
                         setTakeDownFeedback(null);
                         editTakeDown((current) => ({ ...current, open: true }));

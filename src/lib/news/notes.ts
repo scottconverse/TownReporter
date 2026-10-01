@@ -78,6 +78,21 @@ export type NoteOpened = { url: string; title: string; for?: string };
  */
 export type TopicConfirmation = { topic: string; token: string; at: string };
 
+/**
+ * The claims the evidence check raised, printed without anyone judging them
+ * (unit U24).
+ *
+ * The desk has to allow this -- a story may be publishable with an unreviewed
+ * claim and the editor is the one who decides that -- but it may not be silent
+ * about it. This is the record that someone said so: how many claims, for
+ * which exact draft version (`topicConfirmationFingerprint` of
+ * `evidenceReviewToken`, the same identity the section confirmation uses), and
+ * who. A stored record with no token or no count is dropped on read, exactly
+ * as a half-written `topicConfirmation` is: a gate that matches everything is
+ * not a gate.
+ */
+export type UnreviewedClaimsConfirmation = { count: number; token: string; at: string; by: string };
+
 export type ReportingNotes = {
   news: string;
   why: string;
@@ -109,6 +124,15 @@ export type ReportingNotes = {
    * editor's confirmation would silently stop counting.
    */
   topicConfirmation?: TopicConfirmation;
+  /**
+   * The unreviewed claims an editor accepted for one exact draft version
+   * (unit U24). Named explicitly in parseNotes below, like the fields around
+   * it: the parser builds its object field by field, so a field it does not
+   * name is dropped on the next read and the override would silently stop
+   * counting -- after which the story would refuse to print with no way to see
+   * why.
+   */
+  unreviewedClaimsConfirmation?: UnreviewedClaimsConfirmation;
   /**
    * Why the editor held this lead, when they told the desk.
    *
@@ -236,6 +260,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...topicConfirmationFromRaw(o),
+      ...unreviewedClaimsConfirmationFromRaw(o),
       ...holdFromRaw(o),
       ...meetingFromRaw(o),
     };
@@ -335,6 +360,33 @@ function topicConfirmationFromRaw(o: Record<string, unknown>): Pick<ReportingNot
       topic: topic.slice(0, 60),
       token: token.slice(0, 64),
       at: String(r.at ?? "").slice(0, 40),
+    },
+  };
+}
+
+/**
+ * The accepted-unreviewed-claims record, read defensively (unit U24).
+ *
+ * The same rule as the section confirmation above, for the same reason: a
+ * record with no token would match every draft version, and one with no count
+ * would say "some claims were accepted" without saying how many went out
+ * unread. Either way it is a half-write, so it is dropped.
+ */
+function unreviewedClaimsConfirmationFromRaw(
+  o: Record<string, unknown>,
+): Pick<ReportingNotes, "unreviewedClaimsConfirmation"> {
+  const raw = o.unreviewedClaimsConfirmation;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const token = String(r.token ?? "").trim();
+  const count = Number(r.count);
+  if (!token || !Number.isFinite(count) || count < 1) return {};
+  return {
+    unreviewedClaimsConfirmation: {
+      count: Math.floor(count),
+      token: token.slice(0, 64),
+      at: String(r.at ?? "").slice(0, 40),
+      by: String(r.by ?? "").slice(0, 200),
     },
   };
 }
@@ -780,6 +832,10 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     // Kept, not shed: it is a gate on publishing, and losing it silently would
     // look to the editor exactly like a confirmation that never took.
     topicConfirmation: work.topicConfirmation,
+    // Unit U24, kept for the same reason: an override the editor recorded and
+    // the desk then shed would come back as "that press never happened", with
+    // no way to tell it apart from one that did.
+    unreviewedClaimsConfirmation: work.unreviewedClaimsConfirmation,
     // Kept for the same reason as the confirmation above: it is the only record
     // of why an editor parked a lead, and a shed reason reads as "never given".
     hold: work.hold,

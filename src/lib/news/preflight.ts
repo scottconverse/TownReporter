@@ -206,7 +206,7 @@ export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflig
         ? "cli-missing"
         : looksLikeProviderAuthFailure(detail)
           ? "provider-auth"
-          : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL|XAI_API_KEY/i.test(detail)
+          : /not available|ANTHROPIC_API_KEY|LLM_BASE_URL/i.test(detail)
             ? "unconfigured"
             : "unknown";
 

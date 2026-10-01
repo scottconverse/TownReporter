@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { correctionMailto, readerSearch, readerStorageKey } from "./reader.ts";
+import { correctionMailto, correctionRecipient, readerSearch, readerStorageKey } from "./reader.ts";
 import * as readerApi from "./reader.ts";
 test("reader navigation rejects invalid pages and unsupported views", () => {
   assert.equal(readerSearch({ page: -3 }).page, undefined);
@@ -24,6 +24,28 @@ test("correction email preserves multiline details and URL punctuation without e
   assert.match(parsed.searchParams.get("body")!, /Name: José\nTime: 6:30/);
   assert.ok(parsed.searchParams.get("body")!.includes(d.evidence));
   assert.notEqual(readerStorageKey("Paper", "City A"), readerStorageKey("Paper", "City B"));
+});
+
+/*
+  Unit U24: /corrections and /about must name the SAME address.
+
+  They read the same setting (`paper_settings.editor_email`, over the
+  build-time `VITE_TOWNREPORTER_EDITOR_EMAIL`), but the correction form used to
+  override it for any paper whose name was "TownReporter" and print
+  `townreporter@gmail.com` instead. On the stand-in editorial day the two public
+  pages named two different addresses for one paper -- and the page that exists
+  to tell a reader where to send a correction was the one that was wrong.
+*/
+test("the correction recipient is the paper's configured contact, whatever the paper is called", () => {
+  /* The exact pair the walkthrough saw. */
+  assert.equal(correctionRecipient({ editorEmail: "editor@townreporter.test" }), "editor@townreporter.test");
+  /* A paper that happens to be called TownReporter gets its own configured
+     address, not a shipped one. */
+  assert.equal(correctionRecipient({ editorEmail: "desk@example.org" }), "desk@example.org");
+  /* Whitespace is not an address. */
+  assert.equal(correctionRecipient({ editorEmail: "   " }), null);
+  /* Unset means unset, and the form says so rather than inventing one. */
+  assert.equal(correctionRecipient({ editorEmail: null }), null);
 });
 
 test("reader text-size preferences normalize the saved choices", () => {

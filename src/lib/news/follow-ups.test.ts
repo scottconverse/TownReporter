@@ -93,6 +93,23 @@ describe("a fresh database with no migrations applied", { timeout: 30000 }, () =
     await ensureFixtureTables();
 
     const sql = await getSql();
+    /*
+      U18a-1: `migrations/*.sql` is applied to this database before the file
+      loads, so `follow_ups` is already there and the "boot PGLite fresh, skip
+      migrations" state this test reproduces has to be produced deliberately.
+      Drop the table AND its `ensureSchemaOnce` marker -- the marker is what
+      makes the ensure chain a no-op -- so the property under test is unchanged:
+      one `performListFollowUps` call brings the table into being.
+    */
+    await sql.query("drop table if exists follow_ups cascade");
+    const [markerTable] = await sql<{ exists: boolean }>`
+      select exists (
+        select 1 from information_schema.tables
+        where table_schema = 'public' and table_name = '_schema_ensure_state'
+      ) as exists
+    `;
+    if (markerTable!.exists)
+      await sql.query("delete from _schema_ensure_state where name = 'follow-ups'");
     const before = await sql<{ exists: boolean }>`
       select exists (
         select 1 from information_schema.tables

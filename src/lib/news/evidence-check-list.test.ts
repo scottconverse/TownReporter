@@ -177,16 +177,26 @@ describe("openRecordAction", () => {
 });
 
 describe("evidenceRanLine", () => {
+  /* Unit U24: the line is a reading of the shared state, so every case below
+     says what a check that RAN looks like. The state's own cases -- a line for
+     a draft nothing ran on -- are in `evidence-check-state.test.ts`. */
+  const RAN = { ran: true, toReview: 0, contradicted: 0 } as const;
+
   it("writes the drawn line from the record, in the drawn order", () => {
     assert.equal(
-      evidenceRanLine({ checkedAt: "2026-10-01T14:14:00.000Z", modelLabel: "Claude Sonnet", captures: 3 }),
+      evidenceRanLine({
+        state: RAN,
+        checkedAt: "2026-10-01T14:14:00.000Z",
+        modelLabel: "Claude Sonnet",
+        captures: 3,
+      }),
       "Ran 8:14 a.m. · Claude Sonnet · checked against 3 captures",
     );
   });
 
   it("says capture, not captures, for one", () => {
     assert.equal(
-      evidenceRanLine({ checkedAt: null, modelLabel: "", captures: 1 }),
+      evidenceRanLine({ state: RAN, checkedAt: null, modelLabel: "", captures: 1 }),
       "checked against 1 capture",
     );
   });
@@ -198,18 +208,72 @@ describe("evidenceRanLine", () => {
   */
   it("drops a piece it does not have instead of printing a separator", () => {
     assert.equal(
-      evidenceRanLine({ checkedAt: "2026-10-01T14:14:00.000Z", modelLabel: "", captures: 3 }),
+      evidenceRanLine({
+        state: RAN,
+        checkedAt: "2026-10-01T14:14:00.000Z",
+        modelLabel: "",
+        captures: 3,
+      }),
       "Ran 8:14 a.m. · checked against 3 captures",
     );
     assert.equal(
-      evidenceRanLine({ checkedAt: null, modelLabel: "Claude Sonnet", captures: 0 }),
+      evidenceRanLine({ state: RAN, checkedAt: null, modelLabel: "Claude Sonnet", captures: 0 }),
       "Claude Sonnet",
     );
   });
 
   it("is empty when the desk recorded none of it, never 'Ran · · '", () => {
-    assert.equal(evidenceRanLine({ checkedAt: null, modelLabel: "", captures: 0 }), "");
-    assert.equal(evidenceRanLine({ checkedAt: "not a date", modelLabel: "  ", captures: 0 }), "");
+    assert.equal(
+      evidenceRanLine({ state: RAN, checkedAt: null, modelLabel: "", captures: 0 }),
+      "",
+    );
+    assert.equal(
+      evidenceRanLine({ state: RAN, checkedAt: "not a date", modelLabel: "  ", captures: 0 }),
+      "",
+    );
+  });
+
+  /*
+    UNIT U24 -- THE LINE AND THE BAR READ ONE STATE.
+
+    This is the case that was wrong on the stand-in editorial day: the check had
+    run (two captures cited, seven claims raised) and the bar above the pane
+    said "No evidence check ran on this draft". The line now asks the shared
+    state first, so a state that says no run produces no line at all -- and a
+    state with claims waiting says how many, in the same words the publish
+    blocker prints.
+  */
+  it("says nothing when the shared state says no check ran, whatever the captures", () => {
+    assert.equal(
+      evidenceRanLine({
+        state: { ran: false, toReview: 0, contradicted: 0 },
+        checkedAt: null,
+        modelLabel: "",
+        captures: 2,
+      }),
+      "",
+    );
+  });
+
+  it("counts the claims waiting on a person, the count the blocker prints", () => {
+    assert.equal(
+      evidenceRanLine({
+        state: { ran: true, toReview: 7, contradicted: 0 },
+        checkedAt: null,
+        modelLabel: "",
+        captures: 2,
+      }),
+      "checked against 2 captures · 7 claims need review",
+    );
+    assert.equal(
+      evidenceRanLine({
+        state: { ran: true, toReview: 1, contradicted: 0 },
+        checkedAt: null,
+        modelLabel: "",
+        captures: 0,
+      }),
+      "1 claim needs review",
+    );
   });
 });
 

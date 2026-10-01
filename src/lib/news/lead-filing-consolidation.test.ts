@@ -670,3 +670,90 @@ test("killed lead + a reworded why with no new anchor: stamped, not refiled", as
     await db.close();
   }
 });
+
+/*
+  U26b (2026-09-30): the region words the matcher treats as the paper's own
+  furniture arrive from the CALLER (`fileScanLeads`'s last argument -- see
+  NewsroomPlace in ./lead-match.ts), not from the shipped Longmont constants.
+  These two cases are the same pair filed twice, changing only that argument:
+  a place and a month, two different county stories, one county page.
+
+  With the paper's own place -- Longmont, Colorado, Boulder County -- "Boulder"
+  and "Longmont" are the newsroom's furniture, so the pair has no shared
+  evidence and the candidate is a plain new lead. With no place at all the
+  same two words read as names and the pair is a "possible" duplicate, linked
+  but still filed. That difference IS the parameter: desk.ts's performScanWork
+  passes the first (via `getPaperPlace`), and a caller that says nothing about
+  where its paper is gets the second rather than Longmont's answer.
+*/
+const U26B_COUNTY_PAGE = ["https://bouldercounty.gov/agendas/"];
+const U26B_PLACE = { city: "Longmont", state: "Colorado", county: "Boulder" };
+const U26B_EXISTING = {
+  // Not 1: the row this insert creates takes id 1, and the two ids are
+  // different things -- one is the lead already on the desk, the other is
+  // the candidate this call files.
+  id: 41,
+  status: "new",
+  headline: "Boulder County commissioners honor Longmont artists Oct. 24",
+  source_urls: U26B_COUNTY_PAGE,
+};
+const U26B_CANDIDATE = {
+  headline: "Boulder County commissioners open Longmont vaccine clinic Oct. 5",
+  why: "A different item on the same county page.",
+  evidence: "",
+  topic: "council",
+  source_urls: U26B_COUNTY_PAGE,
+};
+
+test("U26b: with the newsroom's own place, a county page plus a month is not a duplicate", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      960,
+      [U26B_CANDIDATE],
+      [{ ...U26B_EXISTING }],
+      U26B_PLACE,
+    );
+    assert.equal(result.leadsCreated, 1, "the candidate is filed");
+    assert.equal(result.possibleMatched, 0, "the paper's own place and a month are not a shared subject");
+    const rows = (
+      await db.query<{ id: number; possible_duplicate_of: number | null; status: string }>(
+        "select id, possible_duplicate_of, status from leads order by id",
+      )
+    ).rows;
+    assert.deepEqual(rows, [{ id: 1, possible_duplicate_of: null, status: "new" }]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("U26b: with no place passed at all, nothing is furniture and the same pair links -- no newsroom's region is assumed", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      961,
+      [U26B_CANDIDATE],
+      [{ ...U26B_EXISTING }],
+    );
+    assert.equal(result.leadsCreated, 1, "a possible match is filed, never discarded");
+    assert.equal(result.possibleMatched, 1, "with no place to call its own, both names are evidence");
+    const rows = (
+      await db.query<{ id: number; possible_duplicate_of: number | null; dup_kind: string | null }>(
+        "select id, possible_duplicate_of, dup_kind from leads order by id",
+      )
+    ).rows;
+    assert.deepEqual(rows, [{ id: 1, possible_duplicate_of: 41, dup_kind: "possible" }]);
+  } finally {
+    await db.close();
+  }
+});

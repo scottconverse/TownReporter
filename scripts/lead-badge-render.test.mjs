@@ -26,9 +26,27 @@ function moduleUrl(source, fileName, imports = {}) {
 }
 
 const REACT_URL = import.meta.resolve("react");
+/*
+  FB5: `desk-chrome-utils.ts` reaches for the desk's toast now -- announceToDesk
+  draws the visible bar as well as speaking into `#desk-announcer`. Nothing the
+  markup below asserts is about toasts, so the module is stubbed shut here the
+  same way every other specifier in this file is: what is under test is the
+  markup that renders, not what the desk says while it renders it.
+*/
+const deskToastStub = moduleUrl(
+  `export function deskToast() {}
+export function deskToastHostMounted() { return false; }`,
+  "desk-toast-stub.ts",
+);
+const deskToasterStub = moduleUrl(
+  `export function DeskToaster() { return null; }`,
+  "desk-toaster-stub.ts",
+);
+
 const deskChromeUtils = moduleUrl(
   await readFile(new URL("../src/components/desk-chrome-utils.ts", import.meta.url), "utf8"),
   "desk-chrome-utils.ts",
+  { "@/components/desk-toast": deskToastStub },
 );
 /*
   Redesign phase 2a: the job shape, the clock and the m:ss format moved out of
@@ -42,6 +60,17 @@ const deskJobsUrl = moduleUrl(
   { react: REACT_URL },
 );
 const { leadOrigin } = await import(deskChromeUtils);
+
+/*
+  Unit U24: the nav list and the active-item rule moved out of desk-chrome.tsx
+  into src/lib/desk-nav.ts, so a test can read them. It imports nothing, so the
+  REAL module compiles here and the shell draws the nav this file asserts on
+  rather than a stand-in that would keep passing if the shell stopped using it.
+*/
+const deskNavUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
+  "desk-nav.ts",
+);
 
 function inlineModule(source) {
   const rewritten = source.replaceAll('"react"', JSON.stringify(REACT_URL));
@@ -184,8 +213,12 @@ const preflightStub = inlineModule(`
   export function looksLikeProviderAuthFailure() { return false; }
   export function providerAuthTarget() { return ""; }
 `);
+// U26 (2026-09-30): desk-copy.ts's nearDuplicate() asks lead-match.ts for
+// distinguishingOverlap() now (it decides the "looks already printed" chip on
+// subject words rather than raw title overlap). This row only renders a dup
+// it is handed, so the stub answers "no overlap at all".
 const leadMatchStubForCopy = inlineModule(`
-  export function nonStoplistedProperNouns() { return new Set(); }
+  export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
 `);
 const paperModuleStub = inlineModule(`
   export const TOPICS = [];
@@ -209,6 +242,8 @@ const { LeadRowView } = await import(
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+
+      "@/components/desk-toaster": deskToasterStub,
       "@/lib/paper": paperStub,
       "@/lib/paper-context": paperContextStub,
       "@/lib/paper-context-state": paperContextStub,
@@ -680,7 +715,10 @@ const { Chip } = await import(
       "@/lib/auth/use-current-user": currentUserStub,
       "@/lib/news/claim": claimStub,
       "@/lib/news/desk-copy": deskCopyStub,
+      "@/lib/desk-nav": deskNavUrl,
       "@/components/desk-chrome-utils": deskChromeUtils,
+
+      "@/components/desk-toaster": deskToasterStub,
       "@/components/desk-jobs": deskJobsUrl,
       "@/lib/appearance-context": appearanceContextStub,
       /*

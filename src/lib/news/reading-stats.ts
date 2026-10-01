@@ -10,9 +10,9 @@
   browser only ever carries three function references.
 
   Types cross back to the page with `import type` / `export type`, which is
-  erased at compile time -- the same form src/lib/news/xai-oauth.ts uses for
-  `XaiOauthStatus` and src/routes/desk.story.$leadId.tsx uses for `PullRunView`.
-  No value is ever imported from a `.server.ts` here.
+  erased at compile time -- the same form src/lib/news/custom-ai-settings.ts
+  uses for `PublicCustomAiConnection` and src/routes/desk.story.$leadId.tsx
+  uses for `PullRunView`. No value is ever imported from a `.server.ts` here.
 
   All three refuse anyone who is not an editor: `requireEditor` is called
   inside `getReadingStats` / `exportReadingCsv` themselves (src/lib/news/

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
+import type { NewsroomPlace } from "./lead-match.ts";
 import {
   blockedDigBannerText,
   cameBackLabel,
@@ -732,6 +733,105 @@ describe("Worth a Look presentation", () => {
     );
     assert.ok(dup);
     assert.equal(dup!.slug, "svvsd-bond-vote");
+  });
+
+  /**
+   * U26 (2026-09-30): the owner's Queue. A lead about the Supreme Court
+   * hearing Boulder County's climate suit was chipped "Looks already printed:
+   * Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing
+   * Longmont's Oct. 24 Day of the Dead Celebration" -- two county stories in
+   * one section, sharing a place and a month and nothing else. The pair came
+   * through here (desk-leads' chip is `nearDuplicate`), not through the lead
+   * matcher: it shared two capitalised words the stoplist did not name, which
+   * is all "two proper nouns" ever asked. Restoring the Longmont-only
+   * stoplist makes the first of these chip again.
+   */
+  describe("U26: a shared place and month is not a shared story", () => {
+    /** The production paper's own place: the chip is decided with the
+     * newsroom's words (U26b), so these run as that newsroom. */
+    const LONGMONT: NewsroomPlace = { city: "Longmont", state: "Colorado", county: "Boulder" };
+
+    /** Same section on both sides, since the section is part of what the
+     * owner's pair had in common. */
+    function chipFor(leadHeadline: string, printedHeadline: string, place: NewsroomPlace = LONGMONT) {
+      return nearDuplicate(
+        { headline: leadHeadline, topic: "council" },
+        [
+          {
+            slug: "county-piece",
+            headline: printedHeadline,
+            topic: "council",
+            published_at: "2026-09-29T12:00:00Z",
+          },
+        ],
+        place,
+      );
+    }
+
+    it("does not chip the owner's pair across two Boulder County stories", () => {
+      assert.equal(
+        chipFor(
+          "U.S. Supreme Court to Hear Boulder County Climate Suit Oct. 5",
+          "Boulder County Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24 Day of the Dead Celebration",
+        ),
+        null,
+      );
+    });
+
+    it("does not chip two county items whose only shared subject-shaped word is 'officials'", () => {
+      // The raw title overlap here is real -- boulder, county, officials,
+      // longmont all appear on both sides -- which is exactly why raw overlap
+      // cannot be what decides this chip.
+      assert.equal(
+        chipFor(
+          "Boulder County officials open new trailhead near Longmont Oct. 5",
+          "Boulder County officials seek volunteers for Longmont cleanup Oct. 24",
+        ),
+        null,
+      );
+    });
+
+    it("does not chip two county items whose only shared subject-shaped word is 'leaders'", () => {
+      assert.equal(
+        chipFor(
+          "Boulder County leaders debate oil and gas rules Oct. 5",
+          "Boulder County leaders celebrate Longmont artists Oct. 24",
+        ),
+        null,
+      );
+    });
+
+    /*
+      U26b: the chip is decided with the NEWSROOM's place (nearDuplicate's
+      `place`), so the same two headlines are judged differently by two papers
+      -- which is the point. Under a paper set up for Riverbend, "Longmont"
+      and "Boulder" are somebody else's towns: names in a headline, not this
+      paper's own furniture. Under Longmont's configuration they are furniture
+      and the chip stays off (the test above).
+    */
+    it("reads the paper's own place: a Riverbend paper treats Longmont as a name, not furniture", () => {
+      const riverbend: NewsroomPlace = { city: "Riverbend", state: "Oregon" };
+      // Riverbend's own town is furniture there...
+      assert.equal(
+        chipFor(
+          "Riverbend council opens the Riverbend trailhead Oct. 5",
+          "Riverbend council seeks volunteers for the Riverbend cleanup Oct. 24",
+          riverbend,
+        ),
+        null,
+      );
+      // ...and Longmont's is not, so a shared Longmont name is evidence to
+      // THIS paper exactly as "Bohn Farm" is (the chip's two-names-and-a-
+      // section rule). Nothing is guessed either way: the words come from the
+      // configuration, not from this module.
+      assert.ok(
+        chipFor(
+          "Longmont's Twin Peaks rezoning heads to council Oct. 5",
+          "Longmont's Twin Peaks parking variance clears council Oct. 24",
+          riverbend,
+        ),
+      );
+    });
   });
 
   it("marks a YouTube watch URL as youtube kind", () => {
@@ -1536,6 +1636,89 @@ describe("scan coverage accounting (P0-3)", () => {
     assert.doesNotMatch(success!, /failed/i);
     assert.match(failure!, /provider failure/i);
     assert.match(failure!, /nothing was analyzed/i);
+  });
+
+  /*
+    UNIT U24 -- WHOSE FAILURE IT WAS.
+
+    The arm above used to fire on `error && analyzed === 0` whatever the cause,
+    so a run where every source failed to FETCH was reported as a provider
+    failure. On the stand-in editorial day one report carried both diagnoses in
+    one paragraph: "Provider failure after 0 fetched — nothing was analyzed"
+    beside "First source failed: Page had almost no readable text". No model was
+    called at all. `model_batches_used` is the discriminator, and it is the same
+    one the worker uses to choose that error string: zero batches means
+    `buildScanBatches` produced nothing, which happens only when no source
+    yielded text.
+  */
+  it("calls a run that never reached a model a fetch failure, never a provider one", () => {
+    const fetchFailure = scanCoverageLine({
+      sources_selected: 1,
+      sources_attempted: 1,
+      sources_fetched: 0,
+      sources_failed: 1,
+      sources_analyzed: 0,
+      model_batches_used: 0,
+      model_batches_failed: 0,
+      leads_created: 0,
+      error:
+        "Scan fetched no source text, so no writing pass ran. First source failed: Page had almost no readable text",
+    });
+    assert.match(fetchFailure!, /^Fetch failure/);
+    assert.match(fetchFailure!, /0 fetched/);
+    assert.match(fetchFailure!, /no writing pass ran/);
+    assert.doesNotMatch(
+      fetchFailure!,
+      /provider/i,
+      "a run whose sources could not be read must never be sent to the provider",
+    );
+  });
+
+  /*
+    UNIT U24b -- "FETCH FAILURE" NEEDS THE FETCH TO HAVE FAILED.
+
+    U24 split this arm on `model_batches_used === 0` and called the whole half
+    "Fetch failure". A scan cancelled or errored AFTER it had read its pages but
+    BEFORE the first batch was built also records zero batches, and the desk
+    told its reader the FETCH had failed -- sending them to the Sources screen
+    when the run had stopped between its two halves.
+  */
+  it("calls it stopped-before-the-writing-pass when sources WERE fetched", () => {
+    const stopped = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 0,
+      model_batches_failed: 0,
+      leads_created: 0,
+      error: "The run was stopped before its writing pass.",
+    });
+    assert.match(stopped!, /^Stopped before the writing pass \(40 fetched\)/);
+    assert.match(stopped!, /nothing was analyzed/);
+    assert.doesNotMatch(
+      stopped!,
+      /Fetch failure/,
+      "40 pages came back; the fetch is not what failed",
+    );
+    assert.doesNotMatch(stopped!, /provider/i);
+  });
+
+  it("still names the provider when the batches ran and their answers were unusable", () => {
+    const providerFailure = scanCoverageLine({
+      sources_selected: 40,
+      sources_attempted: 40,
+      sources_fetched: 40,
+      sources_failed: 0,
+      sources_analyzed: 0,
+      model_batches_used: 2,
+      model_batches_failed: 2,
+      leads_created: 0,
+      error: "Writing pass returned no usable JSON.",
+    });
+    assert.match(providerFailure!, /^Provider failure/);
+    assert.doesNotMatch(providerFailure!, /Fetch failure/);
   });
 
   it("states partial coverage plainly when some batches failed", () => {

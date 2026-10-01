@@ -141,6 +141,10 @@ test("the memo a completed check writes counts as an evidence check, on both scr
   const facts: CheckFacts = {
     hasDraft: true,
     ...recordedChecks(JSON.stringify(research)),
+    /* No resolved review is passed on this row, so there is no count. The pass
+       record is also the only "it ran" this projection carries. */
+    evidenceRan: true,
+    evidenceToReview: 0,
     evidenceOutstanding: false,
     namedOutlets: 0,
     namesOutstanding: false,
@@ -180,6 +184,8 @@ test("the same memo still yields the warning while something is outstanding", as
   const facts: CheckFacts = {
     hasDraft: true,
     ...recordedChecks(JSON.stringify(research)),
+    evidenceRan: true,
+    evidenceToReview: 0,
     evidenceOutstanding: true,
     namedOutlets: 0,
     namesOutstanding: false,

@@ -684,7 +684,10 @@ Low-level configured-provider precedence is below. Per-run explicit choices on S
 | `LLM_BASE_URL` (or `LLM_API_KEY` + `LLM_MODEL`) | any OpenAI-compatible endpoint; also forces Story/Scan Automatic to it |
 | `ANTHROPIC_API_KEY`                             | Claude, billed to that key                                             |
 | _nothing_                                       | **Claude, through your Claude Code login**                             |
-| `XAI_API_KEY`                                   | Grok                                                                   |
+
+Grok (xAI) is no longer a provider, so `XAI_API_KEY` is not a rung: it is
+ignored, and an install that still sets it is told so once at start-up. A saved
+Custom AI connection still reaches any OpenAI-compatible endpoint.
 
 ### Drafting scope and evidence review
 
@@ -867,7 +870,7 @@ fields remain blank; they do not inherit Longmont's values.
 | Framework | [TanStack Start](https://tanstack.com/start) on Vite, React 19 | File-based routes, typed server functions, SSR without a separate API                                          |
 | Server    | Nitro, `node-server` preset                                    | A long-lived process: Chromium stays warm and background jobs are not chopped into request-sized pieces        |
 | Database  | PostgreSQL (PGLite for a throwaway look)                       | Plain SQL through `pg`; migrations are numbered `.sql` files                                                   |
-| Auth      | [better-auth](https://better-auth.com)                         | Email/password, with a bearer path for partitioned-cookie previews                                             |
+| Auth      | [better-auth](https://better-auth.com)                         | Email/password against the desk's own database                                                                 |
 | Styling   | Tailwind 4                                                     |                                                                                                                |
 | Fetching  | `undici`, with a connect-time SSRF guard                       | The address approved is the address connected to                                                               |
 | Rendering | Playwright Chromium                                            | JS-heavy civic portals and YouTube "Show transcript"                                                           |
@@ -1311,7 +1314,6 @@ comment on each, is [`.env.example`](../.env.example).
 | `TOWNREPORTER_CODEX_REASONING_EFFORT`                             | Optional per-launch CLI override; unset preserves native config. `high` is the only value verified here; invalid values fail clearly. |
 | `CODEX_CLI_PATH` · `CODEX_HOME`                                   | Unusual Codex binary or OAuth-state locations; normal discovery needs neither                                                         |
 | `CLAUDE_CLI_PATH`                                                 | Unusual Claude Code binary location                                                                                                   |
-| `XAI_API_KEY`                                                     | Grok                                                                                                                                  |
 | `CRON_SECRET`                                                     | Lets an external monitor ping the job runner                                                                                          |
 | `HOST`                                                            | What the server binds to. Unset means every interface, LAN included. Set `127.0.0.1` when a tunnel or proxy fronts it.                |
 | `VITE_AUTH_ENABLED=false`                                         | No login at all. Local only. Never on a public host.                                                                                  |

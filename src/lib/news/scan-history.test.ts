@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 // Import the REAL paging helpers that desk.scan.tsx uses. The point of this
 // file is to be bound to the production code, not to re-implement it.
-import { pageOffset, nextWindowSize, isHistoryExhausted, accumulateScanPages } from "./scan-history.ts";
+import { pageOffset, nextWindowSize, isHistoryExhausted, accumulateScanPages, scanIsRunning, scanReportIsCurrent } from "./scan-history.ts";
 
 const scanRouteSource = readFileSync(new URL("../../routes/desk.scan.tsx", import.meta.url), "utf8");
 
@@ -100,5 +100,59 @@ describe("scan history refresh (a running scan must be able to change on screen)
     const merged = accumulateScanPages(first, second);
     assert.deepEqual(merged.map((r) => r.id), [5, 4, 3], "no duplicates");
     assert.equal(merged.find((r) => r.id === 4)!.v, 2, "overlap must take the newer copy");
+  });
+});
+
+/*
+  UNIT U24 -- THE REPORT ON SCREEN IS THE RUN THE EDITOR IS WAITING FOR.
+
+  `scanning` was "our own press is in flight OR the newest row is still
+  open". Between those two sits the window the stand-in editorial day caught:
+  `runScan` returns as soon as the job is queued, and the invalidated history
+  query has not answered yet, so the newest row is still the PREVIOUS, finished
+  run. In that window the page drew "Scanning sources…" over the old run's
+  "Done. Partial coverage: 200 selected · 186 fetched · 44 leads" report, and
+  the walkthrough read it as the new scan having already finished.
+*/
+describe("U24: a pressed scan is running before its own report arrives", () => {
+  it("does not call the pre-press run a report while a new scan is on its way", () => {
+    const waiting = { newestRunId: 44, reportBeforePress: 44 };
+    assert.equal(scanReportIsCurrent(waiting), false, "the run on screen is the one from BEFORE the press");
+    assert.equal(
+      scanIsRunning({ pressInFlight: false, newestOpen: false, ...waiting }),
+      true,
+      "and the page is running a scan, whatever the button state",
+    );
+  });
+
+  it("calls it a report again the moment a different run arrives", () => {
+    const arrived = { newestRunId: 45, reportBeforePress: 44 };
+    assert.equal(scanReportIsCurrent(arrived), true);
+    assert.equal(scanIsRunning({ pressInFlight: false, newestOpen: false, ...arrived }), false);
+    /* ...and while that run is open, the page is running it. */
+    assert.equal(scanIsRunning({ pressInFlight: false, newestOpen: true, ...arrived }), true);
+  });
+
+  it("does not invent a wait for a page that never pressed anything", () => {
+    /* A page opened on a finished history: nothing is running, and the newest
+       row IS the report. A fresh desk with no runs at all is the same case. */
+    assert.equal(scanReportIsCurrent({ newestRunId: 44, reportBeforePress: null }), true);
+    assert.equal(scanIsRunning({ pressInFlight: false, newestOpen: false, newestRunId: 44, reportBeforePress: null }), false);
+    assert.equal(scanIsRunning({ pressInFlight: false, newestOpen: false, newestRunId: null, reportBeforePress: null }), false);
+  });
+
+  it("is running while the press itself is still in flight", () => {
+    assert.equal(
+      scanIsRunning({ pressInFlight: true, newestOpen: false, newestRunId: 44, reportBeforePress: null }),
+      true,
+    );
+  });
+
+  it("is what desk.scan.tsx actually reads", () => {
+    /* The tripwire: a page that stops passing `reportBeforePress` silently
+       goes back to drawing the previous report under the new scan's progress. */
+    assert.match(scanRouteSource, /scanIsRunning\(\{/);
+    assert.match(scanRouteSource, /reportBeforePress/);
+    assert.match(scanRouteSource, /setReportBeforePress\(showing\)/);
   });
 });

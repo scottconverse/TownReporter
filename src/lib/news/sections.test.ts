@@ -2,6 +2,7 @@ import { before, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import { getSql, getPglite } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   getSections,
   saveSections,
@@ -20,18 +21,31 @@ import {
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 import { commitScanForAuthenticatedEditor } from "./model-request-commit.server.ts";
 import { enqueueJob } from "./jobs.ts";
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
+// migrations/*.sql before the file loads; the postgres-integration runner runs
+// the same file WITHOUT that preload, so the fixture asks for it itself --
+// through the one shared applier, which does nothing at all when the ledger is
+// already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
 
 before(async () => {
   const sql = await getSql();
-  await (
-    await getPglite()
-  ).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
-  for (const table of ["sources", "articles", "leads", "drafts", "scan_runs"]) {
-    await sql.query(`alter table ${table} add column newsroom_id integer not null default 1`);
+  // U18a-1: this hook used to replay migrations/0002_newsroom.sql and
+  // 0056_newsroom_source_identity.sql by hand, because under plain `node
+  // --test` nothing applied `migrations/*.sql`. The applier above applies every
+  // file now, so a second replay of 0002 would only re-run its unguarded
+  // welcome-article seed insert against the row it already wrote -- a duplicate
+  // `articles.slug`. The 0045 replay below stays: this test is about 0045 being
+  // replayable.
+  // U18a-1: 0045's `articles_resolve_section` trigger is in the database from
+  // the start now, so the `legacy` topic these rows carry has to be a section
+  // its newsroom has. Before the preload, 0045 ran AFTER these two inserts and
+  // its own seed derived the `legacy` section from them; declaring it here is
+  // the same end state, reached in the order a migrated database requires.
+  for (const room of [701, 702]) {
+    await sql`insert into section_config(newsroom_id) values (${room}) on conflict do nothing`;
+    await sql`insert into newsroom_sections(newsroom_id,key,name,position,visible) values (${room},'legacy','Legacy',100,true) on conflict do nothing`;
   }
-  await (
-    await getPglite()
-  ).exec(await readFile(new URL("../../../migrations/0056_newsroom_source_identity.sql", import.meta.url), "utf8"));
   await sql`insert into articles (user_id,newsroom_id,slug,headline,body,topic) values ('section-test',701,'sections-legacy','Legacy','Original body','legacy')`;
   await sql`insert into articles (user_id,newsroom_id,slug,headline,body,topic) values ('section-test',702,'sections-foreign','Foreign','Private body','legacy')`;
   const beforeMigration=await sql`select * from articles order by id`;

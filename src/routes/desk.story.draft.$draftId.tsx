@@ -12,6 +12,7 @@ import {
   type CheckFacts,
 } from "@/lib/news/check-gates";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { StoryBody } from "@/components/story-body";
 import { editorActionError } from "@/lib/news/desk-copy";
@@ -138,6 +139,15 @@ function EditorialPage() {
       ),
   });
 
+  /*
+    FB5: the ⌘S badge this screen's "Save edits" carries had nothing behind it
+    (FB0-REPORT.md Table B, "⌘S badge … DEAD"). Bound, not removed: saving here
+    is manual — there is a press, a `dirty` flag and an "Unsaved changes" line,
+    and no autosave — and README "Interactions & behavior" names ⌘S as the
+    workbench's save. The binding rides the button's own condition and adds no
+    announcement of its own; the save already answers through `setMsg`.
+  */
+
   const publish = useMutation({
     mutationFn: async () => {
       await saveEditorialDraft({ data: { draftId: id, headline, dek, body, topic } });
@@ -186,6 +196,15 @@ function EditorialPage() {
     sectionReady: topic.trim() !== "",
     openClaims: 0,
     namedOutlets: [],
+    /*
+      Unit U24: an editorial resolves no findings review (that pane lives on
+      the reported workbench), so there is no count to gate on here and the
+      editorial publish path `performPublishEditorial` does not read one.
+      Leaving both out of the list is the same as the server not gating on
+      them -- the same reason `openClaims` and `namedOutlets` above are empty.
+    */
+    unreviewedClaims: 0,
+    unreviewedAccepted: false,
     evidenceStale,
     reviewingEvidence: review.isPending,
     reconcileActive: false,
@@ -214,6 +233,17 @@ function EditorialPage() {
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(q.data),
     evidenceChecked: recorded.evidenceChecked,
+    /* Unit U24b: an editorial resolves no review, so "it ran" is the same pass
+       record and nothing else -- the note below says the same for the count. */
+    evidenceRan: recorded.evidenceChecked,
+    /*
+      Unit U24: an editorial has no findings review behind it -- the editorial
+      desk resolves no review and this bar has no Checks pane to agree with --
+      so it keeps the record-only reading it has always had rather than
+      inventing a count. `deskRowChecks` does the same for the desk home's
+      projected row.
+    */
+    evidenceToReview: 0,
     evidenceRequired: recorded.evidenceRequired,
     evidenceOutstanding: evidenceStale || review.isPending,
     namesUnresolved: namesPending,
@@ -364,6 +394,7 @@ function EditorialPage() {
       <div className="work-bar astra-story-actions">
         {!onPaper ? (
           <>
+            <SaveShortcut save={() => save.mutate()} enabled={dirty && !save.isPending} />
             <InkButton
               tone="ghost"
               disabled={save.isPending || !dirty}

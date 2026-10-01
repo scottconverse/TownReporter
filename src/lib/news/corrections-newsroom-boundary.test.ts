@@ -3,6 +3,35 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import { performAddCorrection } from "./corrections.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+// U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
+// applies migrations/*.sql before the file loads; the postgres-integration
+// runner runs the same file WITHOUT that preload, so the fixture asks for it
+// itself -- through the one shared applier, which does nothing at all when
+// the ledger is already full and applies the whole set when it is empty.
+await applyMigrationsToTestPglite();
+
+/**
+ * U18a-1: `articles` is the real table now, so a row needs the columns it
+ * declares `not null` (`body`, `topic` among them), and 0045's trigger refuses
+ * a topic whose section the newsroom does not have. These two helpers write
+ * the room, its section and the story the way the desk would.
+ */
+async function ensureRoom(sql: Awaited<ReturnType<typeof getSql>>, newsroomId: number) {
+  await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict (id) do nothing", [
+    newsroomId,
+    `Test room ${newsroomId}`,
+  ]);
+  await sql.query("insert into section_config(newsroom_id) values($1) on conflict do nothing", [
+    newsroomId,
+  ]);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible)
+     values($1,'council','Council',0,true) on conflict (newsroom_id,key) do nothing`,
+    [newsroomId],
+  );
+}
 
 async function ensureFixtureTables() {
   const sql = await getSql();
@@ -41,17 +70,19 @@ describe("corrections stay inside the editor's newsroom", () => {
     const slugA = `own-published-${stamp}`;
     const slugB = `foreign-published-${stamp}`;
     const unpublishedSlug = `own-unpublished-${stamp}`;
+    await ensureRoom(sql, newsroomA);
+    await ensureRoom(sql, newsroomB);
     await sql`
-      insert into articles (newsroom_id, user_id, slug, headline, status)
-      values (${newsroomA}, ${editorA}, ${slugA}, ${"Own published story"}, 'published')
+      insert into articles (newsroom_id, user_id, slug, headline, body, topic, status)
+      values (${newsroomA}, ${editorA}, ${slugA}, ${"Own published story"}, 'Body', 'council', 'published')
     `;
     await sql`
-      insert into articles (newsroom_id, user_id, slug, headline, status)
-      values (${newsroomB}, ${"editor-b"}, ${slugB}, ${"Foreign published story"}, 'published')
+      insert into articles (newsroom_id, user_id, slug, headline, body, topic, status)
+      values (${newsroomB}, ${"editor-b"}, ${slugB}, ${"Foreign published story"}, 'Body', 'council', 'published')
     `;
     await sql`
-      insert into articles (newsroom_id, user_id, slug, headline, status)
-      values (${newsroomA}, ${editorA}, ${unpublishedSlug}, ${"Own draft story"}, 'draft')
+      insert into articles (newsroom_id, user_id, slug, headline, body, topic, status)
+      values (${newsroomA}, ${editorA}, ${unpublishedSlug}, ${"Own draft story"}, 'Body', 'council', 'draft')
     `;
 
     const own = await performAddCorrection(
@@ -105,9 +136,10 @@ describe("an editor's correction cannot wear the machine's marker", () => {
     const newsroom = 820_003;
     const editor = `correction-editor-marker-${stamp}`;
     const slug = `own-published-${stamp}`;
+    await ensureRoom(sql, newsroom);
     await sql`
-      insert into articles (newsroom_id, user_id, slug, headline, status)
-      values (${newsroom}, ${editor}, ${slug}, ${"Own published story"}, 'published')
+      insert into articles (newsroom_id, user_id, slug, headline, body, topic, status)
+      values (${newsroom}, ${editor}, ${slug}, ${"Own published story"}, 'Body', 'council', 'published')
     `;
 
     const marker = await performAddCorrection(

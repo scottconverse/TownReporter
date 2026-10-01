@@ -109,7 +109,7 @@ export function RoutineNoticePermissions() {
         text: result.error,
         reload: result.code === "conflict",
       });
-      announceToDesk(result.error);
+      announceToDesk(result.error, "err");
       return;
     }
     applyPolicy(result.policy);
@@ -131,7 +131,7 @@ export function RoutineNoticePermissions() {
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Routine permissions did not save.";
       setFeedback({ kind: "error", text });
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
   });
 
@@ -154,7 +154,7 @@ export function RoutineNoticePermissions() {
       if (!result?.ok) {
         const text = result?.error ?? "Could not reload routine permissions.";
         setFeedback({ kind: "error", text, reload: true });
-        announceToDesk(text);
+        announceToDesk(text, "err");
         return;
       }
       applyPolicy(result.policy);
@@ -165,7 +165,7 @@ export function RoutineNoticePermissions() {
     onError: (error) => {
       const text = error instanceof Error ? error.message : "Could not reload routine permissions.";
       setFeedback({ kind: "error", text, reload: true });
-      announceToDesk(text);
+      announceToDesk(text, "err");
     },
   });
 

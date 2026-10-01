@@ -41,7 +41,6 @@ debug.log
 # the documentation links to. That is the deliberate exception.
 screenshots/
 artifacts/browsed_files/
-artifacts/imagine_images/
 artifacts/*.zip
 artifacts/*.tar.gz
 artifacts/*.bin

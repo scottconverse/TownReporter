@@ -28,6 +28,8 @@ import {
 import {
   FOLLOW_UP_FILTERS,
   FOLLOW_UP_FILTER_LABELS,
+  followUpFilterLabel,
+  followUpStoppedNotice,
   followUpTargets,
   isAgentKind,
   isFollowUpSchedule,
@@ -124,13 +126,13 @@ function FollowUpsPage() {
         input.action === "run-now"
           ? "Run started."
           : input.action === "stop"
-            ? "Stopped. Any run in flight stops at its next step."
+            ? followUpStoppedNotice()
             : "Follow-up updated.",
       );
     },
     // The refusals ("A draft is being written right now…") are thrown by the
     // server on purpose, so the press that could not do anything says why.
-    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not do that."),
+    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not do that.", "err"),
   });
 
   const save = useMutation({
@@ -140,7 +142,7 @@ function FollowUpsPage() {
         : createAiFollowUp({ data: asWireInput(input) }),
     onSuccess: (result) => {
       if (result && result.ok === false) {
-        announceToDesk(result.error);
+        announceToDesk(result.error, "err");
         return;
       }
       invalidate();
@@ -148,7 +150,7 @@ function FollowUpsPage() {
       setDialog(null);
     },
     onError: (err) =>
-      announceToDesk(err instanceof Error ? err.message : "Could not save that follow-up."),
+      announceToDesk(err instanceof Error ? err.message : "Could not save that follow-up.", "err"),
   });
 
   const cancel = useMutation({
@@ -158,7 +160,7 @@ function FollowUpsPage() {
       announceToDesk("Cancelling — the run stops at its next step.");
     },
     onError: (err) =>
-      announceToDesk(err instanceof Error ? err.message : "Could not cancel that run."),
+      announceToDesk(err instanceof Error ? err.message : "Could not cancel that run.", "err"),
   });
 
   return (
@@ -198,9 +200,7 @@ function FollowUpsPage() {
             aria-pressed={filter === key}
             onClick={() => setFilter(key)}
           >
-            {key === "stopped"
-              ? FOLLOW_UP_FILTER_LABELS[key]
-              : `${FOLLOW_UP_FILTER_LABELS[key]} · ${counts.get(key) ?? 0}`}
+            {followUpFilterLabel(key, counts.get(key) ?? 0)}
           </button>
         ))}
       </div>

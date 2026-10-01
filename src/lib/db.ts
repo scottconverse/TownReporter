@@ -1,4 +1,7 @@
-import { pendingMigrations } from "../../scripts/migration-plan.mjs";
+import { isMigrationFile, migrationName, pendingMigrations } from "../../scripts/migration-plan.mjs";
+// Type-only: erased at build time, so the embedded driver is still imported
+// lazily (see createPgliteSql) and never loads on the Neon path.
+import type { PGlite } from "@electric-sql/pglite";
 
 /** Which database backend is active. */
 export type DbSource = "neon" | "pglite";
@@ -132,6 +135,131 @@ function createNeonSql(): Promise<Sql> {
   return globalRef.__pgSqlPromise__;
 }
 
+/**
+ * Apply every migration in `files` (path -> file contents) that `_migrations`
+ * has not already recorded, in basename order, each file and its ledger row in
+ * ONE transaction (parity with scripts/migrate.mjs) so a failed statement can
+ * never leave a file half-applied but untracked. Returns the names it applied.
+ *
+ * ONE implementation, two sources of `files`:
+ *
+ *   - `createPgliteSql` below, where the bundler inlines them through
+ *     `import.meta.glob` (dev server, preview, built server);
+ *   - `src/lib/test-support/pglite-migrations.ts`, which reads the same
+ *     directory with `node:fs` because the unit suite runs under plain
+ *     `node --test` and has no bundler at all.
+ *
+ * They must agree on order, on the transaction, and on the ledger row, or the
+ * test database stops predicting the one the paper runs on.
+ */
+export async function applyPendingMigrations(
+  pg: PGlite,
+  files: Record<string, string>,
+): Promise<string[]> {
+  const doneRows = await pg.query<{ name: string }>("select name from _migrations");
+  const done = doneRows.rows.map((r) => r.name);
+  const applied: string[] = [];
+  for (const { name, path } of pendingMigrations(Object.keys(files), done)) {
+    await pg.transaction(async (tx) => {
+      await tx.exec(files[path]);
+      await tx.query("insert into _migrations (name) values ($1)", [name]);
+    });
+    applied.push(name);
+  }
+  return applied;
+}
+
+/**
+ * The bundler's view of `migrations/*.sql`, as `path -> contents`, computed
+ * once per module instance.
+ *
+ * `import.meta.glob` is a Vite macro: it must be a literal call inside the
+ * module it is bundled from, so it lives here rather than in the caller.
+ * Outside a bundle there is no transform at all and it throws -- see
+ * {@link migrationFiles} for what answers instead.
+ */
+function bundledMigrationFiles(): Record<string, string> {
+  try {
+    // Does not descend, so the opt-in auth schema under migrations/auth/ stays
+    // out of an app that never asked for sign-in.
+    return import.meta.glob("/migrations/*.sql", {
+      query: "?raw",
+      import: "default",
+      eager: true,
+    }) as Record<string, string>;
+  } catch {
+    // No Vite transform and nothing registered: no schema source at all, which
+    // is the `postgres-integration` lane's footing. It migrates its own scratch
+    // databases (see src/lib/test-support/pg-admin.ts).
+    return {};
+  }
+}
+
+const globalMigrationFiles = globalThis as typeof globalThis & {
+  __pgliteMigrationFiles__?: Record<string, string>;
+};
+let bundledFiles: Record<string, string> | null = null;
+
+/**
+ * Every `migrations/*.sql` this process can see, as `path -> contents`.
+ *
+ * Normally the bundler inlines it (`import.meta.glob`, no runtime fs needed).
+ * A plain `node --test` process has no bundler, so `src/lib/test-support/pglite-migrations.ts`
+ * -- the preload `scripts/run-tests-safe.mjs` loads before every file in the
+ * `src/**` group -- reads the SAME directory with `node:fs` and registers it
+ * here first. Whichever source answers, the files go through the same applier
+ * and land in the same `_migrations` ledger.
+ *
+ * Registration happens before this module is evaluated, and nothing is applied
+ * until a database is actually opened, so a test file that never touches the
+ * database pays nothing for it.
+ */
+function migrationFiles(): Record<string, string> {
+  const registered = globalMigrationFiles.__pgliteMigrationFiles__;
+  if (registered) return registered;
+  return (bundledFiles ??= bundledMigrationFiles());
+}
+
+/**
+ * The basenames of every migration this build knows about, in no order any
+ * caller should rely on -- pass them to `pendingMigrations` (scripts/migration-plan.mjs,
+ * or `src/lib/migration-status.ts`) for apply order.
+ *
+ * Deliberately NOT inside `createPgliteSql`: the boot guard
+ * (`src/lib/migration-status.ts`) needs this list on the **Neon** path too,
+ * where no PGLite instance is ever opened and `getPglite()` would throw.
+ * Empty in a process with neither a bundler nor the test preload -- the
+ * `postgres-integration` lane -- where the guard then has nothing to compare
+ * and stays quiet, exactly as before this unit.
+ */
+export function migrationFileNames(): string[] {
+  return Object.keys(migrationFiles()).filter(isMigrationFile).map(migrationName);
+}
+
+/** PostgreSQL `undefined_table`. PGlite and the `pg` driver both report it. */
+const UNDEFINED_TABLE = "42P01";
+
+/**
+ * The migration names recorded in this database's `_migrations` ledger.
+ *
+ * `[]` when the ledger table does not exist at all (SQLSTATE 42P01): a
+ * database nothing has ever migrated has zero applied migrations, and saying
+ * so is what lets the boot guard name every file instead of dying on an
+ * opaque "relation _migrations does not exist". Any other error (no database
+ * reachable, no permission) propagates -- it is not a statement about the
+ * ledger.
+ */
+export async function appliedMigrations(): Promise<string[]> {
+  const sql = await getSql();
+  try {
+    const rows = await sql.query<{ name: string }>("select name from _migrations order by name");
+    return rows.map((row) => row.name);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === UNDEFINED_TABLE) return [];
+    throw error;
+  }
+}
+
 async function createPgliteSql(): Promise<Sql> {
   // Embedded Postgres, imported on demand so it never loads on the Neon path.
   // One in-memory instance per process, shared across HMR module instances, so
@@ -157,34 +285,12 @@ async function createPgliteSql(): Promise<Sql> {
   const pg = await globalRef.__pgliteInstance__;
 
   // Apply migrations/ (the single schema source) so preview matches production.
-  // SQL is inlined by the bundler via import.meta.glob (no runtime fs); applied
-  // files are tracked in _migrations. The glob does not descend, so the opt-in
-  // auth schema under migrations/auth/ stays out. Runs once per module instance
-  // — so an HMR reload after adding a migration file applies it live — with
+  // Applied files are tracked in _migrations. Runs once per module instance —
+  // so an HMR reload after adding a migration file applies it live — with
   // passes serialized on a global chain so concurrent callers never
   // double-apply.
   const migrate = async (): Promise<void> => {
-    let migrations: Record<string, string> = {};
-    try {
-      migrations = import.meta.glob("/migrations/*.sql", {
-        query: "?raw",
-        import: "default",
-        eager: true,
-      }) as Record<string, string>;
-    } catch {
-      // Node unit tests have no Vite glob transform; investigate schema is applied by ensureInvestigateSchema.
-      migrations = {};
-    }
-    const doneRows = await pg.query<{ name: string }>("select name from _migrations");
-    const done = doneRows.rows.map((r) => r.name);
-    for (const { name, path } of pendingMigrations(Object.keys(migrations), done)) {
-      // Apply + record atomically (parity with scripts/migrate.mjs) so a failed
-      // statement can't leave a file half-applied but untracked.
-      await pg.transaction(async (tx) => {
-        await tx.exec(migrations[path]);
-        await tx.query("insert into _migrations (name) values ($1)", [name]);
-      });
-    }
+    await applyPendingMigrations(pg, migrationFiles());
   };
   const pass = (globalRef.__pgliteMigrateChain__ ?? Promise.resolve())
     .catch(() => undefined) // an earlier failed pass must not wedge the chain

@@ -1,5 +1,6 @@
 /**
- * Local email/password sign-in (this app's Better Auth DB — not the Grok broker).
- * On for self-host: /login → create editor account. Do not edit server.ts for this.
+ * Email/password sign-in against this app's own Better Auth DB — the desk's one
+ * and only way in. On: /login → create editor account (or sign in). Do not edit
+ * server.ts for this.
  */
 export const emailAndPasswordEnabled = true;

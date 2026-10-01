@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import {
-  APP_ENV_REL_PATH,
-  mergeAppEnv,
-  parseAppEnv,
+  XAI_REMOVED_WARNING,
+  parseDotEnv,
   projectRoot,
-  readAppEnv,
+  readDotEnv,
+  xaiRemovedWarning,
 } from "./with-app-env.mjs";
 
 /**
@@ -37,10 +37,17 @@ const execFileAsync = promisify(execFile);
 const WRAPPER = join(projectRoot(), "scripts/with-app-env.mjs");
 const PRINT_FLAG = "process.stdout.write(String(process.env.VITE_AUTH_ENABLED));";
 
+/**
+ * The diagnostic line plus whatever the child command printed.
+ *
+ * The wrapper's own WARNING lines are dropped: they depend on the AMBIENT
+ * environment (an operator's `XAI_API_KEY` must not change what these tests
+ * assert about the child's output), and the warning has its own tests below.
+ */
 function childOutputAfterDatabaseDiagnostic(stdout) {
   const [diagnostic, ...childOutput] = stdout.split("\n");
   assert.match(diagnostic, /^\[with-app-env\] DATABASE_URL (?:-> |is set but unparseable|unset )/);
-  return childOutput.join("\n");
+  return childOutput.filter((line) => !line.startsWith("[with-app-env] WARNING:")).join("\n");
 }
 
 function environmentOutsideNodeTestRunner(overrides = {}) {
@@ -49,70 +56,55 @@ function environmentOutsideNodeTestRunner(overrides = {}) {
   return env;
 }
 
-function makeWorkspace(appEnvJson) {
+/** A workspace with the `.env` the wrapper merges, or none when absent. */
+function makeWorkspace(dotEnvText) {
   const root = mkdtempSync(join(tmpdir(), "app-env-"));
-  if (appEnvJson !== undefined) {
-    mkdirSync(join(root, ".grok"), { recursive: true });
-    writeFileSync(join(root, APP_ENV_REL_PATH), appEnvJson);
-  }
+  if (dotEnvText !== undefined) writeFileSync(join(root, ".env"), dotEnvText);
   return root;
 }
 
-test("keeps VITE_-prefixed string entries", () => {
-  assert.deepEqual(parseAppEnv('{"VITE_AUTH_ENABLED":"false"}'), {
+test("parses KEY=value, strips quotes, skips comments and blanks", () => {
+  assert.deepEqual(parseDotEnv('A=1\n# B=2\n\nC="three"\nD=\'four\'\nE=\n'), {
+    A: "1",
+    C: "three",
+    D: "four",
+    E: "",
+  });
+});
+
+test("a missing .env is a clean no-op", () => {
+  assert.deepEqual(readDotEnv(makeWorkspace()), {});
+});
+
+test("reads the environment from a workspace .env", () => {
+  const root = makeWorkspace("VITE_AUTH_ENABLED=false\nDATABASE_URL=postgres://x\n");
+  assert.deepEqual(readDotEnv(root), {
     VITE_AUTH_ENABLED: "false",
+    DATABASE_URL: "postgres://x",
   });
 });
 
-test("drops non-VITE keys, non-string values and malformed documents", () => {
-  assert.deepEqual(parseAppEnv('{"DATABASE_URL":"postgres://x","VITE_N":1,"VITE_OK":"y"}'), {
-    VITE_OK: "y",
-  });
-  assert.deepEqual(parseAppEnv("not json"), {});
-  assert.deepEqual(parseAppEnv('["VITE_AUTH_ENABLED"]'), {});
-  assert.deepEqual(parseAppEnv("null"), {});
+test("this app's tracked env template does not switch sign-in off", () => {
+  // `VITE_AUTH_ENABLED=false` is the documented off-switch and the only one.
+  // The template ships it commented out, so a fresh install has sign-in on.
+  assert.equal(readDotEnv(projectRoot()).VITE_AUTH_ENABLED, undefined);
+  const template = parseDotEnv(readFileSync(join(projectRoot(), ".env.example"), "utf8"));
+  assert.equal(template.VITE_AUTH_ENABLED, undefined);
 });
 
-test("a missing app-env.json is a clean no-op", () => {
-  assert.deepEqual(readAppEnv(makeWorkspace()), {});
-});
-
-test("reads the app env from a workspace", () => {
-  const root = makeWorkspace('{"VITE_AUTH_ENABLED":"false"}');
-  assert.deepEqual(readAppEnv(root), { VITE_AUTH_ENABLED: "false" });
-});
-
-test("an explicit process-env override wins over the file", () => {
-  const merged = mergeAppEnv(
-    { VITE_AUTH_ENABLED: "false" },
-    { VITE_AUTH_ENABLED: "true", PATH: "/usr/bin" },
-  );
-  assert.equal(merged.VITE_AUTH_ENABLED, "true");
-  assert.equal(merged.PATH, "/usr/bin");
-});
-
-test("this app does not ship VITE_AUTH_ENABLED=false", () => {
-  assert.deepEqual(readAppEnv(projectRoot()), {});
-});
-
-test("vite loadEnv resolves the wrapped value", () => {
-  // What `import.meta.env.VITE_AUTH_ENABLED` becomes: loadEnv prefix-matches
-  // process.env, so the wrapper's merge has to land before Vite starts.
-  // Do not `import { loadEnv } from "vite"` here — Vite 8 loads rolldown
-  // native bindings that SIGSEGV the test worker under qemu-user.
-  const root = makeWorkspace('{"VITE_AUTH_ENABLED":"false"}');
-  const merged = mergeAppEnv(readAppEnv(root), { PATH: "/usr/bin" });
-  assert.equal(merged.VITE_AUTH_ENABLED, "false");
-});
-
-test("the wrapped command reports its database and runs with the app env applied", async () => {
+test("the wrapped command reports its database and inherits the workspace .env", async () => {
   const { stdout } = await execFileAsync(process.execPath, [
     WRAPPER,
     process.execPath,
     "-e",
     PRINT_FLAG,
   ]);
-  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), "undefined");
+  // The wrapper merges `.env` under `process.env`, so an explicit override in
+  // the caller's environment wins over the file. Nothing in this checkout sets
+  // the flag, so a run reaches the child without one.
+  const expected =
+    process.env.VITE_AUTH_ENABLED ?? readDotEnv(projectRoot()).VITE_AUTH_ENABLED ?? "undefined";
+  assert.equal(childOutputAfterDatabaseDiagnostic(stdout), expected);
 });
 
 test("the wrapper reports its database and the command sees an explicit override", async () => {
@@ -233,4 +225,51 @@ test("an ordinary wrapped app command retains its explicit database environment"
     { env: { ...process.env, DATABASE_URL: sentinel } },
   );
   assert.equal(childOutputAfterDatabaseDiagnostic(stdout), sentinel);
+});
+
+/*
+  GR-C removed Grok (xAI) as a provider. An install whose only writing model was
+  `XAI_API_KEY` loses it, so the desk has to say so at start-up rather than
+  silently refusing to draft. These three tests own the sentence, the trigger,
+  and the fact that it reaches stdout (the production start script dies on the
+  first byte of native stderr -- see the comment in with-app-env.mjs).
+*/
+test("warns when XAI_API_KEY or GROK_API_KEY is set, and stays quiet otherwise", () => {
+  assert.equal(xaiRemovedWarning({}), null);
+  assert.equal(xaiRemovedWarning({ XAI_API_KEY: "" }), null, "an empty value is not set");
+  assert.equal(xaiRemovedWarning({ XAI_API_KEY: "xai-test" }), XAI_REMOVED_WARNING);
+  assert.equal(xaiRemovedWarning({ GROK_API_KEY: "grok-test" }), XAI_REMOVED_WARNING);
+  assert.match(XAI_REMOVED_WARNING, /no longer supported/);
+  assert.match(XAI_REMOVED_WARNING, /XAI_API_KEY is ignored/);
+  assert.match(XAI_REMOVED_WARNING, /Models screen/);
+});
+
+test("the wrapper prints the xAI removal warning for a command that starts the app", async () => {
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [WRAPPER, process.execPath, "-e", "0"],
+    {
+      env: environmentOutsideNodeTestRunner({
+        XAI_API_KEY: "xai-test",
+        DATABASE_URL: "postgres://sentinel.invalid/xai-warning",
+      }),
+    },
+  );
+  assert.match(stdout, /^\[with-app-env\] DATABASE_URL -> sentinel\.invalid:5432/);
+  assert.ok(
+    stdout.split("\n").includes(`[with-app-env] WARNING: ${XAI_REMOVED_WARNING}`),
+    `the warning must be on stdout; got:\n${stdout}`,
+  );
+});
+
+test("the wrapper prints no warning for an install that has no xAI key", async () => {
+  const env = environmentOutsideNodeTestRunner({ DATABASE_URL: "postgres://sentinel.invalid/quiet" });
+  delete env.XAI_API_KEY;
+  delete env.GROK_API_KEY;
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [WRAPPER, process.execPath, "-e", "0"],
+    { env },
+  );
+  assert.doesNotMatch(stdout, /WARNING/);
 });

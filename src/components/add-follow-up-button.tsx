@@ -66,14 +66,14 @@ export function AddFollowUpButton({
       }),
     onSuccess: (result) => {
       if (result && result.ok === false) {
-        announceToDesk(result.error);
+        announceToDesk(result.error, "err");
         return;
       }
       void qc.invalidateQueries({ queryKey: ["follow-ups"] });
       announceToDesk("Follow-up started. It runs on its own and reports here.");
       setOpen(false);
     },
-    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not start that follow-up."),
+    onError: (err) => announceToDesk(err instanceof Error ? err.message : "Could not start that follow-up.", "err"),
   });
 
   return (

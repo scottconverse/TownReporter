@@ -258,6 +258,14 @@
   font-size: calc(16px * var(--ts));
   transition: background 0.15s;
 }
+/* Unit U24: a second screen that belongs to the item above it. Indented and a
+   step quieter, so the nav still reads as the eleven destinations it draws and
+   "Scan the wire" reads as what is under "Sources & scan". */
+.desk-ltr.astra .astra-nav.sub {
+  padding-left: 26px;
+  font-weight: 600;
+  font-size: calc(15px * var(--ts));
+}
 .desk-ltr.astra .astra-nav:hover {
   background: var(--hover);
   color: var(--fg);
@@ -5653,6 +5661,11 @@
   font-size: calc(0.875rem * var(--ts));
   color: var(--fg2);
 }
+/* Unit U24: what the press on one source row answered. A result, not a status:
+   it is the desk's answer to the check the editor just asked for, so it is read
+   in ink and marked ok/fail by its own colour rather than by a chip word. */
+.desk-ltr.astra .astra-row-result { font-weight: 700; color: var(--fg); }
+.desk-ltr.astra .astra-row-result.is-fail { color: var(--danger); }
 .desk-ltr.astra .astra-row-num {
   font-weight: 800;
   font-size: calc(1.0625rem * var(--ts));
@@ -6562,3 +6575,213 @@
   gap: 10px;
   margin: 10px 0 4px;
 }
+
+/* ---------------------------------------------------------------------------
+   FB5: THE DESK'S TOAST, AND THE ONE THAT SPEAKS.
+
+   docs/design/handoff-2026-09-26/README.md §Toasts: "Use `sonner`: a yellow
+   bar with `#111` text … Keep `announceToDesk` for screen readers." Until this
+   unit the desk had only the second half: every press answered into an sr-only
+   region and a sighted editor saw nothing (FB0-REPORT.md R3 -- "there is no
+   toast layer, and `announceToDesk` is invisible").
+
+   Sonner draws the stack, the enter/leave and the hover-pause;
+   `desk-toaster.tsx` mounts it `unstyled`, so nothing below fights sonner's own
+   per-toast card -- these rules are the whole look of it. Positioning, z-index
+   and reduced motion are settled in that file's comment; this is only paint.
+
+   Three rules from the design system decide the colours, and none of them is
+   negotiable:
+
+     1. Text on yellow is `#111` in BOTH themes (design-system §3). So the ok
+        card hardcodes `#111` rather than reading `--fg`, which is bone in
+        night mode and would be unreadable on `--a`.
+     2. State colours appear as borders and text only, never as page
+        backgrounds (§3). So a failure is `--danger` text inside a dashed
+        `--danger` border on the panel ground -- the same shape `.notice-err`
+        already uses in styles.css, which is where the desk's own "a check that
+        failed" treatment is defined.
+     3. Square, ruled, flat: no radius, no shadow (§11 item 8, §12).
+
+   Every size is `calc(Npx * var(--ts))` so Text: Large reaches the toast too,
+   and every one of them is at or above the 14px floor
+   (scripts/desk-min-font.test.mjs) -- the walk measures computed type across
+   the whole body, so a 12px toast would fail it exactly like a 12px label.
+--------------------------------------------------------------------------- */
+
+/*
+   The stack's clearance is NOT declared here. `DESK_TOAST_LIFT` in
+   `desk-toast.ts` is the only number, and `desk-toaster.tsx` hands it to sonner
+   as `--offset-bottom` / `--offset-top` on the stack element itself -- a
+   stylesheet copy of it would be a second, silently-drifting authority for the
+   one value that decides whether a toast covers the publish bar. The offset to
+   the right of the nav is `calc(var(--desk-nav-w, 0px) + 16px)`, and that
+   variable IS this stylesheet's: it is 230px, 206px under 1200px and 0px at
+   the phone breakpoint where the nav goes off-canvas.
+*/
+
+/*
+   The host, not the stack. `position: fixed` with `inset: 0` takes it out of
+   the shell's grid flow entirely, so mounting it as a child of
+   `.desk-ltr.astra` beside the nav and the workspace cannot add a track or a
+   row to that layout. `pointer-events: none` so the invisible full-viewport box
+   never eats a click meant for the page; the stack inside takes them back.
+*/
+.desk-ltr .desk-toaster-host {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  pointer-events: none;
+}
+/*
+   M6 of the batch-6 pre-merge audit: the stack took pointer events back for the
+   WHOLE region it occupies, which on a bottom-anchored stack means the blank
+   space around the card swallows presses meant for the page underneath -- a
+   toast sitting near a row menu or a gate made that control unpressable for as
+   long as it lived. `none` on the region again, and only the two things an
+   editor actually presses -- the Undo button and the ✕ -- take them back.
+*/
+.desk-ltr .desk-toaster {
+  pointer-events: none;
+}
+
+/* The card. Sonner positions and animates the <li>; everything visible is here. */
+.desk-ltr .desk-toaster [data-sonner-toast] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 2px solid #111;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--a);
+  color: #111;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* The message, and the space it is allowed to take before the buttons. */
+.desk-ltr .desk-toaster [data-title] {
+  flex: 1;
+  min-width: 0;
+  font-size: calc(14px * var(--ts));
+  font-weight: 600;
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+/*
+   A failure: the reason, not an apology and not a second accent. Dashed
+   --danger is the desk's existing "a check that failed" edge -- `.notice-err`
+   in styles.css -- and the leading "!" the message carries is aria-hidden, so
+   the kind survives without colour for a reader and without repeating itself
+   for a screen reader.
+*/
+.desk-ltr .desk-toaster .desk-toast-err {
+  border: 2px dashed var(--danger);
+  background: var(--bg2);
+  color: var(--danger);
+}
+
+/* "Needs attention", the amber the design system gives it -- not a failure. */
+.desk-ltr .desk-toaster .desk-toast-warn {
+  border: 2px solid var(--warn);
+  background: var(--bg2);
+  color: var(--warn);
+}
+
+/* The Undo press on a done toast. The ink-button family: 44px, square, ruled. */
+.desk-ltr .desk-toaster [data-button] {
+  flex-shrink: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 2px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  cursor: pointer;
+  /* The two things an editor presses take pointer events back; see above. */
+  pointer-events: auto;
+}
+/*
+   The ✕. Same rule for the same reason: it is pressable, the card around it is
+   not. `min-height`/`min-width` are the desk's 44px floor so the glyph is a
+   target a thumb can hit, not a 14px character.
+*/
+.desk-ltr .desk-toaster [data-close-button] {
+  pointer-events: auto;
+  min-width: 44px;
+  min-height: 44px;
+}
+.desk-ltr .desk-toaster [data-button]:hover {
+  background: rgba(17, 17, 17, 0.08);
+}
+.desk-ltr .desk-toaster .desk-toast-err [data-button]:hover,
+.desk-ltr .desk-toaster .desk-toast-warn [data-button]:hover {
+  background: var(--hover);
+}
+
+/* Dismiss. A text "✕", not sonner's SVG, and a real 44px target. */
+.desk-ltr .desk-toaster [data-close-button] {
+  position: static;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transform: none;
+}
+.desk-ltr .desk-toaster [data-close-button]:hover {
+  background: rgba(17, 17, 17, 0.08);
+}
+.desk-ltr .desk-toaster .desk-toast-err [data-close-button]:hover,
+.desk-ltr .desk-toaster .desk-toast-warn [data-close-button]:hover {
+  background: var(--hover);
+}
+
+/*
+   No icons (design-system §9: "Icons: avoid them. Words are clearer"). The
+   Toaster nulls every sonner icon so no wrapper is rendered at all; this is the
+   second lock, in case a future sonner version renders the wrapper regardless.
+*/
+.desk-ltr .desk-toaster [data-icon] {
+  display: none;
+}
+
+/*
+   The phone half of M6 is NOT here. `desk-toaster.tsx` picks the edge at mount
+   (`deskStackPosition`, `≤700px`), because the edge is sonner's
+   `data-y-position` attribute and only the prop that writes it can move the
+   stack: a stylesheet rule setting `top: …; bottom: auto` moved the box while
+   sonner went on laying the cards out as a bottom-anchored stack, and measured
+   in a 390px frame that put the card at y=28px -- over the very header the
+   offset was there to clear. Both edges' offsets are `desk-toast.ts`'s
+   (`DESK_TOASTER_OFFSET`, `DESK_TOASTER_MOBILE_OFFSET`), which is also the only
+   place the clearance is written down -- there is deliberately no stylesheet
+   copy of it to drift.
+*/
+
+/*
+   Reduced motion: `.desk-ltr.astra *` (above) already sets `animation: none`
+   and `transition: none` for everyone who asks for it, and sonner's visible
+   state is carried by `[data-mounted=true] { opacity: 1 }` rather than by an
+   animation -- so a toast with motion turned off still appears, fully drawn,
+   with no pulsing or sliding. Nothing extra is needed here, and this note is
+   here so the next person does not add an animation that assumes otherwise.
+*/

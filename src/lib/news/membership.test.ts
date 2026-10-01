@@ -4,22 +4,18 @@ import { getSql } from "../db.ts";
 import {
   ensureNewsroomSchema,
   ensureInviteSchema,
-  isGrokPreviewHost,
   ForbiddenError,
   deskIsClaimed,
   leaveAsEditor,
   readNewsroomAccess,
 } from "./membership.ts";
 
-describe("newsroom hosts", () => {
-  it("treats grok.me as preview and localhost as self-host", () => {
-    assert.equal(isGrokPreviewHost("townreporter-longmont.grok.me"), true);
-    assert.equal(isGrokPreviewHost("grok.me"), true);
-    assert.equal(isGrokPreviewHost("localhost"), false);
-    assert.equal(isGrokPreviewHost("127.0.0.1"), false);
-    assert.equal(isGrokPreviewHost("paper.example.org"), false);
-  });
-});
+/*
+  `isGrokPreviewHost` and its test lived here. Both are gone: TownReporter
+  removed Grok as a provider, so nothing calls it and nothing sets a grok.me
+  host any more. A test for a host no code reads is a test that pins a fact
+  about a product this is not.
+*/
 
 /*
   Two tests lived here that read NEWSROOM_SETUP_TOKEN and asserted
@@ -86,8 +82,8 @@ describe("who owns the desk", () => {
     );
     await sql`delete from newsroom_members`;
     await sql`delete from "user" where id in (${OWNER}, ${EDITOR})`;
-    await sql`insert into "user" (id, email, name) values (${OWNER}, ${OWNER_EMAIL}, ${"Scott Converse"})`;
-    await sql`insert into "user" (id, email, name) values (${EDITOR}, ${"desk@townreporter.example"}, ${"Desk Editor"})`;
+    await sql`insert into "user" (id, email, name, "emailVerified") values (${OWNER}, ${OWNER_EMAIL}, ${"Scott Converse"}, true)`;
+    await sql`insert into "user" (id, email, name, "emailVerified") values (${EDITOR}, ${"desk@townreporter.example"}, ${"Desk Editor"}, true)`;
     await sql`insert into newsroom_members (user_id, role, newsroom_id) values (${OWNER}, 'owner', 1)`;
 
     const access = await readNewsroomAccess(OWNER);

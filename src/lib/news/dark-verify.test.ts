@@ -333,6 +333,143 @@ describe("editor-controlled queue handoff", { timeout: 60000 }, () => {
     assert.match(lead[0]!.why, /editor lead, not a factual finding/i);
   });
 
+  /*
+    Unit U25, B3. The handoff read `order by id desc limit 12` over `artifacts`
+    with no predicate, so a lead's source list was the last twelve pages the dig
+    had reached. On the Kid City USA file those were a movie listicle, four
+    courier sites, three phone-water-damage blogs, unicode.org and an Outlook
+    sign-in page -- and the one real source, the r/Longmont thread, was absent.
+
+    THE MUTATION THAT MATTERS. Reverting either handoff writer to the bare
+    `order by id desc limit 12` selection fails this case.
+  */
+  it("carries only the captures that got the article and are about the signal", async () => {
+    await ensureLeadsTable();
+    const user = `queue-sources-${Date.now()}`;
+    const seeded = await seedSignal(user, {
+      name: "Kid City USA Longmont closure with one week's notice",
+      observation: "Residents say the daycare at 1941 Terry Street closes on Oct. 2.",
+    });
+    const sql = await getSql();
+    const seed = (url: string, title: string, fetchStatus: number, fetchOutcome: string, fullText: string) =>
+      sql`
+        insert into artifacts (
+          user_id, investigation_id, url, title, content_hash, full_text,
+          fetch_status, fetch_outcome, newsroom_id
+        ) values (
+          ${user}, ${seeded.investigationId}, ${url}, ${title}, ${`hash-${title}`}, ${fullText},
+          ${fetchStatus}, ${fetchOutcome}, ${DEFAULT_NEWSROOM_ID}
+        )
+      `;
+
+    await seed(
+      "https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure",
+      "Local Daycare closure linked to flurry of other abrupt closures",
+      200,
+      "fetched",
+      "Kid City USA Longmont is closing on Oct. 2.",
+    );
+    // Everything below was captured by the real dig and must not become a source.
+    await seed("https://movieweb.com/after-movies-in-order", "After Movies in Order", 200, "fetched", "Films.");
+    await seed("https://shipslide.com/courier-services/anaheim-ca", "TOP Courier Services Anaheim, CA", 200, "fetched", "Couriers.");
+    await seed("https://outlook.office.com/mail", "Outlook", 200, "parse-failed", "");
+    await seed("https://merriam-webster.com/dictionary/under", "merriam-webster.com", 403, "fetch-failed", "");
+
+    const queued = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
+    assert.equal(queued.ok, true);
+    const [lead] = await sql<{ source_urls: string }>`
+      select source_urls from leads where id = ${queued.ok ? queued.leadId : 0}
+    `;
+    assert.deepEqual(
+      JSON.parse(lead!.source_urls) as string[],
+      ["https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure"],
+      "the lead's source list is the dig's junk again",
+    );
+  });
+
+  /*
+    M3 of the batch-6 pre-merge audit. `sendDarkSignalToQueueFor` selects its
+    captures with snake_cased columns -- `fetch_status`, `fetch_outcome`,
+    `full_text` -- and handed the rows straight to `usableLeadSources`, which
+    reads `CapturedPage`'s camelCase. Every field the capture check reads was
+    `undefined`, and TypeScript allowed it because `CapturedPage`'s fields are
+    all optional, so a snake_cased row structurally satisfies it. The capture
+    check therefore never ran: a 404, a 403 or a soft-404 whose TITLE shared a
+    word with the lead was still listed as a source on it, which the sibling
+    case above cannot catch -- every row there is dropped by the "about the
+    lead" rule instead, so it passes with the check disabled.
+
+    THE MUTATION THAT MATTERS. Handing `arts` to `usableLeadSources` again --
+    instead of `arts.map(capturedPageOf)` -- fails this case: all three failed
+    captures land on `leads.source_urls` beside the one real source.
+  */
+  it("refuses a capture that failed even when its title matches the lead", async () => {
+    await ensureLeadsTable();
+    const user = `queue-capture-${Date.now()}`;
+    const seeded = await seedSignal(user, {
+      name: "Kid City USA Longmont closure with one week's notice",
+      observation: "Residents say the daycare at 1941 Terry Street closes on Oct. 2.",
+    });
+    const sql = await getSql();
+    const seed = (url: string, title: string, fetchStatus: number, fetchOutcome: string, fullText: string) =>
+      sql`
+        insert into artifacts (
+          user_id, investigation_id, url, title, content_hash, full_text,
+          fetch_status, fetch_outcome, newsroom_id
+        ) values (
+          ${user}, ${seeded.investigationId}, ${url}, ${title}, ${`hash-${title}`}, ${fullText},
+          ${fetchStatus}, ${fetchOutcome}, ${DEFAULT_NEWSROOM_ID}
+        )
+      `;
+
+    // The one the dig actually got, and the only one that may be a source.
+    await seed(
+      "https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure",
+      "Local Daycare closure linked to flurry of other abrupt closures",
+      200,
+      "fetched",
+      "Kid City USA Longmont is closing on Oct. 2.",
+    );
+    /*
+      Every one of these is ABOUT the lead -- their titles carry the same words
+      `leadSourceRefusalReason` looks for -- and every one of them failed. Only
+      the capture check can refuse them; the token rule would keep all three.
+    */
+    await seed(
+      "https://www.longmontcolorado.gov/agendas/kid-city-usa-closure-notice",
+      "Kid City USA closure notice | Longmont",
+      404,
+      "not-found",
+      "",
+    );
+    await seed(
+      "https://www.timescall.com/kid-city-usa-closure",
+      "Kid City USA closure coverage",
+      403,
+      "blocked",
+      "",
+    );
+    // A soft 404: the server answered 200 with a placeholder and no article.
+    await seed(
+      "https://www.daycarewatch.com/kid-city-usa-closure",
+      "Kid City USA closure notice",
+      200,
+      "parse-failed",
+      "",
+    );
+
+    const queued = await sendDarkSignalToQueueFor(user, DEFAULT_NEWSROOM_ID, seeded.signalId);
+    assert.equal(queued.ok, true);
+    const [lead] = await sql<{ source_urls: string }>`
+      select source_urls from leads where id = ${queued.ok ? queued.leadId : 0}
+    `;
+    assert.deepEqual(
+      JSON.parse(lead!.source_urls) as string[],
+      ["https://reddit.com/r/Longmont/comments/1wqeq6x/local_daycare_closure"],
+      "a capture that failed became a source on the lead",
+    );
+  });
+
   it("uses a no / no / no result for triage without blocking the editor", async () => {
     await ensureLeadsTable();
     const user = `queue-watch-${Date.now()}`;
@@ -420,6 +557,89 @@ describe("verification evidence integrity", { timeout: 60000 }, () => {
     assert.equal(out.verified, 1);
     assert.equal((await readSignal(seeded.signalId)).verification_status, "verified");
   });
+  /*
+    Unit U25, B2. On the Kid City USA file four good adversarial queries came
+    back recorded as answered by `https://www.youtubekids.com/`: Bing matched
+    the word "Kid" and the first raw hit was written down as the source. The
+    provider answer, the run record and the pack the gate model reads all have
+    to agree that a landing page answered nothing.
+
+    THE MUTATION THAT MATTERS. Removing the `boilerplatePageReason` filter from
+    the search loop in dark-verify.ts fails this case.
+  */
+  it("does not let an app landing page be the source that answered a query", async () => {
+    const seeded = await seedSignal(`integrity-boilerplate-${Date.now()}`, {
+      name: "Kid City USA Longmont closure with one week's notice",
+    });
+    const out = await verifyRunSignals({
+      userId: "integrity-boilerplate",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: {
+        search: async (query) => ({
+          state: "SEARCH_SUCCESS_RESULTS" as const,
+          provider: "fixture",
+          hits: [
+            { title: "YouTube Kids", url: "https://www.youtubekids.com/", snippet: "" },
+            { title: "KID Definition & Meaning", url: "https://www.merriam-webster.com/dictionary/kid", snippet: "" },
+            {
+              title: "Child care facility search",
+              url: "https://cdhs.colorado.gov/child-care-facility-search",
+              snippet: "",
+            },
+          ],
+          relevance: { decision: "not-evaluated", reason: "fixture", meaningfulQueryTokens: query ? ["kid"] : [] },
+        }),
+        model: async () => FULL_ANSWER,
+      },
+    });
+    for (const record of out.searches) {
+      assert.notEqual(record.url, "https://www.youtubekids.com/", "a landing page answered the query");
+      assert.notEqual(
+        record.url,
+        "https://www.merriam-webster.com/dictionary/kid",
+        "a dictionary entry answered the query",
+      );
+      assert.equal(record.url, "https://cdhs.colorado.gov/child-care-facility-search");
+      assert.match(record.outcome, /refused 2/, `the run record does not say what it dropped: ${record.outcome}`);
+    }
+  });
+
+  /*
+    And when the search itself judged nothing on the question, no URL is
+    recorded at all -- a query that ran and got no answer must not look like a
+    query that got one.
+  */
+  it("records no source when the search judged its results off the question", async () => {
+    const seeded = await seedSignal(`integrity-degraded-${Date.now()}`);
+    const out = await verifyRunSignals({
+      userId: "integrity-degraded",
+      newsroomId: 1,
+      runId: seeded.runId,
+      investigationId: seeded.investigationId,
+      place: PLACE,
+      deps: {
+        search: async () => ({
+          state: "SEARCH_SUCCESS_RESULTS" as const,
+          provider: "fixture",
+          hits: [{ title: "After (film series)", url: "https://en.wikipedia.org/wiki/After_(film_series)", snippet: "" }],
+          relevance: {
+            decision: "degraded" as const,
+            reason: "none matched enough investigation-question terms",
+            meaningfulQueryTokens: ["survey"],
+          },
+        }),
+        model: async () => FULL_ANSWER,
+      },
+    });
+    for (const record of out.searches) {
+      assert.equal(record.url, null, "an off-question result was recorded as the answer");
+      assert.match(record.outcome, /none matching the question/);
+    }
+  });
+
   it("gives the gate model actual bounded search evidence", async () => {
     const seeded = await seedSignal("integrity-evidence");
     let pack = "";

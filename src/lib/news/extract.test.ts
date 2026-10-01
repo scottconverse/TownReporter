@@ -8,6 +8,8 @@ import {
   diffExcerpt,
   extractMeetingInstant,
   extractReferences,
+  heuristicPlan,
+  junkQueryReason,
   leadHoursBefore,
   namedSubjects,
   nthWeekday,
@@ -54,6 +56,171 @@ describe("queriesForRef", () => {
     assert.ok(qs.some((q) => /press release/i.test(q)));
     assert.ok(qs.some((q) => /registered agent/i.test(q)));
     assert.ok(qs.some((q) => /campaign contribution/i.test(q)));
+  });
+});
+
+/*
+  Unit U25, B2 — the junk the dig searched with on 2026-09-30, held to its own
+  strings.
+
+  Every query below was run against a real provider during the Kid City USA
+  stand-in walkthrough, and the results were captured and read: `"ints" RFP
+  Longmont` returned Outlook and Microsoft pages, `"SITION" RFP Longmont`
+  returned a Chinese Q&A site and a Cadillac forum, and `"under that name in our
+  state" Longmont` returned Merriam-Webster, Under Armour and a Paducah sports
+  bar. The two sources are fixed here rather than only filtered downstream.
+
+  THE MUTATION THAT MATTERS. Reverting `CONTRACT_RE`'s `\bpo\b` to a bare `po`
+  fails "does not split a word that merely starts with po" -- it captures the
+  tail of "points", "position" and "popular" and turns each into a contract
+  number -- and restoring `under` to `DATED_RE` fails the "reference" case that
+  produced the whole "under" epidemic.
+*/
+describe("junk queries and the words they came out of", () => {
+  it("does not split a word that merely starts with po", () => {
+    const refs = extractReferences(
+      "The points of the position are popular with the Portuguese delegation, per Pollock.",
+    );
+    const contracts = refs.filter((r) => r.kind === "contract").map((r) => r.value);
+    assert.deepEqual(contracts, [], `mid-word fragments became contract numbers: ${contracts.join(", ")}`);
+    // A real purchase-order number still reads as one.
+    const po = extractReferences("Purchase order #PO-44821 was signed.");
+    assert.ok(po.some((r) => r.kind === "contract" && r.value === "PO-44821"));
+  });
+
+  /**
+   * The same trap, chosen so only the regex ANCHOR can save it: the fragment
+   * `lice` is a whole word in its own right further down the same page, so the
+   * whole-word rule lets it through and the `\bpo\b` fix is the only guard.
+   */
+  it("does not take the tail of a word whose tail is itself a word", () => {
+    const refs = extractReferences(
+      "The police log is public. Treatment for lice is common. A policy review follows.",
+    );
+    const contracts = refs.filter((r) => r.kind === "contract").map((r) => r.value);
+    assert.deepEqual(contracts, [], `a substring of a longer word became a contract: ${contracts.join(", ")}`);
+  });
+
+  it("does not read the preposition 'under' as a document reference", () => {
+    const refs = extractReferences(
+      "UNDER Definition & Meaning - Merriam-Webster — https://merriam-webster.com/dictionary/under",
+    );
+    assert.deepEqual(refs.filter((r) => r.kind === "reference"), []);
+    // The citation phrases the pattern is for still match.
+    const kept = extractReferences("Filed pursuant to agreement dated March 3, 2023.");
+    assert.ok(kept.some((r) => r.kind === "reference"), "a real citation phrase stopped matching");
+  });
+
+  it("refuses a value that only appears inside a longer word", () => {
+    const refs = extractReferences("The composition of the packet is under review.");
+    assert.ok(
+      !refs.some((r) => /^sition$/i.test(r.value)),
+      "a capture starting mid-word survived the whole-word rule",
+    );
+  });
+
+  it("names a reason for every junk query the walkthrough ran", () => {
+    const junk = [
+      '"SITION" RFP Longmont',
+      '"ints" RFP Longmont',
+      '"after" Longmont contract',
+      '"rtuguese" Longmont contract',
+      '"under that name in our state" Longmont',
+      '"Under - Paducah, KY 42001 - Menu, Reviews, Hours &amp; Contact — https://restaurantjump" Longmont',
+      '"UNDER Definition &amp; Meaning - Merriam-Webster — https://merriam-webster" Longmont',
+      '"$1900" Longmont',
+    ];
+    for (const query of junk) {
+      const reason = junkQueryReason(query);
+      assert.ok(reason, `this query would still have been sent to a provider: ${query}`);
+      assert.ok(reason.length > 8, `the reason is not a sentence: ${reason}`);
+    }
+  });
+
+  it("keeps the queries the desk writes itself", () => {
+    for (const query of [
+      '"Kid City USA" Longmont press release OR announcement OR newsroom',
+      'site:longmontcolorado.gov Kid City USA Longmont agenda OR minutes',
+      '"Longmont\'s Kid City USA daycare" Longmont after:2026-07-02 before:2026-10-01',
+      '"Kid City USA Enterprises" "registered agent" Colorado',
+      '"1941 Terry Street" assessor Longmont',
+    ]) {
+      assert.equal(junkQueryReason(query), null, `a usable query was refused: ${query}`);
+    }
+  });
+
+  /*
+    M1 of the batch-6 pre-merge audit. The first cut of the quoted-phrase rules
+    asked for a four-letter run inside every quoted token, which refused the
+    identifiers a civic search is FOR: the contract, bid and agency references
+    the desk derives from the record and quotes itself in `queriesForRef`. The
+    audit's list is below, and the junk list above is the other half of the
+    table -- a rule that accepts these must still refuse those.
+
+    THE MUTATION THAT MATTERS. Removing the `/\d/` identifier rule (the first
+    `continue` in the loop) fails "keeps the identifiers a civic search is
+    for": `"2023-0456"`, `"PO 12345"` and `"O-2024-15"` go back to "a quoted
+    fragment shorter than a word".
+  */
+  it("keeps the identifiers a civic search is for", () => {
+    // The desk's own contract search, quoted the way `queriesForRef` writes it.
+    assert.equal(
+      junkQueryReason(queriesForRef({ kind: "contract", value: "2023-0456" }, SHIPPED)[0]),
+      null,
+      "the desk's own contract query was refused",
+    );
+    for (const query of [
+      '"2023-0456" Longmont contract',
+      '"PO 12345"',
+      '"O-2024-15"',
+      '"RFP"',
+      '"SAMHSA"',
+      '"CDPHE"',
+      '"RFP-2024-09" Longmont',
+      '"the 2023-0456 contract for the Terry Street parcel"',
+    ]) {
+      assert.equal(junkQueryReason(query), null, `a real civic query was refused: ${query}`);
+    }
+  });
+
+  it("still refuses the junk of the same shape", () => {
+    /*
+      The other side of the M1 table. Each of these is a quoted token in the
+      same shape as an accepted one, and each is a slice of a page rather than
+      the name of a thing.
+    */
+    for (const query of [
+      '"SITION" RFP Longmont',
+      '"ints" RFP Longmont',
+      '"after" Longmont contract',
+      '"$1900" Longmont',
+      '"under that name in our state" Longmont',
+      '"the rest of the document is under review here"',
+    ]) {
+      const reason = junkQueryReason(query);
+      assert.ok(reason, `this query would still have been sent to a provider: ${query}`);
+    }
+    // `"$1900"` is a number, not the identifier its digits make it look like.
+    assert.match(junkQueryReason('"$1900" Longmont')!, /number or punctuation/);
+    assert.match(junkQueryReason('"SITION" RFP Longmont')!, /fragment in capitals/);
+  });
+
+  it("never derives a fallback query from a captured page", () => {
+    /*
+      The fallback reads the lead's own words; this is the pack it must NOT be
+      reading -- captured page text, with titles and URLs in it. Every search
+      it could invent from here is one the walkthrough actually ran.
+    */
+    const capturedPages = [
+      "Over/Under | Sports Bar | Paducah, KY — https://overunderpaducah.com/",
+      "See https://underarmour.com/en-us?msockid=334c7b9deb666c2b08da6c79ea156deb for the store",
+      "UNDER Definition & Meaning | Dictionary.com — https://dictionary.com/browse/under",
+    ].join("\n");
+    const plan = heuristicPlan(capturedPages, new Set(), SHIPPED);
+    for (const query of plan.searches) {
+      assert.equal(junkQueryReason(query), null, `the fallback invented a junk query: ${query}`);
+      assert.ok(!/https?:|&amp;| — /.test(query), `a scraped page became a search: ${query}`);
+    }
   });
 });
 

@@ -1,7 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
-import { nonStoplistedProperNouns } from "./lead-match.ts";
+import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
 
 export function organizationFromUrl(url: string): string {
@@ -1093,7 +1093,52 @@ export function scanCoverageLine(s: {
   if (batchesUsed > 0) {
     parts.push(`${batchesUsed} batch${batchesUsed === 1 ? "" : "es"}${batchesFailed ? `, ${batchesFailed} failed` : ""}`);
   }
+  /*
+    ── WHOSE FAILURE (UNIT U24) ───────────────────────────────────────────────
+
+    This arm used to read `errorBit && analyzed === 0` and nothing else, and
+    the sentence it wrote named the model provider. On the stand-in editorial
+    day that produced, in one paragraph, "Provider failure after 0 fetched —
+    nothing was analyzed" and "First source failed: Page had almost no
+    readable text" -- two diagnoses pointing at two different culprits, of
+    which only the second was true. No model was called at all.
+
+    `model_batches_used` is the discriminator, and it is the same one
+    `performScanWork` uses to choose that error string in the first place: a
+    run records `model_batches_used = batches.length`, and `buildScanBatches`
+    returns nothing when no source yielded text, so ZERO batches means the run
+    never reached a model. The desk must not send its reader to the provider
+    for that -- the sources are what to look at, and the Sources screen is
+    where they are.
+
+    A run that DID send batches and got nothing usable back keeps the provider
+    sentence: that one really is about the model.
+  */
   if (errorBit && analyzed === 0) {
+    if (batchesUsed === 0) {
+      /*
+        UNIT U24b -- "FETCH FAILURE" NEEDS THE FETCH TO HAVE FAILED.
+
+        U24 split this arm on `model_batches_used === 0` (the run never reached
+        a model) and called the whole half "Fetch failure". That is only true
+        when nothing was fetched: a scan cancelled or errored AFTER it had read
+        40 pages but before the first batch was built also records zero
+        batches, and the desk told its reader the FETCH had failed -- pointing
+        at the sources when the run had in fact stopped between the two halves.
+        Two different failures, two different sentences:
+
+          - not one source yielded text: the fetch really is what failed, and
+            the Sources screen is where the work is;
+          - sources came back and the run ended anyway: it stopped before the
+            writing pass, which is about the run, not about the sites.
+      */
+      if (fetched === 0) {
+        const read =
+          attempted > 0 ? ` ${failed || attempted} of ${attempted} sources could not be read.` : "";
+        return `Fetch failure after 0 fetched — no source text reached the desk, so no writing pass ran.${read} ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+      }
+      return `Stopped before the writing pass (${fetched} fetched) — no source reached the model, so nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
+    }
     return `Provider failure after ${fetched} fetched — nothing was analyzed. ${leadBit}. ${editorScanError(errorBit) ?? ""}`.trim();
   }
   if (partial) {
@@ -1356,22 +1401,52 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  * got tagged as covering "Longmont's permit counter goes dark Wednesday
  * mornings starting Sept. 2" for no reason but sharing the paper's own city
  * name and a weekday/month. Two fixes, both required for the proper-noun
- * path: proper nouns now exclude the same PROPER_NOUN_STOPLIST that
- * lead-match.ts's anchor matcher uses (paper/city furniture, months,
- * weekdays), and a proper-noun match alone is no longer enough -- it also
+ * path: proper nouns now exclude the same stoplist that lead-match.ts's
+ * anchor matcher uses -- the newsroom's own city/state/county, civic
+ * furniture, months, weekdays (`properNounStoplist`, fed by this function's
+ * `place`) -- and a proper-noun match alone is no longer enough -- it also
  * needs the two leads' `topic` to agree, unless titlesOverlap already says
  * yes on its own.
+ *
+ * U26 (2026-09-30): the topic gate was still not enough, and the owner's
+ * Queue showed it. A lead about "U.S. Supreme Court to Hear Boulder County
+ * Climate Suit Oct. 5" was chipped as already printed as "Boulder County
+ * Proclaims Hispanic and Latinx Heritage Month, Listing Longmont's Oct. 24
+ * Day of the Dead Celebration": two county stories, one topic, one region,
+ * one month, no shared subject. Two county stories will always share
+ * "Boulder County" and usually share a section, so both ways in now require
+ * DISTINGUISHING words (see distinguishingOverlap) rather than raw ones:
+ *
+ *   - the titles agree on at least two of them, at least one a subject word
+ *     ("Boulder County officials open ... Longmont" against "Boulder County
+ *     officials seek ... Longmont" shares officials alone -- one word, and a
+ *     civic one -- so it no longer qualifies, where titlesOverlap's raw count
+ *     of boulder/county/officials/longmont did);
+ *   - or the two share two real NAMES and the same section. That is the Bohn
+ *     Farm case below, kept as it was: two genuine names in one place (a
+ *     farm, a portal page, a school district) are evidence a subject word
+ *     alone is not, and the stoplist is what keeps the newsroom's own place
+ *     names from ever counting as one.
+ *
+ * U26b (2026-09-30): that stoplist is the NEWSROOM's, so `place` (the paper's
+ * city/state/county) is a parameter here as it is on the matcher -- the chip
+ * and the matcher that files the lead must not disagree about what the
+ * paper's own region is. See NewsroomPlace.
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
   published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
+  place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
-    if (
-      titlesOverlap(lead.headline, p.headline) ||
-      (properNounOverlap(lead.headline, p.headline) && sameTopic)
-    ) {
+    const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);
+    // Nothing else can fire, and the Queue calls this once per published
+    // story per lead: skip the tokenising work in the common case.
+    if (!titlesOverlapRaw && !sameTopic) continue;
+    const { subjects, names } = distinguishingOverlap(lead.headline, p.headline, place);
+    const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
+    if (titlesAgree || (names >= 2 && sameTopic)) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     }
   }
@@ -1524,14 +1599,6 @@ export function killRecordLine(input: {
   return input.reopened
     ? "Reopened — no record of when or why it was killed"
     : "Killed before the desk started recording why — no reason was kept";
-}
-
-function properNounOverlap(a: string, b: string): boolean {
-  const pa = nonStoplistedProperNouns(a);
-  const pb = nonStoplistedProperNouns(b);
-  let shared = 0;
-  for (const w of pa) if (pb.has(w)) shared += 1;
-  return shared >= 2;
 }
 
 export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {

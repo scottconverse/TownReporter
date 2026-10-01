@@ -22,7 +22,7 @@ export type OgSite = {
   color?: string;
 };
 
-export type GrokHeadContext = {
+export type HeadContext = {
   appName?: string;
   creator?: string;
   creatorId?: string;
@@ -53,7 +53,7 @@ export declare function appOgHeadTags(ctx?: {
   cwd?: string;
 }): string[];
 export declare function stripShareMetaTags(html: string): string;
-export declare function normalizeHeadContext(ctx?: GrokHeadContext): {
+export declare function normalizeHeadContext(ctx?: HeadContext): {
   appName: string;
   creator: string;
   creatorId: string;
@@ -61,8 +61,8 @@ export declare function normalizeHeadContext(ctx?: GrokHeadContext): {
   cwd: string;
   site: OgSite;
 };
-export declare function injectAppHead(html: string, ctx?: GrokHeadContext): string;
-export declare function createHeadInjector(ctx?: GrokHeadContext): {
+export declare function injectAppHead(html: string, ctx?: HeadContext): string;
+export declare function createHeadInjector(ctx?: HeadContext): {
   push(chunk: Uint8Array | string): Uint8Array[];
   flush(): Uint8Array[];
 };

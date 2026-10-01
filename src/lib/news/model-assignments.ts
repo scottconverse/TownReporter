@@ -25,9 +25,9 @@
  *    offer would be a second registry. `jobModelOptions` is the single
  *    builder; the custom half is appended by the caller, because the
  *    connections are a query, not a constant.
- * 2. Grok stays retired from every picker. `grok-oauth` is `NO_SURFACE` in
- *    the registry, so it is in no `providersFor` list, so it is in no job's
- *    menu and no job's default. There is a test for exactly that.
+ * 2. A retired provider stays retired. `RETIRED_PROVIDER_IDS` are in no
+ *    `providersFor` list, so in no job's menu and no job's default, and a row
+ *    that stored one is not runnable. There is a test for exactly that.
  * 3. A content refusal is final and never falls back. That decision is not
  *    re-made here: `nextJobFallback` asks `looksLikeContentRefusal` in
  *    ./automatic-failover.ts, the same function the mid-run failover uses, so
@@ -192,8 +192,8 @@ export type ModelAssignmentRow = {
 
 /**
  * A value a job may hold: a registry id offered for that job's surface, a
- * custom connection, or Automatic. A retired id (`grok-oauth`) is in none of
- * those, so it fails here and the desk says why instead of running it.
+ * custom connection, or Automatic. A retired id has no entry, so it is in none
+ * of those, so it fails here and the desk says why instead of running it.
  */
 export function isOfferedForJob(jobKey: string, providerId: string): boolean {
   const job = modelJob(jobKey);
@@ -304,7 +304,6 @@ export function jobSlotEmptyLabel(slot: JobSlotName): string {
 export const CONNECTION_WORD: Readonly<Record<ProviderKind, string>> = {
   "claude-code": "sign-in",
   codex: "sign-in",
-  "xai-oauth": "sign-in",
   openai: "API",
   anthropic: "API",
   local: "on this computer",

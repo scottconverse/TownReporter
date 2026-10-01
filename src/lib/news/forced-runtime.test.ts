@@ -177,34 +177,25 @@ describe("forced runtime snapshots", () => {
     });
   });
 
-  it("keeps SuperGrok credentials out of the batch snapshot and resolves them at call time", async () => {
+  /*
+    GR-C removed Grok (xAI), so a batch row stored by an older build can still
+    hold this snapshot -- and it must be REFUSED, not run. Before this change
+    the row resolved the SuperGrok OAuth transport; there is no such transport
+    now, and the honest answer is "this build cannot run it" rather than a
+    silent switch to something else.
+  */
+  it("refuses a stored SuperGrok batch snapshot, which this build no longer has a transport for", () => {
     const snapshot = {
       runtime: "grok-oauth",
       modelChoice: "grok-oauth",
       transport: "xai-oauth",
       model: "grok-4.6",
       newsroomId: 42,
-    } as const satisfies ForcedRuntimeSnapshot;
-    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
+    };
+    assert.equal(parseForcedRuntimeSnapshot(snapshot), null);
+    // The credentials this record used to carry stay out of any snapshot the
+    // reader hands back, and out of the row it was written from.
     assert.doesNotMatch(JSON.stringify(snapshot), /access.?token|refresh.?token|secret/i);
-    let received: unknown;
-    const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
-      claude: async () => { throw new Error("wrong transport"); },
-      codex: async () => { throw new Error("wrong transport"); },
-      local: async () => { throw new Error("wrong transport"); },
-      xai: async (_system, _user, _maxTokens, options) => {
-        received = options;
-        return { ok: true as const, text: "done" };
-      },
-    });
-    assert.equal(result.ok, true);
-    assert.deepEqual(received, {
-      choice: "grok-oauth",
-      newsroomId: 42,
-      model: "grok-4.6",
-    });
-    assert.equal(forcedOcrOptions(snapshot).provider, "grok-oauth");
-    assert.equal(forcedOcrOptions(snapshot).newsroomId, "42");
   });
 
   it("preflights the exact saved Forced model and preserves the legacy LM Studio choice", async () => {

@@ -24,6 +24,7 @@ import {
   type DarkRunRow,
   type InvestigationRow,
 } from "@/lib/news/dark";
+import { cancelStoryJob } from "@/lib/news/job-progress";
 import {
   blockedDigBannerText,
   editorError,
@@ -324,6 +325,29 @@ function DarkPage() {
     default, which is what this round ran at before the select existed.
   */
   const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null } | null>(null);
+  /*
+    Unit U25, B4: stop a running dig.
+
+    `cancelStoryJob` is the same server function the follow-ups' Cancel uses --
+    it checks that the job is in this newsroom and does not look at the kind,
+    so a `dark` job needs no new route. The flag is a request: the worker reads
+    it at its next boundary, which is why the copy says "at its next step"
+    rather than claiming the run has stopped. The poll below picks the change
+    up, so nothing else has to be invalidated by hand.
+  */
+  const stop = useMutation({
+    mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
+    onSuccess: () => {
+      showNotice("Stopped. The run ends at its next step and what it has found is kept.", true);
+      invalidate();
+    },
+    onError: (err) => {
+      const msg =
+        editorError(err instanceof Error ? err.message : "Could not stop the run") ||
+        "Could not stop the run";
+      showNotice(msg, false);
+    },
+  });
   const advance = useMutation({
     mutationFn: (id: number) => {
       const picked = firstRoundPick.current;
@@ -1007,6 +1031,17 @@ function DarkPage() {
               queueError={queueError?.invId === openId ? queueError.message : null}
               followPending={followLead.isPending}
               parkPending={park.isPending}
+              stopJobId={currentDarkJob?.id ?? null}
+              // Unit U25, B4: the editor's way out of a running dig. Same
+              // job-cancel the follow-ups use (see `cancelStoryJob`, which
+              // checks newsroom ownership and not kind), so the queue and the
+              // worker agree about what "stopped" means.
+              stopPending={stop.isPending}
+              onStopDig={() => {
+                if (currentDarkJob?.id == null) return;
+                setNotice(null);
+                stop.mutate(currentDarkJob.id);
+              }}
               onKeepDigging={() => {
                 setNotice(null);
                 beginDigPhase();
@@ -1331,6 +1366,9 @@ const DARK_STOP_COPY: Record<string, string> = {
   "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
   "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
   "provider-failed": "Stopped because the provider failed; completed work remains saved",
+  // Unit U25, B4: the editor's own Stop, so the run history says what happened
+  // rather than falling through to the raw enum word.
+  cancelled: "Stopped by the editor; everything found before the stop is saved",
   completed: "Completed within the run limits",
 };
 
@@ -1379,6 +1417,9 @@ function InvestigationWorkspace({
   queueError,
   followPending,
   parkPending,
+  stopJobId,
+  stopPending,
+  onStopDig,
   onKeepDigging,
   onQueue,
   onClose,
@@ -1404,6 +1445,10 @@ function InvestigationWorkspace({
   queueError: string | null;
   followPending: boolean;
   parkPending: boolean;
+  /** The running dig's job id, when there is one to stop. Unit U25, B4. */
+  stopJobId: number | null;
+  stopPending: boolean;
+  onStopDig: () => void;
   onKeepDigging: () => void;
   onQueue: () => void;
   onClose: () => void;
@@ -1840,6 +1885,18 @@ function InvestigationWorkspace({
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}
           </InkButton>
+          {/*
+            Unit U25, B4. Only while a run is in flight, and it asks rather
+            than kills: the worker stops at its next hop boundary, and the
+            sentence under the strip says so. Before this there was no press
+            here at all -- the walkthrough scanned every button and summary on
+            this page for /stop|pause|halt|cancel|abandon/ and found none.
+          */}
+          {stopJobId != null && digging ? (
+            <InkButton tone="quiet" disabled={stopPending} onClick={onStopDig}>
+              {stopPending ? "Stopping…" : "Stop this dig"}
+            </InkButton>
+          ) : null}
           <Link to="/desk/follow-ups" className="btn solid">
             Start an AI follow-up
           </Link>

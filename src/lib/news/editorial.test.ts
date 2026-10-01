@@ -769,16 +769,16 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
 
   /*
     0.6.63 Unit Y item 4 retired `grok-oauth` from every picker ("REMOVE
-    Grok"), so an "explicit SuperGrok choice" is no longer a thing an editor
-    can make: `opinionModelChoice` no longer accepts the string, and the run
-    falls to Opinion's Automatic ladder (Codex Sol first). What this test
-    still proves is the safety half of that retirement -- a stored
-    `desk_jobs.model_choice` of "grok-oauth" cannot sneak into the OAuth pair
-    through the orchestrator's custom branch; it normalises to Automatic and
-    the editor is told so. `claudeRuntime`'s `runCustomPair` is the poison
-    pill here.
+    Grok"), and GR-C removed the provider and its transport outright, so an
+    "explicit SuperGrok choice" is not a thing any build can make:
+    `opinionModelChoice` does not accept the string, and the run falls to
+    Opinion's Automatic ladder (Codex Sol first). What this test still proves
+    is the safety half -- a stored `desk_jobs.model_choice` of "grok-oauth"
+    cannot sneak into the OAuth pair through the orchestrator's custom branch;
+    it normalises to Automatic and the editor is told why.
+    `claudeRuntime`'s `runCustomPair` is the poison pill here.
   */
-  it("falls a stored SuperGrok choice back to Opinion's default instead of the OAuth pair", async () => {
+  it("falls a stored SuperGrok choice back to Opinion's default instead of a removed transport", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     assert.equal(
@@ -786,7 +786,7 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
       "codex-frontier",
       "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Codex Sol",
     );
-    assert.match(retiredModelChoiceNote("grok-oauth") ?? "", /no longer offered/);
+    assert.match(retiredModelChoiceNote("grok-oauth") ?? "", /has been removed/);
     const result = await orchestrateEditorial(
       { ...ORCHESTRATION_INPUT, modelChoice: "grok-oauth" },
       claudeRuntime(events, { ok: true, text: DELIVERED }),

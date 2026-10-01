@@ -65,6 +65,7 @@ import {
 import { storableText } from "./storable-text.ts";
 import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
+import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
@@ -101,6 +102,8 @@ import {
   setJobStage,
   throwIfJobCancelled,
   waitForModel,
+  JobCancelledError,
+  JOB_CANCELLED_REASON,
   type DeskJob,
 } from "./jobs.ts";
 import {
@@ -642,6 +645,42 @@ export type InvestigationRow = {
   last_model_choice?: string | null;
 };
 
+/**
+ * One capture as both handoff writers read it: enough of `artifacts` for
+ * `leadSourceRefusalReason` to judge whether it may become a source on a lead.
+ */
+type CapturedArtifactRow = {
+  url: string;
+  title: string;
+  fetch_status: number | null;
+  fetch_outcome: string | null;
+  full_text: string | null;
+};
+
+/**
+ * One `artifacts` row as `leadSourceRefusalReason` reads it.
+ *
+ * The two handoff writers select these rows with snake_cased columns, and they
+ * used to hand the row straight to `usableLeadSources`, which reads
+ * `CapturedPage` -- `fetchStatus`, `fetchOutcome`, `text`. Every one of those
+ * was `undefined` on a raw row, and TypeScript never said so: `CapturedPage`'s
+ * fields are all optional, so a snake_cased row structurally *satisfies* it.
+ * The whole capture check was therefore skipped and a 404, a 403 or a
+ * soft-404 whose title happened to share a word with the lead was still listed
+ * as a source on it.
+ *
+ * The translation is explicit and in one place so a later column can be added
+ * without the judge silently reading `undefined` for it. A capture read any
+ * other way is a capture the desk has not judged.
+ */
+const capturedPageOf = (row: CapturedArtifactRow): CapturedPage => ({
+  url: row.url,
+  title: row.title,
+  fetchStatus: row.fetch_status,
+  fetchOutcome: row.fetch_outcome,
+  text: row.full_text,
+});
+
 const HANDOFFS = new Set([
   "HOLD FOR PATTERN",
   "MONITOR",
@@ -1012,8 +1051,9 @@ async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
     why: string;
     status: string;
     closed_reason: string | null;
+    evidence: string | null;
   }>`
-    select label, kind, why, status, closed_reason from frontier_items
+    select label, kind, why, status, closed_reason, evidence from frontier_items
     where newsroom_id = ${newsroomId} and status in ('reopened', 'open')
     order by priority desc, id desc
     limit 16
@@ -2814,9 +2854,16 @@ export async function performDarkRound(job: DeskJob) {
           onUsage: saveUsage,
           onStage: (stage) => setJobStage(job.id, stage),
           reasoningEffort: effortForChoice(rememberedChoice, modelEffort),
+          // Unit U25, B4: the editor's Stop, read fresh at each hop and each
+          // search. Before this a dig could only end at its own hop, time or
+          // call limit -- a 2-to-13-minute wait with no way out, which the
+          // stand-in walkthrough measured by scanning every button on the page
+          // for /stop|pause|halt|cancel|abandon/ and finding none.
+          throwIfCancelled: () => throwIfJobCancelled(job.id),
         }),
       });
     const synthesize = async (on: EffectiveProviderChoice) => {
+      await throwIfJobCancelled(job.id);
       await setJobStage(job.id, `Synthesizing signals with ${modelChoiceLabel(on)}`);
       return synthesizeSignals(
         context.userId,
@@ -2860,6 +2907,9 @@ export async function performDarkRound(job: DeskJob) {
       effortForChoice(choice, modelEffort),
       job,
     );
+    // Stage 2 is the longest single model call of the round and it is not part
+    // of the hop loop, so it needs its own boundary check.
+    await throwIfJobCancelled(job.id);
     await rememberLastModelChoice(id, choice);
     const names = (
       await sql<{ name: string }>`
@@ -2934,6 +2984,27 @@ export async function performDarkRound(job: DeskJob) {
     if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
   } catch (err) {
     const error = asDarkError(err);
+    /*
+      Unit U25, B4: a stopped round says it was stopped, and the file says so
+      too. Without this the cancel arrived as an ordinary failure and the run
+      summary read like a dig that broke -- which is the opposite of what the
+      editor asked for. `throwIfJobCancelled` throws `JobCancelledError`, whose
+      message is `JOB_CANCELLED_REASON`; `executeJob` records that as the job's
+      error, so the desk and the job queue say the same sentence.
+    */
+    const cancelled = err instanceof JobCancelledError;
+    if (cancelled) {
+      await sql`
+        update dark_runs
+        set finished_at = now(), error = ${JOB_CANCELLED_REASON},
+            stop_reason = ${"cancelled"}, summary = ${tailSafeDarkSummary(
+              `Stopped by the editor. Work completed before the stop is saved; open follow-ups remain on the file.`,
+            )}
+        where id = ${runId} and newsroom_id = ${owned(context)}
+      `.catch(() => undefined);
+      await markInvestigationPaused(context.userId, id, JOB_CANCELLED_REASON).catch(() => undefined);
+      throw err;
+    }
     await sql`
       update dark_runs
       set finished_at = now(), error = ${error.slice(0, 800)}
@@ -2981,18 +3052,28 @@ export async function sendDarkSignalToQueueFor(
   } catch {
     news = null;
   }
+  /*
+    Unit U25, B3: the captures that become this lead's sources are the ones the
+    dig actually got AND that are about the lead. `order by id desc limit 12`
+    with no predicate is what put a movie-ordering listicle and four courier
+    sites on the drafted story's source list; see `result-quality.ts`.
+  */
   const arts = sig.investigation_id
-    ? await sql<{ url: string }>`
-        select url from artifacts
+    ? await sql<CapturedArtifactRow>`
+        select url, title, fetch_status, fetch_outcome, full_text from artifacts
         where newsroom_id = ${newsroomId} and investigation_id = ${sig.investigation_id}
-        order by id desc limit 12
+        order by id desc limit 40
       `
-    : await sql<{ url: string }>`
-        select url from artifacts
+    : await sql<CapturedArtifactRow>`
+        select url, title, fetch_status, fetch_outcome, full_text from artifacts
         where newsroom_id = ${newsroomId}
-        order by id desc limit 12
+        order by id desc limit 40
       `;
-  const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+  const urls = JSON.stringify(
+    sanitizePublicUrls(
+      usableLeadSources(arts.map(capturedPageOf), sig.name).map((a) => a.url),
+    ).slice(0, 12),
+  );
   /*
     `why` is ASSEMBLED from the signal, and every part of it is the model's --
     the observation, the linkage map, the alternatives, the pathway, the
@@ -3092,12 +3173,21 @@ export async function queueInvestigationFor(
     await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
     return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
   }
-  const arts = await sql<{ url: string; title: string }>`
-    select url, title from artifacts
+  /*
+    Unit U25, B3. The handoff carried the file's last twelve captures with no
+    predicate at all, so `leads.source_urls` became the junk the dig had most
+    recently fetched -- and the drafted story's "Sources on the lead" listed
+    them while omitting the one real source. Read a wider window, then keep
+    only the captures that got the article and are about this lead.
+  */
+  const arts = await sql<CapturedArtifactRow>`
+    select url, title, fetch_status, fetch_outcome, full_text from artifacts
     where newsroom_id = ${newsroomId} and investigation_id = ${id}
-    order by id desc limit 12
+    order by id desc limit 40
   `;
-  const urls = JSON.stringify(sanitizePublicUrls(arts.map((a) => a.url)));
+  const leadWords = `${inv[0].title}\n${inv[0].summary}`;
+  const leadSources = usableLeadSources(arts.map(capturedPageOf), leadWords);
+  const urls = JSON.stringify(sanitizePublicUrls(leadSources.map((a) => a.url)).slice(0, 12));
   /*
     Same reading as the Write box (Unit P item 2): this newsroom's own section
     names and briefs decide the beat, and a file that names none of them is
@@ -3221,9 +3311,11 @@ export async function queueInvestigationFor(
     proposedBy: "dark",
     leadId: created[0]!.id,
     section: topicUnchosen ? null : topic,
-    pages: arts.map((art) => ({
+    pages: leadSources.slice(0, 12).map((art) => ({
       url: art.url,
-      title: art.title,
+      // `CapturedPage.title` is nullable because a capture may have none;
+      // a proposed source with no title is one with the field absent.
+      title: art.title ?? undefined,
       reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
     })),
   });

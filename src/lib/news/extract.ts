@@ -5,25 +5,85 @@ import { scopedQuery, type ResearchScope } from "./research-scope.ts";
 
 const LLC_RE =
   /\b([A-Z][A-Za-z0-9&.'-]+(?:\s+[A-Z][A-Za-z0-9&.'-]+){0,5}\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?))\b/g;
-const CONTRACT_RE =
-  /\b(?:contract|agreement|po|purchase order)\s*#?\s*([A-Z0-9][A-Z0-9/-]{3,})\b/gi;
+/*
+  Unit U25, B2. `po` used to be a bare alternative here, and `\b` before it only
+  anchors the START of the word: `\bpo` matches the first two letters of any
+  word beginning with them, and `([A-Z0-9][A-Z0-9/-]{3,})` then eats the rest.
+
+  Measured on the Kid City USA file of 2026-09-30, every one of these came from
+  a page about the word "under", and every one became a real query:
+
+    "Portuguese" -> po + "rtuguese"   "points" -> po + "ints"
+    "popular"    -> po + "pular"      "position" -> po + "SITION"
+    "Pollock"    -> po + "llock"      "pointedly" -> po + "intedly"
+
+  which is where `"SITION" RFP Longmont` and `"ints" RFP Longmont` came from --
+  the two queries whose Bing results the desk then read as sources. `po` as a
+  whole word ("PO #12345") still matches.
+*/
+const CONTRACT_RE = /\b(?:contract|agreement|po|purchase order)\b\s*#?\s*([A-Z0-9][A-Z0-9/-]{3,})\b/gi;
 const RFP_RE = /\b(?:RFP|RFQ|IFB)[\s#:.-]*([A-Z0-9][A-Z0-9/-]{2,})\b/gi;
 const ORD_RE = /\b(?:ordinance|resolution)\s*(?:no\.?|number|#)?\s*([A-Z0-9][A-Z0-9/-]{2,})\b/gi;
 const PARCEL_RE = /\b(?:parcel|AIN|assessor(?:'s)? (?:id|number)|PIN)\s*[:#]?\s*([A-Z0-9-]{5,})\b/gi;
+/*
+  Unit U25, B2. `under` is not a citation phrase, it is an English preposition,
+  and matching it turned whole sentences into "references" -- the run's frontier
+  filled with `under that name in our state`, `under` and eventually dictionary
+  idioms, and the dig spent a whole round on the string "under". The phrases
+  kept below all introduce a document or a record; `under` alone introduces
+  whatever noun happens to follow it.
+*/
 const DATED_RE =
-  /\b(?:pursuant to|according to|as previously approved|amended by|under|see attachment|as discussed(?: at)?|prepared by|submitted by)\b[^.\n]{5,120}/gi;
+  /\b(?:pursuant to|according to|as previously approved|amended by|per section|see attachment|as discussed(?: at)?|prepared by|submitted by)\b[^.\n]{5,120}/gi;
 const URL_RE = /https?:\/\/[^\s<>"'\\)\]]+/gi;
 const AGENT_RE =
   /\b(?:registered agent|principal|prepared by|submitted by|applicant)\s*[:\-–]?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})\b/g;
 const CASE_RE = /\b((?:PLN|SP|CUP|ANX|PLAN)[- ]?\d{2,4}[- ]?\d+)\b/gi;
 const MONEY_RE = /\$[\d,]+(?:\.\d{2})?/g;
 
+/**
+ * Whether `value` appears in the haystack as a whole word rather than inside one.
+ *
+ * Unit U25, B2's backstop. Every one of the junk values this run produced --
+ * `SITION`, `ints`, `rtuguese`, `pular`, `llock`, `intedly` -- was a substring
+ * of a longer word that a regex's capture group happened to start inside. A
+ * value that never appears between word boundaries in the text it came from is
+ * not a name, a number or an identifier; it is the tail of one.
+ *
+ * The regexes that produced them are anchored properly now (`CONTRACT_RE`), so
+ * this is the general rule rather than the specific repair: any future pattern
+ * that captures from mid-word is caught here instead of becoming a query.
+ */
+function appearsAsWholeWord(haystack: string, value: string): boolean {
+  const needle = value.toLowerCase().replace(/\s+/g, " ");
+  if (!needle) return false;
+  const isWordChar = (ch: string | undefined) => ch !== undefined && /[a-z0-9]/i.test(ch);
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at < 0) return false;
+    const before = at === 0 ? undefined : haystack[at - 1];
+    const after = haystack[at + needle.length];
+    if (!isWordChar(before) && !isWordChar(after)) return true;
+    from = at + 1;
+  }
+}
+
 export function extractReferences(text: string): ExtractedRef[] {
   const out: ExtractedRef[] = [];
   const seen = new Set<string>();
+  /*
+    Lower-cased and whitespace-collapsed ONCE per call rather than per
+    candidate: this runs over the whole retrieved pack, up to 24,000 characters,
+    and a page can yield eighty candidates.
+  */
+  const haystack = text.toLowerCase().replace(/\s+/g, " ");
   const push = (kind: string, value: string) => {
     const v = value.replace(/\s+/g, " ").trim().slice(0, 240);
     if (v.length < 3) return;
+    // A URL is its own value and is written as written; everything else has to
+    // be a word the text actually contains, not a slice out of the middle.
+    if (kind !== "url" && !appearsAsWholeWord(haystack, v)) return;
     const key = `${kind}:${v.toLowerCase()}`;
     if (seen.has(key)) return;
     seen.add(key);
@@ -147,6 +207,130 @@ export function preferPrimaryUrls(urls: string[], subjects: string[]): string[] 
   return [...urls].sort((a, b) => primarySourceScore(b, subjects) - primarySourceScore(a, subjects) || b.length - a.length);
 }
 
+/**
+ * Why this query must not be sent to a search provider, or `null` if it may.
+ *
+ * Unit U25, B2. The dig's fallback path derived searches from whatever text it
+ * had -- captured pages included -- and so searched for scraped page titles,
+ * whole sentences and URL prefixes. Measured on the Kid City USA walkthrough,
+ * these all reached a provider:
+
+ *   `"Under - Paducah, KY 42001 - Menu, Reviews, Hours &amp; Contact — https://restaurantjump" Longmont …`
+ *   `"UNDER Definition &amp; Meaning - Merriam-Webster — https://merriam-webster" Longmont …`
+ *   `"under that name in our state" Longmont …`
+ *   `"ints" RFP Longmont …`   `"SITION" RFP Longmont …`   `"after" Longmont contract …`
+
+ * A query is a search for a *thing*, and each of these is a slice of a *page*.
+ * The reasons are named rather than lumped into one boolean so the run file can
+ * say which rule dropped what, and so a test can hold each rule to its own
+ * string. The caller caps and de-duplicates what survives; this only judges.
+ *
+ * M1 of the batch-6 pre-merge audit: the first cut of these rules refused real
+ * civic searches along with the junk. `"2023-0456" Longmont contract`,
+ * `"PO 12345"`, `"O-2024-15"`, `"RFP"` and `"SAMHSA"` -- the contract, bid and
+ * agency identifiers the desk derives from the record and quotes itself in
+ * `queriesForRef` -- all came back "a quoted fragment shorter than a word",
+ * because not one of them carries a four-letter run. The two rules that decide
+ * what a quoted phrase is are now named for what they *recognise* rather than
+ * for what they exclude, and the junk the audit measured is still refused:
+ * `"SITION"`, `"ints"`, `"after"`, the scraped titles and the URLs.
+ */
+
+/**
+ * Capitalised tokens that are the back half of a longer word rather than a
+ * name. `"SITION"` reached a provider out of a page that said "POSITION"; no
+ * search for a record is a suffix. Deliberately short and additive -- a lone
+ * capitalised token is how the desk writes an agency (`SAMHSA`), a document
+ * type (`RFP`) or a code (`CDPHE`), so the list names the fragments measured
+ * rather than guessing at a shape.
+ */
+const FRAGMENT_IN_CAPITALS = new Set(["sition", "position"]);
+
+export function junkQueryReason(query: string): string | null {
+  const q = query.replace(/\s+/g, " ").trim();
+  if (!q) return "empty query";
+  if (q.length > 200) return "a query longer than a sentence is a page, not a search";
+  if (/https?:\/\/|www\./i.test(q)) return "the query contains an address";
+  if (/&(?:amp|quot|lt|gt|nbsp|#\d+);/i.test(q)) return "the query contains scraped page markup";
+  /*
+    A page title arrives welded to its own site name -- `TITLE — host` or
+    `Site | Section | Title` -- which no search for a record looks like.
+  */
+  if (/\S\s+—\s+\S/.test(q) || /\S\s+\|\s+\S.*\|\s*\S/.test(q))
+    return "the query contains a page title";
+  for (const quoted of q.match(/"([^"]*)"/g) ?? []) {
+    const phrase = quoted.slice(1, -1).trim();
+    if (!phrase) return "the query quotes nothing";
+    const words = phrase.split(/\s+/);
+    /*
+      A document identifier. `"2023-0456"`, `"PO 12345"`, `"O-2024-15"` -- a
+      contract, a purchase order, an ordinance -- are the things a civic search
+      is FOR, and `queriesForRef` quotes a contract reference verbatim. A digit
+      is what makes one: no ordinary English word carries one. It needs a
+      letter or an internal separator as well, which is what keeps a bare
+      amount out: `"$1900"` is a number somebody said, not a record.
+    */
+    if (/\d/.test(phrase) && phrase.length >= 4 && (/[a-z]/i.test(phrase) || /[-/.]/.test(phrase)))
+      continue;
+    /*
+      A lone capitalised token is an agency, a programme, a document type or a
+      code -- `"RFP"`, `"SAMHSA"`, `"CDPHE"` -- and both the desk and the record
+      write them that way. The measured exception is the page fragment: the
+      back half of a longer word, which is what `"SITION"` was.
+    */
+    const only = words[0]!;
+    if (
+      words.length === 1 &&
+      /^[A-Z0-9][A-Z0-9.\-/&']*$/.test(only) &&
+      !FRAGMENT_IN_CAPITALS.has(only.toLowerCase())
+    )
+      continue;
+    /*
+      A quoted phrase of a sentence's length is a sentence the extractor picked
+      up, not a thing anybody names. The longest real names the desk derives
+      are five words, so the ceiling is a full headline rather than a phrase --
+      the same ceiling the "quoted sentence" test below uses, raised because a
+      quoted 6-to-12-word phrase is still a thing somebody named.
+    */
+    if (words.length > 12) return "a quoted sentence, not a search term";
+    /*
+      `"under that name in our state"` -- four or more ordinary lowercase words
+      in quotes is a clause the extractor lifted out of prose. Every phrase the
+      desk writes itself is one to three words (`"registered agent"`, `"normal
+      process"`), and a real quoted name carries a capital somewhere.
+    */
+    if (words.length >= 4 && !/[A-Z]/.test(phrase))
+      return "a quoted sentence, not a search term";
+    if (!/[a-z]/i.test(phrase)) return "a number or punctuation, not a name";
+    if (!words.some((word) => /[a-z]{4,}/i.test(word.replace(/[^a-z0-9]/gi, ""))))
+      return "a quoted fragment shorter than a word";
+    /*
+      `"under"`, `"after"`, `"ints"` -- one ordinary lowercase word in quotes is
+      a word the desk pulled out of prose, not the name of anything. A real
+      single-word subject is a proper noun or an identifier, so it carries a
+      capital, a digit or a hyphen; the operators the desk writes itself
+      (`"registered agent"`, `"normal process"`) are two words or more.
+    */
+    if (words.length === 1 && /^[a-z]{3,}$/.test(phrase))
+      return "a quoted common word, not a name";
+    /*
+      `"SITION"` -- a run of capitals that is neither a name nor a short code.
+      A name is written the way names are written (mixed case, a digit, a
+      hyphen, a suffix -- "Kid City USA", "RFP-2024-09", "CDPHE"); a lone
+      all-caps word of six characters or more out of a page of prose is the
+      back half of a longer one. This is where "POSITION" went.
+    */
+    if (words.length === 1 && !/[a-z]/.test(only.slice(1)) && !/[\d.\-/&']/.test(only) && only.length > 5)
+      return "a fragment in capitals, not a name or a code";
+  }
+  return null;
+}
+
+/** `junkQueryReason`, kept as a filter for callers that only want the survivor list. */
+export function isUsableQuery(query: string): boolean {
+  return junkQueryReason(query) === null;
+}
+
 export function queriesForRef(ref: ExtractedRef, scope: ResearchScope): string[] {
   const v = ref.value;
   const city = scope.city.trim();
@@ -206,18 +390,28 @@ export function heuristicPlan(
     priority: number;
     queries: string[];
   }[] = [];
+  const searched = new Set<string>();
   for (const ref of refs) {
     if (ref.kind === "url") fetch_urls.push(ref.value);
     else {
+      /*
+        Unit U25, B2: the queries a reference generates are judged before they
+        are written down, not only before they are run. A junk query that lands
+        in `pendingQueries` is re-run on the next hop by the frontier fill, so
+        filtering at the search only would leave the file full of them.
+      */
+      const queries = queriesForRef(ref, scope).filter(isUsableQuery);
       frontier.push({
         label: ref.value,
         kind: ref.kind,
         why: "Referenced in evidence; not yet searched",
         priority: ref.kind === "company" || ref.kind === "contract" ? 9 : 6,
-        queries: queriesForRef(ref, scope),
+        queries,
       });
-      for (const q of queriesForRef(ref, scope)) {
-        if (!tried.has(q)) searches.push(q);
+      for (const q of queries) {
+        if (tried.has(q) || searched.has(q)) continue;
+        searched.add(q);
+        searches.push(q);
       }
     }
   }

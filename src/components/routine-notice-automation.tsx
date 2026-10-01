@@ -40,10 +40,19 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
           r.automation.enabled ? "Routine editions are active." : "Routine editions are paused.",
         );
       } else setNote(r.error);
-      announceToDesk(r.ok ? "Routine edition settings saved." : r.error);
+      /*
+        Two calls, not one ternary with a tone: a refusal and a save are
+        different answers, and the toast paints them differently (yellow for a
+        finished press, dashed danger for one that failed).
+      */
+      if (r.ok) announceToDesk("Routine edition settings saved.");
+      else announceToDesk(r.error, "err");
     },
-    onError: (e) =>
-      setNote(e instanceof Error ? e.message : "Routine edition settings did not save."),
+    onError: (e) => {
+      const text = e instanceof Error ? e.message : "Routine edition settings did not save.";
+      setNote(text);
+      announceToDesk(text, "err");
+    },
   });
   if (query.isError || sectionQuery.isError)
     return (

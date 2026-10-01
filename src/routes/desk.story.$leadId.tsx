@@ -13,6 +13,7 @@ import {
 import {
   publishBlockers,
   publishGateNote,
+  showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
@@ -28,6 +29,10 @@ import {
   type EvidenceDecision,
 } from "@/lib/news/draft-evidence";
 import { auditDraft, findingsWithIds, type DraftAuditFinding } from "@/lib/news/draft-audit";
+import type {
+  EvidenceCheckReport,
+  EvidenceCheckState,
+} from "@/lib/news/evidence-check-state";
 import { parseStyleRecord } from "@/lib/news/draft-audit-record";
 import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -35,6 +40,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
+import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   draftLead,
@@ -46,6 +52,7 @@ import {
   publishLead,
   pullTodo,
   resolveDraftMeetingReview,
+  acceptUnreviewedClaims,
   continuePullJob,
   overrideNamedOutlet,
   resolveLeadDuplicate,
@@ -61,7 +68,7 @@ import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
-import { useAreaLabels, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
   clipTodoText,
@@ -85,6 +92,7 @@ import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
+import { evidenceReviewDisabled, takeDownPressDisabled } from "@/lib/news/finding-evidence-locks";
 import { evidenceDetailId, STYLE_ROW_KEY } from "@/lib/news/evidence-check-list";
 import {
   modelChoiceLabel,
@@ -215,6 +223,14 @@ function StoryPage() {
      name it. Falls back to the key, which is what the desk stored. */
   const sectionName = (key: string) => sections.find((s) => s.key === key)?.name ?? key;
   const { formatShortDate } = usePaperDateFormatters();
+  /*
+    Unit U24: the paper as the desk has it configured, for the one rule below
+    that needs to know which city this paper publishes in (`creditsHomeCity`,
+    src/lib/news/source-credit.ts). The resolved identity, not the build-time
+    constant, so a desk that renamed its city in Paper setup gets its own city's
+    prose words -- the same value /about renders.
+  */
+  const paperIdentity = usePaper();
   // The same words the reader sees on the pill row: this paper's own
   // geography, not the shipped default's (see `useAreaLabels`).
   const labels = useAreaLabels();
@@ -327,6 +343,15 @@ function StoryPage() {
   const [checkedDraftStale, setCheckedDraftStale] = useState(false);
   const [evidenceReview, setEvidenceReview] = useState<EvidenceCheckReview | null>(null);
   const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
+  /*
+    Unit U24: the evidence check's one state, reported up by the Checks pane
+    (the only thing holding the resolved review) and read by the chips, the
+    publish bar and the blockers. Declared here with the rest of the page's
+    state, above the loading and not-found returns below, because a hook after
+    an early return is a hook that does not run on every render.
+  */
+  const [panelEvidence, setPanelEvidence] = useState<EvidenceCheckReport | null>(null);
+  const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence(state), []);
   /*
     Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
     owns nothing else: the record, the two calls and the saved text all stay
@@ -758,6 +783,40 @@ function StoryPage() {
       setMsg(
         editorActionError(err instanceof Error ? err.message : "", "record the override") ??
           "Could not record the override.",
+      );
+    },
+  });
+
+  /*
+    Unit U24: the recorded override for a draft going to paper with claims its
+    own evidence check raised and nobody judged. It is a press, not a checkbox
+    in the publish dialog, so the acceptance is a separate, dated, attributed
+    record rather than a side effect of printing -- and `performPublish` refuses
+    without it, which is what makes it a gate instead of a suggestion.
+  */
+  const acceptUnreviewed = useMutation({
+    /*
+      Unit U24b: the press carries the REVIEW TOKEN the editor was looking at,
+      the same identity the judgment saves send, and the server refuses an
+      acceptance recorded against a review that has moved since. The bare lead
+      id plus a token -- `rowId` and a string, validated together.
+    */
+    mutationFn: () =>
+      acceptUnreviewedClaims({
+        data: { leadId: id, evidenceToken: panelEvidence?.evidenceToken ?? "" },
+      }),
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      announceToDesk(
+        res.ok
+          ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
+          : res.error,
+      );
+    },
+    onError: (err) => {
+      announceToDesk(
+        editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
+          "Could not record that acceptance.",
       );
     },
   });
@@ -1405,6 +1464,12 @@ function StoryPage() {
   const uncredited = uncreditedOutlets(
     body,
     draftSources.length > 0 || !mayInheritLeadSources(data.draft ?? {}) ? draftSources : sources,
+    /*
+      Unit U24: the paper's own city, so a story that attributes to "the city
+      manager" is not told it never named City of Longmont. It turns the prose
+      words on for that one source and no other -- see `creditsHomeCity`.
+    */
+    paperIdentity.city,
   );
   /*
     Claims of absence block printing until a person has confirmed each one.
@@ -1446,6 +1511,19 @@ function StoryPage() {
     reconcileStatus.data?.status === "queued" ||
     reconcileStatus.data?.status === "running";
   const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
+  /*
+    Unit U25, B1: the two reasons the evidence panel closes, kept apart so the
+    takedown press can stay live on a published story. See
+    `src/lib/news/finding-evidence-locks.ts` for why they differ.
+  */
+  const reviewLocks = {
+    locked,
+    onPaper,
+    waiting,
+    busy: save.isPending || reviewEvidence.isPending || reconcileActive,
+  };
+  const panelLocks = evidenceReviewDisabled(reviewLocks);
+  const takeDownLocks = takeDownPressDisabled(reviewLocks);
   /*
     Why the "Fix these with the model" button is off, in the editor's own words,
     or "" when it is on. The first reason is the ordinary one on a fresh check --
@@ -1494,6 +1572,39 @@ function StoryPage() {
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
   /*
+    ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
+
+    The chip, the line beside the Publish button and the blocker all read
+    `evidenceState`; the Checks pane is the only thing that can produce it,
+    because it is the only thing holding the resolved review, so it reports it
+    up (`onEvidenceState`) and this page reads it. Before, the bar asked the
+    draft's memo and the pane asked the findings, and on the stand-in editorial
+    day they said opposite things about the same run: `○ Evidence check not run`
+    above seven `! Needs review` rows.
+
+    Until the pane reports -- the review query is still in flight, or there is
+    no draft to review -- the page falls back to the record it does hold
+    (`recordedChecks`), which is exactly what it printed before this unit. That
+    fallback can only ever under-report, and only for the first paint.
+  */
+  const evidenceState: EvidenceCheckState = panelEvidence ?? {
+    ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
+    toReview: 0,
+    contradicted: 0,
+  };
+  /*
+    Unit U24b: an acceptance covers this draft when it is for THIS version AND
+    it was given for at least as many claims as are outstanding now. The count
+    matters because the fingerprint alone does not: a judgment the desk
+    downgrades to unreviewed -- because the capture behind it changed or the
+    binding moved -- does not touch the draft row, so the token stands still
+    while the number of claims to answer for grows. "I accepted three" must not
+    print four.
+  */
+  const acceptanceCovers =
+    data.unreviewedClaimsAcceptedCount > 0 &&
+    data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
+  /*
     Every reason the Publish button is off, in one place (unit CT).
 
     `publishBlockers` owns the list -- a sentence and a press for each reason --
@@ -1515,6 +1626,18 @@ function StoryPage() {
     sectionReady,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,
+    /*
+      Unit U24: the claims the draft's own evidence check raised and nobody has
+      judged, and whether this exact version has already been accepted. Both
+      come from the one state the Checks pane reports up (`evidenceState`
+      below), so the count in "Before you can publish", the count on the chip,
+      the line under "Evidence check" and the rows themselves are one number.
+    */
+    unreviewedClaims: evidenceState.toReview,
+    // M5: which part of that number the record disagrees with, so the blocker
+    // and its override can say so.
+    contradictedClaims: evidenceState.contradicted,
+    unreviewedAccepted: acceptanceCovers,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
@@ -1642,6 +1765,14 @@ function StoryPage() {
         /* The same mutation the evidence review's own "keep" press calls. */
         reviewEvidence.mutate("keep");
         return;
+      case "accept-unreviewed":
+        /*
+          Unit U24: the second honest answer to "claims nobody has judged".
+          `performPublish` refuses without this record, so the press is the gate
+          -- and the record names who accepted, when, and which draft version.
+        */
+        acceptUnreviewed.mutate();
+        return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView({ block: "center" });
         return;
@@ -1673,7 +1804,16 @@ function StoryPage() {
   const nameCheck = readNameCheck(data.draft?.research_json);
   const checkFacts: CheckFacts = {
     hasDraft: Boolean(data.draft),
+    /*
+      Unit U24b: the PASS is the RECORD and nothing else. U24 widened this to
+      "a check ran at all", which turned a draft whose findings were all
+      `Could not check` or judged `contradicts` into `✓ Evidence checked` and
+      "All checks done." -- a green claim about an answer nobody had given.
+      "It ran" is the separate fact below, and it only chooses wording.
+    */
     evidenceChecked: draftChecks.evidenceChecked,
+    evidenceRan: evidenceState.ran,
+    evidenceToReview: evidenceState.toReview,
     evidenceRequired: draftChecks.evidenceRequired,
     evidenceOutstanding:
       evidenceStale || openClaims.length > 0 || reconcileActive || reviewEvidence.isPending,
@@ -1998,8 +2138,22 @@ function StoryPage() {
               opens on (unit CT). The heading below was "Before you publish",
               which would now be two near-identical headings for two different
               things; the drawing calls this list "Evidence check".
+
+              UNIT U24 -- NOT ON A KILLED LEAD. This list is work toward a
+              publish, and a killed lead cannot be printed: the page already
+              drops the editors, "Draft with AI" and the whole publish bar for
+              it, because `performPublish` refuses a killed lead outright. What
+              was left was the list itself, advertising "4 things block
+              Publish" with four enabled buttons -- "Write the headline",
+              "Write the story", "Write a dek", "Pick a section" -- three of
+              which point at fields this page no longer draws. The action on a
+              killed lead is Reopen, and that panel is already on the page; a
+              second list of controls that cannot be reached is the desk
+              contradicting itself.
             */}
-            <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+            {showsPublishPrep(data.lead.status) ? (
+              <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+            ) : null}
             {data.draft ? (
               /*
                 The panel, not the list (unit CW2). The panel owns the review
@@ -2015,14 +2169,22 @@ function StoryPage() {
                 currentDraft={{ headline, dek, body, topic }}
                 meetingEvidence={data.draftMeetingEvidence}
                 isOwner={isOwner}
-                disabled={
-                  locked ||
-                  onPaper ||
-                  waiting ||
-                  save.isPending ||
-                  reviewEvidence.isPending ||
-                  reconcileActive
-                }
+                /*
+                  Unit U25, B1. Two rules, named and tested in
+                  `src/lib/news/finding-evidence-locks.ts`, because they used to
+                  be one expression and the difference between them is the whole
+                  of finding B1.
+
+                  The panel closes on a published story: a judgment binds to a
+                  saved draft and a published story has none. The takedown press
+                  must NOT inherit that -- a published story's captures are the
+                  only ones with public pages at /evidence/:versionId, so it is
+                  the only place the press matters, and it rendered disabled on
+                  all ten claims of story 16 with no tooltip and no way to reach
+                  it. The server still refuses every editor who is not the owner.
+                */
+                disabled={panelLocks}
+                takeDownDisabled={takeDownLocks}
                 list={{
                   checkedAt: evidenceCheckedAt,
                   modelLabel: reconcileStatus.data?.modelChoice
@@ -2035,6 +2197,14 @@ function StoryPage() {
                   compareLabel: evidenceReview ? "Compare checked vs. previous version" : "",
                   onCompare: openCompareChecked,
                   onStylePress: focusStyleFix,
+                  /*
+                    The one fact the page holds and the panel cannot: whether the
+                    memo records a decision or a reconciliation stamp. The panel
+                    adds it to what it can see and reports the whole state back
+                    (unit U24).
+                  */
+                  evidenceRecorded: draftChecks.evidenceChecked,
+                  onEvidenceState,
                 }}
               />
             ) : (
@@ -2622,12 +2792,29 @@ function StoryPage() {
           saved are the heavy 2px ink (`.btn`), the two that only look are
           the light 1px rule (`.btn.quiet`).
         */}
+        {/*
+          FB5: the ⌘S chip below had nothing behind it. README "Interactions &
+          behavior" lists "⌘S saves in the story workbench", and the key fell
+          through to the browser's Save-page dialog instead (FB0-REPORT.md
+          Table B, "⌘S badge … DEAD"). It is bound rather than removed, because
+          saving here is manual -- there is a press, an "Unsaved changes" line
+          and no autosave.
+
+          `SaveShortcut` rides the button's own condition, so the key can never
+          save what the button would refuse, and it adds no announcement of its
+          own: this save already answers visibly and out loud through `setMsg`.
+        */}
         {data.draft && !locked && !onPaper ? (
-          <InkButton
-            tone="ghost"
-            disabled={save.isPending || reconcileActive}
-            onClick={() => save.mutate()}
-          >
+          <>
+            <SaveShortcut
+              save={() => save.mutate()}
+              enabled={!save.isPending && !reconcileActive}
+            />
+            <InkButton
+              tone="ghost"
+              disabled={save.isPending || reconcileActive}
+              onClick={() => save.mutate()}
+            >
             Save edits
             {/*
               The drawn ⌘S chip, aria-hidden so the press's accessible name
@@ -2638,7 +2825,8 @@ function StoryPage() {
             <span className="astra-wb-kbd" aria-hidden="true">
               ⌘S
             </span>
-          </InkButton>
+            </InkButton>
+          </>
         ) : null}
         {data.draft && !locked && !onPaper ? (
           <DraftReconcileControl {...reconcileControlProps} render="button" />

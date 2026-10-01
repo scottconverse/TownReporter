@@ -23,9 +23,10 @@
  *    model name in a route file would be a second registry that nothing keeps
  *    in step -- and the prototype's names (Codex Sol, Gemini Pro) are exactly
  *    that, which is why none of them appear below.
- * 2. Grok is in no picker. It is `NO_SURFACE` in the registry, so it is in no
- *    menu this file can build, and the Connections tab shows its real card
- *    under sign-ins, retired from pickers, with its own actions intact.
+ * 2. Grok is in no picker -- and, since GR-C removed Grok (xAI) as a provider,
+ *    the retired id has no registry entry at all, so it is in no menu this file
+ *    can build and no card on this screen offers it. A row that still stores
+ *    the id reads as Automatic with the note model-choice.ts owns.
  * 3. No Load and no Pull button, anywhere. TownReporter never loads a model
  *    into anyone's GPU (0.6.71). "Not loaded" is stated, and stated in the
  *    chip's help text, because the first call will load it and that takes a
@@ -61,7 +62,6 @@ import {
   testCustomAiConnectionFn,
   type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
-import { disconnectXaiOauthFn, getXaiOauthStatusFn } from "@/lib/news/xai-oauth";
 import { isCustomModelChoice, modelChoiceLabel, type ModelChoiceOption } from "@/lib/news/model-choice";
 import type { LocalModelEntry, LocalServer } from "@/lib/news/local-models";
 import {
@@ -177,11 +177,6 @@ function ModelsPage() {
     enabled: isOwner,
     refetchInterval: 60_000,
   });
-  const xai = useQuery({
-    queryKey: ["xai-oauth-status"],
-    queryFn: () => getXaiOauthStatusFn(),
-    enabled: isOwner,
-  });
   const catalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
@@ -190,10 +185,9 @@ function ModelsPage() {
   /* Counted only once every read has answered, or an editor watching the page
      settle sees the number climb. Null draws the plain label. */
   const counted =
-    custom.isSuccess && statuses.isSuccess && xai.isSuccess && catalog.isSuccess
+    custom.isSuccess && statuses.isSuccess && catalog.isSuccess
       ? (custom.data?.length ?? 0) +
         (statuses.data?.length ?? 0) +
-        (xai.data ? 1 : 0) +
         (catalog.data?.servers.length ?? 0)
       : null;
 
@@ -214,7 +208,6 @@ function ModelsPage() {
       const [fresh] = await Promise.all([
         refreshLocalModelCatalog(),
         qc.invalidateQueries({ queryKey: ["provider-statuses"], refetchType: "all" }),
-        qc.invalidateQueries({ queryKey: ["xai-oauth-status"], refetchType: "all" }),
       ]);
       await qc.invalidateQueries({
         queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
@@ -950,9 +943,8 @@ function StatusChip({
  *
  * One value rather than two booleans: the tab shows one dialog at a time, so a
  * card must not be able to leave "Add" and a connection's Settings open at
- * once. The Grok sign-in is deliberately NOT a third case -- the design draws
- * that card with no action on it at all, and the one Grok form that exists
- * stays reachable on Server settings, which this tab links to.
+ * once. There is no third case: the two ways in are the same two the design
+ * draws, and the Grok sign-in card is gone with the provider (GR-C).
  */
 type ConnectionDialog = { kind: "add" } | { kind: "connection"; id: string };
 
@@ -1040,9 +1032,15 @@ function ConnectionsTab({
  * Deliberately NOT the job vocabulary in `JOB_STATUS_LABEL`: "✓ Ready" is a
  * claim about a job whose model can actually run, and a connection card that
  * said it would be the same kind of lie Defect 3 was about. A connection is
- * "✓ Connected", "✓ Signed in", "✓ Running", "Not set up", "Turned off",
- * "Retired" or "Could not reach"; the job it feeds is a separate question and
- * has its own chip on the other tab.
+ * "✓ Connected", "✓ Signed in", "✓ Running", "Not set up", "Turned off" or
+ * "Could not reach"; the job it feeds is a separate question and has its own
+ * chip on the other tab.
+ *
+ * There was a "Retired" chip too, and it is gone with the card that drew it
+ * (the Grok sign-in, GR-C). Its help said "only its transport stays
+ * registered" -- true while SuperGrok was retired-but-wired, and false the
+ * moment the provider was removed, which is exactly the kind of stale claim a
+ * chip nobody draws any more keeps making.
  */
 type ConnectionChipKind =
   | "connected"
@@ -1050,7 +1048,6 @@ type ConnectionChipKind =
   | "running"
   | "off"
   | "notset"
-  | "retired"
   | "unreachable"
   | "slow";
 
@@ -1081,11 +1078,6 @@ const CONNECTION_CHIP: Readonly<
     tone: "quiet",
     label: "Not set up",
     help: "Nothing is stored for this connection yet, so no job can run on it. Set it up to make its models available.",
-  },
-  retired: {
-    tone: "quiet",
-    label: "Retired",
-    help: "Retired by the owner: offered in no picker and in no ladder. Only its transport stays registered, so a stored value can still be read and removed.",
   },
   unreachable: {
     tone: "signin",
@@ -1250,9 +1242,6 @@ function ApiKeyConnections({
     queryKey: ["custom-ai-connections"],
     queryFn: () => getCustomAiConnectionsFn(),
   });
-  /* The Grok sign-in's own status: the retired card appears only when there is
-     something of Grok's to remove, which is what the design draws. */
-  const xai = useQuery({ queryKey: ["xai-oauth-status"], queryFn: () => getXaiOauthStatusFn() });
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: ["custom-ai-connections"] });
@@ -1279,16 +1268,6 @@ function ApiKeyConnections({
     },
     onError: () => onNote("That check did not run."),
   });
-  const disconnectGrok = useMutation({
-    mutationFn: () => disconnectXaiOauthFn(),
-    onSuccess: () => {
-      onNote("The Grok sign-in was removed.");
-      void qc.invalidateQueries({ queryKey: ["xai-oauth-status"] });
-      void qc.invalidateQueries({ queryKey: PROVIDER_AVAILABILITY_QUERY_KEY, refetchType: "all" });
-    },
-    onError: () => onNote("That Grok sign-in could not be removed."),
-  });
-
   if (connections.isPending) return <ListSkeleton rows={2} />;
   if (connections.isError && !connections.data) {
     return (
@@ -1305,7 +1284,6 @@ function ApiKeyConnections({
     );
   }
   const rows = connections.data ?? [];
-  const grokConnected = xai.data?.connected === true;
   return (
     <>
       {rows.map((row) => (
@@ -1355,33 +1333,13 @@ function ApiKeyConnections({
         </ConnectionCard>
       ))}
 
-      {grokConnected ? (
-        <ConnectionCard
-          title="Grok (SuperGrok sign-in)"
-          how="Retired by the owner · never offered in any picker or in Automatic"
-          chip={<ConnectionChip kind="retired" />}
-          actions={
-            <InkButton
-              tone="quiet-danger"
-              disabled={disconnectGrok.isPending}
-              onClick={() => {
-                if (confirm("Remove the Grok sign-in from this desk? This cannot be undone."))
-                  disconnectGrok.mutate();
-              }}
-            >
-              {disconnectGrok.isPending ? "Removing…" : "Remove"}
-            </InkButton>
-          }
-        />
-      ) : null}
-
       {/*
         A provider with nothing configured is a card with one button, not a
         form: an empty form on a page nobody is editing reads as unfinished
         work. The brief draws exactly this card, and "+ Add a connection" above
         is the same door.
       */}
-      {!rows.length && !grokConnected ? (
+      {!rows.length ? (
         <ConnectionCard
           title="No API connection yet"
           how="Nothing is stored on this server"
@@ -1394,8 +1352,7 @@ function ApiKeyConnections({
 }
 
 /**
- * The CLI sign-ins: the same card Server settings draws, plus the retired Grok
- * card beside it.
+ * The CLI sign-ins: the same card Server settings draws.
  *
  * The cards are `li`s because the component that draws them is the one Server
  * settings draws, markup included -- `li[data-provider]` is what
@@ -1459,23 +1416,6 @@ function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
           </ProviderStatusCard>
         ))}
       </ul>
-
-      {/*
-        Grok stays on this screen as a RETIRED card and nothing else: the design
-        draws it with the note, a Retired chip and no button at all, and the
-        owner's standing instruction is that no picker offers it. Nothing here
-        offers the sign-in either. The one Grok form that exists lives on Server
-        settings, which the group's own note links to.
-
-        Drawn whether or not a Grok sign-in exists, because "retired" is a fact
-        about the transport, not about this desk's copy of it -- and the card
-        claims nothing that depends on one.
-      */}
-      <ConnectionCard
-        title="Grok (SuperGrok sign-in)"
-        how="Retired from pickers · the sign-in transport stays registered"
-        chip={<ConnectionChip kind="retired" />}
-      />
     </>
   );
 }

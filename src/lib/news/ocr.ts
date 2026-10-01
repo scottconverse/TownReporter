@@ -427,13 +427,6 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
         "the chosen local model cannot read images — pick a vision model (marked · vision in the picker).",
     };
   }
-  if (entry.kind === "xai-oauth") {
-    return {
-      needsOcr: true,
-      reason:
-        "Grok (SuperGrok) is a text-only connection in TownReporter and cannot read scan images. Choose Anthropic, Codex, Claude Code, or a local model marked · vision for OCR.",
-    };
-  }
   return { needsOcr: true, reason: `${entry.label} cannot read images.` };
 }
 
@@ -445,7 +438,8 @@ function samePlan(a: Plan, b: Plan): boolean {
 /** Resolve fallback transports only after a page's selected reader has a
  * classified technical failure. Every returned plan is vision-capable by
  * construction: named Claude/Codex readers, an Anthropic image model, or a
- * discovered local model explicitly marked vision. Grok never enters this list. */
+ * discovered local model explicitly marked vision. A text-only provider never
+ * enters this list -- that is what the refusal above states. */
 async function resolveVisionFallbackPlans(opts: OcrOptions, primary?: Plan): Promise<Plan[]> {
   const candidates: Plan[] = [];
   const adapters = opts.adapters as OcrAdapters | undefined;
