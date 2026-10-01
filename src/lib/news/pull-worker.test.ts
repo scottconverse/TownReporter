@@ -137,6 +137,54 @@ describe("durable Pull pipeline", () => {
     );
   });
 
+  it("stops at the query boundary when the Cancel lands after the first search", async () => {
+    /*
+      B8B2. The query loop asks `assertNotCancelled` at the top of every pass,
+      and until now nothing in this file reached that boundary: the claim case
+      below is answered before the loop starts, and every other case either
+      fails the search or has its queries already completed. Delete the
+      `await deps.assertNotCancelled?.()` from the loop and the whole file stays
+      green -- which is the hole this case fills.
+
+      A search Pull spends one search per question, so the boundary that matters
+      is BETWEEN two of them: an editor who pressed Cancel while the first
+      answer was being written must not pay for the second search.
+    */
+    const searched: string[] = [];
+    const statuses: string[] = [];
+    await assert.rejects(
+      runPullPipeline(receipt({ queries: ["first question", "second question"], queryIndex: 0 }), {
+        search: async (query) => {
+          searched.push(query);
+          return {
+            state: "SEARCH_SUCCESS_ZERO_RESULTS",
+            hits: [],
+            provider: "fixture",
+            lineage: [],
+          };
+        },
+        ingest: async () => assert.fail("no page should be opened for a cancelled pull"),
+        stopRequested: async () => false,
+        // The editor's press lands while the first search is being saved.
+        assertNotCancelled: async () => {
+          if (searched.length >= 1) throw new Error("Cancelled by the editor");
+        },
+        saveDocument: async () => undefined,
+        saveReceipt: async (next) => {
+          statuses.push(next.status);
+        },
+      }),
+      /Cancelled by the editor/,
+      "the desk's own reason leaves the pipeline rather than becoming a failure line",
+    );
+    assert.deepEqual(searched, ["first question"], "the second search was never made");
+    assert.equal(
+      statuses.includes("completed"),
+      false,
+      "and nothing says Done for a pull the editor stopped",
+    );
+  });
+
   it("continues from checkpoint indexes without repeating completed documents", async () => {
     const prior = {
       title: "Already saved",
