@@ -822,8 +822,16 @@ function DeskHome() {
       void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
     },
+    /*
+      B7R, item 4: the same tone rule as the refusal above. A draft that never
+      started is not a finished press, and it was announced in the accent that
+      means it was.
+    */
     onError: (err) =>
-      announceToDesk(err instanceof Error ? err.message : "That draft did not start."),
+      announceToDesk(
+        err instanceof Error ? err.message : "That draft did not start.",
+        "err",
+      ),
   });
 
   /*

@@ -219,7 +219,13 @@ export function DailyScanSettings() {
         text: `${success} The saved schedule changed elsewhere; your unsaved edits were retained. Reload the latest settings before saving.`,
         reload: true,
       });
-      announceToDesk(`${success} Saved schedule changed elsewhere.`);
+      /*
+        B7R, item 4: this branch is the one `setFeedback` above already marks
+        `kind: "error"` -- the schedule on the server moved under the editor's
+        unsaved edits and the press did not do what they asked. It was the only
+        failure in this file announced in the accent that means success.
+      */
+      announceToDesk(`${success} Saved schedule changed elsewhere.`, "err");
       return;
     }
     receivePolicy(result, success);

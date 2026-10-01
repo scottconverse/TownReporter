@@ -190,12 +190,24 @@ export function useDeskAction<Result>(copy: DeskActionCopy<Result>): DeskAction<
 export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variables> & {
   mutationFn: (variables: Variables) => Promise<Data>;
   /**
-   * The press's own follow-up: the invalidations, the close, the navigate. It
-   * runs after the done toast, so a screen that is about to change says what
-   * happened before it changes. It does NOT run when the answer refused
-   * (`{ok:false}`): a refused press changed nothing, and a follow-up that
-   * assumed otherwise would be the desk inventing the outcome it just reported
-   * the absence of.
+   * The press's own follow-up: the invalidations, the close, the navigate.
+   *
+   * B7R, item 3. It is AWAITED, so the whole of it is part of the press: the
+   * button stays pending and the done toast is not raised until it settles.
+   * It used to be fired and forgotten (`void after(...)`), which let the press
+   * settle while the follow-up was still running -- the row read "Accept"
+   * again while the Sources screen was still filing the source under its
+   * sections -- and turned a follow-up that threw into an unhandled promise
+   * nobody reported. Success is now announced when the action is over, not
+   * when the first half of it is.
+   *
+   * A rejection here is reported through the same error toast as a failed
+   * call, carrying the real reason, because from the editor's side it is the
+   * same thing: the press did not finish.
+   *
+   * It does NOT run when the answer refused (`{ok:false}`): a refused press
+   * changed nothing, and a follow-up that assumed otherwise would be the desk
+   * inventing the outcome it just reported the absence of.
    */
   after?: (data: Data, variables: Variables) => void | Promise<void>;
   /**
@@ -233,18 +245,36 @@ export function useDeskMutation<Data, Variables>(
 
   return useMutation<Data, Error, Variables>({
     mutationFn: (variables: Variables) => optionsRef.current.mutationFn(variables),
-    onSuccess: (data: Data, variables: Variables) => {
+    /*
+      ASYNC ON PURPOSE, and react-query is what makes it work: it awaits
+      `onSuccess` before it dispatches "success", so `isPending` stays true for
+      the whole of the follow-up. Everything the editor reads as "this press is
+      still running" -- the disabled button, the pending label, the awaited
+      `mutateAsync` -- covers the follow-up too, and the done toast is raised
+      only once the action is actually over.
+
+      A follow-up that fails is caught HERE rather than rethrown: react-query
+      answers a rejection from `onSuccess` by calling `onError`, which would
+      report the same failure a second time. One press, one sentence.
+    */
+    onSuccess: async (data: Data, variables: Variables) => {
       const refusal = deskAnswerFailure(data);
       if (refusal) {
         if (!optionsRef.current.muted?.())
           deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
         return;
       }
+      try {
+        await optionsRef.current.after?.(data, variables);
+      } catch (error) {
+        if (!optionsRef.current.muted?.())
+          deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
+        return;
+      }
       if (!optionsRef.current.muted?.()) {
         const { message, undo } = deskActionDone(data, variables, optionsRef.current);
         if (message) deskToast(message, { tone: "ok", undo });
       }
-      void optionsRef.current.after?.(data, variables);
     },
     onError: (error: Error) => {
       if (optionsRef.current.muted?.()) return;

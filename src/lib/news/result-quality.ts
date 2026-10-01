@@ -152,6 +152,20 @@ export type CapturedPage = {
 const USABLE_OUTCOMES = new Set(["fetched", "unchanged", "changed"]);
 
 /**
+ * How much of a captured page the relevance test reads.
+ *
+ * Unit B7R, item 2. The test looked at the title, the host and the address
+ * only, so a real record behind an opaque address was refused for saying
+ * nothing about the lead: a council packet titled "Agenda Packet" at
+ * `longmontcolorado.gov/sites/default/files/packet.pdf` shares no term with
+ * the lead in any of those three, and its own captured text names the lead in
+ * the first line. The capture the desk already made is the evidence, and this
+ * is how much of it counts -- bounded because a dictionary or courier page is
+ * long and its body would otherwise drown the test in incidental words.
+ */
+const RELEVANCE_SAMPLE = 20_000;
+
+/**
  * Why this captured page may not be listed as a source on a lead or a draft,
  * or `null` if it may.
  *
@@ -173,7 +187,11 @@ export function leadSourceRefusalReason(page: CapturedPage, leadWords: string): 
     return "the capture has no readable text";
   const lead = new Set(queryTokens(leadWords));
   if (!lead.size) return null;
-  const page_ = new Set(queryTokens(`${page.title ?? ""} ${hostOf(page.url)} ${page.url}`));
+  const page_ = new Set(
+    queryTokens(
+      `${page.title ?? ""} ${hostOf(page.url)} ${page.url} ${(page.text ?? "").slice(0, RELEVANCE_SAMPLE)}`,
+    ),
+  );
   for (const token of lead) if (page_.has(token)) return null;
   return "nothing in this page is about the lead";
 }

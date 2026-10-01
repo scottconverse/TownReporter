@@ -807,16 +807,23 @@ function StoryPage() {
       }),
     onSuccess: async (res) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      /*
+        B7R, item 4: two answers, two tones. A recorded acceptance is a finished
+        press and takes the accent; the refusal is a failure and takes the
+        danger edge, so the reason is never painted as the next step.
+      */
       announceToDesk(
         res.ok
           ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
           : res.error,
+        res.ok ? "ok" : "err",
       );
     },
     onError: (err) => {
       announceToDesk(
         editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
           "Could not record that acceptance.",
+        "err",
       );
     },
   });

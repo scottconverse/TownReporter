@@ -231,7 +231,9 @@ function ImportPage() {
     onSuccess: (result) => {
       if (!result.ok) {
         setNotice({ text: result.error, kind: "error" });
-        announceToDesk(result.error);
+        // B7R, item 4: a refusal is not a finished press, and the notice it
+        // sits beside is already `kind: "error"`.
+        announceToDesk(result.error, "err");
         return;
       }
       setDone({
