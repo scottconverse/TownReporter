@@ -1,6 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { patchLeadsData, shiftTabCounts, statusIn } from "./desk-lead-status.ts";
+import { QueryClient } from "@tanstack/react-query";
+import {
+  leadStatusOptimistic,
+  moveLeadStatusNow,
+  patchLeadsData,
+  shiftTabCounts,
+  statusIn,
+} from "./desk-lead-status.ts";
 
 /**
  * The optimistic row, as a pure rule (unit FB6, item 2).
@@ -173,5 +180,67 @@ describe("statusIn", () => {
     assert.equal(statusIn(page([{ id: 4, status: "killed" }], {}), 4), "killed");
     assert.equal(statusIn([{ id: 4, status: "held" }], 5), undefined);
     assert.equal(statusIn({}, 4), undefined);
+  });
+});
+
+/*
+  N6 of the batch-7 re-audit: the press must not be UNDONE by a fetch that was
+  already on its way when the editor pressed.
+
+  The optimistic write patches the caches through `getQueriesData`/`setQueryData`
+  and never told React Query to stop the `["leads"]` fetch that started a moment
+  earlier. That fetch carries the row's OLD status, lands after the press, and
+  writes it back over the top -- the row flips Held and flips back until the
+  post-press invalidation lands. That is the same "line going back and forth"
+  the owner opened this unit about, one round trip later.
+
+  These two cases run against a REAL query client and a fetch held open on
+  purpose, which is the only way to see it: the rule is not in the arithmetic
+  (`patchLeadsData` above) but in the order the cache is touched.
+
+  THE MUTATION THAT MATTERS: delete the `cancelQueries` call from
+  `leadStatusOptimistic` and "an in-flight refetch cannot redraw the old status"
+  fails, with the row reading `new` again.
+*/
+describe("an in-flight refetch cannot undo the press", () => {
+  /** A client whose fetch for `["leads"]` we can release by hand. */
+  function heldFetch(status: string) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rows = [{ id: 1, headline: "A", status }];
+    qc.setQueryData(["leads"], rows);
+    let release: () => void = () => {};
+    const inFlight = qc
+      .fetchQuery({
+        queryKey: ["leads"],
+        queryFn: () => new Promise((resolve) => {
+          release = () => resolve(rows);
+        }),
+      })
+      .catch(() => undefined);
+    return { qc, release: () => release(), inFlight };
+  }
+
+  it("cancels it before an optimistic Hold moves the row", async () => {
+    const { qc, release, inFlight } = heldFetch("new");
+    await leadStatusOptimistic(qc).optimistic({ id: 1, status: "held" });
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "held");
+    release();
+    await inFlight;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(
+      statusIn(qc.getQueryData(["leads"]), 1),
+      "held",
+      "the fetch that was already in flight redrew the old status",
+    );
+  });
+
+  it("cancels it in the dialog's own confirmation write too", async () => {
+    const { qc, release, inFlight } = heldFetch("new");
+    moveLeadStatusNow(qc, 1, "killed");
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "killed");
+    release();
+    await inFlight;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "killed");
   });
 });

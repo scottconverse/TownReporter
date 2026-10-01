@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { isTypingTarget, movedIndex, TRIAGE_LEGEND, triageAction } from "./desk-triage.ts";
+import { parseHTML } from "linkedom";
+import {
+  isInteractiveTarget,
+  isTypingTarget,
+  movedIndex,
+  TRIAGE_LEGEND,
+  triageAction,
+  triageOverlayOpen,
+} from "./desk-triage.ts";
 
 /**
  * The triage keys, as one rule (unit FB6, item 4).
@@ -174,5 +182,86 @@ describe("the legend bar's words", () => {
         );
       }
     }
+  });
+});
+
+/*
+  N4 of the batch-7 re-audit: the keys must stand down for a control that
+  already owns the keystroke, and for a surface that already owns the page.
+
+  `isTypingTarget` stood down for INPUT, TEXTAREA, SELECT and contenteditable --
+  the four places an editor TYPES. It did not stand down for the places an
+  editor ACTIVATES: the Queue's Hold/Kill dialogs, the bulk strip, the pager,
+  "More", and every link on both lists. A keyboard user who tabbed to one of
+  them and pressed Enter had the activation cancelled and was navigated to the
+  cursor lead's story instead; with a dialog open, a stray X opened the Kill
+  dialog behind it. Both were run in the audit's probe.
+
+  The rule is the same one the desks' own ⌘S follows (`deskShouldSave`): a
+  keystroke belongs to the thing the editor is standing on. Here it is asked in
+  two halves -- is the TARGET a control, and is a DIALOG over the list -- and
+  both are pure, so both are testable without a browser.
+*/
+function element(html: string) {
+  const { document } = parseHTML(`<!doctype html><html><body>${html}</body></html>`);
+  return (document.body.firstElementChild as unknown as HTMLElement) ?? null;
+}
+
+function page(html: string) {
+  return parseHTML(`<!doctype html><html><body>${html}</body></html>`).document;
+}
+
+describe("N4 — the keys stand down on a control the editor is standing on", () => {
+  it("reads a button, a link and a summary as controls", () => {
+    for (const html of [
+      "<button>Hold</button>",
+      "<a href='/desk/queue'>Open</a>",
+      "<summary>More</summary>",
+      "<div role='button'>Hold</div>",
+      "<div role='link'>Open</div>",
+      "<div contenteditable='true'>edit</div>",
+    ]) {
+      assert.equal(isInteractiveTarget(element(html)), true, `not seen as a control: ${html}`);
+    }
+    assert.equal(isInteractiveTarget(element("<div>a row</div>")), false);
+    assert.equal(isInteractiveTarget(null), false);
+  });
+
+  it("keeps the typing fields of the original rule", () => {
+    for (const html of ["<input>", "<textarea></textarea>", "<select></select>"]) {
+      assert.equal(isInteractiveTarget(element(html)), true, html);
+    }
+  });
+
+  it("does not claim a key pressed on a control, Enter above all", () => {
+    for (const html of ["<button>Hold</button>", "<a href='/x'>Open</a>", "<summary>More</summary>"]) {
+      const target = element(html);
+      assert.equal(triageAction(key("Enter", { target })), null, `Enter was claimed on ${html}`);
+      assert.equal(triageAction(key("x", { target })), null, `X was claimed on ${html}`);
+      assert.equal(triageAction(key("j", { target })), null, `J was claimed on ${html}`);
+    }
+  });
+
+  it("stands down entirely while a dialog or an open menu is over the list", () => {
+    for (const html of [
+      "<dialog open><button>Confirm</button></dialog>",
+      "<div role='dialog' data-state='open'><button>Confirm</button></div>",
+      "<details open><summary>More</summary><button>Kill</button></details>",
+    ]) {
+      assert.equal(triageOverlayOpen(page(html)), true, `not seen as standing over the list: ${html}`);
+      assert.equal(triageAction(key("j"), true), null, "a move was claimed with a dialog open");
+      assert.equal(triageAction(key("Enter"), true), null, "Enter was claimed with a dialog open");
+      assert.equal(triageAction(key("x"), true), null, "Kill was opened behind a dialog");
+    }
+  });
+
+  it("stays out of the way of a shut menu and an empty page", () => {
+    assert.equal(triageOverlayOpen(page("<details><summary>More</summary></details>")), false);
+    assert.equal(triageOverlayOpen(page("<dialog>Confirm</dialog>")), false);
+    assert.equal(triageOverlayOpen(page("<div role='dialog' data-state='closed'></div>")), false);
+    assert.equal(triageOverlayOpen(page("")), false);
+    assert.equal(triageOverlayOpen(null), false);
+    // ... and with nothing over it, the list still works.
+    assert.deepEqual(triageAction(key("j"), false), { kind: "move", delta: 1 });
   });
 });

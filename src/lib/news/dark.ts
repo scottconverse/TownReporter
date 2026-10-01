@@ -56,9 +56,12 @@ import {
 } from "./investigate.ts";
 import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
 import {
+  groundedHeadline,
+  markedSpecifics,
   markUngroundedSpecifics,
   placeCorpus,
   prepareCorpus,
+  stripUngroundedNotes,
   type GroundingCorpus,
 } from "./dark-specific-grounding.ts";
 import { readableCapture } from "./html-text.ts";
@@ -1720,13 +1723,28 @@ export async function synthesizeSignals(
     The pass that files signals is the other door into durable state -- it
     writes `dark_signals` and, through `summary`, `dark_runs.summary` -- and it
     is the door the walkthrough's "The facility at 1749 Main Street
-    transitioned from a prior operator" came through. The corpus is the pack
-    this model was handed: the file's own captures and the lead it was opened
-    from (`buildDarkSynthesisPack`). A specific that is nowhere in it wears the
-    marker; nothing is deleted, because the editor still needs to see what the
-    model was reaching for. See dark-specific-grounding.ts.
+    transitioned from a prior operator" came through. A specific that is
+    nowhere in the file wears the marker; nothing is deleted, because the
+    editor still needs to see what the model was reaching for. See
+    dark-specific-grounding.ts.
+
+    N2 of the batch-7 re-audit: the corpus is the FILE -- the captures and the
+    lead it was opened from -- and NOT the pack this model was handed. The pack
+    is the model's own earlier notes: `buildDarkSynthesisPack` prints its
+    FRONTIER, RELATIONSHIPS, CLAIMS, HYPOTHESES and ANOMALIES sections, every
+    one of them written by the model on an earlier pass. Handed the pack, this
+    pass could find "1749 Main Street" in a RELATIONSHIPS line and call its own
+    invention grounded, one hop after `groundPlan` refused to spend a search on
+    it. This is the same narrowing `buildBrief` took for the same reason, and it
+    reads the same corpus through the same reader.
+
+    A failed read falls back to the paper's own place and nothing else, and
+    never to the pack: a narrower corpus marks more, never less, and
+    over-marking is the honest error here.
   */
-  const corpus = prepareCorpus(pack);
+  const corpus = await groundingCorpus(investigationId, newsroomId, place).catch(() =>
+    prepareCorpus("", placeCorpus(place)),
+  );
   const summary = markUngroundedSpecifics(
     preserveBoundedAbsenceLanguage(parsed.editor_summary, pack),
     corpus,
@@ -3121,6 +3139,27 @@ export async function performDarkRound(job: DeskJob) {
 }
 
 /**
+ * The file's own title, marker-stripped: the grounded subject a lead falls back
+ * to when its signal's name leaves nothing to headline.
+ *
+ * Read only when it is needed -- a name that survives the strip is the headline
+ * -- and read through `groundedHeadline` rather than used raw, because the one
+ * thing that must never reach `leads.headline` is the Dark Desk's marker
+ * (N3 of the batch-7 re-audit).
+ */
+async function investigationHeadlineFor(
+  sql: Sql,
+  investigationId: number,
+  newsroomId: number,
+): Promise<string> {
+  const rows = await sql<{ title: string }>`
+    select title from investigations
+    where id = ${investigationId} and newsroom_id = ${newsroomId} limit 1
+  `.catch(() => []);
+  return groundedHeadline(rows[0]?.title ?? "");
+}
+
+/**
  * Send ONE signal to the working queue as a story lead.
  *
  * Protocol and triage state travel with the lead, but neither can block the
@@ -3180,40 +3219,90 @@ export async function sendDarkSignalToQueueFor(
     ).slice(0, 12),
   );
   /*
+    N3 of the batch-7 re-audit: THE MARKER NEVER LEAVES THE DARK DESK.
+
+    Every prose field of this signal wears the marker where the model named
+    something no capture carries -- `name` since M1, and the rest since DD1 --
+    and every one of them is read by the Queue, the Draft button, the story page
+    and the duplicate check. The marker is a note addressed to an editor
+    reading the Dark Desk; on the working queue it is noise that survives into
+    a headline and a draft. So the specifics come out here, and what they said
+    is handed to the editor as a sentence in the notes instead -- the same
+    bargain DD1 strikes everywhere else: nothing is deleted, what the model was
+    reaching for is still readable, and it is never mistaken for fact.
+  */
+  const signalFields = [
+    sig.name,
+    sig.observation,
+    sig.linkage_map,
+    sig.alternatives,
+    sig.pathway,
+    sig.counter_narrative,
+    sig.gate_missing_context ?? "",
+  ];
+  const unconfirmed = [
+    ...new Set(signalFields.flatMap((field) => markedSpecifics(String(field ?? "")))),
+  ];
+  /*
+    The two LONG fields of the notes, stripped before they are cut to length
+    rather than after: a slice that lands inside a marker leaves "(not in a",
+    which no stripper can pair with the specific it belonged to -- the same
+    trap the frontier labels fall into (see `UNRESOLVED_PROVENANCE_KIND`).
+  */
+  const opposing = stripUngroundedNotes(sig.counter_narrative ?? "").slice(0, 800);
+  const missing = stripUngroundedNotes(sig.gate_missing_context ?? "").slice(0, 800);
+  /*
     `why` is ASSEMBLED from the signal, and every part of it is the model's --
     the observation, the linkage map, the alternatives, the pathway, the
     opposing account. The guard goes on the joined sentence, not on each clause
     on the way in, so a field added to this list by a later author is covered
-    without their having to know this comment exists.
+    without their having to know this comment exists. The `strip` is N3's half
+    of it: the same joined sentence, with the Dark Desk's markers and the
+    specifics they mark taken back out on the way to the queue.
   */
   const why = storableText(
-    [
-      `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
-      `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
-      `Stage: ${words.chip}. ${words.sentence}`,
-      `Editor triage: ${newsworthinessWords(news)}`,
-      verified ? "" : "Research protocol incomplete. This is an editor lead, not a factual finding.",
-      `Opposing account: ${(sig.counter_narrative || "Not established.").slice(0, 800)}`,
-      `Missing context: ${(sig.gate_missing_context || "Not assessed.").slice(0, 800)}`,
-      sig.observation,
-      `Linkage: ${sig.linkage_map}`,
-      `Alternatives: ${sig.alternatives}`,
-      `Pathway: ${sig.pathway}`,
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
+    stripUngroundedNotes(
+      [
+        `DARK DESK investigation notes. Claim kinds in the evidence. Publication is a separate human action.`,
+        `Posture: ${sig.posture}. Type: ${sig.signal_type}. Strength ${sig.strength} / confidence ${sig.confidence}.`,
+        `Stage: ${words.chip}. ${words.sentence}`,
+        `Editor triage: ${newsworthinessWords(news)}`,
+        verified ? "" : "Research protocol incomplete. This is an editor lead, not a factual finding.",
+        unconfirmed.length
+          ? `Unconfirmed, not in any capture: ${unconfirmed.join("; ")}. Nothing here carries it yet — check it before it goes into a story.`
+          : "",
+        `Opposing account: ${opposing || "Not established."}`,
+        `Missing context: ${missing || "Not assessed."}`,
+        sig.observation,
+        `Linkage: ${sig.linkage_map}`,
+        `Alternatives: ${sig.alternatives}`,
+        `Pathway: ${sig.pathway}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    ),
   ).slice(0, 4000);
+  /*
+    The headline, from the signal's name with the marker and the ungrounded
+    specific taken out. A name that was only ever the invented address leaves
+    nothing to headline, and the file's own title -- the lead the Dark Desk was
+    opened from, and the one string here the editor wrote -- is the grounded
+    subject to fall back to.
+  */
+  const headline =
+    groundedHeadline(sig.name) ||
+    (sig.investigation_id ? await investigationHeadlineFor(sql, sig.investigation_id, newsroomId) : "");
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id)
     values (
       ${userId},
       ${newsroomId},
-      ${storableText(sig.name).slice(0, 240)},
+      ${storableText(headline || "Untitled Dark Desk signal").slice(0, 240)},
       ${why},
       'council',
       'new',
       ${urls},
-      ${storableText(sig.observation).slice(0, 4000)},
+      ${storableText(stripUngroundedNotes(sig.observation)).slice(0, 4000)},
       ${Math.min(20, sig.strength)},
       ${sig.investigation_id}
     )
@@ -3336,12 +3425,40 @@ export async function queueInvestigationFor(
       and status in ('open', 'reopened', 'deferred') and trim(next_steps) <> ''
     order by priority desc, id asc limit 3
   `;
+  /*
+    N3 of the batch-7 re-audit: THE MARKER NEVER LEAVES THE DARK DESK.
+
+    The single-signal handoff is where the marker was caught reaching
+    `leads.headline`, but this path carries it too: the signal names, the
+    next-step lines and the file's own summary are all model prose written with
+    the marker when the model named something no capture carries, and all of
+    them are stitched into the lead's notes. Every piece is taken off its
+    markers BEFORE it is shortened -- a shortened marker is half a marker
+    ("(not in a"), which no stripper downstream can pair with the specific it
+    belonged to -- and what the specifics said is handed over as a sentence the
+    editor can read, rather than deleted.
+  */
+  const plain = (value: string) => stripUngroundedNotes(String(value ?? ""));
+  const unconfirmed = [
+    ...new Set([
+      ...signalNotes.flatMap((signal) => markedSpecifics(signal.name)),
+      ...signalNotes.flatMap((signal) => markedSpecifics(signal.counter_narrative)),
+      ...signalNotes.flatMap((signal) => markedSpecifics(signal.gate_missing_context ?? "")),
+      ...signalNotes.flatMap((signal) => markedSpecifics(signal.what_would_kill)),
+      ...frontier.flatMap((item) => markedSpecifics(item.next_steps)),
+      ...markedSpecifics(briefNext),
+      ...markedSpecifics(inv[0].summary),
+    ]),
+  ];
   const nextSteps = [briefNext, ...frontier.map((item) => item.next_steps)]
     .filter(Boolean)
-    .map((step) => shorten(step, 300));
+    .map((step) => shorten(plain(step), 300));
   const handoff = [
     "DARK DESK notes. Publication is a separate human action.",
     `${verifiedCount} of ${total} filed signals completed the research protocol; other signals remain unverified. This is a lead handoff, not publication.`,
+    unconfirmed.length
+      ? `Unconfirmed, not in any capture: ${unconfirmed.join("; ")}. Nothing here carries it yet — check it before it goes into a story.`
+      : "",
     nextSteps.length
       ? `Next steps (not established facts): ${shorten([...new Set(nextSteps)].join("\n"), 600)}\nOpen investigation for all follow-ups.`
       : "",
@@ -3350,10 +3467,10 @@ export async function queueInvestigationFor(
       : "",
     ...signalNotes.map((signal) =>
       [
-        `${shorten(signal.name, 80)} — ${signal.verification_status === "verified" ? "verified" : "unverified"}`,
-        `Opposing account: ${shorten(signal.counter_narrative || "Not established.", 320)}`,
-        `Missing context: ${shorten(signal.gate_missing_context || "Not assessed.", 320)}`,
-        `What would disprove it: ${shorten(signal.what_would_kill || "Not established.", 160)}`,
+        `${shorten(plain(signal.name), 80)} — ${signal.verification_status === "verified" ? "verified" : "unverified"}`,
+        `Opposing account: ${shorten(plain(signal.counter_narrative) || "Not established.", 320)}`,
+        `Missing context: ${shorten(plain(signal.gate_missing_context ?? "") || "Not assessed.", 320)}`,
+        `What would disprove it: ${shorten(plain(signal.what_would_kill) || "Not established.", 160)}`,
       ].join("\n"),
     ),
   ]
@@ -3368,15 +3485,17 @@ export async function queueInvestigationFor(
     the model's: `topicFromText` answers with a key from the newsroom's own
     section list.
   */
-  const evidence = storableText(
-    `${handoff}\n\nFile summary: ${shorten(inv[0].summary, Math.max(0, 4000 - handoff.length - 16))}`,
+  const evidence = stripUngroundedNotes(
+    storableText(
+      `${handoff}\n\nFile summary: ${shorten(plain(inv[0].summary), Math.max(0, 4000 - handoff.length - 16))}`,
+    ),
   );
   const created = await sql<{ id: number }>`
     insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
     values (
       ${userId},
       ${newsroomId},
-      ${storableText(inv[0].title).slice(0, 240)},
+      ${storableText(stripUngroundedNotes(inv[0].title)).slice(0, 240)},
       ${evidence},
       ${topic},
       'new',

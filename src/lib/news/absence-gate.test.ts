@@ -638,4 +638,39 @@ describe("splitSentences: a country abbreviation, and where the name ends", () =
       assert.equal(splitSentences(text).join(""), text);
     }
   });
+
+  /*
+    N5 of the batch-7 re-audit, the LOW the L6 fix left behind. "U.S." continues
+    into a single capitalised word only when that word can only be part of a
+    phrase -- "of", in "Department of Agriculture" -- so `U.S. Bank said it
+    would close.` split after "U.S.", and an absence rewrite would have replaced
+    half of a sentence about a bank. These are the names a US abbreviation
+    really introduces on a civic beat, and each one is a single capitalised
+    word: the general rule cannot tell them from a new sentence's subject, so
+    they are named.
+  */
+  it("keeps a known 'U.S. <Name>' company or agency whole", () => {
+    for (const text of [
+      "U.S. Bank said it would close the branch.",
+      "He sued U.S. Steel over it.",
+      "A U.S. Cellular tower stands there.",
+      "The U.S. Navy paid for it.",
+      "U.S. Census figures put the town at 8,600.",
+      "U.S. Postal Service workers said nothing.",
+    ]) {
+      assert.equal(splitSentences(text).length, 1, `split a name in two: ${text}`);
+      assert.equal(splitSentences(text).join(""), text);
+    }
+  });
+
+  it("still splits when the word after 'U.S.' cannot continue a name", () => {
+    // The names above are a list, not a licence: any other single capitalised
+    // word is still the subject of a new sentence.
+    for (const text of [
+      "He moved to the U.S. Colorado officials said nothing.",
+      "The U.S. closed the office. Bank staff left.",
+    ]) {
+      assert.equal(splitSentences(text).length, 2, `merged two sentences: ${text}`);
+    }
+  });
 });

@@ -154,6 +154,20 @@ export function statusIn(data: unknown, id: number): string | undefined {
  * the check.
  */
 export function moveLeadStatusNow(qc: QueryClient, id: number, status: LeadStatusMove): void {
+  /*
+    N6 of the batch-7 re-audit. A `["leads"]` fetch that started before this
+    write lands after it carrying the row's OLD status, and writes it back over
+    the top -- the row flips and flips back until something corrects it again.
+    The invalidation that follows this call does not save it: React Query does
+    not start a second fetch for a key that already has one in flight.
+
+    `cancelQueries` is called first and its promise is deliberately dropped:
+    the cancellation itself -- the state revert and the retryer's abort -- is
+    synchronous, and the promise only reports that the sweep is over. Awaiting
+    it here would put the row's move a microtask behind the dialog that
+    confirmed it, which is the flicker this module exists to remove.
+  */
+  void qc.cancelQueries({ queryKey: LEADS_KEY });
   for (const [key, data] of qc.getQueriesData({ queryKey: LEADS_KEY })) {
     const previous = statusIn(data, id);
     if (previous === undefined || previous === status) continue;
@@ -162,11 +176,26 @@ export function moveLeadStatusNow(qc: QueryClient, id: number, status: LeadStatu
 }
 
 export function leadStatusOptimistic(qc: QueryClient): {
-  optimistic: (input: { id: number; status: LeadStatusMove }) => LeadStatusUndo;
+  optimistic: (input: { id: number; status: LeadStatusMove }) => Promise<LeadStatusUndo>;
   rollback: (context: unknown, input?: { id: number; status: LeadStatusMove }) => void;
 } {
   return {
-    optimistic: ({ id, status }) => {
+    /*
+      N6 of the batch-7 re-audit, and the React Query optimistic-update pattern
+      it names: CANCEL THE IN-FLIGHT READS FIRST. A `["leads"]` fetch that
+      started before the press resolves after it carrying the row's old status
+      and writes it straight back over the optimistic one -- the row flips Held
+      and flips back, which is the "line going back and forth" the owner
+      reported, one round trip later. The post-press invalidation does not
+      repair it either: React Query will not start a second fetch for a key
+      that already has one in flight, so the stale answer IS the answer.
+
+      This is `async` on purpose, and `onMutate` awaits it (`desk-action.ts`),
+      so the cancellation is finished before the patch below and the caller's
+      undo handle is the value, not a promise of it.
+    */
+    optimistic: async ({ id, status }) => {
+      await qc.cancelQueries({ queryKey: LEADS_KEY });
       const moves: LeadStatusUndo["moves"] = [];
       for (const [key, data] of qc.getQueriesData({ queryKey: LEADS_KEY })) {
         const previous = statusIn(data, id);
