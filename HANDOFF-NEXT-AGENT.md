@@ -6,7 +6,7 @@ Reviewed baseline: `main` after PR #148 (`3c0bc37c`), 68 commits after the v0.6.
 
 Owner decision, 2026-09-29: retain the bounded automatic routine-notice publication exception; ordinary stories still require editor Publish. This records policy, not evidence that the routine-notice path is running in production.
 
-The 64-entry gap ledger named in [the 0.6.81 release guide](docs/releases/0.6.81.md) as `design/SPEC-GAPS-0681.md` is unavailable in this checkout. Its entries and dispositions are not reconstructed here; an external copy may exist.
+The 64-entry gap ledger named in [the 0.6.81 release guide](docs/releases/0.6.81.md) as `design/SPEC-GAPS-0681.md` was recovered on 2026-10-01 and is committed as [docs/design/SPEC-GAPS-0681.md](docs/design/SPEC-GAPS-0681.md). None of its entries is a bug: each is a place where the drawing was silent and the build made a recorded choice, and each waits for an owner ruling.
 
 ## Archived release snapshot — 0.6.51 (2026-09-16)
 
