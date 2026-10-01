@@ -1594,6 +1594,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     reopened. `force` is for the boundary writes -- the start of the pass and
     the start of a batch -- where the whole point is that the row changes THEN,
     not up to a second later.
+
+    AND ON THE CLAIM, like every other write to this row. A scan's worker is
+    fenced by `desk_jobs.claim_token` -- `lockManualScanClaim` is what the
+    receipt and the failure paths go through -- because a job whose lease was
+    reclaimed by a newer worker must not settle the run that worker now owns.
+    These counters are a write to that same row, and without the fence a
+    superseded worker keeps moving them under the replacement: the Scan page
+    counts down as often as up, on a run two processes are fetching for.
+
+    The fence is on the WRITE, not on the value, so a count this worker wrote
+    while it still held the claim stays on the row -- it was true when it was
+    written. What it must not do is write again after losing the claim.
+
+    A run with no claim token -- the older rows, and anything a test seeds --
+    is unfenced here, exactly as before.
   */
   const writeLiveRunRow = async (force = false) => {
     const at = Date.now();
@@ -1608,6 +1623,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           sources_analyzed = ${failureReceipt.sourcesAnalyzed},
           model_batches_used = ${failureReceipt.modelBatchesUsed}
       where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+        and (
+          ${job.claim_token ?? null}::text is null
+          or exists (
+            select 1 from desk_jobs
+            where id = ${job.id} and newsroom_id = ${job.newsroom_id} and kind = 'scan'
+              and status = 'running' and claim_token = ${job.claim_token}
+          )
+        )
     `.catch(() => undefined);
   };
   const noteSourceProgress = async () => {

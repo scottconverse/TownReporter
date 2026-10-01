@@ -287,6 +287,25 @@ test("a model switch on the way past is reported, not hidden", () => {
 });
 
 /*
+  ... AND ONCE, ON THE SURFACE THE EDITOR IS READING.
+
+  FB1 unit 3 made the rail's Running box a real compact JobCard, which brought
+  the durable "Model switch: ..." sentence into the nav as well as the card on
+  the page under it. An editor on the story workspace then read the same
+  sentence twice at the same moment -- which is what
+  scripts/story-quota-failover-e2e.mjs's `getByText` met as a strict-mode
+  violation. `failoverNote={false}` is the rail saying it is the summary.
+*/
+test("the rail's summary draws no model-switch line, and the page's card still does", () => {
+  const switched = job({ failoverNote: "Codex hit its usage limit" });
+  assert.doesNotMatch(render({ job: switched, compact: true, failoverNote: false }), /Model switch/);
+  // The rest of the compact card is untouched: suppressing the sentence must
+  // not be done by suppressing the card.
+  assert.match(render({ job: switched, compact: true, failoverNote: false }), /Drafting story/);
+  assert.match(render({ job: switched, compact: true }), /Model switch: Codex hit its usage limit/);
+});
+
+/*
   FB1, unit 4: THE SCAN'S CARD.
 
   The kind the owner was actually complaining about. Before FB1 a scan had no

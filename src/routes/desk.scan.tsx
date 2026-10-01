@@ -447,15 +447,31 @@ function ScanPage() {
                 one.
               */}
               <p className="scan-line">{scanRowLine(s)}</p>
+              {/*
+                WHAT THE RUN FOUND IS NOT A VERDICT ON HOW IT ENDED, so this
+                line sits OUTSIDE the gate below.
+
+                The gate is for the sentences that assert a RESULT -- the
+                failed-source line, the "why", the stall copy, the error. This
+                is not one of those: it is the run's own record, and a row that
+                has not settled is making no claim by carrying it. FB1b swept it
+                into the same fragment, which no scan this desk writes could
+                tell apart (the receipt sets `summary` and `finished_at` in one
+                statement) and every row a worker died on could:
+                `stalled-run.e2e.test.ts` (unit CR) seeds an orphan and rows
+                whose jobs are terminal or gone, identifies them by this column,
+                and drew four rows -- right chips, and none of them saying which
+                run it was.
+              */}
+              {s.leads_created > 0 && s.summary ? (
+                <p className="wire-sum">{s.summary}</p>
+              ) : null}
               {s.finished_at || s.error ? (
                 <>
                   {failedSourcesLine(parseFailedSources(s.failed_sources)) ? (
                     <p className="wire-warn">
                       {failedSourcesLine(parseFailedSources(s.failed_sources))}
                     </p>
-                  ) : null}
-                  {s.leads_created > 0 && s.summary ? (
-                    <p className="wire-sum">{s.summary}</p>
                   ) : null}
                   {s.stalled ? (
                     <p className="wire-warn">{stalledRunCopy("scan")}</p>

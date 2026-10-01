@@ -22,6 +22,20 @@ import {
 import { getSql } from "../db.ts";
 import { ensureDarkSchema, readDarkDials, synthesizeSignals } from "./dark.ts";
 import { verifyRunSignals } from "./dark-verify.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+/*
+  The M1 case below runs `synthesizeSignals` over a REAL capture, and that
+  function reads `sources` when it builds the watch list it hands the model
+  (see dark.ts). `sources` is a migrated table no `ensure*Schema` helper
+  creates. `scripts/run-tests-safe.mjs` registers `migrations/*.sql` as a
+  preload, so the ordinary suite opens PGlite with the table already there;
+  `scripts/run-postgres-integration.mjs` runs the same file WITHOUT that
+  preload, which is how the postgres-integration lane met
+  `relation "sources" does not exist`. Asking for the schema here is how this
+  fixture says it needs one, the same way `dark-queue.test.ts` does.
+*/
+await applyMigrationsToTestPglite();
 
 /*
   The MEDIUM and LOW findings of the batch-7 pre-merge audit

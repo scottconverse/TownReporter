@@ -37,6 +37,7 @@ export function JobCard({
   job,
   compact,
   title,
+  failoverNote = true,
   stallSeconds = 60,
   now,
   onCancel,
@@ -60,6 +61,24 @@ export function JobCard({
    * box cannot say the same thing twice (FB1b, item 1).
    */
   title?: string;
+  /**
+   * Whether this card prints the durable "Model switch: ..." sentence.
+   *
+   * True everywhere the card is the surface an editor is reading. False in the
+   * rail's Running box, which draws the SAME job the page under it already
+   * draws in full -- so an editor on the story workspace read the sentence
+   * twice at once, once in the nav and once in the job's own Draft progress
+   * card. `scripts/story-quota-failover-e2e.mjs` caught it: its `getByText`
+   * for "Model switch: This draft moved to Codex Terra because DeepSeek v4.1
+   * Flash reached its usage limit" matched two elements.
+   *
+   * The rail's job is the one the design gives it -- "each job's title with
+   * elapsed time and current stage" -- and a switch sentence is the job's own
+   * detail, not a second title. It is also the only card the editor cannot
+   * reach: every row there is a summary of a job whose full card is one press
+   * away, on the page that job belongs to.
+   */
+  failoverNote?: boolean;
   stallSeconds?: number;
   now?: number;
   onCancel?: () => void;
@@ -170,7 +189,9 @@ export function JobCard({
         {running && !stalled ? <span className="job-card-quiet">Last activity {fmt(quiet)} ago</span> : null}
       </div>
 
-      {job.failoverNote ? <p className="job-card-quiet">Model switch: {job.failoverNote}</p> : null}
+      {failoverNote && job.failoverNote ? (
+        <p className="job-card-quiet">Model switch: {job.failoverNote}</p>
+      ) : null}
 
       {job.cancelRequested && running ? (
         <p className="job-card-quiet" role="status" aria-live="polite">
@@ -256,12 +277,15 @@ export function DeskJobCard({
   job,
   compact,
   title,
+  failoverNote,
   onNavigate,
   viewLabel,
 }: {
   job: JobProgressView;
   compact?: boolean;
   title?: string;
+  /** See `JobCard`: false only in the rail's Running box. */
+  failoverNote?: boolean;
   onNavigate?: (job: JobProgressView) => void;
   viewLabel?: string;
 }) {
@@ -291,6 +315,7 @@ export function DeskJobCard({
         job={job}
         compact={compact}
         title={title}
+        failoverNote={failoverNote}
         viewLabel={viewLabel}
         onView={go}
         onOpen={go}

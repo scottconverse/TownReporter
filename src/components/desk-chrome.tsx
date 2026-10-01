@@ -530,7 +530,23 @@ function RunningBox({
             clock on its own column, and it is the same element on every other
             screen the card appears on.
           */}
-          <DeskJobCard job={job} compact title={jobHeadline(job)} viewLabel="Open" />
+          {/*
+            NO "Model switch:" LINE HERE. The rail draws the same job the page
+            beside it draws, so a durable switch sentence printed in both places
+            is the same sentence twice on one screen -- which is what
+            scripts/story-quota-failover-e2e.mjs met on the story workspace,
+            where its `getByText` for that sentence matched two elements. The
+            rail is the summary ("each job's title with elapsed time and current
+            stage"); the card on the job's own page is where the switch is read.
+            See `JobCard`'s `failoverNote`.
+          */}
+          <DeskJobCard
+            job={job}
+            compact
+            title={jobHeadline(job)}
+            viewLabel="Open"
+            failoverNote={false}
+          />
         </div>
       ))}
     </div>

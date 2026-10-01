@@ -25,8 +25,9 @@
  *     numbers stripped, three sections that are not stories, unticked;
  *   - the editor re-files one story's section by hand and takes a second story
  *     out, and only the ticked six import;
- *   - the Queue shows six Imported leads with the held one flagged, and the
- *     story the editor removed is not there;
+ *   - the Queue shows five Imported leads under Open and the sixth -- the one
+ *     the report triaged Hold -- under Held with its flag (FB6, report 7a: a
+ *     held lead leaves Open), and the story the editor removed is nowhere;
  *   - nothing printed: the imported headline is not on the public paper yet;
  *   - a story opens, its section is confirmed and it publishes on the normal
  *     button -- with the body word for word as pasted, its cited pages as
@@ -428,23 +429,47 @@ async function theTickedStoriesLandInTheQueue() {
 
   await panel.getByRole("link", { name: "Open the Queue", exact: true }).click();
   await page.waitForURL(/\/desk\/queue/, { timeout: 30_000 });
+  /*
+    FIVE IN OPEN AND ONE UNDER HELD, which is six (FB6, owner report 7a).
+
+    Six stories import and one of them is the report's Hold -- the editor left
+    that triage alone, so it lands on the Queue held. Before FB6 the Queue's
+    Open tab counted held leads and this read six; FB6 changed `openLeads` so a
+    held lead leaves Open, because Hold is "not now" -- it has its own tab and
+    its own count on both screens (desk-copy.ts: `openLeads`). The sixth is not
+    missing and not unreachable: it is one press away, and the second half of
+    this step counts it under Held, where the owner asked to find it.
+  */
   await page.locator(".chip.imported").first().waitFor({ timeout: 45_000 });
-  const imported = await page.locator(".chip.imported").count();
-  must(imported === 6, `the Queue shows ${imported} Imported leads, expected 6`);
+  const importedOpen = await page.locator(".chip.imported").count();
+  must(importedOpen === 5, `the Queue's Open tab shows ${importedOpen} Imported leads, expected 5`);
   must(
     (await page.locator(".lead-row", { hasText: TAKEN_OUT }).count()) === 0,
     "the story the editor took out is on the Queue",
   );
+  // Not in Open: a held lead is set aside, and the tab is where it waits.
+  must(
+    (await page.locator(".lead-row", { hasText: HELD }).count()) === 0,
+    "the held story is still counted and drawn in the Queue's Open tab",
+  );
+  // Taken here, while the imports are still on the Queue: the phase that
+  // publishes one happens later, and a picture of four would not match.
+  facts.push(await screenshot("import-queue-1280-light.png", 1280, 900, ".chip.imported"));
+
+  await page.getByRole("button", { name: /^Held\b/ }).click();
   const heldRow = page.locator(".lead-row", { hasText: HELD });
   await heldRow.waitFor({ timeout: 30_000 });
   must(
     (await heldRow.locator(".chip.st-held").count()) === 1,
     "the held story is on the Queue with no Hold flag",
   );
-  // Taken here, while all six are still on the Queue: the phase that publishes
-  // one happens later, and a picture of five would not match the claim.
-  facts.push(await screenshot("import-queue-1280-light.png", 1280, 900, ".chip.imported"));
-  step("the Queue shows six Imported leads, the held one flagged");
+  must(
+    (await heldRow.locator(".chip.imported").count()) === 1,
+    "the held story reached the Held tab without its Imported mark",
+  );
+  const importedHeld = await page.locator(".chip.imported").count();
+  must(importedHeld === 1, `the Held tab shows ${importedHeld} Imported leads, expected 1`);
+  step("the Queue shows five Imported leads under Open and the held one under Held, flagged");
 }
 
 /** Nothing is published by an import. The paper does not have these stories. */

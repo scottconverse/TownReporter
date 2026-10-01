@@ -18,6 +18,20 @@ import {
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
 import { readDeskJobs } from "./job-progress.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+
+/*
+  `readDeskJobs` reads `drafts` and `leads` to give a story job its headline --
+  both migrated tables, and neither is one `ensureJobsSchema` writes.
+  `scripts/run-tests-safe.mjs` registers `migrations/*.sql` as a preload, so the
+  ordinary suite opens PGlite with them already there;
+  `scripts/run-postgres-integration.mjs` runs the same file WITHOUT that
+  preload, which is how the postgres-integration lane met
+  `relation "drafts" does not exist` (42P01) here while the file was green in
+  the ordinary suite. Asking for the schema is how this fixture says it needs
+  one -- the same call `dark-queue.test.ts` makes.
+*/
+await applyMigrationsToTestPglite();
 
 /*
   THE PROGRESS MODEL, FOR EVERY KIND (FB1, units 1-3).

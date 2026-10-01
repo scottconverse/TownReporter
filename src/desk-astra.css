@@ -5460,6 +5460,24 @@
   background: var(--surface);
   border: 1px solid var(--line);
   min-width: 0;
+  /*
+    A CONFIG TOKEN IS ONE WORD, AND IT MUST NOT PUSH THE PAGE SIDEWAYS.
+
+    A panel's prose names the settings it is asking for, and a setting's name
+    has no break in it: U29's Opinion readiness notice says "start Ollama (or
+    set TOWNREPORTER_DEEPSEEK_BASE_URL to its address)", and that variable is
+    thirty characters the browser will not split. At 390px with Text: Large
+    the word is wider than the list item holding it, so the line ran past the
+    viewport and the whole desk scrolled sideways -- 5px, measured on CI's
+    fonts and invisible under the local ones (scripts/desk-uiux-walk.mjs,
+    case-18, Opinion).
+
+    `break-word`, not `anywhere`: it splits a word that cannot fit its line and
+    leaves every min-content width exactly where it was, so nothing else on the
+    desk re-wraps and no grid track changes size. It inherits, so one
+    declaration covers the panel's paragraphs, list items and help lines.
+  */
+  overflow-wrap: break-word;
 }
 .desk-ltr.astra .astra-panel.hot { border: 2px solid var(--a); }
 .desk-ltr.astra .astra-panel.plain { gap: 0; }
