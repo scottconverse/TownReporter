@@ -15,7 +15,17 @@ import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
+import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
+import { createHostGate } from "./host-gate.ts";
+import {
+  BLOCKED_TRIES_PER_HOST_PER_DAY,
+  classifyRefusal,
+  dailyCapSentence,
+  skipThisPass,
+  touchAfterFailure,
+  touchAfterSuccess,
+  type SourceTouch,
+} from "./fetch-politeness.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
 import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
@@ -284,6 +294,12 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
   const sql = await getSql();
   return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- SH-B: the wait or the block, and the plain sentence the row
+             -- prints while it is parked ("Asked us to come back at 3:40 PM —
+             -- will retry then"). Read here because the Sources row is where
+             -- the editor has to be able to see that the desk has not simply
+             -- given up on a source they chose.
+             retry_after, retry_after_note, blocked_at, blocked_attempts,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
@@ -1210,8 +1226,17 @@ export async function performCheckOneSource(
   | { ok: false; url: string; title: string; error: string; line: string }
 > {
   const sql = await getSql();
-  const [src] = await sql.query<{ id: number; url: string; title: string; status: string }>(
-    "select id,url,title,status from sources where id=$1 and newsroom_id=$2",
+  const [src] = await sql.query<{
+    id: number;
+    url: string;
+    title: string;
+    status: string;
+    /** SH-B: read so this press's refusal continues the run of blocks rather
+     *  than restarting it at the first step of the backoff. */
+    blocked_at: string | null;
+    blocked_attempts: number | null;
+  }>(
+    "select id,url,title,status,blocked_at,blocked_attempts from sources where id=$1 and newsroom_id=$2",
     [sourceId, owned(context)],
   );
   if (!src) {
@@ -1251,8 +1276,15 @@ export async function performCheckOneSource(
     const bundle = await withRetry(() => ingestUrl(src.url));
     const text = postgresText(bundle.text);
     if (!text.trim()) throw new Error("Page had almost no readable text");
+    /*
+      SH-B: a press that read the page ends any wait and any block, the same
+      way a scan that read it does. Without this the row the editor just fixed
+      would keep saying "Waiting" -- the chip and the note are drawn from these
+      columns, and a successful read that left them behind would make the press
+      look like it had done nothing.
+    */
     await sql.query(
-      "update sources set last_fetched_at=now(), last_error=null where id=$1 and newsroom_id=$2",
+      "update sources set last_fetched_at=now(), last_error=null, retry_after=null, retry_after_note=null, blocked_at=null, blocked_attempts=0 where id=$1 and newsroom_id=$2",
       [sourceId, owned(context)],
     );
     return {
@@ -1264,9 +1296,39 @@ export async function performCheckOneSource(
     };
   } catch (err) {
     const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
+    /*
+      SH-B: an editor's press is still the desk knocking on somebody's server,
+      so a refusal it earns is recorded with the same rules a scan uses -- the
+      site's `Retry-After` if it gave one, otherwise the default wait, and for
+      a block the next step of the backoff. The press itself is never refused:
+      the editor asked, and `assertCooldown` above is what stops a held-down
+      button from being a burst.
+    */
+    const failure = classifyRefusal({
+      status: err instanceof IngestFetchError ? err.status : null,
+      retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
+      nowMs: Date.now(),
+    });
+    const touch = failure
+      ? touchAfterFailure({
+          refusal: failure,
+          previousBlockedAt: src.blocked_at,
+          previousBlockedAttempts: src.blocked_attempts,
+          nowMs: Date.now(),
+        })
+      : { ...touchAfterSuccess(), last_error: msg };
+    if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
     await sql.query(
-      "update sources set last_error=$1, last_fetched_at=now() where id=$2 and newsroom_id=$3",
-      [msg, sourceId, owned(context)],
+      "update sources set last_error=$1, last_fetched_at=now(), retry_after=$4, retry_after_note=$5, blocked_at=$6, blocked_attempts=$7 where id=$2 and newsroom_id=$3",
+      [
+        touch.last_error,
+        sourceId,
+        owned(context),
+        touch.retry_after,
+        touch.retry_after_note,
+        touch.blocked_at,
+        touch.blocked_attempts,
+      ],
     );
     return {
       ok: false as const,
@@ -1284,6 +1346,50 @@ export const checkOneSource = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((sourceId: unknown) => rowId.parse(sourceId))
   .handler(async ({ context, data: sourceId }) => performCheckOneSource(context, sourceId));
+
+/*
+  SH-B: the per-host allowance for hostile answers.
+
+  Three tiny helpers rather than one clever query, because each answers a
+  different question and they are read in different places. `sourceHost` is the
+  key they share, and it is the hostname -- not the URL and not the port --
+  because a site that has decided to refuse this desk is refusing the desk, and
+  every path on it counts as the same site.
+*/
+function sourceHost(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/** The first moment of tomorrow, in the desk's own timezone. Reading "will try
+ *  again tomorrow" as "in exactly 24 hours" would be a small lie the second
+ *  time it is printed. */
+function startOfTomorrow(nowMs: number): Date {
+  const d = new Date(nowMs);
+  d.setHours(24, 0, 0, 0);
+  return d;
+}
+
+async function hostAtDailyCap(sql: Sql, newsroomId: number, host: string): Promise<boolean> {
+  if (!host) return false;
+  const rows = await sql<{ tries: number }>`
+    select tries from source_host_tries
+    where newsroom_id = ${newsroomId} and host = ${host} and day = current_date
+  `;
+  return (rows[0]?.tries ?? 0) >= BLOCKED_TRIES_PER_HOST_PER_DAY;
+}
+
+async function noteHostRefusal(sql: Sql, newsroomId: number, host: string): Promise<void> {
+  if (!host) return;
+  await sql`
+    insert into source_host_tries (newsroom_id, host, day, tries)
+    values (${newsroomId}, ${host}, current_date, 1)
+    on conflict (newsroom_id, host, day) do update set tries = source_host_tries.tries + 1
+  `;
+}
 
 /** Injectable seam so a scan job with a real Claude/Codex 401 mid-run, and
  * the failover it triggers, can be tested without a real provider. Same
@@ -1396,7 +1502,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   */
   const reportStage = progressReporterFor(job);
   const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
-  const fetchUrl = deps.ingestUrl ?? ingestUrl;
+  /*
+    SH-B item 1: one host, one request at a time, a short gap between them.
+
+    One gate for the whole pass, so the pacing is shared by every source the
+    scan reads out of the same host -- which is the case that mattered: six
+    city pages under one domain, six workers, and fifty requests to one small
+    municipal server with nothing between them. `deps.ingestUrl` overrides the
+    fetch entirely (tests and the offline paths), and in that case there is no
+    network to pace.
+  */
+  const hostGate = createHostGate();
+  const fetchUrl = deps.ingestUrl ?? ((url: string) => ingestUrl(url, { schedule: hostGate.schedule }));
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
   /*
@@ -1508,7 +1625,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const allSources =
     deps.scheduledSnapshot?.sources ??
     (await sql<SourceRow>`
-      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
+      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- SH-B: the wait a site asked for, and the block it put on us. Both
+             -- are read here because the pass has to SKIP a parked row, which
+             -- is the only thing that makes a recorded "come back at 3:40"
+             -- mean anything.
+             retry_after, blocked_at, blocked_attempts
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
@@ -1538,7 +1660,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     changed: boolean;
   }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
-  const pendingSourceTouches: { id: number; error: string | null }[] = [];
+  /*
+    The scheduled path queues its writes and commits them inside the run
+    transaction. It carries the same columns the manual path writes inline --
+    the politeness columns included -- because the two paths are the same
+    feature and a row must not depend on which kind of scan touched it. This is
+    the mistake `scan-coverage.test.ts` exists to catch.
+  */
+  const pendingSourceTouches: {
+    id: number;
+    error: string | null;
+    retry_after?: Date | null;
+    retry_after_note?: string | null;
+    blocked_at?: Date | null;
+    blocked_attempts?: number;
+  }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
@@ -1578,6 +1714,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
   */
   let attemptedCount = 0;
+  /** SH-B: rows this pass selected but deliberately did not knock on -- parked
+   *  by a site's "come back later", or held back by the per-host allowance. */
+  let skippedThisPass = 0;
   let lastLiveWriteAt = 0;
   /*
     THE LIVE RUN ROW.
@@ -1653,6 +1792,56 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await reportStage("Reading the sources");
   await mapLimit(watchSlice, 6, async (src) => {
     await deps.scheduledGuard?.();
+    /*
+      SH-B items 2 and 3, the half that makes them real: a row the site asked
+      us to leave alone is LEFT ALONE. This is the difference between storing
+      `retry_after` and honouring it, and it is why the select above now reads
+      the column. Nothing else changes: the source stays accepted, stays on
+      watch, and the next pass after the time arrives fetches it with no
+      special handling at all.
+    */
+    const nowMs = Date.now();
+    if (skipThisPass({ retryAfter: src.retry_after, nowMs })) {
+      /*
+        Counted as selected-but-not-attempted, which is what it is and what the
+        coverage receipt already means by the difference between those two
+        numbers (a row cut by `SCAN_WATCH_CAP` reads the same way). Reporting a
+        source the desk deliberately did not knock on as "attempted" would put
+        a fetch in the record that never happened.
+      */
+      skippedThisPass += 1;
+      return;
+    }
+    /*
+      The per-host allowance for the day. A newsroom can watch six pages of one
+      city site and a source-level counter would give each of them a full
+      allowance -- six times the traffic to one host, which is the thing being
+      prevented. So the count is per host, and a host that has refused us
+      `BLOCKED_TRIES_PER_HOST_PER_DAY` times today is left until tomorrow.
+    */
+    {
+      const host = sourceHost(src.url);
+      if (host && (await hostAtDailyCap(sql, owned(context), host))) {
+        const until = startOfTomorrow(nowMs);
+        const note = dailyCapSentence();
+        if (deps.scheduledCommit)
+          pendingSourceTouches.push({
+            id: src.id,
+            error: note,
+            retry_after: until,
+            retry_after_note: note,
+            blocked_at: src.blocked_at ? new Date(src.blocked_at) : null,
+            blocked_attempts: src.blocked_attempts ?? 0,
+          });
+        else
+          await sql`
+            update sources set retry_after = ${until}, retry_after_note = ${note}, last_error = ${note}
+            where id = ${src.id} and newsroom_id = ${owned(context)}
+          `;
+        skippedThisPass += 1;
+        return;
+      }
+    }
     try {
       const bundle = await withRetry(async () => {
         await deps.scheduledGuard?.();
@@ -1681,7 +1870,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
       else
         await sql`
-        update sources set last_fetched_at = now(), last_error = null
+        update sources set last_fetched_at = now(), last_error = null,
+          -- SH-B: a read that worked is the end of any wait and any block.
+          retry_after = null, retry_after_note = null, blocked_at = null, blocked_attempts = 0
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       pendingHashes.push({ id: src.id, hash, text, changed });
@@ -1699,10 +1890,45 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     } catch (err) {
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
-      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
+      /*
+        SH-B items 2 and 3: was this refusal aimed at us?
+
+        `ingestUrl` now carries the status and the site's `Retry-After` out of
+        the fetch, so a 429/503 becomes a recorded wait and a 401/403 becomes a
+        recorded block with a growing backoff -- instead of both being written
+        onto the row as "Could not check", which sent the editor to fix a
+        source that was working. An ordinary failure (404, timeout, empty page)
+        is none of this feature's business and falls through to the message it
+        always had.
+      */
+      const failure = classifyRefusal({
+        status: err instanceof IngestFetchError ? err.status : null,
+        retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
+        nowMs,
+      });
+      const touch: SourceTouch = failure
+        ? touchAfterFailure({
+            refusal: failure,
+            previousBlockedAt: src.blocked_at,
+            previousBlockedAttempts: src.blocked_attempts,
+            nowMs,
+          })
+        : { ...touchAfterSuccess(), last_error: msg };
+      if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
+      if (deps.scheduledCommit)
+        pendingSourceTouches.push({
+          id: src.id,
+          error: touch.last_error,
+          retry_after: touch.retry_after,
+          retry_after_note: touch.retry_after_note,
+          blocked_at: touch.blocked_at,
+          blocked_attempts: touch.blocked_attempts,
+        });
       else
         await sql`
-        update sources set last_error = ${msg}, last_fetched_at = now()
+        update sources set last_error = ${touch.last_error}, last_fetched_at = now(),
+          retry_after = ${touch.retry_after}, retry_after_note = ${touch.retry_after_note},
+          blocked_at = ${touch.blocked_at}, blocked_attempts = ${touch.blocked_attempts}
         where id = ${src.id} and newsroom_id = ${owned(context)}
       `;
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
@@ -1733,6 +1959,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await noteSourceProgress();
     }
   });
+  /*
+    SH-B: a row the pass deliberately did not knock on is not an attempt.
+    `sources_selected` still counts it -- it was in scope -- so the receipt
+    reads "14 selected, 12 attempted" exactly the way it already reads when
+    `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
+    to come back is not recorded as a fetch that never happened.
+  */
+  failureReceipt.sourcesAttempted = Math.max(0, watchSlice.length - skippedThisPass);
 
   const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
@@ -2134,8 +2368,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
     if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
     for (const touch of pendingSourceTouches) {
+      // A success touch carries no politeness fields at all, and clearing them
+      // is exactly right for it: a read that worked ends any wait and any
+      // block. A refusal touch carries what `touchAfterFailure` decided.
       await writeSql`
-        update sources set last_error = ${touch.error}, last_fetched_at = now()
+        update sources set last_error = ${touch.error}, last_fetched_at = now(),
+          retry_after = ${touch.retry_after ?? null},
+          retry_after_note = ${touch.retry_after_note ?? null},
+          blocked_at = ${touch.blocked_at ?? null},
+          blocked_attempts = ${touch.blocked_attempts ?? 0}
         where id = ${touch.id} and newsroom_id = ${owned(context)}
       `;
     }
@@ -2261,7 +2502,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           leads_created = ${leadsCreated},
           sources_proposed = ${proposed},
           sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          -- SH-B: the receipt says what the pass DID, so a row it deliberately
+          -- did not knock on is not an attempt. The live row above keeps the
+          -- full scope on purpose (see scanRunningLine's pin: the scope is not
+          -- progress); this is the record of the finished pass.
+          sources_attempted = ${Math.max(0, watchSlice.length - skippedThisPass)},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${analyzedSourceCount},
           model_batches_used = ${batches.length},

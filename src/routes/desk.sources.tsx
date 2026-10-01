@@ -1250,24 +1250,45 @@ function WatchRows({
         const paused = s.status === "paused";
         const failed = s.last_error != null;
         const fresh = s.new_since_last_pass ?? 0;
+        /*
+          SH-B item 4: the row that is waiting.
+
+          Two states the editor could not previously tell apart from "we have
+          given up": a site that asked us to come back later, and a site that
+          has blocked us. Both are still on watch, both are parked until a
+          recorded time, and both say so in a sentence rather than a code --
+          "Asked us to come back at 3:40 PM — will retry then" / "Blocked us at
+          9:12 AM — trying again after 3:12 PM".
+
+          The sentence is read off `retry_after_note`, which the fetch wrote at
+          the moment the site answered. Nothing is recomputed here and nothing
+          compares against the clock, because the note is rewritten on every
+          attempt and cleared by a read that worked: it can never be stale.
+        */
+        const waiting = s.retry_after_note ?? null;
+        const blocked = waiting != null && s.blocked_at != null;
         const chip = paused
           ? { cls: "paused", label: "Paused" }
-          : failed
-            ? { cls: "fail", label: "Could not check" }
-            : fresh > 0
-              ? { cls: "changed", label: "Changed" }
-              : s.last_fetched_at
-                ? { cls: "same", label: "✓ No change" }
-                : { cls: "wait", label: "Not checked yet" };
+          : waiting != null
+            ? { cls: "wait", label: blocked ? "Blocked" : "Waiting" }
+            : failed
+              ? { cls: "fail", label: "Could not check" }
+              : fresh > 0
+                ? { cls: "changed", label: "Changed" }
+                : s.last_fetched_at
+                  ? { cls: "same", label: "✓ No change" }
+                  : { cls: "wait", label: "Not checked yet" };
         const note = paused
           ? "Paused · the scanner will not fetch it"
-          : failed
-            ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
-            : fresh > 0
-              ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
-              : s.last_fetched_at
-                ? `Checked ${formatDateTime(s.last_fetched_at)}`
-                : "Added, not fetched yet";
+          : waiting != null
+            ? waiting
+            : failed
+              ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
+              : fresh > 0
+                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+                : s.last_fetched_at
+                  ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                  : "Added, not fetched yet";
         const checking = checkingId === s.id;
         const result = checkResult?.id === s.id ? checkResult : null;
         const kills = killCounts?.get(s.id);

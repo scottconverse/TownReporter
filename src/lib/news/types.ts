@@ -30,6 +30,21 @@ export type SourceRow = {
     no answer rather than a wrong one.
   */
   new_since_last_pass?: number | null;
+  /*
+    SH-B: politeness, on the row. `retry_after` is when the desk may ask this
+    source again -- set when a site said "come back later" (429/503) and when a
+    host blocked us (401/403/bot wall), and the moment the next pass reads to
+    decide whether to skip the row. `retry_after_note` is the sentence the
+    Sources row prints while it is parked, stored rather than recomputed
+    because it is what the site told us, at the moment it told us.
+    `blocked_at`/`blocked_attempts` are the run of blocks the backoff is read
+    from. Optional for the same reason as the block above: most readers of this
+    type select only the watch-list columns.
+  */
+  retry_after?: string | null;
+  retry_after_note?: string | null;
+  blocked_at?: string | null;
+  blocked_attempts?: number | null;
 };
 
 export type LeadRow = {
