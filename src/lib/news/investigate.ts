@@ -9,6 +9,13 @@ import {
 } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
 import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
+import {
+  groundPlan,
+  markUngroundedSpecifics,
+  queryNamesUngroundedSpecific,
+  prepareCorpus,
+  type GroundingCorpus,
+} from "./dark-specific-grounding.ts";
 import { resurfaceRefusalReason } from "./result-quality.ts";
 import { readableCapture } from "./html-text.ts";
 import { darkPlannerFor } from "./dark-prompt.ts";
@@ -2465,6 +2472,96 @@ export async function retrievePack(
   return compact(graph, PLANNER_GRAPH_CAP);
 }
 
+/**
+ * How much captured text this desk will hold in memory to judge one hop's
+ * specifics against. Generous: the whole point is that a specific a capture
+ * carries is not reported as invented, and a capture that has fallen off the
+ * end of a smaller budget would be exactly that mistake. See
+ * `dark-specific-grounding.ts` for what is done with it.
+ */
+export const GROUNDING_CORPUS_CAP = 400_000;
+
+/**
+ * What the desk actually holds, for the grounding rule.
+ *
+ * Unit DD1, item 1. The file's captures, in full, plus the investigation's own
+ * title and summary -- which carry the editor's paste and the lead the file
+ * was opened from, and are therefore the other thing a specific may legitimately
+ * come from. Nothing else is in here on purpose: the planner's pack also holds
+ * the MODEL's own earlier output (frontier labels, hypotheses, previous
+ * queries), and grounding a model's sentence against the model's own earlier
+ * sentence is how "1749 Main Street" would launder itself into a fact.
+ *
+ * Unreadable captures are left out for the same reason `retrievePack` leaves
+ * them out: a paywall notice or a nav shell is not text that may ground
+ * anything.
+ */
+export async function groundingCorpus(
+  investigationId: number,
+  newsroomId?: number,
+): Promise<GroundingCorpus> {
+  const sql = await getSql();
+  const room = newsroomId ?? (await investigationNewsroom(investigationId));
+  const head = await sql<{ title: string; summary: string }>`
+    select title, summary from investigations
+    where newsroom_id = ${room} and id = ${investigationId} limit 1
+  `;
+  const captures = await sql<{
+    title: string;
+    url: string;
+    full_text: string;
+    fetch_status: number | null;
+    fetch_outcome: string | null;
+  }>`
+    select title, url, full_text, fetch_status, fetch_outcome from artifacts
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 120
+  `.catch(() => []);
+  /*
+    The file's own saved leads, and the reason they are here.
+
+    A dig's whole job is to follow what its earlier rounds wrote down -- that is
+    what `frontier_items` and `hypotheses` ARE -- so a specific those rows name
+    is a specific the file holds. Leaving them out would mean a company the desk
+    filed as a lead in round one could never be searched for in round two.
+
+    They bring the laundering risk with them, and `prepareCorpus` is what closes
+    it: every specific that carries the marker is STRIPPED out of the corpus,
+    marker and all, before anything is judged against it. So a specific nothing
+    captured can never ground itself on the next hop, and a specific the file
+    genuinely holds -- one a capture or the lead carries -- still does.
+  */
+  const savedLeads = await sql<{ label: string; why: string; next_steps: string }>`
+    select label, why, next_steps from frontier_items
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 80
+  `.catch(() => []);
+  const savedHypotheses = await sql<{ body: string }>`
+    select body from hypotheses
+    where newsroom_id = ${room} and investigation_id = ${investigationId}
+    order by id desc limit 40
+  `.catch(() => []);
+  const parts: string[] = [];
+  const investigation = head[0];
+  if (investigation)
+    parts.push(`${investigation.title}\n${investigation.summary}`);
+  for (const lead of savedLeads) parts.push(`${lead.label}\n${lead.why}\n${lead.next_steps}`);
+  for (const hypothesis of savedHypotheses) parts.push(hypothesis.body);
+  for (const capture of captures) {
+    if (
+      readableCapture({
+        text: capture.full_text,
+        status: capture.fetch_status,
+        outcome: capture.fetch_outcome,
+        title: capture.title,
+      }).kind !== "ok"
+    )
+      continue;
+    parts.push(`${capture.title}\n${capture.url}\n${capture.full_text}`);
+  }
+  return prepareCorpus(parts.join("\n\n").slice(0, GROUNDING_CORPUS_CAP));
+}
+
 export async function findEvidenceChunks(
   userId: string,
   investigationId: number,
@@ -2517,6 +2614,14 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   if (opts.executionMode === "responsive" && !opts._responsiveOperation) {
     return responsiveResearchLoop(opts, investigationTitle, place, newsroomId);
   }
+  /*
+    Unit DD1, item 1: what the desk holds, for the grounding rule. Seeded from
+    the file's own title so a hop that cannot read its captures still has the
+    lead's words to ground against, then refreshed at the top of every hop.
+  */
+  let corpus: GroundingCorpus = await groundingCorpus(opts.investigationId, newsroomId).catch(() =>
+    prepareCorpus(investigationTitle),
+  );
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   /*
@@ -2705,6 +2810,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       break;
     }
     await setStage(`Researching hop ${hop + 1}/${hopsBudget}`, researchPct(hop, 0, 1));
+    // Re-read per hop, not once per run: the hop that just finished captured
+    // pages, and a specific those pages carry is grounded for the next hop.
+    // A failed read keeps the previous corpus rather than falling back to an
+    // empty one, which would mark every specific in the plan as invented.
+    corpus = await groundingCorpus(opts.investigationId, newsroomId).catch(() => corpus);
     const openFrontier = await readActiveFrontier();
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
@@ -2762,6 +2872,27 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       plan.frontier = [...plan.frontier, ...heur.frontier];
     }
     plan.frontier = boundedFrontierItems(plan.frontier, NEW_FRONTIER_PER_HOP);
+
+    /*
+      Unit DD1, item 1: hold the whole hop to the grounding rule before any of
+      it is written down.
+
+      This is the one place every durable thing a hop produces passes through --
+      the searches that will be run, the frontier items and hypotheses
+      `persistPlan` writes, the questions, and the summary that becomes
+      `investigations.summary` and the run record -- and it is downstream of
+      every way a plan can be produced (the model, the post-search selector, the
+      keyword fallback), so a caller that injects its own planner is held to the
+      same rule as production.
+
+      Measured on the live file: the planner wrote "1749 Main Street" into a
+      hypothesis, a frontier label, two questions and two searches, and no
+      capture in the file contained "1749" -- every source it did hold, the
+      post and the licensing record the same round captured included, gave the
+      real street number instead. See dark-specific-grounding.ts.
+    */
+    const grounding = groundPlan(plan, corpus);
+    plan = grounding.plan;
 
     // Say it out loud. A run that dug with the heuristic must not read like a
     // run that dug with the model.
@@ -2878,7 +3009,25 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     const usable = [...withMinimums, ...fill].filter((q) => {
       const reason = junkQueryReason(q);
       if (reason) dropped.push(`${reason}: ${q.slice(0, 120)}`);
-      return !reason;
+      if (reason) return false;
+      /*
+        Unit DD1, item 1: and the same gate refuses a query that names a
+        specific no capture in this file carries.
+
+        It has to be HERE rather than only on `plan.searches`, because this is
+        the only filter every query passes through: the minimum-filled queries
+        are derived from the plan's own hypotheses, and a hypothesis that
+        reached this point wearing the marker would otherwise hand its invented
+        address straight back to a provider as a search term. `groundPlan` drops
+        the planner's own queries and marks the text; this drops whatever the
+        rest of the hop built out of it.
+      */
+      const invented = queryNamesUngroundedSpecific(q, corpus);
+      if (invented) {
+        grounding.droppedQueries.push({ query: q, named: invented });
+        return false;
+      }
+      return true;
     });
     const queries = usable
       .map((q) => storableText(queryWithResearchWindow(q, opts.preferences)))
@@ -2895,6 +3044,25 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${dropped.length} query${
         dropped.length === 1 ? "" : "s"
       } that were not searches: ${[...new Set(dropped)].slice(0, 4).join("; ")}`;
+    }
+    /*
+      Say it out loud too, and say WHICH specific: a hop that searched less than
+      it planned must not read like a hop that had nothing to do, and the
+      editor's clue that the model believes something this file does not say is
+      the name of the thing it believes.
+
+      The note quotes the refused specific, and this note is durable text
+      itself, so what it quotes wears the same marker -- otherwise the run
+      record becomes the one place the invented address is written down as if
+      the desk believed it.
+    */
+    const namedDrop = [...new Set(grounding.droppedQueries.map((d) => d.named))].slice(0, 4);
+    if (namedDrop.length) {
+      const count = grounding.droppedQueries.length;
+      lastSummary = `${lastSummary ? `${lastSummary}\n` : ""}Dropped ${count} ${
+        count === 1 ? "query" : "queries"
+      } naming something no capture in this file carries: ${namedDrop.join("; ")}`;
+      lastSummary = markUngroundedSpecifics(lastSummary, corpus);
     }
 
     /*
@@ -3115,7 +3283,15 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         for (const url of postSearchPlan?.fetch_urls.slice(0, FETCHES_PER_HOP) ?? []) {
           if (sanitizePublicUrls([url]).length) toFetch.add(url);
         }
-        if (postSearchPlan) await persistPlan(opts.userId, opts.investigationId, postSearchPlan, newsroomId);
+        // Unit DD1, item 1: the selector's plan is model output like any other
+        // and reaches the same columns. Grounded on the same corpus.
+        if (postSearchPlan)
+          await persistPlan(
+            opts.userId,
+            opts.investigationId,
+            groundPlan(postSearchPlan, corpus).plan,
+            newsroomId,
+          );
       } catch (err) {
         postSearchFailure = err instanceof Error ? err.message : "post-search selector failed";
         selectorFailures.push(postSearchFailure);
@@ -3135,6 +3311,19 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     let repeatedSourcesThisHop = 0;
     let newReadableSourcesThisHop = 0;
     while (fetchedThisHop.length < fetchLimit) {
+      /*
+        Unit DD1, item 3: the editor's Stop, between documents.
+
+        The hop boundary is two model calls and a handful of fetches long; the
+        search loop already asks between searches, but a hop whose searches are
+        done still had four page reads to go, and none of them asked. Measured
+        on the Kid City USA file, the press landed at 0:36 and the run ended at
+        2:17 -- 102 s of the editor's stop being real and invisible.
+
+        Throws, like every other reading of this seam: a stopped run must leave
+        the loop, and everything captured before the stop is already saved.
+      */
+      await opts.throwIfCancelled?.();
       const discovery = selectedReads[0] ?? (opts._responsiveOperation !== "search" && !searchSlotUsed
         ? sanitizePublicUrls([...currentSearchHits]).map(canon).find((u) => !fetchedThisRun.has(u))
         : undefined);
@@ -3671,7 +3860,17 @@ async function responsiveResearchLoop(
         evidence: finding.text,
         source_url: finding.evidenceUrl ?? "",
       }));
-      await persistPlan(opts.userId, opts.investigationId, plan, newsroomId);
+      // Unit DD1, item 1: the finish action's summary and findings are the
+      // model's own prose and go straight to `investigations.summary`,
+      // `pause_reason` and `claims`. Held to the same grounding rule as a
+      // batch hop's plan.
+      const groundedFinish = groundPlan(
+        plan,
+        await groundingCorpus(opts.investigationId, newsroomId).catch(() =>
+          prepareCorpus(investigationTitle),
+        ),
+      ).plan;
+      await persistPlan(opts.userId, opts.investigationId, groundedFinish, newsroomId);
       /*
         The model wrote `plan.summary`, and the receipt trail beside it carries
         excerpts of captured pages. Both reach `investigations.summary` -- and
@@ -3682,7 +3881,7 @@ async function responsiveResearchLoop(
         the run, read back as prose, not evidence whose bytes have to survive
         for a hash.
       */
-      summary = storableText(durableResponsiveSummary(plan.summary, receipts));
+      summary = storableText(durableResponsiveSummary(groundedFinish.summary, receipts));
       const counts = await responsiveCounts(opts.investigationId);
       await sql`update investigations set status = 'open', pause_reason = null, summary = ${summary.slice(0, 2500)}, updated_at = now() where id = ${opts.investigationId} and newsroom_id = ${newsroomId}`;
       return { ...counts, hops: aggregateHops, paused: false, summary, plannerFailures: 0, plannerStartupFailures: 0, actionDecisions: decision, finished: true };

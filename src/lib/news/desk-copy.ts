@@ -259,6 +259,39 @@ export function darkJobActive(status: string | null | undefined): boolean {
   return status === "queued" || status === "running";
 }
 
+/**
+ * The sentence the desk owes an editor who presses Stop this dig.
+ *
+ * Unit DD1, item 3. The press only writes a flag; the worker reads it at its
+ * next step, and the step it is in can be a minute of model calls long. The
+ * walkthrough of 2026-09-30 measured 102 seconds of silence after the press
+ * with this sentence sitting unused in the code -- the file renders its notice
+ * only when nothing is running, which is the one moment it is not needed.
+ */
+export const DIG_STOP_ACK = "Stopped. The run ends at its next step and what it has found is kept.";
+
+/**
+ * The Stop control, in every state it can be in.
+ *
+ * `requested` is the editor's own press for the running job, held in the route
+ * until the job really ends. Without it the button reverts to "Stop this dig"
+ * the instant the server answers -- which is a second into a stop that takes a
+ * minute and a half -- and the desk reads as though the press did nothing.
+ */
+export function digStopControl(state: {
+  /** A dig job is in flight for the open file. */
+  running: boolean;
+  /** This editor has already pressed Stop for that job. */
+  requested: boolean;
+  /** The press is still travelling to the server. */
+  sending: boolean;
+}): { visible: boolean; label: string; disabled: boolean; line: string | null } {
+  if (!state.running) return { visible: false, label: "", disabled: true, line: null };
+  if (state.requested || state.sending)
+    return { visible: true, label: "Stopping…", disabled: true, line: DIG_STOP_ACK };
+  return { visible: true, label: "Stop this dig", disabled: false, line: null };
+}
+
 export function observedDarkJobFinished(
   observed: { investigationId: number; jobId: number } | null,
   investigationId: number | null,
@@ -289,18 +322,18 @@ export function progressLine(input: {
   }
   if (input.running || input.status === "investigating") {
     if (input.artifacts > 0 && round > 0) {
-      return `${input.artifacts} records on file. ${investigationRoundLabel(round, of)}…`;
+      return `${input.artifacts} captures on file. ${investigationRoundLabel(round, of)}…`;
     }
     if (round > 0) return `Still reading. ${investigationRoundLabel(round, of)}…`;
     if (input.searches > 0) return "Following names and documents mentioned in the records…";
-    if (input.artifacts > 0) return `${input.artifacts} records on file. Checking earlier copies…`;
+    if (input.artifacts > 0) return `${input.artifacts} captures on file. Checking earlier copies…`;
     if (input.claims > 0) return "Checking what the records actually say…";
     return "Checking earlier copies…";
   }
   if (input.status === "paused") {
     return "Finished this round. More still to open.";
   }
-  if (input.artifacts > 0) return `This round is done. ${input.artifacts} records on file.`;
+  if (input.artifacts > 0) return `This round is done. ${input.artifacts} captures on file.`;
   return "This round is done.";
 }
 

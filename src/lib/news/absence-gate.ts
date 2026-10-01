@@ -133,6 +133,33 @@ export function namedDocument(sentence: string): string | null {
 }
 
 /**
+ * The same document, as a phrase a sentence can carry.
+ *
+ * Unit DD1, item 4. `namedDocument` returns a bare noun -- "Report" -- which is
+ * exactly right as a search ask and wrong in prose: "TownReporter did not find
+ * Report among the documents it opened: <a Reddit thread>" does not parse, and
+ * the capital reads as the title of a document the desk went looking for. With
+ * its article the sentence says the true thing: the desk opened those, and a
+ * report was not among them.
+ *
+ * A phrase that already carries its own determiner ("the survey page", "that
+ * notice") is left exactly as written.
+ */
+export function missingDocumentPhrase(named: string | null): string {
+  if (!named) return "that document";
+  if (/^(?:a|an|the|this|that|these|those|its|their|our|his|her|any|no)\s/i.test(named)) return named;
+  const article = /^[aeiou]/i.test(named) ? "an" : "a";
+  /*
+    Only a generic document word is folded down: "Report" is a common noun
+    wearing a capital, and "a report" is what the sentence needs. A name is left
+    as the desk read it -- "a Rochester citizen survey", never "a rochester".
+  */
+  const [head, ...rest] = named.split(" ");
+  const folded = DOC_TYPE.test(head!) ? head!.toLowerCase() : head!;
+  return `${article} ${[folded, ...rest].join(" ")}`;
+}
+
+/**
  * A period that ends a token, not a sentence.
  *
  * Unit U25, B3. `splitSentences` breaks on every period, so "the specific date
@@ -432,7 +459,7 @@ export function rewriteSentences(
  * class of bug as a prompt that tells every install it works in Longmont.
  */
 export function notYetOpened(sentence: string, paperName = "TownReporter"): string {
-  return `${paperName} has not yet opened ${namedDocument(sentence) ?? "that document"}.`;
+  return `${paperName} has not yet opened ${missingDocumentPhrase(namedDocument(sentence))}.`;
 }
 
 /*
@@ -907,7 +934,7 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
 
   let needsRedraft = false;
   const honest = (sentence: string) =>
-    `${paperName} did not find ${namedDocument(sentence) ?? "that document"} among the documents it opened: ${joinTitles(input.openedTitles)}.`;
+    `${paperName} did not find ${missingDocumentPhrase(namedDocument(sentence))} among the documents it opened: ${joinTitles(input.openedTitles)}.`;
   // "TownReporter searched <domain> and <n> more ways and found nothing" --
   // <n> is every rung of the ladder after the first, so the editor sees the
   // real count of things the app already tried, not just one search.
@@ -947,7 +974,7 @@ export async function runAbsenceGate(input: AbsenceGateInput): Promise<AbsenceGa
       summary: summaryFor(found),
       needsCheck: true,
     });
-    const what = namedDocument(sentence) ?? "that document";
+    const what = missingDocumentPhrase(namedDocument(sentence));
     verifyLines.push(
       input.searchAllowed === false ? `VERIFY BEFORE PRINT — ${what} was not checked externally. Confirm it yourself before publishing.` :
       `VERIFY BEFORE PRINT — the story says ${what} was not found. TownReporter searched ` +

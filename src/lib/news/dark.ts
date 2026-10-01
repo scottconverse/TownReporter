@@ -53,6 +53,8 @@ import {
   resurfaceDeadEnds,
   runDueMonitors,
 } from "./investigate.ts";
+import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
+import { markUngroundedSpecifics, prepareCorpus } from "./dark-specific-grounding.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
 import { OCR_TOTAL_BUDGET_MS, pdfPageCount, productionOcr } from "./ocr.ts";
@@ -996,8 +998,11 @@ export const listInvestigations = createServerFn({ method: "GET" })
       select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
         i.created_at, i.updated_at,
         coalesce((
+          -- Unit DD1, item 6: captures, and only captures. The editor's own
+          -- pasted tip is an editor:// row, and counting it here is what put
+          -- the rail one ahead of the file's own line. See dark-counters.ts.
           select count(*)::int from artifacts a
-          where a.investigation_id = i.id
+          where a.investigation_id = i.id and a.url not like 'editor://%'
         ), 0) as records,
         coalesce((
           select count(*)::int from frontier_items f
@@ -1148,6 +1153,18 @@ export const getInvestigation = createServerFn({ method: "GET" })
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60
     `;
+    /*
+      Unit DD1, item 6. The sixty rows above are a page, not a fact about the
+      file, so the counts the editor is shown are asked for separately and over
+      the whole file -- the same query `listInvestigations` counts the rail row
+      with, so the two surfaces cannot say different things about one file.
+    */
+    const captureCountRows = await sql
+      .query<{ captures: number; readable: number }>(DIG_CAPTURE_COUNT_SQL, [owned(context), id])
+      .catch(() => [] as { captures: number; readable: number }[]);
+    const captureCounts = captureCountRows[0]
+      ? digCaptureCounts(captureCountRows[0])
+      : digCaptureCountsFromRows(artifacts);
     const entities = await sql<{ name: string; kind: string; why: string }>`
       select e.name, e.kind, e.why
       from investigation_entities ie
@@ -1357,6 +1374,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
       brief,
+      captureCounts,
       frontier,
       artifacts,
       entities,
@@ -1690,8 +1708,24 @@ export async function synthesizeSignals(
     };
 
   const parsed = parseJsonBlock<DarkJson>(ai.text) ?? {};
-  const summary = preserveBoundedAbsenceLanguage(parsed.editor_summary, pack).slice(0, 2000);
-  const gaps = (parsed.inventory_gaps ?? []).join("; ").slice(0, 800);
+  /*
+    Unit DD1, item 1: the case file is held to the grounding rule too.
+
+    The pass that files signals is the other door into durable state -- it
+    writes `dark_signals` and, through `summary`, `dark_runs.summary` -- and it
+    is the door the walkthrough's "The facility at 1749 Main Street
+    transitioned from a prior operator" came through. The corpus is the pack
+    this model was handed: the file's own captures and the lead it was opened
+    from (`buildDarkSynthesisPack`). A specific that is nowhere in it wears the
+    marker; nothing is deleted, because the editor still needs to see what the
+    model was reaching for. See dark-specific-grounding.ts.
+  */
+  const corpus = prepareCorpus(pack);
+  const summary = markUngroundedSpecifics(
+    preserveBoundedAbsenceLanguage(parsed.editor_summary, pack),
+    corpus,
+  ).slice(0, 2000);
+  const gaps = markUngroundedSpecifics((parsed.inventory_gaps ?? []).join("; "), corpus).slice(0, 800);
   const header = [
     summary,
     gaps ? `Gaps: ${gaps}` : "",
@@ -1747,13 +1781,15 @@ export async function synthesizeSignals(
         ${normalizePosture(sig.posture)},
         ${storableText(String(sig.type ?? "")).slice(0, 80)},
         ${strength}, ${confidence},
-        ${storableText(preserveBoundedAbsenceLanguage(sig.observation, pack)).slice(0, 4000)},
-        ${storableText(String(sig.pattern ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.linkage_map ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.alternatives ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.counter_narrative ?? "")).slice(0, 4000)},
-        ${storableText(String(sig.what_would_kill ?? "")).slice(0, 2000)},
-        ${storableText(String(sig.pathway ?? "")).slice(0, 2000)},
+        ${storableText(
+          markUngroundedSpecifics(preserveBoundedAbsenceLanguage(sig.observation, pack), corpus),
+        ).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.pattern ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.linkage_map ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.alternatives ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.counter_narrative ?? ""), corpus)).slice(0, 4000)},
+        ${storableText(markUngroundedSpecifics(String(sig.what_would_kill ?? ""), corpus)).slice(0, 2000)},
+        ${storableText(markUngroundedSpecifics(String(sig.pathway ?? ""), corpus)).slice(0, 2000)},
         ${storableText(String(sig.privacy_review ?? "")).slice(0, 500)},
         ${handoff},
         ${"black-desk"},
@@ -3764,6 +3800,45 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   });
 }
 
+/**
+ * Unit DD1, item 1: the editor brief, held to the grounding rule.
+ *
+ * The brief is the last model-written prose in the file and the first thing an
+ * editor reads -- "WHAT WOULD SETTLE IT", "DO THIS NEXT", the hypothesis on the
+ * line under the percentage. It is written from the same pack as everything
+ * else `buildDarkBriefPromptPack` assembles, so a specific that is nowhere in
+ * that pack wears the marker rather than being handed to an editor as the next
+ * place to go. Measured on the Kid City USA file: the brief's "DO THIS NEXT"
+ * sent the editor to a street address no capture in the file carried.
+ *
+ * Every string field of the brief, and nothing else: the numbers and the
+ * closed vocabularies (`verdict`, `evidence_status`) are not prose and cannot
+ * carry an invented specific.
+ */
+export function groundBrief(brief: InvestigationBrief, pack: string): InvestigationBrief {
+  const corpus = prepareCorpus(pack);
+  const text = (value: string) => markUngroundedSpecifics(value, corpus);
+  const list = (values: string[]) => values.map(text);
+  return {
+    ...brief,
+    headline: text(brief.headline),
+    tldr: text(brief.tldr),
+    why_verdict: text(brief.why_verdict),
+    hypothesis: text(brief.hypothesis),
+    supports: list(brief.supports),
+    benign: text(brief.benign),
+    kills_it: text(brief.kills_it),
+    next: text(brief.next),
+    connections: list(brief.connections),
+    sections: {
+      record: text(brief.sections.record),
+      tested: text(brief.sections.tested),
+      open: text(brief.sections.open),
+      known: text(brief.sections.known),
+    },
+  };
+}
+
 export async function buildBrief(
   userId: string,
   newsroomId: number,
@@ -3841,8 +3916,12 @@ export async function buildBrief(
   }
   if (!ai?.ok) return { ok: false as const, error: "error" in ai ? ai.error : "no response" };
 
-  const brief = parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus);
+  const brief = groundBrief(
+    parseBrief(parseJsonBlock<unknown>(ai.text), new Date(), evidenceStatus),
+    pack,
+  );
   if (!briefIsUseful(brief)) return { ok: false as const, error: "brief was empty" };
+
 
   await sql`
     insert into investigation_briefs (investigation_id, newsroom_id, brief_json, generated_at)

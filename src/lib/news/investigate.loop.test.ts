@@ -624,7 +624,7 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
 
   it("does not treat a failed search as zero results", async () => {
     const user = `loop-searchfail-${Date.now()}`;
-    const { sql, id } = await bootInv(user, "Search failure");
+    const { sql, id } = await bootInv(user, "Front Range Municipal Solutions LLC");
     const attempt: SearchAttemptFn = async (_query): Promise<SearchAttempt> => ({
       state: "SEARCH_FAILED_PROVIDER",
       hits: [],
@@ -789,7 +789,7 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
 
   it("keeps every new planner frontier query pending without marking it tried", async () => {
     const user = `loop-pending-new-${Date.now()}`;
-    const { sql, id } = await bootInv(user, "Candidate records");
+    const { sql, id } = await bootInv(user, "Avery Candidate records");
     const pending = [
       '"Avery Candidate" endorsements Longmont',
       '"Avery Candidate" campaign contribution Colorado',
@@ -824,7 +824,7 @@ describe("researchLoop integration", { timeout: 120000 }, () => {
 
   it("merges later planner frontier queries into an existing row without falsely trying them", async () => {
     const user = `loop-pending-existing-${Date.now()}`;
-    const { sql, id } = await bootInv(user, "Candidate records");
+    const { sql, id } = await bootInv(user, "Avery Candidate records");
     const label = "Candidate political identity and endorsements";
     await sql`
       insert into frontier_items (user_id, newsroom_id, investigation_id, kind, label, label_norm, why, priority, next_steps, queries_tried)
