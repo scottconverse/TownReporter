@@ -339,6 +339,23 @@ export async function runPullPipeline(
   if (receipt.sourceUrl) {
     const sourceUrl = receipt.sourceUrl;
     await save("Opening the source page");
+    /*
+      B8B item 2: the claim branch had no cancel check at all.
+
+      The search path asks at every durable boundary (the loop below), but a
+      claim's Pull names exactly one page and finishes, so the boundary it
+      needed was this one -- and it was the only one there is. An editor who
+      pressed Cancel on a claim Pull watched the fetch open the page anyway,
+      and a Cancel that arrives before the first byte was answered with a
+      document rather than with "Cancelled by the editor".
+
+      Outside the `try` on purpose: the catch below turns a thrown error into a
+      failure line against the source, which would file a cancellation as "could
+      not open <url>" -- the silent failure this unit exists to remove. Here the
+      JobCancelledError leaves the pipeline and `performPullWork`'s caller ends
+      the row cancelled, with the reason the desk wrote.
+    */
+    await deps.assertNotCancelled?.();
     try {
       const got = await withinDeadline((signal) => deps.ingest(sourceUrl, signal), deadlineAt, now);
       receipt.counters.documentsOpened += 1;
