@@ -260,6 +260,141 @@ export type AdversarialQuery = {
 };
 
 /**
+ * Words that say what the desk was thinking, not what the file is about.
+ *
+ * Unit DD1, item 2. The verification lane used to paste the signal's whole name
+ * in front of its boilerplate, so a "Dog That Didn't Bark" signal went to a
+ * provider as the sentence "Silence from city, county, and state on a childcare
+ * closure" -- a query whose only distinctive terms are the ones describing the
+ * ABSENCE, and which came back, four times out of four, with a Wikipedia page
+ * and a dictionary entry. The search that would have found the licensing record
+ * is the one that names the childcare closure.
+ */
+const SUBJECT_NOISE = new Set([
+  "silence", "silent", "absence", "absent", "missing", "nothing", "none",
+  "unanswered", "unverified", "unclear", "unknown", "undetermined", "unexplained",
+  "alleged", "allegedly", "reportedly", "claims", "claimed", "never",
+  "question", "questions", "concern", "concerns", "issue", "issues",
+  "pattern", "apparent", "apparently", "possible", "possibly", "maybe",
+]);
+
+/** Ordinary connective tissue. Dropped whatever its case, and it breaks a run. */
+const SUBJECT_GRAMMAR = new Set([
+  "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "by",
+  "for", "from", "with", "about", "into", "over", "under", "that", "this",
+  "these", "those", "is", "are", "was", "were", "be", "been", "has", "have",
+  "had", "not", "no", "its", "their", "our", "any", "all", "says", "said", "per", "via",
+]);
+
+/**
+ * Words that are only noise when they are lowercase.
+ *
+ * "city", "county" and "state" are how the desk writes about an absence ("from
+ * city, county, and state") and they are also how a business is named ("Kid
+ * City USA"). Dropping them by case keeps the first out of a search and the
+ * second in one.
+ */
+const SUBJECT_LOWERCASE_FILLER = new Set([
+  "city", "county", "state", "district", "government", "officials", "agency",
+  "department", "residents", "resident", "people", "public", "local", "area",
+  "new", "more", "other", "same", "last", "first", "next", "still", "yet",
+]);
+
+/** How many content words a verification query may carry before it is a sentence. */
+export const ADVERSARIAL_SUBJECT_WORDS = 6;
+
+/**
+ * What the signal is ABOUT, as a search subject.
+ *
+ * Content words in the order the signal wrote them, with the desk's own framing
+ * and the ordinary connective tissue removed. A run of capitalised words ("Kid
+ * City USA") is kept together and moved to the front, because that is the name
+ * of a thing and a search for a record wants it whole.
+ *
+ * Falls back to the observation when the name carries no content of its own, so
+ * a signal titled "Silence from city, county, and state" still gets a subject.
+ * Returns "" only when neither field carries a content word, and
+ * `adversarialQueries` then runs no searches at all rather than a search for
+ * nothing.
+ */
+export function adversarialSubject(
+  signal: { name?: string | null; observation?: string | null },
+  _place?: Place,
+): string {
+  for (const raw of [signal.name, signal.observation]) {
+    const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const words = text.match(/[\p{L}\p{N}'’-]+/gu) ?? [];
+    const names: string[] = [];
+    const rest: string[] = [];
+    let run: string[] = [];
+    const flush = () => {
+      if (run.length >= 2) names.push(run.join(" "));
+      else if (run.length === 1) rest.push(run[0]!);
+      run = [];
+    };
+    for (const word of words) {
+      const bare = word.replace(/[’']s$/i, "").toLowerCase();
+      if (SUBJECT_NOISE.has(bare) || SUBJECT_GRAMMAR.has(bare)) {
+        flush();
+        continue;
+      }
+      // A capitalised word is a proper noun and belongs to the name it is
+      // part of, even when the same word lowercased is filler ("Kid City").
+      if (/^\p{Lu}/u.test(word) && word.length > 1) {
+        run.push(word);
+        continue;
+      }
+      flush();
+      if (SUBJECT_LOWERCASE_FILLER.has(bare)) continue;
+      if (word.length >= 4 || /\d/.test(word)) rest.push(word);
+    }
+    flush();
+    const subject = [...names, ...rest].slice(0, ADVERSARIAL_SUBJECT_WORDS).join(" ").trim();
+    if (subject) return subject;
+  }
+  return "";
+}
+
+/**
+ * Hosts that are a reference work rather than a record of anything.
+ *
+ * Unit DD1, item 2. The adversarial lane's own relevance judgement comes from
+ * the search provider, and on the Kid City USA file that judgement was happy to
+ * hand back `en.wikipedia.org` as the source that answered four of the five
+ * verification signals. An encyclopaedia entry is a summary of other people's
+ * work; it can never be the licensing record a gate went looking for, and the
+ * desk's own boilerplate list already refuses its sibling `wiktionary.org` for
+ * the same reason.
+ *
+ * Kept here rather than added to `result-quality.ts`'s dictionary list because
+ * this is the adversarial lane's rule: a reader-facing lead's sources are
+ * judged by `leadSourceRefusalReason`, which unit B7R owns.
+ */
+const REFERENCE_WORK_HOSTS = ["wikipedia.org", "britannica.com", "encyclopedia.com"];
+
+/**
+ * Why this page may not be counted as the source a verification query returned,
+ * or `null` if it may.
+ *
+ * `boilerplatePageReason` first -- the dictionary, the app landing page, the
+ * engine's own page -- and then the reference works above. Named, so the run
+ * record can say which rule refused it rather than only that something did.
+ */
+export function adversarialSourceRefusalReason(url: string): string | null {
+  const host = (() => {
+    try {
+      return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  if (REFERENCE_WORK_HOSTS.some((entry) => host === entry || host.endsWith(`.${entry}`)))
+    return "a reference work summarising other sources, not a record";
+  return null;
+}
+
+/**
  * "For every serious hypothesis also search the innocent explanation" — and
  * the boring explanation is written FIRST. civic-scanner: "Gate 2 — Mandatory
  * Adverse Search: Actively search for evidence that CONTRADICTS the story.
@@ -271,15 +406,7 @@ export function adversarialQueries(
   place: Place,
   officialDomainList: string[] = [],
 ): AdversarialQuery[] {
-  const subject =
-    String(signal.name ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 90) ||
-    String(signal.observation ?? "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 90);
+  const subject = adversarialSubject(signal);
   if (!subject) return [];
   const city = place.city || "";
   const county = place.county ? `${place.county} County` : city;
@@ -295,8 +422,16 @@ export function adversarialQueries(
   const site = officialSite ? `site:${officialSite} ` : "";
   return [
     {
-      // The boring explanation, written first and searched first.
-      query: `${subject} ${city} routine OR scheduled OR "normal process" OR explanation`.trim(),
+      /*
+        The boring explanation, written first and searched first.
+
+        Unit DD1, item 2: no `"normal process"` and no `"according to"`. Those
+        are the two phrases the provider kept answering with a dictionary --
+        merriam-webster came back as "the source" for the ordinary gate on the
+        Kid City USA file -- and neither adds anything to a search whose subject
+        is already written down.
+      */
+      query: `${subject} ${city} explanation OR routine OR scheduled`.trim(),
       kind: "ordinary",
       tier: "official",
     },
@@ -306,7 +441,7 @@ export function adversarialQueries(
       tier: "official",
     },
     {
-      query: `${subject} ${city} news OR reported OR "according to"`.trim(),
+      query: `${subject} ${city} news OR reported OR coverage`.trim(),
       kind: "press",
       tier: "local-press",
     },

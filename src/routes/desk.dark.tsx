@@ -44,6 +44,8 @@ import {
   plainEditorText,
   plainFinding,
   progressLine,
+  DIG_STOP_ACK,
+  digStopControl,
   recordKindFromUrl,
   redditFeedLabel,
   redditFeedStatusLabel,
@@ -61,6 +63,7 @@ import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { searchOutcomeWords } from "@/lib/news/search-trail-words";
+import { captureCounterLine, digRailCounterLine } from "@/lib/news/dark-counters";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { takeDarkSeed } from "@/lib/news/dark-seed";
@@ -300,6 +303,9 @@ function DarkPage() {
     }
     if (!observedDarkJobFinished(observedActiveDarkJob.current, openId, job)) return;
     observedActiveDarkJob.current = null;
+    // Unit DD1, item 3: the run this editor asked to stop has actually ended,
+    // so the desk stops saying "Stopping…" -- this is the only place it clears.
+    setStopRequestedFor((asked) => (job && asked === job.id ? null : asked));
     clearPhase();
     void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
     void qc.invalidateQueries({ queryKey: ["investigations"] });
@@ -335,16 +341,29 @@ function DarkPage() {
     rather than claiming the run has stopped. The poll below picks the change
     up, so nothing else has to be invalidated by hand.
   */
+  /*
+    Unit DD1, item 3: which running job this editor has already asked to stop.
+
+    `stop.isPending` is true only while the request is travelling, so on its own
+    it turned the button back into "Stop this dig" about a second into a stop
+    that takes a minute and a half -- the walkthrough of 2026-09-30 measured
+    102 s of the desk saying nothing. This is cleared when the observed job
+    actually ends (see the effect below), which is the only honest point at
+    which "Stopping…" stops being true.
+  */
+  const [stopRequestedFor, setStopRequestedFor] = useState<number | null>(null);
   const stop = useMutation({
     mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
     onSuccess: () => {
-      showNotice("Stopped. The run ends at its next step and what it has found is kept.", true);
+      showNotice(DIG_STOP_ACK, true);
       invalidate();
     },
     onError: (err) => {
       const msg =
         editorError(err instanceof Error ? err.message : "Could not stop the run") ||
         "Could not stop the run";
+      // The press did not land, so the desk must stop claiming it did.
+      setStopRequestedFor(null);
       showNotice(msg, false);
     },
   });
@@ -660,6 +679,12 @@ function DarkPage() {
   // most likely because the app restarted mid-round. Gates the busy UI so a
   // dead round does not poll and spin forever with "Keep digging" disabled.
   const stalled = Boolean(detail.data?.stalled);
+  /**
+   * Is a dig actually in flight for the open file? The one expression the
+   * workspace's busy state and the Stop control are both drawn from, so the
+   * button cannot offer to stop a run the page has already given up on.
+   */
+  const digRunning = (digging || inv?.status === "investigating") && !stalled;
   useEffect(() => {
     const now = inv?.status === "investigating" || digging;
     if (wasInvestigating.current && !now) clearPhase();
@@ -670,7 +695,9 @@ function DarkPage() {
     status: inv?.status ?? (digging ? "investigating" : "open"),
     hops: inv?.hops ?? 0,
     budget: inv?.budget ?? 5,
-    artifacts: detail.data?.artifacts.length ?? 0,
+    // Unit DD1, item 6: the whole file's captures, not the page's sixty rows,
+    // so the line the live run writes agrees with the two counters beside it.
+    artifacts: detail.data?.captureCounts?.captures ?? 0,
     searches: detail.data?.searches.length ?? 0,
     claims: detail.data?.claims.length ?? 0,
   });
@@ -1012,8 +1039,8 @@ function DarkPage() {
               openId={openId}
               detail={detail.data ?? undefined}
               pending={detail.isPending && !detail.data}
-              digging={(digging || inv?.status === "investigating") && !stalled}
-              keepDisabled={(digging || inv?.status === "investigating") && !stalled}
+              digging={digRunning}
+              keepDisabled={digRunning}
               stalled={stalled}
               darkJobError={
                 detail.data?.darkJob?.status === "failed"
@@ -1031,15 +1058,25 @@ function DarkPage() {
               queueError={queueError?.invId === openId ? queueError.message : null}
               followPending={followLead.isPending}
               parkPending={park.isPending}
-              stopJobId={currentDarkJob?.id ?? null}
               // Unit U25, B4: the editor's way out of a running dig. Same
               // job-cancel the follow-ups use (see `cancelStoryJob`, which
               // checks newsroom ownership and not kind), so the queue and the
               // worker agree about what "stopped" means.
-              stopPending={stop.isPending}
+              //
+              // Unit DD1, item 3: the state is derived from the press AND the
+              // job, not from the request alone -- see `digStopControl`.
+              stopControl={digStopControl({
+                // The same `digRunning` the workspace is drawn with: a stalled
+                // run has no worker left to read the flag, so it offers no
+                // Stop button and cannot sit on "Stopping…" for ever.
+                running: digRunning && currentDarkJob?.id != null,
+                requested: stopRequestedFor != null && stopRequestedFor === currentDarkJob?.id,
+                sending: stop.isPending,
+              })}
               onStopDig={() => {
                 if (currentDarkJob?.id == null) return;
                 setNotice(null);
+                setStopRequestedFor(currentDarkJob.id);
                 stop.mutate(currentDarkJob.id);
               }}
               onKeepDigging={() => {
@@ -1117,7 +1154,7 @@ function DeskFileCard({
       >
         <span className="astra-file-t">{row.title || `File ${row.id}`}</span>
         <span className="astra-file-m">
-          {editorStatus(row.status)} · {records} record{records === 1 ? "" : "s"} on file
+          {editorStatus(row.status)} · {digRailCounterLine(records)}
           {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
           {formatShortDate(row.updated_at)}
         </span>
@@ -1417,8 +1454,7 @@ function InvestigationWorkspace({
   queueError,
   followPending,
   parkPending,
-  stopJobId,
-  stopPending,
+  stopControl,
   onStopDig,
   onKeepDigging,
   onQueue,
@@ -1445,9 +1481,7 @@ function InvestigationWorkspace({
   queueError: string | null;
   followPending: boolean;
   parkPending: boolean;
-  /** The running dig's job id, when there is one to stop. Unit U25, B4. */
-  stopJobId: number | null;
-  stopPending: boolean;
+  stopControl: { visible: boolean; label: string; disabled: boolean; line: string | null };
   onStopDig: () => void;
   onKeepDigging: () => void;
   onQueue: () => void;
@@ -1483,18 +1517,20 @@ function InvestigationWorkspace({
       extractionMethod: a.extraction_method,
     })),
   );
-  const readableLabel =
-    captureStats.total === 0
-      ? "0 records on file"
-      : captureStats.ok === captureStats.total
-        ? `${captureStats.total} records on file`
-        : `${captureStats.ok} readable / ${captureStats.total} captured`;
+  /*
+    Unit DD1, item 6. The line's counts come from the whole file, and from the
+    same query the rail row is counted with -- not from the sixty rows this page
+    happens to have loaded. See dark-counters.ts: the rail and this line used to
+    disagree by one (the editor's pasted tip) and, on a long file, by more.
+  */
+  const captureCounts = detail?.captureCounts ?? { captures: 0, readable: 0, unreadable: 0 };
+  const readableLabel = captureCounterLine(captureCounts);
   const readableCountBadge =
-    captureStats.total === 0
+    captureCounts.captures === 0
       ? 0
-      : captureStats.ok === captureStats.total
-        ? captureStats.total
-        : `${captureStats.ok}/${captureStats.total}`;
+      : captureCounts.readable >= captureCounts.captures
+        ? captureCounts.captures
+        : `${captureCounts.readable}/${captureCounts.captures}`;
   const showBlockedBanner = captureStats.total >= 3 && captureStats.blockedRatio > 0.6;
   const claims = detail?.claims ?? [];
   const hyps = detail?.hypotheses ?? [];
@@ -1658,8 +1694,22 @@ function InvestigationWorkspace({
         {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
         {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
         {digging ? <Busy label={phase || "Searching records…"} /> : null}
+        {/*
+          Unit DD1, item 3. The acknowledgement belongs here, above the notice
+          line, and NOT inside it: the notice line is suppressed while a run is
+          live, and the editor presses Stop precisely while a run is live. The
+          walkthrough measured 102 seconds of a desk that had accepted the stop
+          and said nothing about it.
+        */}
+        {stopControl.line ? (
+          <p className="note" role="status">
+            {stopControl.line}
+          </p>
+        ) : null}
         {run ? <DarkRunMeter run={run} active={digging} /> : null}
-        {notice && !digging ? <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p> : null}
+        {notice && !digging && stopControl.line == null ? (
+          <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+        ) : null}
         {
           /*
             Persistent, not a fleeting toast: this banner stays mounted for as
@@ -1892,9 +1942,9 @@ function InvestigationWorkspace({
             here at all -- the walkthrough scanned every button and summary on
             this page for /stop|pause|halt|cancel|abandon/ and found none.
           */}
-          {stopJobId != null && digging ? (
-            <InkButton tone="quiet" disabled={stopPending} onClick={onStopDig}>
-              {stopPending ? "Stopping…" : "Stop this dig"}
+          {stopControl.visible ? (
+            <InkButton tone="quiet" disabled={stopControl.disabled} onClick={onStopDig}>
+              {stopControl.label}
             </InkButton>
           ) : null}
           <Link to="/desk/follow-ups" className="btn solid">

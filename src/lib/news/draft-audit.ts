@@ -507,6 +507,110 @@ const snippetOf = (sentence: string): string =>
     ? `${trimEdges(sentence.slice(0, DRAFT_AUDIT_LIMITS.snippetChars))}…`
     : sentence;
 
+/*
+  ── Stating harder than the story does ──────────────────────────────────────
+
+  Unit DD1, item 5. The drafted Kid City USA story (lead 72, 2026-09-30) read:
+
+    dek:  "State licensing records show the program IS ON PROBATION and was
+           recommended for adverse action in July."
+    body: "…shows a RECOMMENDATION FOR PROBATION dated July 30, 2026, with no
+           final outcome or outcome date listed."
+
+  The capture says what the body says. "Recommended" is not "in force": a
+  reader who stops at the dek has been told something the story's own text does
+  not support, and nothing in this checker read the two against each other.
+
+  The rule is deliberately narrow, because the alternative -- guessing at
+  hedges -- is how a checker starts inventing doubt. A state the story only
+  RECOMMENDS, PROPOSES or ADVISES (or says is not final) may not be asserted as
+  present anywhere in the draft: not in the dek, not in the headline, not in
+  the body. Where the story simply states the state, with nothing pending
+  behind it, this says nothing at all.
+*/
+/** The noun phrase a recommendation attaches to: "recommendation for probation". */
+const PENDING_TARGET = new RegExp(
+  String.raw`\b(?:recommend(?:s|ed|ation|ations|ing)?|propos(?:es|ed|al|als|ing)?|advis(?:es|ed))\b` +
+    String.raw`(?:\s+\w+){0,3}?\s+(?:for|of|to|that|toward|towards)\s+` +
+    String.raw`((?:[a-z][\w'’-]*)(?:\s+(?:[a-z][\w'’-]*)){0,2})`,
+  "gi",
+);
+
+/** Words that make a captured "target" a sentence rather than a state. */
+const NOT_A_STATE = new Set([
+  "the", "a", "an", "it", "them", "this", "that", "be", "not", "no", "any",
+  "his", "her", "their", "its", "our", "more", "less", "further", "another",
+]);
+
+/** A word that continues the sentence rather than the state's own name. */
+const NOT_PART_OF_A_STATE = new Set([
+  "dated", "issued", "filed", "listed", "signed", "served", "entered", "sent",
+  "was", "were", "is", "are", "and", "or", "with", "no", "not", "by", "in",
+  "on", "at", "for", "to", "from", "that", "this", "which", "per", "as", "of",
+  "after", "before", "later", "then", "but", "its", "their", "his", "her",
+]);
+
+/**
+ * The states the draft's own text holds back: "recommendation for probation"
+ * yields "probation". Gathered from the whole draft, so the check needs nothing
+ * but the draft itself.
+ */
+export function pendingStates(text: string): string[] {
+  const found = new Set<string>();
+  for (const match of text.matchAll(PENDING_TARGET)) {
+    const captured = trimEdges(match[1]!).toLowerCase().replace(/\s+/g, " ").split(" ");
+    // The state's own name ends where the sentence carries on: "probation
+    // dated July 30" names probation, and the date is when it was recommended.
+    const cut = captured.findIndex((word, index) => index > 0 && NOT_PART_OF_A_STATE.has(word));
+    const words = cut > 0 ? captured.slice(0, cut) : captured;
+    const phrase = words.join(" ");
+    if (phrase.length < 5 || NOT_A_STATE.has(words[0]!)) continue;
+    found.add(phrase);
+  }
+  return [...found];
+}
+
+/**
+ * Sentences that assert one of those states as present fact.
+ *
+ * "is on probation", "was placed on probation", "has been suspended" -- the
+ * copula is what makes it a statement about now rather than a proposal.
+ */
+function certaintyUpgradeFindings(
+  text: string,
+  states: string[],
+  position: { paragraph: number },
+): DraftAuditFinding[] {
+  if (!states.length) return [];
+  const findings: DraftAuditFinding[] = [];
+  const bounds = sentenceBounds(maskQuotedText(text));
+  bounds.forEach(([start, end], index) => {
+    const sentence = trimEdges(text.slice(start, end));
+    if (!sentence) return;
+    const lowered = sentence.toLowerCase();
+    for (const state of states) {
+      const escaped = state.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const asserted = new RegExp(
+        String.raw`\b(?:is|are|was|were|has been|have been|remains|remained)\s+` +
+          String.raw`(?:on|under|in|placed on|subject to)?\s*${escaped}\b`,
+      );
+      if (!asserted.test(lowered)) continue;
+      findings.push({
+        severity: "review",
+        code: "unearned-certainty",
+        paragraph: position.paragraph,
+        sentence: index + 1,
+        message:
+          `This draft only recommends "${state}" — nothing in it says that is in force. ` +
+          `This sentence states it as fact. Say who recommended it and when, or what the outcome is.`,
+        snippet: snippetOf(sentence),
+      });
+      break;
+    }
+  });
+  return findings;
+}
+
 const allIndexesOf = (haystack: string, needle: string): number[] => {
   const found: number[] = [];
   let from = 0;
@@ -880,6 +984,15 @@ export function auditDraft(input: { headline: string; dek: string; body: string;
 
   const story = storyTextForAudit(input.body);
   const paragraphs = splitParagraphs(story);
+
+  /*
+    Unit DD1, item 5: what this draft's own text holds back, read once, and
+    held against the headline, the dek and every body paragraph -- the same
+    three fields, the same rule. See `certaintyUpgradeFindings` above.
+  */
+  const heldBack = pendingStates(trimEdges([...above, story].join(" ")));
+  findings.push(...certaintyUpgradeFindings(above.join(" "), heldBack, { paragraph: 0 }));
+
   const bodySentences: string[] = [];
   paragraphs.forEach((paragraph, index) => {
     const masked = maskQuotedText(paragraph);
@@ -897,6 +1010,7 @@ export function auditDraft(input: { headline: string; dek: string; body: string;
         ),
       );
     }
+    findings.push(...certaintyUpgradeFindings(paragraph, heldBack, { paragraph: index + 1 }));
     findings.push(...synonymCyclingFindings(masked.toLowerCase(), { paragraph: index + 1, sentence: 0 }, snippetOf(paragraph)));
   });
 

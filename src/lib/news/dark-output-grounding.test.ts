@@ -1,6 +1,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { groundedDarkWindow, isGroundedDarkPromise, preserveBoundedAbsenceLanguage } from "./dark.ts";
+import {
+  groundBrief,
+  groundedDarkWindow,
+  isGroundedDarkPromise,
+  preserveBoundedAbsenceLanguage,
+} from "./dark.ts";
+import { asVerdict } from "./dark-brief.ts";
 
 describe("Dark Desk model-output grounding", () => {
   it("uses the saved run window rather than a model-invented date", () => {
@@ -119,5 +125,53 @@ describe("Dark Desk model-output grounding", () => {
       ),
       "The bounded evidence pack did not establish the existence of the organization. The bounded evidence pack did not establish registration for Pizza With Purpose. The bounded evidence pack did not establish permits for the festival. The bounded evidence pack did not establish the presence of the fiscal sponsor.",
     );
+  });
+});
+
+/*
+  Unit DD1, item 1: the editor brief is the last model-written prose in the
+  file and the first thing an editor reads. Its "DO THIS NEXT" sent the
+  walkthrough's reader to a street address no capture in the file carried.
+*/
+describe("Dark Desk brief grounding (DD1 item 1)", () => {
+  const pack =
+    "CAPTURE 31 — Colorado Shines: Kid City USA Longmont, licence 1770463, " +
+    "1941 Terry St, Longmont, CO 80501. A recommendation for probation was dated July 30, 2026.";
+
+  const brief = {
+    headline: "Kid City USA Longmont said to close on one week's notice",
+    tldr: "One Reddit post and one licensing record, and they disagree about nothing.",
+    verdict: asVerdict("thin"),
+    why_verdict: "One source for the closure itself.",
+    hypothesis: "The Longmont closure is unconfirmed.",
+    strength: 0.2,
+    supports: ["The Reddit post says 1941 Terry Street."],
+    benign: "A quarterly posting cycle.",
+    kills_it: "The licensing record for 1941 Terry Street.",
+    next: "Pull the licensing record for the property at 1749 Main Street.",
+    connections: ["The landlord of 1749 Main Street also owns the Grand Junction site."],
+    sections: { record: "One record.", tested: "None.", open: "None.", known: "One." },
+    evidence_status: "unverified" as const,
+    generated_at: "2026-09-30T23:00:00.000Z",
+  };
+
+  it("marks an address the brief invented and keeps the one the capture carries", () => {
+    const out = groundBrief(brief, pack);
+    assert.match(out.next, /1749 Main Street \(not in any capture yet\)/);
+    assert.match(out.connections[0]!, /1749 Main Street \(not in any capture yet\)/);
+    assert.equal(out.kills_it, brief.kills_it, "a grounded line was disturbed");
+    assert.equal(out.hypothesis, brief.hypothesis);
+    assert.equal(out.benign, brief.benign);
+    assert.equal(out.strength, brief.strength, "the percentage is not prose");
+    assert.equal(out.verdict, brief.verdict);
+  });
+
+  it("leaves a wholly grounded brief byte-for-byte unchanged", () => {
+    const grounded = {
+      ...brief,
+      next: "Pull the licensing record for 1941 Terry Street.",
+      connections: ["Licence 1770463 is the one the Colorado Shines record carries."],
+    };
+    assert.deepEqual(groundBrief(grounded, pack), grounded);
   });
 });

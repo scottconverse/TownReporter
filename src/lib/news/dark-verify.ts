@@ -33,9 +33,11 @@ import { boilerplatePageReason } from "./result-quality.ts";
 import { storableText } from "./storable-text.ts";
 import type { WebHit, SearchAttempt } from "./search-web.ts";
 import type { DarkRunBudget, DarkRunUsageSnapshot } from "./dark-run-budget.ts";
+import { junkQueryReason } from "./extract.ts";
 import {
   DARK_VERIFY_SYSTEM,
   adversarialQueries,
+  adversarialSourceRefusalReason,
   newsworthyDecision,
   readGates,
   readNewsworthiness,
@@ -178,10 +180,24 @@ export async function verifyRunSignals(opts: {
   signalLoop: for (let signalIndex = 0; signalIndex < selected.length; signalIndex++) {
     const sig = selected[signalIndex]!;
     await opts.onStage?.(`Testing explanations for signal ${signalIndex + 1} of ${selected.length}`);
-    const plan = adversarialQueries(sig, opts.place, official).map((q) => ({
+    /*
+      Unit DD1, item 2: the hop lane's junk filter, on this lane too.
+
+      A query this lane plans is one the APP runs, so it passes the same
+      `junkQueryReason` gate the hop planner's queries pass. The dropped ones
+      are said out loud in the signal's record rather than silently skipped,
+      the way the hop loop says them.
+    */
+    const plannedQueries = adversarialQueries(sig, opts.place, official).map((q) => ({
       ...q,
       query: queryWithResearchWindow(q.query, opts.preferences),
     }));
+    const droppedQueries: string[] = [];
+    const plan = plannedQueries.filter((q) => {
+      const reason = junkQueryReason(q.query);
+      if (reason) droppedQueries.push(`${reason}: ${q.query.slice(0, 120)}`);
+      return !reason;
+    });
     const records: AdversarialRecord[] = [];
 
     const evidence: string[] = [];
@@ -233,9 +249,28 @@ export async function verifyRunSignals(opts: {
         came back on the question -- `relevance.decision === "degraded"` -- no
         URL is recorded at all: the query ran, and it did not get an answer.
       */
+      /*
+        Unit DD1, item 2: a page that is not a record does not get to answer the
+        query, and the run record says which rule refused it.
+
+        `boilerplatePageReason` names the dictionary, the app landing page and
+        the engine's own page; `adversarialSourceRefusalReason` adds the
+        reference works -- `en.wikipedia.org/wiki/Childcare` came back as "the
+        source" for four of the five verification signals on the Kid City USA
+        file, because the query named a childcare closure and the entry is
+        titled "Childcare".
+
+        When nothing survives, the query ran and got no answer: no URL is
+        recorded at all, and the outcome says so instead of showing the editor a
+        page nobody could have used.
+      */
+      // How many the provider returned, before any rule refused one -- the
+      // difference between "the search found nothing" and "the search found
+      // pages that are not records", which are two different facts.
+      const returned = hits.length;
       const refused: string[] = [];
       hits = hits.filter((h) => {
-        const why = boilerplatePageReason(h.url);
+        const why = boilerplatePageReason(h.url) ?? adversarialSourceRefusalReason(h.url);
         if (why) refused.push(`${why} (${h.url.slice(0, 120)})`);
         return !why;
       });
@@ -243,9 +278,9 @@ export async function verifyRunSignals(opts: {
       if (state.startsWith("SEARCH_SUCCESS")) {
         outcome = answered
           ? `${hits.length} result(s)${relevanceDecision === "relevant" ? "" : " (not assessed for relevance)"}`
-          : hits.length && relevanceDecision === "degraded"
-            ? `${hits.length} result(s), none matching the question (kept as candidates, not as an answer)`
-            : "no results found";
+          : returned && relevanceDecision === "degraded"
+            ? `${returned} result(s), none matching the question (kept as candidates, not as an answer)`
+            : "no independent source found";
       }
       if (refused.length)
         outcome = `${outcome}; refused ${refused.length}: ${[...new Set(refused)].slice(0, 3).join("; ")}`.slice(
