@@ -17,6 +17,7 @@ import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import { myDesk } from "@/lib/news/claim";
 import { getDailyScanPolicy } from "@/lib/news/daily-scan";
+import { sourceStatusUndoTo, type SingleRowStatus } from "@/lib/news/source-status-undo";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import {
   dailyScheduleLabel,
@@ -298,9 +299,11 @@ function SourcesPage() {
     SILENT FAIL"). It reports through the shared action family now: the reason
     the server gave, visibly, on every one of those presses.
   */
-  const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "accepted" | "rejected" | "paused" }) =>
-      setSourceStatus({ data: input }),
+  const setStatus = useDeskMutation<
+    Awaited<ReturnType<typeof setSourceStatus>>,
+    { id: number; status: SingleRowStatus; from?: string }
+  >({
+    mutationFn: (input) => setSourceStatus({ data: { id: input.id, status: input.status } }),
     pending: "Saving…",
     done: (_result, input) =>
       input.status === "paused"
@@ -308,6 +311,30 @@ function SourcesPage() {
         : input.status === "accepted"
           ? "Accepted: the scanner may fetch this source."
           : "Removed: this source is out of the watch list.",
+    /*
+      FB7, item 1: "NO UNDO" on the row's Remove (FB0-REPORT.md Table B,
+      Sources). Removing is one press and the source leaves the watch list and
+      its row -- with nothing to press to get it back, on a screen whose own
+      bulk path has offered an Undo all along.
+
+      The way back is the status the row had, which is why the variables carry
+      `from`: the mutation knows the new status and has no memory of the old
+      one. It is offered for Remove only -- Pause already has its inverse
+      ("Resume") drawn on the same row, and an Undo next to it would be two
+      buttons for one press.
+    */
+    undo: (_result, input) => {
+      const back = sourceStatusUndoTo(input);
+      if (!back) return null;
+      return {
+        label: "Undo",
+        // A block body, not an arrow expression: returning the mutation's own
+        // result here would make `setStatus`'s type depend on itself.
+        run: () => {
+          setStatus.mutate({ id: input.id, status: back, from: "rejected" });
+        },
+      };
+    },
     failedLead: "Could not change that source. ",
     after: async (_res, input) => {
       await qc.invalidateQueries({ queryKey: ["sources"] });
@@ -330,6 +357,25 @@ function SourcesPage() {
       );
     },
   });
+  /*
+    FB7, item 1. Which row pressed Pause / Resume / Remove / Accept / Drop.
+    It is one mutation for four buttons in two components, so the pending state
+    has to travel as data rather than be read off the hook in each row -- see
+    the prop's own note on `WatchRows`.
+  */
+  const statusId = setStatus.isPending ? (setStatus.variables?.id ?? null) : null;
+  /*
+    FB7, item 1: "NO UNDO + no confirm" on the row's Remove. Removing takes a
+    source off the watch list -- the scanner stops fetching it and its row
+    leaves this screen -- and it used to be one press with nothing behind it.
+
+    Two presses now, the desk's own two-step shape (`confirmId` on Opinion and
+    Published): the first arms the row, the second does it. It is held here
+    rather than in the row because the rows are drawn in a `.map` and cannot
+    own state each; one id is all this needs, because only one row can be
+    armed at a time.
+  */
+  const [confirmRemove, setConfirmRemove] = useState<number | null>(null);
 
   const groups: {
     k: string;
@@ -485,8 +531,25 @@ function SourcesPage() {
           });
         }}
       />
+      {/*
+        FB7, item 1 (FB0-REPORT.md Table B, Sources: the notice line was
+        "SILENT (a11y)" -- "no role at all"). Everything this screen says in one
+        sentence lands here: the add dialog's outcome, the section-assignment
+        follow-up, "Accepted, but filing it under X failed". A sighted editor
+        could read it; a screen reader was never told it had changed.
+
+        `alert` for a failure and `status` for an outcome, not `role="status"`
+        for both: a polite region queues behind whatever is being read, and a
+        failure is the one sentence on this screen that should interrupt.
+        Exactly one region is drawn, because the line is one.
+      */}
       {notice ? (
-        <p className={"note" + (notice.kind === "err" ? " err" : "")}>{notice.text}</p>
+        <p
+          className={"note" + (notice.kind === "err" ? " err" : "")}
+          role={notice.kind === "err" ? "alert" : "status"}
+        >
+          {notice.text}
+        </p>
       ) : null}
       {/*
         The design draws this screen as two columns: the watch list, and the
@@ -625,19 +688,25 @@ function SourcesPage() {
                       justAddedSince={addedFloor}
                       killCounts={killCounts}
                   checkingId={checkOne.isPending ? (checkOne.variables ?? null) : null}
+                  statusId={statusId}
                   checkResult={checkResult}
                   onCheck={(id) => {
                     setCheckResult(null);
                     checkOne.mutate(id);
                   }}
-                  onStatus={(id, status) => setStatus.mutate({ id, status })}
+                  confirmRemoveId={confirmRemove}
+                  onConfirmRemove={setConfirmRemove}
+                  onStatus={(id, status, from) => setStatus.mutate({ id, status, from })}
                 />
               ) : (
                 <SourceTable
                   rows={rows}
                   acts={g.acts}
                       justAddedSince={addedFloor}
-                  onStatus={(id, status) => setStatus.mutate({ id, status })}
+                  statusId={statusId}
+                  confirmRemoveId={confirmRemove}
+                  onConfirmRemove={setConfirmRemove}
+                  onStatus={(id, status, from) => setStatus.mutate({ id, status, from })}
                   /* Only where an Accept button sits, because only there can
                      the tick be saved in the same step. */
                   assignUI={
@@ -726,9 +795,21 @@ function SourcesPage() {
               (FB1, unit 3), so the bar, the chip row, the stall rule and Cancel
               are the drawn card's and not a second rendering of the same row.
             */}
+            {/*
+              FB7, item 2: NOT `compact`.
+
+              This is where "Add & run first check" in the add-sources dialog
+              lands and where a source's first check is watched -- the one
+              place an editor looks after adding a source. The compact card
+              drops the stage chip row (JobCard.tsx: `!compact && job.stages`),
+              and the Scan screen draws this exact job at full size already, so
+              the first check named the same stages on one screen and none on
+              the other. Opinion and Drafts made the same swap; this is the
+              last of them.
+            */}
             {scanJob ? (
               <div className="sources-scan-card">
-                <DeskJobCard job={scanJob} compact />
+                <DeskJobCard job={scanJob} />
               </div>
             ) : null}
           </div>
@@ -835,6 +916,60 @@ function suggesterKey(
   by: string | null | undefined,
 ): "scan" | "research" | "dark" | "editor" | "unrecorded" {
   return by === "scan" || by === "research" || by === "dark" || by === "editor" ? by : "unrecorded";
+}
+
+/*
+  FB7, item 1. `SingleRowStatus` and the rule that decides whether a press has
+  a way back live in `lib/news/source-status-undo.ts`, so the rule can be
+  tested without a React tree -- see the note there.
+*/
+
+/**
+ * Remove, in two presses, with a way back afterwards (FB7, item 1).
+ *
+ * "Remove" took a source off the watch list in one press with no confirm and
+ * no Undo -- FB0-REPORT.md Table B's "SILENT FAIL + NO UNDO + no confirm".
+ * The press is armed here and the done toast carries the Undo; this is the
+ * desk's own two-step shape (`confirmId` on Opinion and Published) rather than
+ * a dialog, because the row it is about is right there and a modal would take
+ * the editor off it.
+ *
+ * One component for all three Remove buttons on this screen (the paused row's,
+ * the active row's and the one behind "More"), so the wording and the arming
+ * cannot drift apart between them.
+ */
+function RemoveAction({
+  label,
+  armed,
+  busy,
+  onAsk,
+  onCancel,
+  onConfirm,
+}: {
+  label: string;
+  armed: boolean;
+  busy: boolean;
+  onAsk: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  if (!armed) {
+    return (
+      <InkButton tone="quiet" disabled={busy} aria-busy={busy || undefined} onClick={onAsk}>
+        {label}
+      </InkButton>
+    );
+  }
+  return (
+    <>
+      <InkButton tone="solid" disabled={busy} aria-busy={busy || undefined} onClick={onConfirm}>
+        {busy ? "Removing…" : "Yes, remove"}
+      </InkButton>
+      <InkButton tone="quiet" onClick={onCancel}>
+        Keep
+      </InkButton>
+    </>
+  );
 }
 
 const SUGGESTER_FILTERS: {
@@ -1221,6 +1356,9 @@ function WatchRows({
   justAddedSince,
   killCounts,
   checkingId,
+  statusId,
+  confirmRemoveId,
+  onConfirmRemove,
   checkResult,
   onCheck,
   onStatus,
@@ -1236,12 +1374,26 @@ function WatchRows({
   /** The row a check is in flight for, so only that row says "Checking…". */
   checkingId: number | null;
   /**
+   * The row a Pause / Resume / Remove write is in flight for (FB7, item 1).
+   *
+   * `setStatus` is one mutation for four buttons, so it carries one
+   * `isPending`; `variables.id` is which row pressed it. Every one of those
+   * presses used to leave its button enabled and worded exactly as it was, so
+   * one row's write in flight left four buttons -- and every other row's --
+   * looking dead but pressable, and a second press re-sent the same change.
+   */
+  statusId: number | null;
+  /** The row whose Remove has been pressed once and is waiting on the second. */
+  confirmRemoveId: number | null;
+  onConfirmRemove: (id: number | null) => void;
+  /**
    * What the last per-row check answered, so the row that was pressed says it
    * (unit U24). Null before any press, and cleared when a new one starts.
    */
   checkResult: { id: number; ok: boolean; line: string } | null;
   onCheck: (id: number) => void;
-  onStatus: (id: number, status: "accepted" | "rejected" | "paused") => void;
+  /** `from` is the status the row was in, so the done toast can offer Undo. */
+  onStatus: (id: number, status: SingleRowStatus, from?: string) => void;
 }) {
   const { formatDateTime } = usePaperDateFormatters();
   return (
@@ -1269,6 +1421,15 @@ function WatchRows({
                 ? `Checked ${formatDateTime(s.last_fetched_at)}`
                 : "Added, not fetched yet";
         const checking = checkingId === s.id;
+        /*
+          FB7, item 1. The pending state for this row's Pause / Resume /
+          Remove: the button that was pressed disables itself and says what it
+          is doing, in the same paint as the click -- the press→pending shape
+          `useDeskAction` gives every other control on this desk. The other
+          rows are left alone: they were not pressed and nothing about them
+          has changed.
+        */
+        const statusBusy = statusId === s.id;
         const result = checkResult?.id === s.id ? checkResult : null;
         const kills = killCounts?.get(s.id);
         return (
@@ -1312,12 +1473,34 @@ function WatchRows({
               <div className="astra-row-acts">
                 {paused ? (
                   <>
-                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
-                      Resume
+                    <InkButton
+                      tone="quiet"
+                      disabled={statusBusy}
+                      aria-busy={statusBusy || undefined}
+                      onClick={() => onStatus(s.id, "accepted")}
+                    >
+                      {statusBusy ? "Resuming…" : "Resume"}
                     </InkButton>
-                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
-                      Remove
-                    </InkButton>
+                    <RemoveAction
+                      label="Remove"
+                      armed={confirmRemoveId === s.id}
+                      busy={statusBusy}
+                      onAsk={() => onConfirmRemove(s.id)}
+                      onCancel={() => onConfirmRemove(null)}
+                      /*
+                        Deliberately NOT disarming here: the row stays armed so
+                        the second press keeps drawing "Removing…" while the
+                        write is in flight. Disarming first turned the button
+                        back into "Remove" in the same paint, so the pending
+                        state this item exists to add was never visible. The
+                        arming clears itself when the row leaves -- which is
+                        what a successful Remove does -- and a failed one leaves
+                        it armed, ready for another press.
+                      */
+                      onConfirm={() => {
+                        onStatus(s.id, "rejected", s.status);
+                      }}
+                    />
                   </>
                 ) : (
                   <>
@@ -1328,8 +1511,13 @@ function WatchRows({
                     >
                       {checking ? "Checking…" : failed ? "Retry" : "Check now"}
                     </InkButton>
-                    <InkButton tone="quiet" onClick={() => onStatus(s.id, "paused")}>
-                      Pause
+                    <InkButton
+                      tone="quiet"
+                      disabled={statusBusy}
+                      aria-busy={statusBusy || undefined}
+                      onClick={() => onStatus(s.id, "paused")}
+                    >
+                      {statusBusy ? "Pausing…" : "Pause"}
                     </InkButton>
                     {/*
                     Remove, one click deeper.
@@ -1347,13 +1535,17 @@ function WatchRows({
                     <details className="row-more">
                       <summary className="btn quiet">More ▾</summary>
                       <div className="row-more-panel">
-                        <button
-                          type="button"
-                          className="btn quiet"
-                          onClick={() => onStatus(s.id, "rejected")}
-                        >
-                          Remove
-                        </button>
+                        <RemoveAction
+                          label="Remove"
+                          armed={confirmRemoveId === s.id}
+                          busy={statusBusy}
+                          onAsk={() => onConfirmRemove(s.id)}
+                          onCancel={() => onConfirmRemove(null)}
+                          onConfirm={() => {
+                            onConfirmRemove(null);
+                            onStatus(s.id, "rejected", s.status);
+                          }}
+                        />
                       </div>
                     </details>
                   </>
@@ -1387,6 +1579,9 @@ function SourceTable({
   rows,
   acts,
   justAddedSince,
+  statusId,
+  confirmRemoveId,
+  onConfirmRemove,
   onStatus,
   assignUI,
 }: {
@@ -1394,7 +1589,13 @@ function SourceTable({
   acts: ("accepted" | "rejected")[];
   /** The watch list's high-water mark when the add dialog last reported a save. */
   justAddedSince?: number | null;
-  onStatus: (id: number, status: "accepted" | "rejected") => void;
+  /** See `WatchRows`: the row an Accept / Drop write is in flight for. */
+  statusId: number | null;
+  /** See `WatchRows`: the row whose Drop is waiting on its second press. */
+  confirmRemoveId: number | null;
+  onConfirmRemove: (id: number | null) => void;
+  /** See `WatchRows`: `from` is the status the row was in, for the Undo. */
+  onStatus: (id: number, status: SingleRowStatus, from?: string) => void;
   /** Absent for a non-owner, and on the On watch list, where a source is already accepted. */
   assignUI?: {
     options: { key: string; name: string }[];
@@ -1472,14 +1673,27 @@ function SourceTable({
               ) : null}
               <span className="row-acts">
                 {acts.includes("accepted") ? (
-                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "accepted")}>
-                    Accept
+                  <InkButton
+                    tone="quiet"
+                    disabled={statusId === s.id}
+                    aria-busy={statusId === s.id || undefined}
+                    onClick={() => onStatus(s.id, "accepted", s.status)}
+                  >
+                    {statusId === s.id ? "Accepting…" : "Accept"}
                   </InkButton>
                 ) : null}
                 {acts.includes("rejected") ? (
-                  <InkButton tone="quiet" onClick={() => onStatus(s.id, "rejected")}>
-                    Drop
-                  </InkButton>
+                  <RemoveAction
+                    label="Drop"
+                    armed={confirmRemoveId === s.id}
+                    busy={statusId === s.id}
+                    onAsk={() => onConfirmRemove(s.id)}
+                    onCancel={() => onConfirmRemove(null)}
+                    onConfirm={() => {
+                      onConfirmRemove(null);
+                      onStatus(s.id, "rejected", s.status);
+                    }}
+                  />
                 ) : null}
               </span>
             </td>

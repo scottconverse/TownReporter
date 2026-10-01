@@ -4113,6 +4113,16 @@
 .desk-ltr.astra .queue-scan-card {
   margin-top: 10px;
 }
+/* FB7, item 2: the dig round's, the brief's and the PDF read's cards on the
+   Dark Desk. The card is drawn next to the control that started it, so it
+   needs the same breathing room the scan's card gets on the other screens --
+   and a bound so a full-size card inside the narrow file column cannot push
+   the Decide strip off the panel. */
+.desk-ltr.astra .dark-job-card {
+  margin-top: 10px;
+  margin-bottom: 10px;
+  min-width: 0;
+}
 /* FB6, item 2: the one-reason box a bulk Kill asks for, laid out like the bulk
    Delete confirm it sits beside. */
 .desk-ltr.astra .queue-bulk-reason {

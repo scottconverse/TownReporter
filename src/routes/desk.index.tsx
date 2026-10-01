@@ -100,6 +100,7 @@ import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
+import { wireScanLine } from "@/lib/news/scan-wire-line";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
@@ -2277,7 +2278,17 @@ function DeskHome() {
           <section className="wirecol gc-wire">
             <SecHead
               title="The wire"
-              sub={last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet"}
+              /*
+                FB7, item 3. A scan in flight owns the heading. It used to say
+                "No scans yet" whenever no scan had FINISHED, so the panel read
+                "No scans yet" directly above a job card announcing that one was
+                running. `wireScanLine` builds the sentence from the job's own
+                step, so the two lines on this panel cannot disagree.
+              */
+              sub={
+                wireScanLine(scanJob) ??
+                (last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet")
+              }
             />
             {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
             {/*

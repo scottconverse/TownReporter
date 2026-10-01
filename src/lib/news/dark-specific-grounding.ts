@@ -47,6 +47,62 @@ import type { HopPlan } from "./investigate.ts";
 /** The visible marker. Quoted in the editor handbook; do not reword silently. */
 export const UNGROUNDED_MARKER = "(not in any capture yet)";
 
+/**
+ * The other half of the same sentence -- FB7, item 5 (A2c X3).
+ *
+ * `UNGROUNDED_MARKER` says "nothing here carries this". This one says the
+ * opposite: every record the line names IS carried by a capture the file
+ * already holds, so a step that asks for it is asking for what is on file.
+ *
+ * A2c found exactly that in the brief's DO THIS NEXT: it asked for the
+ * Colorado Shines licensing record the same round had already captured. The
+ * grounding machinery could already tell the two cases apart -- it just had
+ * no word for the second one, so the stale ask went out unremarked.
+ *
+ * Same convention, deliberately: marked IN PLACE, so the editor still reads
+ * what the brief asked for and sees the answer beside it, rather than the
+ * step being silently deleted.
+ */
+export const ALREADY_ON_FILE_MARKER = "(already on file)";
+
+/** `text` with a trailing marker and the space before it taken back off. */
+const ON_FILE_SUFFIX = ` ${ALREADY_ON_FILE_MARKER}`;
+
+/**
+ * Is this line asking for a record the file already has?
+ *
+ * Two conditions, and both are needed:
+ *
+ *   - It names at least one specific. A next step that names nothing concrete
+ *     ("interview the neighbours") is not asking for a record and gets no
+ *     marker -- there is nothing to have on file.
+ *   - Every specific it names is GROUNDED, i.e. some capture carries it. That
+ *     is the whole test: `ungroundedSpecifics` returning nothing means the
+ *     corpus already answers for every name, number and address in the line.
+ *
+ * It is deliberately not a judgement about whether the step is worth doing.
+ * "Read the licence record again" is legitimate work; what is not legitimate
+ * is the brief offering it as the next thing to go and get.
+ */
+export function briefStepAlreadyOnFile(text: string, corpus: GroundingCorpus): boolean {
+  if (!text.trim()) return false;
+  if (text.includes(ALREADY_ON_FILE_MARKER)) return false;
+  if (!findSpecifics(text).length) return false;
+  return ungroundedSpecifics(text, corpus).length === 0;
+}
+
+/**
+ * The line with the "already on file" marker appended, when it applies.
+ *
+ * Byte-for-byte unchanged when it does not, so the common case stays invisible
+ * -- the same rule `markUngroundedSpecifics` keeps.
+ */
+export function markAlreadyOnFile(text: string, corpus: GroundingCorpus): string {
+  if (!briefStepAlreadyOnFile(text, corpus)) return text;
+  if (text.endsWith(ALREADY_ON_FILE_MARKER)) return text;
+  return `${text.replace(/\s+$/, "")}${ON_FILE_SUFFIX}`;
+}
+
 /** `text` with a trailing marker and the space before it taken back off. */
 const MARKER_SUFFIX = ` ${UNGROUNDED_MARKER}`;
 

@@ -433,13 +433,51 @@ export function collapsePrintedDuplicates<T extends { headline: string; body?: s
   return kept;
 }
 
+/**
+ * WHY a worth-a-look card is not drawn in the inbox, or null if it is.
+ *
+ * FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened ...
+ * with 'SET ASIDE 0' throughout." The card vanished because
+ * `titlesOverlap` matched it against some OTHER investigation's title -- a
+ * bag-of-words test that says two stories are the same -- and the screen
+ * answered by not drawing it. Nothing told the editor it had ever been there,
+ * and the counter they checked ("SET ASIDE") counts investigations that are
+ * parked as files, which is a different thing entirely.
+ *
+ * The boolean could not say any of that. This returns the reason, so the desk
+ * can draw the card with the covering file's name on it rather than deleting
+ * it. `worthItemOnDesk` below is the same question asked as a yes/no, and is
+ * kept because three callers only need the boolean.
+ */
+export type WorthItemOnDeskReason =
+  /** The editor opened this card on this visit; `claimedIds` remembers it. */
+  | { kind: "opened"; title: string }
+  /** This file's title already covers the card -- see `titlesOverlap`. */
+  | { kind: "covered"; title: string };
+
+export function worthItemOnDeskReason(
+  item: { id: string; title: string; source_url?: string },
+  investigations: { title: string }[],
+  claimedIds: string[] = [],
+): WorthItemOnDeskReason | null {
+  if (claimedIds.includes(item.id)) return { kind: "opened", title: item.title };
+  const covering = investigations.find((inv) => titlesOverlap(item.title, inv.title));
+  return covering ? { kind: "covered", title: covering.title } : null;
+}
+
+/** The one sentence that says why a card is not in the inbox, in place of it. */
+export function worthItemOnDeskLine(reason: WorthItemOnDeskReason): string {
+  return reason.kind === "opened"
+    ? "You opened this one — it is still on the desk, not gone."
+    : `Already on the desk as “${reason.title}”.`;
+}
+
 export function worthItemOnDesk(
   item: { id: string; title: string; source_url?: string },
   investigations: { title: string }[],
   claimedIds: string[] = [],
 ): boolean {
-  if (claimedIds.includes(item.id)) return true;
-  return investigations.some((inv) => titlesOverlap(item.title, inv.title));
+  return worthItemOnDeskReason(item, investigations, claimedIds) != null;
 }
 
 export function pileForStatus(status: string): "desk" | "aside" {

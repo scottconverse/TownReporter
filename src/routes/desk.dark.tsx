@@ -25,7 +25,8 @@ import {
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
-import { invalidateDeskJobs } from "@/components/job-card-state";
+import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
+import { DeskJobCard } from "@/components/JobCard";
 import {
   blockedDigBannerText,
   editorError,
@@ -54,6 +55,8 @@ import {
   redditResultHeadline,
   stalledRunCopy,
   worthItemOnDesk,
+  worthItemOnDeskLine,
+  worthItemOnDeskReason,
 } from "@/lib/news/desk-copy";
 
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
@@ -65,6 +68,7 @@ import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-
 import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { searchOutcomeWords } from "@/lib/news/search-trail-words";
 import { captureCounterLine, digRailCounterLine } from "@/lib/news/dark-counters";
+import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { takeDarkSeed } from "@/lib/news/dark-seed";
@@ -608,21 +612,37 @@ function DarkPage() {
     mutationFn: (post: { url: string; title: string; excerpt: string; updated: string; author: string }) =>
       fileRedditTip({ data: post }),
     onSuccess: (res, post) => {
-      if (!res?.ok) return;
-      if (res.filed) {
-        const markFiled = (p: RedditScanResult["topScores"][number]) =>
-          p.url === post.url ? { ...p, state: "filed" as const } : p;
-        setRedditResult((prev) =>
-          prev
-            ? {
-                ...prev,
-                topScores: prev.topScores.map(markFiled),
-                nearMisses: prev.nearMisses.map(markFiled),
-              }
-            : prev,
-        );
-        invalidate();
+      /*
+        FB7, item 1: the `catch {}`-free rule, applied to the one press on this
+        screen that answered a refusal with a bare `return`.
+
+        `fileRedditTipFor` answers `{ok:true, filed:false}` when the tip is
+        already on the desk -- the honest answer to a second press, and the
+        shape the old code took as "nothing to do, say nothing". So the editor
+        pressed File as tip on a tip that was already filed and the desk did
+        absolutely nothing: no chip, no toast, no change. It says so now, in
+        the ok tone, because a refusal to duplicate is not a failure.
+      */
+      if (!res?.ok) {
+        showNotice("Could not file that tip.");
+        return;
       }
+      if (!res.filed) {
+        showNotice("That tip is already on the Dark Desk — nothing was filed twice.", true);
+        return;
+      }
+      const markFiled = (p: RedditScanResult["topScores"][number]) =>
+        p.url === post.url ? { ...p, state: "filed" as const } : p;
+      setRedditResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              topScores: prev.topScores.map(markFiled),
+              nearMisses: prev.nearMisses.map(markFiled),
+            }
+          : prev,
+      );
+      invalidate();
     },
     onError: (err) => {
       showNotice(err instanceof Error ? err.message : "Could not file that tip.");
@@ -712,7 +732,26 @@ function DarkPage() {
   const allInv = investigations.data ?? [];
   const active = allInv.filter((row) => pileForStatus(row.status) === "desk");
   const parked = allInv.filter((row) => pileForStatus(row.status) === "aside");
-  const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, allInv, claimedIds));
+  /*
+    FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened
+    ... with 'SET ASIDE 0' throughout."
+
+    The card was drawn here and then was not, because `worthItemOnDesk` hides
+    any card whose title fuzzily matches an investigation's -- and the screen
+    said nothing about it. The counter the editor checked counts PARKED FILES,
+    which is a different thing, so the card simply left with no trace.
+
+    Split in two now: what is still a card, and what is covered, WITH the
+    reason and the file that covers it. Nothing is deleted from the screen to
+    make a list shorter -- the covered ones move under one line at the foot of
+    the pile that names the file each of them is already on.
+  */
+  const worthRows = (worth.data ?? []).map((item) => ({
+    item,
+    off: worthItemOnDeskReason(item, allInv, claimedIds),
+  }));
+  const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
+  const covered = worthRows.filter((row) => row.off);
 
   return (
     /*
@@ -879,6 +918,54 @@ function DarkPage() {
                 />
               ))
             )}
+            {/*
+              FB7, item 5 (A2c C6): the cards this pile is NOT drawing, each
+              with the reason. A2c watched one of these vanish unopened and had
+              no way to find out where it went; the rule this unit sets is that
+              nothing disappears without one. The rows are real links, so the
+              file a tip is already on is one press away rather than a name the
+              editor has to go and search for.
+            */}
+            {covered.length ? (
+              <details className="wire-more astra-pile-pad">
+                <summary>
+                  {covered.length} {covered.length === 1 ? "signal is" : "signals are"} not listed above
+                </summary>
+                {covered.map(({ item, off }) => (
+                  <p key={item.id} className="wire-line">
+                    <b>{plainEditorText(item.title)}</b> — {worthItemOnDeskLine(off!)}
+                    {off!.kind === "covered" ? (
+                      <>
+                        {" "}
+                        {/*
+                          The file this tip is already on, reached the way every
+                          other "open that file" link on this desk reaches one:
+                          the id is handed over in `OPEN_KEY` and read on
+                          arrival. The route carries no search params, so a
+                          query string here would have looked like a link and
+                          opened nothing.
+                        */}
+                        <Link
+                          to="/desk/dark"
+                          className="inline-link"
+                          onClick={() => {
+                            const covering = allInv.find((r) => r.title === off!.title);
+                            if (covering == null) return;
+                            try {
+                              sessionStorage.setItem(OPEN_KEY, String(covering.id));
+                            } catch {
+                              /* a browser that will not keep it opens its own box */
+                            }
+                          }}
+                        >
+                          Open that file →
+                        </Link>
+                      </>
+                    ) : null}
+                  </p>
+                ))}
+              </details>
+            ) : null}
             {reddit.isPending ? (
               <div className="astra-pile-pad">
                 <div className="reddit-progress">
@@ -1008,7 +1095,7 @@ function DarkPage() {
               </InkButton>
             </div>
             {!tipSubreddit.isPending && !tipSubreddit.data?.subreddit ? (
-              <p className="note">
+              <p className="note" role={tipSubreddit.isError ? "alert" : "status"}>
                 {tipSubreddit.isError
                   ? "Could not read the configured Reddit source."
                   : "Reddit check needs one unambiguous subreddit URL in Sources; no subreddit is guessed from the town name."}{" "}
@@ -1021,8 +1108,18 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
+          {/*
+            FB7, item 1. Every notice on this screen was `<p className="note">`
+            with no role at all (FB0-REPORT.md Table B, Dark Desk: "no role
+            anywhere") -- so the screen that answers most of this desk's presses
+            answered a screen reader with silence. `alert` for a failure,
+            `status` for an outcome: a polite region queues behind whatever is
+            being read and a failure is the sentence that should not wait.
+          */}
           {notice && openId == null && !redditResult ? (
-            <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+            <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
+              {notice}
+            </p>
           ) : null}
 
           {/*
@@ -1510,6 +1607,40 @@ function InvestigationWorkspace({
   useEffect(() => {
     setFrN(6);
   }, [openId]);
+  /*
+    FB7, item 2. THE JOB CARDS IN CONTEXT.
+
+    A dig round, a brief rewrite and a PDF read are all long jobs this file
+    owns, and until now none of them drew a card on the screen they run from:
+    the dig showed a `Busy` line, the brief a `Busy` line, the PDF read a
+    sentence and a `stage`. FB0-REPORT.md Table B called all three "LAZY BAR".
+
+    The card for each comes from the desk's one job query -- same reader, same
+    Cancel, same stall rule as every other card in the product -- and the
+    `subjectId` match is what keeps it honest: a `dark` or `brief` job's
+    subject is an INVESTIGATION, an `artifact-ocr` job's is an ARTIFACT, and
+    drawing the newsroom's open dig on whichever file happened to be open is
+    the plausible-looking wrong answer `job-progress.ts` warns about.
+
+    Running and queued only. Done and failed are already reported in place, in
+    one sentence each, right where the press was -- `darkJobError` above the
+    Decide strip, the brief card's own line, and the PDF reader's two
+    `role="alert"` lines. A second statement of the same failure is how a
+    screen starts contradicting itself (the same rule `StoryJobProgress`
+    keeps).
+  */
+  const jobs = useDeskJobs();
+  const fileJob = (kind: "dark" | "brief" | "artifact-ocr", subjectId: number | null) =>
+    subjectId == null
+      ? null
+      : ((jobs.data ?? []).find(
+          (row) =>
+            row.kind === kind &&
+            row.subjectId === subjectId &&
+            (row.status === "queued" || row.status === "running"),
+        ) ?? null);
+  const digJob = fileJob("dark", openId);
+  const briefJob = fileJob("brief", openId);
   const inv = detail?.investigation;
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
@@ -1551,7 +1682,19 @@ function InvestigationWorkspace({
   const brief = detail?.brief ?? null;
   const run = detail?.run ?? null;
   const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
-  const facts = claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind));
+  /*
+    FB7, item 5 (A2c X3). Five rounds that each recorded the same sentence left
+    five `claims` rows -- `investigate.ts` inserts one per planned claim per
+    round and nothing dedupes the body -- so WHAT WE KNOW printed the same line
+    five times. Deduped on the way OUT (`dark-fact-lines.ts`), not at the
+    insert: the rows are the file's own record of what each round found, and
+    merging them on write would rewrite that record.
+
+    `factLinesDropped` is what lets the section say how many echoes it folded,
+    rather than the list quietly shrinking.
+  */
+  const facts = dedupeFactLines(claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind)));
+  const factsFolded = factLinesDropped(claims.filter((c) => /FACT|OBSERVATION/i.test(c.kind)));
   const questions = openQuestionsFrom(detail);
   // Grade each "On the record" line by whether it ties to a captured
   // source (a URL, or a claim with evidence/a version), so the list reads
@@ -1699,7 +1842,11 @@ function InvestigationWorkspace({
 
       {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
       <div className="astra-notices">
-        {stalled ? <p className="note err">{stalledRunCopy("dark")}</p> : null}
+        {stalled ? (
+          <p className="note err" role="status">
+            {stalledRunCopy("dark")}
+          </p>
+        ) : null}
         {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
         {digging ? <Busy label={phase || "Searching records…"} /> : null}
         {/*
@@ -1715,8 +1862,13 @@ function InvestigationWorkspace({
           </p>
         ) : null}
         {run ? <DarkRunMeter run={run} active={digging} /> : null}
+        {/* The same live region as the one above the file pane -- see the note
+            there. This is the copy of the notice line the editor sees while a
+            file is open, which is when most of these presses happen. */}
         {notice && !digging && stopControl.line == null ? (
-          <p className={"note" + (noticeOk ? "" : " err")}>{notice}</p>
+          <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
+            {notice}
+          </p>
         ) : null}
         {
           /*
@@ -1853,6 +2005,18 @@ function InvestigationWorkspace({
             onRefresh={onWriteBrief}
             refreshing={briefPending}
           />
+          {/*
+            FB7, item 2. The brief's card, directly under the brief it is
+            rewriting -- the same "the card is where the press was" rule
+            `scan-card-placement.test.ts` pins for the scan. A model call that
+            writes a whole brief with no stage, no clock and no Cancel was
+            Table B's "LAZY BAR" on Write/Rewrite the brief.
+          */}
+          {briefJob ? (
+            <div className="dark-job-card">
+              <DeskJobCard job={briefJob} />
+            </div>
+          ) : null}
           {findings.length > 0 ? (
             <div className="of-block">
               <p className="side-label">On the record</p>
@@ -1906,6 +2070,19 @@ function InvestigationWorkspace({
                   ) : null}
                 </p>
               ))}
+              {/*
+                The folded echoes are COUNTED, not just dropped. The editor
+                read five lines here yesterday; a section that silently shows
+                one is the same "nothing may vanish without a reason" rule this
+                unit is about, one level down.
+              */}
+              {factsFolded > 0 ? (
+                <p className="meta">
+                  {factsFolded} repeated {factsFolded === 1 ? "record" : "records"} folded into the{" "}
+                  {facts.length === 1 ? "line" : "lines"} above — {factsFolded === 1 ? "it was" : "they were"}{" "}
+                  recorded again by later rounds, word for word.
+                </p>
+              ) : null}
             </div>
           ) : null}
           {/*
@@ -1939,6 +2116,21 @@ function InvestigationWorkspace({
           comment. Nothing became unreachable: the state behind it is the same
           one this route has always held, and the picker writes it from there.
         */}
+        {/*
+          FB7, item 2. The dig round's card, under the verb that started it.
+
+          Table B's row for Keep digging was "LAZY BAR -- a whole dig round, no
+          card, no cancel": the round can run for minutes and spend real money,
+          and all it drew was the button reading "Reading…". The card carries
+          the stage list, the percent, the elapsed clock, the stall rule's
+          Keep waiting, and Cancel -- which the worker already honours (it
+          stops at its next hop boundary).
+        */}
+        {digJob ? (
+          <div className="dark-job-card">
+            <DeskJobCard job={digJob} />
+          </div>
+        ) : null}
         <div className="astra-panel-acts">
           <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
             {digging ? "Reading…" : "Keep digging"}
@@ -2159,6 +2351,25 @@ function OpenedRecords({
 
   const selected = ordered.find((a) => a.id === openId) ?? ordered[0];
   const idx = selected ? ordered.findIndex((a) => a.id === selected.id) : -1;
+  /*
+    FB7, item 2. The retained-PDF read's own card, for THIS capture.
+
+    An `artifact-ocr` job's subject is the ARTIFACT, not the file, so this is
+    matched on the record the editor is looking at rather than on the open
+    investigation. Table B called these two presses "LAZY BAR -- 1.5s poll,
+    `stage` text only, no cancel, despite `dark.ts:2660` honouring it": the
+    worker honours a cancel the screen never offered. The card offers it.
+  */
+  const jobs = useDeskJobs();
+  const ocrJob =
+    selected == null
+      ? null
+      : ((jobs.data ?? []).find(
+          (row) =>
+            row.kind === "artifact-ocr" &&
+            row.subjectId === selected.id &&
+            (row.status === "queued" || row.status === "running"),
+        ) ?? null);
   const body = useQuery({
     queryKey: ["artifact", selected?.id ?? 0],
     queryFn: () => getArtifact({ data: selected!.id }),
@@ -2347,8 +2558,25 @@ function OpenedRecords({
             </button>
             <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · the entire packet is saved in batches of up to 12 pages · original retained PDF only`}</span>
           </form> : null}
-          {requestPageRead.error ? <p className="note err">{requestPageRead.error.message}</p> : null}
-          {pageRead.data?.error ? <p className="note err">{pageRead.data.error}</p> : null}
+          {ocrJob ? (
+            <div className="dark-job-card">
+              <DeskJobCard job={ocrJob} />
+            </div>
+          ) : null}
+          {/* FB7, item 1: the PDF reader's two failures, announced. `Read
+              selected pages`/`Read entire PDF` are the two presses on this
+              screen that spend the most, and both of their error sentences
+              were drawn without a role -- silent to a screen reader. */}
+          {requestPageRead.error ? (
+            <p className="note err" role="alert">
+              {requestPageRead.error.message}
+            </p>
+          ) : null}
+          {pageRead.data?.error ? (
+            <p className="note err" role="alert">
+              {pageRead.data.error}
+            </p>
+          ) : null}
           {pageRead.data?.stage && (pageRead.data.status === "queued" || pageRead.data.status === "running") ? (
             <p className="meta">{pageRead.data.stage}</p>
           ) : null}
