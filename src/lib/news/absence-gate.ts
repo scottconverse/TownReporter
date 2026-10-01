@@ -152,11 +152,207 @@ export function namedDocument(sentence: string): string | null {
  * correctly, and the paragraph still read broken -- because the abbreviation
  * had been cut in half on the way in.
 
- * Titles, months, "No." and the two Latin clock abbreviations are the ones a
- * news story actually contains.
+ * This list is the abbreviations that carry ONE period. The ones that carry
+ * two -- a.m., p.m., U.S., U.S.A. -- are handled by `continuesAbbreviation`
+ * below, because the raw split cuts them at their first period and no test
+ * here can ever see "a.m.".
  */
 const ABBREVIATION_TAIL =
-  /\b(?:jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|mr|mrs|ms|dr|prof|rev|hon|st|ave|blvd|rd|ln|vs|inc|ltd|co|corp|dept|est|approx|fig|a\.m|p\.m|u\.s|u\.s\.a)\.$/i;
+  /\b(?:jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|mr|mrs|ms|dr|prof|rev|hon|st|ave|blvd|rd|ln|vs|inc|ltd|co|corp|dept|est|approx|fig)\.$/i;
+
+/*
+  Unit B7R, item 1. The multi-dot abbreviations, and the two rules that decide
+  whether the word after one starts a new sentence.
+
+  The raw split breaks "9 a.m." at its first period, so the merge step has to
+  recognise BOTH halves: the partial tail it is holding ("9 a.") and the piece
+  it is holding it against ("m. "). `ABBREVIATION_TAIL` listed `a\.m`, `p\.m`,
+  `u\.s` and `u\.s\.a` for this job and none of them could ever match -- the
+  tail is always the truncated half. They are matched here instead, and the
+  question they were meant to answer is asked properly: does the sentence end
+  after the abbreviation, or does it carry on?
+
+    "No agenda was posted as of 9 a.m."        -- the story ended there
+    "The meeting starts at 9 a.m. Monday."     -- a weekday continues it
+    "The meeting starts at 9 a.m. The council met." -- a new sentence starts
+    "The vote was at 7 p.m. and the room emptied."  -- lowercase continues it
+*/
+
+/** Weekday and month names: "9 a.m. Monday" is one sentence, not two. */
+const WEEKDAY_MONTH = new Set([
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+  "mon",
+  "tue",
+  "tues",
+  "wed",
+  "thu",
+  "thur",
+  "thurs",
+  "fri",
+  "sat",
+  "sun",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "may",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "sept",
+  "oct",
+  "nov",
+  "dec",
+  "january",
+  "february",
+  "march",
+  "april",
+  "june",
+  "july",
+  "august",
+  "september",
+  "october",
+  "november",
+  "december",
+]);
+
+/**
+ * Function words that open a sentence far more often than they continue a
+ * proper name. Only these end a sentence after "U.S." or after an initial --
+ * "U.S. Department of Agriculture" and "J. R. Smith" are one name each, and
+ * "U.S. The city said" and "R. Then he left" are two sentences.
+ */
+const SENTENCE_OPENERS = new Set([
+  "a",
+  "an",
+  "the",
+  "this",
+  "that",
+  "these",
+  "those",
+  "it",
+  "he",
+  "she",
+  "they",
+  "we",
+  "you",
+  "there",
+  "here",
+  "but",
+  "and",
+  "or",
+  "so",
+  "yet",
+  "then",
+  "however",
+  "meanwhile",
+  "still",
+  "in",
+  "on",
+  "at",
+  "by",
+  "for",
+  "from",
+  "with",
+  "after",
+  "before",
+  "during",
+  "under",
+  "over",
+  "when",
+  "while",
+  "if",
+  "as",
+  "because",
+  "no",
+  "not",
+  "never",
+  "nothing",
+  "one",
+  "two",
+  "three",
+  "his",
+  "her",
+  "its",
+  "their",
+  "our",
+  "all",
+  "both",
+  "each",
+  "many",
+  "most",
+  "some",
+  "another",
+  "other",
+]);
+
+/** The first word of a fragment, without leading quotes or brackets. */
+function firstWord(part: string): string {
+  return /[A-Za-z][A-Za-z'’]*/.exec(part)?.[0] ?? "";
+}
+
+/** "…9 a." + "m. " — the clock abbreviation was cut at its first period. */
+function partialMultiDot(tail: string, part: string): boolean {
+  if (/[ap]\.$/i.test(tail) && /^m\./i.test(part)) return true;
+  if (/u\.$/i.test(tail) && /^s\./i.test(part)) return true;
+  if (/u\.s\.$/i.test(tail) && /^a\./i.test(part)) return true;
+  return false;
+}
+
+/**
+ * Does the next part belong to the sentence `previous` already ends?
+ *
+ * Only the boundaries that a multi-dot abbreviation or an initial can create
+ * are decided here; everything the single-token `ABBREVIATION_TAIL` list
+ * already covers is merged before this is consulted.
+ */
+function continuesAbbreviation(previous: string, part: string): boolean {
+  const tail = previous.trimEnd();
+  const word = firstWord(part);
+  const lower = word.toLowerCase();
+  const capitalised = /^[A-Z]/.test(word);
+
+  if (partialMultiDot(tail, part)) return true;
+
+  // A clock time: only a capitalised word that is not a weekday or month name
+  // starts a new sentence after it. A lowercase word never does.
+  if (/[ap]\.m\.$/i.test(tail)) return !capitalised || WEEKDAY_MONTH.has(lower);
+
+  // A country abbreviation continues into a proper name ("U.S. Department of
+  // Agriculture") and ends only before a word that opens a sentence.
+  if (/u\.s(?:\.a)?\.$/i.test(tail)) return !(capitalised && SENTENCE_OPENERS.has(lower));
+
+  const initial = /\b([A-Z])\.$/.exec(tail);
+  if (initial) {
+    // "J." + "R. …" -- the start of a run of initials.
+    if (/^[A-Z]\./.test(part)) return true;
+    // "R." + "Smith …" -- the last initial of a name. What follows has to look
+    // like a surname: capitalised, not a word that opens sentences, and not
+    // standing after a determiner, which is what "He was given an A." is.
+    if (!capitalised || SENTENCE_OPENERS.has(lower)) return false;
+    const before = tail.slice(0, initial.index).trimEnd();
+    const previousWord = /([A-Za-z.]+)$/.exec(before)?.[1] ?? "";
+    // "…J. R." + "Smith" -- the last initial of a run.
+    if (/[A-Z]\.$/.test(previousWord)) return true;
+    /*
+      "…with J." + "Smith" -- an initial introduced by an ordinary word. What
+      is deliberately NOT here is a single capital letter after a capitalised
+      word: "The plan is Option A. Council members disagreed." and "He earned a
+      B. Smith agreed." are two sentences, and a lone letter in that position
+      is a label far more often than it is somebody's first initial.
+    */
+    return /^[a-z]+$/.test(previousWord) && !/^(?:a|an|the)$/.test(previousWord);
+  }
+
+  return false;
+}
 
 /**
  * Split text into sentences without losing a character.
@@ -172,7 +368,10 @@ export function splitSentences(text: string): string[] {
   const merged: string[] = [];
   for (const part of parts) {
     const previous = merged[merged.length - 1];
-    if (previous !== undefined && ABBREVIATION_TAIL.test(previous.trimEnd())) {
+    if (
+      previous !== undefined &&
+      (ABBREVIATION_TAIL.test(previous.trimEnd()) || continuesAbbreviation(previous, part))
+    ) {
       merged[merged.length - 1] = previous + part;
       continue;
     }

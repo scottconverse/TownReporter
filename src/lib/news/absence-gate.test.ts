@@ -131,6 +131,105 @@ describe("tool-talk never describes the city", () => {
   });
 });
 
+/*
+  Unit B7R, item 1. `ABBREVIATION_TAIL` carried `a\.m`, `p\.m`, `u\.s` and
+  `u\.s\.a` alternatives that could never match: the splitter cuts "9 a.m." at
+  its FIRST period, so the tail the merge step inspects is "9 a." -- "a.m." is
+  never what it sees. The alternatives were dead code and the abbreviations
+  were split anyway:
+
+    splitSentences("No agenda was posted as of 9 a.m.")
+      -> ["No agenda was posted as of 9 a.", "m."]
+
+  Harmless while sentences are only counted, and destructive when one of them
+  is REPLACED -- which is what the absence gate does. The rewrite takes the
+  first fragment, and the orphan "m." is stored in the story.
+
+  THE MUTATIONS THAT MATTER. Deleting the multi-dot merge rules fails
+  "keeps a clock time in one sentence" and the gate-level case below; making
+  them unconditional (dropping the lookahead) fails "still splits after a
+  clock time that ends a sentence".
+*/
+describe("multi-dot abbreviations are never split", () => {
+  const cases: [string, string][] = [
+    ["No agenda was posted as of 9 a.m.", "a clock time at the end of the story"],
+    ["The meeting starts at 9 a.m. Monday.", "a clock time followed by a weekday"],
+    ["The meeting starts at 9 a.m. Sept. 14.", "a clock time followed by a month"],
+    ["The vote was at 7 p.m. and the room emptied.", "a clock time mid-sentence"],
+    ["He lives in the U.S. now.", "the country abbreviation"],
+    ["The U.S. Department of Agriculture said otherwise.", "U.S. before a proper name"],
+    ["The U.S.A. is not the county.", "the three-letter country abbreviation"],
+    ["J. R. Smith filed the report.", "a run of initials"],
+    ["The meeting with J. Smith ended at noon.", "a single initial"],
+  ];
+
+  for (const [text, what] of cases) {
+    it(`keeps ${what} in one sentence`, () => {
+      const parts = splitSentences(text);
+      assert.equal(parts.length, 1, `split into ${JSON.stringify(parts)}`);
+      assert.equal(parts.join(""), text, "the join invariant must hold");
+    });
+  }
+
+  it("still splits after a clock time that ends a sentence", () => {
+    const text = "The meeting starts at 9 a.m. The council met.";
+    assert.deepEqual(
+      splitSentences(text).map((s) => s.trim()),
+      ["The meeting starts at 9 a.m.", "The council met."],
+    );
+    assert.equal(splitSentences(text).join(""), text);
+  });
+
+  it("still splits after the country abbreviation when the next word opens a sentence", () => {
+    const text = "He moved back to the U.S. The council met.";
+    assert.deepEqual(
+      splitSentences(text).map((s) => s.trim()),
+      ["He moved back to the U.S.", "The council met."],
+    );
+    assert.equal(splitSentences(text).join(""), text);
+  });
+
+  it("still splits after an initial when the next word opens a sentence", () => {
+    const text = "He was given an A. Then he left.";
+    assert.deepEqual(
+      splitSentences(text).map((s) => s.trim()),
+      ["He was given an A.", "Then he left."],
+    );
+    assert.equal(splitSentences(text).join(""), text);
+  });
+
+  it("keeps the ordinary splits it already made", () => {
+    const text = "One thing happened. Then another!\n\nA third?";
+    assert.equal(splitSentences(text).join(""), text);
+    assert.equal(splitSentences(text).length, 3);
+  });
+
+  /**
+   * The defect as the editor met it: the gate rewrote the fragment before the
+   * abbreviation and stored the orphan. This is the end-to-end shape -- the
+   * sentence that claims the absence is the one that ends "9 a.m.".
+   */
+  it("leaves no orphan when the gate rewrites a sentence ending in a clock time", async () => {
+    const body = "No council agenda for the Monday meeting was posted as of 9 a.m.";
+    const result = await runAbsenceGate({
+      headline: "Council meets",
+      dek: "",
+      body,
+      integrity_notes: "",
+      unanswered: [],
+      openedTitles: ["Agenda Packet"],
+      knownUrls: [],
+      domains: [DOMAIN],
+      city: CITY,
+      search: searchFindingNothing,
+      redraftAllowed: false,
+    });
+    assert.doesNotMatch(result.body, /\bm\./, `an orphan was stored: ${result.body}`);
+    assert.match(result.body, /did not find .* among the documents it opened/);
+    assert.equal(result.gate.filter((g) => g.kind === "absence").length, 1);
+  });
+});
+
 describe("the memo's document asks become site-restricted queries", () => {
   it("keeps abbreviated dates and names in document errands", () => {
     const dated = "District town-hall agenda or event-details page for the Oct. 12 Longmont High School meeting";
