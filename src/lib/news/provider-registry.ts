@@ -97,6 +97,17 @@ export const PICKER_PROVIDER_IDS = [
   "claude-sonnet",
   "claude-haiku",
   "local-model",
+  /*
+    `deepseek-flash` is the one id in BOTH lists (unit U29, owner decision
+    2026-09-30). It is Automatic's first rung everywhere -- see `ladderRank` on
+    its entry -- and Opinion's model menu now offers it BY NAME as well, which
+    is what puts its id here. Story, Scan and Dark Desk keep reaching it the
+    way they always have, through Automatic; the forced surfaces (a batch, a
+    meeting redraft, OCR, a transcript) do not offer it at all, because a run
+    that has to name ONE runtime up front may not name a rung
+    (`validateForcedRuntime`).
+  */
+  "deepseek-flash",
 ] as const;
 
 /*
@@ -136,6 +147,17 @@ export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
 export const AUTOMATIC_RUNG_IDS = ["deepseek-flash", "qwen-local"] as const;
 export type AutomaticRungId = (typeof AUTOMATIC_RUNG_IDS)[number];
 
+/*
+  Ids the desk resolves on its own, plus the configured gateway.
+
+  Unit U29 (owner decision 2026-09-30): an id can now be in this list AND in
+  `PICKER_PROVIDER_IDS`. `deepseek-flash` is Automatic's first rung on every
+  surface -- which is what makes it internal, and what keeps it out of a
+  batch's runtime (`validateForcedRuntime` refuses a rung) -- and it is also a
+  name Opinion's model menu offers. Being internal is about who RESOLVES the
+  id, not about whether one menu may print it; `configured` and `qwen-local`
+  are still offered nowhere.
+*/
 export const INTERNAL_PROVIDER_IDS = ["configured", ...AUTOMATIC_RUNG_IDS] as const;
 
 export type PickerProviderId = (typeof PICKER_PROVIDER_IDS)[number] | RetiredProviderId;
@@ -257,6 +279,28 @@ export type ProviderEntry = {
    * unattended work. The configured gateway is checked before that ladder.
    */
   ladderRank?: number;
+  /**
+   * Position in OPINION's own Automatic ladder, lowest first. Omitted means
+   * "Opinion's Automatic never chooses this on its own".
+   *
+   * Opinion's ladder is not the desk's (`ladderRank`): an editorial is the
+   * paper's own voice, so from 0.6.52 it was written by a named subscription
+   * model -- Codex Sol, with Claude Sonnet as its one fallback -- and Opinion
+   * never reaches for the LM Studio rung.
+   *
+   * Unit U29 (owner decision 2026-09-30): "use deepseek ... deepseek is the
+   * best model at the lowest price we have". DeepSeek v4.1 Flash is now
+   * Opinion's FIRST rung, ahead of those two, and it is the ONE rung the two
+   * ladders share -- so this field and `ladderRank` agree on its position.
+   * The order lives here, in the registry, rather than in an
+   * `if (opinion) return "deepseek"` somewhere down the line: the picker's
+   * help sentence, the readiness copy, the failover ladder and the two-pass
+   * writer all read it from `opinionAutomaticLadder()`.
+   *
+   * `opinionAutomaticLadder()` is the runtime source of truth for the ORDER;
+   * `provider-registry.test.ts` asserts the two agree.
+   */
+  opinionLadderRank?: number;
   /** Values verified for this exact named model and transport. */
   efforts?: readonly ModelEffort[];
   defaultEffort?: ModelEffort;
@@ -474,7 +518,13 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       surface -- the bake-off scored it 13.1 against DeepSeek's 30.9, and the
       owner's ladder is DeepSeek, then Qwen on this computer, then Codex
       Terra. It is still offered everywhere an editor chooses a model.
+
+      Opinion is the exception, and it is a written product decision rather
+      than a leftover: an editorial is the paper's own voice, and Sonnet is
+      the last thing Opinion tries before a piece fails (0.6.52; unit U29 put
+      DeepSeek ahead of it). Every other surface leaves Claude to a hand pick.
     */
+    opinionLadderRank: 3,
   },
   {
     id: "claude-haiku",
@@ -505,6 +555,14 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     offeredFor: EVERY_SURFACE,
     // No ladderRank: Automatic never reaches for the frontier model on its
     // own. Choosing Sol is a decision an editor makes deliberately.
+    /*
+      ...but Opinion's Automatic DOES reach for it, second, behind DeepSeek
+      (unit U29). 0.6.52 made Codex Sol the model an editorial was written
+      with; the owner's 2026-09-30 decision put DeepSeek v4.1 Flash ahead of
+      it on price and on the measured research score, and Sol stays the rung
+      Opinion falls to when DeepSeek cannot answer.
+    */
+    opinionLadderRank: 2,
   },
   {
     id: "claude-frontier",
@@ -652,6 +710,11 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     id: "deepseek-flash",
     label: "DeepSeek v4.1 Flash",
     detail: "Ollama · research and drafting",
+    // The select's own line. "Ollama · research and drafting" is a clause and
+    // the label alone is 19 characters, so the pair would be 52 in a box
+    // measured for 34 -- the sentence moves to the option's title and the help
+    // line (see `pickerOptionText`).
+    optionDetail: "Ollama",
     kind: "local",
     model: "deepseek-v4.1-flash:cloud",
     // Ollama's OpenAI-compatible face. The bake-off ran this model through
@@ -672,8 +735,26 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       notSwitchedOff("TOWNREPORTER_DEEPSEEK") &&
       (Boolean(env("TOWNREPORTER_DEEPSEEK_BASE_URL")) || localDiscoveryReachable),
     offSwitchEnv: "TOWNREPORTER_DEEPSEEK",
-    offeredFor: NO_SURFACE,
+    /*
+      Opinion's menu, and nowhere else (unit U29, owner decision 2026-09-30:
+      "use deepseek ... keep the picker regardless").
+
+      Story, Scan and Dark Desk already run this model through Automatic, and
+      their menus are unchanged -- an editor there picks "Automatic" and the
+      ladder resolves to this rung. Opinion gets it BY NAME because Opinion's
+      Automatic has its own ladder and its own picker, and the owner's choice
+      was that an editor writing an editorial can select the model Automatic
+      will try first.
+
+      `forced: false` on purpose: a batch, a meeting redraft, OCR or a
+      transcript must name a runtime an editor can hold, and a rung is not one
+      (`validateForcedRuntime` refuses it).
+    */
+    offeredFor: { ...NO_SURFACE, opinion: true },
     ladderRank: 1,
+    // The one rung both ladders share, and first on each: the desk researches
+    // and drafts with it, and Opinion does too.
+    opinionLadderRank: 1,
     // Same list `openAiCompatibleModelEfforts` returns for this model id.
     efforts: DEEPSEEK_V4_1_FLASH_EFFORTS,
     // No plannerModel: a local server serves one model and has never heard of
@@ -734,6 +815,25 @@ const BY_ID = new Map(PROVIDER_REGISTRY.map((entry) => [entry.id, entry]));
 
 export function providerEntry(id: string | undefined | null): ProviderEntry | null {
   return (id && BY_ID.get(id as ProviderId)) || null;
+}
+
+/**
+ * Can this provider run a tool-using RESEARCH pass?
+ *
+ * A property of the transport, so it is answered here rather than by naming
+ * ids anywhere: the two command-line tools have a WebSearch/WebFetch loop, and
+ * an OpenAI-compatible HTTP endpoint (Ollama, llama.cpp, LM Studio, a saved
+ * connection) has no tool surface on the wire at all -- there is nothing to
+ * authorize and nothing to hide.
+ *
+ * Opinion's two-pass flow is what reads it (unit U29): a candidate whose
+ * provider has no tool loop has no gathering pass to run, so it writes in ONE
+ * call from the material the editor supplied, and the run says so. The
+ * picker's own help sentence reads the same answer, so the editor is told
+ * before they start rather than after. Both callers ask this one question.
+ */
+export function providerRunsToolPass(entry: ProviderEntry | null | undefined): boolean {
+  return entry?.kind === "claude-code" || entry?.kind === "codex";
 }
 
 const ASTRA_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
@@ -888,6 +988,29 @@ export function automaticLadder(): readonly ProviderId[] {
 /** The ladder as it stands on THIS machine right now. */
 export function enabledAutomaticLadder(): readonly ProviderId[] {
   return automaticLadder().filter((id) => providerEntry(id)?.enabled());
+}
+
+/**
+ * The order OPINION's Automatic tries providers in (unit U29).
+ *
+ * Derived from `opinionLadderRank`, exactly the way the desk's ladder is
+ * derived from `ladderRank` -- so an id is added to, reordered in or taken
+ * out of Opinion's ladder by editing ONE registry entry, and every reader of
+ * it (the picker's help sentence, `checkOpinionReadiness`'s copy, the
+ * orchestration's fall-through, the Models screen's Opinion row and the two
+ * failover sites) follows without being touched.
+ *
+ * Static, and not filtered by `enabled()`, for the same reason
+ * `automaticLadder()` is not: the callers already cope with a rung that
+ * turns out to be unavailable -- the probe fails and the loop moves on --
+ * and filtering here would make an exported constant depend on when the
+ * module happened to be imported relative to a test's env setup.
+ */
+export function opinionAutomaticLadder(): readonly ProviderId[] {
+  return PROVIDER_REGISTRY.filter((entry) => entry.opinionLadderRank !== undefined)
+    .slice()
+    .sort((a, b) => a.opinionLadderRank! - b.opinionLadderRank!)
+    .map((entry) => entry.id);
 }
 
 /**

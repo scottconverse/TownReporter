@@ -854,16 +854,20 @@ Where the paper says what it thinks.
 
 Use **Add documents** or drop files into **Start with your documents**, paste source text, or supply URLs. Keep the writing instruction separate from the evidence. Then press **Write an editorial**. See the [current desk guide](editor-desk.md) for limits, progress, recovery and where the finished draft appears.
 
-Choose **Automatic**, any named Codex or Claude model, or **Local model**;
-saved custom connections are offered too. Codex Sol is selected by default.
+Choose **Automatic**, any named Codex or Claude model, **Local model**, or
+**DeepSeek v4.1 Flash**;
+saved custom connections are offered too. Automatic is selected by default, so an
+editor who never opens the menu writes with the first ready rung.
 **Opinion's own Automatic** tries
-Codex Sol, then Claude Sonnet once if Codex is unavailable — that order belongs
-to Opinion. Stories, scans and Dark Desk walk the desk's own Automatic ladder:
+DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet once if the one before it
+is unavailable — that order belongs
+to Opinion, and DeepSeek is a named pick there as well. Stories, scans and Dark
+Desk walk the desk's own Automatic ladder:
 DeepSeek v4.1 Flash, then the local model on this computer when one is loaded,
 then Codex Terra; Claude Sonnet is a hand pick there. An explicit choice
 remains the requested first runtime; a recognized technical failure can move
 only the unfinished call and records requested and actual model and effort.
-A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options.
+A content refusal is terminal. Claude and Codex both read the complete configured voice through their native instruction-file options, and they research and write with it in hand — the voice file holds the research protocol (local record, packet and tape rules, triangulation, the surprise hunt), so the writer that follows it needs both the file and the tools in the same run. DeepSeek v4.1 Flash, **Local model** and saved connections have no web tools of their own, so the desk fetches for them — and the model holds the same voice while it plans those searches and reads what came back, so the protocol governs the research and not only the writing. The desk reads the newsroom's own record first, in the protocol's order: the city's PrimeGov agendas, packets and minutes (PDFs, with OCR for a scanned packet), the meeting transcripts this desk captured, and the pages it already holds. Research then runs to the protocol's stopping conditions — every load-bearing claim doubly sourced, two surprising facts with one from a local primary document — rather than to a fixed number of searches, with a safety ceiling of 30 minutes and 80 pages (`EDITORIAL_RESEARCH_CEILING_MS`, `EDITORIAL_RESEARCH_PAGE_CEILING`) and **Cancel** stopping it at any point before the piece is written.
 Readiness lists every missing prerequisite — voice file, installation, or
 login — before the button is enabled, and the server checks again when you
 click. If OAuth expires, open the named provider on this machine and sign in;
@@ -899,7 +903,8 @@ The desk checks that the delivery is actually an editorial before it files
 anything. A provider refusal, limitation note, neutral-summary substitute,
 implausible headline, or incomplete body makes the row **Failed** and creates no
 draft. There is then no Read, Edit, or Publish action to mistake for success.
-Opinion's Automatic can move from Codex Sol to Claude Sonnet once. A named
+Opinion's Automatic can move from DeepSeek v4.1 Flash to Codex Sol and on to
+Claude Sonnet once. A named
 choice is tried
 first and the same technical-only unfinished-call rule applies. A finished row
 names the requested and actual model and effort. Opus is never selected by an
@@ -912,8 +917,13 @@ prompt sit under the piece there, marked _does not print_.
 Earlier measured runs took **ten to forty minutes**; that is an observation,
 not a deadline. The current research and writing passes each have a default
 45-minute ceiling. The Claude pair can therefore take about 90 minutes.
-Explicit Local model makes one writing call using the supplied material; it
-does not run the frontier research pass. The row
+An explicit Local model, DeepSeek v4.1 Flash or saved connection makes one
+writing call, and the desk's own research pass runs before it inside the
+"Researching with the desk" stage. That pass is the desk's, not the frontier
+research engine, but it is not a token look either: it runs to the protocol's
+stopping conditions, so a piece that needs a dozen searches gets them, and it
+stops for the editor at any hop. Its ceiling is 30 minutes and 80 pages by
+default, under this 45-minute per-pass clock. The row
 shows a clock counting up and a moving rule; at 3:40 that is normal, not stuck.
 The page rechecks every twenty seconds.
 
@@ -1294,7 +1304,7 @@ In the story workspace, use **Check draft against evidence**. The check reads th
 
 ## Current Opinion document and review workflow
 
-Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion defaults to Codex Sol; Automatic tries Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
+Opinion and Write a story share large-document upload, OCR, long pasted text and URL intake. Opinion opens on Automatic, which tries DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. Both subscription writers read the complete configured voice using native instruction-file options and can research while writing. Failed requests retain saved material for restoration. A provider refusal creates no draft. A saved editorial missing its required claims-and-sources appendix remains marked for review and blocked from publication until repaired. Written-source name matches support corrections; unresolved identities remain visible. See [the current desk guide](editor-desk.md) for the complete editor flow.
 
 ## 0.6.52: model and document boundaries
 

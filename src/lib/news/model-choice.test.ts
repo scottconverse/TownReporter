@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DARK_AUTOMATIC_LADDER,
+  DEFAULT_OPINION_MODEL,
   effectiveStoryModelChoice,
   darkModelChoice,
   localModelOptionLabel,
@@ -21,6 +22,7 @@ import {
   shouldHydrateDarkModel,
 } from "./model-choice.ts";
 import { LOCAL_MODEL_UNCONFIGURED } from "./preflight.ts";
+import { isOfferedForJob, jobModelOptions } from "./model-assignments.ts";
 import { RETIRED_PROVIDER_IDS, automaticLadder, providersFor } from "./provider-registry.ts";
 
 const STORY_VALUES = [
@@ -111,15 +113,115 @@ describe("model choice contract", () => {
     assert.match(STORY_MODEL_CHOICES[0].detail, /recommended/i);
   });
 
-  it("offers the signed-in Codex providers on Opinion", () => {
+  /*
+    UNIT U29 -- OPINION'S PICKER NAMES DEEPSEEK.
+
+    The owner's decision of 2026-09-30 ("use deepseek ... keep the picker
+    regardless") made DeepSeek v4.1 Flash Opinion's first Automatic rung and a
+    nameable choice there. The picker is otherwise the Story list exactly as it
+    was, and this pins both halves: every Story choice is still offered on
+    Opinion, and the ONE addition is the rung -- nothing else moved.
+  */
+  it("offers every Story choice on Opinion, plus the DeepSeek rung by name", () => {
+    const opinionValues = OPINION_MODEL_CHOICES.map((choice) => choice.value);
+    assert.deepEqual(opinionValues, [...STORY_VALUES, "deepseek-flash"]);
     assert.deepEqual(
-      OPINION_MODEL_CHOICES.map((choice) => choice.value),
-      STORY_VALUES,
-    );
-    assert.deepEqual(
-      OPINION_MODEL_CHOICES.map((choice) => choice.value),
+      opinionValues.filter((value) => value !== "deepseek-flash"),
       STORY_MODEL_CHOICES.map((choice) => choice.value),
+      "Opinion must not lose a single choice Story offers",
     );
+    // And it is offered on Opinion ONLY: Story's own menu still reaches
+    // DeepSeek the way it always has, through Automatic.
+    assert.ok(!STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
+    assert.ok(!providersFor("dark").some((entry) => entry.id === "deepseek-flash"));
+    assert.ok(!providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
+
+    const deepseek = OPINION_MODEL_CHOICES.find((choice) => choice.value === "deepseek-flash")!;
+    assert.equal(deepseek.label, "DeepSeek v4.1 Flash");
+    assert.equal(pickerOptionText(deepseek), "DeepSeek v4.1 Flash — Ollama");
+    assert.ok(
+      pickerOptionText(deepseek).length <= PICKER_OPTION_TEXT_MAX,
+      "the option must fit the measured select box",
+    );
+    assert.match(pickerOptionTitle(deepseek), /research and drafting/);
+    // A pick that says DeepSeek says DeepSeek back: not Automatic, and not the
+    // page default Codex Sol.
+    assert.equal(opinionModelChoice("deepseek-flash"), "deepseek-flash");
+    assert.equal(modelChoiceLabel("deepseek-flash", "opinion"), "DeepSeek v4.1 Flash");
+    assert.match(modelChoiceHelp("deepseek-flash", "opinion"), /Prefers DeepSeek v4\.1 Flash/);
+  });
+
+  /*
+    Unit U29: the editor is told BEFORE the run that a DeepSeek editorial is
+    written in one call from the material they supplied. Unit U30 kept the
+    "no web search of its own" half and replaced the "no gathering pass ran"
+    half: the desk now researches for it, and the sentence says so. The
+    sentence is read from the same registry answer the pair dispatch turns on
+    (`providerRunsToolPass`), so it cannot describe a flow the desk does not
+    run.
+  */
+  it("says a no-web-tools pick is researched by the desk, and says it only where that is true", () => {
+    const help = modelChoiceHelp("deepseek-flash", "opinion");
+    assert.match(help, /no web search of its own/);
+    assert.match(help, /the desk searches and reads the sources for it/);
+    assert.doesNotMatch(help, /no gathering pass runs/, "the desk researches for this writer now");
+
+    // The two CLIs DO run their own gathering pass, so their help says nothing
+    // of the sort -- read from their registry kind, not from a list of ids.
+    for (const choice of ["claude-frontier", "codex-frontier"] as const) {
+      const cliHelp = modelChoiceHelp(choice, "opinion");
+      assert.match(cliHelp, /Prefers/);
+      assert.doesNotMatch(cliHelp, /the desk searches and reads the sources for it/, choice);
+    }
+  });
+
+  /*
+    The Models screen's "Assign models to jobs" row for Opinion draws its menu
+    from this same list (`jobModelOptions("opinion")` in ./model-assignments.ts),
+    so DeepSeek being here is what makes it selectable there.
+  */
+  it("is selectable as Opinion's assignment in the Models screen", () => {
+    assert.ok(jobModelOptions("opinion").some((option) => option.value === "deepseek-flash"));
+    assert.ok(isOfferedForJob("opinion", "deepseek-flash"));
+    // A forced job's menu is a different list on purpose: a run that must name
+    // ONE runtime up front may not name a rung.
+    assert.ok(!isOfferedForJob("story-draft", "deepseek-flash"));
+    assert.ok(!isOfferedForJob("ocr", "deepseek-flash"));
+  });
+
+  /*
+    UNIT U29b -- OPINION OPENS ON AUTOMATIC.
+
+    The owner's decision D18d was "use deepseek ... keep the picker
+    regardless". Unit U29 made DeepSeek the ladder's first rung; U29b makes
+    Automatic the page's default, so the decision reaches the editor who never
+    touches the picker instead of only the one who opens it.
+
+    The other half of the same test is the half that must NOT change: an
+    editor's own saved choice is honoured exactly as it was.
+  */
+  it("defaults Opinion to Automatic, and still honours an editor's own pick", () => {
+    assert.equal(DEFAULT_OPINION_MODEL, "auto");
+    // "Nobody has chosen" -- an omitted field from the client, or a stored id
+    // this build cannot read -- means Automatic, not a pinned model.
+    assert.equal(opinionModelChoice(undefined), "auto");
+    assert.equal(opinionModelChoice(null), "auto");
+    assert.equal(opinionModelChoice(""), "auto");
+    assert.equal(opinionModelChoice("not-a-model"), "auto");
+    assert.equal(opinionModelChoice("qwen-local"), "auto", "the LM Studio rung is not an Opinion pick");
+    // ...and every real pick survives, including the rung Opinion names.
+    for (const choice of OPINION_MODEL_CHOICES) {
+      assert.equal(opinionModelChoice(choice.value), choice.value, `${choice.value} must load as itself`);
+    }
+    assert.equal(opinionModelChoice("codex-frontier"), "codex-frontier");
+    assert.equal(
+      modelChoiceLabel(opinionModelChoice("codex-frontier"), "opinion"),
+      "Codex Sol",
+      "a saved explicit Codex choice still loads as Codex",
+    );
+    // Story and Scan already default this way; Opinion agreeing is the point.
+    assert.equal(STORY_MODEL_CHOICES[0]?.value, "auto");
+    assert.equal(OPINION_MODEL_CHOICES[0]?.value, "auto");
   });
 
   it("derives the forced batch list directly and excludes Automatic", () => {
@@ -161,7 +263,13 @@ describe("model choice contract", () => {
     */
     assert.equal(modelChoiceLabel("grok-oauth"), "Automatic");
     assert.equal(storyModelChoice("grok-oauth"), "auto");
-    assert.equal(opinionModelChoice("grok-oauth"), "codex-frontier");
+    /*
+      Unit U29b: all three normalisers now answer the same thing for a value
+      nobody can read. Opinion used to fall to a pinned Codex Sol, so a stored
+      id from an older build spent on the frontier model without anyone
+      choosing it; Automatic is what the desk would have run anyway.
+    */
+    assert.equal(opinionModelChoice("grok-oauth"), "auto");
     assert.equal(darkModelChoice("grok-oauth"), "auto");
     assert.equal(
       retiredModelChoiceNote("grok-oauth"),
@@ -200,18 +308,19 @@ describe("model choice contract", () => {
     assert.equal(rememberedStoryModelChoice("local-model", "editor"), "local-model");
   });
 
-  it("round-trips Opinion choices and defaults missing or invalid input to Sol", () => {
+  it("round-trips Opinion choices and defaults missing or invalid input to Automatic", () => {
     for (const value of [
       "auto",
       "claude-frontier",
       "codex-balanced",
       "codex-frontier",
       "local-model",
+      "deepseek-flash",
     ] as const) {
       assert.equal(opinionModelChoice(value), value);
     }
     for (const invalid of ["local", "zen", "codex", "grok-oauth", undefined, null, {}]) {
-      assert.equal(opinionModelChoice(invalid), "codex-frontier");
+      assert.equal(opinionModelChoice(invalid), "auto");
     }
   });
 
@@ -230,7 +339,7 @@ describe("model choice contract", () => {
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.",
+      "Tries DeepSeek v4.1 Flash, Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
     );
     /*
       0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed

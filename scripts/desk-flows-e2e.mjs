@@ -64,11 +64,17 @@ async function openRowMenu(row) {
   }
 }
 
-async function assertSharedModelPicker(picker, expectedValue, surface) {
+/*
+  `expectedNames` is a parameter rather than the module constant because
+  Opinion's menu carries one name Story's does not: DeepSeek v4.1 Flash, the
+  rung its Automatic starts on and the one pick that is also a rung (unit U29).
+  Every other surface still passes the shared list.
+*/
+async function assertSharedModelPicker(picker, expectedValue, surface, expectedNames = expectedModelNames) {
   const names = (await picker.locator("option").allInnerTexts()).map((line) =>
     line.split("—")[0].trim(),
   );
-  if (JSON.stringify(names) !== JSON.stringify(expectedModelNames)) {
+  if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
     throw new Error(`${surface} model picker choices differ: ${JSON.stringify(names)}`);
   }
   if ((await picker.inputValue()) !== expectedValue) {
@@ -192,10 +198,18 @@ async function main() {
   await page.getByLabel("Writing model").waitFor();
   step("Opinion's AI card opens the form");
 
-  // Opinion uses the shared native provider registry, with Sol selected by default.
+  /*
+    Opinion uses the shared native provider registry, opens on Automatic (units
+    U29/U29b: an editor who never touches the picker writes with the first ready
+    rung -- DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet) and offers
+    the DeepSeek rung by name as well.
+  */
   const opinionModel = page.getByLabel("Writing model");
-  await assertSharedModelPicker(opinionModel, "codex-frontier", "Opinion");
-  step("Opinion exposes every named Codex and Claude model plus Local model");
+  await assertSharedModelPicker(opinionModel, "auto", "Opinion", [
+    ...expectedModelNames,
+    "DeepSeek v4.1 Flash",
+  ]);
+  step("Opinion exposes every named Codex and Claude model, Local model and DeepSeek");
 
   // UIUX-03: a live region has to exist before its content changes, or the
   // announcement is frequently never made.

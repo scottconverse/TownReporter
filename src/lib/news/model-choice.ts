@@ -13,8 +13,11 @@ import {
   automaticLadder,
   isAutomaticChoiceId,
   isAutomaticRungId,
+  opinionAutomaticLadder,
+  providerRunsToolPass,
   providersFor,
   providerEntry,
+  type AutomaticChoiceId,
   type AutomaticRungId,
   type PickerProviderId,
   type ProviderSurface,
@@ -116,10 +119,52 @@ export function isCustomModelChoice(value: unknown): value is CustomModelChoice 
 }
 export type EffectiveStoryModelChoice = StoryModelChoice | "configured";
 
-/* Opinion uses the same native subscription providers as Story. Automatic
-   starts on Codex Sol and keeps Claude Sonnet as its limited fallback. */
-export const DEFAULT_OPINION_MODEL = "codex-frontier" as const;
-export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as const;
+/*
+  Opinion's own ladder, derived from the registry -- not typed out here.
+
+  It reads: DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet. The
+  owner's decision of 2026-09-30 replaced the earlier written product
+  decision that Opinion's Automatic was Codex Sol then Claude Sonnet only
+  ("use deepseek ... deepseek is the best model at the lowest price we have");
+  the ORDER lives on the registry entries (`opinionLadderRank`), beside the
+  desk's own `ladderRank`, so this constant -- and every sentence and failover
+  list that reads it -- cannot drift from what Automatic actually walks.
+
+  DeepSeek is the one rung the two ladders share, and it is first on each: the
+  desk researches and drafts with it, and so does Opinion. Codex Sol and
+  Claude Sonnet stay Opinion's own; the LM Studio rung and the configured
+  gateway are never on this ladder, because an editorial is the paper's voice
+  and is written by a named subscription (or Ollama Cloud) model.
+*/
+export const OPINION_AUTOMATIC_LADDER: readonly Exclude<OpinionModelChoice, "auto">[] =
+  opinionAutomaticLadder().filter((id): id is AutomaticChoiceId => isAutomaticChoiceId(id));
+
+/**
+ * What Opinion's picker opens on, and what an omitted or unreadable choice
+ * becomes: Automatic.
+ *
+ * Unit U29 (owner decision 2026-09-30) made DeepSeek v4.1 Flash Opinion's
+ * first rung; U29b then made it the DEFAULT, which is the other half of the
+ * same decision ("use deepseek ... keep the picker regardless"). It used to
+ * be a pinned Codex Sol, and that quietly made the owner's choice reach only
+ * the editors who opened the picker: an editor who pressed Write without
+ * touching it ran Sol, and on a desk whose Ollama answered but whose Codex
+ * was signed out, the page said "this desk cannot write yet" while a model
+ * that worked sat one menu item away.
+ *
+ * Automatic is the default on the other two surfaces that offer it -- Story
+ * (`desk.index.tsx`) and Scan (`desk.scan.tsx`) both open on "auto" -- so this
+ * is also the desk saying the same thing in the same way. The picker is
+ * unchanged and an editor's saved pick is honoured as it always was: this is
+ * only what a run does when nobody has said otherwise.
+ *
+ * It is read in three places, all of them "nobody has chosen": the Opinion
+ * page's initial state (`desk.opinion.tsx`), `opinionModelChoice`'s fallback
+ * for an id this build no longer offers, and the readiness/start server
+ * functions' validator when the client sends no choice at all
+ * (`opinion.ts`).
+ */
+export const DEFAULT_OPINION_MODEL = "auto" as const;
 /**
  * Dark Desk's Automatic ladder, which is Automatic's ladder (0.6.63, Unit Y
  * item 1).
@@ -136,6 +181,17 @@ export const OPINION_AUTOMATIC_LADDER = ["codex-frontier", "claude-sonnet"] as c
  * them.
  */
 export const DARK_AUTOMATIC_LADDER: readonly string[] = automaticLadder();
+/**
+ * Opinion's picker: Automatic, then every named Codex and Claude model, then
+ * Local model, then DeepSeek v4.1 Flash (unit U29), plus the newsroom's saved
+ * connections at the edge.
+ *
+ * DeepSeek is the only entry in this list that is also an Automatic rung --
+ * it is first on Opinion's ladder AND selectable by name, which is what the
+ * owner asked for ("keep the picker regardless"). It is offered here and
+ * nowhere else (`offeredFor` on its registry entry): Story, Scan and Dark
+ * Desk still reach it only through their own Automatic.
+ */
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("opinion");
 
 /**
@@ -158,11 +214,17 @@ export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
 /**
  * Batch and meeting runs must name ONE exact provider, so Automatic is absent
- * -- and so are Automatic's own rungs. A rung is not a choice an editor can
- * make; it is what Automatic resolved to on the day, which is why
- * `dailyScanRuntime` and `draftBatchRuntime` narrow the rungs away too. The
- * daily scan keeps "auto" itself (Unit AA): a rung is refused, Automatic is
- * allowed, and the server names the rung it resolved to on the run record.
+ * -- and so are Automatic's own rungs. A rung is what Automatic resolved to on
+ * the day, which is why `dailyScanRuntime` and `draftBatchRuntime` narrow the
+ * rungs away too. The daily scan keeps "auto" itself (Unit AA): a rung is
+ * refused, Automatic is allowed, and the server names the rung it resolved to
+ * on the run record.
+ *
+ * Unit U29: Opinion's menu does offer one rung by name (DeepSeek v4.1 Flash),
+ * and that changes nothing here. These are the FORCED surfaces -- a batch, a
+ * meeting redraft, OCR, a transcript -- whose runs have to name a runtime
+ * before they start; none of them opens the Opinion picker, and
+ * `validateForcedRuntime` still refuses a rung that reaches one.
  */
 export type ForcedModelChoice = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 
@@ -186,6 +248,17 @@ export function effectiveStoryModelChoice(value: unknown): EffectiveStoryModelCh
   return value === "configured" ? "configured" : storyModelChoice(value);
 }
 
+/**
+ * Turn an untrusted stored string back into a choice Opinion may hold.
+ *
+ * A value Opinion's menu offers -- including the DeepSeek rung, which is the
+ * one entry that is both a name and a rung (unit U29) -- is kept exactly as
+ * stored. Anything else becomes `DEFAULT_OPINION_MODEL`, which since U29b is
+ * Automatic: the same answer Story and Dark give an unreadable choice, and
+ * the honest one, because Automatic is what the desk would have run had the
+ * editor never picked. It used to fall to a pinned Codex Sol, which meant a
+ * stored value nobody could read quietly spent on the frontier model.
+ */
 export function opinionModelChoice(value: unknown): OpinionModelChoice {
   if (isCustomModelChoice(value)) return value;
   return OPINION_MODEL_CHOICES.some((choice) => choice.value === value)
@@ -350,10 +423,33 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
     return "Uses the selected Ollama or on-device model for this run. If it is unavailable, the run stops instead of silently switching providers.";
   }
   if (selected.value !== "auto") {
+    /*
+      Unit U29 said a model with no web tools writes in ONE call from the
+      material the editor supplied, and the picker said so before the run.
+      Unit U30 kept the one writing call and took the "unresearched" half away:
+      the desk runs its own bounded research pass first (searching, opening and
+      capturing pages through the Dark Desk's machinery) and the same no-tool
+      provider plans its queries and reads its captures back. So the sentence
+      the editor reads now describes research that happens, rather than its
+      absence. Read from the same registry answer the pair dispatch turns on
+      (`providerRunsToolPass`), so sentence and behaviour cannot drift. "Local
+      model" has already returned above with its own wording; this is the
+      DeepSeek rung and anything like it.
+    */
+    if (scope === "opinion" && !providerRunsToolPass(providerEntry(selected.value))) {
+      return `Prefers ${selected.label} for this run. It has no web search of its own, so the desk searches and reads the sources for it before the editorial is written. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
+    }
     return `Prefers ${selected.label} for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.`;
   }
   if (scope === "opinion") {
-    return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next signed-in provider. A provider refusal stops the run.`;
+    /*
+      "ready provider" rather than "signed-in provider" since unit U29: the
+      first rung on this ladder is DeepSeek v4.1 Flash on an Ollama endpoint,
+      which is reached over HTTP and is never signed in to. The sentence is
+      read from the registry ladder, so reordering a rung cannot leave it
+      describing an order the desk no longer walks.
+    */
+    return `Tries ${ladderSentence(OPINION_AUTOMATIC_LADDER)}. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.`;
   }
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}.${loadedRungNote(DARK_AUTOMATIC_LADDER)} Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
@@ -405,6 +501,11 @@ export function rememberedStoryModelChoice(value: unknown, source: unknown): Sto
  * there," everywhere the desk says it. Any other local-model failure
  * (unreachable server, rejected credentials) is already specific and passes
  * through untouched.
+ *
+ * Unit U29 added the DeepSeek rung's own sentence. It is an Ollama endpoint
+ * rather than a sign-in, so the fix is a server on this machine (or naming
+ * that rung's own address) and the sentence says exactly that: the generic
+ * copy names Claude Code and Codex logins, and neither is what is missing.
  */
 export function opinionProviderProblem(
   error: string,
@@ -417,20 +518,21 @@ export function opinionProviderProblem(
 
     It used to hand the generic "AI is not available. No model is set up yet:
     open Claude Code or Codex on this machine and log in, or set LLM_BASE_URL"
-    straight through for the two rungs Opinion actually walks. On the stand-in
+    straight through for the rungs Opinion actually walks. On the stand-in
     editorial day that appeared on /desk/opinion minutes after the desk had
     written a draft with DeepSeek, so the desk looked as though it could not
-    see its own writer. Nothing was broken -- Opinion's Automatic is a
-    different ladder (`OPINION_AUTOMATIC_LADDER`, Codex Sol then Claude
-    Sonnet) and deliberately contains none of the story ladder's rungs -- but
-    the message said "no model is set up" without saying WHOSE models it meant.
+    see its own writer. Nothing was broken -- Opinion's Automatic walked a
+    ladder of its own and the message never said WHOSE models it meant.
 
-    So each rung now names itself and the one step that fixes it, and
+    So each rung names itself and the one step that fixes it, and
     `checkOpinionReadiness` adds the sentence that says which models Opinion
     has at all (see `OPINION_MODEL_UNIVERSE`). Every other failure -- an
     unreachable server, a rejected login -- is already specific and passes
     through untouched.
   */
+  if (candidate === "deepseek-flash") {
+    return "Opinion can write with DeepSeek v4.1 Flash, and its Ollama server is not answering on this machine: start Ollama (or set TOWNREPORTER_DEEPSEEK_BASE_URL to its address), then try again.";
+  }
   if (candidate === "codex-frontier") {
     return "Opinion can write with Codex Sol, and Codex is not set up on this machine: open Codex and log in.";
   }
