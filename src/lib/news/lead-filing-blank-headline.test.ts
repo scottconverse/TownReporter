@@ -40,7 +40,14 @@ test("a headline that cleans to nothing is skipped, not filed as a blank lead", 
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer, dup_kind text
+      last_resurfaced_scan_run_id integer, dup_kind text,
+      -- Migration 0113 (U28): fileScanLeads writes the duplicate check's
+      -- verdict on every row it files, asked or not, so a table built without
+      -- these fails the insert with a missing-column error for dup_ai_same
+      -- -- a missing migration, not a filing bug.
+      dup_ai_same boolean, dup_ai_why text, dup_ai_target text,
+      dup_ai_printed_same boolean, dup_ai_printed_why text, dup_ai_printed_slug text,
+      dup_ai_model text, dup_ai_checked_at timestamptz
     )`);
     const sql = makeSql(db);
     const result = await fileScanLeads(
@@ -103,7 +110,14 @@ test("a headline that cleans to nothing is skipped the same way an absent one is
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer, dup_kind text
+      last_resurfaced_scan_run_id integer, dup_kind text,
+      -- Migration 0113 (U28): fileScanLeads writes the duplicate check's
+      -- verdict on every row it files, asked or not, so a table built without
+      -- these fails the insert with a missing-column error for dup_ai_same
+      -- -- a missing migration, not a filing bug.
+      dup_ai_same boolean, dup_ai_why text, dup_ai_target text,
+      dup_ai_printed_same boolean, dup_ai_printed_why text, dup_ai_printed_slug text,
+      dup_ai_model text, dup_ai_checked_at timestamptz
     )`);
     const sql = makeSql(db);
     const result = await fileScanLeads(

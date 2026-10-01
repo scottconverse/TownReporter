@@ -12,7 +12,12 @@ test("filing stamps the exact killed repeat instead of inserting behind a possib
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer, dup_kind text
+      last_resurfaced_scan_run_id integer, dup_kind text,
+      -- Migration 0113 (U28): the duplicate check writes these on every row
+      -- fileScanLeads files, asked or not; see lead-filing-blank-headline.test.ts.
+      dup_ai_same boolean, dup_ai_why text, dup_ai_target text,
+      dup_ai_printed_same boolean, dup_ai_printed_why text, dup_ai_printed_slug text,
+      dup_ai_model text, dup_ai_checked_at timestamptz
     )`);
     const source_urls = ["https://example.org/road-work"];
     const existing = [
@@ -86,7 +91,12 @@ test("a possible repeat of a killed lead is held, while a possible open match st
       newsworthiness integer, status text, possible_duplicate_of integer,
       topic_unchosen boolean not null default false,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
-      last_resurfaced_scan_run_id integer, dup_kind text
+      last_resurfaced_scan_run_id integer, dup_kind text,
+      -- Migration 0113 (U28): the duplicate check writes these on every row
+      -- fileScanLeads files, asked or not; see lead-filing-blank-headline.test.ts.
+      dup_ai_same boolean, dup_ai_why text, dup_ai_target text,
+      dup_ai_printed_same boolean, dup_ai_printed_why text, dup_ai_printed_slug text,
+      dup_ai_model text, dup_ai_checked_at timestamptz
     )`);
     for (const status of ["killed", "new"]) {
       await db.exec("truncate leads restart identity");

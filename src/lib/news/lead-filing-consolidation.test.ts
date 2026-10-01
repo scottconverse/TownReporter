@@ -63,7 +63,13 @@ const CREATE_LEADS = `create table leads (
   topic_unchosen boolean not null default false,
   resurfaced_count integer default 0, last_resurfaced_at timestamptz,
   last_resurfaced_scan_run_id integer,
-  dup_kind text, kill_reason text, kill_reason_url text, killed_at timestamptz
+  dup_kind text, kill_reason text, kill_reason_url text, killed_at timestamptz,
+  -- Migration 0113 (U28): fileScanLeads writes the duplicate check's verdict
+  -- on every row it files, asked or not -- see lead-filing-blank-headline's
+  -- own note on the same columns.
+  dup_ai_same boolean, dup_ai_why text, dup_ai_target text,
+  dup_ai_printed_same boolean, dup_ai_printed_why text, dup_ai_printed_slug text,
+  dup_ai_model text, dup_ai_checked_at timestamptz
 )`;
 
 test("the 207/212 case: the same story twice in one scan run is filed once, with the source URLs merged", async () => {
