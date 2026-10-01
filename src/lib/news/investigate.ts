@@ -1384,6 +1384,22 @@ type FrontierRow = {
   why: string;
 };
 
+/**
+ * The frontier kind `persistPlan` files when a relationship's or a claim's
+ * provenance cannot be tied to a capture.
+ *
+ * Named once because its exact value is load-bearing in TWO places that cannot
+ * see each other: the row `persistPlan` writes, and the exclusion in
+ * `groundingCorpus` that keeps those rows out of the grounding corpus (N2 of
+ * the batch-7 re-audit). These are the frontier labels written WITHOUT going
+ * through `groundPlan`'s marking -- a relationship's label is built from `from`
+ * and `to`, which are keys and are deliberately unmarked, and a claim's is the
+ * claim text cut at 240 characters, which can cut a marker in half -- so
+ * "other model-written labels are stored marked" is not true of them, and the
+ * marker-stripping in `prepareCorpus` cannot close the door.
+ */
+export const UNRESOLVED_PROVENANCE_KIND = "unresolved-provenance";
+
 /** Record a lead. Unknown/weak/parked never skip this — exhaustion is historical, not a ban. */
 export async function persistDiscovery(
   userId: string,
@@ -2544,8 +2560,21 @@ export async function groundingCorpus(
     They are safe to include because every one of them is MARKED when the model
     wrote a specific nothing carried: `groundPlan` marks a planner's frontier
     labels and hypotheses before `persistPlan` writes them, and `prepareCorpus`
-    strips the marked specific out whole. The ONE class of label that is
-    deliberately unmarked is the entity-derived one below -- see `entityNames`.
+    strips the marked specific out whole. The classes of label that are
+    deliberately unmarked are left out by name instead -- the entity-derived one
+    below, and the relationship-derived one here.
+
+    N2 of the batch-7 re-audit: `persistPlan` files an unresolved RELATIONSHIP
+    as a frontier item labelled `${from} ${kind} ${to}`, and both ends are
+    deliberately unmarked because a relationship's names are keys. Nothing in
+    that row went through `groundPlan`, so the marker-stripping above cannot
+    close it: the model returns a relationship naming "1749 Main Street", the
+    row is written, and the next hop reads the address back out of its own notes
+    and calls it grounded. The row is EXCLUDED rather than marked, because a
+    marker spliced between a relationship's two ends would be read back as part
+    of one of the names; the capture is the only thing that may ground a
+    specific, so a specific that appears in no capture appears in no part of the
+    corpus. Everything else about the row stays: the editor still sees it.
 
     The file's title and summary carry the editor's paste and the lead the file
     was opened from: the other thing a specific may legitimately come from.
@@ -2553,6 +2582,7 @@ export async function groundingCorpus(
   const savedLeads = await sql<{ label: string; why: string; next_steps: string }>`
     select label, why, next_steps from frontier_items
     where newsroom_id = ${room} and investigation_id = ${investigationId}
+      and coalesce(kind, '') <> ${UNRESOLVED_PROVENANCE_KIND}
     order by id desc limit 80
   `.catch(() => []);
   const savedHypotheses = await sql<{ body: string }>`
@@ -4444,7 +4474,7 @@ async function persistPlan(
     `;
     if (prov.status === "unresolved") {
       await persistDiscovery(userId, investigationId, {
-        kind: "unresolved-provenance",
+        kind: UNRESOLVED_PROVENANCE_KIND,
         label: `${from} ${r.kind} ${to}`.slice(0, 240),
         why: "Relationship provenance unresolved; keep investigating",
         evidence: relationshipEvidence.slice(0, 400),
@@ -4537,7 +4567,7 @@ async function persistPlan(
     `;
     if (prov.status === "unresolved") {
       await persistDiscovery(userId, investigationId, {
-        kind: "unresolved-provenance",
+        kind: UNRESOLVED_PROVENANCE_KIND,
         label: c.text.slice(0, 240),
         why: "Provenance unresolved; keep investigating — missing artifact link is a state, not a stop",
         evidence: (c.evidence || c.text).slice(0, 400),

@@ -892,7 +892,10 @@ function DeskHome() {
   /*
     The triage keys are `desk-triage.ts` now -- the same rule the Queue binds,
     so J means the same thing on both screens and a key added to one is added to
-    both. Today's own stand-downs (typing, modifiers) live there with it.
+    both. Today's own stand-downs live there with it: typing, a modifier, a
+    focused control, and any dialog, modal or open `<details>` menu over the
+    list (N4 of the batch-7 re-audit -- the hook checks the document for that
+    itself, so a dialog this screen opens by a name it forgot is still covered).
   */
   useTriageKeys((action) => {
     const lead = newLeads[movedIndex(cursor, 0, newLeads.length)];

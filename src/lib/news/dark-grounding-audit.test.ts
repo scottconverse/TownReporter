@@ -18,6 +18,7 @@ import {
   ensureInvestigateSchema,
   frontierDedupKey,
   groundingCorpus,
+  persistDiscovery,
 } from "./investigate.ts";
 import { getSql } from "../db.ts";
 import { ensureDarkSchema, readDarkDials, synthesizeSignals } from "./dark.ts";
@@ -428,6 +429,77 @@ describe("the audit's own corpus is still read the way DD1 reads it", () => {
   });
 });
 
+describe("N1 — a title in front of a name does not hide the name", () => {
+  /*
+    The batch-7 re-audit's own input and its own corpus. M5 stopped institutions
+    being read as invented people, and it over-corrected: a run containing any
+    `INSTITUTION_WORD` was rejected outright, and `mayor`, `sheriff`, `clerk`,
+    `superintendent`, `attorney`, `treasurer`, `secretary` and `governor` are
+    all in that list -- so "title + invented name", the commonest shape of an
+    invented person in civic copy, came back unmarked. `cutAtSentenceEnd` had
+    the second half of it: "Dr.", "Sen." and "Gov." are two-letter tokens with a
+    period, which the L4 fix reads as a sentence end, so the name behind them
+    was cut off before it was ever judged.
+  */
+  const COUNCIL = prepareCorpus("The council met in Longmont.");
+
+  it("marks an invented official however the desk titles them", () => {
+    for (const text of [
+      "Mayor Jane Doe approved the permit.",
+      "Sheriff Jim Beam said so.",
+      "Superintendent Mary Jones",
+      "County Clerk Jane Doe filed it.",
+      "Dr. Jane Doe approved it.",
+      "Sen. John Smith said",
+      "Gov. Jim Beam",
+    ]) {
+      assert.match(
+        markUngroundedSpecifics(text, COUNCIL),
+        /\(not in any capture yet\)/,
+        `the title hid the name: ${text}`,
+      );
+    }
+  });
+
+  it("refuses a query that names one of them", () => {
+    const named = queryNamesUngroundedSpecific("Mayor Jane Doe Longmont", COUNCIL);
+    assert.ok(named, "a titled invented name was allowed as a search term");
+    assert.match(named!, /Mayor Jane Doe/);
+  });
+
+  it("keeps the title in the text and marks the name whole", () => {
+    // The title is part of what the editor reads; what the marker says is that
+    // nothing here carries the person, and it reads the same either way.
+    assert.equal(
+      markUngroundedSpecifics("Mayor Jane Doe approved the permit.", COUNCIL),
+      "Mayor Jane Doe (not in any capture yet) approved the permit.",
+    );
+  });
+
+  it("does not read a title on its own as a person", () => {
+    for (const text of ["The mayor said so.", "The county clerk filed it.", "Sheriff"]) {
+      const names = findSpecifics(text).filter((s) => s.kind === "name");
+      assert.deepEqual(names.map((s) => s.text), [], `a bare title was read as a person: ${text}`);
+    }
+  });
+
+  it("still does not read an institution as an invented person", () => {
+    // The titles are stripped only in FRONT of a name, so M5's cases stand.
+    for (const text of [
+      "Boulder County Public Health",
+      "Public Records Request",
+      "Colorado Secretary of State",
+      "Secretary of State",
+      "City of Longmont",
+      "City Council",
+      "Police Department",
+    ]) {
+      const names = findSpecifics(text).filter((s) => s.kind === "name");
+      assert.deepEqual(names.map((s) => s.text), [], `read as a person: ${text}`);
+    }
+  });
+});
+
 /*
   A paper in a two-word city: the place rule has to answer for each WORD, or
   "Grand Junction" could never be named in a first-hop query.
@@ -510,6 +582,181 @@ describe("M6 — an invented entity cannot ground the next hop's query", () => {
 
     await sql`delete from frontier_items where investigation_id = ${inv!.id}`;
     await sql`delete from entities where newsroom_id = ${ROOM} and canonical = ${"1749 main street"}`;
+    await sql`delete from artifacts where investigation_id = ${inv!.id}`;
+    await sql`delete from investigations where id = ${inv!.id}`;
+  });
+});
+
+/*
+  N2 of the batch-7 re-audit: M6's narrowing relies on "model-written labels are
+  stored MARKED", and that is true of a planner's frontier labels, hypotheses
+  and claims (`groundPlan` marks them) but false of the two rows `persistPlan`
+  writes from a relationship or an unresolved identity. `persistPlan` files an
+  unresolved relationship as `${from} ${kind} ${to}` with both ends unmarked --
+  deliberately, because a relationship's names are keys -- so the frontier table
+  carried an invented address the model could read back on the next hop and call
+  grounded. The synthesis pass had the same door standing open a second time:
+  its corpus was the PACK, and the pack lists RELATIONSHIPS, FRONTIER, CLAIMS,
+  HYPOTHESES and ANOMALIES -- every one of them the model's own earlier notes.
+
+  Both fixtures below are the audit's, run against PGlite through the real
+  `persistDiscovery`, the real `groundingCorpus` and the real `synthesizeSignals`.
+*/
+describe("N2 — a relationship-derived label cannot ground the next hop", () => {
+  const ROOM = 91095;
+  const INVENTED = "1749 Main Street leased by Front Range Holdings";
+
+  it("leaves the relationship's own label out of the corpus, and keeps the captures", async () => {
+    const user = `n2-relationship-${Date.now()}`;
+    await ensureInvestigateSchema();
+    const sql = await getSql();
+    const [inv] = await sql<{ id: number }>`
+      insert into investigations (user_id, newsroom_id, title)
+      values (${user}, ${ROOM}, 'Kid City USA Longmont closing') returning id
+    `;
+    await sql`
+      insert into artifacts
+        (user_id, investigation_id, newsroom_id, url, title, content_hash, full_text, classification, fetch_status)
+      values (
+        ${user}, ${inv!.id}, ${ROOM}, ${"https://fixture.example/shines"}, ${"Colorado Shines"},
+        ${"hash-n2"}, ${CAPTURE}, ${"discovered"}, ${200}
+      )
+    `;
+    /*
+      Exactly what `persistPlan` files for a relationship whose provenance is
+      unresolved: the label is built from the model's `from` and `to` and is
+      written unmarked.
+    */
+    await persistDiscovery(user, inv!.id, {
+      kind: "unresolved-provenance",
+      label: INVENTED,
+      why: "Relationship provenance unresolved; keep investigating",
+      evidence: "Front Range Holdings — 1749 Main Street",
+      priority: 7,
+    });
+
+    const corpus = await groundingCorpus(inv!.id, ROOM, {
+      city: "Longmont",
+      state: "Colorado",
+      county: "Boulder",
+    });
+    const named = queryNamesUngroundedSpecific("1749 Main Street lease", corpus);
+    assert.ok(named, "a relationship label grounded the address it named");
+    assert.match(named!, /1749 Main Street/);
+    assert.match(
+      markUngroundedSpecifics("The lease at 1749 Main Street ended", corpus),
+      /1749 Main Street \(not in any capture yet\)/,
+    );
+    // The capture is still what grounds the file, and the label itself is still
+    // filed for the editor to read.
+    assert.equal(queryNamesUngroundedSpecific("Kid City USA Longmont 1941 Terry Street lease", corpus), null);
+    const [filed] = await sql<{ label: string }>`
+      select label from frontier_items where investigation_id = ${inv!.id} limit 1
+    `;
+    assert.equal(filed?.label, INVENTED, "the relationship row was not filed at all");
+
+    await sql`delete from frontier_items where investigation_id = ${inv!.id}`;
+    await sql`delete from artifacts where investigation_id = ${inv!.id}`;
+    await sql`delete from investigations where id = ${inv!.id}`;
+  });
+
+  it("grounds the synthesis pass on the captures, not on the model's own notes", async () => {
+    const user = `n2-synthesis-${Date.now()}`;
+    await ensureDarkSchema();
+    await ensureInvestigateSchema();
+    const sql = await getSql();
+    const [inv] = await sql<{ id: number }>`
+      insert into investigations (user_id, newsroom_id, title)
+      values (${user}, ${ROOM}, 'Kid City USA Longmont closing') returning id
+    `;
+    await sql`
+      insert into artifacts
+        (user_id, investigation_id, newsroom_id, url, title, content_hash, full_text, classification, fetch_status)
+      values (
+        ${user}, ${inv!.id}, ${ROOM}, ${"https://fixture.example/shines"}, ${"Colorado Shines"},
+        ${"hash-n2b"}, ${CAPTURE}, ${"discovered"}, ${200}
+      )
+    `;
+    // The invented address, in the model's own earlier notes: a relationship
+    // row, which `buildDarkSynthesisPack` prints into its RELATIONSHIPS section.
+    await sql`
+      insert into relationships
+        (user_id, newsroom_id, investigation_id, from_name, to_name, kind, evidence, provenance_status)
+      values (
+        ${user}, ${ROOM}, ${inv!.id}, ${"Front Range Holdings"}, ${"1749 Main Street"},
+        ${"leases"}, ${"The lease names it"}, ${"unresolved"}
+      )
+    `;
+    const [run] = await sql<{ id: number }>`
+      insert into dark_runs (user_id, newsroom_id) values (${user}, ${ROOM}) returning id
+    `;
+    const reply = JSON.stringify({
+      // The REAL address, which the capture carries: the control for the two
+      // assertions below, because a corpus that marks everything is as useless
+      // as one that grounds everything.
+      editor_summary: "The licensing record at 1941 Terry Street lists one operator.",
+      inventory_gaps: [],
+      signals: [
+        {
+          name: "Lease ended at 1749 Main Street",
+          posture: "whisper",
+          type: "records",
+          strength: 8,
+          confidence: 0.4,
+          observation: "The lease at 1749 Main Street ended.",
+          pattern: "One parcel, two operators",
+          linkage_map: "",
+          alternatives: "A routine sale",
+          counter_narrative: "",
+          what_would_kill: "The deed",
+          pathway: "Ask the clerk",
+          privacy_review: "Public record",
+          handoff: "HOLD FOR PATTERN",
+        },
+      ],
+      promises: [],
+    });
+    const stored = await synthesizeSignals(
+      user,
+      run!.id,
+      inv!.id,
+      "",
+      await readDarkDials(ROOM),
+      "local-model",
+      null,
+      ROOM,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      { chat: async () => ({ ok: true as const, text: reply }) },
+    );
+    assert.equal(stored.error, undefined, "the synthesis must have reached the model");
+    const [signal] = await sql<{ name: string; observation: string }>`
+      select name, observation from dark_signals where run_id = ${run!.id}
+    `;
+    assert.match(
+      signal!.name,
+      /1749 Main Street \(not in any capture yet\)/,
+      `the model's own note grounded the address: ${signal!.name}`,
+    );
+    assert.match(
+      signal!.observation,
+      /1749 Main Street \(not in any capture yet\)/,
+      `the model's own note grounded the observation: ${signal!.observation}`,
+    );
+    // ... and the capture still grounds what it carries: the pass's own summary
+    // names the real address, and it is not marked.
+    assert.match(stored.summary, /1941 Terry Street/, "the pass summary did not keep the model's sentence");
+    assert.equal(
+      stored.summary.includes(UNGROUNDED_MARKER),
+      false,
+      `a captured address was marked: ${stored.summary}`,
+    );
+
+    await sql`delete from dark_signals where run_id = ${run!.id}`;
+    await sql`delete from dark_runs where id = ${run!.id}`;
+    await sql`delete from relationships where investigation_id = ${inv!.id}`;
     await sql`delete from artifacts where investigation_id = ${inv!.id}`;
     await sql`delete from investigations where id = ${inv!.id}`;
   });
