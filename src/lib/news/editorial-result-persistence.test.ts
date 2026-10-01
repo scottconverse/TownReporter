@@ -14,6 +14,11 @@ import { enqueueJob, ensureJobsSchema, findOpenJob } from "./jobs.ts";
 import { persistEditorialSuccess } from "./editorial-result-persistence.ts";
 import { ensureStoryDocuments, readEditorialDocuments } from "./story-documents.server.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
+import {
+  readSuppliedMaterialCut,
+  SUPPLIED_MATERIAL_CAP,
+  withThousands,
+} from "./supplied-material-cap.ts";
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
 // migrations/*.sql before the file loads; the postgres-integration runner runs
 // the same file WITHOUT that preload, so the fixture asks for it itself --
@@ -28,6 +33,9 @@ const TEST_EDITORIAL: Editorial = {
   factSheet: "The archive is publicly funded.",
   imagePrompt: "A public archive reading room.",
 };
+/** B8P: the editor's paste, at the size the finding describes. */
+const PARAGRAPH = `${"The council packet lists each agenda item and its staff report. ".repeat(6)}\n\n`;
+
 const skipNameCheck = async (opts: Parameters<typeof import("./editorial-name-check.ts").checkEditorialNames>[0]) => ({
   editorial: opts.editorial,
   nameCheck: { version: 1 as const, checkedAt: new Date(0).toISOString(), checkedText: "", complete: true, note: "Test name check.", rows: [] },
@@ -335,6 +343,105 @@ describe("Opinion completion commit", () => {
         finished: true,
         extras: 1,
       });
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
+  /*
+    Unit B8P. The cut happens before the model call; the COUNTS are stored with
+    the piece, in the same `research_json` blob the name check already lives in
+    -- so no migration, and the note is still there after a reload. These two
+    cases are the two the editor can be in: material too long to send whole, and
+    material that fit.
+  */
+  it("stores the length cut with the piece so the note survives a reload", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-length-cut");
+    const request = await insertRequest(sql, { userId });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    const packet = `${PARAGRAPH.repeat(Math.ceil(2_000_000 / PARAGRAPH.length))}FINAL PAGE OF THE PACKET.`;
+
+    try {
+      const result = await fileEditorial(
+        {
+          userId,
+          newsroomId: 1,
+          subject: "Keep local history public",
+          sourceText: packet,
+          pointers: [],
+          sourceKind: "paste",
+          sourceRef: "desk",
+          completion: { requestId: request.id, jobId: job.id },
+        },
+        TEST_EDITORIAL,
+        "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
+      );
+      assert.equal(result.ok, true);
+      if (!result.ok) assert.fail((result as any).error);
+
+      const [row] = await sql<{ research_json: string }>`
+        select research_json from drafts where id = ${result.draftId}
+      `;
+      const cut = readSuppliedMaterialCut(row?.research_json);
+      assert.ok(cut, "the cut was stored with the draft");
+      assert.equal(cut.totalChars, packet.length);
+      assert.ok(cut.keptChars <= SUPPLIED_MATERIAL_CAP);
+      assert.ok(cut.keptChars < cut.totalChars);
+      assert.match(cut.note, new RegExp(`${withThousands(packet.length)} characters`));
+      assert.match(cut.note, /cut for length/);
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
+  it("stores no length cut for a piece whose material was sent whole", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-no-length-cut");
+    const request = await insertRequest(sql, { userId });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+
+    try {
+      const result = await fileEditorial(
+        {
+          userId,
+          newsroomId: 1,
+          subject: "Keep local history public",
+          sourceText: "The editor's own notes on the levy.",
+          pointers: [],
+          sourceKind: "paste",
+          sourceRef: "desk",
+          completion: { requestId: request.id, jobId: job.id },
+        },
+        TEST_EDITORIAL,
+        "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
+      );
+      assert.equal(result.ok, true);
+      if (!result.ok) assert.fail((result as any).error);
+
+      const [row] = await sql<{ research_json: string }>`
+        select research_json from drafts where id = ${result.draftId}
+      `;
+      assert.equal(row?.research_json.includes("lengthCut"), false);
+      assert.equal(readSuppliedMaterialCut(row?.research_json), null);
     } finally {
       await cleanCompletionFixture(sql, userId);
     }
