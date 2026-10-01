@@ -131,7 +131,7 @@ async function apply112(): Promise<void> {
   await sql.query(migrationSql(MIGRATION_112));
 }
 
-it("a database holding a SuperGrok sign-in migrates cleanly and the table is gone", { skip, timeout: 60_000 }, async () => {
+it("a database holding a SuperGrok sign-in migrates cleanly and the table STAYS (rollback-safe)", { skip, timeout: 60_000 }, async () => {
   const sql = await db.getSql();
   assert.equal(
     await tableExists("xai_oauth_connections"),
@@ -150,17 +150,25 @@ it("a database holding a SuperGrok sign-in migrates cleanly and the table is gon
 
   await apply112();
 
+  // The previous build (batch 4) still reads this table with no catch, and a
+  // failed promote puts that build back on a database that has already run this
+  // migration. So the table, and the row, must still be there: the drop is
+  // deferred (docs/design/DEFERRED-MIGRATIONS.md).
   assert.equal(
     await tableExists("xai_oauth_connections"),
-    false,
-    "the SuperGrok credential table must be gone",
+    true,
+    "the table must stay: the previous build reads it",
   );
+  const after = await sql<{ n: number }>`
+    select count(*)::int as n from xai_oauth_connections where newsroom_id = ${NEWSROOM}
+  `;
+  assert.equal(after[0]!.n, 1, "the sign-in row must be untouched");
   assert.equal(await tableExists("newsrooms"), true, "the migration must touch nothing else");
   assert.equal(await tableExists("custom_ai_connections"), true);
 
   // Idempotent: a re-run (a retried promote, a second migrate) must not fail.
   await apply112();
-  assert.equal(await tableExists("xai_oauth_connections"), false);
+  assert.equal(await tableExists("xai_oauth_connections"), true);
 });
 
 it("a newsroom whose stored choices hold grok-oauth still loads, as Automatic", { skip, timeout: 60_000 }, async () => {

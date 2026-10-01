@@ -1,19 +1,31 @@
 -- GR-C: Grok (xAI) was removed as a provider.
 --
+-- THIS MIGRATION NO LONGER DROPS ANYTHING. The file keeps its name (the
+-- migration ledger records applied files by name, and renaming it would make a
+-- database that already ran it run it again), but its body is now a comment.
+--
 -- `xai_oauth_connections` held one row per newsroom for the SuperGrok
 -- device-code OAuth connection: the encrypted credential, the in-flight login
 -- state and the account's discovered model ids. The connection, its transport
--- and the code that read this table are all gone, so the table goes with them.
+-- and the code that read this table are all gone from this build.
 --
--- Nothing else references it: no foreign key points at it, the credential was
--- encrypted with the same server secret as a saved Custom AI key (which lives
--- in `custom_ai_connections` and is untouched), and the removal is deliberate
--- -- a newsroom that signed in to SuperGrok loses that sign-in, which is the
--- point of the change. The Models screen told owners so with a Remove button
--- before this migration lands.
+-- WHY THE TABLE STAYS FOR NOW. `npm run build` runs the migrations before the
+-- new build is started, and a promote that fails after that point puts the
+-- PREVIOUS build back. The previous build (batch 4, 32ef34ea) still reads this
+-- table with no catch (`provider-availability.server.ts` awaits
+-- `getXaiOauthStatus()`, which feeds the model picker), so a dropped table
+-- would leave the old paper up with every model picker failing. The production
+-- auditor found this on 2026-10-01; the owner chose to keep the table through
+-- the rollout.
+--
+-- THE DROP IS DEFERRED, NOT CANCELLED. It ships as a migration in the release
+-- AFTER the one that carries the Grok removal, when a rollback to a build that
+-- reads the table is no longer possible: see
+-- docs/design/DEFERRED-MIGRATIONS.md. Nothing in this build reads or writes the
+-- table, and no foreign key points at it.
 --
 -- A newsroom whose `model_assignments.provider_id` or `desk_jobs.model_choice`
--- still holds the string `grok-oauth` is unaffected by this migration: those
--- rows keep loading, and the desk normalises the retired id to Automatic with
--- a visible note (see src/lib/news/model-choice.ts's `retiredModelChoiceNote`).
-drop table if exists xai_oauth_connections;
+-- still holds the string `grok-oauth` is unaffected: those rows keep loading,
+-- and the desk normalises the retired id to Automatic with a visible note (see
+-- src/lib/news/model-choice.ts's `retiredModelChoiceNote`).
+select 1;
