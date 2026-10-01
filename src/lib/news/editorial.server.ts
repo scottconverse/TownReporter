@@ -41,9 +41,11 @@ import {
   buildWritingPack,
   opinionHeadline,
   editorialSourcesError,
+  suppliedMaterialForPrompt,
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
+import { suppliedMaterialCutRecord } from "./supplied-material-cap.ts";
 import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
@@ -741,6 +743,25 @@ export async function fileEditorial(
     integrityNotes = checked.integrityNotes;
   }
 
+  /*
+    UNIT B8P -- WHAT THE MODEL WAS NOT GIVEN.
+
+    The cap itself is applied where the prompt is built (`editorial.ts`'s
+    `suppliedMaterialForPrompt`, the one way either pack reads this text), and
+    it is applied again here from the SAME pure function and the same input, so
+    the note the editor reads cannot disagree with what was actually sent. When
+    nothing was cut this is null and nothing is stored.
+
+    It is stored on the draft, in `research_json` -- the free-form JSON blob the
+    desk screens already read back (`nameCheck` lives there the same way) -- so
+    the note persists WITH the piece and survives a reload. No migration.
+  */
+  const suppliedMaterial = suppliedMaterialForPrompt({
+    subject: input.subject,
+    sourceText: input.sourceText,
+  });
+  const lengthCut = suppliedMaterial ? suppliedMaterialCutRecord(suppliedMaterial) : null;
+
   // Receipts at the end of the piece, where the reader can reach them.
   const body = ed.appendix ? `${ed.body}\n\n---\n\nCLAIMS AND SOURCES\n\n${ed.appendix}` : ed.body;
 
@@ -813,7 +834,12 @@ export async function fileEditorial(
         ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
         ${storableText(headline)}, ${""}, ${storableText(body)}, ${"opinion"}, ${"[]"}, ${"editorial"},
         ${storableText(integrityNotes)},
-        ${JSON.stringify(sanitizeJsonLeaves(nameCheck ? { nameCheck } : {}))}
+        ${JSON.stringify(
+          sanitizeJsonLeaves({
+            ...(nameCheck ? { nameCheck } : {}),
+            ...(lengthCut ? { lengthCut } : {}),
+          }),
+        )}
       )
       returning id
     `;

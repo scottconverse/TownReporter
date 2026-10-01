@@ -14,6 +14,7 @@ import {
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { DeskLengthCut } from "@/components/desk-length-cut";
 import { StoryBody } from "@/components/story-body";
 import { editorActionError } from "@/lib/news/desk-copy";
 import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
@@ -456,6 +457,9 @@ function EditorialPage() {
         has nothing here: on the reported screen it lives on the Checks tab.
       */}
       <DeskNameCheck research={q.data.research_json} headline={headline} dek={dek} body={body} />
+      {/* Unit B8P: the material behind this piece was cut for length. Stored on
+          the draft, so it reads the same here as it does on the opinion desk. */}
+      <DeskLengthCut research={q.data.research_json} />
 
       {q.data.fact_sheet ? (
         <Field label="Editor's fact sheet" chip="does not print" hint="What the voice checked. For you, not the reader.">

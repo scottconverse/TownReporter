@@ -27,7 +27,9 @@ import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-regist
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
+import { DeskLengthCut } from "@/components/desk-length-cut";
 import { editorialSourcesError, parseEditorial } from "@/lib/news/editorial";
+import { readSuppliedMaterialCut } from "@/lib/news/supplied-material-cap";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import {
   editorialAttribution,
@@ -737,6 +739,19 @@ function OpinionPage() {
                       {r.job ? <DeskJobCard job={r.job} /> : <Busy label={r.stage || "Working…"} />}
                     </div>
                   ) : null}
+                  {/*
+                    Unit B8P, the job-result half. The row IS the job result for
+                    a finished editorial, and this is the line the editor comes
+                    back to: the piece is done, and the material behind it was
+                    longer than the writer was given. Read from the draft's own
+                    stored record, so it is here on every load, not only in the
+                    moment the job completed.
+                  */}
+                  {r.finished_at && !r.error && readSuppliedMaterialCut(r.research_json) ? (
+                    <div className="astra-span">
+                      <DeskLengthCut research={r.research_json} />
+                    </div>
+                  ) : null}
                   {r.error ? (
                     <div className="astra-span text-rust">
                       {editorDraftError(r.error) ?? r.error}
@@ -826,6 +841,13 @@ function OpinionPage() {
                 dek={piece.data.dek}
                 body={piece.data.body}
               />
+              {/*
+                Unit B8P. Sits beside the name check because it is the same
+                kind of thing: a note about the piece, read off the stored
+                draft, still here after a reload. It draws nothing at all
+                unless this piece's material was actually cut.
+              */}
+              <DeskLengthCut research={piece.data.research_json} />
               {piece.data.fact_sheet ? (
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2">
