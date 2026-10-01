@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { fileScanLeads, type SqlTag } from "./lead-filing.ts";
-import { collectDupPairs, runDupCheck, type DupCheckChat } from "./dup-check.ts";
+import { collectDupPairs, runDupCheck, type DupCheckChat, type DupCheckOutcome } from "./dup-check.ts";
 import { printedDupChip } from "./desk-copy.ts";
 
 /*
@@ -341,6 +341,89 @@ describe("U28: the duplicate check settles the link the matcher only guessed at"
         printedDupChip({ ...row, dup_ai_printed_same: true }, BOHN_PRINTED, PLACE)?.aiWhy,
         "and a yes would show the sentence",
       );
+    } finally {
+      await db.close();
+    }
+  });
+});
+
+/*
+  L2 of the batch-7 pre-merge audit: the verdict is the verdict ABOUT THIS PAIR.
+
+  `dup-check.ts` keys its answers by candidate index and records the headline it
+  asked about, and the filing loop matches the candidate independently. The
+  module header said the lookup was "by this candidate's position and the
+  matched lead's headline"; only the position was actually used. The audit could
+  not construct a reachable collision with the current ordering, which is the
+  point: this is the line that makes the stated safety property true of the code
+  rather than of the ordering, and the row below is what a stale answer would
+  look like -- another pair's "no" silently clearing a link this candidate's own
+  words had earned.
+*/
+describe("U28: a verdict about a different target is not this row's verdict", () => {
+  it("files the word rule's link when the recorded target is not the lead we matched", async () => {
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${EXISTING_HEADLINE}, ${"Two closed sessions are scheduled."},
+                ${"council"}, ${"new"},
+                ${JSON.stringify(["https://longmontleader.com/agenda/sept-council"])}, 6)
+        returning id
+      `;
+      const existing = [
+        {
+          id: seeded[0]!.id,
+          status: "new",
+          headline: EXISTING_HEADLINE,
+          source_urls: ["https://longmontleader.com/agenda/sept-council"],
+        },
+      ];
+
+      // Hand-built, because `runDupCheck` cannot produce this: it records the
+      // headline it was handed. A stale or mis-paired outcome is exactly what
+      // the guard is for.
+      const outcome: DupCheckOutcome = {
+        decisions: new Map([
+          [
+            0,
+            {
+              lead: {
+                headline: "A lead this run never matched",
+                verdict: { same: false, why: "an executive session, not a permit hearing" },
+              },
+            },
+          ],
+        ]),
+        model: "deepseek-v4.1-flash:cloud",
+        failure: null,
+        asked: 1,
+        skipped: 0,
+      };
+
+      const result = await fileScanLeads(
+        sql,
+        { userId: "u" },
+        1,
+        906,
+        [CANDIDATE],
+        existing,
+        PLACE,
+        outcome,
+      );
+
+      assert.equal(result.dupCheckCleared, 0, "someone else's verdict cleared the link");
+      assert.equal(result.possibleMatched, 1, "the word rule's link stands");
+      const [filed] = (await filedRows(sql)).filter((r) => r.id !== seeded[0]!.id);
+      assert.equal(filed!.possible_duplicate_of, seeded[0]!.id);
+      assert.equal(filed!.dup_kind, "possible");
+      assert.equal(filed!.dup_ai_same, null, "another pair's answer is not this row's");
+      assert.equal(filed!.dup_ai_target, null);
+      assert.equal(filed!.dup_ai_why, null);
+      // The row was still filed by a check that ran, so the model is recorded:
+      // "the desk asked" is true, "and it said this" is not.
+      assert.equal(filed!.dup_ai_model, "deepseek-v4.1-flash:cloud");
     } finally {
       await db.close();
     }

@@ -25,6 +25,7 @@
 
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { cityOfficialHost } from "./research-scope.ts";
+import { stripMarkedSpecifics, stripUngroundedMarker } from "./dark-specific-grounding.ts";
 
 /* -------------------------------------------------------------------------
    Stage 1 — the Black Desk cap
@@ -322,7 +323,18 @@ export function adversarialSubject(
   _place?: Place,
 ): string {
   for (const raw of [signal.name, signal.observation]) {
-    const text = String(raw ?? "").replace(/\s+/g, " ").trim();
+    /*
+      M1 of the pre-merge audit. The subject becomes the queries the app runs,
+      so a marked specific must be GONE from it, not merely marked: the marker's
+      own words became search terms ("… Main Street facility 1749 capture
+      changed hands"), and the invented address itself was reordered into a
+      query the ordering guard downstream could no longer see. `stripMarked…`
+      takes the specific and the marker together; `stripUngroundedMarker` is
+      the belt for a marker the specific reader did not pair with a span.
+    */
+    const text = stripUngroundedMarker(stripMarkedSpecifics(String(raw ?? "")))
+      .replace(/\s+/g, " ")
+      .trim();
     if (!text) continue;
     const words = text.match(/[\p{L}\p{N}'’-]+/gu) ?? [];
     const names: string[] = [];

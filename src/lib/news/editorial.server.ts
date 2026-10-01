@@ -487,13 +487,20 @@ export async function writeEditorial(
       /*
         UNIT U30 -- THE DESK RESEARCHES FOR THIS WRITER.
 
-        It runs HERE, before the voice is handed to the writing call, and its
-        two model calls are the same no-tool transport: the provider that plans
-        the queries and reads the captures is the rung the editor picked. Neither
-        of those calls is given the voice, and the transport underneath them has
-        no tool surface to give the web to, so SEC-3 holds on both sides -- the
-        pass with the web never held the voice, and the pass with the voice never
-        had a web tool (unit U29's property, kept).
+        It runs HERE, before the writing call, and its two model calls are the
+        same no-tool transport: the provider that plans the queries and reads
+        the captures is the rung the editor picked. The transport underneath
+        them has no tool surface, so the research pass never holds the web and
+        the voice at once -- it holds the voice and the desk does the fetching.
+
+        L7 of the batch-7 pre-merge audit: this note used to say "neither of
+        those calls is given the voice", and that is the pre-U31 shape. U31 (the
+        owner's D20) is the reverse: `deskResearchFor` is handed `voice.text` as
+        the system message of BOTH calls, exactly as the writing call is,
+        because the voice file carries the research protocol the planner and the
+        reader are told to follow. The boundary SEC-3 describes is about tools,
+        not about the voice, and SECURITY.md records it that way: "the model
+        holds the voice and the desk holds the fetching".
 
         What the editor is owed instead is the truth about the pass, and the run
         says it: the desk searched and read, and the writing pack carries the

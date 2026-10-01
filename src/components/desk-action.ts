@@ -203,7 +203,10 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    *
    * A rejection here is reported through the same error toast as a failed
    * call, carrying the real reason, because from the editor's side it is the
-   * same thing: the press did not finish.
+   * same thing: the press did not finish. It is reported ONCE and then
+   * rethrown -- see `DeskFollowUpError` -- so the caller that awaits
+   * `mutateAsync` learns the press failed rather than carrying on as if it had
+   * finished (L5 of the batch-7 pre-merge audit).
    *
    * It does NOT run when the answer refused (`{ok:false}`): a refused press
    * changed nothing, and a follow-up that assumed otherwise would be the desk
@@ -226,6 +229,53 @@ export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variable
    */
   muted?: () => boolean;
 };
+
+/**
+ * A follow-up that failed AFTER its sentence was already shown.
+ *
+ * L5 of the batch-7 pre-merge audit. `onSuccess` catches the follow-up's
+ * rejection so it can report it once instead of twice — but catching it also
+ * made the mutation settle as a SUCCESS, and a press site that chains
+ * `await mutateAsync(...).then(close)` then closed the dialog, navigated away
+ * or re-enabled the row on a press that never finished. The answer the editor
+ * saw and the answer the caller saw disagreed.
+ *
+ * Rethrowing is what makes them agree: react-query answers a rejection out of
+ * `onSuccess` by dispatching "error" and rejecting the promise, so
+ * `mutateAsync` rejects and `mutate`'s own callers see the failure state. The
+ * wrapper exists so `onError` — which react-query calls on the way past — can
+ * recognise a failure whose toast has already been raised and stay quiet.
+ */
+export class DeskFollowUpError extends Error {
+  /**
+   * Read instead of `instanceof`.
+   *
+   * A class that extends `Error` loses its prototype when it is downlevelled --
+   * TypeScript's ES5 emit does `_super.call(this, message) || this`, and an
+   * `Error.call` returns a FRESH Error, so the value the caller holds is not an
+   * instance of this class at all. That is not hypothetical: this module is
+   * transpiled to ES5 by the desk's own DOM harness, where `instanceof` here is
+   * false and the identical failure gets reported twice. The flag is assigned in
+   * the constructor, so it survives every target.
+   */
+  readonly deskFollowUpReported = true as const;
+  constructor(
+    message: string,
+    readonly cause: unknown,
+  ) {
+    super(message);
+    this.name = "DeskFollowUpError";
+  }
+}
+
+/** Was this failure's sentence already shown? See `DeskFollowUpError`. */
+export function isReportedFollowUpFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { deskFollowUpReported?: unknown }).deskFollowUpReported === true
+  );
+}
 
 /**
  * The same rules around a React Query mutation.
@@ -253,9 +303,14 @@ export function useDeskMutation<Data, Variables>(
       `mutateAsync` -- covers the follow-up too, and the done toast is raised
       only once the action is actually over.
 
-      A follow-up that fails is caught HERE rather than rethrown: react-query
-      answers a rejection from `onSuccess` by calling `onError`, which would
-      report the same failure a second time. One press, one sentence.
+      A follow-up that fails is caught HERE, reported once, and RETHROWN as a
+      `DeskFollowUpError`. The catch is what keeps it to one sentence —
+      react-query answers a rejection from `onSuccess` by calling `onError`,
+      which would report the same failure a second time — and `onError` below
+      recognises the wrapper and stays quiet. The rethrow is L5 of the
+      pre-merge audit: swallowing it settled the mutation as a SUCCESS, so a
+      caller awaiting `mutateAsync` carried on as though the press had
+      finished.
     */
     onSuccess: async (data: Data, variables: Variables) => {
       const refusal = deskAnswerFailure(data);
@@ -267,9 +322,9 @@ export function useDeskMutation<Data, Variables>(
       try {
         await optionsRef.current.after?.(data, variables);
       } catch (error) {
-        if (!optionsRef.current.muted?.())
-          deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
-        return;
+        const sentence = deskActionFailure(error, optionsRef.current);
+        if (!optionsRef.current.muted?.()) deskToast(sentence, { tone: "err" });
+        throw new DeskFollowUpError(sentence, error);
       }
       if (!optionsRef.current.muted?.()) {
         const { message, undo } = deskActionDone(data, variables, optionsRef.current);
@@ -278,6 +333,9 @@ export function useDeskMutation<Data, Variables>(
     },
     onError: (error: Error) => {
       if (optionsRef.current.muted?.()) return;
+      // Already said, by the catch above. Saying it again is the double toast
+      // the catch exists to prevent.
+      if (isReportedFollowUpFailure(error)) return;
       deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
     },
   });

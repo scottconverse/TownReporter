@@ -12,8 +12,13 @@ import { isSelfReferential, labelAfterCitationCheck } from "./claim-hygiene.ts";
 import {
   groundPlan,
   markUngroundedSpecifics,
+  normaliseForGrounding,
+  placeCorpus,
   queryNamesUngroundedSpecific,
   prepareCorpus,
+  stripUngroundedMarker,
+  UNGROUNDED_MARKER,
+  unmarkGroundedSpecifics,
   type GroundingCorpus,
 } from "./dark-specific-grounding.ts";
 import { resurfaceRefusalReason } from "./result-quality.ts";
@@ -2484,21 +2489,30 @@ export const GROUNDING_CORPUS_CAP = 400_000;
 /**
  * What the desk actually holds, for the grounding rule.
  *
- * Unit DD1, item 1. The file's captures, in full, plus the investigation's own
- * title and summary -- which carry the editor's paste and the lead the file
- * was opened from, and are therefore the other thing a specific may legitimately
- * come from. Nothing else is in here on purpose: the planner's pack also holds
- * the MODEL's own earlier output (frontier labels, hypotheses, previous
- * queries), and grounding a model's sentence against the model's own earlier
- * sentence is how "1749 Main Street" would launder itself into a fact.
+ * Unit DD1, item 1. The file's captures, in full; the investigation's own title
+ * and summary, which carry the editor's paste and the lead the file was opened
+ * from; the file's saved leads and hypotheses, MARKER-STRIPPED; and nothing
+ * that is an entity's own name (M6 of the pre-merge audit -- see `entityNames`).
+ *
+ * The rule the composition answers is "a specific is grounded by something the
+ * desk HOLDS, never by something the model said". The captures and the lead are
+ * the first kind. A saved lead is the second kind and is read back on purpose,
+ * so `prepareCorpus` takes out every specific it wears a marker on, whole. An
+ * entity name is the one model-written string that is never marked -- it is a
+ * key -- so it is kept out by name instead.
  *
  * Unreadable captures are left out for the same reason `retrievePack` leaves
  * them out: a paywall notice or a nav shell is not text that may ground
  * anything.
+ *
+ * `place` is the paper's own city, state and county, from its settings: the one
+ * thing that is ground truth without a capture, because the desk knows where it
+ * publishes from.
  */
 export async function groundingCorpus(
   investigationId: number,
   newsroomId?: number,
+  place?: { city?: string | null; state?: string | null; county?: string | null },
 ): Promise<GroundingCorpus> {
   const sql = await getSql();
   const room = newsroomId ?? (await investigationNewsroom(investigationId));
@@ -2518,18 +2532,23 @@ export async function groundingCorpus(
     order by id desc limit 120
   `.catch(() => []);
   /*
-    The file's own saved leads, and the reason they are here.
+    The file's own saved leads and hypotheses, and the reason they are here.
 
     A dig's whole job is to follow what its earlier rounds wrote down -- that is
     what `frontier_items` and `hypotheses` ARE -- so a specific those rows name
     is a specific the file holds. Leaving them out would mean a company the desk
-    filed as a lead in round one could never be searched for in round two.
+    filed as a lead in round one could never be searched for in round two; it is
+    the property `investigate.loop.test.ts` pins as "a later editor on the same
+    file sees the hops".
 
-    They bring the laundering risk with them, and `prepareCorpus` is what closes
-    it: every specific that carries the marker is STRIPPED out of the corpus,
-    marker and all, before anything is judged against it. So a specific nothing
-    captured can never ground itself on the next hop, and a specific the file
-    genuinely holds -- one a capture or the lead carries -- still does.
+    They are safe to include because every one of them is MARKED when the model
+    wrote a specific nothing carried: `groundPlan` marks a planner's frontier
+    labels and hypotheses before `persistPlan` writes them, and `prepareCorpus`
+    strips the marked specific out whole. The ONE class of label that is
+    deliberately unmarked is the entity-derived one below -- see `entityNames`.
+
+    The file's title and summary carry the editor's paste and the lead the file
+    was opened from: the other thing a specific may legitimately come from.
   */
   const savedLeads = await sql<{ label: string; why: string; next_steps: string }>`
     select label, why, next_steps from frontier_items
@@ -2541,11 +2560,32 @@ export async function groundingCorpus(
     where newsroom_id = ${room} and investigation_id = ${investigationId}
     order by id desc limit 40
   `.catch(() => []);
+  /*
+    M6 of the pre-merge audit: the ENTITY NAMES, kept out.
+
+    `persistPlan` files an unresolved identity as a frontier item labelled with
+    the entity's own `name`, and that name is deliberately unmarked -- it is the
+    key the resolver merges on, so appending a marker to it would make "Jane
+    Smith (not in any capture yet)" a different person from "Jane Smith". That
+    is the one hole the marker-stripping above cannot close: the model returns
+    `{name: "1749 Main Street", kind: "address"}`, the row is written, and the
+    next hop reads the address back out of its own notes and calls it grounded.
+    The capture is the only thing that may ground an entity's name, so a
+    frontier item whose label IS an entity's name is left out of the corpus.
+    Everything else about the row stays: the editor still sees it.
+  */
+  const entityNames = await sql<{ name: string }>`
+    select name from entities where newsroom_id = ${room} order by id desc limit 400
+  `.catch(() => []);
+  const entityLabels = new Set(entityNames.map((entity) => normaliseForGrounding(entity.name)));
   const parts: string[] = [];
   const investigation = head[0];
   if (investigation)
     parts.push(`${investigation.title}\n${investigation.summary}`);
-  for (const lead of savedLeads) parts.push(`${lead.label}\n${lead.why}\n${lead.next_steps}`);
+  for (const lead of savedLeads) {
+    if (entityLabels.has(normaliseForGrounding(lead.label))) continue;
+    parts.push(`${lead.label}\n${lead.why}\n${lead.next_steps}`);
+  }
   for (const hypothesis of savedHypotheses) parts.push(hypothesis.body);
   for (const capture of captures) {
     if (
@@ -2559,7 +2599,10 @@ export async function groundingCorpus(
       continue;
     parts.push(`${capture.title}\n${capture.url}\n${capture.full_text}`);
   }
-  return prepareCorpus(parts.join("\n\n").slice(0, GROUNDING_CORPUS_CAP));
+  return prepareCorpus(
+    parts.join("\n\n").slice(0, GROUNDING_CORPUS_CAP),
+    place ? placeCorpus(place) : undefined,
+  );
 }
 
 export async function findEvidenceChunks(
@@ -2619,9 +2662,11 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     the file's own title so a hop that cannot read its captures still has the
     lead's words to ground against, then refreshed at the top of every hop.
   */
-  let corpus: GroundingCorpus = await groundingCorpus(opts.investigationId, newsroomId).catch(() =>
-    prepareCorpus(investigationTitle),
-  );
+  let corpus: GroundingCorpus = await groundingCorpus(
+    opts.investigationId,
+    newsroomId,
+    place,
+  ).catch(() => prepareCorpus(investigationTitle, placeCorpus(place)));
   const officialDomainList = opts.officialDomains ?? [];
   const pressDomainList = opts.pressDomains ?? [];
   /*
@@ -2814,8 +2859,40 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     // pages, and a specific those pages carry is grounded for the next hop.
     // A failed read keeps the previous corpus rather than falling back to an
     // empty one, which would mark every specific in the plan as invented.
-    corpus = await groundingCorpus(opts.investigationId, newsroomId).catch(() => corpus);
+    corpus = await groundingCorpus(opts.investigationId, newsroomId, place).catch(() => corpus);
     const openFrontier = await readActiveFrontier();
+    /*
+      M3 of the audit: the marker is a statement about the file AT THE MOMENT
+      it was written, and a capture read since then can make it false. A stored
+      frontier label is text the next query is built from, and a label wearing
+      the marker -- quoted with the paper's own town around it -- is a phrase no
+      provider can match, so a hop whose label has been corroborated would
+      search for something that cannot exist.
+
+      Swept here, once per hop, where the fresh corpus and the open items are
+      both in hand. Only the items the new captures ground are rewritten; the
+      rest keep their marker, because for them the statement still stands.
+    */
+    for (const f of openFrontier) {
+      if (!f.label.includes(UNGROUNDED_MARKER) && !(f.next_steps ?? "").includes(UNGROUNDED_MARKER))
+        continue;
+      const label = unmarkGroundedSpecifics(f.label, corpus);
+      const nextSteps = unmarkGroundedSpecifics(f.next_steps ?? "", corpus);
+      if (label === f.label && nextSteps === (f.next_steps ?? "")) continue;
+      f.label = label;
+      f.next_steps = nextSteps;
+      /*
+        Best-effort: `frontier_items` carries a unique index on the deduped
+        label, so an unmarked label that another item already holds cannot be
+        written back. The hop still sees the unmarked text in memory, which is
+        what the queries are built from; the row keeps its marker until the
+        duplicate is resolved.
+      */
+      await sql`
+        update frontier_items set label = ${label}, next_steps = ${nextSteps}
+        where id = ${f.id} and newsroom_id = ${newsroomId}
+      `.catch(() => undefined);
+    }
     const terms = openFrontier.map((f) => f.label);
     const graph = await retrievePack(opts.userId, opts.investigationId, terms);
     const preferenceContext = opts.preferences ? describeResearchWindow(opts.preferences).slice(0, 2_000) : "";
@@ -2932,7 +3009,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         continue;
       }
       let added = 0;
-      for (const q of (f.next_steps || "")
+      // M3: a stored query is text a provider is asked to match, so the
+      // marker a reader needs must not be in it. See `stripUngroundedMarker`.
+      for (const q of (stripUngroundedMarker(f.next_steps || ""))
         .split("|")
         .map((s) => s.trim())
         .filter(Boolean)) {
@@ -2957,7 +3036,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
       if (f.kind === "url") continue;
       const triedStrats = parseJsonArray(f.strategies_tried);
-      for (const s of remainingStrategies(f.kind, f.label, triedStrats, scope)) {
+      // M3: the label is stored text and may still wear the marker; a strategy
+      // query built from it would ask a provider for a phrase that cannot exist.
+      for (const s of remainingStrategies(f.kind, stripUngroundedMarker(f.label), triedStrats, scope)) {
         if (planned.length + fill.length >= SEARCHES_PER_HOP) break;
         const q = s.query;
         if (

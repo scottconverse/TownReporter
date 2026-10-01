@@ -205,6 +205,20 @@ const ABBREVIATION_TAIL =
     "The vote was at 7 p.m. and the room emptied."  -- lowercase continues it
 */
 
+/**
+ * Words that can only sit INSIDE a noun phrase, never start a sentence.
+ *
+ * The test they answer, after "U.S." and a single capitalised word: is that
+ * word part of a name the abbreviation introduced ("U.S. Department of
+ * Agriculture") or the subject of a new sentence ("He moved to the U.S.
+ * Colorado officials said nothing.")? A function word after it settles the
+ * question -- nothing opens a sentence with "of" -- and an ordinary word after
+ * it is a subject. See `continuesAbbreviation`.
+ */
+const PHRASE_CONTINUATION = new Set([
+  "of", "in", "for", "and", "to", "on", "at", "by", "with", "from", "de", "del", "van", "von",
+]);
+
 /** Weekday and month names: "9 a.m. Monday" is one sentence, not two. */
 const WEEKDAY_MONTH = new Set([
   "monday",
@@ -352,9 +366,28 @@ function continuesAbbreviation(previous: string, part: string): boolean {
   // starts a new sentence after it. A lowercase word never does.
   if (/[ap]\.m\.$/i.test(tail)) return !capitalised || WEEKDAY_MONTH.has(lower);
 
-  // A country abbreviation continues into a proper name ("U.S. Department of
-  // Agriculture") and ends only before a word that opens a sentence.
-  if (/u\.s(?:\.a)?\.$/i.test(tail)) return !(capitalised && SENTENCE_OPENERS.has(lower));
+  /*
+    A country abbreviation continues into a proper name ("U.S. Department of
+    Agriculture") and ends only before a word that opens a sentence.
+
+    L6 of the batch-7 pre-merge audit: "U.S." also continues into a single
+    capitalised word that is NOT part of the name, so
+    `He moved to the U.S. Colorado officials said nothing.` came back as one
+    sentence and an absence rewrite replaced both clauses as a unit. What the
+    continuation actually needs is a noun phrase that keeps going: either the
+    capitalised run is longer than one word ("U.S. Supreme Court"), or the word
+    after it is a function word that can only sit inside a phrase -- "U.S.
+    Department of Agriculture" has "of" there. "Colorado officials" is neither,
+    so it starts a sentence.
+  */
+  if (/u\.s(?:\.a)?\.$/i.test(tail)) {
+    if (!capitalised) return true;
+    if (SENTENCE_OPENERS.has(lower)) return false;
+    const after = part.trimStart().match(/[\p{L}'’.]+/gu) ?? [];
+    if (after.length >= 2 && /^[A-Z]/.test(after[1]!)) return true;
+    return PHRASE_CONTINUATION.has((after[1] ?? "").replace(/[.'’]/g, "").toLowerCase());
+  }
+
 
   const initial = /\b([A-Z])\.$/.exec(tail);
   if (initial) {
