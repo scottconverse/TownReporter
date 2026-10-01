@@ -307,8 +307,10 @@ it(
   path's test above uses, so the two paths are now compared on the ROW rather
   than on the words that wrote it.
 
-  One source always reads fine: a run in which every source failed throws before
-  the commit, and the touches would never be written at all.
+  One source always reads fine here, so that a run which reaches `commitResults`
+  is the thing under test. (Before B8F2 that was also the only way the touches
+  could be written at all -- a run in which EVERY source failed threw out of the
+  pass before the commit, losing them. That ending has its own test below.)
 */
 
 /** Newsroom 2, so this block owns its whole watch list. `watchSlice` is every
@@ -325,35 +327,46 @@ type Fixture = {
   /** The refusal the stubbed fetch throws, or undefined for a clean read. */
   bad?: number;
   retryAfterMs?: number | null;
+  /** A transport-level failure with no HTTP answer at all -- the network
+   *  dropped, the host never replied. Its own field because "the site refused
+   *  us" and "we never reached the site" are different rows. */
+  networkError?: string;
   /** How long the stubbed fetch takes, so a counted progress step can be
    *  observed while the pass is still running. */
   delayMs?: number;
 };
 
-async function seedScheduledNewsroom(): Promise<void> {
+async function seedScheduledNewsroom(newsroomId = SCHEDULED_NEWSROOM): Promise<void> {
   const sql = await db.getSql();
   await sql.query(
     `insert into paper_settings
       (newsroom_id,name,city,state,timezone,onboarded,youtube_channels,meeting_keywords,seed_sources)
      values ($1,'Scheduled Fixture','Springfield','IL','America/Chicago',true,'[]'::jsonb,'[]'::jsonb,'[]'::jsonb)
      on conflict (newsroom_id) do nothing`,
-    [SCHEDULED_NEWSROOM],
+    [newsroomId],
   );
 }
 
 /** The newsroom's whole watch list, replaced. `healthy` is always present --
  *  see the note above -- and is appended first so the fixtures' order is the
- *  caller's. */
-async function seedWatch(fixtures: Fixture[]): Promise<Map<string, number>> {
+ *  caller's. `null` for it is the all-failed case: a newsroom with nothing on
+ *  watch that reads, which is the only shape that reaches the failure exit. */
+async function seedWatch(
+  fixtures: Fixture[],
+  newsroomId = SCHEDULED_NEWSROOM,
+  healthyUrl: string | null = HEALTHY_URL,
+): Promise<Map<string, number>> {
   const sql = await db.getSql();
-  const urls = [HEALTHY_URL, ...fixtures.map((f) => f.url)];
+  const urls = healthyUrl
+    ? [healthyUrl, ...fixtures.map((f) => f.url)]
+    : fixtures.map((f) => f.url);
   /* The newsroom is this block's alone, so anything not in the current watch
      list goes. It is a DELETE and not a truncate for the rows the caller wants
      to KEEP: several tests run the pass twice over the same rows, and a fresh
      id each time would make "the same row gained a streak" untestable. The
      upsert therefore leaves the row's history exactly where it was. */
   await sql.query("delete from sources where newsroom_id=$1 and url <> all($2::text[])", [
-    SCHEDULED_NEWSROOM,
+    newsroomId,
     urls,
   ]);
   const ids = new Map<string, number>();
@@ -363,7 +376,7 @@ async function seedWatch(fixtures: Fixture[]): Promise<Map<string, number>> {
        values($1,$2,$3,$4,'official','A','accepted')
        on conflict (user_id,newsroom_id,url) do update set status = 'accepted'
        returning id`,
-      [`source-streak-${process.pid}`, SCHEDULED_NEWSROOM, url, `Fixture ${index}`],
+      [`source-streak-${process.pid}`, newsroomId, url, `Fixture ${index}`],
     );
     ids.set(url, row!.id);
   }
@@ -381,6 +394,7 @@ async function scheduledRun(fixtures: Fixture[], scheduled = true): Promise<Map<
     ingestUrl: async (url: string) => {
       const fixture = fixtures.find((f) => f.url === url);
       if (fixture?.delayMs) await new Promise((r) => setTimeout(r, fixture.delayMs));
+      if (fixture?.networkError) throw new Error(fixture.networkError);
       if (fixture?.bad)
         throw new IngestFetchError(fixture.bad, fixture.retryAfterMs ?? null);
       return {
@@ -673,6 +687,112 @@ it(
         `Tried ${BLOCKED_TRIES_PER_HOST_PER_DAY} times today — will try again tomorrow`,
       );
     }
+  },
+);
+
+/*
+  ── A SCHEDULED SCAN WHERE EVERY SOURCE FAILED (B8F2) ────────────────────────
+
+  The all-failed exit is the one scheduled ending that does NOT go through
+  `commitResults`, and `commitResults` was the only consumer of the queued
+  `pendingSourceTouches`. So a newsroom whose whole watch list failed on an
+  unattended pass -- an outage, a dropped line, the one host that answers 429 --
+  had the failed RUN recorded and nothing else on the source rows: no streak, no
+  stored `retry_after`, no reason. The desk went on knocking at full speed and
+  "Keeps failing" never arrived, on the lane nobody is watching.
+
+  Both kinds of answer are here on purpose: a 429 with the site's own
+  `Retry-After` ("come back later", which is an ATTEMPT and not a read) and a
+  transport failure with no HTTP answer at all ("we never reached the site").
+  The run is still a failed run -- that part already worked -- and the test
+  asserts it, because a fix that wrote the source rows by quietly turning the
+  pass into a success would be worse than the defect.
+*/
+
+/** A newsroom of its own: `watchSlice` is every accepted source in the
+ *  newsroom, so the all-failed case needs a newsroom in which nothing else is
+ *  on watch. */
+const FAILING_NEWSROOM = 3;
+const ALL_FAILED_429_URL = "https://example.test/all-failed-429";
+const ALL_FAILED_NET_URL = "https://example.test/all-failed-network";
+
+it(
+  "a scheduled scan in which every source fails still writes what each source answered",
+  { skip, timeout: 120000 },
+  async () => {
+    assert.equal(db.getDbSource(), "neon", "fixture must use the real pg adapter, not PGLite");
+    await seedScheduledNewsroom(FAILING_NEWSROOM);
+    /* No healthy source: this is the shape that reaches the failure exit. */
+    const fixtures: Fixture[] = [
+      { url: ALL_FAILED_429_URL, bad: 429, retryAfterMs: 600_000 },
+      { url: ALL_FAILED_NET_URL, networkError: "connect ECONNRESET" },
+    ];
+    const ids = await seedWatch(fixtures, FAILING_NEWSROOM, null);
+    const sql = await db.getSql();
+    const job = await seedScanJob(FAILING_NEWSROOM);
+
+    const run = scan(job, {
+      ingestUrl: async (url: string) => {
+        const fixture = fixtures.find((f) => f.url === url);
+        if (fixture?.networkError) throw new Error(fixture.networkError);
+        if (fixture?.bad) throw new IngestFetchError(fixture.bad, fixture.retryAfterMs ?? null);
+        return { text: "Unreachable fixture.", titleHint: "Fixture", extras: [] };
+      },
+      grokChat: async () => ({
+        ok: true as const,
+        text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: "Fixture." }),
+      }),
+      setJobModelChoice: async () => {},
+      scheduledCommit: (write) => write(sql),
+    });
+
+    /* Every source failed, so there is nothing to write about -- the pass
+       refuses to run a writing call, which is the correct ending and not what
+       this test is about. What it must not do is throw its way out of the
+       source writes. */
+    await assert.rejects(run, /no source text|writing pass/);
+
+    const [runRow] = await sql.query<{
+      finished_at: string | null;
+      error: string | null;
+      sources_selected: number;
+      sources_failed: number;
+    }>(
+      `select finished_at::text, error, sources_selected, sources_failed
+       from scan_runs where id=$1`,
+      [job.subject_id],
+    );
+    assert.ok(runRow!.finished_at, "the run is still recorded as FINISHED");
+    assert.ok(runRow!.error, "and as failed, with a reason on the row");
+    assert.equal(runRow!.sources_selected, 2, "both sources were in scope");
+    assert.equal(runRow!.sources_failed, 2, "and both are named as failed");
+
+    /* The 429: the site asked us to wait, so the wait and its sentence are on
+       the row and the next pass is left alone until then. */
+    const waited = await healthOf(ids.get(ALL_FAILED_429_URL)!);
+    assert.equal(
+      waited.consecutive_failures,
+      1,
+      "an unattended run in which EVERY source failed still counts the attempt",
+    );
+    assert.ok(waited.failure_streak_started_at, "and the streak records when it began");
+    assert.equal(waited.last_ok_at, null, "a wait is not a read");
+    assert.ok(waited.last_fetched_at, "the desk did knock on the door");
+    assert.equal(waited.last_error, null, "a site that asked us to wait has not failed us");
+    assert.ok(waited.retry_after, "the wait the site asked for is stored");
+    assert.match(waited.retry_after_note ?? "", /^Asked us to come back at /);
+    assert.ok(
+      skipThisPass({ retryAfter: waited.retry_after, nowMs: Date.now() }),
+      "so the next pass leaves it alone instead of knocking at full speed",
+    );
+
+    /* The dropped connection: an attempt that failed with a reason, and no wait
+       to honour -- nobody asked us to come back. */
+    const dropped = await healthOf(ids.get(ALL_FAILED_NET_URL)!);
+    assert.equal(dropped.consecutive_failures, 1, "a source we never reached was still attempted");
+    assert.match(dropped.last_error ?? "", /ECONNRESET/, "with its own reason on the row");
+    assert.equal(dropped.retry_after, null, "nobody asked us to wait");
+    assert.equal(dropped.last_ok_at, null);
   },
 );
 

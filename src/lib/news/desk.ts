@@ -1822,6 +1822,47 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   */
   const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
+  /*
+    THE ONE CONSUMER OF THE QUEUED SOURCE WRITES (B8F2).
+
+    On the scheduled lane the fetch loop writes nothing to a source row as it
+    goes: it queues the touch and the run commits it inside the run's
+    transaction. That makes this loop the ONLY thing that ever puts an
+    unattended scan's answers on the source rows, which means EVERY ending of
+    the pass has to reach it.
+
+    It used to live inside `commitResults` alone, and `commitResults` is not
+    the ending a scan takes when EVERY source failed -- that ending writes the
+    failed run row and throws. So a newsroom whose whole watch list failed on
+    an unattended pass recorded the failed run and nothing else: no streak, no
+    stored `retry_after`, no reason. The desk went on knocking at full speed
+    and "Keeps failing" never arrived, on the lane nobody is watching. The
+    editor-started lane never had this shape because it writes during the
+    loop.
+
+    `writeSourceTouch` and nothing else: a source row must not depend on which
+    path touched it (HIGH-1, A-B8). One rule, three write sites.
+  */
+  const writeQueuedSourceWrites = async (writeSql: Sql) => {
+    for (const queued of pendingSourceTouches) {
+      await writeSourceTouch(writeSql, {
+        id: queued.id,
+        newsroomId: owned(context),
+        touch: queued.touch,
+      });
+    }
+    /*
+      A source that HAD a hash and then answered 404 is worth an anomaly, and on
+      this lane it is queued beside its touch. Consuming the two in one place is
+      what stops a later early exit from leaving one of them behind.
+    */
+    for (const gone of pendingDisappeared) {
+      await writeSql`
+        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+        values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
+      `;
+    }
+  };
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
@@ -2353,9 +2394,32 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
       The scheduled path commits through the caller-supplied transaction so the
       write lands in the same unit of work as the rest of a scheduled run.
+
+      B8F2: the QUEUED SOURCE WRITES go in that same transaction, beside the
+      failed run. This ending never reaches `commitResults` -- it writes the run
+      row and throws -- so without this the whole unattended pass left every
+      source row untouched: a newsroom whose sources ALL failed during an
+      outage got no failure streak, no stored `retry_after`, no `blocked_*`,
+      and the desk kept knocking at full speed on the one lane no editor is
+      watching. The inline lane was never affected; it writes during the loop.
+
+      One transaction and not a second one, deliberately: the run row and the
+      rows it is a receipt FOR must not be able to disagree about whether the
+      pass settled. If the touch write fails, the whole unit rolls back and the
+      caller's own `finalizeDailyScanFailure` records the failed run -- which is
+      the way round that loses nothing an editor can see, and never the other
+      way (a source row written for a run that was never settled).
+
+      The fence is the one this lane already has: `deps.scheduledCommit` is the
+      scheduler's own transaction, which refuses a job whose claim token is no
+      longer the running one -- so a worker that lost this run to a newer one
+      writes neither the run row nor the sources.
     */
     if (deps.scheduledCommit) {
-      await deps.scheduledCommit((writeSql) => recordFailedRun(writeSql, error));
+      await deps.scheduledCommit(async (writeSql) => {
+        await recordFailedRun(writeSql, error);
+        await writeQueuedSourceWrites(writeSql);
+      });
     } else {
       await recordManualFailure(error);
     }
@@ -2519,20 +2583,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
       Now both paths call `writeSourceTouch`, which branches on the outcome the
       touch carries. One rule, three write sites, and nothing left to drift.
+
+      B8F2: the consumption itself is `writeQueuedSourceWrites` now, because
+      this is no longer the only ending that has to run it -- the all-failed
+      ending below does too, and it never gets here.
     */
-    for (const queued of pendingSourceTouches) {
-      await writeSourceTouch(writeSql, {
-        id: queued.id,
-        newsroomId: owned(context),
-        touch: queued.touch,
-      });
-    }
-    for (const gone of pendingDisappeared) {
-      await writeSql`
-        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
-        values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
-      `;
-    }
+    await writeQueuedSourceWrites(writeSql);
     for (const p of pendingHashes) {
       await writeSql`
         update sources
