@@ -55,7 +55,9 @@ import {
   runDueMonitors,
 } from "./investigate.ts";
 import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
+import { dedupeFactLines } from "./dark-fact-lines.ts";
 import {
+  markAlreadyOnFile,
   markUngroundedSpecifics,
   placeCorpus,
   prepareCorpus,
@@ -3806,9 +3808,18 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
   return briefPack({
     title: inv[0].title,
     verification,
-    facts: claims
-      .filter((c) => /FACT|OBSERVATION/i.test(c.kind))
-      .map((c) => ({ body: c.body, evidence: c.evidence ?? "" })),
+    /*
+      FB7, item 5 (A2c X3). Deduped BEFORE the model sees it, not only before
+      the editor does. Five identical WHAT WE KNOW lines in the pack are part
+      of why the brief kept re-asking for a record the file already held: the
+      model was shown the same sentence five times and read it as five
+      confirmations of something half-established. One line, once.
+    */
+    facts: dedupeFactLines(
+      claims
+        .filter((c) => /FACT|OBSERVATION/i.test(c.kind))
+        .map((c) => ({ body: c.body, evidence: c.evidence ?? "" })),
+    ),
     hypotheses: hyps.map((h) => h.body),
     questions: front.map((f) => `${f.label}${f.why ? ` — ${f.why}` : ""}`),
     findings: anoms.map((a) => `${a.kind}: ${a.summary}`),
@@ -3851,7 +3862,14 @@ export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus):
     supports: list(brief.supports),
     benign: text(brief.benign),
     kills_it: text(brief.kills_it),
-    next: text(brief.next),
+    /*
+      FB7, item 5 (A2c X3): "its DO THIS NEXT asks for the licensing record the
+      round had already captured". The grounding pass above marks what the file
+      does NOT carry; this marks the opposite case, where every record the step
+      names is already among the captures. Same convention -- marked in place,
+      so the editor reads the ask and its answer together.
+    */
+    next: markAlreadyOnFile(text(brief.next), prepared),
     connections: list(brief.connections),
     sections: {
       record: text(brief.sections.record),

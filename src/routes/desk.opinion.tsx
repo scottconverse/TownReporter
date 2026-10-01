@@ -720,7 +720,21 @@ function OpinionPage() {
                     <p className="astra-span text-rust">{stalledRunCopy("editorial")}</p>
                   ) : !r.finished_at ? (
                     <div className="astra-span">
-                      {r.job ? <DeskJobCard job={r.job} compact /> : <Busy label={r.stage || "Working…"} />}
+                      {/*
+                        FB7, item 4 (the U30 note). NOT `compact`.
+
+                        The compact card drops the stage chip row
+                        (JobCard.tsx: `!compact && job.stages`), which is the
+                        whole of what the report found on this row: the chips
+                        name the steps the editorial is working through, and
+                        that is the only place on this screen they are drawn.
+                        Drafts made the same swap (desk.drafts.tsx, FB6 item 6)
+                        for the same reason -- a row that is one per request,
+                        full width, has the room the compact card exists to
+                        save. The editor gets the chips, the percent, the bar,
+                        the step in words, and Cancel.
+                      */}
+                      {r.job ? <DeskJobCard job={r.job} /> : <Busy label={r.stage || "Working…"} />}
                     </div>
                   ) : null}
                   {r.error ? (

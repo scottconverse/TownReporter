@@ -41,6 +41,25 @@ export type JobProgressView = {
   /** The card's bold line: what this job is doing, in the editor's words. */
   title: string;
   /**
+   * The row's `subject_id`, uninterpreted -- what this job is ABOUT.
+   *
+   * FB7, item 2. What the subject MEANS depends on the kind: for a draft or a
+   * reconcile it is a lead, for a `dark` or a `brief` it is an investigation,
+   * and for an `artifact-ocr` it is the artifact whose pages are being read.
+   * `leadId` above is the story-card view of the same column and is 0 for
+   * every kind that is not a story -- which is exactly why a screen cannot use
+   * it to ask "is this job about the file I am looking at?". The Dark Desk
+   * needs that question answered to place the dig round's, the brief's and the
+   * PDF read's cards beside their own controls, and a card drawn for the wrong
+   * file is the plausible-looking wrong answer this module exists to avoid.
+   *
+   * Deliberately not named `leadId` for the other kinds: a scan's subject is a
+   * `scan_runs` id and an editorial's is an `editorial_requests` id, and
+   * printing whichever lead happened to share the number is the defect the
+   * note on `headline` already describes.
+   */
+  subjectId: number;
+  /**
    * The story's headline, for the two kinds whose subject IS a lead.
    *
    * Null for every other kind, deliberately: a scan's subject is a `scan_runs`
@@ -188,6 +207,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
   return {
     id: row.id,
     kind: row.kind,
+    subjectId: row.subject_id,
     status: row.status,
     model,
     stages: jobStages(row),

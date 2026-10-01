@@ -14,6 +14,7 @@ import {
 import { InkButton } from "@/components/desk-chrome";
 import { EvidenceCheckList } from "@/components/evidence-check-list";
 import { TAKEDOWN_REASON_MAX, takeDownEvidenceCapture } from "@/lib/news/evidence-takedown";
+import { takedownDoneNotice, takedownFailedNotice } from "@/lib/news/takedown-notice";
 import {
   blankTakeDownForm,
   takeDownConfirmText,
@@ -760,22 +761,25 @@ export function FindingEvidenceReviewPanel({
         return;
       }
       setOpenedCapture(null);
-      setTakeDownFeedback({
-        kind: "ok",
-        text:
-          "Excerpt taken down. The stored text and any original file for this capture are " +
-          "emptied, the audit trail records why, and the public page now says the publisher " +
-          "asked. There is no restore.",
-      });
+      /*
+        FB7, item 5 (A2c X1). The sentence used to be the same whatever the
+        editor had ticked, so the one fact a takedown turns on -- whether the
+        public notice still carries the link to the original -- was the one
+        thing it did not say. A2c measured it: the link WAS kept, and the
+        notice never said so, leaving the editor to go and look.
+
+        The server already answers it (`TakeDownCaptureResult.linkKept`,
+        evidence-takedown.ts) and the checkbox that decides it is on this form
+        ("Remove the link to the original too. Left unticked, the public notice
+        keeps the link."). Both arms are stated in the same place, in the same
+        words the checkbox uses, so the answer and the question match.
+      */
+      setTakeDownFeedback({ kind: "ok", text: takedownDoneNotice(result.linkKept) });
       captureRead.reset();
       await reviewQuery.refetch();
       await qc.invalidateQueries({ queryKey: ["finding-evidence-review", leadId] });
     },
-    onError: () =>
-      setTakeDownFeedback({
-        kind: "err",
-        text: "The takedown could not be completed. Nothing was removed.",
-      }),
+    onError: () => setTakeDownFeedback({ kind: "err", text: takedownFailedNotice() }),
   });
 
   const save = useMutation({
