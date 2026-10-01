@@ -155,6 +155,15 @@ describe("the filed row carries the record to the desk", () => {
           "utf8",
         ),
       );
+      /*
+        Migration 0113 (U28): the same story as 0094 above. `fileScanLeads`
+        now writes the duplicate check's eight verdict columns on every row it
+        files -- asked or not -- so a table without them fails the insert with
+        `column "dup_ai_same" of relation "leads" does not exist`.
+      */
+      await db.exec(
+        await readFile(new URL("../../../migrations/0113_lead_dup_ai_check.sql", import.meta.url), "utf8"),
+      );
       const sql: SqlTag = async <T>(parts: TemplateStringsArray, ...values: unknown[]) => {
         const query = parts.reduce((out, part, i) => out + (i ? `$${i}` : "") + part, "");
         return (await db.query<T>(query, values)).rows;

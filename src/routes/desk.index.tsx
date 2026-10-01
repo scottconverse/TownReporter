@@ -73,9 +73,9 @@ import {
   editorStatus,
   flakyFailureCopy,
   followUpsRailCopy,
-  nearDuplicate,
   openLeads,
   parseFailedSources,
+  printedDupChip,
   pileForStatus,
   scanCountsLine,
   scanZeroWhy,
@@ -1832,7 +1832,10 @@ function DeskHome() {
                       </p>
                     ) : null}
                     {newLeads.map((l, index) => {
-                      const dup = nearDuplicate(l, printed, paperPlace);
+                      // U28: the chip and the server's "≈ Printed" tab are the
+                      // same call (printedDupChip), so a pair the desk's
+                      // duplicate check cleared is gone from both.
+                      const dup = printedDupChip(l, printed, paperPlace);
                       const held = l.status === "held";
                       const done = held || l.status === "killed";
                       /*

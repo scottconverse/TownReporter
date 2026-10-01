@@ -6,6 +6,7 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   cameBackLabel,
   DEVELOPING_LABEL,
+  dupAiReason,
   killedAsDuplicateNote,
   killRecordLine,
   printedDuplicateLine,
@@ -561,7 +562,7 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           className="chip dup"
           title={`Covers ground published ${formatShortDate(dup.publishedAt)}. Open the piece, or kill this lead as a duplicate.`}
         >
-          {printedDuplicateLine(dup.headline)}
+          {printedDuplicateLine(dup.headline, dup.aiWhy)}
         </Link>
       ) : null}
       {lead.resurfaced_count && lead.resurfaced_count > 0 ? (
@@ -580,6 +581,13 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           pair are loaded and the Compare view renders -- the old chip opened
           the other lead, whose page knew nothing about the pair and said so
           by saying nothing at all.
+
+          U28: the link only exists at all when the desk's own duplicate check
+          either was not asked or agreed -- a "no" clears `possible_duplicate_of`
+          before the row is written (lead-filing.ts), so there is no chip to
+          gate here. What this does carry is the model's sentence, which is the
+          difference between "the desk thinks these might be the same" and
+          "the desk asked, and here is why".
         */
         <Link
           to="/desk/story/$leadId"
@@ -588,7 +596,11 @@ export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | nul
           title={
             lead.dup_kind === "developing"
               ? `This story came back with facts the killed lead "${lead.possible_duplicate.headline}" did not have. Open it to compare.`
-              : `Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.`
+              : `Possible duplicate of ${lead.possible_duplicate.headline} (${lead.possible_duplicate.status}). Open it to compare.${
+                  lead.dup_ai_same === true && dupAiReason(lead.dup_ai_why)
+                    ? ` AI: ${dupAiReason(lead.dup_ai_why)}`
+                    : ""
+                }`
           }
         >
           {lead.dup_kind === "developing" ? "New facts · compare" : "Possible duplicate · compare"}

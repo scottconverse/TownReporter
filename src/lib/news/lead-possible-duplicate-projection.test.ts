@@ -107,6 +107,31 @@ describe("possible-duplicate linkage survives the desk server boundary", () => {
     }
   });
 
+  it("projects the duplicate check's verdict, so the chip can carry its reason and be cleared", () => {
+    /*
+      U28. Both halves of the chip are decided off these columns and neither can
+      work without all of them: `printedDupChip` (desk-copy.ts) needs
+      `dup_ai_printed_same` AND `dup_ai_printed_slug` (a verdict about a
+      different article must not gate this chip), and the "Possible duplicate ·
+      compare" tooltip needs `dup_ai_why` beside `dup_ai_same`. Dropping any one
+      of them in the SELECT leaves the row chipped with no reason and no way to
+      tell "not the same story" from "never asked", which is the failure this
+      file exists to catch. They are pinned at the shared reader and at the
+      workbench, exactly as `possible_duplicate_of` is above.
+    */
+    for (const [name, next] of [
+      ["listLeads", "async function insertLeadWithDraft"],
+      ["getLead", "export const deleteLead"],
+    ] as const) {
+      const block = handlerBlock(name, next);
+      assert.match(
+        block,
+        /l\.dup_ai_same, l\.dup_ai_why, l\.dup_ai_target,[\s\S]*?l\.dup_ai_printed_same, l\.dup_ai_printed_why, l\.dup_ai_printed_slug,/,
+        `${name} must return the duplicate check's verdict with the row it is about`,
+      );
+    }
+  });
+
   it("shows available prior context in the main row and keeps the narrow badge bounded", () => {
     assert.match(leadView, /lead\.possible_duplicate_of \? \([\s\S]*?lead\.status === "held"/i);
     assert.match(leadView, /possible duplicate of[\s\S]*?lead\.possible_duplicate\.headline[\s\S]*?lead\.possible_duplicate\.status/i);

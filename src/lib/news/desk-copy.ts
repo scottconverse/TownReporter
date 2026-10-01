@@ -1506,7 +1506,48 @@ export function inviteMessage(input: {
   );
 }
 
-export type PrintedDup = { slug: string; publishedAt: string; note: string; headline: string };
+export type PrintedDup = {
+  slug: string;
+  publishedAt: string;
+  note: string;
+  headline: string;
+  /**
+   * U28 (2026-09-30): the duplicate check's own sentence for this pair, when
+   * the desk asked its model and the model said these two ARE the same story.
+   * Null for every chip the word rule earned on its own -- including every row
+   * filed before migration 0113 -- and the chip then reads exactly as it did
+   * before this unit. See `printedDupChip`.
+   */
+  aiWhy?: string | null;
+};
+
+/**
+ * What a lead's row says about the duplicate check, as the columns carry it
+ * (migration 0113; written by `fileScanLeads` from `runDupCheck`'s verdicts).
+ *
+ * Every field is nullable and null means "the desk did not ask", which is NOT
+ * the same as false: a scan whose check failed, timed out or ran past its pair
+ * budget stores nulls, and a null must leave the word rule exactly as it was.
+ * That is why `printedDupChip` below tests `=== false` rather than falsiness.
+ */
+export type DupAiVerdictFields = {
+  /** The verdict on the link to another lead (`possible_duplicate_of`). */
+  dup_ai_same?: boolean | null;
+  dup_ai_why?: string | null;
+  /** The headline that link's verdict was about; kept when the link is cleared. */
+  dup_ai_target?: string | null;
+  /** The verdict on the "looks already printed" chip. */
+  dup_ai_printed_same?: boolean | null;
+  dup_ai_printed_why?: string | null;
+  /** The published story that verdict was about; null for every other row. */
+  dup_ai_printed_slug?: string | null;
+};
+
+/** The one-line AI reason off a row, ready to show, or null. */
+export function dupAiReason(value: string | null | undefined): string | null {
+  const line = String(value ?? "").trim();
+  return line || null;
+}
 
 /**
  * "≈ PRINTED" false positives (real case, 2026-09-02): properNounOverlap
@@ -1550,7 +1591,14 @@ export type PrintedDup = { slug: string; publishedAt: string; note: string; head
  */
 export function nearDuplicate(
   lead: { headline: string; topic?: string },
-  published: readonly { slug: string; headline: string; topic?: string; published_at: string }[],
+  /**
+   * U28: `topic` is `string | null` rather than optional-string because the
+   * column it comes from is nullable -- the scan's duplicate check reads the
+   * published list with a narrow SELECT (desk.ts's `queryDupCheckPrinted`) and
+   * hands what Postgres returns straight through. Widening, not loosening:
+   * every comparison below already tests `!= null`.
+   */
+  published: readonly { slug: string; headline: string; topic?: string | null; published_at: string }[],
   place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
@@ -1568,6 +1616,48 @@ export function nearDuplicate(
   return null;
 }
 
+/**
+ * U28 (2026-09-30): the "Looks already printed" chip, with the desk's
+ * duplicate check applied -- the one way to ask "does this lead have a chip,
+ * and does the desk have anything more to say about it".
+ *
+ * The word rule still decides WHETHER a pair is borderline; the check only
+ * decides what the desk does about one. Three outcomes, and the third is the
+ * one that matters most:
+ *
+ *   - the model was not asked about this pair (no verdict stored, or a verdict
+ *     about a DIFFERENT published story): the chip is exactly what
+ *     `nearDuplicate` returned, with no reason line. This is every row filed
+ *     before 0113 and every scan whose check failed -- the word rule, unchanged.
+ *   - the model said no: NO chip. The pair was borderline enough to ask about
+ *     and the answer was that they are not the same story, so the desk stops
+ *     claiming they are.
+ *   - the model said yes: the chip stays, carrying the model's sentence, so an
+ *     editor reads "Looks already printed: <headline> — AI: same council vote,
+ *     same date." and can judge it without opening anything.
+ *
+ * The slug test is not belt-and-braces. `published` is re-read on every Queue
+ * load and the list changes; `nearDuplicate` returns the first match in that
+ * list, so a verdict recorded against one article must never gate a chip about
+ * another. A mismatch is "not asked", which is the safe direction.
+ *
+ * One function, so the Queue's row, its "≈ Printed" tab (`queuePrintedMatches`)
+ * and the Today screen cannot disagree about which leads are chipped.
+ */
+export function printedDupChip(
+  lead: { headline: string; topic?: string | null } & DupAiVerdictFields,
+  published: readonly { slug: string; headline: string; topic?: string | null; published_at: string }[],
+  place?: NewsroomPlace | null,
+): PrintedDup | null {
+  const dup = nearDuplicate({ headline: lead.headline, topic: lead.topic ?? undefined }, published, place);
+  if (!dup) return null;
+  if (lead.dup_ai_printed_slug !== dup.slug) return dup;
+  if (lead.dup_ai_printed_same === false) return null;
+  if (lead.dup_ai_printed_same !== true) return dup;
+  const aiWhy = dupAiReason(lead.dup_ai_printed_why);
+  return aiWhy ? { ...dup, aiWhy } : dup;
+}
+
 /*
  * Unit AK items 2, 4, 6 and 7 (2026-09-26): the words the desk uses about a
  * lead that may already be printed, and about a lead that was killed.
@@ -1579,11 +1669,20 @@ export function nearDuplicate(
  * dead end with a sentence that names the story and offers the next press.
  */
 
-/** Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
+/**
+ * Unit AK item 4: what the row says instead of "≈ PRINTED". It names the
  * headline it thinks the lead matches, so an editor can judge it without
- * opening anything. */
-export function printedDuplicateLine(headline: string): string {
-  return `Looks already printed: ${headline.trim()}`;
+ * opening anything.
+ *
+ * U28: when the desk's duplicate check agreed the two are the same story, the
+ * model's own sentence rides along ("... — AI: same council vote, same date."),
+ * which is the difference between a chip an editor has to verify and one they
+ * can act on. Omitted (the word rule's own chip), the line is unchanged.
+ */
+export function printedDuplicateLine(headline: string, aiWhy?: string | null): string {
+  const line = `Looks already printed: ${headline.trim()}`;
+  const why = dupAiReason(aiWhy);
+  return why ? `${line} — AI: ${why}` : line;
 }
 
 /** Unit AK item 4: the reason recorded when an editor kills a lead as a

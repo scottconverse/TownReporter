@@ -157,6 +157,15 @@ import {
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
+import {
+  collectDupPairs,
+  runDupCheck,
+  DUP_CHECK_TIMEOUT_MS,
+  type DupCheckOutcome,
+  type DupCheckPrinted,
+} from "./dup-check.ts";
+import { readModelAssignments } from "./model-assignments-store.ts";
+import { resolveJobModel } from "./model-assignments.ts";
 import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
@@ -489,6 +498,14 @@ async function queryLeadRows(context: { newsroomId: number }) {
              order by d.updated_at desc,d.id desc limit 1)) as story_headline,
            l.resurfaced_count, l.last_resurfaced_at, l.last_resurfaced_scan_run_id,
            l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+           -- U28: the duplicate check's verdict, so the row's "Looks already
+           -- printed" chip can carry the model's own sentence and can be
+           -- suppressed when the desk asked and the answer was no. All six
+           -- travel together: a chip gated on one of them without the target
+           -- slug beside it could not tell "not the same story" from "never
+           -- asked" (see printedDupChip in ./desk-copy.ts).
+           l.dup_ai_same, l.dup_ai_why, l.dup_ai_target,
+           l.dup_ai_printed_same, l.dup_ai_printed_why, l.dup_ai_printed_slug,
            -- Unit AK item 5: the Compare view shows both leads side by side
            -- without a second round trip, so the prior lead's why, sources,
            -- dates and kill record travel with the row.
@@ -796,6 +813,10 @@ export const getLead = createServerFn({ method: "GET" })
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
              l.origin,
              l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
+             -- U28: the duplicate check's verdict, so the story page's chip
+             -- and its Compare view say the same thing the Queue row does.
+             l.dup_ai_same, l.dup_ai_why, l.dup_ai_target,
+             l.dup_ai_printed_same, l.dup_ai_printed_why, l.dup_ai_printed_slug,
              -- Unit AK item 5: the Compare view shows both leads side by side
              -- without a second round trip, so the prior lead's why, sources,
              -- dates and kill record travel with the row.
@@ -1282,6 +1303,53 @@ export type PerformScanWorkDeps = {
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
 };
+
+/**
+ * U28: the published stories a fresh lead can look like, in the shape the
+ * duplicate check reads (slug, headline, the dek the model is shown, topic,
+ * date).
+ *
+ * Deliberately NOT `queryPublishedRows`: that reader exists for screens and
+ * carries every article's body, its corrections and its meeting reviews, which
+ * is a great deal of text to move in order to ask about one headline. This is
+ * the narrow read, and it keeps that reader's order -- newest first -- because
+ * `nearDuplicate` returns the FIRST match in the list and the chip shown later
+ * must be the pair the desk asked about (see `printedDupChip`, which refuses a
+ * verdict recorded against a different slug).
+ */
+async function queryDupCheckPrinted(context: { newsroomId: number }): Promise<DupCheckPrinted[]> {
+  const sql = await getSql();
+  return sql<DupCheckPrinted>`
+    select slug, headline, dek, topic, published_at
+    from articles
+    where newsroom_id = ${owned(context)} and status = ${"published"}
+    order by published_at desc nulls last, id desc
+  `;
+}
+
+/**
+ * U28: the scan's audit line.
+ *
+ * The duplicate check's one consequence an editor could notice without asking
+ * for it is a "Possible duplicate · compare" LINK that is not there, on a pair
+ * the word rule had flagged. That is the right outcome when the desk's model
+ * read both and said they are not the same story, but "the desk decided
+ * something and said nothing" is the failure mode this repository keeps
+ * writing tests against, so the count goes in the run's own record and in the
+ * audit event. The clause is absent entirely when nothing was cleared, so the
+ * ordinary line reads exactly as it always has.
+ */
+function scanAuditDetail(
+  runId: number,
+  fetchedCount: number,
+  leadsCreated: number,
+  dupCheckCleared: number,
+): string {
+  const base = `run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`;
+  return dupCheckCleared > 0
+    ? `${base}, ${dupCheckCleared} possible-duplicate link(s) cleared by the duplicate check`
+    : base;
+}
 
 /*
   Wrapped in createServerOnlyFn for the same reason performDraftWork is (see
@@ -1914,6 +1982,125 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
 
+  /*
+    The leads this scan may match against.
+
+    `fileScanLeads` has always read this itself, inside the commit transaction.
+    U28 hoists it out for the same reason `getPaperPlace` above is read out
+    here: the duplicate check has to identify its borderline pairs BEFORE the
+    commit, and a model call inside `commitResults` would hold that transaction
+    open for as long as the model takes. On the dev desk's single PGlite
+    connection that is not a slow query, it is the whole desk.
+  */
+  const existingLeadsRaw = await sql<{
+    id: number;
+    status: string;
+    headline: string;
+    source_urls: string;
+    created_at: string;
+    why: string | null;
+    evidence: string | null;
+  }>`
+    select id, status, headline, source_urls, created_at, why, evidence
+    from leads
+    where newsroom_id = ${owned(context)}
+      and status <> 'published'
+      and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
+  `;
+  const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
+    id: l.id,
+    status: l.status,
+    headline: l.headline,
+    source_urls: parseLeadSourceUrls(l.source_urls),
+    created_at: l.created_at,
+    // Unit AK item 2: the killed lead's own words, so a strong match that
+    // brings new facts can be filed against it instead of discarded.
+    why: l.why,
+    evidence: l.evidence,
+  }));
+
+  /*
+    U28 (2026-09-30): the owner's "double check. worth it."
+
+    For the pairs the word rules can only rate BORDERLINE -- the matcher's
+    "possible" tier, and a "Looks already printed" chip candidate -- the desk
+    asks its own model one short question, once for the whole scan, batched:
+    are these the same news story? See ./dup-check.ts for what that decides
+    (a chip, and only a chip) and what it deliberately does not.
+
+    The model is the one this newsroom assigned to the `lead-score` job -- the
+    row the Models screen already draws as "Lead scoring & duplicates / Scores
+    leads, spots ≈ printed" -- resolved through the same order every other job
+    uses (`resolveJobModel`: an explicit pick, then the saved rows, then the
+    surface's default, which is Automatic and therefore the ladder's first rung,
+    DeepSeek v4.1 Flash). Nothing here hard-codes a provider, and the answer
+    records which model actually replied rather than which one was meant to.
+
+    The SCHEDULED scan is the one exception, and it is a transport fact rather
+    than a second policy: that lane is pinned to exactly one runtime
+    (`forcedChat`, daily-scan.server.ts), so the check runs on the model the
+    scan itself is already running on. There is no other transport available to
+    hand a per-job assignment to.
+
+    A failure here is never fatal and never moves a chip on its own: the
+    outcome is empty, `fileScanLeads` falls back to the word rule, and the only
+    trace is a log line -- the operator asked for no noise about it.
+  */
+  let dupCheck: DupCheckOutcome | null = null;
+  try {
+    await throwIfJobCancelled(job.id);
+    /* A scan that found nothing has no pairs and no reason to read the
+     * published list -- the check costs one query and one model call per scan
+     * THAT NEEDS ONE, and not one query per scheduled scan. */
+    const printed = data.leads.length > 0 ? await queryDupCheckPrinted(context) : [];
+    const collected = collectDupPairs({
+      candidates: data.leads,
+      existing: existingLeads,
+      printed,
+      place: scanPlace,
+    });
+    if (collected.pairs.length > 0) {
+      /*
+        `scheduledCommit` is this function's own test for "am I the scheduled
+        lane" (it is what the commit below branches on), and the scheduled
+        lane's job row carries the exact choice its forced runtime is pinned
+        to (daily-scan.server.ts queues it with `model.modelChoice`), so
+        passing it back to that same runtime is a no-op rather than a
+        re-resolution.
+      */
+      const assigned = deps.scheduledCommit
+        ? String(job.model_choice)
+        : (
+            await resolveJobModel({
+              jobKey: "lead-score",
+              explicit: null,
+              assignments: await readModelAssignments(job.newsroom_id).catch(() => []),
+            })
+          ).providerId;
+      const dupChoice = assigned as EffectiveProviderChoice;
+      const dupTimeoutMs = Math.min(batchTimeoutMs(assigned), DUP_CHECK_TIMEOUT_MS);
+      dupCheck = await runDupCheck({
+        pairs: collected.pairs,
+        skipped: collected.skipped,
+        chat: async (system, user, maxTokens) => {
+          const got = await runChat(system, user, maxTokens, {
+            timeoutMs: dupTimeoutMs,
+            choice: dupChoice,
+            newsroomId: job.newsroom_id,
+          });
+          return got.ok
+            ? { ok: true as const, text: got.text, model: got.meta?.model ?? null }
+            : { ok: false as const, error: got.error };
+        },
+      });
+    }
+  } catch (error) {
+    // A check that could not run must not be able to change an answer: the
+    // word rule stands, exactly as it did before this unit (see dup-check.ts).
+    console.error("[scan] duplicate check could not run", error);
+  }
+  if (dupCheck?.failure) console.error(`[scan] run ${runId}: ${dupCheck.failure}`);
+
   const commitResults = async (writeSql: Sql) => {
     if (!deps.scheduledCommit && !(await lockManualScanClaim(writeSql, job)))
       throw new Error("Scan job claim was superseded; refusing stale result writes.");
@@ -1949,34 +2136,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       }
     }
 
-    // Loaded once, not fed to the AI: matching happens in code (findMatchingLead).
-    const existingLeadsRaw = await writeSql<{
-      id: number;
-      status: string;
-      headline: string;
-      source_urls: string;
-      created_at: string;
-      why: string | null;
-      evidence: string | null;
-    }>`
-      select id, status, headline, source_urls, created_at, why, evidence
-      from leads
-      where newsroom_id = ${owned(context)}
-        and status <> 'published'
-        and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
-    `;
-    const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
-      id: l.id,
-      status: l.status,
-      headline: l.headline,
-      source_urls: parseLeadSourceUrls(l.source_urls),
-      created_at: l.created_at,
-      // Unit AK item 2: the killed lead's own words, so a strong match that
-      // brings new facts can be filed against it instead of discarded.
-      why: l.why,
-      evidence: l.evidence,
-    }));
-
+    /*
+      `existingLeads` was read above, outside this transaction, because the
+      duplicate check needs it before the commit (see that read's own comment).
+      Matching still happens in code (findMatchingLead), never in the model.
+    */
     const {
       leadsCreated,
       resurfacedKilled,
@@ -1985,6 +2149,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       developingFiled,
       firstDiscardedHeadline,
       mergedSameScan,
+      dupCheckCleared,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -1993,6 +2158,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       data.leads,
       existingLeads,
       scanPlace,
+      dupCheck,
     );
 
     let proposed = 0;
@@ -2088,12 +2254,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     if (deps.scheduledCommit) {
       await writeSql`
         insert into audit_events (user_id, action, detail, newsroom_id)
-        values (${context.userId}, 'scan', ${`run ${runId} fetched ${fetchedCount} leads ${leadsCreated}`}, ${owned(context)})
+        values (${context.userId}, 'scan', ${scanAuditDetail(runId, fetchedCount, leadsCreated, dupCheckCleared)}, ${owned(context)})
       `;
     } else {
       await refreshManualScanClaim(writeSql, job);
     }
-    return { leadsCreated };
+    return { leadsCreated, dupCheckCleared };
   };
 
   /*
@@ -2104,7 +2270,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     the editor has for this stretch.
   */
   await reportStage("Filing the leads", 95);
-  let committed: { leadsCreated: number };
+  let committed: { leadsCreated: number; dupCheckCleared: number };
   try {
     await deps.beforeScheduledCommit?.();
     committed = deps.scheduledCommit
@@ -2131,7 +2297,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     await audit(
       context.userId,
       "scan",
-      `run ${runId} fetched ${fetchedCount} leads ${committed.leadsCreated}`,
+      scanAuditDetail(runId, fetchedCount, committed.leadsCreated, committed.dupCheckCleared),
       owned(context),
     );
   } catch (error) {

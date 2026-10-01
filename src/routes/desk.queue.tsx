@@ -38,7 +38,7 @@ import {
   duplicateKillReason,
   editorActionError,
   mergeFocusSelection,
-  nearDuplicate,
+  printedDupChip,
   suggestFocusLeads,
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
@@ -1122,8 +1122,11 @@ function QueuePage() {
           <div className="lead-list roomy">
             {shown.map((l) => {
               // U26b: the same paper's place the server's counts and the scan's
-              // matcher use, so the chip and the "≈ Printed" tab agree.
-              const dupMatch = nearDuplicate(l, printed, PAPER);
+              // matcher use, so the chip and the "≈ Printed" tab agree. U28:
+              // the same `printedDupChip` the server's counts now use, so a
+              // pair the desk's duplicate check cleared is absent from the tab
+              // AND from the row -- one rule, not two.
+              const dupMatch = printedDupChip(l, printed, PAPER);
               return (
                 <LeadRowView
                   key={l.id}

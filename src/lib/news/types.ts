@@ -86,6 +86,21 @@ export type LeadRow = {
    * see newFactsIn in lib/news/lead-match.ts. `"possible"` is the QA-1
    * "possible" match tier, filed and linked rather than stamped. */
   dup_kind?: string | null;
+  /** U28 (migration 0113). The desk's duplicate check, as lib/news/dup-check.ts
+   * left it. Null on every field means the desk never asked -- no borderline
+   * pair, a check that failed, or a row filed before this unit -- which is NOT
+   * the same as `false`: only an explicit `false` suppresses a chip. See
+   * `printedDupChip` in lib/news/desk-copy.ts. */
+  dup_ai_same?: boolean | null;
+  /** The model's one-line reason for the link verdict above. */
+  dup_ai_why?: string | null;
+  /** The headline that verdict was about; kept when the verdict cleared the link. */
+  dup_ai_target?: string | null;
+  /** The verdict on the "Looks already printed" chip. */
+  dup_ai_printed_same?: boolean | null;
+  dup_ai_printed_why?: string | null;
+  /** The published story that chip verdict was about. */
+  dup_ai_printed_slug?: string | null;
   /** Migration 0094. The reason recorded when this lead was killed, shown on
    * its page and beside any finding filed against it (Unit AK items 4 and 6).
    * Null for a kill with no stated reason, and for every lead killed before
