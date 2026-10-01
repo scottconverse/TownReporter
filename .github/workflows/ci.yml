@@ -1066,6 +1066,16 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      # A promotion that dies at npm ci takes the paper down with it -- it has
+      # already backed up, stopped the app and fast-forwarded by then -- and
+      # that is what happened three times on the live machine. `npm test`
+      # discovers scripts\promote-step-runner.test.mjs everywhere but skips the
+      # parts that run PowerShell; this runner is where they run for real.
+      # It uses fake npm and a fake start in a temp directory and touches no
+      # service, no port and no database. The 20-second case is why this job's
+      # timeout matters, not this step's.
+      - name: Prove a promotion survives its own long steps (PR1)
+        run: node --test scripts/promote-step-runner.test.mjs
       - run: npm run build
       # One step, on purpose. The runner tears down a step's child processes
       # when the step ends, so an app booted in one step is gone by the next.
