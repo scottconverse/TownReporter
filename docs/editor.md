@@ -211,6 +211,8 @@ The watch list chosen during Paper setup. The Longmont edition ships with city, 
 
 **Accept one:** accepting a suggested source works the same way. Tick sections on its row first, then **Accept**, and it is accepted and filed under them together. A suggested source has to be accepted before a section may read it, so the two happen in that order; if the filing fails you are told so, rather than being left to find out at the next scan.
 
+**When a source keeps failing.** A source the desk could not read on three scans in a row stops saying **Could not check** and says **Keeps failing** instead — on its Sources row and on the desk home — with how many scans in a row, the plain reason for the last one, and the date the run of failures began. The desk never pauses or drops a source on its own: the row offers **Pause** (it stops being fetched until you resume it) and **Delete**, which asks once and names the source before taking it off the watch list by the same path **Remove** uses. Pages already saved from that source stay in the newsroom.
+
 **Suggested sources.** The third group — **Suggested sources: N** — is everything the desk found while it worked and has not decided yet. It is built for volume: 175 waiting suggestions was normal before this screen existed, and clicking each one to read its page was the only way to decide. Each row now carries the material a decision needs, and several rows can be decided at once.
 
 - **The reason** the pass recorded — what the page offers the paper, in the model's one sentence. A row suggested before this was recorded says *No reason was recorded when this was suggested* rather than showing a blank.

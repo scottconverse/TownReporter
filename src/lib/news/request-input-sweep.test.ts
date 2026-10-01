@@ -31,6 +31,7 @@ import {
   evidenceCompareInput,
   evidenceUrl,
   fileLeadInput,
+  findReplacementInput,
   findSourcesInput,
   followUpsInput,
   holdLeadInput,
@@ -874,6 +875,21 @@ const rows: Row[] = [
     ],
   },
   {
+    fn: "editor-dialog-actions.ts findReplacement (SH0-9)",
+    run: findReplacementInput.parse.bind(findReplacementInput),
+    // The free tier's "Use this instead" adds the page it chose; the AI tier
+    // sends the source id alone.
+    valid: { sourceId: 7, url: "https://city.test/agendas", title: "Agendas" },
+    bad: [
+      { why: "zero source id", value: { sourceId: 0 } },
+      { why: "oversize url", value: { sourceId: 7, url: x(LIMITS.url + 1) } },
+      // A topic is NOT an input: the beat decides what is searched for, and a
+      // client-supplied one would be a second, unchecked description of the
+      // same source. The schema drops it rather than passing it through.
+      { why: "no source id", value: { topic: "water" } },
+    ],
+  },
+  {
     fn: "editor-dialog-actions.ts:95 findSources",
     run: findSourcesInput.parse.bind(findSourcesInput),
     valid: { topic: "Longmont water", scope: "records" },
@@ -1116,7 +1132,7 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * is for.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findReplacementInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

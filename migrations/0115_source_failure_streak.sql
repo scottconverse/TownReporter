@@ -1,0 +1,33 @@
+-- Unit SH0-1: how many scans in a row could not read a watched source, so the
+-- editor can be told "Keeps failing" instead of "Could not check" forever.
+--
+-- WHY A COUNT AND NOT A DERIVATION. `sources.last_error` is the MOST RECENT
+-- attempt only -- the success path clears it, the failure path overwrites it --
+-- and `last_fetched_at` is written on failure too (both in the scan's fetch
+-- loop). So nothing in this schema can answer "has this source failed three
+-- times running", which is the only question the label asks. `scan_runs.
+-- failed_sources` is a JSON array of one run, and reading three runs off it
+-- would be a join through text. The count is the honest, cheap shape.
+--
+-- NO BACKFILL, DELIBERATELY. A streak the desk did not observe is a claim it
+-- must not make: a source that failed five times before this migration has no
+-- recorded failures at all, and every existing row therefore reads 0. The copy
+-- never prints a number below the threshold, so an unobserved history shows
+-- nothing rather than a guess.
+--
+-- `last_ok_at` IS NEW INFORMATION, not a rename. `last_fetched_at` moves on a
+-- FAILED attempt as well, so there was no column anywhere that could say when
+-- a source last read successfully -- which is what "first failed <date>" and
+-- any future "down since" sentence are read from.
+--
+-- `failure_streak_started_at` is stamped at the FIRST failure of the streak
+-- (`coalesce(failure_streak_started_at, now())` in the write, so a later
+-- failure in the same streak does not move it) and cleared on success, on a
+-- status change and on a URL change -- a stale streak outliving the row it
+-- described is the one way this column can lie.
+--
+-- ALL THREE ARE ADDITIVE WITH DEFAULTS, so an install that never opens the
+-- Sources screen behaves exactly as before.
+alter table sources add column if not exists consecutive_failures integer not null default 0;
+alter table sources add column if not exists failure_streak_started_at timestamptz;
+alter table sources add column if not exists last_ok_at timestamptz;

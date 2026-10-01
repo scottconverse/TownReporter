@@ -37,6 +37,7 @@ import {
 } from "./model-assignments.ts";
 import { readModelAssignments } from "./model-assignments-store.ts";
 import { saveDraftForEditor, type DraftEditInput } from "./draft-edit.server.ts";
+import { beatsForSource, replacementTopic } from "./source-replacements.ts";
 import { insertProposedNewsroomSource } from "./source-seeds.server.ts";
 import { linkStoryDocuments } from "./story-documents.server.ts";
 import { commitStoryDraftForAuthenticatedEditor } from "./model-request-commit.server.ts";
@@ -489,6 +490,198 @@ export async function performFindSources(
     ok: true as const,
     proposed,
     skipped: rows.length - proposed,
+    notice:
+      proposed === 0
+        ? "Nothing new: every page the model named is already a source, already suggested, or one the desk will not watch."
+        : noticeLine(resolution),
+  };
+}
+
+/* ------------------------------------------------------- find a replacement -- */
+
+export type FindReplacementResult =
+  | {
+      ok: true;
+      /** How many rows reached the review list. */
+      proposed: number;
+      /** What the model offered that the door refused -- the model's number is
+       *  not the desk's, and a dialog must not report rows that are not there. */
+      skipped: number;
+      /** The topic the beat produced, so the editor can see what was asked. */
+      topic: string;
+      notice: string | null;
+    }
+  | { ok: false; error: string };
+
+/**
+ * "Find a replacement" (unit SH0-9): the AI tier, on the editor's press.
+ *
+ * IT REUSES THE FIND-SOURCES PATH RATHER THAN A SECOND ONE. The prompt, the
+ * parser, the provider resolution and the one door every suggestion goes
+ * through are all `performFindSources`'s -- `findSourcesPrompt`,
+ * `parseProposedSources` and `deps.proposeSource`. What is new here is the
+ * seeding and the provenance: the topic comes from the BEAT (the sections the
+ * owner filed the source under, or the recorded guess, or the source's own
+ * title), and every row is filed with `replacesSourceId` and
+ * `proposedBy: "desk"` so the editor knows what they are looking at.
+ *
+ * EXACTLY ONE MODEL CALL, ON AN EXPLICIT PRESS. Same shape as its neighbour:
+ * one `deps.chat`, 1400 tokens, `noTools: true` -- the desk is asking for a
+ * list of pages, not for an agent to go and read them. The model comes from the
+ * newsroom's own picker through `resolveFor`, never from a constant here, so
+ * the editor's Automatic choice is what decides.
+ *
+ * NOTHING IS ACCEPTED. `insertProposedNewsroomSource` writes
+ * `status='proposed'` and nothing in this function or below it can write
+ * anything else; accepting stays the editor's existing press on the Sources
+ * screen. That is the owner's line ("never auto-add"), and it is pinned by
+ * test.
+ */
+export async function performFindReplacement(
+  context: EditorDialogContext,
+  data: {
+    sourceId: number;
+    /**
+     * The editor's "Use this instead" press on a candidate the desk already
+     * showed them. When it is present NO MODEL IS CALLED AT ALL -- the page is
+     * already chosen, and the only thing left to do is file it for approval,
+     * which is what the AI tier's rows end up doing anyway. One function
+     * because it is one door: the two presses differ in where the URL came
+     * from, and in nothing else.
+     */
+    url?: string;
+    title?: string;
+    modelChoice?: string;
+    modelEffort?: string | null;
+  },
+  deps: EditorDialogDeps,
+): Promise<FindReplacementResult> {
+  const sql = await deps.getSql();
+  const rows = await sql<{
+    id: number;
+    url: string;
+    title: string | null;
+    proposed_section: string | null;
+  }>`
+    select id, url, title, proposed_section from sources
+    where id = ${data.sourceId} and newsroom_id = ${context.newsroomId} limit 1
+  `;
+  const source = rows[0];
+  if (!source) return { ok: false as const, error: "That source is not on the watch list." };
+
+  /*
+    THE BEAT, RESOLVED THE WAY THE FREE TIER RESOLVES IT -- the same function,
+    so the panel's siblings and the model's topic cannot describe the source
+    differently. The sections come from `section_sources` (the owner's own
+    filing), then the recorded guess, then the source's title matched against
+    the newsroom's sections.
+  */
+  const filed = await sql<{ section_key: string }>`
+    select section_key from section_sources
+    where newsroom_id = ${context.newsroomId} and source_id = ${source.id}
+  `;
+  const sections = await sql<{ key: string; name: string }>`
+    select key, name from newsroom_sections
+    where newsroom_id = ${context.newsroomId} and visible = true
+    order by position asc
+  `;
+  const beats = beatsForSource({
+    sections: filed.map((row) => row.section_key),
+    proposedSection: source.proposed_section,
+    title: source.title,
+    knownSections: sections,
+  });
+  const topic = replacementTopic({ beats, knownSections: sections, title: source.title });
+  if (topic.trim().length < 4) {
+    return {
+      ok: false as const,
+      error:
+        "The desk cannot tell what this source was for, so it has nothing to search on. File it under a section, or add the replacement by hand.",
+    };
+  }
+
+  /*
+    THE FREE TIER'S PRESS. A candidate the desk read off this site, chosen by
+    the editor: no model, no fetch, one row through the door -- and the same
+    honest answer about whether it landed.
+  */
+  const chosen = String(data.url ?? "").trim();
+  if (chosen) {
+    const added = await deps.proposeSource(sql, {
+      userId: context.userId,
+      newsroomId: context.newsroomId,
+      url: chosen,
+      title: String(data.title ?? "").trim() || chosen,
+      reason: "Suggested as a replacement for a source the desk could not read.",
+      proposedBy: "desk",
+      replacesSourceId: source.id,
+    });
+    return {
+      ok: true as const,
+      proposed: added ? 1 : 0,
+      skipped: added ? 0 : 1,
+      topic,
+      notice: added
+        ? "Added to Suggested sources. Nothing is fetched until you accept it."
+        : "That page is already a source, already suggested, or one the desk will not watch.",
+    };
+  }
+
+  const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
+  const prompt = findSourcesPrompt(topic, "records");
+  const got = await deps.chat(prompt.system, prompt.user, 1400, {
+    choice: resolution.providerId as EffectiveProviderChoice,
+    newsroomId: context.newsroomId,
+    reasoningEffort: resolution.effort,
+    /*
+      No tools, deliberately. This is a "name some pages" question; an agent
+      that can fetch would go and read the very host that just refused the
+      desk, which is the one thing the whole feature is built not to do.
+    */
+    noTools: true,
+  });
+  if (!got.ok) {
+    return {
+      ok: false as const,
+      error: "The model could not be reached, so no replacement was suggested. Nothing was changed.",
+    };
+  }
+
+  const offered = parseProposedSources(got.text);
+  if (!offered.length) {
+    return {
+      ok: true as const,
+      proposed: 0,
+      skipped: 0,
+      topic,
+      notice: "The model came back with nothing the desk could use as a source.",
+    };
+  }
+
+  let proposed = 0;
+  for (const row of offered) {
+    const added = await deps.proposeSource(sql, {
+      userId: context.userId,
+      newsroomId: context.newsroomId,
+      url: row.url,
+      title: row.name,
+      reason: row.reason,
+      proposedBy: "desk",
+      replacesSourceId: source.id,
+      /*
+        No `via`: the four values that column carries (`feed`, `sitemap`,
+        `moved`, `canonical`) all describe a signpost the desk READ. A page a
+        model named is not one of those, and null -- "not recorded" -- is the
+        honest answer rather than the nearest label.
+      */
+    });
+    if (added) proposed += 1;
+  }
+  return {
+    ok: true as const,
+    proposed,
+    skipped: offered.length - proposed,
+    topic,
     notice:
       proposed === 0
         ? "Nothing new: every page the model named is already a source, already suggested, or one the desk will not watch."

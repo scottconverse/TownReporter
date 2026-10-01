@@ -1703,6 +1703,30 @@ export const findSourcesInput = z.object({
 });
 
 /**
+ * "Find a replacement" (SH0-9): the source whose replacement the editor is
+ * asking for, and the same optional model pick `findSourcesInput` carries.
+ *
+ * The TOPIC IS NOT AN INPUT, deliberately. What to search for is resolved on
+ * the server from the source's beat (`beatsForSource`); a topic from the
+ * client would be a second, unchecked way to describe the same source, and the
+ * panel has no field to type one into.
+ */
+export const findReplacementInput = z.object({
+  sourceId: publishId,
+  /*
+    The free tier's "Use this instead": a page the desk already showed the
+    editor, which is filed for approval with no model call at all. Bounded the
+    way the dialog's other free-text fields are, and `url` is checked for shape
+    by the proposal door rather than here -- it is the same door every other
+    suggestion goes through, and a second check would be a second rule.
+  */
+  url: z.string().max(LIMITS.url).optional(),
+  title: z.string().max(LIMITS.headlineEdit).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortLoose.nullable().optional(),
+});
+
+/**
  * `editor-dialog-actions.ts` weaveIntoStory (`story-documents.server.ts:123`
  * caps 22).
  *

@@ -9,10 +9,12 @@ import {
   listScans,
   checkOneSource,
   listSourcesPage,
+  replacementCandidates,
   reviewSuggestedSources,
   runScan,
   setSourceStatus,
 } from "@/lib/news/desk";
+import { findReplacement } from "@/lib/news/editor-dialog-actions";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import { myDesk } from "@/lib/news/claim";
@@ -23,9 +25,11 @@ import {
   dailyScheduleLabel,
   editorActionError,
   editorFetchError,
+  keepsFailingNote,
   scanRowLine,
   suggestedOriginLine,
 } from "@/lib/news/desk-copy";
+import { keepsFailing } from "@/lib/news/source-rows";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
@@ -1401,25 +1405,43 @@ function WatchRows({
       {rows.map((s) => {
         const paused = s.status === "paused";
         const failed = s.last_error != null;
+        /*
+          SH0-3: the flag the whole unit exists for. `keepsFailing` is the
+          predicate (SH0-2) and it already refuses a paused row, so this is the
+          same "the desk tried three times and could not read it" the note
+          below spells out. It does NOT replace the failure state -- a row that
+          has failed once still says "Could not check" -- and it draws nothing
+          new on the desk: the same chip, a stronger word.
+        */
+        const keeps = keepsFailing(s);
         const fresh = s.new_since_last_pass ?? 0;
         const chip = paused
           ? { cls: "paused", label: "Paused" }
-          : failed
-            ? { cls: "fail", label: "Could not check" }
-            : fresh > 0
-              ? { cls: "changed", label: "Changed" }
-              : s.last_fetched_at
-                ? { cls: "same", label: "✓ No change" }
-                : { cls: "wait", label: "Not checked yet" };
+          : keeps
+            ? { cls: "fail", label: "Keeps failing" }
+            : failed
+              ? { cls: "fail", label: "Could not check" }
+              : fresh > 0
+                ? { cls: "changed", label: "Changed" }
+                : s.last_fetched_at
+                  ? { cls: "same", label: "✓ No change" }
+                  : { cls: "wait", label: "Not checked yet" };
         const note = paused
           ? "Paused · the scanner will not fetch it"
-          : failed
-            ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
-            : fresh > 0
-              ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
-              : s.last_fetched_at
-                ? `Checked ${formatDateTime(s.last_fetched_at)}`
-                : "Added, not fetched yet";
+          : keeps
+            ? keepsFailingNote({
+                count: s.consecutive_failures ?? 0,
+                lastError: s.last_error,
+                url: s.url,
+                firstFailedAt: s.failure_streak_started_at,
+              })
+            : failed
+              ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
+              : fresh > 0
+                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+                : s.last_fetched_at
+                  ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                  : "Added, not fetched yet";
         const checking = checkingId === s.id;
         /*
           FB7, item 1. The pending state for this row's Pause / Resume /
@@ -1519,35 +1541,69 @@ function WatchRows({
                     >
                       {statusBusy ? "Pausing…" : "Pause"}
                     </InkButton>
-                    {/*
-                    Remove, one click deeper.
+                    {keeps ? (
+                      /*
+                        SH0-3 / owner addendum item 1: a row that keeps failing
+                        offers the two things an editor actually wants, ONE
+                        PRESS EACH -- Pause (already above) and Delete.
 
-                    BJ3 item 1: three 44px buttons at their natural width came
-                    to 292px of the 598px the column has at 1280. The grid's
-                    third track is `auto`, so it sized to that 292px max-content
-                    and the `1fr` name track starved to 79px -- the BJ2 finding
-                    (every name one word per line, the url printed over the
-                    chip). The drawing puts two buttons on an active row, so
-                    Remove is drawn here as the same `row-more` disclosure the
-                    other desks use: still one tab stop, still one click away,
-                    and the row keeps the width for its name.
-                  */}
-                    <details className="row-more">
-                      <summary className="btn quiet">More ▾</summary>
-                      <div className="row-more-panel">
-                        <RemoveAction
-                          label="Remove"
-                          armed={confirmRemoveId === s.id}
-                          busy={statusBusy}
-                          onAsk={() => onConfirmRemove(s.id)}
-                          onCancel={() => onConfirmRemove(null)}
-                          onConfirm={() => {
-                            onConfirmRemove(null);
-                            onStatus(s.id, "rejected", s.status);
-                          }}
-                        />
-                      </div>
-                    </details>
+                        Delete is drawn as a plain button here rather than
+                        behind the "More ▾" disclosure every other active row
+                        uses, because the whole point of the flag is that this
+                        row has been waiting. It asks ONE question first, and
+                        the question names what goes: the source, and the watch
+                        list it leaves. Nothing is autosaved, nothing was
+                        paused or removed behind the editor's back -- the
+                        addendum is explicit that the desk flags and the editor
+                        acts.
+                      */
+                      <InkButton
+                        tone="quiet"
+                        disabled={checking || statusBusy}
+                        onClick={() => {
+                          if (
+                            !confirm(
+                              `Delete “${s.title}”? The desk stops fetching ${hostLabel(s.url)} and this source comes off the watch list. Pages already saved from it stay in the newsroom.`,
+                            )
+                          )
+                            return;
+                          onStatus(s.id, "rejected", s.status);
+                        }}
+                      >
+                        Delete
+                      </InkButton>
+                    ) : (
+                      /*
+                        Remove, one click deeper.
+
+                        BJ3 item 1: three 44px buttons at their natural width
+                        came to 292px of the 598px the column has at 1280. The
+                        grid's third track is `auto`, so it sized to that 292px
+                        max-content and the `1fr` name track starved to 79px --
+                        the BJ2 finding (every name one word per line, the url
+                        printed over the chip). The drawing puts two buttons on
+                        an active row, so Remove is drawn here as the same
+                        `row-more` disclosure the other desks use: still one
+                        tab stop, still one click away, and the row keeps the
+                        width for its name.
+                      */
+                      <details className="row-more">
+                        <summary className="btn quiet">More ▾</summary>
+                        <div className="row-more-panel">
+                          <RemoveAction
+                            label="Remove"
+                            armed={confirmRemoveId === s.id}
+                            busy={statusBusy}
+                            onAsk={() => onConfirmRemove(s.id)}
+                            onCancel={() => onConfirmRemove(null)}
+                            onConfirm={() => {
+                              onConfirmRemove(null);
+                              onStatus(s.id, "rejected", s.status);
+                            }}
+                          />
+                        </div>
+                      </details>
+                    )}
                   </>
                 )}
               </div>
@@ -1568,9 +1624,143 @@ function WatchRows({
                 <SourceKillPattern sourceId={s.id} />
               </div>
             ) : null}
+            {/*
+              SH0-10: "Find a replacement", and ONLY on a row that keeps
+              failing. The panel is the one place in this feature a model may be
+              asked for anything, so it is drawn where the editor has already
+              been told the source is a problem -- never on a row that is fine.
+            */}
+            {keeps ? (
+              <div className="astra-kill">
+                <ReplacementPanel source={s} />
+              </div>
+            ) : null}
           </Fragment>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * "FIND A REPLACEMENT" (SH0-10), under a row that keeps failing.
+ *
+ * TWO PRESSES, PRICED DIFFERENTLY, AND THE EDITOR IS TOLD WHICH IS WHICH.
+ *
+ *   - The list at the top costs NOTHING: it is one read of sources the desk
+ *     already watches on the same beat (`replacementCandidates`), so nothing
+ *     is fetched and the site that just refused us is not asked again.
+ *   - The button at the bottom says **Uses one model call** before it is
+ *     pressed, and it is the only thing in this feature that spends anything.
+ *
+ * Every candidate carries **Use this instead** (files a suggestion for the
+ * editor to approve -- it never accepts anything) and **Not now** (drops it
+ * from this panel only; nothing is written). The rows come back through
+ * `useDeskMutation`, so a press that fails says why.
+ *
+ * WHAT IT SAYS WHEN IT FINDS NOTHING, AND WHY THAT MATTERS. For most newsrooms
+ * the true answer to "what else covers Planning?" is "Planning has only this
+ * one source", which is a fact worth knowing rather than a failure -- so the
+ * panel says exactly that instead of showing a spinner that resolves to
+ * nothing.
+ */
+function ReplacementPanel({ source }: { source: SourceRow }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const found = useQuery({
+    queryKey: ["replacement-candidates", source.id],
+    queryFn: () => replacementCandidates({ data: source.id }),
+    enabled: open,
+  });
+  const file = useDeskMutation({
+    mutationFn: (input: { url?: string; title?: string }) =>
+      findReplacement({
+        data: {
+          sourceId: source.id,
+          ...(input.url ? { url: input.url, title: input.title } : {}),
+        },
+      }),
+    pending: "Filing…",
+    done: (result) =>
+      result.ok
+        ? result.proposed > 0
+          ? "Added to Suggested sources. Nothing is fetched until you accept it."
+          : (result.notice ?? "Nothing was added.")
+        : (result.error ?? "That did not work."),
+    failedLead: "Could not file that suggestion. ",
+    after: async () => {
+      await qc.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  const beats = found.data?.beatNames ?? [];
+  const candidates = (found.data?.candidates ?? []).filter((c) => !dismissed.includes(c.url));
+
+  return (
+    <div className="row-more-panel">
+      <p className="astra-row-meta">
+        <b>Find a replacement.</b>{" "}
+        {beats.length
+          ? `This source is filed under ${beats.join(", ")}.`
+          : "The desk could not tell what this source was for."}
+      </p>
+
+      {!open ? (
+        <InkButton tone="quiet" onClick={() => setOpen(true)}>
+          Find a replacement
+        </InkButton>
+      ) : found.isPending ? (
+        <p className="astra-row-meta" role="status">
+          Looking at what else you already watch…
+        </p>
+      ) : found.isError ? (
+        <p className="astra-row-meta" role="status">
+          The desk could not read the watch list just now. Nothing was changed.
+        </p>
+      ) : (
+        <>
+          {candidates.length ? (
+            candidates.map((candidate) => (
+              <div key={candidate.url} className="astra-row-meta">
+                <span>{candidate.title ?? candidate.url}</span>{" "}
+                <span className="astra-chip">{candidate.label}</span>{" "}
+                <span>
+                  {candidate.via === "sibling" ? "Already on your watch list" : ""}
+                </span>
+                <span className="row-acts">
+                  <InkButton
+                    tone="quiet"
+                    disabled={file.isPending}
+                    onClick={() => file.mutate({ url: candidate.url, title: candidate.title ?? undefined })}
+                  >
+                    Use this instead
+                  </InkButton>
+                  <InkButton
+                    tone="quiet"
+                    disabled={file.isPending}
+                    onClick={() => setDismissed((was) => [...was, candidate.url])}
+                  >
+                    Not now
+                  </InkButton>
+                </span>
+              </div>
+            ))
+          ) : (
+            <p className="astra-row-meta">
+              {beats.length
+                ? `No other source is filed under ${beats.join(", ")}. This may be the only one the newsroom watches.`
+                : "No other source shares a beat with this one."}
+            </p>
+          )}
+          <p className="astra-row-meta">
+            <InkButton tone="quiet" disabled={file.isPending} onClick={() => file.mutate({})}>
+              {file.isPending ? "Asking the model…" : "Ask AI to look further"}
+            </InkButton>{" "}
+            Uses one model call. We have not checked whether any of these is free to read.
+          </p>
+        </>
+      )}
     </div>
   );
 }
