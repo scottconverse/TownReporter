@@ -306,6 +306,7 @@ const scanJob = (over = {}) =>
     kind: "scan",
     title: "Scanning the watch list",
     headline: null,
+    model: "DeepSeek v4.1 Flash",
     stages: [
       "Checking for meeting material",
       "Reading the sources",
@@ -357,4 +358,63 @@ test("a scan that failed with the editor's reason offers no phantom Retry", () =
   // a scan is one of them -- so a failed scan gets the honest reason and no
   // button that would re-run something the editor did not ask for.
   assert.doesNotMatch(html, />Retry/);
+});
+
+/*
+  FB1b, items 1 and 4: THE HEAD, AT RAIL WIDTH.
+
+  What the coordinator saw in the nav after FB1: the box drew the job's name and
+  then the card drew it AGAIN, the title wrapped to three lines inside a 190px
+  column and collided with the clock, and the model line ran into the title
+  ("Scanning the watch listDeepSeek v4.1 Flash · 16%").
+
+  The markup fixes are what a render test can hold: one title, title and model
+  as separate elements on their own lines, the clock outside the title's box,
+  and the class hooks the compact CSS keys on. The geometry itself is checked in
+  a browser -- `scripts/fb1/fb1-scan-shots.mjs` measures the title's scrollWidth
+  against its clientWidth at 390px -- because "it ellipsised instead of
+  wrapping" is not a property of the HTML.
+*/
+test("a compact card draws the title once, on its own line, with the model under it", () => {
+  const html = render({ job: scanJob(), compact: true });
+  // ONE title. The rail used to draw the job's name as its own bold line and
+  // then hand the same job to the card, whose first line is its name again.
+  assert.equal((html.match(/Scanning the watch list/g) ?? []).length, 1);
+  // The title and the model are separate elements, not two inline children of
+  // one span -- which is what ran them together with nothing between them.
+  assert.match(html, /<b class="job-card-title">Scanning the watch list<\/b>/);
+  assert.match(html, /<span class="job-card-model">DeepSeek v4\.1 Flash · 43%<\/span>/);
+  // ...and they live in the wrapper the compact CSS bounds.
+  assert.match(html, /<span class="job-card-id-text">/);
+  // The clock is a sibling of the title column, not a child of it: in a flex
+  // row the two competed for the same line and the clock lost.
+  const head = html.slice(html.indexOf("job-card-head"), html.indexOf("job-card-track"));
+  assert.ok(
+    head.indexOf("job-card-id-text") < head.indexOf("job-card-elapsed"),
+    "the clock is its own column in the head",
+  );
+  assert.match(head, /<b class="job-card-elapsed">\d+:\d\d<\/b>/);
+});
+
+test("a compact card can be titled by its caller, and still only once", () => {
+  /*
+    The rail's case: three rows of ~190px, and a story job's own title is the
+    kind's name -- the same words for every draft. It passes the story's
+    headline instead, and the card still draws exactly one title.
+  */
+  const html = render({
+    job: job({ headline: "Council votes on the water contract" }),
+    compact: true,
+    title: "Council votes on the water contract",
+  });
+  assert.equal((html.match(/Council votes on the water contract/g) ?? []).length, 1);
+  assert.doesNotMatch(html, /Drafting story/);
+});
+
+test("the full card still wraps its title over as many lines as it needs", () => {
+  // The single-line rule is COMPACT-only. A full-width card in a column has the
+  // room and a headline is not something to cut off.
+  const html = render({ job: scanJob() });
+  assert.doesNotMatch(html, /job-card compact/);
+  assert.match(html, /<b class="job-card-title">Scanning the watch list<\/b>/);
 });

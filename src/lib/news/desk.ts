@@ -1511,6 +1511,37 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   */
   let attemptedCount = 0;
   let lastLiveWriteAt = 0;
+  /*
+    THE LIVE RUN ROW.
+
+    The owner's complaint was that a working scan read "0 fetched · No sources
+    were fetched" -- `scanCountsLine`/`scanZeroWhy` off a row only written when
+    the run finishes. FB1b adds the scope to it: `sources_selected` is known
+    before the first fetch, and a row that says "2 fetched" without saying out
+    of how many is a count with no denominator. Everything here is a counter
+    this process already holds; nothing is recomputed and nothing is invented.
+
+    Throttled on the same clock as the card's counted write, and guarded on
+    `finished_at is null` so a receipt that has already settled is never
+    reopened. `force` is for the boundary writes -- the start of the pass and
+    the start of a batch -- where the whole point is that the row changes THEN,
+    not up to a second later.
+  */
+  const writeLiveRunRow = async (force = false) => {
+    const at = Date.now();
+    if (!force && at - lastLiveWriteAt < PROGRESS_WRITE_MIN_MS) return;
+    lastLiveWriteAt = at;
+    await sql`
+      update scan_runs
+      set sources_selected = ${sources.length},
+          sources_attempted = ${watchSlice.length},
+          sources_fetched = ${fetchedCount},
+          sources_failed = ${failedSources.length},
+          sources_analyzed = ${failureReceipt.sourcesAnalyzed},
+          model_batches_used = ${failureReceipt.modelBatchesUsed}
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+    `.catch(() => undefined);
+  };
   const noteSourceProgress = async () => {
     attemptedCount += 1;
     /*
@@ -1523,26 +1554,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       countedStep("Reading sources", attemptedCount, watchSlice.length),
       spanPct(attemptedCount, watchSlice.length, 5, 55),
     );
-    const at = Date.now();
-    if (at - lastLiveWriteAt < PROGRESS_WRITE_MIN_MS) return;
-    lastLiveWriteAt = at;
-    /*
-      THE LIVE COUNT ON THE RUN ROW.
-
-      The owner's complaint was that a working scan read "0 fetched · No
-      sources were fetched" -- `scanCountsLine`/`scanZeroWhy` off the row that
-      is only written when the run finishes. The count is already in this
-      process (`fetchedCount`), so the run says it as it goes. Guarded on
-      `finished_at is null` so a receipt that has already settled is never
-      reopened, and throttled with the progress write above rather than on its
-      own clock.
-    */
-    await sql`
-      update scan_runs
-      set sources_attempted = ${watchSlice.length}, sources_fetched = ${fetchedCount}
-      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
-    `.catch(() => undefined);
+    await writeLiveRunRow();
   };
+  // The scope, before a single page is read: "Running · reading sources — 0 of
+  // 14" is a different sentence from "0 fetched" with no denominator.
+  await writeLiveRunRow(true);
   await reportStage("Reading the sources");
   await mapLimit(watchSlice, 6, async (src) => {
     await deps.scheduledGuard?.();
@@ -1806,6 +1822,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     batchResults.push(parsed);
     failureReceipt.sourcesAnalyzed += batch.sources.length;
+    // The row moves phase: from "reading sources — k of n" to "reading the
+    // pages with a model", which is what the editor watching the history sees.
+    await writeLiveRunRow(true);
   }
 
   const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {

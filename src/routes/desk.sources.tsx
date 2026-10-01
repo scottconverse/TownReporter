@@ -22,7 +22,7 @@ import {
   dailyScheduleLabel,
   editorActionError,
   editorFetchError,
-  scanCountsLine,
+  scanRowLine,
   suggestedOriginLine,
 } from "@/lib/news/desk-copy";
 import { applySections, editorSections } from "@/lib/news/sections";
@@ -717,6 +717,20 @@ function SourcesPage() {
                 {runScanNow.isPending ? "Starting…" : "Run scan now"}
               </InkButton>
             </div>
+            {/*
+              FB1b, item 3: THE RUNNING SCAN'S CARD, BESIDE THE BUTTON THAT
+              STARTED IT.
+
+              It was one panel further down, under "Previous scans", so the
+              press changed nothing in view. Same reader as everywhere else
+              (FB1, unit 3), so the bar, the chip row, the stall rule and Cancel
+              are the drawn card's and not a second rendering of the same row.
+            */}
+            {scanJob ? (
+              <div className="sources-scan-card">
+                <DeskJobCard job={scanJob} compact />
+              </div>
+            ) : null}
           </div>
           {/*
             Previous scans: five rows, and no link. The drawing draws the list
@@ -757,32 +771,11 @@ function SourcesPage() {
                       "0 fetched", and never "No sources were fetched" about a
                       run that has not stopped trying.
                     */}
-                    <span className="astra-row-meta">
-                      {run.error
-                        ? "Failed"
-                        : run.stalled
-                          ? "Stalled with no result"
-                          : run.finished_at
-                            ? scanCountsLine(run)
-                            : (run.sources_attempted ?? 0) > 0 || run.sources_fetched > 0
-                              ? scanCountsLine({ ...run, leads_created: 0 })
-                              : "Reading the sources…"}
-                    </span>
+                    <span className="astra-row-meta">{scanRowLine(run)}</span>
                   </li>
                 ))}
               </ul>
             )}
-            {/*
-              THE RUNNING SCAN'S CARD, on the page the owner watches its
-              sources from. Same reader as everywhere else (FB1, unit 3), so the
-              bar, the chip row, the stall rule and Cancel are the drawn card's
-              and not a second rendering of the same row.
-            */}
-            {scanJob ? (
-              <div className="sources-scan-card">
-                <DeskJobCard job={scanJob} compact />
-              </div>
-            ) : null}
           </div>
         </aside>
       </div>

@@ -36,6 +36,7 @@ const fmt = (total: number) => {
 export function JobCard({
   job,
   compact,
+  title,
   stallSeconds = 60,
   now,
   onCancel,
@@ -48,6 +49,17 @@ export function JobCard({
 }: {
   job: JobProgressView;
   compact?: boolean;
+  /**
+   * What to call this job HERE, when the card's own title is not the most
+   * useful one. The rail's Running box is the only caller: it has three rows of
+   * about 190px each and a story job's `title` is the kind's name ("Drafting
+   * story"), which is the same for every draft. It passes the story's headline
+   * instead -- see `jobHeadline`.
+   *
+   * It is a TITLE, not a second line: the card still draws exactly one, so the
+   * box cannot say the same thing twice (FB1b, item 1).
+   */
+  title?: string;
   stallSeconds?: number;
   now?: number;
   onCancel?: () => void;
@@ -94,11 +106,25 @@ export function JobCard({
 
   return (
     <div className={`job-card${compact ? " compact" : ""} state-${col}`}>
+      {/*
+        THE HEAD IS TWO COLUMNS, AND THE TITLE OWNS ONE LINE (FB1b, item 4).
+
+        The title and the model used to be two inline children of one span, so
+        they ran together on a single line -- "Scanning the watch listDeepSeek
+        v4.1 Flash · 16%" -- with nothing between them but the font weight. They
+        are separate elements with their own line now: the title, then a muted
+        "model · pct".
+
+        The wrapper has its own class rather than being an anonymous span, so
+        the compact rules can bound it: in the nav the title is `nowrap` with an
+        ellipsis, which is what stops "Scanning the watch list" wrapping to
+        three lines and pushing into the clock.
+      */}
       <div className="job-card-head">
         <div className="job-card-id">
           <span className="job-card-dot" aria-hidden="true" />
-          <span>
-            <b className="job-card-title">{job.title}</b>
+          <span className="job-card-id-text">
+            <b className="job-card-title">{title ?? job.title}</b>
             <span className="job-card-model">
               {job.model}
               {job.pct != null && running ? ` · ${job.pct}%` : ""}
@@ -229,11 +255,13 @@ export function JobCard({
 export function DeskJobCard({
   job,
   compact,
+  title,
   onNavigate,
   viewLabel,
 }: {
   job: JobProgressView;
   compact?: boolean;
+  title?: string;
   onNavigate?: (job: JobProgressView) => void;
   viewLabel?: string;
 }) {
@@ -262,6 +290,7 @@ export function DeskJobCard({
       <JobCard
         job={job}
         compact={compact}
+        title={title}
         viewLabel={viewLabel}
         onView={go}
         onOpen={go}

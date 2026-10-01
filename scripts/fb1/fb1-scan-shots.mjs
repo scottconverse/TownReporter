@@ -35,7 +35,7 @@ import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "../first-r
 
 const BASE = (process.env.FB1_BASE_URL || "http://127.0.0.1:8481").replace(/\/$/, "");
 const OUT = resolve(
-  process.env.FB1_SHOTS_DIR || "C:/Users/scott/Desktop/Code/townreporter-coord/fb1-shots",
+  process.env.FB1_SHOTS_DIR || "C:/Users/scott/Desktop/Code/townreporter-coord/fb1-shots/v2",
 );
 const SLOW_SOURCES = Number(process.env.FB1_SLOW_SOURCES || 12);
 mkdirSync(OUT, { recursive: true });
@@ -160,6 +160,102 @@ try {
   await shot("scan-jobcard-counting.png");
   await page.waitForTimeout(14000);
   await shot("scan-jobcard.png");
+
+  /*
+    FB1b, item 3, PROVED IN A BROWSER: the card the press produced is inside the
+    panel the press was made in. `.astra-panel.hot` is the yellow-bordered
+    "Run a scan" panel; the card used to render as its next sibling, below the
+    fold. A failure here is the whole item, so it throws.
+  */
+  const inPanel = await page.evaluate(() => {
+    const card = document.querySelector(".scan-job-card .job-card");
+    const panel = document.querySelector(".astra-panel.hot");
+    return Boolean(card && panel && panel.contains(card));
+  });
+  if (!inPanel) throw new Error("the running scan's card is not inside the Run-scan panel");
+  console.log("ok    the card renders inside the Run-scan panel");
+  const aboveTheFold = await page.evaluate(() => {
+    const card = document.querySelector(".scan-job-card");
+    return card ? card.getBoundingClientRect().top < window.innerHeight : false;
+  });
+  if (!aboveTheFold) throw new Error("the card is below the fold on the screen that started it");
+  console.log("ok    the card is in view where the button was pressed");
+
+  /*
+    FB1b, item 1, MEASURED: one title, not wrapping, not overflowing.
+
+    "It ellipsised instead of wrapping" is not a property of the markup, so it
+    is measured: the nav's card title must be `nowrap`/`hidden`, and the box it
+    sits in must not push the page sideways.
+  */
+  const railTitle = await page.evaluate(() => {
+    const el = document.querySelector(".astra-running .job-card-title");
+    if (!el) return null;
+    const style = getComputedStyle(el);
+    return {
+      text: el.textContent || "",
+      whiteSpace: style.whiteSpace,
+      overflow: style.overflow,
+      height: el.getBoundingClientRect().height,
+      lineHeight: parseFloat(style.lineHeight) || 0,
+    };
+  });
+  if (!railTitle) throw new Error("the nav's Running box drew no card title");
+  if (railTitle.whiteSpace !== "nowrap" || railTitle.overflow !== "hidden")
+    throw new Error(`the rail's title is not a single ellipsised line: ${JSON.stringify(railTitle)}`);
+  if (railTitle.lineHeight && railTitle.height > railTitle.lineHeight * 1.6)
+    throw new Error(`the rail's title wrapped: ${JSON.stringify(railTitle)}`);
+  const railText = await page.locator(".astra-running").innerText();
+  const repeats = railText.split(railTitle.text).length - 1;
+  if (repeats !== 1) throw new Error(`the nav box draws "${railTitle.text}" ${repeats} times`);
+  console.log("ok    the nav box draws one title, on one line");
+
+  /*
+    FB1b, item 5: LIGHT THEME, AND PHONE WIDTH.
+
+    The same card, twice more: in light (the tokens flip, and a border or a
+    muted colour that only works on dark is the classic thing to miss), and at
+    390px, where the whole page must still fit -- `scrollWidth` wider than the
+    viewport is the overflow the coordinator asked about.
+  */
+  const noOverflow = async (label) => {
+    const over = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    if (over > 1) throw new Error(`${label}: the page overflows by ${over}px`);
+    console.log(`ok    ${label}: no horizontal overflow`);
+  };
+
+  /*
+    The footer controls carry aria-labels, which ARE their accessible names --
+    the visible word is only the label text beside them. Dark mode is the desk
+    default, so the press that switches to light is the one labelled
+    "Switch to light appearance".
+  */
+  await page.getByLabel("Switch to light appearance").first().click();
+  await page.waitForTimeout(800);
+  await shot("scan-jobcard-light.png");
+  await noOverflow("desktop light");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(1200);
+  await shot("scan-jobcard-phone.png");
+  await noOverflow("phone 390");
+
+  // The nav at phone width is the drawer, and the Running box is at the top of
+  // it -- the narrowest place this card is ever drawn.
+  const phoneMenu = page.getByRole("button", { name: "Open navigation", exact: true });
+  if (await phoneMenu.count()) {
+    await phoneMenu.click();
+    await page.waitForTimeout(900);
+    await shot("nav-running-box-phone.png");
+    await noOverflow("phone 390 with the nav open");
+  } else {
+    console.log("NOTE: no phone nav button; the drawer was not photographed");
+  }
+  await page.setViewportSize({ width: 1440, height: 950 });
+  await page.getByLabel("Switch to dark appearance").first().click().catch(() => undefined);
+  await page.waitForTimeout(600);
 
   await page.goto(`${BASE}/desk/sources`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);

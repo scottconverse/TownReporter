@@ -229,14 +229,24 @@ it(
         await observe();
       },
       /*
-        SLOW ENOUGH FOR THE THROTTLE TO MATTER. The progress write is capped at
-        one a second by design, so a fetcher that returns instantly would finish
-        the whole list inside the first second and no counted step would ever be
-        written -- which is the correct behaviour of the throttle and a useless
-        test of it. 700 ms a page puts a tick inside the fetch window.
+        SLOW ENOUGH FOR THE THROTTLE TO MATTER, AND FOR THE WINDOW TO BE WIDE.
+
+        The progress write is capped at one a second by design, so a fetcher
+        that returns instantly would finish the whole list inside the first
+        second and no counted step would ever be written -- the correct
+        behaviour of the throttle, and a useless test of it.
+
+        THE FIRST ROUND MUST LAND AFTER THE FIRST SECOND, not just inside the
+        run. Six of the eight pages start together, so they finish together;
+        at 700 ms a round the whole fetch was over at ~1.4 s and the counted
+        step was overwritten by the next phase's arrival within a few
+        milliseconds -- visible, but not reliably visible to a 75 ms sampler.
+        1200 ms a page puts the first round's counted write at 1.2 s with a
+        further 1.2 s of fetching behind it, so the state this test asserts on
+        is on the row for over a second.
       */
       ingestUrl: async (url: string) => {
-        await new Promise((resolve) => setTimeout(resolve, 700));
+        await new Promise((resolve) => setTimeout(resolve, 1200));
         return {
           text: `Fixture page for ${url}: the council meets on Tuesday to vote on the water contract.`,
           titleHint: "Fixture",

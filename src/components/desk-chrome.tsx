@@ -518,12 +518,20 @@ function RunningBox({
         <span className="astra-running-dot" aria-hidden /> Running · {jobs.length}
       </Link>
       {jobs.slice(0, 3).map((job) => (
-        <span className="astra-running-job" key={job.id}>
-          {/* The headline when the job has a story, its kind's own title
-              otherwise -- a scan has no headline and `jobHeadline` says so. */}
-          <b>{jobHeadline(job)}</b>
-          <DeskJobCard job={job} compact viewLabel="Open" />
-        </span>
+        <div className="astra-running-job" key={job.id}>
+          {/*
+            ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).
+
+            This used to draw the job's name as a bold line AND hand the same
+            job to the card, whose first line is its name again -- "Scanning the
+            watch list" twice in a row, then a title wrapping to three lines
+            underneath it. The card's own title is the one that stays: it is
+            single-line with an ellipsis in the compact variant, it carries the
+            clock on its own column, and it is the same element on every other
+            screen the card appears on.
+          */}
+          <DeskJobCard job={job} compact title={jobHeadline(job)} viewLabel="Open" />
+        </div>
       ))}
     </div>
   );

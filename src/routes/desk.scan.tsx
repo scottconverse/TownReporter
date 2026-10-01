@@ -5,7 +5,7 @@ import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
-import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
+import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, scanRowLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskAction } from "@/components/desk-action";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -267,23 +267,23 @@ function ScanPage() {
           {last ? ` · last ran ${formatDateTime(last.started_at)}` : ""}
         </p>
       </div>
-            <p className="astra-note">
-              Scans file leads only. They never draft or publish.
-            </p>
-          </div>
       {/*
-        FB1, unit 4: THE SCAN'S OWN CARD, on the screen that spends the money.
+        FB1, unit 4 / FB1b, item 3: THE SCAN'S OWN CARD, IN THE PANEL.
 
         This was one shimmering `Busy` sentence -- "Fetching accepted sources,
         then one pass for leads. Stay on this page." -- with no stage, no count,
         no elapsed clock, no stall flag and no way to stop it, on the longest
-        and most expensive job the desk runs. The job row has carried a stage
-        list, a step and a heartbeat since FB1's unit 1; this is the card that
-        reads them.
+        and most expensive job the desk runs.
 
-        "Stay on this page" is gone with it. It was advice the desk could not
-        keep (the job is durable and survives navigation) and it was the only
-        thing the sentence said about the wait.
+        FB1 put the card on the page; FB1b put it HERE, inside the panel that
+        owns the Run scan button. The card used to render below the panel, and
+        on a laptop the editor who pressed the button got no visible change at
+        all -- the one thing they had just asked for was under the fold. The
+        press and its progress are the same thought, so they are the same box.
+
+        "Stay on this page" is gone with the sentence. It was advice the desk
+        could not keep (the job is durable and survives navigation) and it was
+        the only thing the line said about the wait.
 
         Until the query answers there is a `Busy` line, because a scan can be
         queued before its row arrives -- but it promises nothing and it names no
@@ -296,6 +296,10 @@ function ScanPage() {
       ) : scanning ? (
         <Busy label="Starting the scan…" />
       ) : null}
+            <p className="astra-note">
+              Scans file leads only. They never draft or publish.
+            </p>
+          </div>
       {!scanning && stalled ? <Notice kind="err">{stalledRunCopy("scan")}</Notice> : null}
       {!scanning && !stalled && last && !last.error && last.leads_created > 0 ? (
         <div className="scan-result">
@@ -429,24 +433,38 @@ function ScanPage() {
                 {formatDateTime(s.started_at)} ·{" "}
                 {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
               </p>
-              <p className="scan-line">
-                {scanCoverageLine(s) ??
-                  scanCountsLine({
-                    sources_fetched: s.sources_fetched,
-                    leads_created: s.leads_created,
-                    sources_proposed: s.sources_proposed,
-                  })}
-              </p>
-              {failedSourcesLine(parseFailedSources(s.failed_sources)) ? (
-                <p className="wire-warn">{failedSourcesLine(parseFailedSources(s.failed_sources))}</p>
-              ) : null}
-              {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
-              {s.stalled ? (
-                <p className="wire-warn">{stalledRunCopy("scan")}</p>
-              ) : s.leads_created === 0 ? (
-                <p className="wire-sum">{scanZeroWhy(s)}</p>
-              ) : s.error ? (
-                <p className="wire-warn">{editorScanError(s.error)}</p>
+              {/*
+                ONE LINE, AND IT IS THE RUN'S OWN STATE (FB1b, item 2).
+
+                This used to hand an OPEN run to `scanCoverageLine` and
+                `scanZeroWhy`, which are sentences about a FINISHED run: a scan
+                thirty seconds into its fetch read "Partial coverage: 0 selected
+                · 2 fetched · 0 analyzed · 0 leads." and "Nothing in the fetched
+                pages crossed the filing bar." -- three claims about the end of
+                a run nobody had reached. `scanRowLine` answers for the running
+                case first and totally; the failed-source line and the "why"
+                below it are verdicts on a result and are gated on there being
+                one.
+              */}
+              <p className="scan-line">{scanRowLine(s)}</p>
+              {s.finished_at || s.error ? (
+                <>
+                  {failedSourcesLine(parseFailedSources(s.failed_sources)) ? (
+                    <p className="wire-warn">
+                      {failedSourcesLine(parseFailedSources(s.failed_sources))}
+                    </p>
+                  ) : null}
+                  {s.leads_created > 0 && s.summary ? (
+                    <p className="wire-sum">{s.summary}</p>
+                  ) : null}
+                  {s.stalled ? (
+                    <p className="wire-warn">{stalledRunCopy("scan")}</p>
+                  ) : s.leads_created === 0 ? (
+                    <p className="wire-sum">{scanZeroWhy(s)}</p>
+                  ) : s.error ? (
+                    <p className="wire-warn">{editorScanError(s.error)}</p>
+                  ) : null}
+                </>
               ) : null}
             </div>
           ))}
