@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.test/</loc></url>
+  <url><loc>https://example.test/about</loc></url>
+  <url><loc>https://example.test/council/agenda-2026-10-07</loc></url>
+  <url><loc>https://example.test/council/minutes-2026-09-16</loc></url>
+  <url><loc>https://example.test/budget/2027-adopted-budget.pdf</loc></url>
+  <url><loc>https://example.test/parks/dog-park-hours</loc></url>
+  <url><loc><![CDATA[https://example.test/planning/ordinance-2044]]></loc></url>
+</urlset>

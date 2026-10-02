@@ -433,13 +433,51 @@ export function collapsePrintedDuplicates<T extends { headline: string; body?: s
   return kept;
 }
 
+/**
+ * WHY a worth-a-look card is not drawn in the inbox, or null if it is.
+ *
+ * FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened ...
+ * with 'SET ASIDE 0' throughout." The card vanished because
+ * `titlesOverlap` matched it against some OTHER investigation's title -- a
+ * bag-of-words test that says two stories are the same -- and the screen
+ * answered by not drawing it. Nothing told the editor it had ever been there,
+ * and the counter they checked ("SET ASIDE") counts investigations that are
+ * parked as files, which is a different thing entirely.
+ *
+ * The boolean could not say any of that. This returns the reason, so the desk
+ * can draw the card with the covering file's name on it rather than deleting
+ * it. `worthItemOnDesk` below is the same question asked as a yes/no, and is
+ * kept because three callers only need the boolean.
+ */
+export type WorthItemOnDeskReason =
+  /** The editor opened this card on this visit; `claimedIds` remembers it. */
+  | { kind: "opened"; title: string }
+  /** This file's title already covers the card -- see `titlesOverlap`. */
+  | { kind: "covered"; title: string };
+
+export function worthItemOnDeskReason(
+  item: { id: string; title: string; source_url?: string },
+  investigations: { title: string }[],
+  claimedIds: string[] = [],
+): WorthItemOnDeskReason | null {
+  if (claimedIds.includes(item.id)) return { kind: "opened", title: item.title };
+  const covering = investigations.find((inv) => titlesOverlap(item.title, inv.title));
+  return covering ? { kind: "covered", title: covering.title } : null;
+}
+
+/** The one sentence that says why a card is not in the inbox, in place of it. */
+export function worthItemOnDeskLine(reason: WorthItemOnDeskReason): string {
+  return reason.kind === "opened"
+    ? "You opened this one — it is still on the desk, not gone."
+    : `Already on the desk as “${reason.title}”.`;
+}
+
 export function worthItemOnDesk(
   item: { id: string; title: string; source_url?: string },
   investigations: { title: string }[],
   claimedIds: string[] = [],
 ): boolean {
-  if (claimedIds.includes(item.id)) return true;
-  return investigations.some((inv) => titlesOverlap(item.title, inv.title));
+  return worthItemOnDeskReason(item, investigations, claimedIds) != null;
 }
 
 export function pileForStatus(status: string): "desk" | "aside" {
@@ -938,6 +976,48 @@ export function editorFetchError(raw: string | null | undefined, url?: string | 
   if (/400/i.test(t)) return "The site rejected the request.";
   if (/Fetch failed/i.test(t)) return "Could not fetch that page.";
   return plainEditorText(t);
+}
+
+/**
+ * THE "KEEPS FAILING" SENTENCE, in the editor's words (SH0-2).
+ *
+ * It says three things and no more: HOW MANY times in a row, WHY the last one
+ * failed (the plain reason, through `editorFetchError`, never the raw message),
+ * and WHEN the run of failures began -- because "since Tuesday" is the part
+ * that tells the editor whether to wait or to act.
+ *
+ * WHAT IT DELIBERATELY DOES NOT SAY:
+ *
+ *  - It never says the site is broken, dead, or blocked. The desk knows one
+ *    thing -- that WE could not read the page -- and the cause can be our own
+ *    parser, a login wall, or a quiet DNS blip. "Could not read this" is the
+ *    whole of what was observed.
+ *  - It never counts scans the desk did not attempt. The count comes from the
+ *    row, which only moves on an attempt (`KEEPS_FAILING_AFTER`, source-rows).
+ *  - It never names a place, a city or a paper: the same sentence is read by
+ *    every install, and the source's own name and address are on the row
+ *    around it.
+ *
+ * The date is the house short form (`killRecordLine`'s), and a missing or
+ * unparseable `firstFailedAt` drops the clause rather than printing "Invalid
+ * Date" or inventing a day.
+ */
+export function keepsFailingNote(input: {
+  count: number;
+  lastError?: string | null;
+  url?: string | null;
+  firstFailedAt?: string | null;
+}): string {
+  const count = Math.max(0, Math.floor(input.count));
+  const times = `${count} scan${count === 1 ? "" : "s"} in a row could not read this.`;
+  const reason = editorFetchError(input.lastError, input.url);
+  const withReason = reason ? `${times} Last reason: ${reason}` : times;
+  const at = input.firstFailedAt ? new Date(input.firstFailedAt) : null;
+  const when =
+    at && !Number.isNaN(at.getTime())
+      ? at.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : null;
+  return when ? `${withReason} First failed ${when}.` : withReason;
 }
 
 export function workingQueueEmptyCopy(input: {
@@ -1904,6 +1984,14 @@ export function suggestedByLabel(by: string | null | undefined): string {
       return "the Dark Desk";
     case "editor":
       return "an editor";
+    /*
+      SH0-9: the source-health path. Without a case here the value falls to
+      "not recorded", and the editor cannot tell a suggestion the desk made
+      while trying to fix a broken source from one nobody can account for --
+      which is the one thing this field exists to answer.
+    */
+    case "desk":
+      return "the source health check";
     default:
       return "not recorded";
   }

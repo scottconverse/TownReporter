@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -568,10 +568,48 @@ function CustomSourcePicker(props: {
     mutationFn: async (id: number) => deleteScanSourcePackFn({ data: { packId: id } }),
     onSuccess: () => onSaved(),
   });
+  /*
+    FB7, item 1: "Delete pack … NO UNDO + no confirm".
+
+    The pack is a named set an editor built by hand, and one press used to
+    destroy it outright. It is two presses now, and the done toast carries an
+    Undo that puts the set back -- the same shape Today's Hold/Kill and
+    Opinion's Delete already use.
+
+    What is remembered for the Undo is the pack's own name and its source ids,
+    captured BEFORE the press. The list the pack came from is server state that
+    the press invalidates, so reading it back afterwards would be reading the
+    list the pack has just been removed from.
+  */
+  const lastDeletedPack = useRef<{ name: string; sourceIds: number[] } | null>(null);
+  /*
+    LOW-9 (A-B8): the armed state is the PACK'S OWN ID, not a boolean. Arm pack
+    A, switch the picker to pack B, press "Yes, delete the pack" -- and with a
+    boolean it deleted B under a prompt the editor had opened for A. The
+    confirming press re-checks that the id it is holding is the one on screen
+    (below), and the picker clears it when it moves. The Sources screen's
+    `confirmRemove` is the same shape for the same reason.
+  */
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+  const armed = confirmDelete !== null && confirmDelete === packId;
   const deletePack = useDeskAction<unknown>({
     pending: "Deleting…",
     done: () => "Pack deleted: the saved set is gone from this list.",
     failedLead: "Could not delete that pack. ",
+    undo: () => {
+      const pack = lastDeletedPack.current;
+      if (!pack) return null;
+      return {
+        label: "Undo",
+        run: async () => {
+          // Rebuilt under its own name with its own ids: the way back is the
+          // pack, not a new one the editor would have to re-tick by hand.
+          await saveScanSourcePackFn({ data: { name: pack.name, sourceIds: pack.sourceIds } });
+          lastDeletedPack.current = null;
+          onSaved();
+        },
+      };
+    },
   });
   const rename = useMutation({
     mutationFn: async (input: { packId: number; name: string }) =>
@@ -609,6 +647,9 @@ function CustomSourcePicker(props: {
             onChange={(e) => {
               const id = e.target.value ? Number(e.target.value) : null;
               setPackId(id);
+              /* The confirm belongs to the pack it was opened for; moving the
+                 picker closes it rather than re-aiming it (LOW-9). */
+              setConfirmDelete(null);
               if (id) {
                 const p = packs.find((x) => x.id === id);
                 if (p) setPickedIds([...p.sourceIds]);
@@ -637,17 +678,64 @@ function CustomSourcePicker(props: {
             >
               Rename…
             </button>
-            <button
-              type="button"
-              className="btn danger"
-              disabled={disabled || deletePack.isPending}
-              aria-busy={deletePack.isPending || undefined}
-              onClick={() => {
-                if (packId) void deletePack.run(() => del.mutateAsync(packId));
-              }}
-            >
-              {deletePack.isPending ? deletePack.pendingLabel : "Delete pack"}
-            </button>
+            {/*
+              Two presses (FB7, item 1). The first arms the row, the second
+              deletes -- the desk's own two-step shape, and the same one the
+              Source rows' Remove now uses. `lastDeletedPack` is filled on the
+              confirming press, from the pack still in `packs`, so the Undo has
+              the name and the ids to rebuild it with.
+            */}
+            {armed ? (
+              <>
+                <button
+                  type="button"
+                  className="btn danger"
+                  disabled={disabled || deletePack.isPending}
+                  aria-busy={deletePack.isPending || undefined}
+                  onClick={() => {
+                    /*
+                      The id is re-checked against the picker before anything
+                      is read or deleted: an arm that outlived its pack must
+                      not take a different one (LOW-9).
+
+                      Deliberately NOT disarmed here either. Disarming first
+                      turned the button back into "Delete pack" in the same
+                      paint, so the pending label this action draws was never
+                      visible -- the mistake the Sources screen's RemoveAction
+                      documents at its own call site. The confirm clears itself
+                      when the pack leaves the list, which is what a successful
+                      delete does.
+                    */
+                    const p = packs.find((x) => x.id === packId);
+                    if (!packId || !p || confirmDelete !== packId) {
+                      setConfirmDelete(null);
+                      return;
+                    }
+                    lastDeletedPack.current = { name: p.name, sourceIds: [...p.sourceIds] };
+                    void deletePack.run(() => del.mutateAsync(packId));
+                  }}
+                >
+                  {deletePack.isPending ? deletePack.pendingLabel : "Yes, delete the pack"}
+                </button>
+                <button
+                  type="button"
+                  className="btn quiet"
+                  disabled={deletePack.isPending}
+                  onClick={() => setConfirmDelete(null)}
+                >
+                  Keep
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="btn danger"
+                disabled={disabled || deletePack.isPending}
+                onClick={() => setConfirmDelete(packId)}
+              >
+                Delete pack
+              </button>
+            )}
           </>
         ) : null}
       </div>

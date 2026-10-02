@@ -762,6 +762,9 @@ async function routineNoticePermissionsJourney(context, observePage) {
     .locator(".row-more-panel")
     .getByRole("button", { name: "Remove", exact: true })
     .click();
+  // FB7 (batch 8): Remove is a two-press confirm. The first press only arms it
+  // ("Yes, remove" / "Keep" appear); the source is not removed until the second.
+  await other.getByRole("button", { name: "Yes, remove", exact: true }).click();
   await other.getByRole("button", { name: /^Rejected / }).click();
   await other.getByRole("heading", { name: "Rejected", exact: true }).waitFor();
   await other.goto(`${base}/desk/ops/routine-notices`, { waitUntil: "domcontentloaded" });

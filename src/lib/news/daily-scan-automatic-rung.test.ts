@@ -109,6 +109,21 @@ before(async () => {
   delete process.env.TOWNREPORTER_DEEPSEEK;
   delete process.env.LLM_BASE_URL;
   process.env.TOWNREPORTER_QWEN = "0";
+  /*
+    ...and Codex switched ON, which is the same kind of assertion.
+
+    The second test below depends on the ladder having a rung AFTER the one
+    that hits its limit, and Codex Terra is that rung. It was left to the
+    ambient environment, so any `TOWNREPORTER_CODEX=0` in the shell switched
+    the rung off, the failover had nowhere to go, and the stub's own 429 came
+    back out of the scan -- "LLM API error 429", which reads exactly like a
+    live model refusing the call and is not. That is the failure that was
+    reported as machine-only and blamed on a real Ollama: the 429 is the
+    repository's own fake endpoint (`setScanMode("quota")`), and the thing
+    that actually differed was this variable. CI's unit job sets neither
+    switch, which is why it passed there.
+  */
+  process.env.TOWNREPORTER_CODEX = "1";
   process.env.CODEX_CLI_PATH = join(process.cwd(), "scripts/fakes/fake-codex-cli.mjs");
   process.env.FAKE_CODEX_SIGNED_IN = "1";
   process.env.FAKE_CODEX_VALID_DRAFT = "1";

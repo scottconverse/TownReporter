@@ -16,6 +16,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   cleanSourceWindow,
+  KEEPS_FAILING_AFTER,
+  keepsFailing,
   onWatch,
   selectSourceRows,
   sourceCounts,
@@ -199,4 +201,58 @@ test("the counts and the tabs cannot disagree: each tab's length is its own coun
     const shown = sourceTabRows(rows, filter);
     assert.equal(shown.length, counts[filter], `tab ${filter}`);
   }
+});
+
+/*
+  ── SH0-1 / SH0-2: "KEEPS FAILING" ───────────────────────────────────────────
+
+  The predicate behind the flag, and the threshold it turns on. The count is
+  written by the scan (SH0-1, pinned in `source-failure-streak.postgres.test.ts`)
+  and read here; the two halves have to agree on what "three in a row" means or
+  the row says a number the database does not hold.
+*/
+
+test("two failures in a row is a bad afternoon, not a pattern", () => {
+  assert.equal(keepsFailing(source({ id: 1, consecutive_failures: 2, last_error: "404" })), false);
+});
+
+test("the flag turns on at the threshold and stays on above it", () => {
+  assert.equal(keepsFailing(source({ id: 2, consecutive_failures: 3, last_error: "404" })), true);
+  assert.equal(keepsFailing(source({ id: 3, consecutive_failures: 4, last_error: "404" })), true);
+});
+
+test("a source with no recorded streak is never flagged", () => {
+  /* The migration backfills nothing: a row that predates 0115, or a row read by
+     a select that did not ask for the column, has no history and must not be
+     given one. */
+  assert.equal(keepsFailing(source({ id: 4 })), false);
+  assert.equal(keepsFailing(source({ id: 5, consecutive_failures: null })), false);
+  assert.equal(keepsFailing(source({ id: 6, consecutive_failures: 0 })), false);
+});
+
+test("a paused source is never flagged, however long its streak", () => {
+  /* The word would be false: pause means the desk has stopped trying. */
+  assert.equal(
+    keepsFailing(source({ id: 7, status: "paused", consecutive_failures: 9, last_error: "404" })),
+    false,
+  );
+  assert.equal(
+    keepsFailing(source({ id: 8, status: "proposed", consecutive_failures: 9 })),
+    false,
+  );
+  assert.equal(
+    keepsFailing(source({ id: 9, status: "rejected", consecutive_failures: 9 })),
+    false,
+  );
+});
+
+test("the threshold is three consecutive failed attempts", () => {
+  assert.equal(KEEPS_FAILING_AFTER, 3);
+});
+
+test("the flag needs no error text of its own: the count is the whole test", () => {
+  /* `last_error` is cleared by the next success, and the count is cleared with
+     it, so the two move together -- but a row whose count reached the threshold
+     is flagged on that alone. */
+  assert.equal(keepsFailing(source({ id: 10, consecutive_failures: 3, last_error: null })), true);
 });

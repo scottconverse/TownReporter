@@ -1,4 +1,5 @@
 import { assertHttpUrl, isBlockedAddress, isIP } from "./url-guard.ts";
+import type { FetchSchedule } from "./host-gate.ts";
 import { htmlToPlainText } from "./html-text.ts";
 import { capFetchResponse, FetchResponseRefusal } from "./body-limit.ts";
 
@@ -162,27 +163,31 @@ export async function resolveFetch(): Promise<FetchLike> {
   return async (url, init) => capFetchResponse(await send(url, init), url);
 }
 
-/** One guarded HTTP hop. A scheduler can own the send and body lifetime. */
+/** One guarded HTTP hop. A scheduler can own the send and body lifetime.
+ *  `url` is handed to the scheduler so it can pace per host (see
+ *  `host-gate.ts`); a scheduler that only ever sees one host ignores it. */
 export async function fetchPublicHttpOnce(
   url: URL,
-  schedule: (send: () => Promise<Response>) => Promise<Response> = (send) => send(),
+  schedule: (send: () => Promise<Response>, url: URL) => Promise<Response> = (send) => send(),
   signal?: AbortSignal,
 ): Promise<Response> {
   await assertPublicHttpUrl(url.toString());
   const doFetch = await resolveFetch();
-  return schedule(() =>
-    doFetch(url, {
-      redirect: "manual",
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 TownReporter/1.0",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml,text/plain,application/pdf;q=0.8,*/*;q=0.1",
-      },
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
-        : AbortSignal.timeout(10000),
-    }),
+  return schedule(
+    () =>
+      doFetch(url, {
+        redirect: "manual",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 TownReporter/1.0",
+          Accept:
+            "text/html,application/xhtml+xml,application/xml,text/plain,application/pdf;q=0.8,*/*;q=0.1",
+        },
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(10000)])
+          : AbortSignal.timeout(10000),
+      }),
+    url,
   );
 }
 
@@ -190,11 +195,14 @@ export async function fetchPublicHttpTracked(
   url: URL,
   hops = 4,
   signal?: AbortSignal,
+  schedule?: FetchSchedule,
 ): Promise<TrackedFetch> {
   const chain: string[] = [url.toString()];
   async function go(u: URL, left: number): Promise<Response> {
     signal?.throwIfAborted();
-    const res = await fetchPublicHttpOnce(u, undefined, signal);
+    // Every hop -- including each redirect -- goes through the scheduler, so a
+    // redirect cannot be used to slip a second request in beside the first.
+    const res = await fetchPublicHttpOnce(u, schedule, signal);
     if ([301, 302, 303, 307, 308].includes(res.status)) {
       if (left <= 0) throw new Error("Too many redirects");
       const loc = res.headers.get("location");
@@ -214,8 +222,13 @@ export async function fetchPublicHttpTracked(
   }
 }
 
-export async function fetchPublicHttp(url: URL, hops = 4, signal?: AbortSignal): Promise<Response> {
-  const tracked = await fetchPublicHttpTracked(url, hops, signal);
+export async function fetchPublicHttp(
+  url: URL,
+  hops = 4,
+  signal?: AbortSignal,
+  schedule?: FetchSchedule,
+): Promise<Response> {
+  const tracked = await fetchPublicHttpTracked(url, hops, signal, schedule);
   return tracked.response;
 }
 

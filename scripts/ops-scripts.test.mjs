@@ -117,6 +117,12 @@ const REQUIRED = [
   // the machine whose walkthrough is waiting, not in CI.
   "lib-stage.ps1",
   "start-stage.ps1",
+  // What a promotion is made of. lib-promote.ps1 is where the run's own log,
+  // the detached launch of the long steps, the resume point and the fallback
+  // to the previous build live; promote.ps1 dot-sources it before it does
+  // anything at all, so losing it fails at the first line of the one script
+  // that puts a release on the live paper.
+  "lib-promote.ps1",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the

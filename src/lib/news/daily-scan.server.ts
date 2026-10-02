@@ -211,7 +211,16 @@ export async function tickDailyScans(
         );
         if (!stillOwner[0]) return false;
         const sources = await tx.query<any>(
-          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error from sources where newsroom_id=$1 and status='accepted' and id=any($2::int[]) order by id",
+          /*
+            SH-B: the snapshot carries the politeness columns too.
+
+            The unattended scan reads its source list from here rather than
+            from the table, so a snapshot without `retry_after` would hand a
+            parked source straight to the fetch loop -- the one place the desk
+            could still ask a site before the time it asked us to come back.
+            The scan's own skip reads these, so they have to travel with it.
+          */
+          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,retry_after,blocked_at,blocked_attempts from sources where newsroom_id=$1 and status='accepted' and id=any($2::int[]) order by id",
           [p.newsroom_id, p.selected_source_ids],
         );
         if (sources.length !== p.selected_source_ids.length || sources.length > p.source_cap)

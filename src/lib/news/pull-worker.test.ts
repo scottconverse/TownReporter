@@ -107,6 +107,84 @@ describe("durable Pull pipeline", () => {
     assert.equal(result.counters.documentsSaved, 0);
   });
 
+  it("cancels a claim Pull at the boundary, before it opens the page", async () => {
+    /*
+      B8B item 2. A claim's Pull names one page and finishes, so "the next
+      durable boundary" is the moment before the fetch -- and that moment was
+      the one boundary the pipeline did not check. An editor's Cancel arriving
+      here was answered by opening the page anyway.
+
+      THE MUTATION THAT MATTERS: delete `await deps.assertNotCancelled?.()` from
+      the `receipt.sourceUrl` branch of `pull.server.ts` and this case fails on
+      the first assert -- `ingest` runs, and the run completes instead of
+      ending cancelled.
+    */
+    const claim = receipt();
+    claim.sourceUrl = "https://longmontcolorado.gov/record";
+    await assert.rejects(
+      runPullPipeline(claim, {
+        search: async () => assert.fail("a claim Pull runs no search"),
+        ingest: async () => assert.fail("a cancelled claim Pull must not open the page"),
+        stopRequested: async () => false,
+        assertNotCancelled: async () => {
+          throw new Error("Cancelled by the editor.");
+        },
+        saveDocument: async () => assert.fail("nothing is saved after a cancel"),
+        saveReceipt: async () => undefined,
+      }),
+      /Cancelled by the editor/,
+      "the desk's own reason leaves the pipeline rather than becoming a failure line",
+    );
+  });
+
+  it("stops at the query boundary when the Cancel lands after the first search", async () => {
+    /*
+      B8B2. The query loop asks `assertNotCancelled` at the top of every pass,
+      and until now nothing in this file reached that boundary: the claim case
+      below is answered before the loop starts, and every other case either
+      fails the search or has its queries already completed. Delete the
+      `await deps.assertNotCancelled?.()` from the loop and the whole file stays
+      green -- which is the hole this case fills.
+
+      A search Pull spends one search per question, so the boundary that matters
+      is BETWEEN two of them: an editor who pressed Cancel while the first
+      answer was being written must not pay for the second search.
+    */
+    const searched: string[] = [];
+    const statuses: string[] = [];
+    await assert.rejects(
+      runPullPipeline(receipt({ queries: ["first question", "second question"], queryIndex: 0 }), {
+        search: async (query) => {
+          searched.push(query);
+          return {
+            state: "SEARCH_SUCCESS_ZERO_RESULTS",
+            hits: [],
+            provider: "fixture",
+            lineage: [],
+          };
+        },
+        ingest: async () => assert.fail("no page should be opened for a cancelled pull"),
+        stopRequested: async () => false,
+        // The editor's press lands while the first search is being saved.
+        assertNotCancelled: async () => {
+          if (searched.length >= 1) throw new Error("Cancelled by the editor");
+        },
+        saveDocument: async () => undefined,
+        saveReceipt: async (next) => {
+          statuses.push(next.status);
+        },
+      }),
+      /Cancelled by the editor/,
+      "the desk's own reason leaves the pipeline rather than becoming a failure line",
+    );
+    assert.deepEqual(searched, ["first question"], "the second search was never made");
+    assert.equal(
+      statuses.includes("completed"),
+      false,
+      "and nothing says Done for a pull the editor stopped",
+    );
+  });
+
   it("continues from checkpoint indexes without repeating completed documents", async () => {
     const prior = {
       title: "Already saved",

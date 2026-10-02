@@ -111,25 +111,40 @@ const { Harness } = await import(harness);
 
 /* ----------------------------------------------------------------- helpers */
 
+/*
+  The Queue holds ONE TAB PER KEY, and each key's page is the server's own
+  narrowing. Seeding all of them (B8B item 1) is what lets a press be judged
+  against the tab it is supposed to LEAVE and the tab it is supposed to ARRIVE
+  in -- a version of this file that seeded only the Open page would pass with the
+  row still sitting in Open under a status that no longer belongs there.
+*/
+const TAB = (filter) => ["leads", filter, "all", "best", "", 25];
+const OPEN = TAB("open");
+const HELD = TAB("held");
+
 /** One page of the Queue's shape, under the same `["leads"]` prefix Today uses. */
 const seed = (qc, rows) => {
   qc.setQueryData(["leads"], rows);
-  qc.setQueryData(["leads", "open", "all", "best", "", 25], {
-    rows,
-    total: rows.length,
-    counts: {
-      open: rows.filter((r) => r.status !== "held" && r.status !== "killed").length,
-      held: rows.filter((r) => r.status === "held").length,
-      killed: rows.filter((r) => r.status === "killed").length,
-      all: rows.length,
-    },
-  });
+  const counts = {
+    open: rows.filter((r) => r.status !== "held" && r.status !== "killed").length,
+    held: rows.filter((r) => r.status === "held").length,
+    killed: rows.filter((r) => r.status === "killed").length,
+    all: rows.length,
+  };
+  for (const [key, status] of [
+    [OPEN, null],
+    [HELD, "held"],
+  ]) {
+    const page = rows.filter((r) => (status === null ? r.status !== "held" : r.status === status));
+    qc.setQueryData(key, { rows: page, total: page.length, counts: { ...counts } });
+  }
 };
 
 const statusOf = (qc, key, id) =>
   (qc.getQueryData(key)?.rows ?? qc.getQueryData(key))?.find?.((row) => row.id === id)?.status;
 
-const pageOf = (qc) => qc.getQueryData(["leads", "open", "all", "best", "", 25]);
+const pageOf = (qc) => qc.getQueryData(OPEN);
+const idsIn = (qc, key) => (qc.getQueryData(key)?.rows ?? []).map((row) => row.id);
 
 /** A promise whose settlement this test decides. */
 function deferred() {
@@ -213,16 +228,16 @@ test("a Hold moves the row before the desk has answered", async () => {
 
     /*
       THE WHOLE POINT. The call has not answered -- `gate` is still open -- and
-      the lead already reads held in BOTH caches, with the Queue's Open count
-      down and its Held count up. A screen that only changed when the answer
-      arrived would still read "new" here.
+      the lead already reads held in BOTH caches, has LEFT the tab whose server
+      filter no longer matches it, and has arrived in the tab that now does. A
+      screen that only changed when the answer arrived would still read "new"
+      here; a screen that changed the row's status but not its tab would still
+      draw the held lead under Open (B8B item 1).
     */
     assert.equal(statusOf(qc, ["leads"], 7), "held", "Today's array moved at once");
-    assert.equal(
-      statusOf(qc, ["leads", "open", "all", "best", "", 25], 7),
-      "held",
-      "the Queue's page moved at once",
-    );
+    assert.deepEqual(idsIn(qc, OPEN), [], "and it LEFT the Open tab's rows, not only its status");
+    assert.deepEqual(idsIn(qc, HELD), [7], "arriving in the Held tab");
+    assert.equal(statusOf(qc, HELD, 7), "held", "where it reads Held");
     assert.equal(pageOf(qc).counts.open, 0, "and it left the Open count");
     assert.equal(pageOf(qc).counts.held, 1);
 
@@ -262,6 +277,9 @@ test("a failed Hold puts the row back and says why in red", async () => {
       with no sentence is the silent failure FB0 measured.
     */
     assert.equal(statusOf(qc, ["leads"], 7), "new", "the row is back where it was");
+    assert.deepEqual(idsIn(qc, OPEN), [7], "and back in the Open tab's rows");
+    assert.equal(statusOf(qc, OPEN, 7), "new", "reading the status it came in with");
+    assert.deepEqual(idsIn(qc, HELD), [], "out of the tab it never belonged in");
     assert.equal(pageOf(qc).counts.held, 0, "and the counts came back with it");
     assert.equal(pageOf(qc).counts.open, 1);
     const [bar] = toast.toasts;
@@ -311,6 +329,8 @@ test("an Undo moves the row back the way it came", async () => {
   try {
     await page.click();
     assert.equal(statusOf(qc, ["leads"], 7), "new");
+    assert.deepEqual(idsIn(qc, OPEN), [7], "back into the Open tab's rows");
+    assert.deepEqual(idsIn(qc, HELD), [], "and out of the Held tab's");
     assert.equal(pageOf(qc).counts.held, 0, "out of Held");
     assert.equal(pageOf(qc).counts.open, 1, "and back into Open");
   } finally {
@@ -359,6 +379,8 @@ test("one failed press in a fan-out does not put back the ones that took", async
       buttons[1].dispatchEvent(new window.Event("click", { bubbles: true }));
     });
     assert.equal(pageOf(qc).counts.held, 2, "both rows moved");
+    assert.deepEqual(idsIn(qc, OPEN), [], "and both left the Open tab");
+    assert.deepEqual([...idsIn(qc, HELD)].sort(), [1, 2], "both arriving in Held");
 
     // Lead 2 lands, then lead 1 fails.
     await React.act(async () => {});
@@ -366,7 +388,15 @@ test("one failed press in a fan-out does not put back the ones that took", async
 
     assert.equal(statusOf(qc, ["leads"], 1), "new", "the failed row came back");
     assert.equal(statusOf(qc, ["leads"], 2), "held", "the row that took did NOT");
+    assert.deepEqual(idsIn(qc, OPEN), [1], "only the failed row is back under Open");
+    assert.deepEqual(idsIn(qc, HELD), [2], "the one that took stays where it arrived");
     assert.equal(pageOf(qc).counts.held, 1);
+
+    /*
+      THE PER-LEAD UNDO, at the level the tabs see it: lead 1's rollback put its
+      own row back and did NOT drag lead 2's row back out of Held with it -- the
+      failure mode a whole-cache snapshot restore would have.
+    */
   } finally {
     await page.close();
   }

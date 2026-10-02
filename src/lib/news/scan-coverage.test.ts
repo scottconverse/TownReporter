@@ -82,10 +82,21 @@ describe("scan run writes coverage accounting (P0-3)", () => {
       not produce and passed against the reintroduced bug (verified by
       reintroducing the guard). That is the test theater this suite exists to
       prevent, so the check below binds to the two-branch structure itself.
+
+      B8F2 widened the scheduled branch's body: the queued source writes are
+      consumed there too, because that ending is the ONLY one the scheduled lane
+      can reach in which every source failed -- and `commitResults`, the other
+      consumer, is never reached then. The pin follows the code and now holds
+      both halves: the failed run AND the source rows its receipt is about go
+      through the scheduler's own transaction, together.
     */
     const branch = /if \(deps\.scheduledCommit\) \{([\s\S]*?)\} else \{([\s\S]*?)\n {4}\}/.exec(block);
     assert.ok(branch, "the outage write must branch on scheduledCommit with an else");
-    assert.match(branch[1], /deps\.scheduledCommit\(\(writeSql\) => recordFailedRun\(writeSql, error\)\)/, "scheduled path commits through its transaction");
+    assert.match(
+      branch[1],
+      /deps\.scheduledCommit\(async \(writeSql\) => \{[\s\S]*recordFailedRun\(writeSql, error\)[\s\S]*writeQueuedSourceWrites\(writeSql\)/,
+      "the scheduled path commits the failed run AND the queued source writes through its own transaction",
+    );
     assert.match(branch[2], /recordManualFailure\(error\)/, "manual path uses its claim-locked transaction");
     assert.doesNotMatch(
       block,

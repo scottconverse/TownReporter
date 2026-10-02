@@ -47,6 +47,204 @@ import type { HopPlan } from "./investigate.ts";
 /** The visible marker. Quoted in the editor handbook; do not reword silently. */
 export const UNGROUNDED_MARKER = "(not in any capture yet)";
 
+/**
+ * The other half of the same sentence -- FB7, item 5 (A2c X3).
+ *
+ * `UNGROUNDED_MARKER` says "nothing here carries this". This one says the
+ * opposite: every record the line names IS carried by a capture the file
+ * already holds, so a step that asks for it is asking for what is on file.
+ *
+ * A2c found exactly that in the brief's DO THIS NEXT: it asked for the
+ * Colorado Shines licensing record the same round had already captured. The
+ * grounding machinery could already tell the two cases apart -- it just had
+ * no word for the second one, so the stale ask went out unremarked.
+ *
+ * Same convention, deliberately: marked IN PLACE, so the editor still reads
+ * what the brief asked for and sees the answer beside it, rather than the
+ * step being silently deleted.
+ */
+export const ALREADY_ON_FILE_MARKER = "(already on file)";
+
+/** `text` with a trailing marker and the space before it taken back off. */
+const ON_FILE_SUFFIX = ` ${ALREADY_ON_FILE_MARKER}`;
+
+/**
+ * THE WORDS THAT NAME A DOCUMENT (MEDIUM-3, A-B8).
+ *
+ * A next step asks for a RECORD -- a licence, a report, minutes, an agenda, a
+ * permit. This is the vocabulary that says so. It is deliberately a list of
+ * document nouns rather than a model call: the question is whether the line is
+ * asking for a thing the file could hold, and that is a word question.
+ *
+ * A word that is not here is not a record: "Read the Colorado Shines notice
+ * board" is not asking for a document, and a step that asks for nothing in
+ * particular has nothing to be on file.
+ */
+const RECORD_NOUNS = new Set([
+  "agenda",
+  "agendas",
+  "application",
+  "applications",
+  "audit",
+  "audits",
+  "budget",
+  "budgets",
+  "certificate",
+  "certificates",
+  "complaint",
+  "complaints",
+  "contract",
+  "contracts",
+  "correspondence",
+  "document",
+  "documents",
+  "filing",
+  "filings",
+  "form",
+  "forms",
+  "inspection",
+  "inspections",
+  "invoice",
+  "invoices",
+  "licence",
+  "licences",
+  "license",
+  "licenses",
+  "log",
+  "logs",
+  "manual",
+  "manuals",
+  "minutes",
+  "notice",
+  "notices",
+  "ordinance",
+  "ordinances",
+  "order",
+  "orders",
+  "packet",
+  "packets",
+  "permit",
+  "permits",
+  "plan",
+  "plans",
+  "policy",
+  "policies",
+  "record",
+  "records",
+  "report",
+  "reports",
+  "resolution",
+  "resolutions",
+  "return",
+  "returns",
+  "ruling",
+  "rulings",
+  "statement",
+  "statements",
+  "study",
+  "studies",
+  "survey",
+  "surveys",
+  "transcript",
+  "transcripts",
+]);
+
+/** The singular of a record word, so "reports" on one side of the comparison
+ *  answers for "report" on the other. Crude on purpose: these words are a
+ *  closed list and the desk only ever compares them with each other. */
+function recordSingular(word: string): string {
+  if (word.endsWith("ies")) return `${word.slice(0, -3)}y`;
+  if (word.endsWith("s") && !word.endsWith("ss")) return word.slice(0, -1);
+  return word;
+}
+
+/** The record nouns a line asks for, as their singular forms. */
+function recordNounsIn(text: string): string[] {
+  const out = new Set<string>();
+  for (const token of text.split(/[^A-Za-z]+/)) {
+    if (!token) continue;
+    const lower = token.toLowerCase();
+    if (RECORD_NOUNS.has(lower)) out.add(recordSingular(lower));
+  }
+  return [...out];
+}
+
+/**
+ * A year, or a number long enough to be a record's own (a case number, a
+ * parcel). Short numbers are not distinctive -- "the 3 reports" is prose -- and
+ * anything longer is already a SPECIFIC, which the grounding pass above has
+ * checked.
+ */
+const RECORD_NUMBER = /\b\d{4,}\b/g;
+
+/** The years and long numbers in a line, as written. */
+function recordNumbersIn(text: string): string[] {
+  return text.match(RECORD_NUMBER) ?? [];
+}
+
+/**
+ * Is this line asking for a record the file already has?
+ *
+ * THE MARKER SAYS "YOU HAVE THIS DOCUMENT", SO THE DOCUMENT IS WHAT MUST BE
+ * CHECKED (MEDIUM-3, A-B8). The old rule was "the step names at least one
+ * specific and every specific it names is grounded", and every specific the
+ * extractor can see is a NAME, an address, a date or a number -- never the
+ * record itself. So a capture that merely mentioned "Kid City USA Longmont"
+ * made "Request the 2025 inspection reports for Kid City USA Longmont" read as
+ * "(already on file)", and the editor skipped asking for a document the file
+ * does not hold. What had been established was that the NAME was on file.
+ *
+ * Four conditions, and all of them are needed:
+ *
+ *   - It names something that says WHICH record -- a specific, or a year/long
+ *     number -- and every specific it names is GROUNDED.
+ *   - It names the RECORD it is asking for -- a word from `RECORD_NOUNS` --
+ *     and that word is on file too. A step that asks for no document gets no
+ *     marker, because there is nothing to have on file.
+ *   - Every year or long number it names is on file, so "the 2024 report" is
+ *     not marked by a file that holds the 2025 one.
+ *
+ * The first condition is a WEAKER anchor than it used to be, deliberately.
+ * It used to be `findSpecifics(text).length`, and the extractor does not treat
+ * "Kid City USA Longmont" -- an institution, not a person -- as a name, so a
+ * step that named only that could never be marked however much of the record
+ * the file held. A year is something to anchor on too, and it is exactly what
+ * the step in the incident anchors on.
+ *
+ * It is deliberately not a judgement about whether the step is worth doing.
+ * "Read the licence record again" is legitimate work; what is not legitimate
+ * is the brief offering it as the next thing to go and get.
+ */
+export function briefStepAlreadyOnFile(text: string, corpus: GroundingCorpus): boolean {
+  if (!text.trim()) return false;
+  if (text.includes(ALREADY_ON_FILE_MARKER)) return false;
+  const numbers = recordNumbersIn(text);
+  if (!findSpecifics(text).length && !numbers.length) return false;
+  if (ungroundedSpecifics(text, corpus).length) return false;
+  const haystack = normalisedCorpus(corpus);
+  const nouns = recordNounsIn(text);
+  if (!nouns.length) return false;
+  for (const noun of nouns) {
+    // Both forms, because a capture that holds "inspection reports" answers a
+    // step that asks for "the inspection report".
+    if (!containsTokens(haystack, noun) && !containsTokens(haystack, `${noun}s`)) return false;
+  }
+  for (const number of numbers) if (!containsTokens(haystack, number)) return false;
+  return true;
+}
+
+/**
+ * The line with the "already on file" marker appended, when it applies.
+ *
+ * Byte-for-byte unchanged when it does not, so the common case stays invisible
+ * -- the same rule `markUngroundedSpecifics` keeps.
+ */
+export function markAlreadyOnFile(text: string, corpus: GroundingCorpus): string {
+  if (!briefStepAlreadyOnFile(text, corpus)) return text;
+  if (text.endsWith(ALREADY_ON_FILE_MARKER)) return text;
+  return `${text.replace(/\s+$/, "")}${ON_FILE_SUFFIX}`;
+}
+
 /** `text` with a trailing marker and the space before it taken back off. */
 const MARKER_SUFFIX = ` ${UNGROUNDED_MARKER}`;
 
@@ -163,6 +361,61 @@ const SENTENCE_OPENER = new Set([
   "was", "were", "has", "have", "had", "can", "could", "should", "will", "would", "are",
   "get", "use", "try", "follow", "query", "compare", "trace", "run", "list", "add",
 ]);
+
+/**
+ * The words that TITLE a person, and the words that qualify the title.
+ *
+ * N1 of the batch-7 re-audit. `INSTITUTION_WORD` above stopped a public body
+ * being read as an invented person, and it over-corrected: a run containing one
+ * was rejected whole, and `mayor`, `sheriff`, `clerk`, `superintendent`,
+ * `secretary`, `attorney`, `treasurer` and `governor` are all in it. "Title +
+ * invented name" is the commonest shape an invented official takes in civic
+ * copy -- `Mayor Jane Doe approved the permit.` -- and every one of those came
+ * back unmarked, so the desk could search for, and write down, a person who
+ * does not exist.
+ *
+ * A title is the opposite of an institution here: it says a PERSON is coming.
+ * So it is taken off the FRONT of the run and the words behind it are judged --
+ * and only when at least two of them are left, because "the Mayor" is a title
+ * and no person, and "Mayor Jane" names one word and is not the full name a
+ * marker is for.
+ */
+const PERSON_TITLE = new Set([
+  "mr", "mrs", "ms", "dr", "prof", "rev", "hon", "sen", "rep", "gov", "sgt", "lt", "capt", "col",
+  "gen", "maj", "adm", "supt", "jr", "sr",
+  "mayor", "sheriff", "superintendent", "clerk", "treasurer", "secretary", "attorney", "governor",
+  "senator", "representative", "judge", "justice", "chief", "commissioner", "councilmember",
+  "councilman", "councilwoman", "alderman", "president", "officer", "deputy", "marshal",
+  "constable", "warden", "principal", "pastor", "rabbi", "coach", "director", "comptroller",
+  "auditor", "trustee", "spokesman", "spokeswoman", "spokesperson",
+]);
+
+/**
+ * The words that sit between a title and the name it titles -- "County Clerk
+ * Jane Doe" -- or in front of it. They are skipped on the way to the title, and
+ * they never qualify a name on their own: "City of Longmont" has no title in
+ * it, so nothing is stripped and it stays the institution it is.
+ */
+const TITLE_QUALIFIER = new Set([
+  "county", "city", "town", "village", "state", "district", "federal", "assistant", "acting",
+  "interim", "former", "deputy", "chief",
+]);
+
+/** The words of `raw` that name the person, with any title in front taken off. */
+function wordsAfterTitle(words: readonly string[]): readonly string[] {
+  let at = 0;
+  let titleEnd = -1;
+  while (
+    at < words.length &&
+    (PERSON_TITLE.has(words[at]!) || TITLE_QUALIFIER.has(words[at]!) || NOT_A_NAME.has(words[at]!))
+  ) {
+    if (PERSON_TITLE.has(words[at]!)) titleEnd = at + 1;
+    at += 1;
+  }
+  if (titleEnd < 0) return words;
+  const named = words.slice(titleEnd);
+  return named.length >= 2 ? named : words;
+}
 
 /** "searched" is "search" with a suffix, and opens a sentence just the same. */
 function isSentenceOpener(word: string): boolean {
@@ -418,11 +671,15 @@ export function placeCorpus(place: {
  * that name must be gone from the query, not merely marked. See M1 of the
  * pre-merge audit.
  */
-export function stripMarkedSpecifics(text: string): string {
-  if (!text.includes(UNGROUNDED_MARKER)) return text;
-  const spans = findSpecifics(text).filter((specific) =>
-    text.startsWith(` ${UNGROUNDED_MARKER}`, specific.index + specific.text.length),
+function markedSpans(text: string): Specific[] {
+  if (!text.includes(UNGROUNDED_MARKER)) return [];
+  return findSpecifics(text).filter((specific) =>
+    text.startsWith(MARKER_SUFFIX, specific.index + specific.text.length),
   );
+}
+
+export function stripMarkedSpecifics(text: string): string {
+  const spans = markedSpans(text);
   if (!spans.length) return text;
   let out = text;
   for (let i = spans.length - 1; i >= 0; i--) {
@@ -431,6 +688,121 @@ export function stripMarkedSpecifics(text: string): string {
     out = `${out.slice(0, specific.index)}${out.slice(end)}`;
   }
   return out;
+}
+
+/**
+ * The specifics in this text that wear the marker, in the order they were
+ * written.
+ *
+ * The other half of `stripMarkedSpecifics`: before a marked span can be taken
+ * out of the text the editor is about to read, the editor has to be told what
+ * it said. See `N3` in dark.ts -- a specific that leaves the Dark Desk is
+ * listed in the lead's notes rather than silently deleted.
+ */
+export function markedSpecifics(text: string): string[] {
+  return markedSpans(String(text ?? "")).map((specific) => specific.text);
+}
+
+/**
+ * A marker the writer cut in half, hanging off the end of its own text.
+ *
+ * A marked name is `slice`d to fit its column (200 characters for a signal's
+ * name, 240 for a frontier label), and a slice that lands inside the marker
+ * leaves "(not in a" -- which neither stripper below can pair with the specific
+ * it belonged to, and which reads as a typo rather than as the note it was.
+ * Only a TRAILING fragment is cut: a "(" in the middle of a sentence is a
+ * bracket, not a broken marker.
+ */
+function partialMarkerAt(text: string): number {
+  const at = text.lastIndexOf("(");
+  if (at === -1) return -1;
+  const tail = text.slice(at);
+  return tail.length >= 5 && UNGROUNDED_MARKER.startsWith(tail) ? at : -1;
+}
+
+function cutPartialMarker(text: string): string {
+  const at = partialMarkerAt(text);
+  return at === -1 ? text : text.slice(0, at);
+}
+
+/**
+ * The same text with every marked specific and every marker taken out, for a
+ * reader who is NOT the Dark Desk's own desk.
+ *
+ * `stripMarkedSpecifics` takes the specific with its marker; a marker whose
+ * specific the reader could not pair with a span (a value cut in half before it
+ * was written down) is taken by `stripUngroundedMarker`, and the fragment of a
+ * marker a column cut in half is taken by `cutPartialMarker`. All three, in
+ * that order, is what "this text may leave the Dark Desk" means -- see
+ * `groundedHeadline`.
+ */
+export function stripUngroundedNotes(text: string): string {
+  return cutPartialMarker(stripUngroundedMarker(stripMarkedSpecifics(String(text ?? ""))));
+}
+
+/**
+ * Words a headline may not END on.
+ *
+ * A marked specific sits where the model put it, and taking it out of
+ * "Operator transition at 1749 Main Street (not in any capture yet)" leaves
+ * "Operator transition at" -- a headline that stops mid-phrase reads as a
+ * truncation, and the one thing the editor must not read here is a sentence the
+ * desk broke.
+ */
+const HEADLINE_TAIL = new Set([
+  "at", "in", "on", "of", "for", "to", "by", "with", "from", "into", "onto", "over", "under",
+  "about", "near", "and", "or", "the", "a", "an", "its", "his", "her", "their", "that", "this",
+  "then", "than", "as", "per", "via", "was", "were", "is", "are", "had", "has", "have",
+]);
+
+/**
+ * A lead headline built from a signal's own name, with the Dark Desk's marker
+ * and the ungrounded specific it marks taken out.
+ *
+ * N3 of the batch-7 re-audit. M1 started marking a signal's `name`, which is
+ * right -- the name is model prose like every other field of the row -- but the
+ * name is also what `sendDarkSignalToQueueFor` writes as the lead's HEADLINE,
+ * so the marker walked out of the Dark Desk and into the Queue, where the
+ * Draft button, the duplicate check and the story page all start from it. The
+ * rule is that the marker never leaves the Dark Desk, and the trade is a fair
+ * one: the editor gets a headline that is true and a note saying what was
+ * dropped, rather than a headline that is honest about its own uncertainty on a
+ * screen that has no way to render it.
+ *
+ * The remainder is cut at the FIRST marked specific rather than spliced around
+ * it: the words after it belong to a sentence whose subject the desk has just
+ * said no capture carries, and "The lease at ended" is worse than "The lease".
+ * Returns "" when that leaves nothing a headline can be -- a name that was only
+ * ever the invented address -- and the caller falls back to the lead's own
+ * grounded subject.
+ */
+export function groundedHeadline(text: string): string {
+  const raw = String(text ?? "");
+  const marked = markedSpans(raw);
+  let kept: string;
+  if (marked.length) {
+    kept = raw.slice(0, marked[0]!.index);
+  } else {
+    /*
+      The marker a column cut in half (`cutPartialMarker`). The specific it was
+      attached to is still in the text and still true -- nothing here carries
+      it -- so the cut goes at the START of that specific, which is exactly
+      what a whole marker would have done. Without this the fragment would be
+      dropped and the invented address would stay, unmarked, in a headline.
+    */
+    const partial = partialMarkerAt(raw);
+    const before = partial === -1 ? raw : raw.slice(0, partial);
+    const spans = partial === -1 ? [] : findSpecifics(before);
+    kept = spans.length ? before.slice(0, spans[spans.length - 1]!.index) : before;
+  }
+  const words = stripUngroundedNotes(kept).replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  while (words.length) {
+    const last = words[words.length - 1]!.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+    if (!HEADLINE_TAIL.has(last)) break;
+    words.pop();
+  }
+  const out = words.join(" ").replace(/[\s,;:.–—-]+$/u, "").trim();
+  return /[\p{L}\p{N}]{2,}/u.test(out) ? out : "";
 }
 
 /** Is this one specific present in the corpus, however either side spells it? */
@@ -519,16 +891,18 @@ function isNameRun(raw: string): boolean {
  * was wrong.
  *
  * What is left is the given-surname shape: two or more capitalised words, none
- * of them an institution word, not opening with a sentence's verb. The paper's
- * own town and state are handled where the corpus is (see `GroundingCorpus`),
+ * of them an institution word, not opening with a sentence's verb -- judged
+ * after any title in front of the name is taken off (`wordsAfterTitle`), so
+ * "Mayor Jane Doe" is a person while "Governor" is not one. The paper's own
+ * town and state are handled where the corpus is (see `GroundingCorpus`),
  * because this function has no settings to read.
  */
 function isPersonNameRun(raw: string): boolean {
-  const words = runWords(raw);
-  if (words.length < 2) return false;
-  if (!words.some((word) => !NOT_A_NAME.has(word))) return false;
-  if (words.some((word) => INSTITUTION_WORD.has(word))) return false;
-  if (isSentenceOpener(words[0]!)) return false;
+  const named = wordsAfterTitle(runWords(raw));
+  if (named.length < 2) return false;
+  if (!named.some((word) => !NOT_A_NAME.has(word))) return false;
+  if (named.some((word) => INSTITUTION_WORD.has(word))) return false;
+  if (isSentenceOpener(named[0]!)) return false;
   return true;
 }
 
@@ -542,7 +916,17 @@ function isPersonNameRun(raw: string): boolean {
  * period only cuts when the token before it is a word of two letters or more
  * and carries no period of its own. "P." and "U.S." therefore survive, and
  * "Shines." does not.
+ *
+ * N1 of the batch-7 re-audit: an HONORIFIC is not a sentence end either. "Dr.",
+ * "Sen." and "Gov." are two-letter tokens with a period, so `Dr. Jane Doe`
+ * was cut down to "Dr" before the name was ever judged and the run was skipped
+ * for being one word long -- the title hid the person a second time, from a
+ * different direction.
  */
+const HONORIFIC_TAIL = new Set([
+  "dr", "mr", "mrs", "ms", "sen", "rep", "gov", "sgt", "lt", "st", "jr", "sr", "prof", "rev", "hon",
+]);
+
 function cutAtSentenceEnd(match: Match): Match {
   const text = match.text;
   for (let at = text.indexOf("."); at !== -1; at = text.indexOf(".", at + 1)) {
@@ -551,6 +935,7 @@ function cutAtSentenceEnd(match: Match): Match {
     const token = before.slice(before.search(/\S+$/));
     const bare = token.replace(/\.+$/, "");
     if (bare.length < 2 || bare.includes(".")) continue;
+    if (HONORIFIC_TAIL.has(bare.toLowerCase())) continue;
     return { ...match, text: before, end: match.index + before.length };
   }
   return match;
@@ -746,10 +1131,7 @@ export function isDurableTextGrounded(text: string, corpus: GroundingCorpus): bo
  * the marker; the rest keep it.
  */
 export function unmarkGroundedSpecifics(text: string, corpus: GroundingCorpus): string {
-  if (!text.includes(UNGROUNDED_MARKER)) return text;
-  const marked = findSpecifics(text).filter((specific) =>
-    text.startsWith(MARKER_SUFFIX, specific.index + specific.text.length),
-  );
+  const marked = markedSpans(text);
   let out = text;
   for (let i = marked.length - 1; i >= 0; i--) {
     const specific = marked[i]!;

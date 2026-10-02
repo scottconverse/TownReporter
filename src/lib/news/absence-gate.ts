@@ -219,6 +219,26 @@ const PHRASE_CONTINUATION = new Set([
   "of", "in", "for", "and", "to", "on", "at", "by", "with", "from", "de", "del", "van", "von",
 ]);
 
+/**
+ * The single capitalised words that carry on a name after "U.S.".
+ *
+ * A short list of the ones an American civic beat prints, and nothing else --
+ * see the N5 note in `continuesAbbreviation` for why a list is the only thing
+ * that can decide this case. Everything not here is still read as the subject
+ * of a new sentence, which is the safe answer: a wrongly split sentence costs
+ * one rewrite, and a wrongly merged one rewrites a claim the story did not make.
+ */
+const US_NAME_CONTINUATION = new Set([
+  "bank",
+  "steel",
+  "cellular",
+  "army",
+  "navy",
+  "census",
+  "postal",
+  "airways",
+]);
+
 /** Weekday and month names: "9 a.m. Monday" is one sentence, not two. */
 const WEEKDAY_MONTH = new Set([
   "monday",
@@ -382,6 +402,16 @@ function continuesAbbreviation(previous: string, part: string): boolean {
   */
   if (/u\.s(?:\.a)?\.$/i.test(tail)) {
     if (!capitalised) return true;
+    /*
+      N5 of the batch-7 re-audit: the names a bare "U.S." introduces on a civic
+      beat, which the general rule cannot tell from a new sentence's subject.
+      "U.S. Bank said it would close the branch." split after "U.S." and an
+      absence rewrite replaced half a sentence about a bank. The general rule
+      wants a NOUN PHRASE that keeps going -- "U.S. Department of Agriculture"
+      has "of" after "Department" -- and a single-word name has nothing after it
+      to give it away, so the ones an American paper actually prints are named.
+    */
+    if (US_NAME_CONTINUATION.has(lower)) return true;
     if (SENTENCE_OPENERS.has(lower)) return false;
     const after = part.trimStart().match(/[\p{L}'’.]+/gu) ?? [];
     if (after.length >= 2 && /^[A-Z]/.test(after[1]!)) return true;

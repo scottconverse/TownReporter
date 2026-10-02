@@ -89,6 +89,28 @@ function rowFor(url) {
     .filter({ has: page.locator(`a[href="${url}"]`) });
 }
 
+/**
+ * Switch the list to one group and wait for THAT group's page, not the last
+ * one's.
+ *
+ * The list keeps the tab that was on screen while the next tab's page loads
+ * (`placeholderData: keepPreviousData`, CZ-long-lists part 1d), and only one
+ * group is drawn at a time -- so an instant after the press the PREVIOUS tab's
+ * rows are on screen under the NEW tab's heading; clicking "Rejected" shows the
+ * On-watch row for a moment. A row assertion made then passes against a row
+ * that is not in that group at all, which is exactly how this walk used to
+ * report a Remove that never happened.
+ *
+ * The group's own count is the thing that only arrives with the new page, so
+ * the count the press is expected to produce is what this waits for.
+ */
+async function openGroup(label, count) {
+  await page.getByRole("button", { name: new RegExp(`^${label} · `) }).click();
+  await page
+    .getByRole("button", { name: `${label} · ${count}`, exact: true })
+    .waitFor({ timeout: 30_000 });
+}
+
 async function theScreenRenders() {
   await page.goto(`${base}/desk/sources`, { waitUntil: "networkidle" });
   await page
@@ -153,13 +175,33 @@ async function droppingThenRestoringUpdatesTheList() {
   // disclosure the other desks use. (A paused row draws Resume + Remove
   // directly; the table rows Suggested and Rejected use say "Drop".)
   await row.locator("details.row-more > summary").click();
-  await row
-    .locator(".row-more-panel")
-    .getByRole("button", { name: "Remove", exact: true })
-    .click();
+  const remove = row.locator(".row-more-panel");
+
+  /*
+    FB7, item 1 took Remove off one press and gave it a confirm, so the first
+    press only arms it. `Keep` is the arm's own way out and it is asserted
+    here, because a confirm whose Cancel still removes the source would be a
+    confirm in name only.
+  */
+  await remove.getByRole("button", { name: "Remove", exact: true }).click();
+  await remove
+    .getByRole("button", { name: "Yes, remove", exact: true })
+    .waitFor({ timeout: 30_000 });
+  await remove.getByRole("button", { name: "Keep", exact: true }).click();
+  await remove.getByRole("button", { name: "Remove", exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByRole("button", { name: "On watch · 1", exact: true }).waitFor({ timeout: 30_000 });
+  await rowFor(sourceUrl).waitFor({ timeout: 30_000 });
+  step("Remove arms, Keep leaves the source where it was, and only the second press removes");
+
+  await remove.getByRole("button", { name: "Remove", exact: true }).click();
+  await remove.getByRole("button", { name: "Yes, remove", exact: true }).click();
+  // FB7, item 1 also put the way back on the done toast, which is this press's
+  // own undo and lasts as long as the toast does.
+  await page.getByRole("button", { name: "Undo", exact: true }).waitFor({ timeout: 30_000 });
+  step("removing offers an Undo on the toast that says it removed");
 
   // Rejecting moves the row out of On watch and into Rejected.
-  await page.getByRole("button", { name: /^Rejected / }).click();
+  await openGroup("Rejected", 1);
   await page.getByRole("heading", { name: "Rejected", exact: true }).waitFor({ timeout: 30_000 });
   const rejectedSection = page.locator("section.src-sec", { hasText: "Rejected" });
   await rejectedSection
@@ -168,7 +210,7 @@ async function droppingThenRestoringUpdatesTheList() {
   step("Remove takes the source off On watch and files it under Rejected");
 
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByRole("button", { name: /^Rejected / }).click();
+  await openGroup("Rejected", 1);
   const stillRejected = page
     .locator("section.src-sec", { hasText: "Rejected" })
     .locator("tr.lead-tr, .astra-row.src", { hasText: sourceUrl });
@@ -176,7 +218,7 @@ async function droppingThenRestoringUpdatesTheList() {
   step("the rejected state survives a reload too");
 
   await stillRejected.getByRole("button", { name: "Accept" }).click();
-  await page.getByRole("button", { name: /^On watch / }).click();
+  await openGroup("On watch", 1);
   await page.getByRole("heading", { name: "On watch", exact: true }).waitFor({ timeout: 30_000 });
   await rowFor(sourceUrl).waitFor({ timeout: 30_000 });
   step("Accept moves the source back onto the watch list");

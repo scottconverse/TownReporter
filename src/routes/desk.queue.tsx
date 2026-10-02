@@ -627,8 +627,11 @@ function QueuePage() {
     FB0-Report Table B, Queue, first row: "keyboard triage -- **missing
     entirely** -- no `onKeyDown` in the file, against README:468". The rule is
     `desk-triage.ts`, the same one Today binds, so J means the same thing on
-    both screens and the stand-downs (typing, modifiers) are the same too; "?"
-    is the shell's and is already bound on every desk screen.
+    both screens and the stand-downs are the same too -- typing, a modifier, a
+    focused control, and any dialog or open `<details>` menu over the list (N4
+    of the batch-7 re-audit; the hook asks the document for that one itself, so
+    this screen does not have to name its own dialogs); "?" is the shell's and
+    is already bound on every desk screen.
 
     `cursor` is an index into the rows ON SCREEN, and it is drawn as `.sel` on
     the row the way Today's is. It is clamped on read rather than stored clamped,

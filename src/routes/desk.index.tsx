@@ -75,6 +75,7 @@ import {
   editorStatus,
   flakyFailureCopy,
   followUpsRailCopy,
+  keepsFailingNote,
   openLeads,
   parseFailedSources,
   printedDupChip,
@@ -93,6 +94,7 @@ import {
   deskDraftState,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
@@ -100,6 +102,7 @@ import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
+import { wireScanLine } from "@/lib/news/scan-wire-line";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
@@ -642,6 +645,29 @@ function DeskHome() {
     .map((s) => {
       const failure = failReasonFor(s);
       if (failure) {
+        /*
+          SH0-3, on the desk home. THE LABEL IS THE ONLY THING THAT CHANGES --
+          no fifth state, no re-sort: a source that keeps failing is a source
+          that could not be checked, so it keeps `rank: 0` and the same place
+          at the top of the wire it has always had. What the editor gains is
+          the word "Keeps" and the two facts behind it, which is the whole
+          difference between "the last pass had a bad minute" and "this has
+          been true for four days".
+        */
+        if (keepsFailing(s)) {
+          return {
+            s,
+            tone: "fail",
+            label: "Keeps failing",
+            note: keepsFailingNote({
+              count: s.consecutive_failures ?? 0,
+              lastError: s.last_error,
+              url: s.url,
+              firstFailedAt: s.failure_streak_started_at,
+            }),
+            rank: 0,
+          };
+        }
         return { s, tone: "fail", label: "Could not check", note: failure, rank: 0 };
       }
       if (citedCount.has(s.id)) {
@@ -892,7 +918,10 @@ function DeskHome() {
   /*
     The triage keys are `desk-triage.ts` now -- the same rule the Queue binds,
     so J means the same thing on both screens and a key added to one is added to
-    both. Today's own stand-downs (typing, modifiers) live there with it.
+    both. Today's own stand-downs live there with it: typing, a modifier, a
+    focused control, and any dialog, modal or open `<details>` menu over the
+    list (N4 of the batch-7 re-audit -- the hook checks the document for that
+    itself, so a dialog this screen opens by a name it forgot is still covered).
   */
   useTriageKeys((action) => {
     const lead = newLeads[movedIndex(cursor, 0, newLeads.length)];
@@ -2274,7 +2303,17 @@ function DeskHome() {
           <section className="wirecol gc-wire">
             <SecHead
               title="The wire"
-              sub={last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet"}
+              /*
+                FB7, item 3. A scan in flight owns the heading. It used to say
+                "No scans yet" whenever no scan had FINISHED, so the panel read
+                "No scans yet" directly above a job card announcing that one was
+                running. `wireScanLine` builds the sentence from the job's own
+                step, so the two lines on this panel cannot disagree.
+              */
+              sub={
+                wireScanLine(scanJob) ??
+                (last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet")
+              }
             />
             {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
             {/*

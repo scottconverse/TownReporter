@@ -68,6 +68,13 @@ export type EditorialRow = {
    * appendix is incomplete, which is what blocks publication.
    */
   integrity_notes?: string | null;
+  /**
+   * `drafts.research_json`, carried so the finished row can say when the
+   * material behind the piece was cut for length (unit B8P). The note lives in
+   * that blob, written when the piece was filed, so the row shows it on every
+   * load rather than only while the job is open.
+   */
+  research_json?: string | null;
 };
 
 export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
@@ -109,6 +116,7 @@ export const listEditorials = createServerFn({ method: "GET" })
              r.created_at, r.finished_at,
              d.headline,
              d.integrity_notes,
+             d.research_json,
              case when d.body is null then null
                   else array_length(regexp_split_to_array(trim(d.body), '\\s+'), 1)
              end as words,

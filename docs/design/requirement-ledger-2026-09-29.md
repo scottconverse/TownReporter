@@ -6,7 +6,7 @@
 
 The accepted handoff sets the decision order: owner [DECISIONS](handoff-2026-09-26/DECISIONS.md), then [design-system guide](handoff-2026-09-26/design-system/README.md), then prototypes and captures. The [screen specification](handoff-2026-09-26/README.md) supplies detail under those decisions. Prototypes and screenshots illustrate; they do not override locked decisions. The supplied ZIP is an earlier handoff snapshot, and its implementation report describes v0.6.80; it is not current implementation evidence.
 
-The [0.6.81 release record](../releases/0.6.81.md) says the separate `design/SPEC-GAPS-0681.md` has 64 entries across CW 20, CX 12, CY 10, CZ 8, DA 4, CY2 4, CW2 4, and DA2 2. That source file and its row dispositions are unavailable in the materials reviewed for this ledger. The groups below are **coverage summaries created for this document**, not reconstructed entries, owner decisions, closures, or replacements for those 64 rows. Reconcile row by row only after recovering the original file.
+The [0.6.81 release record](../releases/0.6.81.md) says the separate `design/SPEC-GAPS-0681.md` has 64 entries across CW 20, CX 12, CY 10, CZ 8, DA 4, CY2 4, CW2 4, and DA2 2. The source file was recovered on 2026-10-01 and is committed as [SPEC-GAPS-0681.md](SPEC-GAPS-0681.md) (all 64 entries word for word, with a status for each); it was not available when this ledger was written. The groups below are **coverage summaries created for this document**, not reconstructed entries, owner decisions, closures, or replacements for those 64 rows. Reconcile row by row only after recovering the original file.
 
 The audit status consulted here was recorded against v0.6.82 commit `7cff3d6cb85b7c2e25087b7a90e021af511694e2`; that separate audit folder is not in this repository. Its source, test, and live findings are not a fresh full audit of `origin/main`. The narrow merged updates below are identified separately. A present source path means implementation evidence only; it does not prove user acceptance. Recorded test results are attributed to their audit or PR, not represented as rerun for this ledger.
 
@@ -29,7 +29,7 @@ The audit status consulted here was recorded against v0.6.82 commit `7cff3d6cb85
 
 ## Reconciliation holds
 
-- Recover the exact `SPEC-GAPS-0681.md`; until then its 64 meanings, owners, and dispositions remain unknown. Do not map these coverage groups to those rows by inference.
+- `SPEC-GAPS-0681.md` is now recovered ([docs/design/SPEC-GAPS-0681.md](SPEC-GAPS-0681.md)). Its 64 entries still wait for owner rulings; do not map these coverage groups to those rows by inference, and recheck every RECHECK entry before putting it to the owner.
 - Resolve whether follow-up Stop cancels current work or only prevents future runs.
 - Reconcile city-level location/trust signals with the aggregate-only privacy rules before changing data collection.
 - Run representative signed-in desk, real-provider, publication, meeting-revision, and legal-removal acceptance only under the applicable owner plan.

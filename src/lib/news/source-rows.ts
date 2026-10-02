@@ -39,7 +39,56 @@ export type SourceRowLike = {
   tier: string;
   status: string;
   last_error: string | null;
+  /** The failure streak (migration 0115, unit SH0-1). Optional because a
+   *  reader that selects only the watch-list columns has no answer -- and a
+   *  missing answer is not a streak, so `keepsFailing` reads it as zero. */
+  consecutive_failures?: number | null;
 };
+
+/**
+ * HOW MANY SCANS IN A ROW BEFORE THE ROW SAYS SOMETHING (SH0-2).
+ *
+ * Three, because two is a bad afternoon: a site is down for a deploy, a feed
+ * is briefly 503, a page times out once -- and the scan runs twice a day, so
+ * two failures can be an hour apart. Three consecutive FAILED ATTEMPTS is the
+ * first point at which "this is a pattern" is a claim the desk can support,
+ * and the label is deliberately about our own failure to read the page, never
+ * about the site being broken.
+ *
+ * ONLY ATTEMPTS COUNT. A source the pass never reached -- past `SCAN_WATCH_CAP`,
+ * or outside the sections a section scan selected -- keeps its count frozen
+ * rather than advancing, because the desk did not try and cannot report a
+ * failure it did not have.
+ */
+export const KEEPS_FAILING_AFTER = 3;
+
+/**
+ * Is this the row that gets the "Keeps failing" flag?
+ *
+ * TWO CONDITIONS, and the second is the one that is easy to forget: the desk
+ * tried and failed at least `KEEPS_FAILING_AFTER` times in a row -- that is
+ * what the count means, there is no separate "did it fail" test -- and the
+ * source is one the desk is STILL TRYING.
+ *
+ * A PAUSED SOURCE IS NEVER FLAGGED. Pause means "do not fetch this on a
+ * schedule", so a paused row that still carried a streak would be told it
+ * "keeps failing" when nothing is being tried at all -- a false sentence, and
+ * one that would only ever get falser. `setSourceStatus` clears the count when
+ * the status moves, so this guard and that write say the same thing twice on
+ * purpose: the write makes it true, the guard keeps it true if anything ever
+ * writes around the write.
+ *
+ * A source with no recorded streak (null, or a row read by a select that did
+ * not ask for the column) reads as zero and is never flagged. The desk must not
+ * claim a history it did not observe.
+ */
+export function keepsFailing(source: {
+  status: string;
+  consecutive_failures?: number | null;
+}): boolean {
+  if (source.status !== "accepted") return false;
+  return (source.consecutive_failures ?? 0) >= KEEPS_FAILING_AFTER;
+}
 
 /**
  * "On watch" is two statuses, not one (the route's own note, kept here because

@@ -53,29 +53,11 @@ test("the migration runner imports nothing that could wipe the database", () => 
  * It may not empty a table. `migrations/` is applied automatically on every
  * build, so anything here runs against production without a human present.
  *
- * ONE EXEMPTION, and only one shape of one. GR-C removed Grok (xAI) as a
- * provider, and with it the `xai_oauth_connections` table's whole reason to
- * exist: the SuperGrok device-code sign-in, the encrypted credential it held,
- * and the code that read it are all deleted in the same change. The brief for
- * that unit asks for the table itself to go, so `0112` drops it. That is a
- * DROP TABLE, which this gate exists to stop -- so the gate has to say which
- * drop it accepts rather than being quietly loosened or deleted.
- *
- * The exemption is a table NAME, not a file: a migration listed here may drop
- * exactly the tables named beside it, and nothing else. `0112` is checked below
- * to contain no TRUNCATE and no DELETE FROM, so it still cannot empty anything
- * -- it can only remove the table it is listed for. A future migration that
- * drops a table with live rows is not covered by this entry and still fails.
+ * THERE IS NO EXEMPTION. GR-C once had one for `DROP TABLE xai_oauth_connections`
+ * in 0112; the production auditor showed why that was wrong (see the live-
+ * release rule below) and the drop moved to docs/design/DEFERRED-MIGRATIONS.md.
  */
-const TABLES_A_MIGRATION_MAY_DROP = new Map([
-  [
-    "0112_drop_xai_oauth_connections.sql",
-    {
-      tables: ["xai_oauth_connections"],
-      why: "GR-C: the table held only the removed SuperGrok credential; its reader, transport and sign-in are deleted in the same change",
-    },
-  ],
-]);
+const DROP_GATE_EXEMPT = new Map();
 
 test("no migration file empties a table", () => {
   const dir = join(ROOT, "migrations");
@@ -83,40 +65,62 @@ test("no migration file empties a table", () => {
   assert.ok(files.length > 0, "expected migration files");
   for (const name of files) {
     const sql = readFileSync(join(dir, name), "utf8").replace(/--.*$/gm, "");
-    const exemption = TABLES_A_MIGRATION_MAY_DROP.get(name);
+    if (DROP_GATE_EXEMPT.has(name)) continue;
     for (const re of DESTRUCTIVE) {
-      const drops = re.source.includes("DROP");
-      if (drops && exemption) {
-        // The exemption covers `DROP TABLE <name>` and nothing else: every drop
-        // in the file must name a table this migration is allowed to remove.
-        const named = [...sql.matchAll(/\bDROP\s+(TABLE|DATABASE|SCHEMA)\b/gi)];
-        assert.equal(named.length, 1, `${name} may drop exactly one thing; found ${named.length}`);
-        assert.match(
-          named[0][1].toUpperCase(),
-          /^TABLE$/,
-          `${name} is exempt for DROP TABLE only (${exemption.why})`,
-        );
-        const targets = [...sql.matchAll(/\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)];
-        assert.deepEqual(
-          targets.map((match) => match[1].toLowerCase()),
-          exemption.tables,
-          `${name} may drop only ${exemption.tables.join(", ")}`,
-        );
-        continue;
-      }
+      // Historical migrations (before the live release) may carry old drops;
+      // they are judged by the live-release rule below, not here.
+      if (re.source.includes("DROP") && migrationNumber(name) <= LIVE_RELEASE_LAST_MIGRATION) continue;
       assert.doesNotMatch(sql, re, `${name} must not contain ${re}`);
     }
   }
 });
 
-test("a migration that drops a table must be exempt by exact table name", () => {
-  // The other direction of the same gate: if a DROP TABLE appears in a file
-  // this test does not name, the loop above already fails -- and if the
-  // exemption outlives the migration it names, that is a hole, so it fails
-  // here. An exemption nobody has to re-justify is how "temporarily" becomes
-  // permanent.
+/**
+ * THE LIVE-RELEASE RULE (owner, 2026-10-01). `npm run build` runs the
+ * migrations BEFORE the new build starts, and a promote that fails after that
+ * point puts the PREVIOUS build back. So a migration in a rollout must leave
+ * everything the live release's schema had in place: nothing dropped, renamed,
+ * retyped, emptied, or made stricter for a writer that does not know about it.
+ * The live release is batch 4 (32ef34ea), whose last migration is 0108. Move
+ * LIVE_RELEASE_LAST_MIGRATION forward only when a new release is actually live.
+ */
+const LIVE_RELEASE_LAST_MIGRATION = 108;
+
+function migrationNumber(name) {
+  const m = /^(\d+)/.exec(name);
+  return m ? Number(m[1]) : 0;
+}
+
+const BREAKS_THE_PREVIOUS_BUILD = [
+  [/\bDROP\s+(TABLE|COLUMN|CONSTRAINT|TYPE|VIEW|SCHEMA)\b/i, "drops something the previous build may read"],
+  [/\bRENAME\b/i, "renames something the previous build reads"],
+  [/\bALTER\s+COLUMN\s+\S+\s+(SET\s+DATA\s+)?TYPE\b/i, "retypes a column the previous build reads"],
+  [/\bALTER\s+COLUMN\s+\S+\s+SET\s+NOT\s+NULL\b/i, "makes an existing column stricter for the previous build's writes"],
+  [/\bADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?\S+\s+[^,;]*\bNOT\s+NULL\b(?![^,;]*\bDEFAULT\b)/i, "adds a NOT NULL column with no default, so the previous build's inserts fail"],
+  [/\bDELETE\s+FROM\b/i, "deletes rows"],
+  [/\bTRUNCATE\b/i, "empties a table"],
+];
+
+test("no migration after the live release breaks the previous build", () => {
   const dir = join(ROOT, "migrations");
-  for (const name of TABLES_A_MIGRATION_MAY_DROP.keys()) {
-    assert.ok(existsSync(join(dir, name)), `${name} is exempt from the drop gate but no longer exists`);
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith(".sql") && migrationNumber(f) > LIVE_RELEASE_LAST_MIGRATION)
+    .sort();
+  assert.ok(files.length > 0, "expected migrations after the live release");
+  for (const name of files) {
+    const sql = readFileSync(join(dir, name), "utf8").replace(/--.*$/gm, "");
+    for (const [re, why] of BREAKS_THE_PREVIOUS_BUILD) {
+      assert.doesNotMatch(sql, re, `${name} ${why}; a failed promote would put the old build back on this database`);
+    }
   }
+});
+
+test("the deferred Grok-table drop is not in any migration that ships", () => {
+  const dir = join(ROOT, "migrations");
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".sql") && migrationNumber(f) > LIVE_RELEASE_LAST_MIGRATION)) {
+    const sql = readFileSync(join(dir, name), "utf8").replace(/--.*$/gm, "");
+    assert.doesNotMatch(sql, /xai_oauth_connections/i, `${name} must not touch xai_oauth_connections (docs/design/DEFERRED-MIGRATIONS.md)`);
+  }
+  const doc = readFileSync(join(ROOT, "docs", "design", "DEFERRED-MIGRATIONS.md"), "utf8");
+  assert.match(doc, /drop table if exists xai_oauth_connections/i, "the deferred drop must stay written down");
 });

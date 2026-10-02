@@ -349,6 +349,109 @@ test("revocation at the final boundary leaves no article, correction, audit, or 
   assert.deepEqual(counts, { articles: 0, corrections: 0, audits: 0 });
 });
 
+test("an editor's Cancel ends a routine edition at the source boundary, before the next read", async () => {
+  /*
+    B8B item 2. The routine-notice loop asked about AUTHORITY between sources
+    (`assertRoutineRunCanContinue`) and never about the editor's Cancel, so a
+    Cancel was not noticed until the loop happened to end -- and `report` spoke
+    once per source, leaving the card silent (and stall-eligible) during a long
+    read.
+
+    THE MUTATION THAT MATTERS: delete `await throwIfJobCancelled(job.id)` from
+    the loop and this case fails twice over -- the run reads a source it was
+    told not to, and the error is not the cancellation the card renders.
+  */
+  await activateFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='cancelled-run',cancel_requested=true where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  let checks = 0;
+  await assert.rejects(
+    performRoutineNoticeWork(job as DeskJob, {
+      now: runNow,
+      check: (async () => {
+        checks += 1;
+        throw new Error("must not read a source after a Cancel");
+      }) as any,
+    }),
+    /Cancelled by the editor/,
+    "the honest reason, not a failure line against a source nobody read",
+  );
+  assert.equal(checks, 0, "the boundary was checked before the fetch, not after it");
+  const [run] = await sql.query<{ status: string; summary_json: string }>(
+    "select status,summary_json from routine_notice_runs where id=$1",
+    [job.subject_id],
+  );
+  assert.equal(run?.status, "failed", "the run is closed, not left running");
+  assert.match(run?.summary_json ?? "", /Cancelled by the editor/);
+  assert.equal(
+    (await sql.query<{ n: number }>("select count(*)::int n from articles where newsroom_id=$1", [room]))[0]
+      ?.n,
+    0,
+    "and nothing was published on the way out",
+  );
+});
+
+test("every routine source read is wrapped in the ticker that beats while it runs", async () => {
+  /*
+    The heartbeat half of B8B item 2, stated as the property that can be checked
+    without waiting twelve real seconds: the read runs INSIDE `waitForModel`, so
+    the ticker's own first beat ("Waiting on …") is written before the fetch is
+    awaited, and the job is not stall-eligible while it is in flight.
+
+    Asserted through the seam the worker already has: `check` is handed no way
+    to report, so the "Waiting on …" line on the job row can only have come from
+    the ticker wrapping it.
+  */
+  const source = await activateFixture();
+  await tickRoutineNoticeEditions(runNow);
+  const sql = await getSql();
+  const [job] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='beat-run' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  let rowInsideRead: { step_text: string | null; beat_at: string | null } | undefined;
+  await performRoutineNoticeWorkWith(job as DeskJob, {
+    now: runNow,
+    check: (async () => {
+      // The ticker's first beat is fired, not awaited, before the read starts
+      // (`waitForModel` beats then runs), so give the write the beat it needs
+      // to land before reading it back -- one connection, in order.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      [rowInsideRead] = await sql.query<{ step_text: string | null; beat_at: string | null }>(
+        "select step_text,beat_at from desk_jobs where id=$1",
+        [job.id],
+      );
+      return {
+        ok: true as const,
+        check: {
+          checkId: 1,
+          source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+          formatKey: "community-arts-event-logistics" as const,
+          checkedAt: runNow.toISOString(),
+          capture: null,
+          state: "refused" as const,
+          counts: { parsed: 0, refused: 1, conflicts: 0 },
+          refusals: [{ code: "structurally-invalid", locator: "document", count: 1 }],
+          candidates: [],
+          newerCaptureAvailable: false,
+          policy: { revision: 1, paused: false, approvalValid: true },
+          canCheck: true,
+        },
+      };
+    }) as any,
+  });
+  assert.match(
+    String(rowInsideRead?.step_text ?? ""),
+    /Waiting on Reading the routine sources/,
+    "the ticker spoke while the read was in flight",
+  );
+  assert.ok(rowInsideRead?.beat_at, "and wrote the beat the stall rule reads");
+});
+
 test("a lost job lease refuses before any source fetch", async () => {
   await activateFixture();
   await tickRoutineNoticeEditions(new Date("2026-09-08T13:00:00Z"));

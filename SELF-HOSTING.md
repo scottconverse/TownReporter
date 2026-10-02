@@ -573,6 +573,65 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
    deciding how to recover. The script does not automatically roll back a
    potentially applied migration.
 
+### The promotion's own log
+
+Every promotion writes `logs\promote-<date>-<time>.log` in the install it is
+promoting, and prints that path as its third line. It has one line per step,
+stamped with the time, and for each command it runs (the dependency install,
+the build) the command, its real exit code and how long it took. The output
+those commands produce -- which is where a failed install explains itself --
+is in files beside the log, named after it and the step, such as
+`promote-20261001-090000-deps.err.log`. Read those before anything else when a
+promotion fails; before this existed there was nothing to read at all.
+
+**No step is allowed to run forever.** The dependency install and the build
+each have twenty minutes; the wait for the restarted app to answer has one.
+Past its limit a step is stopped -- the process and everything under it, by
+PID, never by name, so no other copy of the app on this machine is touched --
+and the promotion fails the ordinary way, which means the previous build goes
+back and starts. The log says `step=<name> TIMED OUT after <n>s -- killed PID
+<n>`. If a step is genuinely that slow, raise its limit in
+`ops\lib-promote.ps1`; do not wait it out.
+
+### Carrying on from a promotion that stopped
+
+If a promotion stops part way -- the machine restarts, the window it was
+started from is closed, the install fails -- it leaves `logs\promote-in-progress`
+behind. Running the script again will not start over on top of it: it reads the
+last run's log, tells you which step that run reached and which step it would
+carry on from, and stops. Re-run it with `-Resume` to continue from that step
+instead of starting over; delete `logs\promote-in-progress` to start over
+deliberately. Whenever the script stops and the paper is not answering, the
+last line it prints is the exact command that brings the paper back.
+
+### "The paper is back on the OLD version"
+
+The build that was running is kept aside before a new one is built, so when the
+new build does not work -- it fails, or the restarted app never answers -- the
+script puts the previous build back, starts it, and says in the log, in those
+words, that the paper is back on the OLD version and the promote did not
+complete. The paper is up and serving, but on yesterday's code: the release did
+not land, so fix the build and promote again. This is the one case where the
+script undoes something by itself. A promotion that gets as far as serving the
+new build and then fails its own checks is NOT rolled back -- the app is up,
+and an automatic rollback of an already-applied migration would be worse than
+the thing being reported. That case still says so loudly and names the backup.
+
+**Then read the sentence after it about the database.** `npm run build` ends in
+the database migration, so an old build can be put back on top of a database
+that has already moved forward. When that has happened the message does not
+stop at "the OLD version"; it says which migration the database is at --
+
+> the paper is back on the OLD version, but the database was already migrated
+> to 0117_source_replaces.sql; if this build reads a table or column a migration
+> removed, tell the developer before continuing
+
+-- or, when the build died part way through the migration and the script cannot
+honestly say where the database got to, "migrations may have run" instead of a
+name. Either way the paper is up, but a page that reads something a migration
+changed can answer wrongly rather than fail, so do not treat "the site is up"
+as "the promotion was fine": tell the developer before promoting again.
+
 If promotion hangs, inspect the app and
 `C:\Users\scott\Desktop\Code\townreporter-web\logs` first. Stop only a
 confirmed hung promotion's own PID if needed; never stop processes by image

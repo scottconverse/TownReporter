@@ -15,7 +15,20 @@ import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, mapLimit, withRetry } from "./ingest";
+import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
+import { createHostGate } from "./host-gate.ts";
+import {
+  BLOCKED_TRIES_PER_HOST_PER_DAY,
+  classifyRefusal,
+  dailyCapSentence,
+  skipThisPass,
+  touchAfterError,
+  touchAfterFailure,
+  touchAfterSkip,
+  touchAfterSuccess,
+  type SourceTouch,
+} from "./fetch-politeness.ts";
+import { writeSourceTouch } from "./source-touch-write.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
 import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
@@ -29,6 +42,13 @@ import { reportAndDraft } from "./report";
 import { cleanListWindow, takeWindow } from "./list-window.ts";
 import { cleanQueueWindow, queueCounts, queueNeedle, queueSelect } from "./queue-rows.ts";
 import { cleanSourceWindow, selectSourceRows, sourceCounts } from "./source-rows.ts";
+import { cityOfficialHost } from "./research-scope.ts";
+import {
+  beatsForSource,
+  hostOf,
+  rankCandidates,
+  siblingCandidates,
+} from "./source-replacements.ts";
 import {
   DESK_DRAFT_FILTERS,
   deskDraftFilterCounts,
@@ -284,6 +304,20 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
   const sql = await getSql();
   return sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
+             -- the row can say "Keeps failing" rather than repeating the last
+             -- reason for ever. last_ok_at is the only column in this schema
+             -- that answers "when did this last READ" -- last_fetched_at moves
+             -- on a failed attempt too.
+             consecutive_failures, failure_streak_started_at, last_ok_at,
+             -- SH-B: the wait or the block, and the plain sentence the row
+             -- prints while it is parked -- "Asked us to come back at 3:40 PM —
+             -- will retry then" when the site gave a time, "Was busy at
+             -- 3:10 PM — trying again after 3:40 PM" when it did not and the
+             -- wait is the desk's own. Read here because the Sources row is
+             -- where the editor has to be able to see that the desk has not
+             -- simply given up on a source they chose.
+             retry_after, retry_after_note, blocked_at, blocked_attempts,
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
@@ -431,6 +465,119 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
     return { ok: true as const, added, total: rows.length, byTier };
   });
 
+/**
+ * The free tier of "Find a replacement" (SH0-10): what the panel draws before
+ * the editor spends anything.
+ *
+ * ONE READ, NO FETCHES, NO MODEL. The candidates are the other sources the
+ * desk already watches on the same beat -- so this costs the newsroom a query
+ * it is already paying for, and it cannot hammer a host that just refused us.
+ * The beat is resolved by `beatsForSource`, the same function the AI tier seeds
+ * its topic from, so the two halves of the panel cannot describe the source
+ * differently.
+ *
+ * THE REFUSALS ARE THE RANKER'S, NOT A COPY. `rankCandidates` drops the
+ * newsroom's legally dropped hosts and orders the paper's own record first; the
+ * query below only gathers the rows to rank. The dropped hosts are read as URLs
+ * because that is what the column holds.
+ */
+export async function performReplacementCandidates(
+  context: { userId: string; newsroomId?: number },
+  sourceId: number,
+): Promise<{
+  beats: string[];
+  beatNames: string[];
+  candidates: ReturnType<typeof rankCandidates>;
+}> {
+  const sql = await getSql();
+  const newsroomId = owned(context);
+  const [source] = await sql.query<{
+    id: number;
+    title: string | null;
+    proposed_section: string | null;
+  }>("select id,title,proposed_section from sources where id=$1 and newsroom_id=$2", [
+    sourceId,
+    newsroomId,
+  ]);
+  if (!source) return { beats: [], beatNames: [], candidates: [] };
+
+  const filed = await sql.query<{ section_key: string }>(
+    "select section_key from section_sources where newsroom_id=$1 and source_id=$2",
+    [newsroomId, sourceId],
+  );
+  const sections = await sql.query<{ key: string; name: string }>(
+    "select key,name from newsroom_sections where newsroom_id=$1 and visible=true order by position asc",
+    [newsroomId],
+  );
+  const beats = beatsForSource({
+    sections: filed.map((row) => row.section_key),
+    proposedSection: source.proposed_section,
+    title: source.title,
+    knownSections: sections,
+  });
+
+  /*
+    Every other accepted source with the sections it is filed under. One query
+    with a left join, so a source filed under nothing still comes back -- it is
+    simply never a sibling, and the panel is right to leave it out.
+  */
+  const peers = await sql.query<{
+    id: number;
+    url: string;
+    title: string | null;
+    kind: string | null;
+    sections: string[] | null;
+  }>(
+    `select s.id, s.url, s.title, s.kind,
+            coalesce(array_agg(ss.section_key) filter (where ss.section_key is not null), '{}') as sections
+       from sources s
+       left join section_sources ss on ss.newsroom_id = s.newsroom_id and ss.source_id = s.id
+      where s.newsroom_id = $1 and s.status = 'accepted' and s.id <> $2
+      group by s.id, s.url, s.title, s.kind
+      order by s.id asc`,
+    [newsroomId, sourceId],
+  );
+  const dropped = await sql.query<{ url: string }>(
+    "select url from sources where newsroom_id=$1 and status='dropped'",
+    [newsroomId],
+  );
+  const [place] = await sql.query<{ city: string | null; state: string | null }>(
+    "select city,state from paper_settings where newsroom_id=$1",
+    [newsroomId],
+  );
+  /*
+    The paper's OWN official host, from the sources it already holds -- the
+    city it is in decides which of them that is, never a name written here.
+  */
+  const officialHost = cityOfficialHost(
+    place?.city ?? "",
+    peers.filter((p) => p.kind === "official").map((p) => p.url),
+    place?.state ?? "",
+  );
+
+  const siblings = siblingCandidates(
+    peers.map((p) => ({
+      id: p.id,
+      url: p.url,
+      title: p.title,
+      kind: p.kind,
+      sections: p.sections ?? [],
+    })),
+    { sourceId, beats },
+  );
+  const candidates = rankCandidates(siblings, {
+    officialHost,
+    droppedHosts: dropped.map((row) => hostOf(row.url) ?? ""),
+  });
+  const nameOf = new Map(sections.map((s) => [s.key, s.name]));
+  return { beats, beatNames: beats.map((key) => nameOf.get(key) ?? key), candidates };
+}
+
+export const replacementCandidates = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((sourceId: unknown) => rowId.parse(sourceId))
+  .handler(async ({ context, data: sourceId }) => performReplacementCandidates(context, sourceId));
+
 export const setSourceStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => sourceStatusInput.parse(input))
@@ -446,11 +593,22 @@ export const setSourceStatus = createServerFn({ method: "POST" })
       off a null check.
     */
     const decided = data.status === "accepted" || data.status === "rejected";
+    /*
+      SH0-1: the failure streak DIES with the status it was recorded under.
+
+      A paused row must never read "Keeps failing" -- the desk has stopped
+      trying, so the sentence would be false -- and a source the editor removed
+      and put back is being judged afresh, not continuing a streak that a
+      different decision interrupted. Clearing it here is what makes both of
+      those true by construction rather than by a guard somewhere downstream.
+    */
     await sql`
       update sources set
         status = ${data.status},
         reviewed_at = case when ${decided} then now() else null end,
-        review_note = case when ${decided} then review_note else null end
+        review_note = case when ${decided} then review_note else null end,
+        consecutive_failures = 0,
+        failure_streak_started_at = null
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
     return { ok: true as const };
@@ -1210,8 +1368,17 @@ export async function performCheckOneSource(
   | { ok: false; url: string; title: string; error: string; line: string }
 > {
   const sql = await getSql();
-  const [src] = await sql.query<{ id: number; url: string; title: string; status: string }>(
-    "select id,url,title,status from sources where id=$1 and newsroom_id=$2",
+  const [src] = await sql.query<{
+    id: number;
+    url: string;
+    title: string;
+    status: string;
+    /** SH-B: read so this press's refusal continues the run of blocks rather
+     *  than restarting it at the first step of the backoff. */
+    blocked_at: string | null;
+    blocked_attempts: number | null;
+  }>(
+    "select id,url,title,status,blocked_at,blocked_attempts from sources where id=$1 and newsroom_id=$2",
     [sourceId, owned(context)],
   );
   if (!src) {
@@ -1251,10 +1418,27 @@ export async function performCheckOneSource(
     const bundle = await withRetry(() => ingestUrl(src.url));
     const text = postgresText(bundle.text);
     if (!text.trim()) throw new Error("Page had almost no readable text");
-    await sql.query(
-      "update sources set last_fetched_at=now(), last_error=null where id=$1 and newsroom_id=$2",
-      [sourceId, owned(context)],
-    );
+    /*
+      SH0-1: the manual check is an ATTEMPT like any other, so it moves the
+      streak the same way the scan does -- one code path per outcome, and this
+      is the second of them. A press that reads the page ends the streak; a
+      press that fails extends it by one, exactly as the scanner would have.
+
+      SH-B: a press that read the page ends any wait and any block, the same
+      way a scan that read it does. Without this the row the editor just fixed
+      would keep saying "Waiting" -- the chip and the note are drawn from these
+      columns, and a successful read that left them behind would make the press
+      look like it had done nothing.
+
+      HIGH-1 (A-B8): all three write sites go through `writeSourceTouch` now,
+      so a press, an inline scan and the scheduled scan's queued commit cannot
+      drift apart on what a read or a refusal does to a row.
+    */
+    await writeSourceTouch(sql, {
+      id: sourceId,
+      newsroomId: owned(context),
+      touch: touchAfterSuccess(),
+    });
     return {
       ok: true as const,
       url: src.url,
@@ -1264,10 +1448,33 @@ export async function performCheckOneSource(
     };
   } catch (err) {
     const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
-    await sql.query(
-      "update sources set last_error=$1, last_fetched_at=now() where id=$2 and newsroom_id=$3",
-      [msg, sourceId, owned(context)],
-    );
+    /*
+      SH-B: an editor's press is still the desk knocking on somebody's server,
+      so a refusal it earns is recorded with the same rules a scan uses -- the
+      site's `Retry-After` if it gave one, otherwise the default wait, and for
+      a block the next step of the backoff. The press itself is never refused:
+      the editor asked, and `assertCooldown` above is what stops a held-down
+      button from being a burst.
+    */
+    const failure = classifyRefusal({
+      status: err instanceof IngestFetchError ? err.status : null,
+      retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
+      nowMs: Date.now(),
+    });
+    const touch = failure
+      ? touchAfterFailure({
+          refusal: failure,
+          previousBlockedAt: src.blocked_at,
+          previousBlockedAttempts: src.blocked_attempts,
+          nowMs: Date.now(),
+        })
+      : touchAfterError(msg);
+    if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
+    await writeSourceTouch(sql, {
+      id: sourceId,
+      newsroomId: owned(context),
+      touch,
+    });
     return {
       ok: false as const,
       url: src.url,
@@ -1284,6 +1491,50 @@ export const checkOneSource = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((sourceId: unknown) => rowId.parse(sourceId))
   .handler(async ({ context, data: sourceId }) => performCheckOneSource(context, sourceId));
+
+/*
+  SH-B: the per-host allowance for hostile answers.
+
+  Three tiny helpers rather than one clever query, because each answers a
+  different question and they are read in different places. `sourceHost` is the
+  key they share, and it is the hostname -- not the URL and not the port --
+  because a site that has decided to refuse this desk is refusing the desk, and
+  every path on it counts as the same site.
+*/
+function sourceHost(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).hostname.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+/** The first moment of tomorrow, in the desk's own timezone. Reading "will try
+ *  again tomorrow" as "in exactly 24 hours" would be a small lie the second
+ *  time it is printed. */
+function startOfTomorrow(nowMs: number): Date {
+  const d = new Date(nowMs);
+  d.setHours(24, 0, 0, 0);
+  return d;
+}
+
+async function hostAtDailyCap(sql: Sql, newsroomId: number, host: string): Promise<boolean> {
+  if (!host) return false;
+  const rows = await sql<{ tries: number }>`
+    select tries from source_host_tries
+    where newsroom_id = ${newsroomId} and host = ${host} and day = current_date
+  `;
+  return (rows[0]?.tries ?? 0) >= BLOCKED_TRIES_PER_HOST_PER_DAY;
+}
+
+async function noteHostRefusal(sql: Sql, newsroomId: number, host: string): Promise<void> {
+  if (!host) return;
+  await sql`
+    insert into source_host_tries (newsroom_id, host, day, tries)
+    values (${newsroomId}, ${host}, current_date, 1)
+    on conflict (newsroom_id, host, day) do update set tries = source_host_tries.tries + 1
+  `;
+}
 
 /** Injectable seam so a scan job with a real Claude/Codex 401 mid-run, and
  * the failover it triggers, can be tested without a real provider. Same
@@ -1396,7 +1647,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   */
   const reportStage = progressReporterFor(job);
   const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
-  const fetchUrl = deps.ingestUrl ?? ingestUrl;
+  /*
+    SH-B item 1: one host, one request at a time, a short gap between them.
+
+    One gate for the whole pass, so the pacing is shared by every source the
+    scan reads out of the same host -- which is the case that mattered: six
+    city pages under one domain, six workers, and fifty requests to one small
+    municipal server with nothing between them. `deps.ingestUrl` overrides the
+    fetch entirely (tests and the offline paths), and in that case there is no
+    network to pace.
+  */
+  const hostGate = createHostGate();
+  const fetchUrl = deps.ingestUrl ?? ((url: string) => ingestUrl(url, { schedule: hostGate.schedule }));
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
   const paperConfig = await getPaperConfig(owned(context));
   /*
@@ -1508,7 +1770,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const allSources =
     deps.scheduledSnapshot?.sources ??
     (await sql<SourceRow>`
-      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error
+      select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             -- SH-B: the wait a site asked for, and the block it put on us. Both
+             -- are read here because the pass has to SKIP a parked row, which
+             -- is the only thing that makes a recorded "come back at 3:40"
+             -- mean anything.
+             retry_after, blocked_at, blocked_attempts
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
@@ -1538,8 +1805,64 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     changed: boolean;
   }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
-  const pendingSourceTouches: { id: number; error: string | null }[] = [];
+  /*
+    The scheduled path queues its writes and commits them inside the run
+    transaction. It carries the same columns the manual path writes inline --
+    the politeness columns included -- because the two paths are the same
+    feature and a row must not depend on which kind of scan touched it. This is
+    the mistake `scan-coverage.test.ts` exists to catch.
+  */
+  /*
+    HIGH-1 (A-B8): the queue carries a whole `SourceTouch`, `outcome` included,
+    and `writeSourceTouch` branches on that word. It used to carry a loose
+    `error` and the scheduled commit read "did we read it?" off `error is null`
+    -- true for a "come back later" touch, so the unattended scan wrote a 429 as
+    a successful read. A touch that has to state its own outcome cannot be
+    mistaken for the other kind of touch.
+  */
+  const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
+  /*
+    THE ONE CONSUMER OF THE QUEUED SOURCE WRITES (B8F2).
+
+    On the scheduled lane the fetch loop writes nothing to a source row as it
+    goes: it queues the touch and the run commits it inside the run's
+    transaction. That makes this loop the ONLY thing that ever puts an
+    unattended scan's answers on the source rows, which means EVERY ending of
+    the pass has to reach it.
+
+    It used to live inside `commitResults` alone, and `commitResults` is not
+    the ending a scan takes when EVERY source failed -- that ending writes the
+    failed run row and throws. So a newsroom whose whole watch list failed on
+    an unattended pass recorded the failed run and nothing else: no streak, no
+    stored `retry_after`, no reason. The desk went on knocking at full speed
+    and "Keeps failing" never arrived, on the lane nobody is watching. The
+    editor-started lane never had this shape because it writes during the
+    loop.
+
+    `writeSourceTouch` and nothing else: a source row must not depend on which
+    path touched it (HIGH-1, A-B8). One rule, three write sites.
+  */
+  const writeQueuedSourceWrites = async (writeSql: Sql) => {
+    for (const queued of pendingSourceTouches) {
+      await writeSourceTouch(writeSql, {
+        id: queued.id,
+        newsroomId: owned(context),
+        touch: queued.touch,
+      });
+    }
+    /*
+      A source that HAD a hash and then answered 404 is worth an anomaly, and on
+      this lane it is queued beside its touch. Consuming the two in one place is
+      what stops a later early exit from leaving one of them behind.
+    */
+    for (const gone of pendingDisappeared) {
+      await writeSql`
+        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
+        values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
+      `;
+    }
+  };
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
@@ -1578,6 +1901,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
   */
   let attemptedCount = 0;
+  /** SH-B: rows this pass selected but deliberately did not knock on -- parked
+   *  by a site's "come back later", or held back by the per-host allowance. */
+  let skippedThisPass = 0;
   let lastLiveWriteAt = 0;
   /*
     THE LIVE RUN ROW.
@@ -1653,6 +1979,58 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await reportStage("Reading the sources");
   await mapLimit(watchSlice, 6, async (src) => {
     await deps.scheduledGuard?.();
+    /*
+      SH-B items 2 and 3, the half that makes them real: a row the site asked
+      us to leave alone is LEFT ALONE. This is the difference between storing
+      `retry_after` and honouring it, and it is why the select above now reads
+      the column. Nothing else changes: the source stays accepted, stays on
+      watch, and the next pass after the time arrives fetches it with no
+      special handling at all.
+    */
+    const nowMs = Date.now();
+    if (skipThisPass({ retryAfter: src.retry_after, nowMs })) {
+      /*
+        Counted as selected-but-not-attempted, which is what it is and what the
+        coverage receipt already means by the difference between those two
+        numbers (a row cut by `SCAN_WATCH_CAP` reads the same way). Reporting a
+        source the desk deliberately did not knock on as "attempted" would put
+        a fetch in the record that never happened.
+
+        But the PROGRESS count moves (LOW-3, A-B8): the bar counts the sources
+        the pass got through, and a parked row is one of them. Without this the
+        card stopped at "199 of 201" whenever anything was parked and then
+        jumped at the end -- a count that stops short reads as a scan that is
+        still going.
+      */
+      skippedThisPass += 1;
+      await noteSourceProgress();
+      return;
+    }
+    /*
+      The per-host allowance for the day. A newsroom can watch six pages of one
+      city site and a source-level counter would give each of them a full
+      allowance -- six times the traffic to one host, which is the thing being
+      prevented. So the count is per host, and a host that has refused us
+      `BLOCKED_TRIES_PER_HOST_PER_DAY` times today is left until tomorrow.
+    */
+    {
+      const host = sourceHost(src.url);
+      if (host && (await hostAtDailyCap(sql, owned(context), host))) {
+        const until = startOfTomorrow(nowMs);
+        const note = dailyCapSentence();
+        /* One `skipped` touch on both paths: the wait and its sentence, and no
+           `last_error` -- the desk never asked this source for anything, so it
+           has nothing to report about it (LOW-2), and the "Tried 4 times today"
+           sentence is about the host anyway. */
+        const touch = touchAfterSkip({ retryAfter: until, note });
+        if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
+        else
+          await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
+        skippedThisPass += 1;
+        await noteSourceProgress();
+        return;
+      }
+    }
     try {
       const bundle = await withRetry(async () => {
         await deps.scheduledGuard?.();
@@ -1678,12 +2056,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       const text = extraBits.length ? `${sourceText}\n\n${extraBits.join("\n\n")}` : sourceText;
       const hash = await sha256(text);
       const changed = hash !== src.last_hash;
-      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: null });
+      /*
+        SH0-1: the streak is written in the SAME statement that clears
+        `last_error`, on both commit paths, because a success is the only thing
+        that can end a streak and a second statement could be skipped without
+        anything noticing. `last_ok_at` is new information -- see 0115 -- and
+        this is its one writer (HIGH-1: literally one, `writeSourceTouch`, on
+        all three paths).
+      */
+      const readTouch = touchAfterSuccess();
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch: readTouch });
       else
-        await sql`
-        update sources set last_fetched_at = now(), last_error = null
-        where id = ${src.id} and newsroom_id = ${owned(context)}
-      `;
+        await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch: readTouch });
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       failureReceipt.sourcesFetched = fetchedCount;
@@ -1699,12 +2083,33 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     } catch (err) {
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
-      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, error: msg });
-      else
-        await sql`
-        update sources set last_error = ${msg}, last_fetched_at = now()
-        where id = ${src.id} and newsroom_id = ${owned(context)}
-      `;
+      /*
+        SH-B items 2 and 3: was this refusal aimed at us?
+
+        `ingestUrl` now carries the status and the site's `Retry-After` out of
+        the fetch, so a 429/503 becomes a recorded wait and a 401/403 becomes a
+        recorded block with a growing backoff -- instead of both being written
+        onto the row as "Could not check", which sent the editor to fix a
+        source that was working. An ordinary failure (404, timeout, empty page)
+        is none of this feature's business and falls through to the message it
+        always had.
+      */
+      const failure = classifyRefusal({
+        status: err instanceof IngestFetchError ? err.status : null,
+        retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
+        nowMs,
+      });
+      const touch: SourceTouch = failure
+        ? touchAfterFailure({
+            refusal: failure,
+            previousBlockedAt: src.blocked_at,
+            previousBlockedAttempts: src.blocked_attempts,
+            nowMs,
+          })
+        : touchAfterError(msg);
+      if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
+      if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
+      else await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
       failureReceipt.sourcesFailed = failedSources.length;
       failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
@@ -1733,6 +2138,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await noteSourceProgress();
     }
   });
+  /*
+    SH-B: a row the pass deliberately did not knock on is not an attempt.
+    `sources_selected` still counts it -- it was in scope -- so the receipt
+    reads "14 selected, 12 attempted" exactly the way it already reads when
+    `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
+    to come back is not recorded as a fetch that never happened.
+  */
+  failureReceipt.sourcesAttempted = Math.max(0, watchSlice.length - skippedThisPass);
 
   const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
@@ -1981,9 +2394,32 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
       The scheduled path commits through the caller-supplied transaction so the
       write lands in the same unit of work as the rest of a scheduled run.
+
+      B8F2: the QUEUED SOURCE WRITES go in that same transaction, beside the
+      failed run. This ending never reaches `commitResults` -- it writes the run
+      row and throws -- so without this the whole unattended pass left every
+      source row untouched: a newsroom whose sources ALL failed during an
+      outage got no failure streak, no stored `retry_after`, no `blocked_*`,
+      and the desk kept knocking at full speed on the one lane no editor is
+      watching. The inline lane was never affected; it writes during the loop.
+
+      One transaction and not a second one, deliberately: the run row and the
+      rows it is a receipt FOR must not be able to disagree about whether the
+      pass settled. If the touch write fails, the whole unit rolls back and the
+      caller's own `finalizeDailyScanFailure` records the failed run -- which is
+      the way round that loses nothing an editor can see, and never the other
+      way (a source row written for a run that was never settled).
+
+      The fence is the one this lane already has: `deps.scheduledCommit` is the
+      scheduler's own transaction, which refuses a job whose claim token is no
+      longer the running one -- so a worker that lost this run to a newer one
+      writes neither the run row nor the sources.
     */
     if (deps.scheduledCommit) {
-      await deps.scheduledCommit((writeSql) => recordFailedRun(writeSql, error));
+      await deps.scheduledCommit(async (writeSql) => {
+        await recordFailedRun(writeSql, error);
+        await writeQueuedSourceWrites(writeSql);
+      });
     } else {
       await recordManualFailure(error);
     }
@@ -2133,18 +2569,26 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       for update
     `;
     if (!openRun[0]) throw new Error("Scan run is already finished; refusing to overwrite its receipt.");
-    for (const touch of pendingSourceTouches) {
-      await writeSql`
-        update sources set last_error = ${touch.error}, last_fetched_at = now()
-        where id = ${touch.id} and newsroom_id = ${owned(context)}
-      `;
-    }
-    for (const gone of pendingDisappeared) {
-      await writeSql`
-        insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
-        values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
-      `;
-    }
+    /*
+      HIGH-1 (A-B8): the SCHEDULED scan's half of the streak.
+
+      This statement used to decide "did we read this page?" from
+      `touch.error is null`, and that was wrong: a "come back later" touch
+      carries a null error on purpose (the site did not fail us), so a 429 on an
+      unattended scan was committed as a successful read -- streak wiped,
+      `last_ok_at` stamped -- while the inline scan and the editor's press
+      counted the same event as a failure. The unattended scan is the main path
+      in production, so the source that escalates to "Keeps failing" on a manual
+      scan never escalated on the real one.
+
+      Now both paths call `writeSourceTouch`, which branches on the outcome the
+      touch carries. One rule, three write sites, and nothing left to drift.
+
+      B8F2: the consumption itself is `writeQueuedSourceWrites` now, because
+      this is no longer the only ending that has to run it -- the all-failed
+      ending below does too, and it never gets here.
+    */
+    await writeQueuedSourceWrites(writeSql);
     for (const p of pendingHashes) {
       await writeSql`
         update sources
@@ -2261,7 +2705,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           leads_created = ${leadsCreated},
           sources_proposed = ${proposed},
           sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          -- SH-B: the receipt says what the pass DID, so a row it deliberately
+          -- did not knock on is not an attempt. The live row above keeps the
+          -- full scope on purpose (see scanRunningLine's pin: the scope is not
+          -- progress); this is the record of the finished pass.
+          sources_attempted = ${Math.max(0, watchSlice.length - skippedThisPass)},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${analyzedSourceCount},
           model_batches_used = ${batches.length},
@@ -2890,6 +3338,18 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const runReportWithCheckpoint = (input: Parameters<typeof reportAndDraft>[0]) =>
     runReport(input, reportDeps);
   /*
+    B8B item 2: the draft kind had no Cancel check of its own.
+
+    `waitForModel` below polls `cancel_requested` while the report runs, but
+    nothing checked it on the way IN, so a Cancel pressed on a draft that had
+    already been claimed still spent four model calls before the first tick
+    could notice -- and `repairDraftStyle` below is a fifth call with no check
+    anywhere near it. Both are boundaries the desk can afford to ask at: the
+    work between them is a model call, and the answer is a sentence rather than
+    a bill.
+  */
+  await throwIfJobCancelled(job.id);
+  /*
     The single longest await in the app: one call covering report.ts's plan,
     write, verify and sourcing passes, four sequential model calls that
     routinely run past the 60s stall window. Without the ticker the card would
@@ -2906,6 +3366,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       }),
   });
   if ("error" in reported) throw new Error(reported.error);
+  /*
+    The boundary between the report and the style repair, and the second half of
+    B8B item 2's draft fix. A Cancel that arrived during the four model calls
+    above is read here, before the fifth is spent and before anything is
+    written: the honest end for a cancelled draft is no draft, with the editor's
+    reason on the row, not a repaired one they never asked for.
+  */
+  await throwIfJobCancelled(job.id);
 
   /*
     THE STYLE AUDIT, BEFORE ANYTHING IS WRITTEN.

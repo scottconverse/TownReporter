@@ -58,6 +58,28 @@ describe("the running scan's card sits with the control that started it", () => 
     assert.equal(source.split("sources-scan-card").length - 1, 1);
   });
 
+  it("draws the Sources card at full size, so the first check names its stages", () => {
+    /*
+      FB7, item 2. The card beside "Run scan now" is where a source's FIRST
+      check is watched -- "Add & run first check" in the add dialog hands off
+      to this panel. It was `compact`, and the compact card drops the stage
+      chip row (JobCard.tsx: `!compact && job.stages`), so the same job named
+      its stages on the Scan screen and none here. Opinion and Drafts were
+      fixed the same way.
+    */
+    const source = read("../../routes/desk.sources.tsx");
+    assert.match(
+      source,
+      /<div className="sources-scan-card">\s*<DeskJobCard job=\{scanJob\} \/>/,
+      "the full card, so the chips are drawn",
+    );
+    assert.doesNotMatch(
+      source,
+      /<DeskJobCard job=\{scanJob\} compact \/>/,
+      "the compact card hides the chips this item exists to show",
+    );
+  });
+
   it("draws both cards from the one desk-jobs reader", () => {
     // The card on a screen is the card everywhere: same reader, same row, same
     // Cancel -- not a second rendering that can drift from the nav's.

@@ -1,0 +1,29 @@
+-- Unit SH0-9: where a replacement suggestion came from, and which source it
+-- would stand in for.
+--
+-- WHY THIS EXISTS AT ALL. 0097 settled that a suggestion is just a `sources`
+-- row with `status='proposed'`, and it carries `proposed_reason`, `proposed_by`
+-- and `proposed_lead_id` so the editor knows what they are looking at. A
+-- replacement suggested for a source that will not read needs one more fact
+-- that no column can express: WHICH ROW IT WOULD REPLACE. Without it the panel
+-- could only say "here is another site", and the editor would have to remember
+-- which broken source they pressed the button on.
+--
+-- `proposed_via` is the companion honesty: how the desk found it. A feed the
+-- page declares about itself, a sitemap line, a moved address and a canonical
+-- link are four different claims, and the editor judges them differently. It is
+-- text for the same reason `proposed_by` is (see 0097): a vocabulary that lives
+-- in one TypeScript union does not need a database enum to go stale.
+--
+-- BOTH NULLABLE, AND THAT IS THE SHAPE OF THE DATA. Every suggestion that
+-- predates this file -- the scan's, the research pass's, the Dark Desk's, the
+-- editor's own "Ask AI to find sources" -- has neither, and null reads as "not
+-- a replacement" rather than "unknown replacement". Nothing is backfilled
+-- because there is nothing to backfill from.
+--
+-- NO INDEX. The read is "the proposals whose replaces-id is this source", and
+-- it is taken over a list the Sources screen has already loaded, for one row
+-- the editor is looking at. A column this narrow on a table this small does not
+-- earn one, and an index is a migration of its own to remove.
+alter table sources add column if not exists proposed_replaces_source_id integer;
+alter table sources add column if not exists proposed_via text;

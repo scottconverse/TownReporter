@@ -1,6 +1,14 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { patchLeadsData, shiftTabCounts, statusIn } from "./desk-lead-status.ts";
+import { QueryClient } from "@tanstack/react-query";
+import {
+  leadStatusOptimistic,
+  leadsViewFor,
+  moveLeadStatusNow,
+  patchLeadsData,
+  shiftTabCounts,
+  statusIn,
+} from "./desk-lead-status.ts";
 
 /**
  * The optimistic row, as a pure rule (unit FB6, item 2).
@@ -71,6 +79,93 @@ describe("patching one lead's status into a cached list", () => {
   it("does not invent a row for a lead the cache has never held", () => {
     const rows = [{ id: 1, status: "new" }];
     assert.deepEqual(patchLeadsData(rows, 99, "held", undefined), rows);
+  });
+});
+
+/**
+ * B8B item 1: the Queue's tabs are filtered on the SERVER, so the cached list
+ * for the Open tab is a list of open leads. Changing a row's status inside it
+ * leaves a held lead drawing under Open until the refetch lands -- the row the
+ * owner watched go back and forth. A list that knows which tab it is showing
+ * can be told the row no longer qualifies for it.
+ *
+ * THE MUTATION THAT MATTERS: make `leadsViewFor` answer with no filter (or drop
+ * the `patch` argument at the two call sites) and every case below that expects
+ * a row to LEAVE or ARRIVE fails while the status-only cases still pass.
+ */
+describe("a list showing a tab takes the row in and out of it", () => {
+  const openPage = () =>
+    page(
+      [
+        { id: 1, status: "new" },
+        { id: 2, status: "new" },
+      ],
+      { open: 2, held: 0, killed: 0, all: 2 },
+    );
+
+  it("takes a held lead out of the Open tab's rows, not just its status", () => {
+    const out = patchLeadsData(openPage(), 1, "held", "new", { filter: "open" }) as {
+      rows: { id: number }[];
+      total: number;
+      counts: Record<string, number>;
+    };
+    assert.deepEqual(
+      out.rows.map((row) => row.id),
+      [2],
+      "the row the tab no longer matches is gone from it",
+    );
+    assert.equal(out.total, 1, "and the tab's own total follows it down");
+    assert.equal(out.counts.open, 1);
+    assert.equal(out.counts.held, 1);
+  });
+
+  it("puts it into the Held tab it is arriving in", () => {
+    const out = patchLeadsData(
+      page([{ id: 9, status: "held" }], { open: 2, held: 1, killed: 0, all: 3 }),
+      1,
+      "held",
+      "new",
+      { filter: "held", incoming: { id: 1, headline: "A", status: "new" } },
+    ) as { rows: { id: number; status: string }[]; total: number; counts: Record<string, number> };
+    assert.deepEqual(
+      out.rows.map((row) => row.id),
+      [1, 9],
+      "the copy handed over is the row the list never held",
+    );
+    assert.equal(out.rows[0]!.status, "held", "already carrying the status it arrived with");
+    assert.equal(out.total, 2);
+    assert.equal(out.counts.held, 2);
+    assert.equal(out.counts.open, 1);
+  });
+
+  it("never invents a row in a list that is not showing a tab", () => {
+    // Today's `listLeads()` array and the Queue's batch pool are not filtered
+    // by status, so a move cannot take a row out of one -- nor put one in.
+    const rows = [{ id: 2, status: "new" }];
+    assert.deepEqual(patchLeadsData(rows, 1, "held", undefined), rows);
+    assert.deepEqual(patchLeadsData(rows, 1, "held", undefined, { filter: undefined }), rows);
+  });
+
+  it("leaves `all` and `printed` alone: neither is a status", () => {
+    const all = page([{ id: 1, status: "new" }], { open: 1, held: 0, killed: 0, all: 1 });
+    const out = patchLeadsData(all, 1, "held", "new", { filter: undefined }) as {
+      rows: { status: string }[];
+    };
+    assert.equal(out.rows[0]!.status, "held", "the row is still listed, wearing its new status");
+    assert.equal(out.rows.length, 1, "and still counted in a list that counts everything");
+  });
+
+  it("reads the tab, and only a tab, off the Queue's own key", () => {
+    assert.equal(leadsViewFor(["leads", "open", "all", "best", "", 25]).filter, "open");
+    assert.equal(leadsViewFor(["leads", "killed", "all", "best", "", 25]).filter, "killed");
+    assert.equal(leadsViewFor(["leads", "held", "all", "best", "", 25]).filter, "held");
+    assert.equal(leadsViewFor(["leads"]).filter, undefined, "Today's whole list is not a tab");
+    assert.equal(leadsViewFor(["leads", "batch-pool"]).filter, undefined);
+    assert.equal(
+      leadsViewFor(["leads", "printed", "all", "best", "", 25]).filter,
+      undefined,
+      "printed is a duplicate match, not a status",
+    );
   });
 });
 
@@ -173,5 +268,67 @@ describe("statusIn", () => {
     assert.equal(statusIn(page([{ id: 4, status: "killed" }], {}), 4), "killed");
     assert.equal(statusIn([{ id: 4, status: "held" }], 5), undefined);
     assert.equal(statusIn({}, 4), undefined);
+  });
+});
+
+/*
+  N6 of the batch-7 re-audit: the press must not be UNDONE by a fetch that was
+  already on its way when the editor pressed.
+
+  The optimistic write patches the caches through `getQueriesData`/`setQueryData`
+  and never told React Query to stop the `["leads"]` fetch that started a moment
+  earlier. That fetch carries the row's OLD status, lands after the press, and
+  writes it back over the top -- the row flips Held and flips back until the
+  post-press invalidation lands. That is the same "line going back and forth"
+  the owner opened this unit about, one round trip later.
+
+  These two cases run against a REAL query client and a fetch held open on
+  purpose, which is the only way to see it: the rule is not in the arithmetic
+  (`patchLeadsData` above) but in the order the cache is touched.
+
+  THE MUTATION THAT MATTERS: delete the `cancelQueries` call from
+  `leadStatusOptimistic` and "an in-flight refetch cannot redraw the old status"
+  fails, with the row reading `new` again.
+*/
+describe("an in-flight refetch cannot undo the press", () => {
+  /** A client whose fetch for `["leads"]` we can release by hand. */
+  function heldFetch(status: string) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const rows = [{ id: 1, headline: "A", status }];
+    qc.setQueryData(["leads"], rows);
+    let release: () => void = () => {};
+    const inFlight = qc
+      .fetchQuery({
+        queryKey: ["leads"],
+        queryFn: () => new Promise((resolve) => {
+          release = () => resolve(rows);
+        }),
+      })
+      .catch(() => undefined);
+    return { qc, release: () => release(), inFlight };
+  }
+
+  it("cancels it before an optimistic Hold moves the row", async () => {
+    const { qc, release, inFlight } = heldFetch("new");
+    await leadStatusOptimistic(qc).optimistic({ id: 1, status: "held" });
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "held");
+    release();
+    await inFlight;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(
+      statusIn(qc.getQueryData(["leads"]), 1),
+      "held",
+      "the fetch that was already in flight redrew the old status",
+    );
+  });
+
+  it("cancels it in the dialog's own confirmation write too", async () => {
+    const { qc, release, inFlight } = heldFetch("new");
+    moveLeadStatusNow(qc, 1, "killed");
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "killed");
+    release();
+    await inFlight;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(statusIn(qc.getQueryData(["leads"]), 1), "killed");
   });
 });

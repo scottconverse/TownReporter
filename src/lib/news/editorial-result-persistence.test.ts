@@ -14,6 +14,11 @@ import { enqueueJob, ensureJobsSchema, findOpenJob } from "./jobs.ts";
 import { persistEditorialSuccess } from "./editorial-result-persistence.ts";
 import { ensureStoryDocuments, readEditorialDocuments } from "./story-documents.server.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
+import {
+  readSuppliedMaterialCut,
+  SUPPLIED_MATERIAL_CAP,
+  withThousands,
+} from "./supplied-material-cap.ts";
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs applies
 // migrations/*.sql before the file loads; the postgres-integration runner runs
 // the same file WITHOUT that preload, so the fixture asks for it itself --
@@ -28,6 +33,9 @@ const TEST_EDITORIAL: Editorial = {
   factSheet: "The archive is publicly funded.",
   imagePrompt: "A public archive reading room.",
 };
+/** B8P: the editor's paste, at the size the finding describes. */
+const PARAGRAPH = `${"The council packet lists each agenda item and its staff report. ".repeat(6)}\n\n`;
+
 const skipNameCheck = async (opts: Parameters<typeof import("./editorial-name-check.ts").checkEditorialNames>[0]) => ({
   editorial: opts.editorial,
   nameCheck: { version: 1 as const, checkedAt: new Date(0).toISOString(), checkedText: "", complete: true, note: "Test name check.", rows: [] },
@@ -340,6 +348,105 @@ describe("Opinion completion commit", () => {
     }
   });
 
+  /*
+    Unit B8P. The cut happens before the model call; the COUNTS are stored with
+    the piece, in the same `research_json` blob the name check already lives in
+    -- so no migration, and the note is still there after a reload. These two
+    cases are the two the editor can be in: material too long to send whole, and
+    material that fit.
+  */
+  it("stores the length cut with the piece so the note survives a reload", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-length-cut");
+    const request = await insertRequest(sql, { userId });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    const packet = `${PARAGRAPH.repeat(Math.ceil(2_000_000 / PARAGRAPH.length))}FINAL PAGE OF THE PACKET.`;
+
+    try {
+      const result = await fileEditorial(
+        {
+          userId,
+          newsroomId: 1,
+          subject: "Keep local history public",
+          sourceText: packet,
+          pointers: [],
+          sourceKind: "paste",
+          sourceRef: "desk",
+          completion: { requestId: request.id, jobId: job.id },
+        },
+        TEST_EDITORIAL,
+        "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
+      );
+      assert.equal(result.ok, true);
+      if (!result.ok) assert.fail((result as any).error);
+
+      const [row] = await sql<{ research_json: string }>`
+        select research_json from drafts where id = ${result.draftId}
+      `;
+      const cut = readSuppliedMaterialCut(row?.research_json);
+      assert.ok(cut, "the cut was stored with the draft");
+      assert.equal(cut.totalChars, packet.length);
+      assert.ok(cut.keptChars <= SUPPLIED_MATERIAL_CAP);
+      assert.ok(cut.keptChars < cut.totalChars);
+      assert.match(cut.note, new RegExp(`${withThousands(packet.length)} characters`));
+      assert.match(cut.note, /cut for length/);
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
+  it("stores no length cut for a piece whose material was sent whole", async () => {
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-no-length-cut");
+    const request = await insertRequest(sql, { userId });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+
+    try {
+      const result = await fileEditorial(
+        {
+          userId,
+          newsroomId: 1,
+          subject: "Keep local history public",
+          sourceText: "The editor's own notes on the levy.",
+          pointers: [],
+          sourceKind: "paste",
+          sourceRef: "desk",
+          completion: { requestId: request.id, jobId: job.id },
+        },
+        TEST_EDITORIAL,
+        "claude-frontier",
+        { checkEditorialNames: skipNameCheck, setJobStage: async () => undefined },
+      );
+      assert.equal(result.ok, true);
+      if (!result.ok) assert.fail((result as any).error);
+
+      const [row] = await sql<{ research_json: string }>`
+        select research_json from drafts where id = ${result.draftId}
+      `;
+      assert.equal(row?.research_json.includes("lengthCut"), false);
+      assert.equal(readSuppliedMaterialCut(row?.research_json), null);
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
   it("rolls every write back when the job half of completion cannot be committed", async () => {
     const sql = await getSql();
     await ensureCompletionSchema();
@@ -518,6 +625,91 @@ describe("Opinion completion commit", () => {
     } finally {
       releaseFailure();
       await delayedFailure;
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+});
+
+describe("B8B item 2: the Opinion desk reads the editor's Cancel", () => {
+  it("stops before the rung probe and the document reading when the Cancel is already on the row", async () => {
+    /*
+      THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+      before `resolvedRung` in `performEditorialWork` and this fails on the
+      first assert -- the probe is spent on a piece the editor stopped.
+    */
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    const userId = uniqueUser("opinion-cancel");
+    const request = await insertRequest(sql, { userId, modelChoice: "auto" });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+    try {
+      await assert.rejects(
+        performEditorialWork(job, {
+          documentProbe: async () => assert.fail("a cancelled piece must not probe a provider"),
+          readEditorialDocuments: async () => assert.fail("nor read the editor's uploads"),
+          writeEditorial: async () => assert.fail("nor write a piece"),
+        }),
+        /Cancelled by the editor/,
+        "the row ends with the editor's own reason",
+      );
+    } finally {
+      await cleanCompletionFixture(sql, userId);
+    }
+  });
+
+  it("stops before the write when the Cancel lands while the uploads are being read", async () => {
+    /*
+      The second boundary: a Cancel that arrives during the reading pass must be
+      read before the write, because the write is the one outcome an editor who
+      cancelled cannot undo.
+
+      THE MUTATION THAT MATTERS: delete the `await throwIfJobCancelled(job.id)`
+      between `setJobStage("Researching the editorial")` and the `waitForModel`
+      write and this fails -- the write runs.
+    */
+    const sql = await getSql();
+    await ensureCompletionSchema();
+    await ensureStoryDocuments(sql);
+    const userId = uniqueUser("opinion-cancel-reading");
+    const request = await insertRequest(sql, { userId, modelChoice: "auto" });
+    const job = await enqueueJob({
+      userId,
+      newsroomId: 1,
+      kind: "editorial",
+      subjectId: request.id,
+      modelChoice: "auto",
+      kick: false,
+    });
+    await sql.query(
+      "insert into story_documents(id,newsroom_id,user_id,editorial_request_id,filename,mime,original) values($1,1,$2,$3,'cancelled.txt','text/plain',$4)",
+      [`opinion-cancel-doc-${Date.now()}`, userId, request.id, Buffer.from("Evidence for the cancelled piece.")],
+    );
+    try {
+      await assert.rejects(
+        performEditorialWork(job, {
+          documentProbe: async (choice) => ({
+            ok: true as const,
+            label: "Test model",
+            choice: choice as "deepseek-flash" | "codex-frontier" | "claude-sonnet",
+          }),
+          readEditorialDocuments: async () => {
+            // The editor's press arrives while the uploads are being read.
+            await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]);
+            return "saved document evidence";
+          },
+          writeEditorial: async () => assert.fail("the write must not start after a Cancel"),
+        }),
+        /Cancelled by the editor/,
+      );
+    } finally {
       await cleanCompletionFixture(sql, userId);
     }
   });

@@ -395,10 +395,32 @@ describe("the sign-in state machine, driven by a fake CLI", () => {
     );
     const failedId = inserted[0]!.id;
 
-    // The fake CLI reports signed in, so the status read resolves the failure.
+    /*
+      The fake CLI reports signed in, so the status read resolves the failure.
+
+      Both paths are named, not just the one this test asserts about:
+      `providerStatuses` asks about EVERY provider, so leaving Codex unset made
+      this test run whatever `codex` is on the machine -- a real installed
+      agent CLI, on any developer box that has one, and nothing at all on CI.
+      That is the same defect class as the model seal's: a test whose setup
+      depended on the machine rather than on the file.
+    */
     const restore = withEnv({
       CLAUDE_CLI_PATH: FAKE_CLAUDE,
       FAKE_CLAUDE_SIGNED_IN: "1",
+      CODEX_CLI_PATH: FAKE_CODEX,
+      FAKE_CODEX_SIGNED_IN: undefined,
+      /*
+        ...and the provider switched ON. `providerStatuses` reads the same
+        off-switch the desk does (`TOWNREPORTER_CLAUDE_CODE`, see
+        provider-login.server.ts) and answers "Turned off with
+        TOWNREPORTER_CLAUDE_CODE=0." rather than probing -- so with that
+        variable in the environment this test failed on its first assertion
+        ("the probe says signed in") on a machine where it passed everywhere
+        else. Same defect as the ladder test: the file, not the shell, has to
+        say which providers are in play.
+      */
+      TOWNREPORTER_CLAUDE_CODE: "1",
     });
     const { resetClaudeCliCache, probeClaudeCode } = await import("./ai-claude-code.server.ts");
     resetClaudeCliCache();
