@@ -20,7 +20,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
-import { PAPER } from "../paper.ts";
+import { EDITOR_EMAIL, PAPER } from "../paper.ts";
 import {
   clearerViewSentence,
   civicReportingLine,
@@ -38,16 +38,35 @@ import {
 
 const LIVE_SHAPED = 900_401; // onboarded, blank name/city/state, like production
 const UNSET = 900_402; // no row at all: a brand-new install
+const LIVE_NULL_EMAIL = 900_403; // the same row with editor_email NULL instead of ''
+
+/*
+  The columns, as the production auditor read them (2026-10-02, read-only):
+  NULL: location, timezone, tagline, kicker, council_votes_url, youtube_channels,
+  meeting_keywords, seed_sources; name/city/state empty; FILLED: deck, trust,
+  named_outlets; editor_email "empty" (the auditor could not say '' from NULL, so
+  both are pinned); onboarded = true. The filled values below are stand-ins of
+  the same kind, not the live text.
+*/
+const LIVE_DECK = "Our own deck for this paper: what we cover and how, written by its editor.";
+const LIVE_TRUST = "Civic news, edited by people.";
+const LIVE_OUTLETS = [
+  { name: "Riverbend Gazette", aliases: ["the Gazette"], domains: ["riverbendgazette.example"] },
+];
 
 async function seedLiveShape() {
   await ensurePaperSettingsSchema();
   const sql = await getSql();
-  await sql`delete from paper_settings where newsroom_id in (${LIVE_SHAPED}, ${UNSET})`;
-  // Only the columns the auditor reported as empty are set empty; every other
-  // column is left NULL, which is the same "fall back to the shipped value" case.
+  await sql`delete from paper_settings where newsroom_id in (${LIVE_SHAPED}, ${UNSET}, ${LIVE_NULL_EMAIL})`;
+  // Columns the auditor reported as NULL are left NULL (the "fall back to the
+  // shipped value" case); name, city, state and editor_email are empty strings.
   await sql`
-    insert into paper_settings (newsroom_id, name, city, state, onboarded)
-    values (${LIVE_SHAPED}, '', '', '', true)
+    insert into paper_settings (newsroom_id, name, city, state, deck, trust, named_outlets, editor_email, onboarded)
+    values (${LIVE_SHAPED}, '', '', '', ${LIVE_DECK}, ${LIVE_TRUST}, ${JSON.stringify(LIVE_OUTLETS)}::jsonb, '', true)
+  `;
+  await sql`
+    insert into paper_settings (newsroom_id, name, city, state, deck, trust, named_outlets, editor_email, onboarded)
+    values (${LIVE_NULL_EMAIL}, '', '', '', ${LIVE_DECK}, ${LIVE_TRUST}, ${JSON.stringify(LIVE_OUTLETS)}::jsonb, null, true)
   `;
 }
 
@@ -69,7 +88,24 @@ describe("a paper that is onboarded but has blank name, city and state (the live
     assert.equal(cfg.location, PAPER.location);
     assert.equal(cfg.timezone, PAPER.timezone);
     assert.equal(cfg.kicker, PAPER.kicker);
-    assert.equal(cfg.deck, PAPER.deck);
+  });
+
+  it("keeps the FILLED deck, trust and named outlets over the shipped defaults", async () => {
+    await seedLiveShape();
+    for (const read of [getPaperConfig, getPublicPaperConfig]) {
+      const cfg = await read(LIVE_SHAPED);
+      assert.equal(cfg.deck, LIVE_DECK, "the stored deck wins, not the Longmont deck");
+      assert.notEqual(cfg.deck, PAPER.deck);
+      assert.equal(cfg.trust, LIVE_TRUST, "the stored trust line wins");
+      assert.notEqual(cfg.trust, PAPER.trust);
+      assert.deepEqual(cfg.namedOutlets.map((o) => o.name), ["Riverbend Gazette"], "the stored outlet list wins");
+    }
+  });
+
+  it("an empty editor_email means no address (not the build-time one); a NULL one falls back to it -- unchanged by F4", async () => {
+    await seedLiveShape();
+    assert.equal((await getPublicPaperConfig(LIVE_SHAPED)).editorEmail, null);
+    assert.equal((await getPublicPaperConfig(LIVE_NULL_EMAIL)).editorEmail, EDITOR_EMAIL);
   });
 
   it("still reads as Longmont on the public site: the placeholder is for un-onboarded papers only", async () => {
