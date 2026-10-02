@@ -320,6 +320,68 @@ function Get-PromoteHealthTimeoutSeconds {
   return 60
 }
 
+<#
+  Start the app, then wait for it to answer. Returns ONE boolean.
+
+  THE HANG THIS REPLACES (production auditor's lab, gate 3, 2026-10-01). The
+  start step used to be a function that ran
+      & powershell -File start-townreporter.ps1
+  inline. A function's output is its return value, so PowerShell read the native
+  command's stdout through a pipe and waited for end-of-file -- and the node
+  server that start script launches holds a copy of that pipe's write end, so the
+  wait lasted as long as the paper stayed up. The promote sat on
+  "step=start started" with the paper serving and the 30-minute marker in place.
+  A stand-in with a 25-second sleeper took 25 seconds and returned an ARRAY of
+  three things, so `-not (Start-TheApp)` did not mean what it looked like either.
+
+  So: the start script's output goes to FILES (there is no pipe for a child to
+  keep open), the wait is on that ONE process by PID (never on its descendants),
+  nothing it prints can reach the return value, and the answer is a boolean from
+  the port probe. A start script that has not finished by $StartSeconds is left
+  alone and the health wait decides: the paper either answers or it does not.
+#>
+function Start-PromoteApp {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$StartScript,
+    [Parameter(Mandatory = $true)][string]$OutDir,
+    [Parameter(Mandatory = $true)][int]$Port,
+    [int]$HealthSeconds = 60,
+    [int]$StartSeconds = 300,
+    [scriptblock]$TestThePort = $null
+  )
+  if (-not $TestThePort) { $TestThePort = { param($p) Test-PromotePaperUp -Port $p } }
+  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $outFile = Join-Path $OutDir "promote-$stamp-start.out.log"
+  $errFile = Join-Path $OutDir "promote-$stamp-start.err.log"
+  Write-PromoteLog $Log "step=start child: powershell -File $StartScript (output: $outFile)"
+  $proc = $null
+  try {
+    $proc = Start-Process -FilePath 'powershell' `
+      -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $StartScript + '"')) `
+      -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+  } catch {
+    Write-PromoteLog $Log "step=start could not launch the start script: $($_.Exception.Message)"
+    return $false
+  }
+  Write-PromoteLog $Log "step=start child pid $($proc.Id)"
+  # That ONE process, by PID. Wait-Process does not wait for its descendants,
+  # which is the point: the app it launches is meant to outlive it.
+  try { $null = Wait-Process -Id $proc.Id -Timeout $StartSeconds -ErrorAction SilentlyContinue } catch { }
+  $finished = $false
+  try { $finished = [bool]$proc.HasExited } catch { $finished = $true }
+  if (-not $finished) {
+    Write-PromoteLog $Log "step=start the start script had not finished after $StartSeconds s; the health wait decides"
+  }
+  for ($i = 0; $i -lt $HealthSeconds; $i++) {
+    if ([bool](& $TestThePort $Port)) { break }
+    Start-Sleep -Seconds 1
+  }
+  return [bool](& $TestThePort $Port)
+}
+
 # --- what node_modules was installed from (the lockfile marker) -------------
 #
 # THE TRAP THIS CLOSES. Whether to run `npm ci` used to be decided from the
