@@ -7,7 +7,11 @@
  * 1024px screen, 259px wider at 900 and 554px wider at 390 -- the whole page
  * scrolled sideways, so the right-hand columns (the model select, the status
  * chip) sat off the edge of a phone. `/desk/queue` was 64px too wide at 900,
- * pushed by the row's own actions and its "More" menu.
+ * pushed by the row's own actions and its "More" menu. `/desk/drafts` was 68px
+ * too wide at 768 -- its four-column row came out 578px inside a 510px column
+ * -- which this walk REPORTED for one release without asserting; PUB2 moved the
+ * row's stacked shape to the 882px at which it breaks and turned the note into
+ * a failing assertion.
  *
  * WHAT THIS WALK PROVES, on the built server and the real desk UI:
  *
@@ -87,14 +91,19 @@ const ROUTES = [
 ];
 
 /**
- * The two pages whose fit this unit is responsible for, and asserts.
+ * The pages whose fit this walk is responsible for, and asserts.
  *
  * Every other desk route is measured and REPORTED (see `otherOverflow`), not
- * asserted: the brief that opened this unit names these two, and a walk that
- * failed on a screen no one has been asked to fix would be a walk that gets
- * switched off rather than read.
+ * asserted: a walk that failed on a screen no one has been asked to fix would
+ * be a walk that gets switched off rather than read.
+ *
+ * Drafts joined this list in PUB2. It was measured here as a note for one
+ * release ("Drafts @768: 68px (widest span.drafts-side)") and never asserted,
+ * so the defect sat in the report with nothing that would fail on it. The fix
+ * moved the row's stacked shape from 700px to the 882px at which it actually
+ * breaks; the note is a failing assertion now, so it cannot come back.
  */
-const MUST_FIT = ["Queue", "Models"];
+const MUST_FIT = ["Queue", "Models", "Drafts"];
 
 const done = [];
 const facts = [];
@@ -390,7 +399,9 @@ async function measureEveryDeskPage() {
     [],
     "no desk page may scroll sideways at any width a desk is read at",
   );
-  step(`Models and Queue fit the window at all ${WIDTHS.length} widths (${measured.length} measurements)`);
+  step(
+    `Models, Queue and Drafts fit the window at all ${WIDTHS.length} widths (${measured.length} measurements)`,
+  );
   if (otherOverflow.length) {
     console.log(
       `  note  ${otherOverflow.length} overflow(s) on desk pages this unit does not own (reported, not asserted):`,

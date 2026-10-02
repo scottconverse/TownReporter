@@ -968,6 +968,16 @@ export function PaperSetupPanel() {
     queryKey: ["first-run-setup"],
     queryFn: () => firstRunSetupState(),
     enabled: me.data?.role === "owner",
+    /*
+      A cached answer is not an answer. "needsSetup: true" left in the cache from
+      earlier (another tab finished setup, or the entry went stale) is returned
+      with `isPending === false` while a background refetch runs, and drawing the
+      blank first-run form from it for an already-onboarded paper lets Save
+      overwrite the paper's identity. So the query refetches on every mount and
+      the screen treats the answer as unresolved until THIS mount has fetched it
+      (`isFetchedAfterMount`).
+    */
+    refetchOnMount: "always",
   });
   if (me.data?.role !== "owner") return null;
   return (
@@ -983,7 +993,7 @@ export function PaperSetupPanel() {
         is added as real rows on the Sources page, not just stored as a default — each editor gets
         them added once, the first time they visit.
       </p>
-      {current.isPending || setupState.isPending ? null : setupState.isError || setupState.data === undefined ? (
+      {current.isPending || setupState.isPending || !setupState.isFetchedAfterMount ? null : setupState.isError || setupState.data === undefined ? (
         /*
           Fail closed. "I could not ask whether this paper is set up" is not
           "it is set up": drawing the form with `firstRun={false}` would fill it

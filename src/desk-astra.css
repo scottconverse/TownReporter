@@ -4287,11 +4287,11 @@
     justify-content: flex-start;
     align-items: flex-start;
   }
-  .desk-ltr.astra .drafts-row,
+  /* PUB2: the Drafts row's stacked shape moved to its own breakpoint (see the
+     DRAFTS media block below); `.today-edition-row` still stacks here. */
   .desk-ltr.astra .today-edition-row {
     grid-template-columns: minmax(0, 1fr);
   }
-  .desk-ltr.astra .drafts-side,
   .desk-ltr.astra .today-edition-act {
     align-items: flex-start;
   }
@@ -4408,6 +4408,41 @@
   }
   .desk-ltr.astra .queue-sel {
     justify-content: space-between;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   DRAFTS (unit PUB2)
+--------------------------------------------------------------------------- */
+/*
+  THE DRAFTS ROW STOPS BEING A FOUR-COLUMN GRID EARLIER THAN A PHONE.
+
+  The F6 walk measured `/desk/drafts` 68px wider than a 768px window with the
+  desktop row in place: `div.drafts-row` came out 578px inside a 510px column,
+  pushed past the edge by `span.drafts-side` and the row's own More menu. Same
+  family as the Queue fix above -- `grid-template-columns: 200px minmax(0,1fr)
+  170px auto` cannot be narrower than 578px of content (200 + 170 + the side's
+  own ~160px of button and menu, plus three 16px gaps), and the desk's main
+  column is only `viewport - 258px` wide once the nav rail and the page padding
+  have taken their share (642 at 900, 510 at 768).
+
+  WHY 882 AND NOT 836. 836 is the exact width at which 578 fits the column
+  (836 - 258 = 578), and a fit with no slack is not a fit -- the same reasoning
+  as the Queue's 1060. 882 leaves the row 46px of it, and costs the four-column
+  row only the 836-882 band, where it had 46px of slack or less.
+
+  Nothing here is a new look. Both declarations are the ones the `max-width:
+  700px` block already carried for this row, moved to the width at which the
+  thing they fix actually breaks; above 882 the drawn four-column row is
+  untouched, and below 700 the phone block's other rules (the static More menu)
+  still apply on top of these.
+*/
+@media (max-width: 882px) {
+  .desk-ltr.astra .drafts-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .drafts-side {
+    align-items: flex-start;
   }
 }
 

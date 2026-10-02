@@ -1212,7 +1212,7 @@ function StoryPage() {
         notesProblem,
       };
     },
-    onSuccess: async ({ result, notesProblem }) => {
+    onSuccess: ({ result, notesProblem }) => {
       /*
         ── EVERY ANSWER IS DRAWN AT THE BAR (UNIT PUB1) ──────────────────────
 
@@ -1224,36 +1224,52 @@ function StoryPage() {
         recorded for a draft version that has since moved), and a page that
         keeps saying "Nothing blocks Publish" after being told otherwise is the
         same bug in a different coat.
+
+        ── THE ANSWER IS RECORDED FIRST, THE REFRESHES ARE NOT WAITED ON ────
+        (PUB2, review-bot finding on PR 163.)
+
+        TanStack keeps a mutation `isPending` until an async `onSuccess`
+        settles, and this one used to await four invalidations -- each of which
+        refetches -- BEFORE it set `publishedSlug`, `justPublished` and `msg`.
+        A slow or stalled `lead` refetch therefore left the bar saying
+        "Publishing…" while the article was already committed, and the two
+        refusal paths had the same ordering. So the state is written first and
+        the invalidations are fired without being awaited (with their rejection
+        handled, so nothing lands as an unhandled rejection); the bar stops
+        saying a press is in flight the moment the server has answered.
       */
-      const refuse = async (text: string) => {
+      const refresh = (queryKey: readonly unknown[]) => {
+        void qc.invalidateQueries({ queryKey }).catch(() => {});
+      };
+      const refuse = (text: string) => {
         setMsg("");
         setPublishRefusal(text);
-        await qc.invalidateQueries({ queryKey: ["lead", id] });
+        refresh(["lead", id]);
       };
       if (!answered(result)) {
-        await refuse(NO_ANSWER);
+        refuse(NO_ANSWER);
         return;
       }
       if (!result.ok) {
-        await refuse(result.error);
+        refuse(result.error);
         return;
       }
       setPublishRefusal("");
-      await qc.invalidateQueries({ queryKey: ["leads"] });
-      await qc.invalidateQueries({ queryKey: ["paper"] });
-      await qc.invalidateQueries({ queryKey: ["published-desk"] });
-      await qc.invalidateQueries({ queryKey: ["lead", id] });
       setPublishedSlug(result.slug);
       setJustPublished(true);
       setMsg(notesProblem ? `On the paper. ${notesProblem}` : "On the paper.");
+      refresh(["leads"]);
+      refresh(["paper"]);
+      refresh(["published-desk"]);
+      refresh(["lead", id]);
     },
-    onError: async (err) => {
+    onError: (err) => {
       setMsg("");
       setPublishRefusal(
         editorActionError(err instanceof Error ? err.message : "", "publish that story") ??
           "Could not publish.",
       );
-      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      void qc.invalidateQueries({ queryKey: ["lead", id] }).catch(() => {});
     },
   });
 
@@ -2055,7 +2071,15 @@ function StoryPage() {
         where the drawing puts it -- see the "under the actions" block below the
         form. The condition and the reassurance line traveled with it.
       */}
-      {completedDraftNeedsReview ? (
+      {/*
+        PUB2 item 1: NOT on a story that is already on the paper. The banner is
+        drawn from the last completion receipt, which does not change when the
+        article prints -- so on a published story it said "Draft saved — review
+        required" beside "Published.", a stale instruction to review something
+        that is already public. `onPaper` covers both the reload of a published
+        story and the moment just after a press on this page.
+      */}
+      {!onPaper && completedDraftNeedsReview ? (
         <Notice kind="err">
           <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.{" "}
           {/*
