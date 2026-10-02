@@ -757,9 +757,10 @@ async function main() {
   await recordedPassages.first().waitFor();
   const firstFindingRecord = review.locator("article").first();
   await firstFindingRecord
+    // Unit PUB1 reworded the ids for an editor: "For support: Saved copy number N
+    // of the page · capture event M (saved copy N)". Same numbers, plain words.
     .getByText(
-      `Artifact version ${findingFixture.citedVersionId} · Capture event ${findingFixture.captureEventId} (version ${findingFixture.citedVersionId})`,
-      { exact: true },
+      `Saved copy number ${findingFixture.citedVersionId} of the page · capture event ${findingFixture.captureEventId} (saved copy ${findingFixture.citedVersionId})`,
     )
     .waitFor();
   const unavailablePassages = review.getByText("Cited capture unavailable", { exact: true });
