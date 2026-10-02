@@ -569,6 +569,51 @@ test("a 5433 URL without the flag is refused by copy, swap-back and rollback; -W
   }
 });
 
+test("starting the app does not wait for the app: a start script whose child outlives it returns at once, with ONE boolean", windowsOnly, async () => {
+  /*
+    THE HANG (production auditor's lab, gate 3). Start-TheApp used to run
+    `& powershell -File start-townreporter.ps1` INLINE inside a function. A
+    function's output is its return value, so PowerShell captured the native
+    command's stdout through a pipe and waited for it to reach end-of-file --
+    and the node server the start script launches holds a copy of that pipe's
+    write end, so the wait lasted as long as the paper ran. Reproduced with a
+    stand-in: a start script that launches a 25-second sleeper took 25 seconds
+    and returned an array of three things instead of a boolean.
+    Start-PromoteApp runs the start script with its output sent to FILES and
+    waits for that one process only.
+  */
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "start-app.ps1", [
+      "$ops = Join-Path $app 'ops'",
+      "New-Item -ItemType Directory -Force -Path $ops | Out-Null",
+      "$fake = @'",
+      "Write-Output '=== fake start'",
+      "Start-Process -FilePath powershell -ArgumentList '-NoProfile','-Command','Start-Sleep -Seconds 14' -WindowStyle Hidden -RedirectStandardOutput \"$PSScriptRoot\\sleeper.out\" -RedirectStandardError \"$PSScriptRoot\\sleeper.err\"",
+      "Write-Output '=== fake start finished'",
+      "'@",
+      "Set-Content -Path (Join-Path $ops 'start-townreporter.ps1') -Value $fake -Encoding ASCII",
+      "$log = New-PromoteLog -App $app",
+      "$t = Get-Date",
+      "$r = Start-PromoteApp -Log $log -StartScript (Join-Path $ops 'start-townreporter.ps1') -OutDir (Join-Path $app 'logs') -Port 9 -HealthSeconds 2 -TestThePort { $true }",
+      "$secs = [int]((Get-Date) - $t).TotalSeconds",
+      "Set-Content -Path (Join-Path $app 'start.txt') -Value \"secs=$secs;count=$(@($r).Count);type=$($r.GetType().Name);value=$r\" -Encoding ASCII",
+    ]);
+    await runPowerShell(harness, { timeout: 60_000 });
+    const out = read(join(install.app, "start.txt")).trim();
+    const secs = Number(/secs=(\d+)/.exec(out)?.[1] ?? "999");
+    assert.ok(secs < 10, `the start step waited for the app's own child (${secs} s): ${out}`);
+    assert.match(out, /count=1;type=Boolean;value=True$/, `Start-PromoteApp must return exactly one boolean: ${out}`);
+    const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+    // Comments explain the history and may quote the old inline call; only code is judged.
+    const startFn = (/function Start-TheApp \{[\s\S]*?\n\}/.exec(src)?.[0] ?? "").replace(/^\s*#.*$/gm, "");
+    assert.ok(startFn.includes("Start-PromoteApp"), "promote.ps1's Start-TheApp does not call Start-PromoteApp");
+    assert.doesNotMatch(startFn, /&\s+powershell/, "promote.ps1's Start-TheApp runs the start script inline again");
+  } finally {
+    cleanup(install);
+  }
+});
+
 test("every step lands in the log with its command, its exit code and its duration", windowsOnly, async () => {
   const install = makeInstall();
   try {

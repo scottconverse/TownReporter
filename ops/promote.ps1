@@ -402,12 +402,12 @@ function Skip-Step([string]$name) {
   the note on the marker's 30-minute cap in ops\lib-promote.ps1.
 #>
 function Start-TheApp {
-  & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ops "start-townreporter.ps1")
-  $healthSeconds = Get-PromoteHealthTimeoutSeconds
-  for ($i = 0; $i -lt $healthSeconds -and -not (Test-PromotePaperUp -Port ([int]$port)); $i++) {
-    Start-Sleep -Seconds 1
-  }
-  return (Test-PromotePaperUp -Port ([int]$port))
+  # NOT an inline `& powershell -File ...` here: a function's output is its
+  # return value, and a native command whose output is captured is waited for
+  # until every holder of its pipe has gone -- which includes the app it starts.
+  # See Start-PromoteApp in ops\lib-promote.ps1 for the hang this replaced.
+  return (Start-PromoteApp -Log $log -StartScript (Join-Path $ops "start-townreporter.ps1") `
+      -OutDir (Join-Path $app "logs") -Port ([int]$port) -HealthSeconds (Get-PromoteHealthTimeoutSeconds))
 }
 
 <#
