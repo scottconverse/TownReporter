@@ -43,7 +43,16 @@ test("the chosen model is passed into runScan, and the picker is disabled while 
   const pickerTag = src.slice(pickerAt, pickerEnd + 2);
   assert.match(pickerTag, /disabled=\{scanning\}/);
   assert.match(pickerTag, /value=\{modelChoice\}/);
-  assert.match(pickerTag, /onChange=\{\(choice\) => \{ setModelChoice\(choice\); setModelEffort\(defaultModelEffort\(choice\)\); \}\}/);
+  /*
+    F3b added `modelChoiceTouched.current = true;` at the head of this handler
+    (the flag that keeps the first-run seed from undoing an editor's own pick);
+    the rest of the line is unchanged, and "the choice reaches the state
+    runScan sends" is what this asserts.
+  */
+  assert.match(
+    pickerTag,
+    /onChange=\{\(choice\) => \{ modelChoiceTouched\.current = true; setModelChoice\(choice\); setModelEffort\(defaultModelEffort\(choice\)\); \}\}/,
+  );
   assert.match(pickerTag, /onEffortChange=\{setModelEffort\}/);
 });
 

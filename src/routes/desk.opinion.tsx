@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { DeskJobCard } from "@/components/JobCard";
@@ -19,9 +20,11 @@ import {
   startEditorial,
 } from "@/lib/news/opinion";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -72,6 +75,24 @@ function OpinionPage() {
   */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
+  /*
+    F3b: F3 stores the first-run default for Opinion's scope too, and this page
+    sends whatever the picker shows as an explicit pick -- so on a fresh
+    install that finished setup with a local model in memory, this picker
+    opens on Local model and "Write editorial" runs it. The owner's own touch
+    wins, and every other paper keeps `DEFAULT_OPINION_MODEL` (Automatic) as
+    before (see first-run-picker-default.ts).
+  */
+  const modelChoiceTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "opinion",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   const [openId, setOpenId] = useState<number | null>(null);
   /*
     Where the opened piece is drawn, so it can be scrolled to.
@@ -445,7 +466,7 @@ function OpinionPage() {
           <ModelPicker
             scope="opinion"
             value={modelChoice}
-            onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }}
+            onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }}
             effort={modelEffort}
             onEffortChange={setModelEffort}
             disabled={start.isPending}
@@ -695,27 +716,70 @@ function OpinionPage() {
                     ) : null}
                     {confirmId === r.id ? (
                       <>
-                        <InkButton
-                          tone="ghost"
-                          disabled={remove.isPending || discard.isPending}
-                          onClick={() =>
-                            r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id)
-                          }
+                        {/*
+                          Unit UI1a2: the confirm press is the one that does the
+                          work, so it carries the states -- "Deleting…" with a
+                          spinner, disabled, and the desk's own reason beside it
+                          if the call is refused. One of the two mutations is
+                          this row's, so `variables` says which.
+                        */}
+                        <ActionButton
+                          tone="danger"
+                          phase={rowActionPhase({
+                            isPending:
+                              (remove.isPending && remove.variables === r.draft_id) ||
+                              (discard.isPending && discard.variables === r.id),
+                            problem:
+                              remove.isError && remove.variables === r.draft_id
+                                ? remove.error instanceof Error
+                                  ? remove.error.message
+                                  : "That did not delete."
+                                : discard.isError && discard.variables === r.id
+                                  ? discard.error instanceof Error
+                                    ? discard.error.message
+                                    : "That did not clear."
+                                  : /* Unit UI1a3, finding 1: both of these server
+                                       functions answer `{ ok: false, error }`
+                                       for their ordinary refusal ("That
+                                       standalone editorial is gone."), which
+                                       settles as a SUCCESS. Read the refusal off
+                                       the settled answer, gated on `!isPending`
+                                       because React Query keeps the last answer
+                                       on `data` while a new press runs. */
+                                    remove.variables === r.draft_id && !remove.isPending
+                                    ? refusedAnswer(remove.data)
+                                    : discard.variables === r.id && !discard.isPending
+                                      ? refusedAnswer(discard.data)
+                                      : null,
+                          })}
+                          workingLabel="Deleting…"
+                          onAct={() => (r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id))}
                         >
-                          {remove.isPending || discard.isPending
-                            ? "Deleting…"
-                            : r.draft_id
-                              ? "Yes, delete"
-                              : "Yes, clear it"}
-                        </InkButton>
-                        <InkButton tone="quiet" onClick={() => setConfirmId(null)}>
+                          {r.draft_id ? "Yes, delete" : "Yes, clear it"}
+                        </ActionButton>
+                        <ActionButton
+                          tone="quiet"
+                          phase="idle"
+                          disabled={remove.isPending || discard.isPending}
+                          disabledReason={
+                            remove.isPending || discard.isPending
+                              ? "The delete is still being saved."
+                              : null
+                          }
+                          onAct={() => setConfirmId(null)}
+                        >
                           Keep
-                        </InkButton>
+                        </ActionButton>
                       </>
                     ) : (
-                      <InkButton tone="quiet" onClick={() => setConfirmId(r.id)}>
+                      <ActionButton
+                        tone="danger"
+                        phase="idle"
+                        disabled={remove.isPending || discard.isPending}
+                        onAct={() => setConfirmId(r.id)}
+                      >
                         {r.draft_id ? "Delete" : "Clear"}
-                      </InkButton>
+                      </ActionButton>
                     )}
                   </span>
                   {!r.finished_at && r.stalled ? (

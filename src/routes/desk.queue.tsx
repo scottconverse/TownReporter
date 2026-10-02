@@ -61,6 +61,7 @@ import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { deskErrorReason, deskToast } from "@/components/desk-toast";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -893,6 +894,27 @@ function QueuePage() {
   const bulkBusy =
     setStatus.isPending || bulkStatus.isPending || startBatch.isPending || bulkRemove.isPending;
   /*
+    Unit UI1a2. The batch's own failure sentence for one of the two bulk presses,
+    or null when that press took.
+
+    The whole point of bulk Hold / Kill going through the shared `ActionButton`
+    is that a partial failure is said AT the control that was pressed rather than
+    only in the toast -- twelve leads go through one `Promise.allSettled`, and
+    the report it builds already carries one sentence per lead that did not take.
+    The toast still says it (and carries the Undo); this is the same answer in
+    the second place the editor is looking.
+  */
+  const bulkProblemFor = (status: "held" | "killed"): string | null => {
+    if (bulkStatus.variables?.status !== status) return null;
+    if (bulkStatus.isError) {
+      return bulkStatus.error instanceof Error
+        ? bulkStatus.error.message
+        : "That change did not reach the desk.";
+    }
+    const failures = bulkStatus.data?.failures ?? [];
+    return failures.length ? failures.join(" ") : null;
+  };
+  /*
     Open the dialog a hash names.
 
     Today's "+ Add a lead" links to /desk/queue#file-lead, and phase 0's
@@ -1145,7 +1167,7 @@ function QueuePage() {
                       ? "Start stories"
                       : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
-                <InkButton
+                <ActionButton
                   tone="quiet"
                   /*
                     FB6, item 1: bulk Hold was `disabled` only and said nothing
@@ -1153,11 +1175,26 @@ function QueuePage() {
                     `Promise.allSettled` with no sign that anything was
                     happening. It stands down and says what it is doing now, as
                     does its sibling below.
+
+                    Unit UI1a2: the shared `ActionButton`, so the press also
+                    carries the batch's own failure sentence beside it. Its DONE
+                    is the ROWS' -- a held lead leaves the selected list reading
+                    "Held", which is the row data saying so, and the batch's own
+                    one-line summary is the confirmation (the "one confirmation"
+                    rule PUB2 set for Publish).
                   */
+                  phase={rowActionPhase({
+                    isPending: bulkStatus.isPending && bulkStatus.variables?.status === "held",
+                    problem: bulkProblemFor("held"),
+                  })}
+                  workingLabel="Holding…"
                   disabled={bulkBusy}
-                  pending={bulkStatus.isPending && bulkStatus.variables?.status === "held"}
-                  pendingLabel="Holding…"
-                  onClick={() => {
+                  disabledReason={
+                    bulkStatus.isPending && bulkStatus.variables?.status !== "held"
+                      ? "Another change to this selection is still being saved."
+                      : null
+                  }
+                  onAct={() => {
                     /*
                       Unit BN, item 3: "Bulk bar Hold uses the hold path." One
                       selected lead is the row's own Hold -- the drawn dialog,
@@ -1173,13 +1210,21 @@ function QueuePage() {
                   }}
                 >
                   Hold
-                </InkButton>
-                <InkButton
+                </ActionButton>
+                <ActionButton
                   tone="quiet-danger"
+                  phase={rowActionPhase({
+                    isPending: bulkStatus.isPending && bulkStatus.variables?.status === "killed",
+                    problem: bulkProblemFor("killed"),
+                  })}
+                  workingLabel="Killing…"
                   disabled={bulkBusy}
-                  pending={bulkStatus.isPending && bulkStatus.variables?.status === "killed"}
-                  pendingLabel="Killing…"
-                  onClick={() => {
+                  disabledReason={
+                    bulkStatus.isPending && bulkStatus.variables?.status !== "killed"
+                      ? "Another change to this selection is still being saved."
+                      : null
+                  }
+                  onAct={() => {
                     /*
                       FB6, item 2: several leads in one kill press asks ONCE for
                       one reason they all carry. One lead keeps the row's own
@@ -1191,7 +1236,7 @@ function QueuePage() {
                   }}
                 >
                   Kill
-                </InkButton>
+                </ActionButton>
                 {bulkKillReason !== null ? (
                   <div className="queue-bulk-delete-confirm">
                     <label className="queue-bulk-reason">
@@ -1228,22 +1273,38 @@ function QueuePage() {
                       {selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published
                       articles stay on the paper.
                     </span>
-                    <InkButton
+                    {/*
+                      Unit UI1a2: the confirm press carries the states. Its DONE
+                      is the rows leaving the Queue, which the list and the
+                      removal's own one-line summary already say.
+                    */}
+                    <ActionButton
                       tone="danger"
-                      disabled={bulkRemove.isPending}
-                      onClick={() => bulkRemove.mutate(selectedDeleteLeads)}
+                      phase={rowActionPhase({
+                        isPending: bulkRemove.isPending,
+                        problem:
+                          bulkRemove.isError
+                            ? bulkRemove.error instanceof Error
+                              ? bulkRemove.error.message
+                              : "Could not delete those leads."
+                            : null,
+                      })}
+                      workingLabel="Deleting…"
+                      onAct={() => bulkRemove.mutate(selectedDeleteLeads)}
                     >
-                      {bulkRemove.isPending
-                        ? "Deleting…"
-                        : `Yes, delete ${selectedDeleteLeads.length}`}
-                    </InkButton>
-                    <InkButton
+                      {`Yes, delete ${selectedDeleteLeads.length}`}
+                    </ActionButton>
+                    <ActionButton
                       tone="quiet"
+                      phase="idle"
                       disabled={bulkRemove.isPending}
-                      onClick={() => setConfirmingBulkDelete(false)}
+                      disabledReason={
+                        bulkRemove.isPending ? "The delete is still being saved." : null
+                      }
+                      onAct={() => setConfirmingBulkDelete(false)}
                     >
                       Keep
-                    </InkButton>
+                    </ActionButton>
                   </div>
                 ) : (
                   <InkButton tone="quiet-danger" onClick={() => setConfirmingBulkDelete(true)}>
@@ -1463,6 +1524,18 @@ function QueuePage() {
                       : undefined
                   }
                   onDelete={() => remove.mutate(l.id)}
+                  /*
+                    Unit UI1a2: this row's own delete, as the shared piece draws
+                    it. `remove` is one mutation for every row, so `variables` is
+                    which row pressed it -- the same shape `statusId` and
+                    `backPending` already use on this screen. The reason is the
+                    screen's own `deleteError`, which is now read at the control
+                    that was pressed as well as in the page's line.
+                  */
+                  deletePending={remove.isPending && remove.variables === l.id}
+                  deleteReason={
+                    remove.variables === l.id && !remove.isPending ? deleteError || null : null
+                  }
                   deleteSelected={selectedDeleteLeads.includes(l.id)}
                   onDeleteSelect={(selected) => {
                     setConfirmingBulkDelete(false);

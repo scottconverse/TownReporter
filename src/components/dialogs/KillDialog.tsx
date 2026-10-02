@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
+import { dialogPressProps } from "@/lib/news/dialog-press";
 import { setLeadStatus } from "@/lib/news/desk";
 
 /**
@@ -60,7 +61,17 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
   const [fill, setFill] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
+  /*
+    Unit UI1a3, finding 4: WHICH destructive press is out, not just "one is".
+
+    One `busy` flag made BOTH "Kill with this reason" and "Kill, no reason" draw
+    "Killing…" with a spinner, which says two destructive controls were
+    activated when the editor pressed one. The dialog records the press it
+    fired, so only that button wears the word; the other stays at its own label
+    (disabled while a request is in flight, but not spinning and not claiming to
+    be running).
+  */
+  const [busy, setBusy] = useState<"primary" | "alt" | null>(null);
   const [error, setError] = useState("");
 
   const trimmed = reason.trim();
@@ -75,7 +86,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
   }
 
   async function kill(withReason: boolean) {
-    setBusy(true);
+    setBusy(withReason ? "primary" : "alt");
     setError("");
     try {
       const res = await setLeadStatus({
@@ -105,7 +116,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
     } catch {
       setError("The kill did not reach the desk. The lead is unchanged.");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -119,11 +130,25 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
       cancelLabel="Cancel"
       altLabel="Kill, no reason"
       onAlt={() => void kill(false)}
-      altDisabled={busy}
+      altDisabled={busy !== null}
       primaryLabel="Kill with this reason"
       onPrimary={() => void kill(true)}
-      primaryDisabled={busy || !trimmed}
+      primaryDisabled={busy !== null || !trimmed}
       primaryTone="solid"
+      /*
+        Unit UI1a2: the press says what it is doing while it is out. Its FAILED
+        is the dialog's own `error` line above (already `role="alert"`), and its
+        DONE is the lead leaving this page for Killed, with `KilledLeadRecord`
+        in its place -- the existing flow, and the one confirmation rule PUB2
+        set means there is no second green "Killed" here.
+
+        Unit UI1a3, finding 4: the word goes to the button that was PRESSED.
+        Handing the same pending label to both made both destructive controls
+        say "Killing…" and spin; `busy` names which one is out, and the other
+        label stays undefined so the shared Dialog foot leaves that button at
+        its own word.
+      */
+      {...dialogPressProps(busy, "Killing…")}
     >
       <div className="astra-field">
         <span className="astra-field-label" id="kill-quick-fill">
@@ -156,7 +181,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
           rows={3}
           value={reason}
           maxLength={500}
-          disabled={busy}
+          disabled={busy !== null}
           onChange={(e) => {
             setReason(e.target.value);
             // Typing over a fill makes it no longer that fill's sentence.
@@ -173,7 +198,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
           type="url"
           value={url}
           maxLength={2000}
-          disabled={busy}
+          disabled={busy !== null}
           onChange={(e) => setUrl(e.target.value)}
           placeholder="https://… (optional)"
         />

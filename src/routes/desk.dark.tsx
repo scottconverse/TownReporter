@@ -63,6 +63,7 @@ import {
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
@@ -220,6 +221,24 @@ function DarkPage() {
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
+  /*
+    F3b: a fresh install that finished setup with a local model in memory
+    opens this picker on Local model. That is also what satisfies
+    `mustChooseReader` below -- Dark Desk makes the owner choose a reader
+    before it will send retained PDF pages, and a stored local default IS that
+    choice. The owner's own touch wins, and every other paper opens on
+    Automatic as before (see first-run-picker-default.ts).
+  */
+  const modelChoiceTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "dark",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   const pickedFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
@@ -1236,6 +1255,7 @@ function DarkPage() {
           <DarkDialsPanel
             modelChoice={modelChoice}
             onModelChoice={(choice) => {
+              modelChoiceTouched.current = true;
               setModelChoice(choice);
               setModelEffort(defaultModelEffort(choice));
             }}

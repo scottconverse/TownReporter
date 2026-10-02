@@ -185,8 +185,24 @@ test("Queue: Run scan now draws the scan's own card and reports a failure", () =
 
 test("Queue: bulk Hold and Kill stand down, say what they are doing, and ask before a batch kill", () => {
   const queue = read("src/routes/desk.queue.tsx");
-  assert.match(queue, /pending=\{bulkStatus\.isPending && bulkStatus\.variables\?\.status === "held"\}\s*pendingLabel="Holding…"/);
-  assert.match(queue, /pending=\{bulkStatus\.isPending && bulkStatus\.variables\?\.status === "killed"\}\s*pendingLabel="Killing…"/);
+  /*
+    Unit UI1a2 moved these two presses onto the shared `ActionButton`, so the
+    pending half is the piece's `phase` rather than `InkButton`'s `pending`, and
+    the word is `workingLabel` rather than `pendingLabel`. The FACT this test
+    measures is unchanged and is what the assertions below still read: each
+    press stands down on its OWN status (not on any bulk write), and says what
+    it is doing while it is out.
+  */
+  assert.match(
+    queue,
+    /isPending: bulkStatus\.isPending && bulkStatus\.variables\?\.status === "held"[\s\S]{0,220}workingLabel="Holding…"/,
+    "bulk Hold stands down on its own status and says it is holding",
+  );
+  assert.match(
+    queue,
+    /isPending: bulkStatus\.isPending && bulkStatus\.variables\?\.status === "killed"[\s\S]{0,220}workingLabel="Killing…"/,
+    "bulk Kill stands down on its own status and says it is killing",
+  );
   // One shared reason, asked for before several leads are killed in one press.
   assert.match(queue, /if \(selectedLeads\.length > 1\) setBulkKillReason\(""\);/);
   assert.match(queue, /Yes, kill \{selectedLeads\.length\}/);

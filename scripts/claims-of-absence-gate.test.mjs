@@ -43,9 +43,15 @@ test("Publish is disabled while a claim of absence is unchecked", () => {
     sit in the button and never reach the sentence beside it. The claim's
     refusal is still pinned in `publish-blockers.ts`, checked below.
   */
+  /*
+    Unit UI1a2 moved both Publish presses onto the shared `ActionButton`, so
+    the anchor is the piece rather than `InkButton`. The FACT is unchanged and
+    is what this still reads: `blockers.length > 0` is inside the button's own
+    `disabled`, so an unconfirmed claim of absence holds the press down.
+  */
   assert.match(
     story,
-    /<InkButton[\s\S]{0,1200}?disabled=\{publish\.isPending \|\| blockers\.length > 0\}[\s\S]{0,250}?Publish in \$\{sectionNameNow\}/,
+    /<(?:ActionButton|InkButton)[\s\S]{0,1200}?disabled=\{publish\.isPending \|\| blockers\.length > 0\}[\s\S]{0,250}?Publish in \$\{sectionNameNow\}/,
     "the Publish button must be disabled while the blocker list is not empty",
   );
   assert.match(

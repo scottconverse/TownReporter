@@ -232,9 +232,16 @@ const { Dialog } = await import(dialogUrl);
 
 const emptyStubUrl = stub("");
 
+/* UI1a3: the Kill dialog hands the foot its pending word through this module,
+   so the REAL one is transpiled and loaded here rather than stubbed. */
+const dialogPressUrl = moduleUrl(
+  await source("src/lib/news/dialog-press.ts"),
+  "dialog-press.ts",
+);
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
   "@/components/dialog": dialogUrl,
   "@/lib/news/desk": deskStubUrl,
+  "@/lib/news/dialog-press": dialogPressUrl,
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
 });
 const correctionUrl = moduleUrl(

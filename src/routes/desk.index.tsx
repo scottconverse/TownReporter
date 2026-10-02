@@ -4,8 +4,9 @@ import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
+import { FirstRunModelCard } from "@/components/first-run-model";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
@@ -97,6 +98,7 @@ import {
 import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import { Dialog } from "@/components/dialog";
@@ -433,6 +435,24 @@ function DeskHome() {
   const [storyModelEffort, setStoryModelEffort] = useState<ModelEffort | null>(
     defaultModelEffort("auto"),
   );
+  /*
+    F3b: a fresh install that finished setup with a local model in memory
+    opens this picker on Local model, so the hand-pressed "Write draft" runs
+    the model that is loaded instead of silently walking Automatic. The
+    owner's own touch always wins, and every other paper -- the live one
+    included -- opens on Automatic exactly as before (see
+    first-run-picker-default.ts).
+  */
+  const storyModelTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "story",
+    current: storyModel,
+    touched: () => storyModelTouched.current,
+    apply: (choice) => {
+      setStoryModel(choice);
+      setStoryModelEffort(defaultModelEffort(choice));
+    },
+  });
   const [storyNotice, setStoryNotice] = useState<{
     text: string;
     kind: "error" | "info";
@@ -877,8 +897,15 @@ function DeskHome() {
     second (`invalidateDeskJobs`, FB1) rather than waiting out the 30 s poll.
   */
   const startDraft = useDeskMutation({
+    /*
+      F3b: this used to hard-code `modelChoice: "auto"` -- an explicit pick,
+      which outranks the paper's stored assignment -- so pressing "Start
+      story" on the Today page walked Automatic even when the paper's writing
+      model was a loaded local one. It sends the composer's picker now, the
+      same one "Write draft" sends, so one page cannot have two answers.
+    */
     mutationFn: (leadId: number) =>
-      draftLead({ data: { leadId, modelChoice: "auto", modelEffort: defaultModelEffort("auto") } }),
+      draftLead({ data: { leadId, modelChoice: storyModel, modelEffort: storyModelEffort } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
@@ -1147,6 +1174,18 @@ function DeskHome() {
         ones -- `.today-steps`, `.today-running`, `.today-edition`), and the
         grid below them holds the work on the left and the rail on the right.
       */}
+      {/*
+        Unit F3 / Option A: the "Choose your writing model" card.
+
+        It draws itself only when the server says so -- `getFirstRunModelCard`
+        answers from `paper_settings.model_prompt_state`, which the first-run
+        hook writes ONLY at the false-to-true `onboarded` flip, and only when a
+        local server answered with nothing in memory. So a paper that is
+        already set up (the live shape) renders nothing here, and a fresh
+        install that found a loaded model has a model and no card.
+      */}
+      <FirstRunModelCard />
+
       {/*
         THE STEP STRIP (README "1. Today"). Four equal cells with 1px gaps: the
         step's number, its name, the big count and the unit, and the one button
@@ -1550,6 +1589,7 @@ function DeskHome() {
                   scope="story"
                   value={storyModel}
                   onChange={(choice) => {
+                    storyModelTouched.current = true;
                     setStoryModel(choice);
                     setStoryModelEffort(defaultModelEffort(choice));
                   }}
