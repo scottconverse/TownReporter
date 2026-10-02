@@ -92,6 +92,8 @@ import {
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
+import { usePaperSetupGate } from "@/components/paper-setup-gate";
+import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { FindingEvidenceReviewPanel } from "@/components/finding-evidence-review";
 import { evidenceReviewDisabled, takeDownPressDisabled } from "@/lib/news/finding-evidence-locks";
@@ -628,6 +630,8 @@ function StoryPage() {
     return () => window.clearTimeout(slow);
   }, [waitingSince]);
 
+  // SG1 / Option A: "Draft with AI" and the redraft it opens.
+  const paperGate = usePaperSetupGate("draft this story");
   const draft = useMutation({
     /*
       Unit BH2 decision 6: the direction is a variable now, because the Redraft
@@ -2302,7 +2306,7 @@ function StoryPage() {
                       here.
                     </p>
                     <InkButton
-                      disabled={waiting || reconcileActive}
+                      disabled={waiting || reconcileActive || paperGate.blocked}
                       onClick={() => {
                         if (waiting) return;
                         draft.mutate(undefined);
@@ -2310,6 +2314,7 @@ function StoryPage() {
                     >
                       {waiting ? "Drafting…" : "Draft with AI"}
                     </InkButton>
+                    <PaperSetupGateNote gate={paperGate} />
                   </>
                 )}
               </section>
@@ -2979,7 +2984,10 @@ function StoryPage() {
                 and is the only way forward, so it stays the heavy one.
               */
               tone={data.draft?.body ? "quiet" : "solid"}
-              disabled={waiting || reconcileActive}
+              /* SG1 / Option A: drafting spends a model on this paper's
+                 behalf, so on an install nobody has set up the press is
+                 disabled and the reason is drawn under it. */
+              disabled={waiting || reconcileActive || paperGate.blocked}
               onClick={() => {
                 if (waiting) return;
                 /*
@@ -3013,6 +3021,7 @@ function StoryPage() {
                       </>
                     : "Draft with AI"}
             </InkButton>
+            <PaperSetupGateNote gate={paperGate} />
           </>
         ) : null}
         {body ? (

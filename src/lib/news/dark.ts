@@ -84,7 +84,7 @@ import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-loo
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { titlesOverlap, topicFromText } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
-import { getPaperConfig } from "./paper-settings.ts";
+import { getPaperConfig, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
@@ -2256,6 +2256,12 @@ export const runDarkDesk = createServerFn({ method: "POST" })
   .validator((input: unknown) => darkRunInput.parse(input))
   .handler(async ({ context, data }) => {
     /*
+      SG1 / Option A: a Dark Desk run searches the web and spends a model on
+      this paper's behalf. An install nobody has set up has no town and no
+      county to look in, so the run is refused in one plain sentence first.
+    */
+    await requirePaperSetUp(owned(context), "start a Dark Desk run");
+    /*
       The editor's pick decides which provider is probed, and an unresolvable
       one refuses BEFORE any spend -- the same commit boundary Story and Scan
       have. `storyModelChoice` narrows anything else to Automatic rather than
@@ -2293,6 +2299,9 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
   .validator((input: unknown) => darkOpenInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
+      // SG1 / Option A: opening a file is step one of a Dark Desk run.
+      const notSetUp = await paperSetUpRefusal(owned(context), "open an investigation");
+      if (notSetUp) return { ok: false as const, error: notSetUp };
       await ensureDarkSchema();
       const opened = await openInvestigationForEditor(context.userId, data, owned(context));
       await audit(context.userId, "dark", `open inv ${opened.investigationId}`, owned(context));
@@ -2306,6 +2315,10 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
 export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
+    // SG1 / Option A: "Find something to dig into" opens an investigation,
+    // which is the start of a Dark Desk run.
+    const notSetUp = await paperSetUpRefusal(owned(context), "start a Dark Desk run");
+    if (notSetUp) return { ok: false as const, error: notSetUp };
     await ensureDarkSchema();
     const items = await gatherWorthALook(owned(context));
     const sql = await getSql();
@@ -2448,11 +2461,15 @@ export async function startDarkRound(
 export const continueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => darkStepInput.parse(input))
-  .handler(async ({ context, data }) =>
-    typeof data === "number"
+  .handler(async ({ context, data }) => {
+    // SG1 / Option A: "Keep digging" starts a Dark Desk round, which searches
+    // and spends. Refused in one sentence until the paper is set up.
+    const notSetUp = await paperSetUpRefusal(owned(context), "keep digging");
+    if (notSetUp) return { ok: false as const, error: notSetUp };
+    return typeof data === "number"
       ? startDarkRound(context, data)
-      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort),
-  );
+      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort);
+  });
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
  * `PerformDraftWorkDeps` uses in desk-model-run.ts. */
@@ -3573,11 +3590,15 @@ export async function queueInvestigationFor(
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => darkSignalInput.parse(input))
-  .handler(async ({ context, data }) =>
-    queueInvestigationFor(context.userId, owned(context), data.id, {
+  .handler(async ({ context, data }) => {
+    // SG1 / Option A: sending an investigation to the Queue is how a Dark Desk
+    // finding becomes a spent draft, so it is refused until setup is done.
+    const notSetUp = await paperSetUpRefusal(owned(context), "send this to the Queue");
+    if (notSetUp) return { ok: false as const, error: notSetUp };
+    return queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
-    }),
-  );
+    });
+  });
 
 export const parkInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
@@ -3643,6 +3664,14 @@ export const getTipSubreddit = createServerFn({method:"GET"})
 export const scanTipSubreddit = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
+    /*
+      SG1 / Option A: this sweep fetches a subreddit the paper's own Sources
+      named; an install nobody has set up has no sources, so it is refused.
+      THROWN rather than returned: the caller's type is the successful read
+      (this handler always threw before), and the refusal reaches the editor
+      through the same error path with the same one sentence.
+    */
+    await requirePaperSetUp(owned(context), "check the tip subreddit");
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
     const { enrichRedditPostsWithLocalRedlib, sweepRedditFeeds } = await import("./reddit.server.ts");

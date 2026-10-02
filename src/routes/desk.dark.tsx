@@ -27,6 +27,8 @@ import {
 import { cancelStoryJob } from "@/lib/news/job-progress";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
+import { usePaperSetupGate } from "@/components/paper-setup-gate";
+import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
   editorError,
@@ -478,7 +480,15 @@ function DarkPage() {
     },
     onSuccess: (res) => {
       if (!res?.ok || !res.investigationId) {
-        showNotice("Nothing to open yet. Paste a lead to start.");
+        /*
+          SG1: "nothing-new" is the desk's own quiet answer and keeps its
+          friendly sentence; any other refusal (an un-set-up paper, a database
+          that would not answer) carries words the editor needs, so they are
+          shown instead of being replaced by "paste a lead to start".
+        */
+        const error = (res as { error?: unknown } | undefined)?.error;
+        const said = typeof error === "string" && error && error !== "nothing-new" ? error : "";
+        showNotice(said || "Nothing to open yet. Paste a lead to start.");
         clearPhase();
         return;
       }
@@ -572,6 +582,8 @@ function DarkPage() {
    * shared with everything else on this machine, so this runs when an editor
    * asks and not on a timer.
    */
+  // SG1 / Option A: every press on this screen that starts a Dark Desk run.
+  const paperGate = usePaperSetupGate("start a Dark Desk run");
   const reddit = useMutation({
     mutationFn: () => scanTipSubreddit(),
     onMutate: () => {
@@ -776,9 +788,18 @@ function DarkPage() {
           <h1 className="h1">Dark Desk</h1>
         </div>
         <div className="astra-head-acts">
-          <button type="button" className="btn solid" onClick={() => setStartOpen(true)}>
+          {/* SG1 / Option A: starting a file is the start of a Dark Desk run,
+              which searches and spends. Disabled, with the reason in text,
+              until the paper is set up. */}
+          <button
+            type="button"
+            className="btn solid"
+            disabled={paperGate.blocked}
+            onClick={() => setStartOpen(true)}
+          >
             + Start a file
           </button>
+          <PaperSetupGateNote gate={paperGate} />
         </div>
       </div>
       {/*
@@ -1076,14 +1097,20 @@ function DarkPage() {
             <div className="astra-pile-acts">
               <InkButton
                 tone="quiet"
-                disabled={busyStart || digging}
+                disabled={busyStart || digging || paperGate.blocked}
                 onClick={() => find.mutate()}
               >
                 {find.isPending ? "Starting…" : "Pick one for me"}
               </InkButton>
               <InkButton
                 tone="quiet"
-                disabled={busyStart || digging || reddit.isPending || !tipSubreddit.data?.subreddit}
+                disabled={
+                  busyStart ||
+                  digging ||
+                  reddit.isPending ||
+                  paperGate.blocked ||
+                  !tipSubreddit.data?.subreddit
+                }
                 onClick={() => reddit.mutate()}
               >
                 {reddit.isPending

@@ -567,6 +567,102 @@ export async function isOnboarded(newsroomId: number): Promise<boolean> {
   return rows[0]?.onboarded === true;
 }
 
+/*
+  SG1 / Option A: an install that has not been set up must not spend.
+
+  A fresh install that nobody has set up has NO town. Every read on the desk
+  falls back to the shipped Longmont constants there (`defaultConfig()`), so a
+  first scan on an un-set-up install searches the wrong town and spends credit.
+  Until the owner finishes Paper setup, the desk REFUSES to start a scan, a
+  Dark Desk run or a draft.
+
+  ONE CHECK, ONE PLACE. Every gated entry point calls `requirePaperSetUp`
+  (or its non-throwing twin `paperSetUpRefusal`); nothing else re-implements
+  the rule, so there is one sentence to change and one thing to test.
+
+  IT READS `onboarded` AND NOTHING ELSE. Never "is the city filled in". The
+  live database has ONE paper_settings row with `onboarded = true` and name,
+  city and state EMPTY, and `mergeRow` folds those blanks into the shipped
+  Longmont values -- so a gate that asked about the city would refuse the live
+  paper, which is the outage this whole unit must not cause. See
+  `paper-live-shape.test.ts` and `paper-setup-gate.test.ts`.
+*/
+
+/** The refusal an un-set-up install gets, with the action it refused. One sentence. */
+export function PAPER_NOT_SET_UP_SENTENCE(action: string): string {
+  return `This paper has not been set up yet. Finish Paper setup first (Server > Paper setup), then ${action}.`;
+}
+
+/**
+ * The refusal when the desk could not even ASK. FAIL CLOSED: the same rule the
+ * Server panel's Paper-setup section follows (ops-panels.tsx) -- "I could not
+ * check whether this paper is set up" is not "it is set up", and treating a
+ * read error as a pass is exactly how an un-set-up install would spend on
+ * Longmont's behalf.
+ */
+export function PAPER_SETUP_UNCHECKABLE_SENTENCE(action: string): string {
+  return `The desk could not check whether this paper has been set up yet, so it will not ${action}. Reload the page and try again.`;
+}
+
+/** The refusal a gated action throws. `paperNotSetUp` is a flag, not `instanceof`:
+ *  a class extending Error loses its prototype when downlevelled to ES5, which
+ *  is what the desk's DOM harness does (see DeskFollowUpError in desk-action.ts). */
+export class PaperNotSetUpError extends Error {
+  readonly paperNotSetUp = true as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "PaperNotSetUpError";
+  }
+}
+
+export function isPaperNotSetUpError(err: unknown): boolean {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { paperNotSetUp?: unknown }).paperNotSetUp === true
+  );
+}
+
+/**
+ * THE check: has this newsroom finished first-run setup? Throws
+ * `PaperNotSetUpError` if not, and throws it too if the answer could not be
+ * read at all (fail closed).
+ *
+ * `readOnboarded` is a seam for tests (and only for tests): production passes
+ * nothing and the read is `isOnboarded`.
+ */
+export async function requirePaperSetUp(
+  newsroomId: number,
+  action: string,
+  readOnboarded: (newsroomId: number) => Promise<boolean> = isOnboarded,
+): Promise<void> {
+  let onboarded: boolean;
+  try {
+    onboarded = await readOnboarded(newsroomId);
+  } catch {
+    throw new PaperNotSetUpError(PAPER_SETUP_UNCHECKABLE_SENTENCE(action));
+  }
+  if (!onboarded) throw new PaperNotSetUpError(PAPER_NOT_SET_UP_SENTENCE(action));
+}
+
+/**
+ * The same check for the handlers that answer `{ ok: false, error }` rather
+ * than throwing: the refusal sentence, or null when the action may start.
+ */
+export async function paperSetUpRefusal(
+  newsroomId: number,
+  action: string,
+  readOnboarded?: (newsroomId: number) => Promise<boolean>,
+): Promise<string | null> {
+  try {
+    await requirePaperSetUp(newsroomId, action, readOnboarded);
+    return null;
+  } catch (err) {
+    if (isPaperNotSetUpError(err)) return (err as Error).message;
+    throw err;
+  }
+}
+
 /**
  * Owner-only: does this newsroom still need the first-run setup screen?
  * A signed-in editor (not owner) always gets `needsSetup: false` -- only the

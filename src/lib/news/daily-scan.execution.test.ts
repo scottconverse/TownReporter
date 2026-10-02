@@ -135,6 +135,9 @@ describe("daily scan refuses loudly, never silently", () => {
       // this reservation has to go first.
       await sql.query("delete from scan_runs where newsroom_id=501");
       await sql.query("delete from daily_scan_reservations where newsroom_id=501");
+      // SG1: the ownership pause is only reached by a paper that HAS finished
+      // setup -- an un-set-up one is skipped before this check runs.
+      await sql.query("insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',true)");
 
       const result = await tickDailyScans(new Date("2026-09-04T14:00:00Z"), {
         runtimeSnapshot: async () => ({ ok: true }) as never,
@@ -166,7 +169,8 @@ describe("daily scan refuses loudly, never silently", () => {
       await sql.query("delete from daily_scan_reservations");
       await sql.query("delete from desk_jobs");
       await sql.query("delete from scan_runs");
-      await sql.query("insert into paper_settings(newsroom_id,timezone) values(501,'America/Denver')");
+      // SG1: the scheduled scan only runs for a paper that has finished setup.
+      await sql.query("insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',true)");
       await sql.query("insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')");
 
       const runtimeSnapshot = async () => ({
@@ -242,6 +246,8 @@ describe("scheduled tick and policy status", () => {
     await sql.query("update daily_scan_policies set runtime=$1 where newsroom_id=501", [
       "custom:11111111-1111-4111-8111-111111111111",
     ]);
+    // SG1: a scheduled run needs a paper that has finished setup.
+    await sql.query("insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',true)");
     await sql.query(
       "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/custom','Custom','rss','1','accepted')",
     );
@@ -277,17 +283,16 @@ describe("scheduled tick and policy status", () => {
     assert.equal(queued.model_choice, snapshot.modelChoice);
   });
 
-  for (const timezone of [null, "   ", "missing-row"] as const) {
+  for (const timezone of [null, "   "] as const) {
     it(`uses the UI's effective timezone for ${String(timezone)} legacy settings`, async () => {
       const sql = await getSql();
       await sql.query("delete from scan_runs");
       await sql.query("delete from daily_scan_reservations");
       await sql.query("delete from desk_jobs");
       await sql.query("delete from scan_runs");
-      if (timezone !== "missing-row")
-        await sql.query("insert into paper_settings(newsroom_id,timezone) values(501,$1)", [
-          timezone,
-        ]);
+      await sql.query("insert into paper_settings(newsroom_id,timezone,onboarded) values(501,$1,true)", [
+        timezone,
+      ]);
       await sql.query(
         "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
       );
@@ -312,6 +317,77 @@ describe("scheduled tick and policy status", () => {
       assert.deepEqual(await tickDailyScans(now, deps), { reserved: 0 });
     });
   }
+  /*
+    SG1 / Option A, item 4(c): THE SCHEDULER SKIP.
+
+    An install nobody has set up has no town, and a scheduled scan there would
+    search the shipped Longmont sources on the owner's behalf and spend their
+    credit. The tick skips it QUIETLY -- no reservation, no scan_runs row, no
+    desk_jobs row, no pause, no error -- and says so in one log line.
+
+    This is the old "missing-row legacy settings" case, which used to reserve a
+    run against the shipped Longmont timezone. Under Option A a row that does
+    not exist is exactly "not set up", so it is now the skip.
+  */
+  it("skips a newsroom with no paper_settings row at all: no reservation, no run, no job", async () => {
+    const sql = await getSql();
+    await sql.query("delete from scan_runs");
+    await sql.query("delete from daily_scan_reservations");
+    await sql.query("delete from desk_jobs");
+    await sql.query("delete from paper_settings");
+    await sql.query(
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
+    );
+    const deps = {
+      kick: false,
+      runtimeSnapshot: async () => {
+        throw new Error("the scheduler must not even probe a model for an un-set-up paper");
+      },
+    };
+    assert.deepEqual(
+      await tickDailyScans(new Date("2026-09-04T14:00:00Z"), deps),
+      { reserved: 0 },
+    );
+    assert.equal((await sql.query("select * from daily_scan_reservations")).length, 0);
+    assert.equal((await sql.query("select * from scan_runs")).length, 0);
+    assert.equal((await sql.query("select * from desk_jobs")).length, 0);
+  });
+
+  it("skips an onboarded = false row the same way, and runs again once onboarded is true", async () => {
+    const sql = await getSql();
+    await sql.query("delete from scan_runs");
+    await sql.query("delete from daily_scan_reservations");
+    await sql.query("delete from desk_jobs");
+    await sql.query("delete from paper_settings");
+    await sql.query(
+      "insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',false)",
+    );
+    await sql.query(
+      "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",
+    );
+    const now = new Date("2026-09-04T14:00:00Z");
+    const runtimeSnapshot = async () => ({
+      requestedRuntime: "codex-balanced" as const,
+      requestedEffort: null,
+      resolvedRuntime: "codex-balanced" as const,
+      switchReason: null,
+      switchNote: null,
+      runtime: "codex-terra" as const,
+      modelChoice: "codex-balanced" as const,
+      model: "fixture",
+      transport: "codex" as const,
+    });
+    assert.deepEqual(await tickDailyScans(now, { runtimeSnapshot, kick: false }), {
+      reserved: 0,
+    });
+    assert.equal((await sql.query("select * from desk_jobs")).length, 0);
+    // Finish setup, and the very same tick reserves normally.
+    await sql.query("update paper_settings set onboarded=true where newsroom_id=501");
+    assert.deepEqual(await tickDailyScans(now, { runtimeSnapshot, kick: false }), {
+      reserved: 1,
+    });
+  });
+
   it("pauses an invalid timezone without preventing another newsroom's due scan", async () => {
     const sql = await getSql();
     await sql.query("delete from scan_runs");
@@ -319,7 +395,7 @@ describe("scheduled tick and policy status", () => {
     await sql.query("delete from desk_jobs");
     await sql.query("delete from scan_runs");
     await sql.query(
-      "insert into paper_settings(newsroom_id,timezone) values(501,'Not/AZone'),(502,'UTC')",
+      "insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'Not/AZone',true),(502,'UTC',true)",
     );
     await sql.query(
       "insert into newsrooms(id,name) values(502,'Test room 502') on conflict (id) do nothing",
@@ -364,7 +440,7 @@ describe("scheduled tick and policy status", () => {
     await sql.query("delete from desk_jobs");
     await sql.query("delete from scan_runs");
     await sql.query(
-      "insert into paper_settings(newsroom_id,timezone) values(501,'America/Denver')",
+      "insert into paper_settings(newsroom_id,timezone,onboarded) values(501,'America/Denver',true)",
     );
     await sql.query(
       "insert into sources(id,newsroom_id,user_id,url,title,kind,tier,status) values(1,501,'fixture','https://example.test/source','Source','rss','1','accepted')",

@@ -34,7 +34,33 @@ import {
   getPaperConfig,
   getPublicPaperConfig,
   isOnboarded,
+  paperSetUpRefusal,
+  requirePaperSetUp,
 } from "./paper-settings.ts";
+
+/*
+  SG1 / Option A: every action the option-A gate refuses for an un-set-up
+  install. The live row (onboarded, blank name/city/state) must be allowed
+  EVERY one of them -- this is the list `paper-setup-gate-wiring.test.ts`
+  proves is wired, so the two files together pin "the gate is on these entry
+  points" AND "the gate lets live through all of them".
+*/
+const GATED_ACTIONS = [
+  "start the scan",
+  "draft this story",
+  "start a Pull",
+  "start a follow-up",
+  "run this follow-up",
+  "start a batch draft",
+  "check this draft's evidence",
+  "start a Dark Desk run",
+  "open an investigation",
+  "keep digging",
+  "send this to the Queue",
+  "check the tip subreddit",
+  "run meeting capture",
+  "re-capture that meeting",
+];
 
 const LIVE_SHAPED = 900_401; // onboarded, blank name/city/state, like production
 const UNSET = 900_402; // no row at all: a brand-new install
@@ -139,5 +165,45 @@ describe("contrast: a brand-new install (no paper_settings row) is the only case
     assert.equal(pub.city, "");
     assert.equal(pub.editorEmail, null);
     assert.equal(clearerViewSentence(pub.city), "A clearer view of your community.");
+  });
+});
+
+/*
+  SG1 / Option A, THE HARD CONSTRAINT, action by action.
+
+  The option-A gate must let PRODUCTION through every single action it guards.
+  If it ever asks whether the city (or the name, or any other column) is filled
+  in, the live row -- onboarded, all three blank -- stops being allowed and the
+  paper stops producing. This block is that guard. It is also why the gate is
+  written against `isOnboarded` and nothing else.
+*/
+describe("the Option A gate lets the LIVE row through every gated action", () => {
+  it("allows every action for the live shape, and refuses every one with no row", async () => {
+    await seedLiveShape();
+    for (const action of GATED_ACTIONS) {
+      await requirePaperSetUp(LIVE_SHAPED, action);
+      assert.equal(
+        await paperSetUpRefusal(LIVE_SHAPED, action),
+        null,
+        `live must be allowed to ${action}`,
+      );
+      assert.match(
+        (await paperSetUpRefusal(UNSET, action)) ?? "",
+        /has not been set up yet/,
+        `a fresh install must be refused "${action}" in one plain sentence`,
+      );
+    }
+  });
+
+  it("allows the live shape even though its city column is blank", async () => {
+    await seedLiveShape();
+    const sql = await getSql();
+    const [row] = await sql<{ city: string | null; name: string | null; state: string | null }>`
+      select city, name, state from paper_settings where newsroom_id = ${LIVE_SHAPED} limit 1
+    `;
+    assert.equal(row.city, "", "the stored city really is blank on the live shape");
+    assert.equal(row.name, "");
+    assert.equal(row.state, "");
+    for (const action of GATED_ACTIONS) await requirePaperSetUp(LIVE_SHAPED, action);
   });
 });

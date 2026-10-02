@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, STORY_MODEL_CHOICES, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { paperSetUpRefusal } from "./paper-settings.ts";
 
 export type DraftReconcileState = "idle" | "queued" | "running" | "completed" | "failed";
 
@@ -90,6 +91,13 @@ export const requestDraftReconciliationFn = createServerFn({ method: "POST" })
   .validator(requestInput)
   .handler(async ({ context, data }): Promise<DraftReconcileRequestResult> => {
     try {
+      // SG1 / Option A: the evidence check spends a model and searches the web
+      // for this paper, so an install that has not been set up must not start one.
+      const notSetUp = await paperSetUpRefusal(
+        context.newsroomId ?? 1,
+        "check this draft's evidence",
+      );
+      if (notSetUp) return { ok: false, error: notSetUp };
       const { requestDraftReconciliation } = await import("./draft-reconcile.server.ts");
       const job = await requestDraftReconciliation(
         { userId: context.userId, newsroomId: context.newsroomId },
