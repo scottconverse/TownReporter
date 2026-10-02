@@ -35,8 +35,8 @@ import {
  * for why a failed promote needs one at all.
  *
  * THIS FILE RUNS AGAINST A REAL POSTGRES, and everything it creates is a
- * throwaway database whose name starts with `townreporter_test_promote_` --
- * the same prefix rule the library itself enforces, because a promotion may
+ * throwaway database named `townreporter_<this run>` -- the same prefix rule
+ * the library itself enforces, because a promotion may
  * only ever copy, create or rename a database whose name starts with
  * `townreporter`, and this machine's Postgres also serves the live paper, the
  * development copy and thirty test databases.
@@ -339,6 +339,57 @@ describe("the live paper's port", () => {
       (error: unknown) => !/port 5433/.test(String(error)),
       "with the flag set, the guard is still refusing instead of the connection failing",
     );
+  });
+
+  it("applies the same naming rules to EVERY command", async () => {
+    /*
+      MAJOR M4. The rules used to be spelled out per command and had drifted:
+      `copy` and `wait-for-zero` never checked the live database's name at all
+      -- `copy` would rename a database called anything at all as long as the
+      copy beside it looked like a copy of it -- and `preflight` accepted an
+      empty stamp that `names` refused.
+
+      The commands are listed here rather than imported, so a command added
+      without a rule fails this test instead of quietly joining the list.
+    */
+    const commands = ["names", "preflight", "copy", "wait-for-zero", "swap-back", "rollback", "state"];
+    const good = {
+      PROMOTE_DB_ADMIN_URL: TEST_SERVER,
+      PROMOTE_DB_DATABASE_URL: TEST_SERVER,
+      PROMOTE_DB_DATABASE: "townreporter",
+      PROMOTE_DB_COPY: "townreporter_prerollout_20261001120000",
+      PROMOTE_DB_FAILED: "townreporter_failed_20261001120000",
+      PROMOTE_DB_STAMP: "20261001120000",
+      PROMOTE_DB_WAIT_SECONDS: "1",
+      PROMOTE_DB_TIMEOUT_SECONDS: "1",
+    };
+
+    for (const command of commands) {
+      // A live database that is not the paper's. Every command must refuse it
+      // BEFORE anything else -- none of these reach the server, which is what
+      // makes it safe to run them against a URL that could not be reached
+      // anyway.
+      const badName = await runCommand(command, readConfig({ ...good, PROMOTE_DB_DATABASE: "someotherpaper" } as NodeJS.ProcessEnv));
+      assert.equal(badName.ok, false, `${command} accepted a database that is not the paper's`);
+      assert.match(String(badName.refusal), /starts with/, `${command} refused for some other reason: ${badName.refusal}`);
+
+      // ...and an empty stamp, which one command used to accept while another
+      // refused it.
+      const noStamp = await runCommand(command, readConfig({ ...good, PROMOTE_DB_STAMP: "" } as NodeJS.ProcessEnv));
+      assert.equal(noStamp.ok, false, `${command} ran with no stamp`);
+      assert.match(String(noStamp.refusal), /No stamp was given for this run/, `${command} refused for some other reason: ${noStamp.refusal}`);
+
+    }
+
+    // A bad COPY name, on the commands that are GIVEN one -- the rule that
+    // keeps something else from being renamed over the paper's database.
+    // `names` and `preflight` are not in this list because they take no copy
+    // name at all: they derive it, and the validator checks what it derived.
+    for (const command of ["copy", "wait-for-zero", "swap-back", "rollback", "state"]) {
+      const badCopy = await runCommand(command, readConfig({ ...good, PROMOTE_DB_COPY: "something_else" } as NodeJS.ProcessEnv));
+      assert.equal(badCopy.ok, false, `${command} accepted a copy name that is not a copy`);
+      assert.match(String(badCopy.refusal), /is not a copy of/, `${command} refused for some other reason: ${badCopy.refusal}`);
+    }
   });
 
   it("only accepts exactly the flag the promotion sets", () => {
@@ -861,6 +912,48 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.equal(rolled.ok, true, `the hand rollback cannot resume the half state: ${rolled.refusal || rolled.error}`);
     assert.equal(rolled.command, "rollback");
     assert.equal(await rowCount(live2, "articles"), 1);
+  });
+
+  it("reports the swap as done when only the size query afterwards fails", async () => {
+    /*
+      MAJOR M5. Both renames have landed -- the paper's database IS the copy --
+      and then the size query fails. The report used to call that "NOT
+      swapped", which the promotion turns into a refusal: the operator would be
+      told the database was not put back when it was, and the recovery would
+      start moving the old build onto a database it thought was still
+      half-migrated.
+    */
+    const stamp = formatStamp();
+    const live = scratchName("sizefail");
+    await createDatabase(live);
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles (id int primary key)");
+      await client.query("insert into articles values (1)");
+    });
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    assert.equal((await copyDatabase({ adminUrl, database: live, copy, stamp })).ok, true);
+
+    const swapped = await swapBack({
+      adminUrl,
+      database: live,
+      copy,
+      failed,
+      stamp,
+      sizeOf: async () => {
+        throw new Error("connection terminated unexpectedly");
+      },
+    });
+
+    assert.equal(swapped.ok, true, `a swap that finished was reported as failed because a size could not be read: ${swapped.refusal || swapped.error}`);
+    assert.equal(swapped.sizeKnown, false, "the report claims to know a size it could not read");
+    assert.equal(swapped.sizeBytes, null);
+    assert.match(String(swapped.sizeNote), /the swap is done, but the size of /, `the note does not say the swap is done: ${swapped.sizeNote}`);
+    assert.deepEqual(swapped.steps, [`renamed ${live} -> ${failed}`, `renamed ${copy} -> ${live}`]);
+
+    // And the server agrees: the swap really happened.
+    assert.equal(await rowCount(live, "articles"), 1);
+    assert.ok((await databaseNames()).includes(failed), "the failed database was not kept");
   });
 
   it("answers the promotion's command line with one line of JSON", async () => {

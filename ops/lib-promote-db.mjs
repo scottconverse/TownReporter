@@ -1083,6 +1083,7 @@ export async function renameDatabase(client, from, to) {
  *   timeoutSeconds?: number,
  *   livePromote?: boolean,
  *   rename?: (client: Client, from: string, to: string) => Promise<void>,
+ *   sizeOf?: (client: Client, name: string) => Promise<number>,
  * }} options
  * @returns {Promise<Record<string, any>>}
  */
@@ -1251,10 +1252,16 @@ export async function swapBack(options) {
     The size, AFTER both renames landed -- and a failure here must not turn a
     swap that worked into a report that says it did not. The database the paper
     serves is already the copy; the size is only something the log says.
+
+    `sizeOf` is the seam that test uses to make this fail on purpose. It is
+    the only way to exercise it: the database the size is read from is the one
+    that was just renamed into place, and nothing a test can do to a real
+    server makes a `pg_database_size` fail without also breaking the swap.
   */
+  const sizeOf = options.sizeOf ?? ((client, name) => databaseSizeBytes(client, name));
   try {
     report.sizeBytes = await withAdmin({ adminUrl: options.adminUrl }, (client) =>
-      databaseSizeBytes(client, options.database),
+      sizeOf(client, options.database),
     );
     report.sizeKnown = true;
   } catch (error) {

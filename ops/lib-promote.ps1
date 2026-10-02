@@ -320,6 +320,138 @@ function Get-PromoteHealthTimeoutSeconds {
   return 60
 }
 
+# --- what node_modules was installed from (the lockfile marker) -------------
+#
+# THE TRAP THIS CLOSES. Whether to run `npm ci` used to be decided from the
+# hash of package-lock.json before and after this script's own fast-forward:
+#
+#     $mustInstall = ($lockBefore -ne $lockAfter) -or ($resumeAt -eq 'deps')
+#
+# That answers "did THIS run move the lockfile". It is the wrong question, and
+# on the first rollout it is wrong in the worst possible way: the live checkout
+# is fast-forwarded BY HAND before the promotion (it has to be -- it is still
+# running the OLD promote script, which does not know about the copy), so
+# `before` is already the new lockfile, `after` is the same new lockfile, the
+# two are equal, and the promotion skips `npm ci` and then builds a release on
+# node_modules from the previous one. Nothing fails. The build succeeds. The
+# page serves whatever the old dependency tree happens to do.
+#
+# So the question asked now is the one that matters: WHAT WAS node_modules
+# ACTUALLY INSTALLED FROM? `npm ci` writes its answer to
+# node_modules\.promote-lock-hash when it succeeds, and the install runs unless
+# that file is there and holds exactly the hash of the lockfile on disk.
+#
+# A marker that is missing, unreadable or unparseable means INSTALL. That is
+# the direction to fail in: an unnecessary `npm ci` costs a few minutes with
+# the paper stopped, and a skipped one costs a release built on the wrong
+# dependency tree, quietly.
+
+<#
+  Where the marker lives. Inside node_modules on purpose: `npm ci` deletes
+  node_modules and recreates it, so a marker that survived an install that
+  failed half way cannot survive one that succeeded.
+#>
+function Get-PromoteLockMarkerPath {
+  param([Parameter(Mandatory = $true)][string]$App)
+  return (Join-Path (Join-Path $App "node_modules") ".promote-lock-hash")
+}
+
+<#
+  The hash of the lockfile node_modules was last installed from, or "" when
+  that is not knowable. "" always means install.
+#>
+function Get-PromoteInstalledLockHash {
+  param([Parameter(Mandatory = $true)][string]$App)
+  $path = Get-PromoteLockMarkerPath -App $App
+  if (-not (Test-Path $path)) { return "" }
+  try {
+    $value = (Get-Content -LiteralPath $path -Raw -ErrorAction Stop)
+    if ($null -eq $value) { return "" }
+    $value = "$value".Trim()
+    # A marker holding something that is not a hash is not a marker: treat it
+    # exactly like a missing one rather than trusting a half-written file.
+    if ($value -notmatch '^[0-9A-Fa-f]{64}$') { return "" }
+    return $value.ToUpperInvariant()
+  } catch {
+    return ""
+  }
+}
+
+<#
+  Write the marker, AFTER a successful install and never before.
+
+  Returns $true when it was written. A write that fails is not an error: the
+  next promotion installs again, which is slower and never wrong. Nothing is
+  ever reported as installed on the strength of this failing.
+#>
+function Set-PromoteInstalledLockHash {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$Hash = ""
+  )
+  if (-not $Hash) { return $false }
+  $path = Get-PromoteLockMarkerPath -App $App
+  try {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    Set-Content -LiteralPath $path -Value $Hash -Encoding ASCII -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+<#
+  Should this run install dependencies? Returns @{ Needed; Reason }.
+
+  `Reason` is written into the promotion's log, because "the install was
+  skipped" is a sentence an operator reading a bad release needs to be able to
+  find and believe -- and it has to say WHICH of the two questions was asked,
+  not just that the answer was no.
+
+  The before/after pair is deliberately NOT the decider any more. It is still
+  computed by the caller (scripts\ci-hash-no-module.ps1 lifts those two lines
+  out and runs them in a PowerShell session that cannot reach Get-FileHash), and
+  it is still worth having in the log, but a run that fast-forwarded the
+  checkout by hand makes the two equal and that says nothing at all about what
+  node_modules holds.
+#>
+function Test-PromoteNeedsInstall {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$LockHash = "",
+    [string]$ResumeAt = ""
+  )
+  if ($ResumeAt -eq 'deps') {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "the previous run stopped at this step, so the install it started never finished"
+    }
+  }
+  if (-not $LockHash) {
+    return [pscustomobject]@{
+      Needed = $false
+      Reason = "there is no package-lock.json here, so there is nothing to install from"
+    }
+  }
+  $installed = Get-PromoteInstalledLockHash -App $App
+  if (-not $installed) {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "there is no record here of what node_modules was installed from (node_modules\.promote-lock-hash is missing), so it is installed again rather than guessed at"
+    }
+  }
+  if ($installed -ne $LockHash.ToUpperInvariant()) {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "node_modules was installed from a different lockfile ($installed, now $($LockHash.ToUpperInvariant()))"
+    }
+  }
+  return [pscustomobject]@{
+    Needed = $false
+    Reason = "node_modules was installed from exactly this lockfile"
+  }
+}
+
 <#
   Kill a process and everything under it, by PID.
 
@@ -957,8 +1089,16 @@ function New-PromoteDbEnvironment {
     live paper's, on the machine that runs it -- unless this is "1". The live
     database's connection string is in the install's .env, which is exactly
     what a test or a hand-typed command on that machine inherits, so the port
-    itself has to be the thing that is guarded, and the flag is the way past
-    it for the one caller that is allowed: this script, promoting for real.
+    itself has to be the thing that is guarded, and the flag is the way past it.
+
+    The flag is set by ANY caller of this function that is not running under
+    -WhatIf, and it is not a secret or a signature: what it means is "the
+    caller has decided this is a real promotion". In the tree that is
+    ops\promote.ps1 -- the real promotion and the real `-RollbackDatabase` --
+    and the harnesses in scripts\promote-step-runner.test.mjs. What it
+    protects against is the thing that actually happens: a test, a hand-typed
+    command or a dry run inheriting .env, finding the live paper by accident,
+    and having no flag to say it meant to.
 
     NOT under -WhatIf, EXCEPT for the three READ-ONLY commands: see
     Get-PromoteDbCommandEnvironment below. A dry run renames nothing, so the

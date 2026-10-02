@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { effectivePort, LIVE_POSTGRES_PORT } from "../ops/lib-postgres-url.mjs";
 import { postgresTestFiles } from "./postgres-test-discovery.mjs";
 import { safeTestEnvironment } from "./test-environment.mjs";
 
@@ -100,6 +101,17 @@ async function main() {
     process.env.TEST_POSTGRES_ADMIN_URL?.trim();
   if (!requestedAdminUrl) throw new Error("Set TEST_POSTGRES_ADMIN_URL to a disposable local/CI Postgres admin database.");
 
+  // The lane's own guard, before anything is spawned. The same rule as the
+  // late preload in postgres-integration-opt-in.mjs, deliberately: this one
+  // stops the run early, that one is the last line of defence, and both read
+  // the port through ops\lib-postgres-url.mjs so they cannot disagree.
+  if (effectivePort(requestedAdminUrl) === LIVE_POSTGRES_PORT) {
+    throw new Error(
+      `Refusing a PostgreSQL integration admin URL on port ${LIVE_POSTGRES_PORT}: that is the live paper's ` +
+        "database on the machine that runs it, and this lane creates and drops databases. Point " +
+        "TEST_POSTGRES_ADMIN_URL at a throwaway server.",
+    );
+  }
   let target;
   try {
     target = new URL(requestedAdminUrl);

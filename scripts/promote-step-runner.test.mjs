@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn, execFileSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { copyDatabaseName, isCopyOf, parseCopyStamp } from "../ops/lib-promote-db.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OPS = join(ROOT, "ops");
@@ -1071,8 +1072,33 @@ test("the promotion order puts the copy inside the stop-the-app window, before a
     // Every failure after the copy runs the same recovery, and it is the one
     // thing that puts the database back. One rule, no exceptions -- a rule
     // with exceptions is a rule that gets applied wrongly at 2 AM.
-    const recoveries = [...src.matchAll(/Invoke-PromoteRolloutFailure/g)].length;
-    assert.ok(recoveries >= 4, `only ${recoveries} failure paths put the database back; the fast-forward, the install, the build and the start all have to`);
+    /*
+      EVERY failure path, one by one, and CALL SITES only.
+
+      This used to count matches of /Invoke-PromoteRolloutFailure/g and ask for
+      four -- which the function's own definition satisfied. Delete three of
+      the four calls and the count is still 1 (the definition) plus the one
+      left, so it passed with three quarters of the recovery gone. Each path
+      is named here with the line that proves it, and the definition is
+      excluded by requiring the call's own `-Why` argument to be on the line.
+    */
+    for (const [what, marker] of [
+      ["the fast-forward", /\$recovered = Invoke-PromoteRolloutFailure -Why "the fast-forward could not run" -RestoreBuild \$false/],
+      ["the dependency install", /\$recovered = Invoke-PromoteRolloutFailure -Why "npm ci did not succeed \(\$code\)" -RestoreBuild \$false/],
+      ["the build", /Invoke-PromoteRolloutFailure -Why "the build did not succeed" -MigrationsRan \$migrations -BuildOutput \$output/],
+      ["the start", /\$recovered = Invoke-PromoteRolloutFailure -Why "the new build did not answer on port \$port" -MigrationsRan 'yes' -BuildOutput \$buildOutputFile/],
+    ]) {
+      const calls = [...src.matchAll(new RegExp(marker.source, "g"))].length;
+      assert.equal(calls, 1, `${what} no longer puts the database back through Invoke-PromoteRolloutFailure (found ${calls} call sites)`);
+    }
+    // ...and the definition itself is not counted as one of them: four call
+    // sites and one definition, whatever anybody adds later.
+    assert.equal([...src.matchAll(/^function Invoke-PromoteRolloutFailure/gm)].length, 1);
+    assert.equal(
+      [...src.matchAll(/Invoke-PromoteRolloutFailure/g)].length,
+      5,
+      "the number of mentions of the recovery changed: four call sites plus the definition",
+    );
     assert.match(src, /if \(\$RollbackDatabase\)/, "promote.ps1 no longer has a way to put a copy back by hand");
   } finally {
     await cleanup(install);
@@ -1587,6 +1613,257 @@ test("the hand rollback refuses while the paper is answering, and says what it w
   } finally {
     await cleanup(install);
   }
+});
+
+test("the REAL database library, through the detached runner, refuses the live port with exit 3", windowsOnly, async () => {
+  /*
+    Every other test in this file drives a fake `node`. This one runs the real
+    ops\lib-promote-db.mjs, as the promotion runs it -- through
+    Invoke-PromoteChild, detached, output redirected to a file -- and reads
+    what comes back the way the promotion reads it: the JSON on stdout and the
+    real exit code.
+
+    The URL is 5433 with a host that cannot resolve, and the live-promote flag
+    is not set, so the guard refuses before anything is dialled. `.invalid` is
+    RFC 2606 and no resolver answers for it: if the guard were missing, this
+    would fail on the connection rather than reaching a real server.
+  */
+  const install = makeInstall();
+  try {
+    const lib = join(OPS, "lib-promote-db.mjs");
+    const harness = writeHarness(install, "real-cli.ps1", [
+      `$node = ${psLiteral(process.execPath)}`,
+      `$lib = ${psLiteral(lib)}`,
+      "$env:PROMOTE_DB_ADMIN_URL = 'postgres://promote:secret@townreporter-live.invalid:5433/townreporter'",
+      "$env:PROMOTE_DB_DATABASE_URL = $env:PROMOTE_DB_ADMIN_URL",
+      "$env:PROMOTE_DB_DATABASE = 'townreporter'",
+      "$env:PROMOTE_DB_COPY = 'townreporter_prerollout_20260110120000'",
+      "$env:PROMOTE_DB_FAILED = 'townreporter_failed_20260110120000'",
+      "$env:PROMOTE_DB_STAMP = '20260110120000'",
+      "$env:PROMOTE_DB_WAIT_SECONDS = '1'",
+      "$env:PROMOTE_DB_TIMEOUT_SECONDS = '1'",
+      "$env:PROMOTE_DB_LIVE_PROMOTE = ''",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      '$r = Invoke-PromoteChild -Log $log -Step \'dbcopy\' -Command "`"$node`" `"$lib`" preflight"',
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "exit=$($r.ExitCode);completed=$($r.Completed)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    // The exit code the promotion reads, which comes from the child's own
+    // PROMOTE_EXIT line -- not from Start-Process, whose ExitCode is empty on
+    // Windows PowerShell 5.1.
+    assert.equal(
+      read(join(install.app, "result.txt")).trim(),
+      "exit=3;completed=True",
+      "the real library did not refuse the live port with exit 3",
+    );
+
+    // ...and the JSON answer, read out of the file the log names.
+    const out = read(stepOutputFile(install.app, "dbcopy"));
+    const line = out.split(/\r?\n/).filter((l) => l.trim().startsWith("{")).pop();
+    assert.ok(line, `the real library printed no JSON: ${out}`);
+    const report = JSON.parse(line);
+    assert.equal(report.ok, false);
+    assert.equal(report.command, "preflight");
+    assert.match(String(report.refusal), /port 5433/);
+    assert.match(String(report.refusal), /PROMOTE_DB_LIVE_PROMOTE=1/);
+    assert.match(String(report.refusal), /Nothing was changed and the paper was not touched\./);
+    // A refusal, not a crash: exit 1 is "it broke", 3 is "it refused".
+    assert.match(out, /PROMOTE_EXIT=3/);
+    assert.doesNotMatch(String(report.error ?? ""), /ECONNREFUSED|ENOTFOUND|getaddrinfo/, "the guard let the connection through");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("every rollback command the script or the docs print is one the parser accepts", windowsOnly, async () => {
+  /*
+    MAJOR M1. The script and the docs printed the copy's name with a HYPHEN in
+    the stamp -- `..._prerollout_20261001-120000` -- and Get-PromoteCopyStamp
+    looks for fourteen digits, so it returned nothing for the very name the
+    operator had just been told to paste. The command refuses when the name is
+    not a copy's, so the one thing the promotion offers an operator whose
+    release went wrong did not work.
+
+    This test does not read the strings and hope. It GENERATES the command the
+    way the promotion generates it, from a copy name the library builds, and
+    then parses that name back with the same parser the refusal uses.
+  */
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "rollback-command.ps1", [
+      // The name a real run would have: `<db>_prerollout_<yyyyMMddHHmmss>`.
+      "$copy = 'townreporter_prerollout_' + (Get-Date -Format 'yyyyMMddHHmmss')",
+      "$command = Get-PromoteRollbackCommand -App $app -Copy $copy",
+      `Set-Content -Path (Join-Path $app 'command.txt') -Value $command -Encoding ASCII`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "copy=$copy;stamp=$(Get-PromoteCopyStamp -Copy $copy)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    const printed = read(join(install.app, "command.txt")).trim();
+    const match = /-RollbackDatabase (\S+)\s*$/.exec(printed);
+    assert.ok(match, `the printed command does not end with a copy name to paste: ${printed}`);
+    /** @type {string} */
+    const pasted = match[1];
+
+    // The parser the rollback itself runs, over the name the operator pastes.
+    const result = read(join(install.app, "result.txt")).trim();
+    assert.match(result, /^copy=townreporter_prerollout_\d{14};stamp=\d{14}$/, `Get-PromoteCopyStamp rejects the name the promotion prints: ${result}`);
+    const stamp = result.slice(result.indexOf("stamp=") + "stamp=".length);
+    assert.equal(parseCopyStamp(pasted), stamp, "the library's parser disagrees with the script's about the printed name");
+    assert.equal(isCopyOf(pasted, "townreporter"), true, "the printed name is not a copy of the database it replaces");
+    // And the generated one is exactly what the library would build.
+    assert.equal(pasted, copyDatabaseName("townreporter", stamp));
+
+    // Everything ELSE the script or the docs print has to be the same shape.
+    // A doc is where a name is most likely to be typed by hand and get it
+    // wrong, and a doc is what an operator reads at 2 AM.
+    for (const [label, text] of [
+      ["SELF-HOSTING.md", readFileSync(join(ROOT, "SELF-HOSTING.md"), "utf8")],
+      ["ops/promote.ps1", readFileSync(join(OPS, "promote.ps1"), "utf8")],
+    ]) {
+      const printedNames = [...text.matchAll(/townreporter[a-z_]*_prerollout_([0-9A-Za-z-]+)/g)];
+      assert.ok(printedNames.length > 0, `${label} no longer shows a rollback command at all`);
+      for (const found of printedNames) {
+        assert.match(
+          found[1],
+          /^\d{14}$/,
+          `${label} prints a copy name whose stamp is not fourteen digits (${found[0]}) -- Get-PromoteCopyStamp returns nothing for it, so the pasted command refuses`,
+        );
+      }
+    }
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("whether to install is decided by what node_modules was built from, not by this run's fast-forward", windowsOnly, async () => {
+  /*
+    THE LOCKFILE TRAP, which the auditor found and the coordinator confirmed.
+
+    `$lockBefore -ne $lockAfter` answers "did THIS run move the lockfile". On
+    the first production rollout the checkout is fast-forwarded BY HAND first
+    -- it has to be, it is still running the old promote script -- so the
+    before hash is already the new lockfile, the two are equal, and the
+    promotion skips `npm ci` and builds the release on the previous
+    node_modules. Nothing fails; the release is just built against the wrong
+    dependency tree.
+
+    So the decision is the marker npm ci leaves behind when it succeeds.
+  */
+  const install = makeInstall();
+  try {
+    const hashA = "A".repeat(64);
+    const hashB = "B".repeat(64);
+    writeFileSync(join(install.app, "package-lock.json"), "{}\n");
+    const marker = join(install.app, "node_modules", ".promote-lock-hash");
+
+    const harness = writeHarness(install, "lockfile.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$a = ${psLiteral(hashA)}`,
+      `$b = ${psLiteral(hashB)}`,
+      "function Decide($lock, $resume) {",
+      "  $d = Test-PromoteNeedsInstall -App $app -LockHash $lock -ResumeAt $resume",
+      "  return \"$($d.Needed)|$($d.Reason)\"",
+      "}",
+      // 1: nothing recorded yet -- the checkout may have been fast-forwarded by
+      // hand, so there is no way to know what node_modules holds.
+      "$noMarker = Decide $a ''",
+      // 2: recorded, and it is exactly this lockfile.
+      "$wrote = Set-PromoteInstalledLockHash -App $app -Hash $a",
+      "$same = Decide $a ''",
+      // 3: recorded, and the lockfile is a different one.
+      "$different = Decide $b ''",
+      // 4: a marker holding something that is not a hash is not a marker.
+      `Set-Content -Path ${psLiteral(marker)} -Value 'not-a-hash' -Encoding ASCII`,
+      "$garbage = Decide $a ''",
+      "$garbageRead = Get-PromoteInstalledLockHash -App $app",
+      // 5: no lockfile at all -- nothing to install from, and never was.
+      "$noLock = Decide '' ''",
+      // 6: -Resume at the install means the install it started never finished.
+      "$resumed = Decide $a 'deps'",
+      // 7: the round trip, and what a written marker looks like.
+      "$rewrote = Set-PromoteInstalledLockHash -App $app -Hash $b",
+      "$readBack = Get-PromoteInstalledLockHash -App $app",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Encoding ASCII -Value (@(
+        "noMarker=$noMarker",
+        "wrote=$wrote",
+        "same=$same",
+        "different=$different",
+        "garbage=$garbage",
+        "garbageRead=$garbageRead",
+        "noLock=$noLock",
+        "resumed=$resumed",
+        "rewrote=$rewrote",
+        "readBack=$readBack"
+      ) -join ([char]10))`,
+    ]);
+
+    await runPowerShell(harness);
+    const result = read(join(install.app, "result.txt")).trim();
+    const line = (name) => result.split("\n").find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1) ?? "(missing)";
+
+    // NO MARKER -> INSTALL. This is the auditor's case: the checkout is
+    // already at the target, so before and after are equal and the old rule
+    // said "skip".
+    assert.match(line("noMarker"), /^True\|/, `a missing marker did not mean "install": ${line("noMarker")}`);
+    assert.match(line("noMarker"), /no record here of what node_modules was installed from/, "the reason does not say what was missing");
+
+    // The marker that a successful install leaves behind: same lockfile -> skip.
+    assert.equal(line("wrote"), "True", "the marker was not written");
+    assert.match(line("same"), /^False\|node_modules was installed from exactly this lockfile$/, `an install was run for a lockfile that was already installed: ${line("same")}`);
+
+    // A different lockfile -> install, and the reason names both hashes.
+    assert.match(line("different"), /^True\|/, "a changed lockfile did not mean install");
+    assert.match(line("different"), new RegExp(hashA), "the reason does not say what was installed");
+    assert.match(line("different"), new RegExp(hashB), "the reason does not say what is on disk now");
+
+    // A half-written or foreign marker is treated exactly like a missing one.
+    assert.match(line("garbage"), /^True\|/, "a marker that is not a hash was trusted");
+    assert.equal(line("garbageRead"), "", "a marker that is not a hash was read back as one");
+
+    // No lockfile: nothing to install from, and that is not a change.
+    assert.match(line("noLock"), /^False\|there is no package-lock\.json here/);
+
+    // -Resume at the install: the previous run's install never finished.
+    assert.match(line("resumed"), /^True\|the previous run stopped at this step/);
+
+    // The round trip, and that the marker is stored as the hash it was given.
+    assert.equal(line("readBack"), hashB, "the marker did not read back as the hash that was written");
+    assert.equal(read(marker).trim(), hashB, "the marker on disk is not the hash");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("the install marker is written after a successful install, and nowhere a failure can reach", () => {
+  /*
+    The marker is the record of a FINISHED install. Written anywhere else it
+    would be a guess, and the whole point of it is that it is not one -- a
+    marker left over from an install that died half way would tell the next
+    promotion that node_modules is built from a lockfile it never finished
+    installing.
+  */
+  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+  const at = (needle, what) => {
+    const index = src.indexOf(needle);
+    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
+    return index;
+  };
+  const failed = at('Die "npm ci did not succeed', "the failed-install branch");
+  const wrote = at("Set-PromoteInstalledLockHash -App $app -Hash $lockAfter", "the marker write");
+  assert.ok(wrote > failed, "the marker is written before the failed install is reported, so a failed install can leave one behind");
+  assert.equal(
+    [...src.matchAll(/Set-PromoteInstalledLockHash/g)].length,
+    1,
+    "the marker is written from more than one place, which is how one of them ends up on a failure path",
+  );
+  // ...and the decision itself does not use the before/after pair any more.
+  assert.match(src, /\$install = Test-PromoteNeedsInstall -App \$app -LockHash \$lockAfter -ResumeAt "\$resumeAt"/, "promote.ps1 no longer asks what node_modules was built from");
+  assert.doesNotMatch(src, /\$mustInstall = \(\$lockBefore -ne \$lockAfter\)/, "the before/after comparison is back as the decider");
+  // The two hash lines stay: scripts\ci-hash-no-module.ps1 lifts exactly these
+  // two out and runs them in a session that cannot reach Get-FileHash.
+  assert.equal([...src.matchAll(/^\$lock(Before|After) = if \(Test-Path/gm)].length, 2, "the two lockfile hash lines the CI fixture lifts out are gone");
 });
 
 test("a resumed run takes the copy's freshness from the copy step, not from the run's start second", windowsOnly, async () => {

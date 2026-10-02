@@ -1179,29 +1179,38 @@ if (Skip-Step 'ff') {
 # stopped hashing on one path would quietly take that check with it.
 $lockAfter = if (Test-Path "package-lock.json") { Get-TownReporterFileHash -Path "package-lock.json" } else { "" }
 
-# --- 6. dependencies, only if the lockfile moved ---------------------------
+# --- 6. dependencies, unless node_modules is already built from this lockfile
 <#
-  The fast-forward happened above, so the lockfile hash before it and after it
-  answers "did this promotion bring a new lockfile".
+  WHAT WAS node_modules INSTALLED FROM?
 
-  A RESUMED run sitting at this step cannot answer that question any more --
-  the checkout is already at origin/main, so before and after are equal -- and
-  it does not need to: reaching 'deps' at all means the install the previous
-  run started never finished, so it runs again. Reporting "lockfile unchanged,
-  skipping install" there would be exactly the wrong answer on the one run
-  where npm ci is the thing that died.
+  Not "did this run move the lockfile". The before/after pair above answers
+  that, and on the first rollout it answers it wrongly: the live checkout is
+  fast-forwarded BY HAND before the promotion -- it has to be, it is still
+  running the old promote script -- so `before` is already the new lockfile,
+  the two are equal, and the promotion used to skip `npm ci` and build a
+  release on the previous node_modules. Nothing failed; the release was just
+  built against the wrong dependency tree.
+
+  So the decider is the marker `npm ci` leaves behind when it succeeds:
+  node_modules\.promote-lock-hash, holding the SHA256 of the lockfile it
+  installed from. The install runs unless that file is there and holds exactly
+  the hash of the lockfile on disk. See Test-PromoteNeedsInstall in
+  ops\lib-promote.ps1 -- including why a missing marker means install.
 #>
-$mustInstall = ($lockBefore -ne $lockAfter) -or ($resumeAt -eq 'deps')
+$install = Test-PromoteNeedsInstall -App $app -LockHash $lockAfter -ResumeAt "$resumeAt"
+$mustInstall = $install.Needed
+Write-PromoteLog $log "the lockfile hash before this run's fast-forward was '$lockBefore' and after it '$lockAfter'"
+Write-PromoteLog $log "node_modules was last installed from '$(Get-PromoteInstalledLockHash -App $app)'; install needed: $mustInstall ($($install.Reason))"
 if (Skip-Step 'deps') {
   # nothing to do
 } else {
   Add-PromoteStep -Log $log -Name 'deps' -Detail "npm ci"
   $t0 = Get-Date
   if (-not $mustInstall) {
-    Say "lockfile unchanged; skipping install"
-    Complete-PromoteStep -Log $log -Name 'deps' -Seconds ((Get-Date) - $t0).TotalSeconds -Detail "lockfile unchanged, no install needed"
+    Say "not installing: $($install.Reason)"
+    Complete-PromoteStep -Log $log -Name 'deps' -Seconds ((Get-Date) - $t0).TotalSeconds -Detail $install.Reason
   } elseif ($PSCmdlet.ShouldProcess("dependencies", "npm ci")) {
-    Say "the lockfile changed; installing dependencies"
+    Say "installing dependencies: $($install.Reason)"
     $r = Invoke-PromoteChild -Log $log -Step 'deps' -Command 'npm ci'
     if ($r.ExitCode -ne 0) {
       $code = if ($r.TimedOut) {
@@ -1218,6 +1227,19 @@ if (Skip-Step 'deps') {
       Say "npm ci did not succeed; putting the database back and bringing the paper up"
       $recovered = Invoke-PromoteRolloutFailure -Why "npm ci did not succeed ($code)" -RestoreBuild $false
       Die "npm ci did not succeed ($code). Its output is in $($r.OutFile). $($recovered.Failure)" 'deps' "Read that file, fix the install, then run this script again. The backup is at $backupNote"
+    }
+    <#
+      ONLY HERE, after exit 0, and nowhere else. The marker is the record of a
+      finished install; writing it anywhere a failure can reach would turn
+      "node_modules is built from this lockfile" into a guess, and the whole
+      point of it is that it is not a guess. npm ci deletes node_modules on
+      the way in, so a marker that survived means the install it belongs to
+      completed.
+    #>
+    if (Set-PromoteInstalledLockHash -App $app -Hash $lockAfter) {
+      Write-PromoteLog $log "recorded that node_modules was installed from lockfile $lockAfter"
+    } else {
+      Write-PromoteLog $log "could not record what node_modules was installed from; the next promotion will install again rather than guess"
     }
     Complete-PromoteStep -Log $log -Name 'deps' -Seconds $r.Seconds -Detail "npm ci exit 0"
   } else {
