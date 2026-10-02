@@ -1,0 +1,7 @@
+<!-- @dsCard group="Components" viewport="700x420" name="Desk" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script><script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script><script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../../_ds_bundle.js"></script><style>body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-display)}</style></head><body><div id="r"></div>
+<script type="text/babel">const NS = Object.values(window).find(v => v && typeof v === 'object' && v.JobCard && v.Button) || {};
+const { LeadRow, JobCard, ScoreBadge, EvidenceMeter } = NS;
+ReactDOM.createRoot(document.getElementById('r')).render(<div style={{padding:16,display:'flex',flexDirection:'column',gap:12}}><LeadRow selected lead={{score:16,title:'Dry Creek annexation returns Oct. 6 for second reading',why:'Second reading is the binding vote.',meta:'Planning · 2 hours ago',opened:3,failed:1,chips:[{kind:'new',label:'NEW'}]}} /><JobCard job={{title:'Drafting story: Dry Creek annexation',model:'Codex Sol · high',state:'running',stages:['Read records','Draft','Headline','Save'],stage:1,pct:42,now:'Writing paragraph 4 of about 8',startedAt:Date.now()-138000,beatAt:Date.now()-3000}} /></div>);</script></body></html>
