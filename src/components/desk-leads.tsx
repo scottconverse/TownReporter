@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
@@ -15,6 +15,7 @@ import {
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { Notice } from "@/components/states";
@@ -172,6 +173,24 @@ export function LeadRowView({
   const [confirming, setConfirming] = useState(false);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  /*
+    F3b: this row's own "Draft with AI" used to open on Automatic and send that
+    as an explicit pick, which outranks the paper's stored writing model -- the
+    same gap as the desk pages, on the Queue's row. Seeded here too, so one
+    fresh install does not get a local default on five screens and Automatic on
+    the sixth. The owner's own touch wins, and every other paper is unchanged
+    (see first-run-picker-default.ts).
+  */
+  const modelChoiceTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "story",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   /*
    * Unit AK item 4: "Kill as duplicate" says what it is doing. The press used
    * to have no equivalent at all -- the badge said "≈ PRINTED" and there was
@@ -341,6 +360,7 @@ export function LeadRowView({
             <ModelPicker
               value={modelChoice}
               onChange={(choice) => {
+                modelChoiceTouched.current = true;
                 setModelChoice(choice);
                 setModelEffort(defaultModelEffort(choice));
               }}

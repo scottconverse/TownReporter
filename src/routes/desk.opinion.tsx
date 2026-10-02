@@ -23,6 +23,7 @@ import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -73,6 +74,24 @@ function OpinionPage() {
   */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
+  /*
+    F3b: F3 stores the first-run default for Opinion's scope too, and this page
+    sends whatever the picker shows as an explicit pick -- so on a fresh
+    install that finished setup with a local model in memory, this picker
+    opens on Local model and "Write editorial" runs it. The owner's own touch
+    wins, and every other paper keeps `DEFAULT_OPINION_MODEL` (Automatic) as
+    before (see first-run-picker-default.ts).
+  */
+  const modelChoiceTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "opinion",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   const [openId, setOpenId] = useState<number | null>(null);
   /*
     Where the opened piece is drawn, so it can be scrolled to.
@@ -446,7 +465,7 @@ function OpinionPage() {
           <ModelPicker
             scope="opinion"
             value={modelChoice}
-            onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }}
+            onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }}
             effort={modelEffort}
             onEffortChange={setModelEffort}
             disabled={start.isPending}

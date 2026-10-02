@@ -135,6 +135,13 @@ const PAPER_SETTINGS_SCHEMA: readonly string[] = [
   `alter table paper_settings add column if not exists named_outlets jsonb`,
   // Unit W item 3: mirrors migrations/0089_paper_settings_named_outlets_revision.sql
   `alter table paper_settings add column if not exists named_outlets_revision integer not null default 0`,
+  /*
+    Unit F3 / Option A: mirrors migrations/0118_paper_first_run_model.sql. The
+    first-run writing-model offer's own memory -- NULL for every paper that
+    existed before this build (including the live one), which is what keeps
+    the card off their desk. See ./first-run-model-settings.ts.
+  */
+  `alter table paper_settings add column if not exists model_prompt_state text`,
 ];
 
 export async function ensurePaperSettingsSchema() {
@@ -865,6 +872,14 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
       });
 
       await ensurePaperSettingsSchema();
+      /*
+        Read BEFORE the flip. Unit F3 / Option A: this RPC is also the Server
+        page's "fix a wrong answer" door, so an already-onboarded paper reaches
+        this code again. The first-run writing-model hook below must run at the
+        false-to-true flip and nowhere else -- an already-onboarded paper keeps
+        the choices it has (the live paper's whole shape).
+      */
+      const wasOnboarded = await isOnboarded(me.newsroomId);
       const sql = await getSql();
       await sql`
         update paper_settings set onboarded = true, updated_at = now()
@@ -872,6 +887,30 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
       `;
 
       await writeWelcomeArticle(me.newsroomId, cfg);
+
+      /*
+        Unit F3 / Option A, AFTER the flip and outside the identity write:
+        default a brand-new paper to whatever local model is loaded, or offer
+        the owner a choice when a server answers with nothing in memory.
+
+        It can never fail or hang setup. The probe is time-bounded, the whole
+        hook is try/catch'd inside itself, and every failure means "store
+        nothing, no card, keep Automatic". A thrown error would be the one
+        thing worse than no default: setup has already been committed at this
+        point and the owner's answers are safe.
+      */
+      try {
+        const { applyFirstRunModelDefault } = await import("./first-run-model-settings.ts");
+        await applyFirstRunModelDefault({
+          newsroomId: me.newsroomId,
+          ownerUserId: context.userId,
+          alreadyOnboarded: wasOnboarded,
+        });
+      } catch (err) {
+        // `applyFirstRunModelDefault` swallows its own probe failures; this is
+        // the belt-and-braces for anything else (a module that would not load).
+        console.error("[setup] first-run writing model could not be decided", err);
+      }
 
       return { ok: true as const };
     } catch (err) {
