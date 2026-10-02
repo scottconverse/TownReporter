@@ -24,6 +24,17 @@ const migrationsPreload = new URL(
   import.meta.url,
 ).href;
 
+/**
+ * The model seal, loaded for BOTH groups and before any test file.
+ *
+ * It replaces `globalThis.fetch` with the default-deny version, so that a test
+ * which forgets to stub the transport is refused instead of quietly calling
+ * whatever model server happens to be running on this machine. It is inert
+ * unless `TOWNREPORTER_TEST_ENV_VERIFIED=1`, which the guard below has already
+ * required. See `src/lib/test-support/model-seal.ts`.
+ */
+const modelSealPreload = new URL("../src/lib/test-support/model-seal.ts", import.meta.url).href;
+
 if (process.argv.length > 2) {
   console.error(
     "npm test runs the complete suite and does not accept filtering arguments. " +
@@ -73,11 +84,13 @@ function run(args) {
 for (const args of [
   // The scripts group is static analysis of the scripts themselves -- it
   // opens no database, so it gets no schema preload.
-  ["--test", ...slice, "scripts/**/*.test.mjs"],
+  ["--test", "--import", modelSealPreload, ...slice, "scripts/**/*.test.mjs"],
   [
     "--experimental-strip-types",
     "--test",
     "--test-concurrency=1",
+    "--import",
+    modelSealPreload,
     "--import",
     migrationsPreload,
     ...slice,
