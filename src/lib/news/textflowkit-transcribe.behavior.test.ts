@@ -12,7 +12,7 @@ import { createServer } from "vite";
   Every test here drives the REAL job machinery -- `enqueueMissingTranscriptions`
   then `drainQueuedJobs`, which claims, heartbeats, and completes a row exactly
   as a scan does -- with two things swapped: the CLI is a fake that writes the
-  measured 0.1.6 JSON shape, and section 5 is inert. Section 5 is stubbed
+  measured JSON shape (0.1.6 and 0.1.8 alike), and section 5 is inert. Section 5 is stubbed
   because it reaches PrimeGov and longmontcitycouncil.org on every run; that is
   a fact about alignment, not about speech-to-text, and a test for this unit has
   no business making outbound requests.
@@ -251,13 +251,13 @@ test("textflowkit installed: the audio becomes a content-addressed revision with
   const provenance = JSON.parse(artifact.provenance_json ?? "{}") as Record<string, unknown>;
   assert.equal(provenance.sourceMethod, "textflowkit-json");
   assert.equal(provenance.tool, "textflowkit");
-  assert.equal(provenance.toolVersion, "0.1.6");
+  assert.equal(provenance.toolVersion, "0.1.8");
   assert.equal(provenance.model, "small");
   assert.equal(provenance.device, "cpu");
   assert.equal(provenance.language, "en");
   assert.equal(provenance.audioArtifactId, seed.audioArtifactId);
   assert.equal(provenance.audioSha256, seed.audioSha256, "the provenance names the audio these words came from");
-  assert.equal(provenance.wordCount, 28, "the per-word timings the 0.1.6 JSON carries are counted, not dropped");
+  assert.equal(provenance.wordCount, 28, "the per-word timings the tool's JSON carries are counted, not dropped");
 
   const segments = await sql.query<{ segment_index: number; start_seconds: string; end_seconds: string; excerpt: string; caption_sha256: string }>(
     "select segment_index,start_seconds,end_seconds,excerpt,caption_sha256 from meeting_transcript_segments where artifact_id=$1 order by segment_index",
@@ -305,7 +305,7 @@ test("textflowkit installed: the audio becomes a content-addressed revision with
   assert.equal(job, null, "a completed job is not open");
   const receipt = JSON.parse(jobs[0]!.result_json) as Record<string, unknown>;
   assert.equal(receipt.revisionArtifactId, artifact.id);
-  assert.equal(receipt.toolVersion, "0.1.6");
+  assert.equal(receipt.toolVersion, "0.1.8");
   assert.equal(receipt.model, "small");
   assert.equal(readdirSync(videoDir).some((name) => name.startsWith("textflowkit-")), false, "the scratch directory is removed");
 });
