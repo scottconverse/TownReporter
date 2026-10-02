@@ -139,6 +139,21 @@ describe("a .us address is official only when it is governmental", () => {
     }
   });
 
+  it("rejects commercial .us hosts that carry a subdomain, which a length check alone would not stop", () => {
+    // Zoom's real hosts look like us02web.zoom.us: three labels, so only the state-code
+    // test on the label before `.us` keeps them out. Two-label hosts are stopped earlier.
+    for (const host of [
+      "us02web.zoom.us",
+      "app.zoom.us",
+      "www.bit.us",
+      "meet.example.us",
+      "events.zz.us", // two letters before .us, but not a state, DC or territory code
+      "co.us", // a bare state label with no locality is not a town site
+    ]) {
+      assert.equal(isOfficialHost(host), false, `${host} is not a government body`);
+    }
+  });
+
   it("accepts the town, county and federal shapes the paper covers", () => {
     for (const host of ["longmont.co.us", "ci.boulder.co.us", "www.larimer.co.us", "usgs.fed.us"]) {
       assert.equal(isOfficialHost(host), true, `${host} is a government address`);
