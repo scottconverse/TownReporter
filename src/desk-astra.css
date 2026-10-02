@@ -6504,6 +6504,17 @@
   background: var(--surface);
   border-top: 3px solid var(--a);
 }
+/* Unit PUB1: the bar a print leaves behind. The story is on the paper, so the
+   rule turns green and the bar holds the one sentence that says so and the way
+   to read it -- in the bar's own place, where the press was made. */
+.desk-ltr.astra .astra-publish-done {
+  border-top-color: var(--ok);
+  justify-content: flex-start;
+}
+.desk-ltr.astra .astra-publish-done .publish-done {
+  color: var(--ok);
+  font-weight: 700;
+}
 .desk-ltr.astra .astra-gates {
   display: flex;
   flex-wrap: wrap;

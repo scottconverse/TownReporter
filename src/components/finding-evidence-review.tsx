@@ -23,7 +23,12 @@ import {
 } from "@/lib/news/evidence-takedown-form";
 import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
-import { groupDisplayCaptures } from "@/lib/news/finding-evidence-display";
+import {
+  captureStateSentence,
+  captureSupportLine,
+  groupDisplayCaptures,
+  revealOpenedCapture,
+} from "@/lib/news/finding-evidence-display";
 import {
   citedCaptureCount,
   evidenceCheckRows,
@@ -85,23 +90,10 @@ function sameDraft(current: CurrentDraft, review: FindingEvidenceReview) {
   );
 }
 
-function captureState(
-  capture: FindingEvidenceReview["rows"][number]["captures"][number],
-  recordLabel = "Cited capture",
-) {
-  if (!capture.available) return `${recordLabel} unavailable`;
-  /*
-    Taken down before "not readable", because it is the reason this record has
-    no readable text -- and "exists, but no readable captured text is
-    available" would read as a defect in the capture rather than a decision the
-    owner recorded, with a reason, in the audit trail.
-  */
-  if (capture.takenDown) return "Excerpt removed at the publisher's request";
-  if (!capture.readable) return `${recordLabel} exists, but no readable captured text is available`;
-  if (capture.excerptState === "found") return "Recorded excerpt found in cited version";
-  if (capture.excerptState === "not-found") return "Recorded excerpt not found in cited version";
-  return "No recorded excerpt to compare";
-}
+/* The sentence for one captured record lives in `finding-evidence-display.ts`
+   (`captureStateSentence`), where it can be read and tested without a browser
+   -- unit PUB1 replaced "No recorded excerpt to compare" with what the card
+   actually is. */
 
 function draftsFrom(review: FindingEvidenceReview): Record<string, JudgmentDraft> {
   return Object.fromEntries(
@@ -270,22 +262,18 @@ function CitedRecordChecks({
                   {capture.title ?? capture.url ?? copy.fallback}
                 </p>
                 <p className="mt-1 text-muted">
-                  {captureState(capture)}
+                  {captureStateSentence(capture)}
                   {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
                 </p>
+                {/*
+                  Unit PUB1: the ids stay, because an editor asking support to
+                  look at a capture needs to name it -- but on their own smaller
+                  line, labelled, in words rather than column names. Above it is
+                  what the record IS; this is how to quote it.
+                */}
                 {group.artifactVersionReference || group.captureEventIds.length ? (
-                  <p className="mt-1 text-muted">
-                    {group.artifactVersionReference && capture.versionId != null
-                      ? `Artifact version ${capture.versionId}`
-                      : ""}
-                    {group.artifactVersionReference && group.captureEventIds.length ? " · " : ""}
-                    {group.captureEventIds
-                      .map((captureEventId) =>
-                        capture.versionId != null
-                          ? `Capture event ${captureEventId} (version ${capture.versionId})`
-                          : `Capture event ${captureEventId}`,
-                      )
-                      .join(" · ")}
+                  <p className="mt-1 text-xs text-muted">
+                    For support: {captureSupportLine(group)}
                   </p>
                 ) : null}
                 {variant === "finding" ? (
@@ -334,6 +322,17 @@ function CitedRecordChecks({
                     ) : null}
                   </>
                 )}
+                {/*
+                  Unit PUB1: the read's own progress, said AT THE LINK. It used
+                  to be a line at the foot of the panel, below the fold on a
+                  long review, so the press looked like nothing happened until
+                  the text arrived somewhere off screen.
+                */}
+                {pending ? (
+                  <p className="mt-1 text-sm text-muted" role="status">
+                    Opening the saved copy…
+                  </p>
+                ) : null}
               </li>
             );
           })}
@@ -376,7 +375,7 @@ function ManualRecordChecks({
               {capture.relation}
             </p>
             <p className="mt-1 text-muted">
-              {captureState(capture, "Selected captured record")}
+              {captureStateSentence(capture, "Selected captured record")}
               {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
             </p>
             {capture.viewHref && capture.versionId != null ? (
@@ -388,6 +387,11 @@ function ManualRecordChecks({
               >
                 View selected captured version
               </button>
+            ) : null}
+            {pending ? (
+              <p className="mt-1 text-sm text-muted" role="status">
+                Opening the saved copy…
+              </p>
             ) : null}
           </li>
         ))}
@@ -738,6 +742,24 @@ export function FindingEvidenceReviewPanel({
         error: "Could not open that captured version.",
       }),
   });
+  /*
+    ── THE OPENED TEXT IS BROUGHT TO THE EDITOR (UNIT PUB1) ───────────────────
+
+    The owner pressed "View exact captured version" in the Checks sidebar and
+    saw a flash and nothing else: the panel IS rendered, at the foot of
+    "Claims & evidence", far below the link on a long review -- so the press
+    looked like it had done nothing at all.
+
+    This runs for both answers, a read that found the capture and one that was
+    refused, because both render the same panel and both have to be seen. The
+    effect (rather than the mutation's callback) is what guarantees the panel
+    is in the document before anything is scrolled or focused.
+  */
+  const capturePanel = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!openedCapture) return;
+    revealOpenedCapture(capturePanel.current);
+  }, [openedCapture]);
 
   /*
     Unit U11b: take this capture's excerpt down, permanently.
@@ -1551,9 +1573,15 @@ export function FindingEvidenceReviewPanel({
         <Notice kind={takeDownFeedback.kind}>{takeDownFeedback.text}</Notice>
       ) : null}
 
-      {captureRead.isPending ? <BusyLine label="Opening captured text…" /> : null}
+      {/*
+        Unit PUB1: the "Opening…" line is drawn at the link that was pressed
+        (see `CitedRecordChecks`), not here -- here it was below the fold on a
+        long review, which is the flash-and-nothing the owner saw.
+      */}
       {openedCapture ? (
         <div
+          ref={capturePanel}
+          tabIndex={-1}
           className="mt-4 border border-rule bg-paper-2 p-4"
           role="region"
           aria-label="Captured text"
