@@ -11,7 +11,12 @@ import {
   readMcpSseText,
   unwrapBingRedirect,
   searchWithFallback,
+  type SearchAttempt,
 } from "./search-web.ts";
+import {
+  clearSearchCooldowns,
+  setSearchCooldownClock,
+} from "./search-cooldown.ts";
 import { setHaloFetchImplForTests } from "./halo-search.ts";
 
 const originalGateway = process.env.TOWNREPORTER_GATEWAY_MCP_URL;
@@ -784,5 +789,201 @@ describe("optional relevance-aware continuation", () => {
       ),
     );
     assert.equal(secondCalled, false);
+  });
+});
+
+/*
+  Point 4: the provider cooldown, at the seam Pull actually uses.
+
+  Scott's three Pulls each asked Exa again seconds after it had answered HTTP
+  429. These cases drive the real `searchWithFallback` with named fake
+  providers -- no network, no real provider -- and an injected clock.
+*/
+describe("searchWithFallback: the block cooldown", () => {
+  let now = 5_000_000;
+
+  beforeEach(() => {
+    now = 5_000_000;
+    clearSearchCooldowns();
+    setSearchCooldownClock(() => now);
+  });
+
+  afterEach(() => {
+    clearSearchCooldowns();
+    setSearchCooldownClock(null);
+  });
+
+  const blockedExa = () => {
+    let calls = 0;
+    const searchExa = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return { state: "SEARCH_BLOCKED", hits: [], provider: "exa-mcp", error: "HTTP 429" };
+    };
+    return { searchExa, calls: () => calls };
+  };
+
+  const emptyDdg = () => {
+    let calls = 0;
+    const searchDdg = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "ddg-html" };
+    };
+    return { searchDdg, calls: () => calls };
+  };
+
+  it("skips a blocked provider on the next pull and calls it again after the window", async () => {
+    const exa = blockedExa();
+    const ddg = emptyDdg();
+    const events: string[] = [];
+    const onProgress = (event: { phase: string; provider: string; error?: string }) => {
+      events.push(`${event.phase}:${event.provider}${event.error ? `:${event.error}` : ""}`);
+    };
+    const run = () =>
+      searchWithFallback("city contract", [exa.searchExa, ddg.searchDdg], undefined, onProgress, undefined, {
+        respectCooldowns: true,
+      });
+
+    await run();
+    assert.equal(exa.calls(), 1);
+
+    await run();
+    assert.equal(exa.calls(), 1, "a provider inside its cooldown is asked for nothing");
+    assert.equal(ddg.calls(), 2, "the other provider is still asked");
+    assert.ok(
+      events.some((event) => event.startsWith("skipped:Exa:blocked just now")),
+      `the run line says the provider was skipped: ${events.join(", ")}`,
+    );
+
+    now += 10 * 60_000 + 1;
+    await run();
+    assert.equal(exa.calls(), 2, "after the window the provider is tried again");
+  });
+
+  const blockedUntil = (retryAfterMs: number) => {
+    let calls = 0;
+    const searchExa = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return {
+        state: "SEARCH_BLOCKED",
+        hits: [],
+        provider: "exa-mcp",
+        error: "HTTP 429",
+        retryAfterMs,
+      };
+    };
+    return { searchExa, calls: () => calls };
+  };
+
+  it("honours a Retry-After the provider sent", async () => {
+    const exa = blockedUntil(20 * 60_000);
+    const run = () =>
+      searchWithFallback("city contract", [exa.searchExa], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    now += 19 * 60_000;
+    await run();
+    assert.equal(exa.calls(), 1, "the provider's own twenty minutes are honoured");
+    now += 2 * 60_000;
+    await run();
+    assert.equal(exa.calls(), 2);
+  });
+
+  it("caps an absurd Retry-After at half an hour", async () => {
+    // Ninety minutes would stop this paper searching until tomorrow morning.
+    const exa = blockedUntil(90 * 60_000);
+    const run = () =>
+      searchWithFallback("city contract", [exa.searchExa], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    now += 29 * 60_000;
+    await run();
+    assert.equal(exa.calls(), 1);
+    now += 2 * 60_000;
+    await run();
+    assert.equal(exa.calls(), 2, "capped at thirty minutes");
+  });
+
+  it("a timeout starts no cooldown", async () => {
+    let calls = 0;
+    const searchDdg = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return { state: "SEARCH_TIMEOUT", hits: [], provider: "ddg-html", error: "timed out" };
+    };
+    const run = () =>
+      searchWithFallback("city contract", [searchDdg], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    await run();
+    assert.equal(calls, 2, "a timeout says nothing about the next request");
+  });
+
+  it("a parse failure starts no cooldown either", async () => {
+    let calls = 0;
+    const searchDdg = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return { state: "SEARCH_FAILED_PARSE", hits: [], provider: "ddg-html" };
+    };
+    const run = () =>
+      searchWithFallback("city contract", [searchDdg], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    await run();
+    assert.equal(calls, 2);
+  });
+
+  it("a provider that answers again clears its own cooldown", async () => {
+    let calls = 0;
+    const searchExa = async (): Promise<SearchAttempt> => {
+      calls += 1;
+      return calls === 1
+        ? { state: "SEARCH_BLOCKED", hits: [], provider: "exa-mcp", error: "HTTP 429" }
+        : { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "exa-mcp" };
+    };
+    const run = () =>
+      searchWithFallback("city contract", [searchExa], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    now += 10 * 60_000 + 1;
+    await run();
+    assert.equal(calls, 2);
+    await run();
+    assert.equal(calls, 3, "the answer cleared the block");
+  });
+
+  it("finishes with nothing to ask when every provider is cooling", async () => {
+    const exa = blockedExa();
+    let ddgCalls = 0;
+    const searchDdg = async (): Promise<SearchAttempt> => {
+      ddgCalls += 1;
+      return { state: "SEARCH_BLOCKED", hits: [], provider: "ddg-html" };
+    };
+    const run = () =>
+      searchWithFallback("city contract", [exa.searchExa, searchDdg], undefined, undefined, undefined, {
+        respectCooldowns: true,
+      });
+    await run();
+    const second = await run();
+    assert.equal(exa.calls(), 1);
+    assert.equal(ddgCalls, 1, "no provider was asked the second time");
+    assert.equal(second.allProvidersCooling, true);
+    assert.deepEqual(
+      second.skippedProviders?.map((row) => row.provider),
+      ["Exa", "DuckDuckGo"],
+    );
+    assert.equal(second.hits.length, 0);
+  });
+
+  it("leaves a caller that does not opt in exactly as it was", async () => {
+    const exa = blockedExa();
+    await searchWithFallback("city contract", [exa.searchExa], undefined, undefined, undefined, {
+      respectCooldowns: true,
+    });
+    await searchWithFallback("city contract", [exa.searchExa]);
+    assert.equal(exa.calls(), 2, "the Dark Desk and the dig engine keep asking");
   });
 });

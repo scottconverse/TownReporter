@@ -760,6 +760,7 @@ function fieldLabelFromPath(path: string): string {
     todo: "the to-do list",
     t: "a to-do line",
     q: "a to-do detail line",
+    triedAt: "the time a to-do line was last tried",
     queries: "the search list on a to-do",
     query: "a search line on a to-do",
     headline: "the headline",

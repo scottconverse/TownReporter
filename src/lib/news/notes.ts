@@ -48,12 +48,35 @@ export function clipTodoText(text: string, max: number = TODO_TEXT_MAX): string 
   return trimmed || cut.trim();
 }
 
+/**
+ * A moment stored on a to-do row, kept only when it really is one.
+ *
+ * A stamp the desk cannot read is worse than none: the row would draw an
+ * invented time beside a real failure. Anything unparseable is dropped, and the
+ * reason is drawn on its own.
+ */
+function todoStamp(raw: unknown): string | undefined {
+  const s = String(raw ?? "").trim();
+  if (!s || s.length > 40 || !Number.isFinite(Date.parse(s))) return undefined;
+  return s;
+}
+
 export type NoteTodo = {
   t: string;
   done: boolean;
   src: "you" | "machine" | "gate";
   /** What the gate actually searched, so the editor can judge the search. */
   q?: string;
+  /**
+   * When the Pull that wrote `q` gave up, ISO UTC (PULL1b).
+   *
+   * Stored with the reason rather than read off a run, because the run that is
+   * newest is not always the run that failed: a successful retry strikes the
+   * line, and the row once printed the retry's finish beside the older failure.
+   * A row whose `q` came from an earlier build has no stamp and is drawn
+   * without a time.
+   */
+  triedAt?: string;
   /**
    * The absence gate's full ladder for this claim (0.6.23) -- every query it
    * ran, in order, with its outcome. `q` is the plain-language summary line;
@@ -187,6 +210,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
             const t = String(r.t ?? "").trim();
             if (!t) return null;
             const q = String((row as { q?: unknown }).q ?? "").trim();
+            const triedAt = todoStamp((row as { triedAt?: unknown }).triedAt);
             const rawQueries = (row as { queries?: unknown }).queries;
             const queries: NoteTodoQuery[] = Array.isArray(rawQueries)
               ? rawQueries
@@ -206,7 +230,9 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
               t: clipTodoText(t),
               done: Boolean(r.done),
               src: todoSource(r.src),
-              ...(q ? { q: clipTodoText(q, TODO_DETAIL_MAX) } : {}),
+              ...(q
+                ? { q: clipTodoText(q, TODO_DETAIL_MAX), ...(triedAt ? { triedAt } : {}) }
+                : {}),
               ...(queries.length ? { queries } : {}),
             };
           })
@@ -628,6 +654,7 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
       const t = String(r.t ?? "").trim();
       if (!t) return null;
       const q = String((row as { q?: unknown }).q ?? "").trim();
+      const triedAt = todoStamp((row as { triedAt?: unknown }).triedAt);
       const rawQueries = (row as { queries?: unknown }).queries;
       const queries: NoteTodoQuery[] = Array.isArray(rawQueries)
         ? rawQueries
@@ -647,7 +674,9 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
         t: clipTodoText(t),
         done: Boolean(r.done),
         src: todoSource(r.src),
-        ...(q ? { q: clipTodoText(q, TODO_DETAIL_MAX) } : {}),
+        ...(q
+          ? { q: clipTodoText(q, TODO_DETAIL_MAX), ...(triedAt ? { triedAt } : {}) }
+          : {}),
         ...(queries.length ? { queries } : {}),
       };
     })

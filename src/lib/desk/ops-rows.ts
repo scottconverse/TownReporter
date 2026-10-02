@@ -237,6 +237,39 @@ export function clockText(localTime: string): string {
   return `${hour12}:${minutes} ${hours < 12 ? "a.m." : "p.m."}`;
 }
 
+/**
+ * "12:15 p.m." from a stored timestamp, in the paper's own time zone.
+ *
+ * A moment ("when was this tried") has to read in the same voice as the desk's
+ * other clock sentences, so the zone conversion is done here and the wording is
+ * done by `clockText` above -- one clock, not two. An unreadable timestamp or
+ * zone returns "" rather than a time nobody can check.
+ */
+export function clockTextAt(
+  iso: string | Date | null | undefined,
+  timeZone: string,
+): string {
+  if (!iso) return "";
+  const date = iso instanceof Date ? iso : new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone || undefined,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+    const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+    if (!hour || !minute) return "";
+    // Some ICU builds print midnight as "24" under hourCycle h23.
+    return clockText(`${hour === "24" ? "00" : hour}:${minute}`);
+  } catch {
+    /* an unknown time zone is not a time */
+    return "";
+  }
+}
+
 /** Daily scan: when it runs and how much it may read. */
 export function dailyScanRows(policy: DailyScanPolicy): OpsRow[] {
   const runs = policy.paused

@@ -1031,6 +1031,15 @@ const todoDetail = z.preprocess(
   (v) => clipTodoText(typeof v === "string" ? v : "", TODO_DETAIL_MAX),
   z.string().max(TODO_DETAIL_MAX),
 );
+/*
+  PULL1b: the moment a Pull wrote a to-do row's reason. A caller that sends
+  nonsense here gets nothing back rather than a refusal -- the row's words are
+  what matter, and an unreadable stamp is dropped by `notes.ts` anyway.
+*/
+const todoStamp = z.preprocess(
+  (v) => (typeof v === "string" && Number.isFinite(Date.parse(v)) ? v : undefined),
+  z.string().max(40).optional(),
+);
 
 /**
  * A stored todo, read back and written whole: loose, because the list is the
@@ -1042,6 +1051,8 @@ export const noteTodo = z.looseObject({
   done: z.boolean(),
   src: z.enum(["you", "machine", "gate"]),
   q: todoDetail.optional(),
+  /** PULL1b: the moment a Pull wrote `q`, so it survives the editor's save. */
+  triedAt: todoStamp.optional(),
   queries: z
     .array(z.looseObject({ query: todoDetail, hit: z.boolean() }))
     .max(50)

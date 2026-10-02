@@ -6,6 +6,7 @@ import {
   newPullReceipt,
   runPullPipeline,
   type PullCheckpoint,
+  type PullPipelineDeps,
   type PullReceipt,
 } from "./pull.server.ts";
 import { emptyNotes } from "./notes.ts";
@@ -331,5 +332,215 @@ describe("durable Pull pipeline", () => {
     assert.equal(result.counters.providersAttempted, 1);
     assert.equal(result.counters.failures, 1);
     assert.match(result.errors[0] ?? "", /Exa: provider unavailable/);
+  });
+});
+
+/*
+  PULL1 point 1: the closing sentence is computed from what the providers did.
+
+  The live report, in one fixture: three Pulls, "13 provider or page failures",
+  and a final line that told Scott the record was not there. Two of those runs
+  had been refused by every search provider there is.
+*/
+describe("what a Pull says when it comes back with nothing", () => {
+  const zeroHits = (overrides: Partial<PullCheckpoint> = {}) =>
+    receipt({
+      queryIndex: 0,
+      queryResults: [null],
+      indexPagesPrepared: true,
+      indexPages: [],
+      indexPageIndex: 0,
+      rankedPrepared: true,
+      rankedUrls: [],
+      ...overrides,
+    });
+
+  const refused: PullPipelineDeps["search"] = async (_query, onProgress) => {
+    await onProgress({ phase: "started", provider: "Exa" });
+    await onProgress({
+      phase: "finished",
+      provider: "exa-mcp",
+      state: "SEARCH_BLOCKED",
+      error: "HTTP 429",
+    });
+    await onProgress({ phase: "started", provider: "DuckDuckGo" });
+    await onProgress({
+      phase: "finished",
+      provider: "ddg-html",
+      state: "SEARCH_BLOCKED",
+      error: "SEARCH_BLOCKED",
+    });
+    return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
+  };
+
+  it("names the providers that refused instead of saying the topic has nothing", async () => {
+    const stages: string[] = [];
+    const result = await runPullPipeline(zeroHits(), {
+      search: refused,
+      ingest: async () => assert.fail("there are no candidate documents"),
+      stopRequested: async () => false,
+      saveDocument: async () => assert.fail("there are no candidate documents"),
+      saveReceipt: async (next) => {
+        stages.push(next.stage);
+      },
+    });
+    const final = stages.at(-1) ?? "";
+    assert.equal(result.status, "completed");
+    assert.match(final, /search is unavailable/i);
+    assert.match(final, /Exa: rate limited/);
+    assert.match(final, /DuckDuckGo: blocked this computer/);
+    assert.match(final, /again/i, "the editor is told a retry will probably repeat it");
+    assert.doesNotMatch(final, /no relevant public document found/i);
+    // The raw lines stay on the receipt for support.
+    assert.ok(result.errors.some((error) => /exa-mcp: HTTP 429/.test(error)));
+  });
+
+  it("keeps the plain sentence when the searches really ran and found nothing", async () => {
+    const stages: string[] = [];
+    const result = await runPullPipeline(zeroHits(), {
+      search: async (_query, progress) => {
+        await progress({ phase: "started", provider: "Exa" });
+        await progress({ phase: "finished", provider: "exa-mcp", state: "SEARCH_SUCCESS_ZERO_RESULTS" });
+        return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "exa-mcp", lineage: [] };
+      },
+      ingest: async () => assert.fail("there are no candidate documents"),
+      stopRequested: async () => false,
+      saveDocument: async () => assert.fail("there are no candidate documents"),
+      saveReceipt: async (next) => {
+        stages.push(next.stage);
+      },
+    });
+    assert.equal(result.searchAnswered, true);
+    assert.equal(stages.at(-1), "Finished · no relevant public document found");
+  });
+
+  it("mentions a failed provider when other searches did run", async () => {
+    const stages: string[] = [];
+    await runPullPipeline(zeroHits(), {
+      search: async (_query, progress) => {
+        await progress({ phase: "started", provider: "Exa" });
+        await progress({
+          phase: "finished",
+          provider: "exa-mcp",
+          state: "SEARCH_BLOCKED",
+          error: "HTTP 429",
+        });
+        await progress({ phase: "started", provider: "DuckDuckGo" });
+        await progress({ phase: "finished", provider: "ddg-html", state: "SEARCH_SUCCESS_ZERO_RESULTS" });
+        return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "ddg-html", lineage: [] };
+      },
+      ingest: async () => assert.fail("there are no candidate documents"),
+      stopRequested: async () => false,
+      saveDocument: async () => assert.fail("there are no candidate documents"),
+      saveReceipt: async (next) => {
+        stages.push(next.stage);
+      },
+    });
+    const final = stages.at(-1) ?? "";
+    assert.match(final, /no relevant public document found/);
+    assert.match(final, /Exa: rate limited/);
+  });
+
+  it("guesses no pages when neither the story nor the hits name an official site", async () => {
+    const stages: string[] = [];
+    const opened: string[] = [];
+    const result = await runPullPipeline(
+      zeroHits({
+        indexPagesPrepared: false,
+        indexPages: [],
+        storyUrls: ["https://en.m.wikipedia.org/wiki/Longmont", "https://m.imdb.com/title/tt1"],
+        officialHosts: [],
+      }),
+      {
+        search: async () => ({
+          state: "SEARCH_SUCCESS_RESULTS",
+          hits: [{ title: "Rental listings", url: "https://whitepalmapts.com/", snippet: "" }],
+          provider: "exa-mcp",
+        }),
+        ingest: async (url) => {
+          opened.push(url);
+          return document(url);
+        },
+        stopRequested: async () => false,
+        saveDocument: async () => assert.fail("no page of an unofficial host may be saved"),
+        saveReceipt: async (next) => {
+          stages.push(next.stage);
+        },
+      },
+    );
+    assert.deepEqual(opened, [], "Wikipedia, IMDb and the rental site are not guessed");
+    assert.equal(result.counters.indexPagesChecked, 0);
+    assert.ok(
+      stages.some((stage) => /names no official site/.test(stage)),
+      `the run says why: ${stages.join(" | ")}`,
+    );
+  });
+
+  it("guesses pages on an official host from the story's own links", async () => {
+    const opened: string[] = [];
+    await runPullPipeline(
+      zeroHits({
+        indexPagesPrepared: false,
+        indexPages: [],
+        storyUrls: ["https://www.longmontcolorado.gov/records"],
+        officialHosts: [],
+      }),
+      {
+        search: async () => ({ state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "exa-mcp" }),
+        ingest: async (url) => {
+          opened.push(url);
+          return document(url);
+        },
+        stopRequested: async () => false,
+        saveDocument: async () => assert.fail("the index pages carry no records"),
+        saveReceipt: async () => undefined,
+      },
+    );
+    assert.deepEqual(opened, [
+      "https://www.longmontcolorado.gov/meetings",
+      "https://www.longmontcolorado.gov/meetings/",
+      "https://www.longmontcolorado.gov/board-meetings",
+    ]);
+  });
+
+  it("stops immediately when every provider is cooling, and fetches nothing", async () => {
+    const stages: string[] = [];
+    const result = await runPullPipeline(
+      zeroHits({
+        indexPagesPrepared: false,
+        indexPages: [],
+        storyUrls: ["https://www.longmontcolorado.gov/records"],
+        officialHosts: [],
+      }),
+      {
+        search: async (_query, progress) => {
+          await progress({ phase: "skipped", provider: "Exa", error: "blocked 2 minutes ago" });
+          await progress({ phase: "skipped", provider: "DuckDuckGo", error: "blocked 2 minutes ago" });
+          return {
+            state: "SEARCH_SUCCESS_ZERO_RESULTS",
+            hits: [],
+            provider: "none",
+            lineage: [],
+            allProvidersCooling: true,
+            skippedProviders: [
+              { provider: "Exa", note: "blocked 2 minutes ago" },
+              { provider: "DuckDuckGo", note: "blocked 2 minutes ago" },
+            ],
+          };
+        },
+        ingest: async () => assert.fail("nothing may be fetched while every provider is cooling"),
+        stopRequested: async () => false,
+        saveDocument: async () => assert.fail("nothing may be saved"),
+        saveReceipt: async (next) => {
+          stages.push(next.stage);
+        },
+      },
+    );
+    assert.equal(result.status, "completed");
+    assert.match(stages.at(-1) ?? "", /search is unavailable/i);
+    assert.ok(
+      stages.some((stage) => /skipped, blocked 2 minutes ago/.test(stage)),
+      `the run line says which provider was skipped: ${stages.join(" | ")}`,
+    );
   });
 });

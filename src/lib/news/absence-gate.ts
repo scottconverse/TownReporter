@@ -565,6 +565,12 @@ export function officialDomains(
   city: string,
   urls: (string | null | undefined)[],
   trusted: (string | null | undefined)[] = [],
+  /**
+   * PULL1b: how many hosts the caller needs. The gate reads a short list and
+   * keeps the historical four; a caller that must not lose a registered host
+   * passes `Infinity` (`officialDomainsEvery`).
+   */
+  cap = 4,
 ): string[] {
   const slug = citySlug(city);
   const out: string[] = [];
@@ -585,7 +591,25 @@ export function officialDomains(
     if (slug.length >= 4 && !host.includes(slug) && !out.includes(host)) continue;
     add(host);
   }
-  return out.sort((a, b) => Number(/\.gov$/.test(b)) - Number(/\.gov$/.test(a))).slice(0, 4);
+  return out.sort((a, b) => Number(/\.gov$/.test(b)) - Number(/\.gov$/.test(a))).slice(0, cap);
+}
+
+/**
+ * Every host `officialDomains` would return, with no cap.
+ *
+ * PULL1b: the four-host cap above is the gate's, and it is fine for a ladder
+ * that runs one search per domain. It is not fine as Pull's eligibility list --
+ * on a newsroom with more than four Tier A sources, a story URL on the fifth or
+ * later host was rejected by `docCandidateHosts` even though the operator had
+ * explicitly registered it. Pull uses this; the gate keeps `officialDomains`.
+ * The separate three-host cap on pages *fetched* (`docIndexPages`) is untouched.
+ */
+export function officialDomainsEvery(
+  city: string,
+  urls: (string | null | undefined)[],
+  trusted: (string | null | undefined)[] = [],
+): string[] {
+  return officialDomains(city, urls, trusted, Number.POSITIVE_INFINITY);
 }
 
 export function isOnDomains(url: string, domains: string[]): boolean {
