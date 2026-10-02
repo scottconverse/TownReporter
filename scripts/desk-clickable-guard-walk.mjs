@@ -1173,7 +1173,17 @@ async function main() {
     );
     step(`both themes were measured (${themesSeen.join(", ")})`);
 
-    const staleEntries = staleAllowlistEntries(allowlist, failures);
+    /*
+      UI1b-3: the stale check reads the failures the run FOUND (`allFailures`),
+      not the ones the allowlist has already taken (`failures`, one line up).
+      `staleAllowlistEntries` asks "does this entry still match a failure?" --
+      against the post-exemption list the answer was always no, so the first
+      entry anybody added to the allowlist was reported as stale and the walk
+      failed before it wrote its report. That made the file unusable: it exists
+      precisely so a drawn exception (the brand mark) can be written down and
+      argued for. `scripts/desk-clickable-guard.test.mjs` pins the reading.
+    */
+    const staleEntries = staleAllowlistEntries(allowlist, allFailures);
     must(
       staleEntries.length === 0,
       `these allowlist entries match no failure any more and must be deleted:\n  ` +

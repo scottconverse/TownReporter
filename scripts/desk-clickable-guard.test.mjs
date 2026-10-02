@@ -348,6 +348,26 @@ test("an allowlist entry that matches no failure any more is stale", () => {
   assert.deepEqual(exemptFailures([{ route: "/desk/queue", name: "More", reason: "x" }], failures), [
     { route: "/desk/models", name: "Check now" },
   ]);
+
+  /*
+    UI1b-3: the two readings must be given the SAME list, and it has to be the
+    list of failures the run FOUND.
+
+    `exemptFailures` takes the allowlist's share out; the stale check asks
+    whether an entry still matches something. Handed the post-exemption list,
+    the answer is always no -- every entry would read as stale, and the first
+    entry anybody added (the brand mark, the one the file exists for) would
+    fail the walk before it wrote its report. The walk passes `allFailures`
+    for the stale check and the exempted list for the exit code; this pins
+    that the two are not the same list, which is the mistake that was there.
+  */
+  const exempted = exemptFailures(live, failures);
+  assert.deepEqual(
+    staleAllowlistEntries(live, exempted),
+    live,
+    "the post-exemption list is the wrong input",
+  );
+  assert.deepEqual(staleAllowlistEntries(live, failures), [], "the found list is the right input");
 });
 
 /* ─────────────────────────── the visit plan ─────────────────────────────── */

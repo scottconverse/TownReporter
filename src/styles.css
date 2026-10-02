@@ -1221,7 +1221,18 @@
 .desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px;min-width:0;max-width:11rem}
 .desk-ltr .lead-row.dead {opacity:.5}
 .desk-ltr .lead-main {min-width:0}
-.desk-ltr .hl-link {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
+/*
+  Unit UI1b-3: every link that goes somewhere is underlined.
+
+  Scott's rule, and now the design system's (README section 6, "Text link"):
+  "If it goes somewhere, it is an underlined link." This class IS a desk
+  headline that goes to a story, and it drew no underline at all -- the single
+  biggest group in the measured baseline (unit UI1b step 1: 63 clickables
+  failed as "link not underlined", and this class is the shared one behind
+  most of them). The underline is the design's: 1px, 3px below the baseline.
+  The hover rule below stays, so pointing at it still deepens the colour.
+*/
+.desk-ltr .hl-link {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
 .desk-ltr .hl-link:hover {color:var(--adeep)}
 .desk-ltr .hl-link.sm {font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .lead-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0;text-wrap:pretty}

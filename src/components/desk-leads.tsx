@@ -523,9 +523,16 @@ export function LeadRowView({
           <span className="meta">{lead.topic}</span>
           <LeadFlags lead={lead} dup={dup} />
         </div>
-        <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
-          {lead.headline}
-        </Link>
+        {/* UI1b-3: the row's list title. A heading, because that is the plain
+            form the design system allows a link to take (README section 6) --
+            an underlined link floating on its own is still a control with no
+            edge. Same shape as the today-card's `<h3 className="today-card-hl">`
+            link on Today. */}
+        <h3 className="hl-head">
+          <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
+            {lead.headline}
+          </Link>
+        </h3>
         {/*
           BF4, defect 1: the Queue row is chips + headline, as drawn. The "why"
           summary line the desk printed under the headline is not in the

@@ -369,13 +369,18 @@ function StatsPage() {
                       <p className="st-story-sec">
                         {story.section} · {readAgeLabel(story.ageDays)}
                       </p>
-                      <Link
-                        to="/articles/$slug"
-                        params={{ slug: story.slug }}
-                        className="st-story-title"
-                      >
-                        {story.headline}
-                      </Link>
+                      {/* UI1b-3: the title cell of the story table -- a
+                          heading, so the one link out of Stats is the plain
+                          form the design system allows (README section 6). */}
+                      <h3 className="hl-head">
+                        <Link
+                          to="/articles/$slug"
+                          params={{ slug: story.slug }}
+                          className="st-story-title"
+                        >
+                          {story.headline}
+                        </Link>
+                      </h3>
                     </div>
                     <span className="st-num">{formatCount(story.loads)}</span>
                     <span className="st-num">{formatClock(story.avgSeconds)}</span>

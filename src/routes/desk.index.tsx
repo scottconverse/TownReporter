@@ -1313,13 +1313,24 @@ function DeskHome() {
                     <span className="today-edition-sec">
                       {sectionName(row.topic) || "No section"}
                     </span>
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(row.lead_id) }}
-                      className="today-edition-hl hl-link"
-                    >
-                      {row.headline}
-                    </Link>
+                    {/*
+                      UI1b-3: the headline is a HEADING, not a bare link
+                      floating in a div. The design system allows one plain
+                      form -- an underlined link inside a sentence, a list
+                      title, a heading or a table cell (README section 6) --
+                      and this is the list title of the row. Same shape as the
+                      today-card above, which has always wrapped its link in
+                      an h3.
+                    */}
+                    <h3 className="hl-head">
+                      <Link
+                        to="/desk/story/$leadId"
+                        params={{ leadId: String(row.lead_id) }}
+                        className="today-edition-hl hl-link"
+                      >
+                        {row.headline}
+                      </Link>
+                    </h3>
                   </div>
                   {/*
                     The checks are their own column, not a tail on the
@@ -2020,16 +2031,20 @@ function DeskHome() {
                               */}
                               <LeadFlags lead={l} dup={dup} />
                             </div>
-                            <Link
-                              to="/desk/story/$leadId"
-                              params={{ leadId: String(l.id) }}
-                              className={
-                                "today-lead-hl hl-link" +
-                                (l.status === "killed" ? " today-lead-struck" : "")
-                              }
-                            >
-                              {l.headline}
-                            </Link>
+                            {/* UI1b-3: the row's list title, in a heading --
+                                see the note on Tonight's edition above. */}
+                            <h3 className="hl-head">
+                              <Link
+                                to="/desk/story/$leadId"
+                                params={{ leadId: String(l.id) }}
+                                className={
+                                  "today-lead-hl hl-link" +
+                                  (l.status === "killed" ? " today-lead-struck" : "")
+                                }
+                              >
+                                {l.headline}
+                              </Link>
+                            </h3>
                             <p className="today-lead-why">{l.why}</p>
                             <div className="today-lead-row2">
                               {/*

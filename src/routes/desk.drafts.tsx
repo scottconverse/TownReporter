@@ -238,13 +238,21 @@ function DraftsPage() {
                   <span className="drafts-overline">
                     {[sectionName(row.topic), draftOrigin(row, state)].filter(Boolean).join(" · ")}
                   </span>
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(row.lead_id) }}
-                    className="drafts-hl hl-link"
-                  >
-                    {row.headline}
-                  </Link>
+                  {/* UI1b-3: the row's list title, in a heading. The link was
+                      underlined on hover only before this unit -- and even
+                      with the underline always on, a link floating on its own
+                      is not the plain form the design system allows (README
+                      section 6: a sentence, a list title, a heading or a
+                      table cell). */}
+                  <h3 className="hl-head">
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(row.lead_id) }}
+                      className="drafts-hl hl-link"
+                    >
+                      {row.headline}
+                    </Link>
+                  </h3>
                 </div>
                 {/* A meta cell with nothing to say still holds its column, so
                     the rows below it do not shift by a column. */}
