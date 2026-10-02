@@ -56,7 +56,7 @@ Rulings on your list:
 
 **7. Release and Compare versions.**
 - **Release has no pop-up, by design.** On a Held row, Release moves the lead straight back to Open, and a toast offers "Released · Undo". The hold reason is already on record. If the build shows no Release button on a held row, that's a bug: every Held row needs Release, plus More ▾.
-- **Compare versions is drawn.** See `screens/dialogs/12-compare/`. Open it from Published → More ▾ → Compare versions, and from the story's Checks tab ("Compare checked vs. previous version"). It needs a story with at least 2 captured versions. When there's only one, show the item disabled with the reason "Only one version so far".
+- **Compare versions is drawn.** See `docs/design/handoff-2026-09-26/screen-captures/dialog-12-compare.png` (source: `docs/design/handoff-2026-09-26/design/Desk Dialogs.dc.html`). Open it from Published → More ▾ → Compare versions, and from the story's Checks tab ("Compare checked vs. previous version"). It needs a story with at least 2 captured versions. When there's only one, show the item disabled with the reason "Only one version so far".
 
 ## Still needed from you
 
