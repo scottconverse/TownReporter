@@ -17,7 +17,7 @@ import {
   showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
-import { PublishBarResult } from "@/components/publish-bar-result";
+import { PublishBarDone, PublishBarResult } from "@/components/publish-bar-result";
 import { ActionButton } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
@@ -3522,11 +3522,31 @@ function StoryPage() {
         keeps the bar where it is and is drawn next to the button that was
         pressed. Both are `PublishBarResult`, so neither can drift from the
         other or from `publishPressState`.
+
+        ── AND THE PRESS ITSELF, CHANGED AND STAYING (UI1b-2) ───────────────
+
+        UI1a made the banner the ONLY confirmation, on the rule that a print
+        takes the control away so the two could not both be drawn. The owner
+        changed that rule on purpose. On his own story the auditor found the
+        Publish button GONE after "Yes, print it", and what he asked for was
+        the control changing: "click a publish button, it publishes and then
+        CHANGES to say 'Published' with, say, a green color". So the slot the
+        press was made in now holds the shared `ActionButton` in its `done`
+        phase -- "Published", the green token, the check, not pressable -- and
+        the banner stays beside it. See `PublishBarDone`.
+
+        The condition is `onPaper`, NOT `press.kind === "published"`, and that
+        is the decision this unit was asked to make and say out loud: the green
+        "Published" is a FACT ABOUT THE STORY, so it is drawn for as long as the
+        story is on the paper -- through the cache refreshes a print triggers,
+        and on a page opened later on a story that went up days ago. The banner
+        is the answer to a PRESS, so it is drawn only right after one
+        (`justPublished`, through `press`), which is PUB1's rule kept exactly.
+        A refusal leaves `onPaper` false, so it can never draw the Published
+        state.
       */}
-      {press.kind === "published" ? (
-        <div className="astra-publish-bar astra-publish-done" id="astra-publish-bar">
-          <PublishBarResult state={press} />
-        </div>
+      {onPaper ? (
+        <PublishBarDone result={press} />
       ) : canPublish ? (
         /*
           The sticky publish bar. What is drawn on it is what is true: the four

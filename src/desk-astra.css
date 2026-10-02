@@ -625,6 +625,34 @@
   border-color: var(--danger);
   color: var(--danger);
 }
+/*
+  UI1b-2: A DONE CONTROL THAT STAYS ON THE PAGE IS NOT A DISABLED ONE.
+
+  The publish bar's Publish button wears its done state for as long as the
+  story is on the paper (see `PublishBarDone`), and a done state has no action,
+  so the control is `disabled`. Two rules would then undo the green the owner
+  asked for:
+
+    - `.desk-ltr.astra button:disabled { opacity: 0.5 }` fades the 2px green
+      edge to a pale one. A settled state is not an unavailable one; at full
+      strength the control reads as "this is where the press was, and it
+      worked", which is the whole point.
+    - `.desk-ltr.astra.night :is(.btn.solid, .document-add-button)` sets
+      `color: #111` at specificity (0,5,0), which beats the token rule above
+      at (0,4,0). The Publish press is drawn at the primary level, so in the
+      night theme the done control came back near-black on a transparent
+      ground -- an invisible word on a dark bar. This rule is written at the
+      night block's own specificity so the done token wins, in both themes.
+*/
+.desk-ltr.astra .action-btn[data-phase="done"]:disabled,
+.desk-ltr.astra.night .action-btn[data-phase="done"],
+.desk-ltr.astra.night .action-btn[data-token="ok"] {
+  opacity: 1;
+  cursor: default;
+  border-color: var(--ok);
+  color: var(--ok);
+  background: transparent;
+}
 .desk-ltr.astra .action-btn .action-label {
   display: inline;
 }
