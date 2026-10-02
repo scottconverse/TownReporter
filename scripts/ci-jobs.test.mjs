@@ -49,6 +49,10 @@ const CLAIMERS = [
   // It creates the first account and boots its own server, so it carries its
   // own desk like the three above.
   "scripts/fb6-desk-feedback-walk.mjs",
+  // Unit F6: every desk route measured against the window at five widths. It
+  // creates the first account, so it needs a virgin desk of its own -- which
+  // it gets by booting its own server on its own port over in-memory PGlite.
+  "scripts/desk-narrow-width-walk.mjs",
 ];
 
 /**

@@ -12,6 +12,7 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { usePublicSections } from "@/lib/use-sections";
 import { isMiscTopic } from "@/lib/news/section-types";
 import { utilityBillAnalyzerUrl } from "@/lib/paper-identity";
+import { clearerViewSentence, datelineLine } from "@/lib/paper-phrases";
 import {
   DarkModeButton,
   ReaderProvider,
@@ -104,7 +105,13 @@ export function Masthead({
       <div className="topbar">
         <div className="wrap topbarin">
           <span className="dateline" suppressHydrationWarning>
-            Today in {paper.city} · {formatDayStamp(new Date())}
+            {/*
+              F5: a paper that has not named a town prints the day alone. The
+              literal "Today in {town} · ..." lived here, so an un-onboarded
+              install read "Today in  · Sat, Sept. 26" (a dangling "in" and a
+              doubled space) in the bar on every public page.
+            */}
+            {datelineLine(paper.city, formatDayStamp(new Date()))}
           </span>
           <div className="topactions">
             <Link to="/" search={{ view: "archive" }} className="toplink">
@@ -149,7 +156,9 @@ export function Masthead({
               Accountable." standfirst, which no longer fits the masthead's
               one-line rule and is printed in the footer either way.
             */}
-            <span className="locality">{paper.city}</span>
+            {/* No town named, no town chip: an empty .locality box is a blank
+                gap under the wordmark, not a fact about the paper. */}
+            {paper.city.trim() ? <span className="locality">{paper.city}</span> : null}
           </div>
           {compact ? (
             <>
@@ -248,7 +257,8 @@ export function PaperShell({
                 {paper.name}
               </Link>
               <p>
-                A clearer view of {paper.city}.<br />
+                {clearerViewSentence(paper.city)}
+                <br />
                 {paper.tagline}
               </p>
             </div>

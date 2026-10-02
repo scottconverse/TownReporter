@@ -40,7 +40,7 @@ import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/n
 import { inviteEditor, myDesk, myRecoveryCodesStatus, regenerateRecoveryCodes } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
-import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
+import { firstRunSetupState, getPaperConfigForEditor } from "@/lib/news/paper-settings";
 /*
   The six settings panels the cards own -- SectionsSetup, NamedOutletsSetup,
   DailyScanSettings, MeetingCaptureSettings, RoutineNoticePermissions,
@@ -946,6 +946,29 @@ export function PaperSetupPanel() {
     queryFn: () => getPaperConfigForEditor(),
     enabled: me.data?.role === "owner",
   });
+  /*
+    F4: is this install still un-onboarded?
+
+    `current.data` comes from getPaperConfig, which falls back to the shipped
+    Longmont constants (city "Longmont", state "Colorado", timezone
+    America/Denver) and to the build-time editor email. Rendered without
+    `firstRun`, this panel -- the SECOND way into the same form, and the one
+    the auditor was looking at -- showed an operator the author's town and
+    address before they had set anything up, while /desk/setup (the first-run
+    gate) started blank.
+
+    The same server function the gate's redirect reads
+    (`firstRunSetupState`, src/routes/desk.index.tsx) answers "has the owner
+    completed setup yet", so both doors into the form agree. Same query key,
+    so one poll serves both screens and a save that clears it clears it here
+    too. An onboarded install gets `needsSetup: false` and is unchanged: the
+    form shows its saved values, falling back exactly as before.
+  */
+  const setupState = useQuery({
+    queryKey: ["first-run-setup"],
+    queryFn: () => firstRunSetupState(),
+    enabled: me.data?.role === "owner",
+  });
   if (me.data?.role !== "owner") return null;
   return (
     <section className="mt-16 border-t border-rule pt-8">
@@ -960,7 +983,28 @@ export function PaperSetupPanel() {
         is added as real rows on the Sources page, not just stored as a default — each editor gets
         them added once, the first time they visit.
       </p>
-      {current.isPending ? null : <PaperSetupForm initial={current.data} submitLabel="Save" />}
+      {current.isPending || setupState.isPending ? null : setupState.isError || setupState.data === undefined ? (
+        /*
+          Fail closed. "I could not ask whether this paper is set up" is not
+          "it is set up": drawing the form with `firstRun={false}` would fill it
+          from the shipped Longmont configuration and the build-time editor
+          address -- the disclosure F4 exists to stop -- and Save would store
+          them. So the form waits for a real answer.
+        */
+        <p
+          role="alert"
+          className="mt-4 max-w-2xl border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger"
+        >
+          The desk could not check whether this paper has been set up yet, so the setup form is not
+          shown. Reload the page to try again.
+        </p>
+      ) : (
+        <PaperSetupForm
+          initial={current.data}
+          firstRun={setupState.data.needsSetup === true}
+          submitLabel="Save"
+        />
+      )}
       {me.data?.role === "owner" ? <DarkDeskCounty /> : null}
     </section>
   );

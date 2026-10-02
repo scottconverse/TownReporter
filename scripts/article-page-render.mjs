@@ -100,6 +100,9 @@ const dekFallbackUrl = await realModule("../src/lib/news/dek-fallback.ts");
    SAME module instances -- two copies of the source in one test process would
    pass while the two pages were labelling rows differently only if the sources
    differed, which is exactly the drift this pairing exists to catch. */
+/* F4: the pages' blank-city sentences come from this pure module (no imports),
+   so it loads real, exactly as the sentences print. */
+const paperPhrasesUrl = await realModule("../src/lib/paper-phrases.ts");
 export const correctionOriginUrl = await realModule("../src/lib/news/correction-origin.ts");
 export const correctionMarkUrl = await realModule("../src/components/correction-origin-mark.tsx", {
   ...pageImports,
@@ -247,6 +250,7 @@ const routeImports = {
   "@/lib/news/public": publicStub,
   "@/lib/news/legal-gone": legalGoneStub,
   "@/lib/news/correction-origin": correctionOriginUrl,
+  "@/lib/paper-phrases": paperPhrasesUrl,
   "@/lib/news/story-dates-public": storyDatesPublicStub,
   "@/lib/news/section-types": sectionTypesStub,
   "@/lib/news/reader-provenance": readerProvenanceUrl,

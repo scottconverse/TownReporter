@@ -4,13 +4,14 @@
   fresh desk) and the Server page's "Paper setup" section (so a mistake
   during first-run is fixable later without touching a file).
 */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { FormError } from "@/components/form-error";
 import { inputClass } from "@/components/desk-chrome-utils";
 import { completeFirstRunSetup } from "@/lib/news/paper-settings";
 import type { PaperConfig } from "@/lib/news/paper-settings";
+import { browserTimeZone } from "@/lib/timezone";
 
 type WatchRow = { url: string; title: string };
 
@@ -41,7 +42,29 @@ export function PaperSetupForm({
   const [name, setName] = useState(firstRun ? "" : (initial?.name ?? ""));
   const [city, setCity] = useState(firstRun ? "" : (initial?.city ?? ""));
   const [state, setState] = useState(firstRun ? "" : (initial?.state ?? ""));
-  const [timezone, setTimezone] = useState(initial?.timezone ?? "America/Denver");
+  /*
+    F12: a first run offers the BROWSER's own zone, not America/Denver.
+
+    `initial?.timezone` on a first run is the shipped Longmont constant, so
+    the box arrived pre-filled "America/Denver" as a real value while the
+    example text in the same box read "America/New_York" -- an operator in
+    Ohio had to know their IANA name and retype it. The zone is a machine
+    string, not a town, so unlike city/state it is filled in -- from the
+    machine the setup is being run on.
+
+    Set in an effect, never during render: the server has no browser zone,
+    so a render-time value would differ between the server pass and the
+    client's first pass and React would flag a hydration mismatch. The
+    placeholder is seeded neutral for the same reason and only then updated.
+  */
+  const [timezone, setTimezone] = useState(firstRun ? "" : (initial?.timezone ?? ""));
+  const [timezoneHint, setTimezoneHint] = useState("Continent/City");
+  useEffect(() => {
+    const zone = browserTimeZone();
+    setTimezoneHint(zone);
+    // Only a first run fills it: an onboarded paper keeps the zone it saved.
+    if (firstRun) setTimezone((current) => current || zone);
+  }, [firstRun]);
   const [tagline, setTagline] = useState(firstRun ? "" : (initial?.tagline ?? ""));
   const [councilVotesUrl, setCouncilVotesUrl] = useState(
     firstRun ? "" : (initial?.councilVotesUrl ?? ""),
@@ -112,6 +135,9 @@ export function PaperSetupForm({
       // from cached data. Do not reset an already-mounted editor's unsaved fields.
       await queryClient.invalidateQueries({queryKey:["paper-config-for-setup"],refetchType:"all"});
       await queryClient.invalidateQueries({queryKey:["paper-config-for-invite"]});
+      // The install is onboarded now, so the Server page's "Paper setup" panel
+      // must stop starting blank (F4). Same key the desk's gate redirect reads.
+      await queryClient.invalidateQueries({queryKey:["first-run-setup"]});
       await onDone?.();
     },
     onError: (err) => setError(err instanceof Error ? err.message : "That did not save."),
@@ -206,7 +232,7 @@ export function PaperSetupForm({
             className={inputClass + " mt-1 w-full"}
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
-            placeholder="America/New_York"
+            placeholder={timezoneHint}
             required
           />
         </label>
