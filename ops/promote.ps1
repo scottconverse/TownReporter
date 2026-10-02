@@ -587,10 +587,17 @@ if ($RollbackDatabase) {
 
   The marker alone does not say enough: logs\promote-in-progress only records
   that a run did not finish. The log beside it records how far it got, so
-  Get-PromoteResumePoint (ops\lib-promote.ps1) reads the newest one and says
-  which step to carry on from.
+  Get-PromoteResumePoint (ops\lib-promote.ps1) reads the newest one that is
+  really a promotion and says which step to carry on from.
+
+  AND NOT THIS RUN'S OWN. The log opened at the top of this script -- before
+  anything could fail, so that a run which dies on its first check still leaves
+  a file saying so -- is by now the newest promote-*.log in the directory and
+  has nothing in it. Reading it back would answer "no step, no backup" every
+  time, which is why -Resume could never resume anything. The path is passed so
+  the lookup can leave it out.
 #>
-$resumePoint = Get-PromoteResumePoint -App $app
+$resumePoint = Get-PromoteResumePoint -App $app -ExcludeLog $log.Path
 $resumeAt = $null
 if ($resumePoint) {
   $reached = if ($resumePoint.Step) { "the step '$($resumePoint.Step)' ($($resumePoint.Status))" } else { "no step it can name" }

@@ -44,6 +44,12 @@ export async function mapLimit<T, R>(
  * the retry is a second entry in their log against us and it buys nothing.
  * Those now fall straight through to the caller, which records the wait or the
  * block instead of hammering (see `fetch-politeness.ts`).
+ *
+ * The same applies to ANY status that arrived with a usable `Retry-After` --
+ * a 503 among them. A server that named a wait has told us when to come back,
+ * and a second ask 400 ms later both contradicts it and, when it succeeds,
+ * throws away the exception that carried the delay, so the wait never reaches
+ * the row.
  */
 export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   try {
@@ -51,7 +57,8 @@ export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (/not fetchable|Invalid URL|Only http/i.test(msg)) throw err;
-    if (err instanceof IngestFetchError && mustNotRetryImmediately(err.status)) throw err;
+    if (err instanceof IngestFetchError && mustNotRetryImmediately(err.status, err.retryAfterMs))
+      throw err;
     await new Promise((r) => setTimeout(r, 400));
     return fn();
   }

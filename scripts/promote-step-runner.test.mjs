@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync, readdirSync, openSync, closeSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -272,8 +272,28 @@ function runPowerShell(file, { timeout = 120_000, onSpawn, env } = {}) {
   });
 }
 
+/**
+ * Read a file, and treat "somebody has it open right now" as "not yet".
+ *
+ * These tests poll the run log WHILE the promotion appends to it, and on
+ * Windows the two opens are mutual: a poll that lands in the instant of an
+ * append used to throw EBUSY out of `readFileSync` and fail the test outright
+ * in under a second. That is the test's bug and not the product's -- nothing
+ * in production reads a log a promote is writing -- and the cure is the same
+ * as for any other transient failure here: the next poll 100 ms later sees it.
+ *
+ * The other half of that race is the product's, and it is fixed in
+ * `Add-PromoteLogLine` (ops\lib-promote.ps1): an append that collided with a
+ * reader used to be silently dropped, which lost the `step=... child pid N`
+ * line about one run in eleven. Both halves are needed -- a tolerant reader
+ * cannot bring back a line the writer never wrote.
+ */
 function read(path) {
-  return existsSync(path) ? readFileSync(path, "utf8") : "";
+  try {
+    return existsSync(path) ? readFileSync(path, "utf8") : "";
+  } catch {
+    return "";
+  }
 }
 
 /**
@@ -745,6 +765,149 @@ test("a leftover marker leads to the resume path, and says which step to carry o
   } finally {
     await removeTree(failed.root);
     await removeTree(finished.root);
+  }
+});
+
+/*
+  THE ORDER THAT MADE -Resume USELESS.
+
+  promote.ps1 opens ITS OWN log as the very first thing it does -- deliberately,
+  so a run that dies on its first check still leaves a file behind saying so --
+  and it looks for an unfinished run much later, in the marker section. Those
+  two facts together mean the newest promote-*.log in the directory is always
+  the log of the run that is asking the question, which has done nothing yet.
+
+  So `-Resume` read back an empty answer: no step, no backup, no next step. It
+  then either refused ("its log does not say where it stopped") or, where the
+  caller falls through on a null, started from the beginning on top of a run
+  that had stopped half way -- including on top of an interrupted `npm ci`.
+
+  Every earlier test called Get-PromoteResumePoint BEFORE any new log existed,
+  which is exactly the state the bug cannot happen in. This one builds the
+  three logs a real machine has at that moment, in the order promote.ps1 makes
+  them: the interrupted run, a stray log that is not a run at all (a
+  hand-rollback writes one), and the current run's own -- newest, and the one
+  the answer must ignore.
+*/
+test("the run's own log is never mistaken for the run being resumed", windowsOnly, async () => {
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "resume-own-log.ps1", [
+      // 1. The interrupted run: it got as far as `deps`, where npm ci died.
+      "$old = New-PromoteLog -App $app -Stamp '20260104-000000'",
+      "Write-PromoteLog $old \"promote started: $app (port 9999), pid 1, arguments: ''\"",
+      "Add-PromoteStep -Log $old -Name 'backup' -Detail 'database townreporter'",
+      "Complete-PromoteStep -Log $old -Name 'backup' -Seconds 2 -Detail 'C:\\backups\\townreporter_2026-01-04_0000.sql (12 MB)'",
+      "Add-PromoteStep -Log $old -Name 'stop' -Detail 'the app on port 9999'",
+      "Complete-PromoteStep -Log $old -Name 'stop' -Seconds 2 -Detail 'stopped PID 5'",
+      "Add-PromoteStep -Log $old -Name 'deps' -Detail 'npm ci'",
+      "Fail-PromoteStep -Log $old -Name 'deps' -Detail 'npm ci did not succeed (exit 1)'",
+      "New-PromoteMarker -App $app | Out-Null",
+      // 2. A stray promote-*.log that is not a promotion: no `promote started`
+      // line and no step lines, exactly what a hand-rollback leaves behind.
+      "$stray = Join-Path (Join-Path $app 'logs') 'promote-20260105-000000.log'",
+      "Set-Content -Path $stray -Value '[2026-01-05 00:00:00] database rollback started: put townreporter_x back as townreporter (this is not a promotion)' -Encoding ASCII",
+      // 3. This run's own log, opened the way promote.ps1 opens it -- before
+      // anything has been looked at, let alone done.
+      "$log = New-PromoteLog -App $app",
+      "Write-PromoteLog $log \"promote started: $app (port 9999), pid 2, arguments: '-Resume'\"",
+      // Pinned times rather than "whatever the clock said": the whole point is
+      // that the current run's log is the NEWEST one in the directory.
+      "(Get-Item $old.Path).LastWriteTime = [datetime]'2026-01-04 00:00:01'",
+      "(Get-Item $stray).LastWriteTime = [datetime]'2026-01-05 00:00:01'",
+      "(Get-Item $log.Path).LastWriteTime = [datetime]'2026-01-06 00:00:01'",
+      "$p = Get-PromoteResumePoint -App $app -ExcludeLog $log.Path",
+      `Set-Content -Path (Join-Path $app 'resume.txt') -Value "step=$($p.Step);status=$($p.Status);next=$($p.NextStep);backup=$($p.Backup);log=$([System.IO.Path]::GetFileName($p.LogPath))" -Encoding ASCII`,
+    ]);
+
+    const { code } = await runPowerShell(harness);
+    assert.equal(code, 0, "asking for the resume point failed outright");
+    assert.equal(
+      read(join(install.app, "resume.txt")).trim(),
+      "step=deps;status=failed;next=deps;backup=C:\\backups\\townreporter_2026-01-04_0000.sql (12 MB);log=promote-20260104-000000.log",
+      "-Resume read this run's own empty log (or a stray one) instead of the interrupted run, so it cannot name the step to carry on from or the backup to keep",
+    );
+  } finally {
+    await removeTree(install.root);
+  }
+});
+
+test("promote.ps1 hands its own log to the resume lookup", () => {
+  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+  /*
+    The ORDER is what broke -Resume, so the order is what this pins: the log
+    has to still be opened first (a run that dies on its first check must leave
+    a file), and the resume lookup has to be told which file that was.
+  */
+  const openAt = src.indexOf("$log = New-PromoteLog -App $app");
+  const resumeAt = src.indexOf("$resumePoint = Get-PromoteResumePoint");
+  assert.ok(openAt > -1, "promote.ps1 no longer opens a log of its own");
+  assert.ok(resumeAt > -1, "promote.ps1 no longer looks for an unfinished run");
+  assert.ok(
+    openAt < resumeAt,
+    "the log is now opened after the resume lookup, which is the opposite of why it is opened first",
+  );
+  assert.match(
+    src,
+    /Get-PromoteResumePoint -App \$app -ExcludeLog \$log\.Path/,
+    "promote.ps1 asks for the resume point without saying which log is its own, so it reads back its own empty one",
+  );
+});
+
+/*
+  THE OTHER HALF OF THE FLAKE, ON PURPOSE AND WITHOUT A RACE.
+
+  The `step=build child pid N` line went missing about one run in eleven, and
+  the reason was not timing: `Add-Content` opens the run's log with no sharing
+  at all, so an append that landed while ANYBODY had the file open failed with
+  a sharing violation -- and Write-PromoteLog swallows that failure on purpose
+  (losing the log is bad, losing the paper is worse), so the line was gone for
+  good. The log simply stopped a line early.
+
+  That is worth fixing on its own account, not only because it made a test
+  flaky: an operator watching a promotion IS a reader, and a promotion whose
+  log erases itself while they watch it is worse than no log at all.
+
+  This holds the log open for the whole run -- the shape `tail -f`, a text
+  editor and this test's own poller all have -- and asserts that every line
+  landed anyway. Deterministic: with `Add-Content` the appends fail outright,
+  so this fails every run rather than one in eleven.
+*/
+test("a promotion keeps writing its log while somebody is reading it", windowsOnly, async () => {
+  const install = makeInstall();
+  let reader = null;
+  try {
+    const logPath = join(install.app, "logs", "promote-20260104-000000.log");
+    writeFileSync(logPath, "");
+    /* Opened for reading and held open across the whole promotion. */
+    reader = openSync(logPath, "r");
+
+    const harness = writeHarness(install, "log-under-reader.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260104-000000'",
+      "Write-PromoteLog $log 'promote started: somebody is reading this file'",
+      "Add-PromoteStep -Log $log -Name 'build' -Detail 'npm run build'",
+      "Write-PromoteLog $log 'step=build child pid 4242'",
+      "Complete-PromoteStep -Log $log -Name 'build' -Seconds 2 -Detail 'exit 0'",
+    ]);
+
+    const { code } = await runPowerShell(harness);
+    assert.equal(code, 0, "the promotion failed outright while its log was being read");
+
+    const text = read(logPath);
+    for (const line of [
+      "promote started: somebody is reading this file",
+      "step=build started -- npm run build",
+      "step=build child pid 4242",
+      "step=build ok",
+    ]) {
+      assert.ok(
+        text.includes(line),
+        `a line went missing because a reader had the log open: ${JSON.stringify(line)}; the log holds ${JSON.stringify(text)}`,
+      );
+    }
+  } finally {
+    if (reader !== null) closeSync(reader);
+    await removeTree(install.root);
   }
 });
 

@@ -16,6 +16,7 @@ import {
   withRetry,
 } from "./ingest.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
+import { classifyRefusal, touchAfterFailure } from "./fetch-politeness.ts";
 
 describe("PrimeGov API capture", () => {
   it("keeps the approved JSON endpoint on the raw-byte ingestion path", async () => {
@@ -548,6 +549,53 @@ describe("politeness: a refusal aimed at us is not hammered", () => {
         /Fetch failed \(503\)/,
       );
       assert.equal(calls, 2);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
+  /*
+    A STATUS IS NOT THE WHOLE ANSWER. A bare 503 is a server that had a bad
+    moment and the single extra ask above is worth keeping. A 503 that came
+    with `Retry-After` is not that: it is the server TELLING us when to come
+    back, and a 400 ms second ask contradicts the one thing it actually said.
+
+    The second request is what loses the wait. Here it SUCCEEDS, so under the
+    old rule `withRetry` returned the page and threw nothing -- the 120 seconds
+    the site asked for were never recorded anywhere, the source was written as
+    a read, and the desk went on treating a host that had just asked for two
+    minutes as a host that was fine.
+  */
+  it("does not retry a 503 that named a wait, so the wait reaches the row", async () => {
+    let calls = 0;
+    setFetchImplForTests(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response("busy", { status: 503, headers: { "retry-after": "120" } });
+      }
+      return new Response("<html><body><p>ok</p></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    try {
+      const err = await withRetry(() => ingestUrl(url)).then(
+        () => null,
+        (e: unknown) => e as { status?: number; retryAfterMs?: number | null },
+      );
+      assert.equal(calls, 1, "the site named a wait and was asked again 400 ms later anyway");
+      assert.equal(err?.status, 503, "the 503 was swallowed by a retry that succeeded");
+      assert.equal(err?.retryAfterMs, 120_000, "the wait the site named did not survive the throw");
+
+      /* And what the scan does with it: the source row is parked until then,
+         with the sentence that says the SITE asked rather than the desk. */
+      const refusal = classifyRefusal({ status: err?.status, retryAfterMs: err?.retryAfterMs ?? null, nowMs: 0 });
+      assert.ok(refusal, "a 503 with a named wait is not a refusal the desk has a rule for");
+      const touch = touchAfterFailure({ refusal, nowMs: 0 });
+      assert.equal(touch.outcome, "wait");
+      assert.equal(touch.retry_after?.getTime(), 120_000, "the row was not parked for the wait the site asked for");
+      assert.match(touch.retry_after_note ?? "", /^Asked us to come back at /);
+      assert.equal(touch.last_error, null, "a site that asked us to wait was written as a failure");
     } finally {
       setFetchImplForTests(null);
     }

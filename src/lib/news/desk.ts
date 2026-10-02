@@ -1602,6 +1602,27 @@ function scanAuditDetail(
     : base;
 }
 
+/**
+ * The receipt for a pass that knocked on nothing because everything on watch
+ * was waiting (see `everySourceWasSkipped` in `performScanWork`).
+ *
+ * A sentence rather than a code, because it is what an editor reads on the
+ * desk's history, and it has to answer the only question that row raises:
+ * "why did my scan do nothing?" The count is there so the answer is a size and
+ * not a shrug -- a newsroom with one parked source and a newsroom with forty
+ * are different situations.
+ *
+ * Agreeing with the number is the whole job of the grammar below: "1 sources
+ * are waiting for their time to come back" reads as a bug in the paper, which
+ * is exactly what this receipt exists to stop the editor thinking.
+ */
+export function noOpScanReceipt(skipped: number): string {
+  const sources = skipped === 1 ? "1 source" : `${skipped} sources`;
+  return `Nothing was due: ${sources} ${skipped === 1 ? "is" : "are"} waiting for ${
+    skipped === 1 ? "its" : "their"
+  } time to come back`;
+}
+
 /*
   Wrapped in createServerOnlyFn for the same reason performDraftWork is (see
   the comment above it): this file is reachable both statically, from client
@@ -2355,6 +2376,43 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
   };
 
+  /*
+    The receipt for a pass in which nothing was due, written the way
+    `recordFailedRun` is written and for the same reason: this ending never
+    reaches `commitResults` either, so without it the run would keep the row it
+    was given at claim and stay open forever.
+
+    Same columns, one difference that is the whole point: `error` is left NULL
+    and `summary` carries the sentence. A run is failed when its `error` says
+    so -- writing the no-op as a failure is the defect this replaces -- and the
+    counts are zero because nothing was fetched, nothing failed and nothing was
+    attempted. `sources_selected` still names the scope, so the row reads
+    "1 selected, 0 attempted", which is what a deferred pass is.
+  */
+  const recordNoOpRun = async (writeSql: Sql, sentence: string) => {
+    await writeSql`
+      update scan_runs
+      set finished_at = now(),
+          sources_fetched = 0,
+          leads_created = 0,
+          sources_proposed = 0,
+          sources_selected = ${sources.length},
+          sources_attempted = 0,
+          sources_failed = 0,
+          sources_analyzed = 0,
+          model_batches_used = 0,
+          model_batches_failed = 0,
+          failed_sources = ${postgresText(JSON.stringify([]))},
+          meetings_found = ${meetingAwareness?.found.length ?? 0},
+          meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
+          meetings_failed = ${meetingAwareness?.failed.length ?? 0},
+          meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? []))},
+          summary = ${storableText(sentence).slice(0, 1200)},
+          error = null
+      where id = ${runId} and newsroom_id = ${owned(context)} and finished_at is null
+    `;
+  };
+
   const recordManualFailure = async (failure: string, sourcesAnalyzed = 0) =>
     withTransaction(async (writeSql) => {
       if (!(await lockManualScanClaim(writeSql, job))) return false;
@@ -2362,6 +2420,66 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await refreshManualScanClaim(writeSql, job);
       return true;
     });
+
+  /*
+    WAS ANYTHING ATTEMPTED AT ALL?
+
+    A pass in which every selected source was deliberately left alone -- every
+    row has a future `retry_after`, or every host has spent the day's allowance
+    -- knocks on nothing. Each worker returns through the skip branch, so
+    `batchResults` stays empty, and the zero-batch exit below read that as
+    "Scan fetched no source text": a FAILED run, thrown, for a scan that did
+    exactly what it was told.
+
+    The desk's own patience is not a failure. So this is the one ending that
+    has to be told apart from the genuine "fetched nothing" case, and the thing
+    that separates them is whether the pass ATTEMPTED anything: a source that
+    was fetched either yielded text or was recorded as failed, so nothing
+    fetched and nothing failed means nothing was tried.
+
+    `watchSlice.length` rather than "not zero": a pass with no sources in scope
+    at all is its own shape and keeps the ending it always had.
+  */
+  const everySourceWasSkipped =
+    watchSlice.length > 0 &&
+    skippedThisPass === watchSlice.length &&
+    fetchedCount === 0 &&
+    failedSources.length === 0;
+
+  if (!batchResults.length && everySourceWasSkipped) {
+    /*
+      THE RECORDED NO-OP.
+
+      Finished, not failed: `error` stays null and the receipt says in plain
+      words why nothing happened, which is the question the desk's history is
+      asked. The counts are all zero because that is what happened -- nothing
+      was fetched, nothing failed, nothing was attempted, no model ran -- and
+      `sources_selected` still names the scope, so the row reads as "1 selected,
+      0 attempted" the way it already does when `SCAN_WATCH_CAP` cuts the tail.
+
+      The queued source writes go in beside it on the scheduled lane, exactly
+      as the all-failed ending does: the skip touches carry the wait and its
+      sentence, and a pass that honoured a wait without writing the reason for
+      it would leave the row saying whatever the last real attempt said.
+    */
+    const noOp = noOpScanReceipt(skippedThisPass);
+    await reportStage(noOp);
+    if (deps.scheduledCommit) {
+      await deps.scheduledCommit(async (writeSql) => {
+        await recordNoOpRun(writeSql, noOp);
+        await writeQueuedSourceWrites(writeSql);
+      });
+    } else {
+      await withTransaction(async (writeSql) => {
+        if (!(await lockManualScanClaim(writeSql, job))) return;
+        await recordNoOpRun(writeSql, noOp);
+        await writeQueuedSourceWrites(writeSql);
+        await refreshManualScanClaim(writeSql, job);
+      });
+      await audit(context.userId, "scan", scanAuditDetail(runId, 0, 0, 0), owned(context));
+    }
+    return;
+  }
 
   if (!batchResults.length) {
     /*

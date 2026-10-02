@@ -83,6 +83,43 @@ function New-PromoteLog {
 }
 
 <#
+  Append one line to the run's log, and do not lose it to a reader.
+
+  `Add-Content` opens the file EXCLUSIVELY, so on Windows a write that lands
+  while anyone else has the log open -- an operator tailing it, a text editor,
+  anything -- fails with a sharing violation. Write-PromoteLog swallows that
+  (it must: losing the log is bad, losing the paper is worse), so the line is
+  gone for good and the record quietly stops matching what happened. Measured
+  on 2026-10-01: a run that only polled the file with a reader dropped the
+  `step=build child pid N` line about one time in eleven, and the log simply
+  ended a line early.
+
+  So the file is opened here by hand, Append + FileShare.ReadWrite: a reader
+  can hold it open for as long as it likes and the append still lands. That is
+  the opposite of what Add-Content does, and it is the difference between a
+  log an operator can watch and one that erases itself while they watch it.
+
+  Best effort, like everything else on this path: a genuine failure to write is
+  still swallowed, because the promotion has a paper to bring back up and the
+  log is not worth stopping for.
+#>
+function Add-PromoteLogLine {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Line
+  )
+  try {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($Line + [Environment]::NewLine)
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Append,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::ReadWrite)
+    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+  } catch { }
+}
+
+<#
   One line per step, timestamped, written to the file AND shown on the
   console. The two are deliberately separate: the file is the record that
   outlives the console, and the console is what the operator watches.
@@ -90,7 +127,8 @@ function New-PromoteLog {
   Neither write may stop a promotion. A closed console pipe is exactly what
   this unit exists for, so a failed console write is swallowed; a failed log
   write is swallowed too, because losing the log is bad and losing the paper
-  is worse.
+  is worse. What must NOT happen is a line going missing because somebody had
+  the log open -- see Add-PromoteLogLine.
 #>
 function Write-PromoteLog {
   param(
@@ -98,7 +136,7 @@ function Write-PromoteLog {
     [Parameter(Mandatory = $true)][string]$Line
   )
   $stamped = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Line
-  try { Add-Content -Path $Log.Path -Value $stamped -Encoding ASCII -ErrorAction Stop } catch { }
+  Add-PromoteLogLine -Path $Log.Path -Line $stamped
   try { Write-Host "  $Line" } catch { }
   # Nothing is emitted to the pipeline, deliberately. In PowerShell a function
   # returns everything it did not capture, so a logging helper that returned
@@ -128,7 +166,7 @@ function Write-PromoteLogFileOnly {
     [Parameter(Mandatory = $true)][string]$Line
   )
   $stamped = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Line
-  try { Add-Content -Path $Log.Path -Value $stamped -Encoding ASCII -ErrorAction Stop } catch { }
+  Add-PromoteLogLine -Path $Log.Path -Line $stamped
 }
 
 <#
@@ -639,18 +677,39 @@ function Wait-PromoteChildProcess {
 <#
   What did the last run reach, and where should a -Resume pick up?
 
-  Reads the newest logs\promote-*.log, not the marker alone: the marker says a
-  run is unfinished, the log says how far it got. The last step line decides:
+  Reads the newest logs\promote-*.log -- the newest one that is a PROMOTION,
+  and not the log of the run asking the question. The marker says a run is
+  unfinished; the log says how far it got. The last step line decides:
 
     ok       -> resume at the step after it
     started  -> it was interrupted mid-flight; run that step again
     failed   -> run that step again
 
+  $ExcludeLog is the caller's OWN log, and it is not optional in practice.
+  promote.ps1 opens its log as its first act -- so a run that dies on its first
+  check still leaves a file behind -- and only looks for an unfinished run
+  much later. By then its own log is the newest file in the directory, so
+  "read the newest log" answers with a file that has just been created and has
+  nothing in it: no step, no backup, no next step. The run then either refuses
+  to resume or starts from the beginning on top of the interrupted one, which
+  is the failure this parameter exists to prevent.
+
+  A log is only a candidate when it carries a `promote started` line. That is
+  what makes a `promote-*.log` a promotion at all: a hand-rollback
+  (Invoke-PromoteRollback) writes its own lines into a promote-*.log and
+  deliberately keeps them outside the step grammar, and a run killed before its
+  first line leaves an empty file. Neither can say where an interrupted run
+  stopped, so neither is allowed to hide the log that can.
+
   Returns $null when there is no marker, so the caller can tell "nothing to
   resume" from "a run is unfinished".
 #>
 function Get-PromoteResumePoint {
-  param([Parameter(Mandatory = $true)][string]$App)
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    # The log this run has already opened, to leave out of the search.
+    [string]$ExcludeLog = ""
+  )
 
   $logs = Join-Path $App "logs"
   if (-not (Test-Path (Join-Path $logs "promote-in-progress"))) { return $null }
@@ -679,13 +738,26 @@ function Get-PromoteResumePoint {
     CopyAt    = $null
   }
 
-  $file = Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  $stepRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] step=(?<name>[a-z]+) (?<status>started|ok|failed)\b(?<rest>.*)$'
+  $startRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] promote started\b'
+
+  # Newest first, this run's own log left out, and the first one that is really
+  # a promotion taken. Compared by full path, case-insensitively, because
+  # Windows paths differ in case more often than they differ in meaning.
+  $exclude = ""
+  if ($ExcludeLog) { $exclude = [System.IO.Path]::GetFullPath($ExcludeLog) }
+  $file = $null
+  foreach ($candidate in @(Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)) {
+    if ($exclude -and [System.IO.Path]::GetFullPath($candidate.FullName) -ieq $exclude) { continue }
+    foreach ($line in @(Get-Content -Path $candidate.FullName -ErrorAction SilentlyContinue)) {
+      if ([regex]::Match($line, $startRe).Success) { $file = $candidate; break }
+    }
+    if ($file) { break }
+  }
   if (-not $file) { return $point }
   $point.LogPath = $file.FullName
 
-  $stepRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] step=(?<name>[a-z]+) (?<status>started|ok|failed)\b(?<rest>.*)$'
-  $startRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] promote started\b'
   # The line the promotion writes once the database names are settled:
   #   promote-db: database=<db> copy=<copy> failed=<failed>
   # The LAST one wins, so a resumed run's log carries the names of the run that

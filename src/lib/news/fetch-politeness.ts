@@ -195,12 +195,30 @@ export function classifyRefusal(input: {
  * fuse: a bot wall is not cleared by asking twice in the same second, and each
  * ask is a fresh entry in the site's log against us.
  *
- * 503 is deliberately NOT in this list. A 503 is usually a server that had a
- * bad moment rather than a rate limiter counting us, and the one retry the
- * scan has always done for it is worth keeping -- the caller still gets a
+ * 503 is deliberately NOT in the status list. A 503 is usually a server that
+ * had a bad moment rather than a rate limiter counting us, and the one retry
+ * the scan has always done for it is worth keeping -- the caller still gets a
  * second chance at a host that never asked us to slow down.
+ *
+ * BUT A STATUS IS NOT THE WHOLE ANSWER, and that was the defect this second
+ * argument closes. A 503 that arrived with a usable `Retry-After` is not a
+ * host that had a bad moment -- it is a host that said, in as many words, when
+ * to come back. Asking again 400 ms later contradicts the only thing it
+ * actually said, and the second ask is not merely rude: if it SUCCEEDS the
+ * exception carrying the delay is never thrown, so the wait is never recorded
+ * on the row and the desk goes on treating a source that asked for two minutes
+ * as one that answered. The rule is about what the site told us, not about
+ * which number it used, so it applies to any status that carried a delay.
+ *
+ * `retryAfterMs` is the value `parseRetryAfter` returned -- already known to be
+ * readable, and null when there was no usable header. Only a real header counts
+ * here: this is the site speaking for itself.
  */
-export function mustNotRetryImmediately(status: number | null | undefined): boolean {
+export function mustNotRetryImmediately(
+  status: number | null | undefined,
+  retryAfterMs: number | null = null,
+): boolean {
+  if (retryAfterMs != null) return true;
   return status != null && [429, 401, 403].includes(status);
 }
 
