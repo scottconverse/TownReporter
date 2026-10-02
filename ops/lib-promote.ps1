@@ -359,6 +359,58 @@ function Get-PromoteHealthTimeoutSeconds {
 }
 
 <#
+  A refusal that changed NOTHING, after the paper has already been stopped.
+
+  FINDING B, from the auditor's clone lab. The copy is refused (the sessions
+  will not clear, the disk is full, the name is taken); the script wrote
+  "Nothing was changed and the paper was not touched. The paper is still down",
+  printed a command for a person to run, and EXITED. For a newspaper that is
+  the site offline until somebody notices -- and nothing about the state
+  justified it. At that moment no copy exists, nothing has been fast-forwarded,
+  nothing has been built and no migration has run: the build on disk is exactly
+  the one that was serving a minute ago.
+
+  So the paper is started again, and this function owns that decision because
+  it is the one place that knows both halves of it:
+
+    - the marker comes off when the paper answers. It has to: the marker
+      silences the watchdog, and leaving it while the paper is UP would mute
+      the one automatic thing that can help for the next half hour. A refusal
+      that ends with a running paper is not an unfinished promotion.
+
+    - the marker STAYS when the paper does not answer. Then the run really is
+      unfinished and the paper really is down, which is what -Resume and the
+      watchdog exist for.
+
+  The caller exits NON-ZERO either way: the promotion did not do what it was
+  asked to. Being up is not the same as having succeeded.
+
+  Returns @{ PaperUp; Sentence }, where Sentence is the plain-words line for
+  the operator.
+#>
+function Invoke-PromoteNothingChanged {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
+    [Parameter(Mandatory = $true)][string]$Refusal
+  )
+  Write-PromoteLog $Log "nothing has changed yet -- no copy, no fast-forward, no build, no migration -- so the paper is started again on the build it was already running"
+  if (& $StartTheApp) {
+    Clear-PromoteMarker -App $App
+    $sentence = "The paper is back up on the version it was running, and nothing was changed."
+    Write-PromoteLog $Log $sentence
+    Write-PromoteLog $Log "the promote did NOT complete: $Refusal"
+    return [pscustomobject]@{ PaperUp = $true; Sentence = $sentence }
+  }
+  Write-PromoteLog $Log "the paper did NOT come back up on the build it was already running"
+  return [pscustomobject]@{
+    PaperUp = $false
+    Sentence = "The paper is still down: it did not come back up on the build it was already running."
+  }
+}
+
+<#
   Start the app, then wait for it to answer. Returns ONE boolean.
 
   THE HANG THIS REPLACES (production auditor's lab, gate 3, 2026-10-01). The

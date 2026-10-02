@@ -1127,7 +1127,24 @@ if (Skip-Step 'dbcopy') {
     $copied = Invoke-PromoteDatabaseCopy -Log $log -App $app -Database $dbName -Copy $dbCopy -Failed $dbFailed -Stamp $dbStamp -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
     if (-not $copied.Ok) {
       Fail-PromoteStep -Log $log -Name 'dbcopy' -Detail $copied.Failure
-      Die "$($copied.Failure) The paper is still down and the database was not copied, so nothing has been built or migrated." 'dbcopy' "Read the sentence above and the log at $($copied.OutFile), fix what it names, then run this script again. The backup is at $backupNote"
+      <#
+        NOTHING HAS CHANGED, SO THE PAPER DOES NOT STAY DOWN FOR THIS.
+
+        The copy was refused -- the sessions would not clear, the disk is full,
+        the name is taken, `CREATE DATABASE` failed and left nothing behind. At
+        this moment no copy exists, nothing has been fast-forwarded, nothing has
+        been built and no migration has run: the build on disk is the one that
+        was serving a minute ago, and it can simply be started again. Leaving a
+        newspaper offline waiting for a person to read a log is not a trade this
+        script gets to make.
+
+        The step's own sentence is carried into the message, and the exit code
+        is still non-zero: the promote did not complete.
+      #>
+      Say "the copy was refused; nothing has changed, so the paper is being brought back up"
+      $back = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal $copied.Failure
+      Say $back.Sentence
+      Die "$($copied.Failure) $($back.Sentence)" 'dbcopy' "Read the sentence above and the log at $($copied.OutFile), fix what it names, then run this script again. The backup is at $backupNote"
     }
     $copySize = Format-PromoteDbSize $copied.Data.sizeBytes
     $dbTaken = $true

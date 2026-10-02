@@ -701,6 +701,79 @@ export async function roleMayCreateDatabases(client) {
 }
 
 /**
+ * The only `pg_stat_activity.backend_type` this module counts as a session.
+ *
+ * FINDING A, from the auditor's clone lab. A rollout aborted with the paper
+ * already stopped because of this:
+ *
+ *   "2 connection(s) are still open to townreporter_prodclone, and PostgreSQL
+ *    will not copy a database while they are."
+ *
+ * Those two were not the app and not a person. `pg_stat_activity` showed empty
+ * usename and application_name, state `active`, query
+ * `autovacuum: VACUUM pg_toast...`, and `backend_type = 'autovacuum worker'`.
+ * A freshly restored 900 MB database gets vacuumed immediately, and the live
+ * one gets it from time to time, so the rollout would abort whenever a vacuum
+ * happened to be running -- and a minute later the same query showed nothing
+ * and the copy worked. That is not a thing an unattended rollout can have.
+ */
+export const SESSION_BACKEND_TYPE = "client backend";
+
+/**
+ * Which rows of `pg_stat_activity` are a SESSION -- somebody who would actually
+ * be disturbed by the database being copied or renamed.
+ *
+ * Everything else in that view is the server working on itself: autovacuum
+ * workers, the checkpointer, the WAL writer, the logical replication launcher,
+ * a background worker. Counting those would refuse a rollout for a reason no
+ * operator can act on, with the paper down.
+ *
+ * WHY IGNORING AUTOVACUUM IS SAFE, and this is the part worth checking rather
+ * than assuming. PostgreSQL's own check for both `CREATE DATABASE ... TEMPLATE`
+ * and `ALTER DATABASE ... RENAME` is `CountOtherDBBackends`
+ * (src/backend/storage/ipc/procarray.c). Its header says, in the source:
+ *
+ *   "If there are other backends in the DB, we will wait a maximum of 5
+ *    seconds for them to exit.  Autovacuum backends are encouraged to exit
+ *    early by sending them SIGTERM, but normal user backends are just waited
+ *    for."
+ *
+ * So an autovacuum worker IS counted by PostgreSQL -- and PostgreSQL deals
+ * with it: it SIGTERMs up to ten of them per pass and waits up to five seconds
+ * for them to go. Recent versions also terminate interruptible background
+ * workers attached to the database (commit f1e251b, "Allow bgworkers to be
+ * terminated for database-related commands"). The conclusion is that a vacuum
+ * cannot make our own `CREATE DATABASE ... TEMPLATE` or `ALTER DATABASE ...
+ * RENAME` fail: they will clear it themselves. A *client* session is the one
+ * PostgreSQL will NOT clear, and the one that therefore has to stop us before
+ * we start -- which is exactly the line drawn here.
+ *
+ * Certainty: the header text above is quoted from the PostgreSQL source and is
+ * the documented behaviour of the function, so I am confident about the
+ * mechanism. What I could not do on this machine is watch it happen: nothing
+ * here can provoke an autovacuum worker on demand (see the test file).
+ *
+ * @param {Array<{ pid?: unknown, usename?: unknown, application_name?: unknown, host?: unknown, state?: unknown, backend_type?: unknown }>} rows
+ * @returns {Array<{ pid: number, user: string, application: string, host: string, state: string }>}
+ */
+export function sessionBackends(rows) {
+  return rows
+    // Compared case-insensitively, and trimmed. PostgreSQL returns exactly
+    // "client backend" and always has, but the failure this guards against is
+    // the quiet one: a comparison that stops matching counts NO sessions, and
+    // the copy then runs under a live app instead of refusing. Being lenient
+    // here can only ever count a row PostgreSQL would also have refused over.
+    .filter((row) => String(row.backend_type ?? "").trim().toLowerCase() === SESSION_BACKEND_TYPE)
+    .map((row) => ({
+      pid: Number(row.pid),
+      user: String(row.usename),
+      application: String(row.application_name),
+      host: String(row.host),
+      state: String(row.state),
+    }));
+}
+
+/**
  * Who is connected to this database right now.
  *
  * Read-only. This module NEVER calls `pg_terminate_backend`: the sessions it
@@ -718,19 +791,14 @@ export async function connectionsTo(client, name) {
             coalesce(usename, '')::text as usename,
             coalesce(application_name, '')::text as application_name,
             coalesce(host(client_addr), 'local')::text as host,
-            coalesce(state, '')::text as state
+            coalesce(state, '')::text as state,
+            coalesce(backend_type, '')::text as backend_type
        from pg_stat_activity
       where datname = $1 and pid <> pg_backend_pid()
       order by pid`,
     [name],
   );
-  return result.rows.map((row) => ({
-    pid: Number(row.pid),
-    user: String(row.usename),
-    application: String(row.application_name),
-    host: String(row.host),
-    state: String(row.state),
-  }));
+  return sessionBackends(result.rows);
 }
 
 /**

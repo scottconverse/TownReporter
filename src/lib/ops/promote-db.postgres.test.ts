@@ -24,6 +24,7 @@ import {
   readConfig,
   requiredFreeBytes,
   runCommand,
+  sessionBackends,
   stateOf,
   swapBack,
   waitForZeroConnections,
@@ -395,6 +396,57 @@ describe("the live paper's port", () => {
     }
   });
 
+  it("counts a SESSION and not the server working on itself", () => {
+    /*
+      FINDING A. The clone lab's rollout refused with "2 connection(s) are still
+      open to townreporter_prodclone" -- and those two were autovacuum workers
+      on a freshly restored database, not the app and not a person. The paper
+      was already stopped. A minute later the same query showed nothing and the
+      copy worked.
+
+      This is the rule itself, without a server: pg_stat_activity rows in, the
+      ones that are a session out.
+    */
+    const row = (backend_type: string, pid: number) => ({
+      backend_type,
+      pid,
+      usename: "postgres",
+      application_name: "townreporter",
+      host: "local",
+      state: "active",
+    });
+
+    const counted = sessionBackends([
+      // The two the auditor saw. A freshly restored database gets vacuumed
+      // immediately, and the live one from time to time.
+      row("autovacuum worker", 9001),
+      row("autovacuum worker", 9002),
+      // ...and the server's other housekeeping, which is nobody's session.
+      row("checkpointer", 9003),
+      row("background writer", 9004),
+      row("walwriter", 9005),
+      row("logical replication launcher", 9006),
+      row("client backend", 9007),
+    ]);
+
+    assert.deepEqual(
+      counted.map((c) => c.pid),
+      [9007],
+      "the session filter no longer separates a client session from the server's own workers",
+    );
+    assert.equal(counted[0]?.application, "townreporter");
+    assert.equal(counted[0]?.user, "postgres");
+
+    // A row with no backend_type at all -- an older server, or a caller that
+    // built the row by hand -- is NOT counted. Not knowing what it is is not a
+    // reason to refuse a rollout with the paper stopped.
+    assert.deepEqual(sessionBackends([{ pid: 1 }]), []);
+    assert.deepEqual(sessionBackends([]), []);
+    // ...and the one string that must match, does, whatever the case or the
+    // surrounding whitespace.
+    assert.equal(sessionBackends([row(" Client Backend ", 5)]).length, 1);
+  });
+
   it("only accepts exactly the flag the promotion sets", () => {
     // "1" and nothing else. A stray empty, "0", "false" or "true" in the
     // environment must read as "no", because this is the one value that
@@ -533,6 +585,25 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     // working. Ending it would have made the checks above pass.
     const alive = await other.query<{ n: string }>("select count(*)::text as n from articles");
     assert.equal(Number(alive.rows[0]?.n), 1, "the other session was killed to make room for the promotion");
+
+    /*
+      ...and the string this module filters on is the string the SERVER
+      actually uses. Not a fixture's idea of it: read back from PostgreSQL for
+      a connection this test knows is a real client session. A constant that
+      drifted -- 'client_backend', a case change, a version that renamed it --
+      would make every rollout skip the connection check entirely, which is the
+      failure that would be hardest to notice.
+    */
+    const otherPid = Number((await other.query<{ pid: number }>("select pg_backend_pid() as pid")).rows[0]?.pid);
+    const actual = await other.query<{ backend_type: string }>(
+      "select backend_type from pg_stat_activity where pid = $1",
+      [otherPid],
+    );
+    assert.equal(
+      actual.rows[0]?.backend_type,
+      "client backend",
+      "PostgreSQL no longer calls a client session 'client backend', so the session check counts nothing",
+    );
 
     // With the session gone, the same calls work -- so the refusals above were
     // about the session and not about the arguments.

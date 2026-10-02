@@ -1945,6 +1945,102 @@ test("every rollback command the script or the docs print is one the parser acce
   }
 });
 
+test("a refusal after the stop brings the paper back up instead of leaving it down", windowsOnly, async () => {
+  /*
+    FINDING B. The copy is refused after the app has been stopped -- the
+    sessions will not clear, the disk is full, the name is taken. The script
+    used to say "nothing was changed" and then EXIT with the paper down,
+    printing a command for a person to run. Nothing about the state justified
+    that: no copy exists, nothing was fast-forwarded, built or migrated, and
+    the build on disk is the one that was serving a minute ago.
+  */
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "nothing-changed.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      "function Start-TheApp {",
+      "  $version = Get-Content -Path (Join-Path $app '.output\\server\\version.txt') -Raw",
+      "  Add-Content -Path $env:FAKE_DB_LOG -Value \"app start $($version.Trim())\" -Encoding ASCII",
+      "  return $env:FAKE_START_COMES_BACK -eq '1'",
+      "}",
+      // The paper is stopped: the marker the watchdog stands down for is there,
+      // exactly as step 4 leaves it.
+      "New-PromoteMarker -App $app | Out-Null",
+      "$before = Test-Path (Join-Path $app 'logs\\promote-in-progress')",
+      "$up = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal 'the copy was refused'",
+      "$markerWhenUp = Test-Path (Join-Path $app 'logs\\promote-in-progress')",
+      // ...and now the restart itself fails: the run really is unfinished, so
+      // the marker has to stay for -Resume and for the watchdog.
+      "New-PromoteMarker -App $app | Out-Null",
+      "$env:FAKE_START_COMES_BACK = '0'",
+      "$down = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal 'the copy was refused'",
+      "$markerWhenDown = Test-Path (Join-Path $app 'logs\\promote-in-progress')",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Encoding ASCII -Value (@(
+        "markerBefore=$before",
+        "up=$($up.PaperUp);upSentence=$($up.Sentence)",
+        "markerWhenUp=$markerWhenUp",
+        "down=$($down.PaperUp);downSentence=$($down.Sentence)",
+        "markerWhenDown=$markerWhenDown"
+      ) -join ([char]10))`,
+    ]);
+    await runPowerShell(harness, { env: { FAKE_START_COMES_BACK: "1" } });
+
+    const result = read(join(install.app, "result.txt"));
+    const line = (name) => result.split(/\r?\n/).find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1) ?? "(missing)";
+
+    assert.equal(line("markerBefore"), "True", "the fixture did not start with the paper stopped");
+    assert.equal(line("up"), "True;upSentence=The paper is back up on the version it was running, and nothing was changed.", `the paper was not brought back: ${line("up")}`);
+    // The marker comes off: it silences the watchdog, and a paper that is UP
+    // with a promote marker left behind is the one thing the marker must never
+    // mean.
+    assert.equal(line("markerWhenUp"), "False", "the marker was left behind with the paper up, so the watchdog stays stood down");
+    // ...and when the restart fails, it stays: the run really is unfinished and
+    // the paper really is down.
+    assert.equal(line("down"), "False;downSentence=The paper is still down: it did not come back up on the build it was already running.", `a failed restart said the paper was up: ${line("down")}`);
+    assert.equal(line("markerWhenDown"), "True", "the marker was cleared although the paper is down, so nothing would resume or repair it");
+
+    // The start ran, twice, on the build on disk -- the one that was serving.
+    const starts = dbTrace(install).filter((l) => l.startsWith("app start"));
+    assert.deepEqual(starts, ["app start old", "app start old"], "the paper was not started on the build it was already running");
+
+    const log = read(newestLog(install.app));
+    assert.match(log, /nothing has changed yet -- no copy, no fast-forward, no build, no migration/, "the log does not say why starting again is safe");
+    assert.match(log, /The paper is back up on the version it was running, and nothing was changed\./, "the log's sentence is missing");
+    assert.match(log, /the promote did NOT complete: the copy was refused/, "the log does not carry the refusal");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("the copy's refusal path starts the paper and still exits non-zero", () => {
+  /*
+    The wiring, because ops\promote.ps1 is a script and cannot be dot-sourced:
+    the refusal branch has to call the restart BEFORE the Die that ends the
+    run, and Die is what clears the marker when the paper answers and exits
+    non-zero either way. `Die`'s own behaviour is held by the existing test
+    that the recovery command is the last line printed when the paper is down.
+  */
+  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+  const at = (needle, what) => {
+    const index = src.indexOf(needle);
+    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
+    return index;
+  };
+  const refused = at("if (-not $copied.Ok) {", "the copy refusal branch");
+  const brought = at("Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal $copied.Failure", "the restart");
+  const died = at("Die \"$($copied.Failure) $($back.Sentence)\"", "the failure exit");
+  assert.ok(refused < brought, "the restart is outside the copy refusal branch");
+  assert.ok(brought < died, "the run ends before the paper is started again");
+  // Nothing between the stop and the copy can have changed anything, and the
+  // message has to say the paper is up rather than that it is down.
+  assert.doesNotMatch(
+    src.slice(refused, died),
+    /The paper is still down and the database was not copied/,
+    "the refusal still tells the operator the paper is down",
+  );
+  assert.equal([...src.matchAll(/Invoke-PromoteNothingChanged/g)].length, 1, "the restart is wired in more than one place");
+});
+
 test("whether to install is decided by what node_modules was built from, not by this run's fast-forward", windowsOnly, async () => {
   /*
     THE LOCKFILE TRAP, which the auditor found and the coordinator confirmed.
