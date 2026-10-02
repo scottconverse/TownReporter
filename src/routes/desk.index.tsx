@@ -6,6 +6,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
+import { FirstRunModelCard } from "@/components/first-run-model";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
 import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
@@ -1147,6 +1148,18 @@ function DeskHome() {
         ones -- `.today-steps`, `.today-running`, `.today-edition`), and the
         grid below them holds the work on the left and the rail on the right.
       */}
+      {/*
+        Unit F3 / Option A: the "Choose your writing model" card.
+
+        It draws itself only when the server says so -- `getFirstRunModelCard`
+        answers from `paper_settings.model_prompt_state`, which the first-run
+        hook writes ONLY at the false-to-true `onboarded` flip, and only when a
+        local server answered with nothing in memory. So a paper that is
+        already set up (the live shape) renders nothing here, and a fresh
+        install that found a loaded model has a model and no card.
+      */}
+      <FirstRunModelCard />
+
       {/*
         THE STEP STRIP (README "1. Today"). Four equal cells with 1px gaps: the
         step's number, its name, the big count and the unit, and the one button

@@ -12,6 +12,7 @@ import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
+import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -278,6 +279,16 @@ function ScanPage() {
         </p>
       </div>
       <PaperSetupGateNote gate={paperGate} />
+      {/*
+        Unit F3 / Option A item 4: the read-only list of what is actually on
+        this machine. It draws whichever provider the picker is on -- before
+        this, the only local model list in the app was `LocalModelSelect`,
+        which renders only when "Local model" is the chosen provider, so a
+        fresh install (whose provider is Automatic) could not see its own
+        machine's models at all. Cloud models are marked in the list and never
+        counted as loaded.
+      */}
+      <LocalModelsOnThisComputer />
       {/*
         FB1, unit 4 / FB1b, item 3: THE SCAN'S OWN CARD, IN THE PANEL.
 
