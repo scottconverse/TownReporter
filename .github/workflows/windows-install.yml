@@ -23,8 +23,12 @@ jobs:
   # report and a docs-only pull request can never reach a mergeable state. A job
   # skipped by `if:` reports as skipped, which satisfies a required check.
   # Failure is safe: if this job cannot classify the change, `docs_only` is not
-  # "true" and both heavy jobs run. push to main and workflow_dispatch always
-  # classify as not-docs-only.
+  # "true" and both heavy jobs run. That depends on the status function in each
+  # heavy job's `if:` (`!cancelled()` / `always()`): GitHub SKIPS a job whose
+  # dependency failed unless its condition has one, and a skipped required job
+  # reports success, so without it a failed classifier would let a non-doc PR
+  # satisfy both required checks without running them. Do not remove it.
+  # push to main and workflow_dispatch always classify as not-docs-only.
   changes:
     name: Classify the change
     runs-on: ubuntu-latest
@@ -58,7 +62,7 @@ jobs:
 
   package:
     needs: changes
-    if: ${{ !inputs.release_tag && needs.changes.outputs.docs_only != 'true' }}
+    if: ${{ !cancelled() && !inputs.release_tag && needs.changes.outputs.docs_only != 'true' }}
     name: Package the exact source candidate
     runs-on: ubuntu-latest
     timeout-minutes: 10
