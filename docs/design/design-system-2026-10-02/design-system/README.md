@@ -116,7 +116,10 @@ The scale:
 | Quiet | **1px `--ink2` border** (`#3a3a3a` light, about 10:1; `#bdbab3` dark, about 8:1), 700. Never the `--line` rule color: 1.4:1 reads as text. | Minor or navigational actions (Open, More ▾, Edit). |
 | Text link | Ink text, always underlined (1px, offset 3px), 700 in UI | Only for going somewhere. Anything that *does* something is a button. |
 | Danger | 2px danger border and text | Kill, Stop, Cancel a job, Legal removal. The label says exactly what happens. |
-| Disabled gate | 2px dashed rule, `--ink2` text, `not-allowed` | Publish before every check passes. The reason is printed beside it. |
+| Disabled gate | **2px dashed `--ink2` edge** (about 10:1 light, 8:1 dark; never `--line`), `--ink2` text, 800, `not-allowed` | Publish before every check passes. The reason is printed beside it. |
+
+- **Checkboxes:** a 24px square mark inside a 44px hit area. Pad the label or the cell; don't enlarge the mark. Unchecked: a 2px `--ink` outline on the ground color (`--bg`), never filled. Checked: `--ink` fill with a ground-colored ✓. Focus: a 2px yellow outline, offset 2px. A filled unchecked box reads as checked, so it is not allowed.
+- **The wordmark** ("TownReporter Desk" in the desk header, "TownReporter" in the masthead) is the one clickable item that is not underlined. It is the brand mark, and it always links home.
 
 - All buttons: at least 44px tall (48px for header primaries), 12–18px horizontal padding, 15px text, labels left-aligned in the button’s flow.
 - Keyboard hints sit inside the button in a 14px bordered box (`S`, `H`, `X`, `⌘S`).
