@@ -61,8 +61,21 @@ else and make sure the copy has **no `.env` file at all**. `npm run dev`,
 `npm run build` and `npm start` all route through
 `scripts/with-app-env.mjs`, which merges `<working directory>/.env` into the
 environment, and Vite loads `.env` from its root at build time — a copy
-without one inherits nothing from the live paper, including its database URL
-and its editor address.
+without one inherits nothing from the live paper's **file**, including its
+database URL and its editor address. (Variables your shell already exports are
+a separate matter; see 1b.)
+
+**1b. Start from a clean shell.** Deleting `.env` does not clear what your
+shell already exports: `scripts/with-app-env.mjs` lets the process
+environment win over the `.env` file, and Vite reads inherited `VITE_*`
+values at build time, so a terminal that carries the live paper's variables
+(its `DATABASE_URL`, `VITE_TOWNREPORTER_EDITOR_EMAIL`, model keys, `PROMOTE_*`,
+`TEXTFLOWKIT_CLI_PATH`) would run the trial with them. Open a **new** terminal
+that has never loaded them, and check before you build: on Windows,
+`Get-ChildItem Env: | Where-Object Name -match '^(VITE_|DATABASE_URL|BETTER_AUTH|TOWNREPORTER_|PROMOTE_|TEXTFLOWKIT|LLM_|OLLAMA|OPENAI|ANTHROPIC|HOST$|PORT$)'`;
+on macOS and Linux, `env | grep -E '^(VITE_|DATABASE_URL|BETTER_AUTH|TOWNREPORTER_|PROMOTE_|TEXTFLOWKIT|LLM_|OLLAMA|OPENAI|ANTHROPIC|HOST=|PORT=)'`.
+Anything it lists that you did not mean to give the trial must be unset (or
+start the trial under `env -i` with only the variables below).
 
 **2. Create an empty database** (any Postgres, any port). Do not point at the
 live one; the build's last step applies migrations to whatever `DATABASE_URL`

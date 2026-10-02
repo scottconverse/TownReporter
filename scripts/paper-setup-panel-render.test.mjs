@@ -103,17 +103,19 @@ const SAVED = {
 };
 
 /** The panel and the form, transpiled against one scenario's stubs. */
-async function renderPanel({ needsSetup, config }) {
+async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
   const reactQueryStub = inlineModule(`
     const DATA = {
       "my-desk": { role: "owner" },
       "paper-config-for-setup": ${JSON.stringify(config)},
-      "first-run-setup": { needsSetup: ${needsSetup} },
+      "first-run-setup": ${setupCheckFails ? "undefined" : `{ needsSetup: ${needsSetup} }`},
       "dark-county": { county: "" },
     };
     export function useQuery({ queryKey }) {
       const data = DATA[queryKey[0]];
-      return { data, isPending: false, isLoading: false, state: { data } };
+      // A query that exhausted its retries: not pending, no data, in error.
+      const failed = queryKey[0] === "first-run-setup" && data === undefined;
+      return { data, isPending: false, isLoading: false, isError: failed, state: { data } };
     }
     export function useMutation() {
       return { mutate() {}, mutateAsync: async () => {}, isPending: false, error: null };
@@ -224,6 +226,19 @@ test("an onboarded install's Paper setup panel is unchanged -- it shows what is 
   assert.equal(valueFor(html, "Riverbend Record"), "Testerville Ledger");
 });
 
+test("when the setup check itself fails the panel shows no form and no shipped identity (fails closed)", async () => {
+  // The config query succeeded (it carries the Longmont fallback) but the
+  // first-run check exhausted its retries: not pending, no data. The form must
+  // not be drawn from the fallback, because Save would store it.
+  const html = await renderPanel({ needsSetup: true, config: LONGMONT_FALLBACK, setupCheckFails: true });
+  assert.match(html, /could not check whether this paper has been set up/);
+  assert.match(html, /role="alert"/);
+  assert.equal(valueFor(html, "Riverbend"), null, "no City box is drawn");
+  assert.doesNotMatch(html, /<form/);
+  assert.doesNotMatch(html, /Longmont/);
+  assert.doesNotMatch(html, new RegExp(SHIPPED_EMAIL.replace(".", "\\.")));
+});
+
 test("the panel asks the same server function the first-run gate does", async () => {
   // A source-shape check for the wiring itself: the flag must come from
   // `firstRunSetupState` (the gate's own read, same query key), not from a
@@ -235,5 +250,7 @@ test("the panel asks the same server function the first-run gate does", async ()
   );
   assert.match(panel, /firstRunSetupState\(\)/);
   assert.match(panel, /queryKey: \["first-run-setup"\]/);
-  assert.match(panel, /firstRun=\{setupState\.data\?\.needsSetup === true\}/);
+  assert.match(panel, /firstRun=\{setupState\.data\.needsSetup === true\}/);
+  // ...and a failed or missing answer is never read as "already set up".
+  assert.match(panel, /setupState\.isError \|\| setupState\.data === undefined/);
 });

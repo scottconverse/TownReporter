@@ -983,10 +983,25 @@ export function PaperSetupPanel() {
         is added as real rows on the Sources page, not just stored as a default — each editor gets
         them added once, the first time they visit.
       </p>
-      {current.isPending || setupState.isPending ? null : (
+      {current.isPending || setupState.isPending ? null : setupState.isError || setupState.data === undefined ? (
+        /*
+          Fail closed. "I could not ask whether this paper is set up" is not
+          "it is set up": drawing the form with `firstRun={false}` would fill it
+          from the shipped Longmont configuration and the build-time editor
+          address -- the disclosure F4 exists to stop -- and Save would store
+          them. So the form waits for a real answer.
+        */
+        <p
+          role="alert"
+          className="mt-4 max-w-2xl border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger"
+        >
+          The desk could not check whether this paper has been set up yet, so the setup form is not
+          shown. Reload the page to try again.
+        </p>
+      ) : (
         <PaperSetupForm
           initial={current.data}
-          firstRun={setupState.data?.needsSetup === true}
+          firstRun={setupState.data.needsSetup === true}
           submitLabel="Save"
         />
       )}
