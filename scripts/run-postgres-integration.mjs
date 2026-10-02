@@ -60,6 +60,9 @@ function runFile(file, env, root, index, total) {
     const child = spawn(process.execPath, [
       "--import", new URL("./test-environment-guard.mjs", import.meta.url).href,
       "--import", new URL("./postgres-integration-opt-in.mjs", import.meta.url).href,
+      // Loaded last, so the opt-in preload above has already decided what this
+      // process is allowed to be; the seal only ever narrows.
+      "--import", new URL("../src/lib/test-support/model-seal.ts", import.meta.url).href,
       "--experimental-strip-types", "--test", "--test-reporter=tap", file,
     ], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";

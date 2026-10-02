@@ -1,8 +1,10 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { Client } from "pg";
+import type { AddressInfo } from "node:net";
 import {
   integrationRequested,
   probePostgres,
@@ -43,6 +45,26 @@ const databaseName = `townreporter_test_dark_stop_${process.pid}_${Date.now()}`;
 const NEWSROOM = 974_501;
 const EDITOR = "dark-stop-editor";
 let created = false;
+
+/**
+ * A loopback port nothing is listening on, chosen by asking the OS for a free
+ * one and handing it straight back.
+ *
+ * This file used to inherit whatever model environment the shell had. On a
+ * machine with Ollama up that meant the second test below -- the one that
+ * proves a round nobody stopped does NOT take the cancel path -- reached a real
+ * model server and spent 9-22 seconds per call doing it; the same file on CI,
+ * where there is no model server, finished in milliseconds. A test whose setup
+ * depends on the machine it runs on is not evidence, so the provider is now
+ * named here.
+ */
+async function unusedLoopbackPort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>((ready) => probe.listen(0, "127.0.0.1", ready));
+  const { port } = probe.address() as AddressInfo;
+  await new Promise<void>((closed) => probe.close(() => closed()));
+  return port;
+}
 let db: typeof import("../db.ts");
 let jobs: typeof import("./jobs.ts");
 let dark: typeof import("./dark.ts");
@@ -58,6 +80,23 @@ describe("stopping a Dark Desk dig (U25 B4)", { skip, timeout: 120000 }, () => {
       await admin.end();
     }
     process.env.DATABASE_URL = withDatabase(adminUrl, databaseName);
+    /*
+      Name the provider this file runs against, and switch off every other way
+      the desk could find one: the two agent CLIs, both Automatic rungs, and
+      any key the operator's shell happens to carry. What is left is one
+      OpenAI-compatible gateway pointed at a loopback port nothing answers --
+      so the round still resolves a provider and still tries to plan, and fails
+      there in milliseconds, on every machine, without a model server.
+    */
+    process.env.TOWNREPORTER_CLAUDE_CODE = "0";
+    process.env.TOWNREPORTER_CODEX = "0";
+    process.env.TOWNREPORTER_DEEPSEEK = "0";
+    process.env.TOWNREPORTER_QWEN = "0";
+    process.env.LLM_BASE_URL = `http://127.0.0.1:${await unusedLoopbackPort()}/v1`;
+    process.env.LLM_MODEL = "no-server-here";
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.LLM_API_KEY;
     db = await import("../db.ts");
     jobs = await import("./jobs.ts");
     dark = await import("./dark.ts");
@@ -149,9 +188,16 @@ describe("stopping a Dark Desk dig (U25 B4)", { skip, timeout: 120000 }, () => {
       values (${EDITOR}, ${NEWSROOM}, ${"dark"}, ${inv!.id}, ${"running"}, ${false})
       returning id
     `;
-    // With no provider configured the round cannot plan anything, so this
-    // proves the flag is what stops it: the same call, one boolean apart,
-    // reaches the provider instead of the cancel path.
+    /*
+      The provider is the unreachable loopback gateway the `before` hook named,
+      so the round really does reach it and really does fail -- which is the
+      point: the same call, one boolean apart, leaves down the ordinary failure
+      path instead of the cancel path. It does NOT prove anything about "no
+      provider configured": this file used to say that, and it was false on
+      every machine that had one, which is how a real model server came to be
+      answering this suite. The seal in `src/lib/test-support/model-seal.ts` is
+      what stops that happening again.
+    */
     const full = await jobs.latestJob({ newsroomId: NEWSROOM, kind: "dark", subjectId: inv!.id });
     assert.ok(full);
     const err = await dark.performDarkRound(full).then(

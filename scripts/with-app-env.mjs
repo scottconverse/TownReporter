@@ -192,7 +192,12 @@ function main(argv) {
   // Avoids the shell entirely (and its DEP0190 warning on every run).
   const resolved = command === "node" ? process.execPath : command;
   const guard = new URL("./test-environment-guard.mjs", import.meta.url).href;
-  const childArgs = directNodeTest && !liveModelTest ? ["--import", guard, ...args] : args;
+  // The focused-run command documented in CONTRIBUTING.md is this wrapper, so
+  // it has to carry the model seal too -- `npm run test:live-model` is the one
+  // deliberate exception, and it is the branch that skips both preloads.
+  const modelSeal = new URL("../src/lib/test-support/model-seal.ts", import.meta.url).href;
+  const childArgs =
+    directNodeTest && !liveModelTest ? ["--import", guard, "--import", modelSeal, ...args] : args;
   const child = spawn(resolved, childArgs, {
     stdio: "inherit",
     env,

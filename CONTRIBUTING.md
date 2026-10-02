@@ -35,6 +35,15 @@ The ordinary test suite is offline and never calls a paid model. Real Postgres,
 browser-flow and live-model lanes are separate; GitHub Actions runs the
 repository's required integration lanes on every push.
 
+Every test process replaces `fetch` with a default-deny seal
+(`src/lib/test-support/model-seal.ts`), so a test that forgets to stub the
+transport is refused rather than answered by whatever model server happens to
+be running on your machine — 127.0.0.1 on 1234, 11434 or 8080, any non-loopback
+host, and any cloud model API all throw with the URL and the reason. Stub
+`fetch`, inject a fake provider, or start a fake server on an ephemeral
+loopback port instead; `TOWNREPORTER_TEST_ALLOW_REAL_MODELS=1` makes one
+deliberate live call and prints a warning to stderr, and CI never sets it.
+
 `npm test` on your own machine runs the complete suite. CI runs that same
 command on several machines at once, each with a shard index in its
 environment, and the single `test` check is green only when every shard is. To
