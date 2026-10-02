@@ -39,6 +39,7 @@ import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
+import { SERVER_FN_HEADER, createServerFnLog } from "./lib/serverfn-traffic.mjs";
 
 const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -199,6 +200,91 @@ async function openShutReviewDisclosures(target = page) {
     });
   }
   return shut;
+}
+
+/**
+ * The ceiling every server-function wait in this walk runs under: the page's
+ * own default timeout (`page.setDefaultTimeout(45_000)`). Spelled out for the
+ * waits that ask the traffic log rather than the wire, so the two kinds of wait
+ * give up at exactly the same moment.
+ */
+const SERVER_FN_CEILING_MS = 45_000;
+
+/**
+ * Watch every server function call the page makes, until `detach()`.
+ *
+ * Records the REQUEST when the browser reports it and the RESPONSE when a
+ * reply lands, both with the page-clock time, so a call that never gets an
+ * answer stays visible in the log as `(no reply)` -- which is the row that
+ * explains a wait that timed out. Bodies are read for their signature only
+ * (`serverFnSignature`), and reading one here does not disturb the page: the
+ * browser context buffers response bodies for Playwright independently of
+ * what the page's own `fetch` does with them.
+ */
+function watchServerFnTraffic() {
+  const log = createServerFnLog();
+  const onRequest = (request) => {
+    if (request.headers()[SERVER_FN_HEADER] !== "true") return;
+    log.noteRequest({
+      at: Date.now(),
+      method: request.method(),
+      path: new URL(request.url()).pathname,
+    });
+  };
+  const onResponse = async (response) => {
+    const request = response.request();
+    if (request.headers()[SERVER_FN_HEADER] !== "true") return;
+    let body = "";
+    try {
+      body = await response.text();
+    } catch {
+      /* a body the browser could not hand over reads as empty, never as a crash */
+    }
+    log.record({
+      at: Date.now(),
+      method: request.method(),
+      path: new URL(response.url()).pathname,
+      status: response.status(),
+      body,
+    });
+  };
+  page.on("request", onRequest);
+  page.on("response", onResponse);
+  return {
+    log,
+    detach() {
+      page.off("request", onRequest);
+      page.off("response", onResponse);
+    },
+  };
+}
+
+/**
+ * Wait for a server function call, decided by the LOG rather than by the wire.
+ *
+ * The difference is the whole of unit FLAKE1. `page.waitForResponse` sees one
+ * moment forward: armed after a press, it cannot see a matching reply that
+ * landed while the press was in flight, and the step then waits out its full
+ * ceiling for a reply nothing will send again. `log.match` searches everything
+ * recorded since the arm time -- and the log is armed BEFORE the press -- so a
+ * reply that arrived between the press and the first poll is found exactly as
+ * one that arrives later.
+ *
+ * Same ceiling as the waits it replaces, and a timeout now dumps every call
+ * the page made since the press, in order, with the status of each and the
+ * newest evidence token any reply carried.
+ */
+async function awaitServerFnCall(log, match, { what, deadline }) {
+  for (;;) {
+    const found = log.match(match);
+    if (found) return found;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `${what} did not arrive within ${SERVER_FN_CEILING_MS / 1000}s.\n${log.table()}`,
+      );
+    }
+    await page.waitForTimeout(50);
+  }
 }
 
 async function callObservedAddCorrection(data) {
@@ -942,11 +1028,17 @@ async function main() {
     await route.continue();
   };
   await page.route("**/*", holdEvidenceDecision);
-  const evidenceDecisionResponse = page.waitForResponse(
-    (response) =>
-      response.request().method() === "POST" &&
-      response.request().headers()["x-tsr-serverfn"] === "true",
-  );
+  /*
+    The traffic log is armed HERE -- before the press, and before the held
+    request is even issued -- and every wait below is decided from it. The
+    replies this step turns on all happen while the POST is held or in the
+    instant after it is released: the draft-save step above invalidated
+    `["lead", id]`, and a lead read still in flight can land with the new
+    evidence token before any listener armed after the press would be looking.
+    A listener cannot see that reply; this log can.
+  */
+  const traffic = watchServerFnTraffic();
+  const decisionTrafficArmedAt = traffic.log.arm(Date.now());
   /*
     Scoped to the blockers list, not the whole page: this desk now draws TWO
     controls with this label -- the publish-blockers row (Unit CT part 1 made
@@ -989,26 +1081,44 @@ async function main() {
   }
   if (!(await judgmentControls.isDisabled()))
     throw new Error("pending keep/remove evidence decision left finding judgments enabled");
-  const refreshedReviewAfterDecision = page.waitForResponse(
-    async (response) => {
-      if (
-        response.request().method() !== "GET" ||
-        response.request().headers()["x-tsr-serverfn"] !== "true" ||
-        !response.ok()
-      ) return false;
-      const body = await response.text().catch(() => "");
-      return (
-        body.includes("canonicalDraft") &&
-        body.includes("evidenceToken") &&
-        body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`)
-      );
+  /*
+    The two waits below are the ones CI lost (PR 170, PR 173: `waitForResponse:
+    Timeout 45000ms exceeded`, the desk left standing on "Your evidence
+    decision is still saving."). Both are now asked of the log armed above, so
+    a reply that landed while the POST was held -- or in the instant after it
+    was released, before a listener could be armed -- is found, and a timeout
+    prints every call the page made instead of one silent promise.
+
+    The ceilings are the ones that were here: 45s from the press for the
+    decision POST (its listener was armed before the press), 45s from the
+    release for the review read (its listener was armed just before it).
+  */
+  releaseEvidenceDecision();
+  await awaitServerFnCall(
+    traffic.log,
+    (call) => call.method === "POST" && call.ok,
+    {
+      what: "the keep/remove decision's own reply",
+      deadline: decisionTrafficArmedAt + SERVER_FN_CEILING_MS,
     },
   );
-  releaseEvidenceDecision();
-  await evidenceDecisionResponse;
+  const refreshDeadline = Date.now() + SERVER_FN_CEILING_MS;
   await page.unroute("**/*", holdEvidenceDecision);
   await keepEvidence.waitFor({ state: "detached" });
-  await refreshedReviewAfterDecision;
+  await awaitServerFnCall(
+    traffic.log,
+    (call) =>
+      call.method === "GET" &&
+      call.ok &&
+      call.body.includes("canonicalDraft") &&
+      call.body.includes("evidenceToken") &&
+      call.body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`),
+    {
+      what: "the finding review re-read that answers the decision",
+      deadline: refreshDeadline,
+    },
+  );
+  traffic.detach();
   await page.waitForFunction(() => {
     const button = [...document.querySelectorAll("#finding-evidence-review article button")]
       .find((candidate) => candidate.textContent?.trim() === "Save judgment");
@@ -1073,6 +1183,18 @@ async function main() {
     .fill(savedRevisionBody);
   step("restored the exact saved draft before stale-review conflict checks");
   const secondTab = await context.newPage();
+  /*
+    The three `waitForResponse` listeners that remain in this walk -- this one,
+    `laterReviewRefetch` below, and `replacementWasPolled` at the foot of the
+    file -- are armed BEFORE the thing that provokes their request (a
+    navigation, an offline/online dispatch, a poll that is already recurring),
+    so none of them can miss a reply the way the decision step's listener could:
+    a listener is only ever blind to what happened before it was armed. They
+    are left as listeners. What they do NOT have is a dump on timeout -- if one
+    of them ever fails, move it onto `watchServerFnTraffic` + `awaitServerFnCall`
+    above, which is the same ceiling with the page's server-function calls
+    printed when it gives up.
+  */
   const initialReviewResponse = secondTab.waitForResponse(
     async (response) => {
       if (
