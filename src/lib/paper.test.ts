@@ -1,8 +1,20 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { formatClockTime, formatDate, formatDateTime, formatShortDate, slugify } from "./paper.ts";
+import {
+  formatClockTime,
+  formatDate,
+  formatDateTime,
+  formatListDate,
+  formatShortDate,
+  slugify,
+} from "./paper.ts";
 import { APP_VERSION } from "./version.ts";
+
+/** The year on the paper's own clock -- the one `formatDateTime` compares to. */
+const CURRENT_YEAR = Number(
+  new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "America/Denver" }).format(new Date()),
+);
 
 describe("Longmont dates", () => {
   it("prints the masthead in America/Denver, not UTC", () => {
@@ -18,11 +30,56 @@ describe("Longmont dates", () => {
       desk), and this pin used to encode `toLocaleString`'s upper-case
       `en-US` form. See `formatClockTime` in ./paper.ts.
     */
-    assert.equal(formatDateTime("2026-08-27T02:10:00.000Z"), "Aug 26, 2026, 8:10 p.m.");
     assert.equal(formatClockTime("2026-08-27T02:10:00.000Z"), "8:10 p.m.");
     // Midnight and noon are the two the 12-hour clock gets wrong by one.
     assert.equal(formatClockTime("2026-08-27T06:00:00.000Z"), "12:00 a.m.");
     assert.equal(formatClockTime("2026-08-27T18:00:00.000Z"), "12:00 p.m.");
+  });
+});
+
+/*
+  UI1b-6. The designer: "Dates in lists read 'Oct. 2, 6:43 a.m.', never ISO."
+  The style has three rules and each is asserted on its own, so one of them
+  drifting cannot hide behind the other two.
+*/
+describe("the designer's list dates", () => {
+  const at = (month: number, year = CURRENT_YEAR) =>
+    `${year}-${String(month).padStart(2, "0")}-15T18:00:00.000Z`;
+
+  it("abbreviates the months AP style, and spells out the short ones", () => {
+    assert.equal(formatListDate(at(1)), "Jan. 15");
+    assert.equal(formatListDate(at(2)), "Feb. 15");
+    assert.equal(formatListDate(at(3)), "March 15", "March is spelled out, not 'Mar.'");
+    assert.equal(formatListDate(at(4)), "April 15");
+    assert.equal(formatListDate(at(5)), "May 15");
+    assert.equal(formatListDate(at(6)), "June 15");
+    assert.equal(formatListDate(at(7)), "July 15");
+    assert.equal(formatListDate(at(8)), "Aug. 15");
+    assert.equal(formatListDate(at(9)), "Sept. 15", "September is 'Sept.', never 'Sep'");
+    assert.equal(formatListDate(at(10)), "Oct. 15");
+    assert.equal(formatListDate(at(11)), "Nov. 15");
+    assert.equal(formatListDate(at(12)), "Dec. 15");
+  });
+
+  it("drops the year in the current year and keeps it on any other", () => {
+    assert.equal(formatListDate(at(10)), "Oct. 15");
+    assert.equal(formatListDate(at(10, CURRENT_YEAR - 1)), `Oct. 15, ${CURRENT_YEAR - 1}`);
+    assert.equal(formatListDate("2019-03-05T19:00:00.000Z"), "March 5, 2019");
+  });
+
+  it("is the date half of the one desk date-time, with the desk's clock", () => {
+    assert.equal(formatDateTime(at(10)), "Oct. 15, 12:00 p.m.");
+    assert.equal(formatDateTime(at(10, 2019)), "Oct. 15, 2019, 12:00 p.m.");
+    // The designer's own example, on the paper's clock: 12:43 UTC is 6:43 a.m. MDT.
+    assert.equal(formatDateTime(`${CURRENT_YEAR}-10-02T12:43:00.000Z`), "Oct. 2, 6:43 a.m.");
+  });
+
+  it("is never ISO, on any day of the year", () => {
+    for (let month = 1; month <= 12; month += 1) {
+      const drawn = formatDateTime(at(month));
+      assert.doesNotMatch(drawn, /\d{4}-\d{2}-\d{2}/, `${drawn} is an ISO string`);
+      assert.match(drawn, /^[A-Z][a-z]+\.? \d{1,2}, \d{1,2}:\d{2} [ap]\.m\.$/, drawn);
+    }
   });
 });
 

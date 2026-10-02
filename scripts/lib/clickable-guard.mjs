@@ -360,6 +360,109 @@ export function exemptFailures(entries, failures) {
   );
 }
 
+/* ───────────────────────────── the margins ──────────────────────────────── */
+
+/**
+ * How close the CLOSEST passing controls are to the two thresholds (UI1b-6).
+ *
+ * A guard with no headroom is a guard that goes red on somebody else's machine.
+ * CI runs headless Chromium on Linux, in UTC, with different fonts: a control
+ * that measures 44.0px here can measure 43.7 there, and a chip that clears the
+ * floor at 3.02:1 can land at 2.98. So the walk reports the closest margins on
+ * every run -- and this machine's numbers are compared against them -- rather
+ * than leaving "it passed" to mean "it passed by however much".
+ *
+ * `height` is reported in CSS pixels above 44, `contrast` in ratio points above
+ * 3. `flakeHeight`/`flakeContrast` are the headroom that counts as too thin:
+ * a control AT 44 or 45px, or a ratio under 3.1:1. A flake risk is reported,
+ * never silently tolerated -- and the fix is headroom in the CSS, not an entry
+ * in the allowlist, because an allowlisted control is exempt from the rule
+ * rather than safe under it.
+ *
+ * Links inside prose are left out of both lists: the rule does not apply to
+ * them (an underlined link in a sentence is the design system's one plain-text
+ * form), so their numbers are not margins on anything.
+ */
+export function closestMargins(
+  controls,
+  { limit = 8, flakeHeight = 1, flakeContrast = 0.1 } = {},
+) {
+  const heights = [];
+  const contrasts = [];
+  for (const control of controls ?? []) {
+    /*
+      FAILING controls are not margins: the wordmark in the allowlist measures
+      24px, and listing that as "-20px below the line" would bury the controls
+      this list exists to show. The rule does not apply to an underlined prose
+      link either, so its numbers are a margin on nothing.
+    */
+    if (!control || control.kind === "underlined link in prose") continue;
+    if (control.failures && control.failures.length) continue;
+    const where = {
+      route: control.route ?? "",
+      theme: control.theme ?? "",
+      viewport: control.viewport ?? null,
+      name: (control.name ?? "").slice(0, 60),
+      selector: control.selector ?? "",
+    };
+    const height = Number(control.height);
+    if (Number.isFinite(height)) {
+      heights.push({
+        ...where,
+        height,
+        minHeight: Number(control.minHeight) || 0,
+        margin: Number((height - MIN_TARGET_PX).toFixed(2)),
+      });
+    }
+    const best = Math.max(Number(control.edgeRatio) || 0, Number(control.fillRatio) || 0);
+    contrasts.push({ ...where, ratio: Number(best.toFixed(3)), margin: Number((best - CONTRAST_FLOOR).toFixed(3)) });
+  }
+  const byMargin = (a, b) => a.margin - b.margin;
+  const flakeRisks = [
+    /*
+      A height risk is a control that is close to the line AND NOT pinned
+      there: `min-height: 44px` is the desk's declared floor and measures 44
+      everywhere, so a button at exactly 44px is the rule being obeyed, not a
+      coin landing on its edge. A control at 44-45px with NO declared floor is
+      sized by its font, and fonts differ between this machine and CI.
+    */
+    ...heights
+      .filter((h) => h.margin <= flakeHeight && h.minHeight < MIN_TARGET_PX)
+      .map((h) => ({ ...h, measure: "height" })),
+    ...contrasts
+      .filter((c) => c.margin < flakeContrast)
+      .map((c) => ({ ...c, measure: "contrast" })),
+  ];
+  return {
+    heights: heights.sort(byMargin).slice(0, limit),
+    contrasts: contrasts.sort(byMargin).slice(0, limit),
+    flakeRisks,
+  };
+}
+
+/* ────────────────────────────── the exit code ───────────────────────────── */
+
+/**
+ * What the walk exits with, from what it found.
+ *
+ * UI1b's first step shipped this guard with a TEMPORARY switch,
+ * `GUARD_BASELINE_ONLY=1`, because on that day's build the walk was red by
+ * design: 463 controls were still plain text and the failure count WAS the
+ * deliverable. CI set it so the build stayed green while the conversion ran,
+ * and the last step of UI1b deletes it. This function is the deletion's
+ * measurable form, and `scripts/desk-clickable-guard.test.mjs` drives it: with
+ * the switch gone, a single failing control FAILS THE BUILD.
+ *
+ * `reportOnly` is the developer's local escape hatch --
+ * `GUARD_REPORT_ONLY=1` -- for looking at a report on a build that is expected
+ * to be red. It defaults OFF, CI never sets it, and the property that matters
+ * is asserted both ways below rather than assumed.
+ */
+export function guardExitCode({ failures = 0, reportOnly = false } = {}) {
+  if (!failures) return 0;
+  return reportOnly ? 0 : 1;
+}
+
 /* ─────────────────────────────── the visit plan ─────────────────────────── */
 
 /**

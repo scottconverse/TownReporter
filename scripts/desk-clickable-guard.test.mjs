@@ -37,8 +37,10 @@ import {
   MIN_TARGET_PX,
   blendOver,
   classifyControl,
+  closestMargins,
   effectiveBackground,
   exemptFailures,
+  guardExitCode,
   parseColor,
   planVisits,
   ratio,
@@ -389,4 +391,86 @@ test("BOTH THEMES ARE VISITED: the plan covers light and night, and 390 in light
   for (const route of ["/desk/queue", "/desk/models"]) {
     assert.equal(plan.filter((v) => v.route === route).length, 3);
   }
+});
+
+/* ─────────────────────────── the exit code ──────────────────────────────── */
+
+/*
+  UI1b's last step: THE GUARD ENFORCES.
+
+  Unit UI1b step 1 shipped the walk behind a temporary `GUARD_BASELINE_ONLY=1`
+  in CI, because on that build the walk was red by design -- 463 controls were
+  still plain text and the failure count WAS the deliverable. The switch printed
+  the same report and exited 0. This step deletes it, so the property that
+  matters is now: A FAILING CONTROL FAILS THE BUILD.
+
+  `guardExitCode` is the whole decision, extracted so it can be driven without a
+  browser, a server or a subprocess. The first case is the one the brief asks
+  for and it is written to fail if the switch ever comes back.
+*/
+test("WITH THE SWITCH OFF, one failing control exits non-zero", () => {
+  assert.equal(
+    guardExitCode({ failures: 1 }),
+    1,
+    "a failing control no longer fails the build -- the guard is a report again",
+  );
+  assert.equal(guardExitCode({ failures: 463 }), 1, "the auditor's 463 must fail the build");
+});
+
+test("a clean run exits zero, and only the local escape hatch overrides a failure", () => {
+  assert.equal(guardExitCode({ failures: 0 }), 0);
+  assert.equal(guardExitCode({ failures: 0, reportOnly: true }), 0);
+  assert.equal(
+    guardExitCode({ failures: 3, reportOnly: true }),
+    0,
+    "GUARD_REPORT_ONLY=1 is the documented local hatch for looking at a red report",
+  );
+});
+
+/* ─────────────────────────── the margins ────────────────────────────────── */
+
+/*
+  UI1b-6. A guard with no headroom goes red on somebody else's machine: CI is
+  headless Chromium on Linux, in UTC, with different fonts, so 44.0px here can
+  be 43.7 there. The walk prints how close the passing controls are, and these
+  cases pin what that list means.
+*/
+test("the closest margins are the nearest passing controls, smallest first", () => {
+  const rows = [
+    { route: "/desk", theme: "light", viewport: 1280, name: "Roomy", height: 60, edgeRatio: 12 },
+    { route: "/desk", theme: "night", viewport: 1280, name: "Tight", height: 46, edgeRatio: 3.2 },
+    { route: "/desk/queue", theme: "light", viewport: 390, name: "Tighter", height: 44, edgeRatio: 3.05 },
+  ];
+  const margins = closestMargins(rows);
+  assert.equal(margins.heights[0].name, "Tighter");
+  assert.equal(margins.heights[0].margin, 0);
+  assert.equal(margins.heights[1].name, "Tight");
+  assert.equal(margins.contrasts[0].name, "Tighter");
+  assert.ok(Math.abs(margins.contrasts[0].margin - 0.05) < 0.001, "3.05:1 is 0.05 above the floor");
+  assert.ok(margins.contrasts.every((r) => r.ratio >= CONTRAST_FLOOR), "a failing control is not a margin");
+});
+
+test("a control inside an underlined prose link is not a margin on anything", () => {
+  const margins = closestMargins([
+    { name: "Read the report", height: 20, edgeRatio: 1.1, kind: "underlined link in prose" },
+    { name: "Check now", height: 44, edgeRatio: 4, kind: "ok" },
+  ]);
+  assert.deepEqual(margins.heights.map((r) => r.name), ["Check now"]);
+  assert.deepEqual(margins.contrasts.map((r) => r.name), ["Check now"]);
+});
+
+test("a control at 44-45px or under 3.1:1 is reported as a flake risk", () => {
+  const margins = closestMargins([
+    { name: "At the line", height: 44, edgeRatio: 3.5, kind: "ok" },
+    { name: "One over", height: 45, edgeRatio: 3.5, kind: "ok" },
+    { name: "Thin contrast", height: 48, edgeRatio: 3.09, kind: "ok" },
+    { name: "Real headroom", height: 48, edgeRatio: 4.5, kind: "ok" },
+  ]);
+  const risky = margins.flakeRisks.map((r) => r.name).sort();
+  assert.deepEqual(risky, ["At the line", "One over", "Thin contrast"]);
+  assert.ok(
+    margins.flakeRisks.some((r) => r.measure === "height") &&
+      margins.flakeRisks.some((r) => r.measure === "contrast"),
+    "both measures must be able to raise a risk",
+  );
 });

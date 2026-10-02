@@ -48,12 +48,13 @@
  *      labels.
  *
  * THE EXIT CODE. The walk FAILS (exit 1) when any non-allowlisted control
- * fails. THIS UNIT IS EXPECTED TO BE RED: `scripts/desk-clickable-allowlist.json`
- * is seeded EMPTY, so today's run fails by design -- the failure count IS the
- * deliverable. So that CI is not red before UI1b has done the conversion, the
- * CI step sets `GUARD_BASELINE_ONLY=1`, which prints exactly the same report
- * and exits 0. THAT SWITCH IS TEMPORARY: the last step of UI1b deletes it (and
- * the comment that sets it) and lets the walk fail the build for real.
+ * fails. UI1b's first step shipped it behind a temporary `GUARD_BASELINE_ONLY`
+ * switch, because on that day's build most of the 463 were still unconverted
+ * and the failure count WAS the deliverable; the last step of UI1b (this one)
+ * deleted the switch, so a failing control now fails the build. The decision
+ * is `guardExitCode` in scripts/lib/clickable-guard.mjs, where a unit test
+ * drives it. `GUARD_REPORT_ONLY=1` is a LOCAL-ONLY developer escape hatch,
+ * default off and never set in CI.
  *
  * NO MODEL IS REACHED: the provider ladder is pointed at an address this walk
  * proves is dead before it boots, `ANTHROPIC_API_KEY` is cleared, and both
@@ -71,8 +72,8 @@
  *
  *   node scripts/desk-clickable-guard-walk.mjs
  *
- * Knobs: GUARD_OUT_DIR (default <repo>/tmp-guard), GUARD_BASELINE_ONLY=1
- *        (report and exit 0 -- CI's temporary switch).
+ * Knobs: GUARD_OUT_DIR (default <repo>/tmp-guard), GUARD_REPORT_ONLY=1
+ *        (report and exit 0 -- LOCAL only, never set in CI).
  */
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
@@ -84,7 +85,9 @@ import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-ru
 import {
   DESK_THEMES,
   classifyControl,
+  closestMargins,
   exemptFailures,
+  guardExitCode,
   planVisits,
   staleAllowlistEntries,
   validateAllowlist,
@@ -109,8 +112,17 @@ const OUT_DIR = checkedOutputPath(
 /** The allowlist: `{route, name, reason}`. Seeded empty; see the file. */
 const ALLOWLIST_PATH = join(REPO, "scripts", "desk-clickable-allowlist.json");
 
-/** The temporary CI switch. The last step of UI1b removes it. */
-const BASELINE_ONLY = process.env.GUARD_BASELINE_ONLY === "1";
+/**
+ * The developer's LOCAL escape hatch: print the same report and exit 0.
+ *
+ * It defaults OFF, CI never sets it, and it is NOT the old CI switch:
+ * `GUARD_BASELINE_ONLY` existed so the build could stay green while UI1b's
+ * conversion ran, and the last step of UI1b deleted it. This one is for a
+ * developer looking at a report on a build they know is red. The exit decision
+ * itself is `guardExitCode` in scripts/lib/clickable-guard.mjs, where the unit
+ * tests drive it.
+ */
+const REPORT_ONLY = process.env.GUARD_REPORT_ONLY === "1";
 
 const stamp = Date.now();
 const email = `desk-guard-${stamp}@townreporter.test`;
@@ -780,6 +792,14 @@ function collectClickables() {
       disabled: el.disabled === true || el.getAttribute("aria-disabled") === "true",
       reasonBeside,
       height: Math.round(rect.height * 10) / 10,
+      /*
+        UI1b-6: the DECLARED floor, so the margin report can tell a control
+        PINNED at 44px (`min-height: 44px`, the desk's own rule, which cannot
+        drift) from one that happens to measure 44-45px because of its font
+        (which can -- CI is Linux headless with different fonts). Only the
+        second is a flake risk.
+      */
+      minHeight: parseFloat(style.minHeight) || 0,
       ownBackground: style.backgroundColor,
       ancestorBackgrounds: ancestors,
       pageBackground:
@@ -1034,6 +1054,7 @@ function buildReport({ routes, allowlistProblems, staleEntries }) {
       visits: facts.find((f) => f.visits)?.visits ?? 0,
     },
     kinds,
+    margins: closestMargins(seen),
     byKind,
     byTheme,
     byRoute,
@@ -1048,7 +1069,7 @@ function buildReport({ routes, allowlistProblems, staleEntries }) {
 
 function markdown(report) {
   const lines = [];
-  lines.push("# The clickable-controls baseline (unit UI1b, step 1)");
+  lines.push("# Nothing clickable is plain text, in both themes (unit UI1b)");
   lines.push("");
   lines.push(`Measured ${report.when} against the built desk at ${report.base}.`);
   lines.push("");
@@ -1067,6 +1088,36 @@ function markdown(report) {
   lines.push("## Failures by theme");
   lines.push("");
   for (const row of report.byTheme) lines.push(`- ${row.value}: ${row.count}`);
+  lines.push("");
+  /*
+    UI1b-6: THE CLOSEST MARGINS, printed on every run, green or red.
+    CI is headless Chromium on Linux with different fonts, so a control that
+    measures 44.0px here can measure 43.7 there. This is the list that says how
+    much room the passing controls actually have.
+  */
+  lines.push("## How close the passing controls are to the line");
+  lines.push("");
+  lines.push("| measure | margin | value | route | theme@width | control |");
+  lines.push("|---|---|---|---|---|---|");
+  for (const row of report.margins.heights) {
+    lines.push(
+      `| height | +${row.margin}px | ${row.height}px | ${row.route} | ${row.theme}@${row.viewport} | ` +
+        `${String(row.name).replace(/\|/g, "\\|")} |`,
+    );
+  }
+  for (const row of report.margins.contrasts) {
+    lines.push(
+      `| contrast | +${row.margin} | ${row.ratio}:1 | ${row.route} | ${row.theme}@${row.viewport} | ` +
+        `${String(row.name).replace(/\|/g, "\\|")} |`,
+    );
+  }
+  lines.push("");
+  lines.push(
+    report.margins.flakeRisks.length
+      ? `**${report.margins.flakeRisks.length} flake risk(s)**: within 1px of 44px or under 3.1:1. ` +
+          `Add headroom in the CSS -- an allowlist entry exempts the control instead of fixing it.`
+      : "No flake risks: nothing measured sits within 1px of 44px or under 3.1:1.",
+  );
   lines.push("");
   lines.push("## What each page drew");
   lines.push("");
@@ -1208,27 +1259,27 @@ async function main() {
 
     await browser.close();
 
-    if (remaining.length && !BASELINE_ONLY) {
+    const exitCode = guardExitCode({ failures: remaining.length, reportOnly: REPORT_ONLY });
+    if (exitCode !== 0) {
       console.error(
-        `\nthe walk is RED on purpose: ${remaining.length} clickable control(s) are plain text, ` +
-          `do not read as links, or are under 44px. This unit measured them; UI1b's next steps convert them.`,
+        `\n${remaining.length} clickable control(s) are plain text, do not read as links, or are ` +
+          `under 44px. Nothing clickable is plain text is the rule (design-system §6); fix the ` +
+          `control, or add a written exception to scripts/desk-clickable-allowlist.json.`,
       );
-      process.exit(1);
-    }
-    if (remaining.length) {
+    } else if (remaining.length) {
       console.log(
-        `\nGUARD_BASELINE_ONLY=1 (TEMPORARY, removed by UI1b's last step): ` +
+        `\nGUARD_REPORT_ONLY=1 (local only, never set in CI): ` +
           `${remaining.length} failure(s) reported, exit 0.`,
       );
     }
     console.log(
       JSON.stringify(
-        { ok: true, baselineOnly: BASELINE_ONLY, steps: done.length, facts, totals: report.totals, kinds: report.kinds },
+        { ok: true, reportOnly: REPORT_ONLY, steps: done.length, facts, totals: report.totals, kinds: report.kinds },
         null,
         2,
       ),
     );
-    process.exit(0);
+    process.exit(exitCode);
   } catch (err) {
     await dump(err);
   }

@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth/client";
 import { leaveEditor } from "@/lib/news/claim";
 import { listInvestigations } from "@/lib/news/dark";
-import { createEditorCopy, openLeads, pileForStatus } from "@/lib/news/desk-copy";
+import { chipLabel, createEditorCopy, openLeads, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
@@ -1124,7 +1124,9 @@ export function Field({
   const wording = (
     <>
       {label}
-      {chip ? <span className="chip dnp">{chip}</span> : null}
+      {/* UI1b-6: "does not print" reached the editor in lower case once the
+          `.chip` transform went; the chip is sentence case like every other. */}
+      {chip ? <span className="chip dnp">{sentenceCase(chip)}</span> : null}
     </>
   );
   const tail = hint ? <p className="meta">{hint}</p> : null;
@@ -1191,24 +1193,22 @@ export function Score({ v }: { v: number }) {
   );
 }
 
-const CHIP_LABELS: Record<string, string> = {
-  aside: "set aside",
-  closed: "closed",
-  exhausted: "exhausted",
-};
-
 /**
  * Every real status renders its own word, styled -- nothing falls through to
  * the unstyled default look. "held", "aside", "closed", and "exhausted" used
  * to collapse onto one shared "set aside" label (or, for "held", no styled
  * chip at all besides the generic `.chip` gray), which read as the same
  * status even though an editor treats them differently: held is coming back,
- * aside/closed/exhausted are done. The visible word is uppercased by the
- * `.chip` CSS rule (text-transform), so "held" already renders HELD.
+ * aside/closed/exhausted are done.
+ *
+ * UI1b-6: the word comes from `chipLabel` (src/lib/news/desk-copy.ts), which
+ * gives it a capital first letter. The `.chip` CSS transform that used to do
+ * that is gone (UI1b-5, "sentence case, no ALL CAPS"), so "held" rendered as
+ * plain "held" -- see the note on `sentenceCase` for why this is a render-site
+ * helper rather than a `::first-letter` rule.
  */
 export function Chip({ s }: { s: string }) {
-  const label = CHIP_LABELS[s] ?? s;
-  return <span className={"chip st-" + s}>{label}</span>;
+  return <span className={"chip st-" + s}>{chipLabel(s)}</span>;
 }
 
 export function SecHead({

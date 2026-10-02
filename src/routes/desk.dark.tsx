@@ -55,6 +55,7 @@ import {
   redditFeedStatusLabel,
   redditPostStateLabel,
   redditResultHeadline,
+  sentenceCase,
   stalledRunCopy,
   worthItemOnDeskLine,
   worthItemOnDeskReason,
@@ -1380,7 +1381,10 @@ function RedditTipRows({
                 {p.coverage === "partial" ? " · some comments were unavailable" : ""}
               </span>
             </div>
-            <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
+            {/* UI1b-6: the label function's words are stored lower case
+                ("filed", "already known", "below the line"); the chip is
+                sentence case, and the words are given their capital here. */}
+            <span className={"chip st-" + p.state}>{sentenceCase(redditPostStateLabel(p.state))}</span>
             {canFile ? (
               <InkButton
                 tone="quiet"

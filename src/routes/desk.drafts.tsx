@@ -7,6 +7,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
+import { sentenceCase } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
   deskDraftElapsed,
@@ -237,7 +238,11 @@ function DraftsPage() {
             return (
               <div className="drafts-row" key={row.id}>
                 <span className="drafts-state">
-                  <span className={"chip " + stateTone(state)}>{state.label}</span>
+                  {/* UI1b-6: sentence case, wherever the word came from. Most
+                      of `deskDraftState`'s labels are already capitalised; a
+                      running row's is the worker's own stage line, which is
+                      not. `sentenceCase` leaves a capital or a marker alone. */}
+                  <span className={"chip " + stateTone(state)}>{sentenceCase(state.label)}</span>
                 </span>
                 <div className="drafts-main">
                   {/* The origin drops out rather than leaving a hanging

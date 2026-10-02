@@ -2476,6 +2476,58 @@ export function redditPostStateLabel(state: "filed" | "already-known" | "below-l
 }
 
 /*
+  ---------------------------------------------------------------------------
+  UI1b-6: SENTENCE CASE, DONE RIGHT
+  ---------------------------------------------------------------------------
+
+  UI1b-5 removed `text-transform: uppercase` from `.desk-ltr .chip`
+  (src/styles.css) on the designer's rule -- "Chips: sentence case, no ALL
+  CAPS" -- and that was right, but it left the OTHER half undone. The words the
+  desk STORES for a lead's status are lower case ("new", "held", "killed",
+  "could not check"), and the CSS transform had been doing the capitalising.
+  With the transform gone, "NEW" became "new": not sentence case, just small.
+  Sentence case means A CAPITAL FIRST LETTER.
+
+  WHY A HELPER AND NOT `::first-letter`. A chip is a `<span>`, and `::first-
+  letter` applies only to a BLOCK CONTAINER: it does nothing to a plain inline
+  span, nothing to `.f-lab .chip` (inline-flex), and works on `.chip.dup`,
+  `.chip.maybe-same` and `.sig-card .chip` (inline-block) -- the same class
+  behaving three ways depending on which screen it is on. Making every chip
+  `inline-block` to rescue the pseudo-element would re-flow chips that sit
+  inside sentences today. So the capital is applied where the desk RENDERS the
+  word, through this one function.
+
+  IT ONLY TOUCHES THE FIRST CHARACTER, and only when that character is a
+  letter: "new" -> "New", "could not check" -> "Could not check", and a chip
+  that already opens with a mark or a capital -- "✓ Evidence checked",
+  "! 3 names to review", "Black Desk · speculative" -- comes back untouched.
+  That is what makes it safe to put on every chip rather than on a list of
+  chips somebody has to remember to extend.
+*/
+export function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * The status words `Chip` draws (src/components/desk-chrome.tsx). These four
+ * used to collapse onto one shared "set aside" or fall through to the raw
+ * stored value; each now names its own state.
+ */
+const CHIP_LABELS: Record<string, string> = {
+  aside: "set aside",
+  closed: "closed",
+  exhausted: "exhausted",
+};
+
+/**
+ * The visible word on a status chip: the desk's own word where it has one, the
+ * stored status otherwise, always in sentence case.
+ */
+export function chipLabel(status: string): string {
+  return sentenceCase(CHIP_LABELS[status] ?? status);
+}
+
+/*
   Unit CU (0.6.81): `followUpDueLabel` and `followUpIsOverdue` stood here --
   "due Tue Sep 9" / "due today" / "Overdue 3 days", the due-date line the
   Follow-ups object drew on the rail, on /desk/follow-ups and on the story

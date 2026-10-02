@@ -79,13 +79,20 @@ describe("C1: date rendering follows the configured timezone", () => {
   it("paper.ts helpers default to PAPER.timezone with no override", () => {
     assert.equal(formatDate(DENVER_WED_UTC_THU), "Wednesday, August 26, 2026");
     assert.equal(formatShortDate(DENVER_WED_UTC_THU), "Aug 26, 2026");
-    assert.match(formatDateTime(DENVER_WED_UTC_THU), /Aug 26, 2026, 8:10 PM/);
+    /*
+      UI1b-6: the desk's list date-time is "Aug. 26, 8:10 p.m." -- AP month
+      abbreviation, the desk's clock face, and no year on a day in the current
+      year. This pin used to encode "Aug 26, 2026, 8:10 PM". `formatDate` and
+      `formatShortDate` above are unchanged on purpose: those draw the public
+      paper, where an old story's year belongs on the page.
+    */
+    assert.match(formatDateTime(DENVER_WED_UTC_THU), /Aug\. 26(, 2026)?, 8:10 p\.m\./);
   });
 
   it("a configured timezone changes the rendered date", () => {
     assert.equal(formatDate(DENVER_WED_UTC_THU, "UTC"), "Thursday, August 27, 2026");
     assert.equal(formatShortDate(DENVER_WED_UTC_THU, "UTC"), "Aug 27, 2026");
-    assert.match(formatDateTime(DENVER_WED_UTC_THU, "UTC"), /Aug 27, 2026, 2:10 AM/);
+    assert.match(formatDateTime(DENVER_WED_UTC_THU, "UTC"), /Aug\. 27(, 2026)?, 2:10 a\.m\./);
   });
 
   it("nthWeekday defaults to PAPER.timezone and moves under an explicit zone", () => {

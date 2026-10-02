@@ -279,8 +279,9 @@ export function formatDayStamp(iso: string | Date | null | undefined, timeZone: 
   queues, so the face is fixed once, here, rather than screen by screen.
 
   `formatClockTime` is the one place that face is written for a real instant.
-  `formatDateTime` is its date plus that clock, unchanged in shape --
-  "Aug 26, 2026, 8:10 p.m." where it used to say "8:10 PM".
+  `formatDateTime` is its date plus that clock -- "Aug. 26, 8:10 p.m." where it
+  used to say "8:10 PM", and "Sept. 28, 2025, 8:10 p.m." for a day that is not
+  in the current year. See `formatListDate` below for the date half.
 */
 export function formatClockTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
@@ -297,16 +298,73 @@ export function formatClockTime(iso: string | Date | null | undefined, timeZone:
   }`;
 }
 
-export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
-  const d = asDate(iso);
-  if (!d) return "";
-  const date = d.toLocaleDateString("en-US", {
-    month: "short",
+/*
+  UI1b-6. THE DESIGNER'S LIST-DATE STYLE: "Oct. 2, 6:43 a.m.", never ISO.
+
+  Three things were wrong with the list/row date-time the desk drew:
+
+    1. THE MONTH. `en-US` "short" gives "Mar", "Jun", "Sep" -- AP style
+       abbreviates Jan., Feb., Aug., Sept., Oct., Nov., Dec. and SPELLS OUT
+       March, April, May, June, July (they are short enough to write in full).
+       The desk's own dateline already reads "Sat, Sept. 26"; a row that said
+       "Sep 26" beside it was the same day spelled two ways.
+    2. THE YEAR. Every row carried it, all year long -- "Oct 2, 2026" on a
+       draft saved this morning. The year is only worth the space when it is
+       not the current one, and the reader is reading the paper's own clock,
+       so the comparison is made in the paper's timezone.
+    3. THE MERIDIEM is already the desk's "a.m." / "p.m." (UI1b-5).
+
+  ONE FORMATTER, so every screen moves together: Drafts, Opinion, Sources,
+  the scan lines on Today, Dark Desk's run history, the watch list, Evidence.
+  The DATE-ONLY helpers (`formatShortDate`, `formatDate`) are deliberately NOT
+  touched: they draw the public paper (a story's dateline, the corrections log,
+  the front page, a captured record's provenance line), where a reader checking
+  an old story needs its year in full.
+*/
+const AP_MONTHS = [
+  "Jan.",
+  "Feb.",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "Aug.",
+  "Sept.",
+  "Oct.",
+  "Nov.",
+  "Dec.",
+] as const;
+
+/** The paper-calendar parts of an instant, in the paper's own timezone. */
+function calendarParts(d: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
     day: "numeric",
     year: "numeric",
     timeZone,
-  });
-  return `${date}, ${formatClockTime(d, timeZone)}`;
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return { month: Number(part("month")), day: Number(part("day")), year: Number(part("year")) };
+}
+
+/**
+ * The desk's date face for a list: "Oct. 2", or "Sept. 28, 2025" when the day
+ * is not in the current year (measured on the paper's clock, not the browser's).
+ */
+export function formatListDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  const { month, day, year } = calendarParts(d, timeZone);
+  const monthName = AP_MONTHS[month - 1] ?? "";
+  const thisYear = calendarParts(new Date(), timeZone).year;
+  return year === thisYear ? `${monthName} ${day}` : `${monthName} ${day}, ${year}`;
+}
+
+export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  return `${formatListDate(d, timeZone)}, ${formatClockTime(d, timeZone)}`;
 }
 
 export function formatAge(iso: string | Date | null | undefined) {

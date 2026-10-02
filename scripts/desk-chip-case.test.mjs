@@ -172,3 +172,85 @@ test("Today's Ready to edit stage is sentence case", () => {
     '"Ready to edit" is shouted at the editor again',
   );
 });
+
+/*
+  ---------------------------------------------------------------------------
+  UI1b-6: SENTENCE CASE MEANS A CAPITAL FIRST LETTER
+  ---------------------------------------------------------------------------
+
+  UI1b-5 took `text-transform: uppercase` off `.desk-ltr .chip`, which was
+  right -- and left the words the desk STORES lower case ("new", "held",
+  "killed", "could not check") rendering exactly that way, because the CSS
+  transform had been doing the capitalising. "NEW" had become "new". The last
+  three tests below pin the fix: the words are capitalised where the desk
+  RENDERS them, through one helper, and the test above this block (every `st-`
+  class in both stylesheets) walks EVERY chip class the desk draws.
+*/
+const { chipLabel, sentenceCase } = await import("../src/lib/news/desk-copy.ts");
+
+const SOURCES = {
+  "desk-chrome.tsx": readFileSync(join(ROOT, "src", "components", "desk-chrome.tsx"), "utf8"),
+  "desk.dark.tsx": readFileSync(join(ROOT, "src", "routes", "desk.dark.tsx"), "utf8"),
+  "desk.drafts.tsx": readFileSync(join(ROOT, "src", "routes", "desk.drafts.tsx"), "utf8"),
+};
+
+test("every `st-` chip class the stylesheets draw renders a capitalised word", () => {
+  /*
+    The classes come from the stylesheets themselves, the same way the chip
+    classes above do: add a chip for a new status and its word is covered here
+    without anybody remembering to extend a list. `chipLabel` is what
+    `Chip()` draws.
+  */
+  const states = new Set();
+  for (const [file, css] of SHEETS) {
+    for (const rule of parseRules(css)) {
+      for (const m of rule.selector.matchAll(/\.st-([a-z][\w-]*)/g)) states.add(m[1]);
+    }
+    assert.ok(states.size > 0 || file === "desk-astra.css", `${file} declares no .st- chip states`);
+  }
+  assert.ok(states.size >= 8, `only ${states.size} chip states found -- the walk is not finding them`);
+  const shouted = [...states].filter((s) => /^[a-z]/.test(chipLabel(s)));
+  assert.deepEqual(shouted, [], "these chips render a lower-case first letter");
+});
+
+test("the capital is applied where the desk renders the words, not in the data", () => {
+  assert.match(
+    SOURCES["desk-chrome.tsx"],
+    /className=\{"chip st-" \+ s\}>\{chipLabel\(s\)\}/,
+    "Chip() stopped drawing chipLabel(s) -- statuses would read 'held' again",
+  );
+  assert.match(
+    SOURCES["desk-chrome.tsx"],
+    /className="chip dnp">\{sentenceCase\(chip\)\}/,
+    "the 'does not print' chip stopped being sentence-cased",
+  );
+  assert.match(
+    SOURCES["desk.dark.tsx"],
+    /\{sentenceCase\(redditPostStateLabel\(p\.state\)\)\}/,
+    "the reddit post chip stopped being sentence-cased",
+  );
+  assert.match(
+    SOURCES["desk.drafts.tsx"],
+    /stateTone\(state\)\}>\{sentenceCase\(state\.label\)\}/,
+    "the Drafts state chip stopped being sentence-cased",
+  );
+});
+
+test("sentenceCase capitalises the first word and leaves everything else alone", () => {
+  assert.equal(sentenceCase("new"), "New");
+  assert.equal(sentenceCase("held"), "Held");
+  assert.equal(sentenceCase("could not check"), "Could not check");
+  assert.equal(sentenceCase("set aside"), "Set aside");
+  // Already-correct chips must come back untouched: the helper is applied to
+  // EVERY chip, so a second capital anywhere would be a bug of its own.
+  assert.equal(sentenceCase("Ready to check"), "Ready to check");
+  assert.equal(sentenceCase("Evidence checked"), "Evidence checked");
+  assert.equal(sentenceCase("✓ Evidence checked"), "✓ Evidence checked");
+  assert.equal(sentenceCase("! 3 names to review"), "! 3 names to review");
+  assert.equal(sentenceCase("Black Desk · speculative, ≤50%"), "Black Desk · speculative, ≤50%");
+  assert.equal(sentenceCase(""), "");
+  // The stored status is not touched: the paper's own data stays as it was.
+  assert.equal(chipLabel("new"), "New");
+  assert.equal(chipLabel("exhausted"), "Exhausted");
+  assert.equal(chipLabel("published"), "Published");
+});

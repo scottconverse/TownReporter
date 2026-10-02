@@ -106,8 +106,19 @@ const deskChromeStub = inlineModule(`
   export function Score({ v }) {
     return createElement("span", { className: "score" }, String(v));
   }
+  /*
+    UI1b-6: the real Chip draws chipLabel(s) -- the capital the old
+    ".chip { text-transform: uppercase }" rule used to supply -- so the stub
+    does too. A stub that rendered the raw status would keep passing while the
+    desk shipped "held" instead of "Held".
+  */
   export function Chip({ s }) {
-    return createElement("span", { className: "chip st-" + s }, s);
+    const label = { aside: "set aside", closed: "closed", exhausted: "exhausted" }[s] ?? s;
+    return createElement(
+      "span",
+      { className: "chip st-" + s },
+      label.charAt(0).toUpperCase() + label.slice(1),
+    );
   }
   export function leadOrigin() {
     return "scan";
@@ -716,6 +727,17 @@ const deskCopyStub = inlineModule(`
   export function openLeads(leads) { return leads ?? []; }
   /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
   export function pileForStatus() { return "desk"; }
+  /*
+    UI1b-6: desk-chrome.tsx now draws its status chips through desk-copy's
+    chipLabel -- the capital the old ".chip { text-transform: uppercase }"
+    rule used to supply. The REAL functions are inlined here rather than
+    stubbed to a constant: the Chip stub below draws through them, so a
+    stand-in that returned anything else would make this file describe itself
+    instead of the desk.
+  */
+  export function sentenceCase(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+  const CHIP_LABELS = { aside: "set aside", closed: "closed", exhausted: "exhausted" };
+  export function chipLabel(status) { return sentenceCase(CHIP_LABELS[status] ?? status); }
 `);
 // Chip() does not touch the appearance context, but desk-chrome.tsx imports it
 // (Light/Dark and Normal/Large moved there -- src/lib/appearance-context.ts),
@@ -821,21 +843,28 @@ test("a genuinely manual zero-score lead remains labelled as editor-filed", () =
   assert.equal(leadOrigin({ scan_run_id: null, newsworthiness: 0 }), "filed by you");
 });
 
-test("a held lead renders the HELD chip with the st-held class", () => {
+/*
+  UI1b-6: THIS PIN WAS UPDATED. It used to assert `>held<`, with a note that
+  the capital came from the `.chip` CSS uppercase transform rather than the
+  markup. UI1b-5 removed that transform ("Chips: sentence case, no ALL CAPS"),
+  so the word is now capitalised where the desk renders it -- `chipLabel`, the
+  function this stub inlines -- and the visible word is "Held". The chip is
+  sentence case, not shouted and not lower case.
+*/
+test("a held lead renders the Held chip with the st-held class", () => {
   const html = renderToStaticMarkup(createElement(Chip, { s: "held" }));
   assert.match(html, /class="chip st-held"/);
-  // The visible word comes from the .chip CSS uppercase transform, not the
-  // markup itself, so the rendered text is lowercase "held" -- assert that
-  // rather than "HELD", and rely on the CSS text-transform (unit-tested by
-  // styles.css's own uppercase declaration on .chip) for the capitalization.
-  assert.match(html, />held</);
+  assert.match(html, />Held</, "the chip word lost its capital first letter");
+  assert.doesNotMatch(html, />HELD</, "chips are not ALL CAPS (README §7)");
 });
 
 test("set-aside, closed, and exhausted leads each render their own labelled, styled chip -- none falls through to the unstyled default", () => {
+  /* UI1b-6: the labels were `set aside` / `closed` / `exhausted` here; the
+     desk draws them in sentence case now, so the pins carry the capital. */
   const cases = [
-    { s: "aside", cls: "st-aside", label: "set aside" },
-    { s: "closed", cls: "st-closed", label: "closed" },
-    { s: "exhausted", cls: "st-exhausted", label: "exhausted" },
+    { s: "aside", cls: "st-aside", label: "Set aside" },
+    { s: "closed", cls: "st-closed", label: "Closed" },
+    { s: "exhausted", cls: "st-exhausted", label: "Exhausted" },
   ];
   for (const { s, cls, label } of cases) {
     const html = renderToStaticMarkup(createElement(Chip, { s }));

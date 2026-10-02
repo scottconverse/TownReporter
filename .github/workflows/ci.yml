@@ -1990,22 +1990,22 @@ jobs:
       # still shows its edge and its reason. The arithmetic is in
       # scripts/lib/clickable-guard.mjs and is unit-tested.
       #
-      # GUARD_BASELINE_ONLY=1 IS TEMPORARY. This unit adds the guard and the
-      # measured baseline and converts nothing, so on today's build the walk is
-      # RED by design -- the failure count IS the deliverable. The switch makes
-      # it print the same report and exit 0 so CI stays green while the
-      # conversion is done; THE LAST STEP OF UI1b DELETES THIS ENV LINE and
-      # lets the walk fail the build for real. It runs inside this job rather
-      # than a new one because branch protection pins the current job set, and
-      # the job already installs Chromium and builds the server.
+      # ENFORCING. UI1b's last step removed the temporary
+      # `GUARD_BASELINE_ONLY=1` switch, so this step now FAILS THE BUILD when
+      # any clickable control is plain text, unreadable as a link, or under
+      # 44px. The one written exception is the header wordmark, in
+      # scripts/desk-clickable-allowlist.json with its reason; anything else
+      # that fails is a defect, not a baseline.
+      #
+      # It runs inside this job rather than a new one because branch protection
+      # pins the current job set, and the job already installs Chromium and
+      # builds the server.
       #
       # Its own process, its own port (3595 -- 3592 is desk-narrow-width's
       # dead-model port and no two integration files may declare the same one),
       # its own desk over in-memory PGlite, and no model: the provider ladder
       # points at a port the walk proves is dead before it boots. ~3 min.
-      - name: Nothing clickable is plain text (measured baseline, red by design)
+      - name: Nothing clickable is plain text, in both themes
         env:
           BETTER_AUTH_SECRET: ci-desk-clickable-guard-secret-not-for-production
-          # TEMPORARY -- removed by UI1b's last step. See the note above.
-          GUARD_BASELINE_ONLY: "1"
         run: node scripts/desk-clickable-guard-walk.mjs
