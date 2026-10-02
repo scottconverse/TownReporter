@@ -59,6 +59,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
+import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { deskErrorReason, deskToast } from "@/components/desk-toast";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
@@ -1586,7 +1587,7 @@ function QueuePage() {
               onChange={(e) => setWhy(e.target.value)}
               required
               minLength={8}
-              placeholder={`Why this is news in ${PAPER.city} today`}
+              placeholder={newsInTownPlaceholder(PAPER.city)}
             />
           </Field>
           <Field label="Topic">

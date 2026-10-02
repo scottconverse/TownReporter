@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { PaperShell } from "@/components/paper-chrome";
 import { usePaper } from "@/lib/paper-context-state";
 import { DEFAULT_PAPER_IDENTITY } from "@/lib/paper-identity";
+import { aboutFollowSentence, civicReportingLine } from "@/lib/paper-phrases";
 
 export const Route = createFileRoute("/about")({
   /*
@@ -24,7 +25,7 @@ function About() {
       <div className="infopage">
         <h1 className="enter-fade font-display text-4xl font-semibold">About this paper</h1>
         <p className="mt-3 text-[11px] tracking-[0.16em] text-rust uppercase">
-          Independent civic reporting for {PAPER.city}
+          {civicReportingLine(PAPER.city)}
         </p>
         <div className="stagger-in mt-6 max-w-2xl space-y-4 text-lg leading-7 text-ink-2">
           <p>
@@ -32,8 +33,7 @@ function About() {
             {PAPER.location}. The public record is only the beginning.
           </p>
           <p>
-            We follow {PAPER.city}’s meetings, money, contracts and public records — then keep
-            digging when something changes, disappears or doesn’t add up. A human editor decides
+            {aboutFollowSentence(PAPER.city)} A human editor decides
             what is published for reported stories. The owner may separately activate automatic
             roundups of approved library, recreation, community-event, registration,
             waste-collection and public-meeting notices; arbitrary prose, investigations, disputes

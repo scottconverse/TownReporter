@@ -20,6 +20,7 @@ import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
 import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
+import { topicReportingSentence } from "@/lib/paper-phrases";
 
 /**
  * How many stories "Latest stories" prints.
@@ -337,7 +338,7 @@ function Home() {
               {search.view === "saved"
                 ? "Saved on this browser, no account needed. Only stories still published appear here."
                 : search.topic
-                  ? `Reporting on ${label?.toLowerCase()} in ${paper.city}.`
+                  ? topicReportingSentence(label?.toLowerCase() ?? "", paper.city)
                   : "Search by topic, name, place or a detail you remember."}
             </p>
           </div>
