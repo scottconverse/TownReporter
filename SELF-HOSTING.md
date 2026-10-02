@@ -50,6 +50,82 @@ restart.
 
 ---
 
+## Trying a fresh install without touching your real one
+
+Everything below runs against a **copy** of the checkout and a **throwaway**
+database. Do not try it in the live checkout: the install owns files and a
+database, and both are chosen by variables you are about to change.
+
+**1. Work from a copy with no `.env`.** Clone or copy the repository somewhere
+else and make sure the copy has **no `.env` file at all**. `npm run dev`,
+`npm run build` and `npm start` all route through
+`scripts/with-app-env.mjs`, which merges `<working directory>/.env` into the
+environment, and Vite loads `.env` from its root at build time — a copy
+without one inherits nothing from the live paper's **file**, including its
+database URL and its editor address. (Variables your shell already exports are
+a separate matter; see 1b.)
+
+**1b. Start from a clean shell.** Deleting `.env` does not clear what your
+shell already exports: `scripts/with-app-env.mjs` lets the process
+environment win over the `.env` file, and Vite reads inherited `VITE_*`
+values at build time, so a terminal that carries the live paper's variables
+(its `DATABASE_URL`, `VITE_TOWNREPORTER_EDITOR_EMAIL`, model keys, `PROMOTE_*`,
+`TEXTFLOWKIT_CLI_PATH`) would run the trial with them. Open a **new** terminal
+that has never loaded them, and check before you build: on Windows,
+`Get-ChildItem Env: | Where-Object Name -match '^(VITE_|DATABASE_URL|BETTER_AUTH|TOWNREPORTER_|PROMOTE_|TEXTFLOWKIT|LLM_|OLLAMA|OPENAI|ANTHROPIC|HOST$|PORT$)'`;
+on macOS and Linux, `env | grep -E '^(VITE_|DATABASE_URL|BETTER_AUTH|TOWNREPORTER_|PROMOTE_|TEXTFLOWKIT|LLM_|OLLAMA|OPENAI|ANTHROPIC|HOST=|PORT=)'`.
+Anything it lists that you did not mean to give the trial must be unset (or
+start the trial under `env -i` with only the variables below).
+
+**2. Create an empty database** (any Postgres, any port). Do not point at the
+live one; the build's last step applies migrations to whatever `DATABASE_URL`
+names.
+
+**3. Set these three variables for the trial**, exported in the shell that
+runs the commands below:
+
+| Variable | What it does |
+| --- | --- |
+| `DATABASE_URL` | the throwaway database, e.g. `postgres://user:pass@127.0.0.1:55432/townreporter_trial` |
+| `BETTER_AUTH_SECRET` | any long random string — sign-in cookies are signed with it |
+| `TOWNREPORTER_DATA_ROOT` | an empty folder this trial owns — the setup code, meeting captures and stats reports are written under it |
+
+Leave `VITE_TOWNREPORTER_EDITOR_EMAIL` **unset** — it is baked into the page
+code at build time, and a fresh-install trial should see the blank state, not
+your real address.
+
+**4. Build and start.**
+
+```
+npm ci
+npm run build
+PORT=8123 node .output/server/index.mjs
+```
+
+`TOWNREPORTER_DATA_ROOT` is read at run time (and by the build's migration
+step) from the environment, not from a `.env` you wrote by hand: exporting it
+in the shell is enough.
+
+**5. The first-owner setup code** is printed once on the console at first boot
+and written to `<TOWNREPORTER_DATA_ROOT>\logs\SETUP-CODE.txt` (Windows) or
+`<TOWNREPORTER_DATA_ROOT>/logs/SETUP-CODE.txt`. It is generated fresh for this
+install, stored only as a hash, and deleted the moment it is used. Sign in,
+type it, and the owner is seated.
+
+**What the app reads from its working directory**, plainly:
+
+- the `.env` file, through `scripts/with-app-env.mjs` at run time and through
+  Vite at build time;
+- the `migrations/`, `public/` and `resources/` folders it ships with;
+- **the data root, when `TOWNREPORTER_DATA_ROOT` is not set.** The setup code
+  and the stats reports then go to `<working directory>/.townreporter-data`;
+  a meeting capture goes under the working directory itself. Nothing about
+  either path depends on `HOME`, on `%LOCALAPPDATA%` or on the user account —
+  redirecting `HOME` does not move them. That fallback is exactly why a trial
+  run from a checkout is not clean unless you set the variable.
+
+---
+
 ## Seven scheduled tasks
 
 | Task                          | When        | Does                                                                                                                                |
@@ -379,6 +455,15 @@ addresses as routing rules.
 
 If you ever want to _send_ from `tips@`, the SPF record must be widened to
 permit the sending provider, or your own mail will be rejected.
+
+**The address readers are told to write to is a separate setting.**
+`VITE_TOWNREPORTER_EDITOR_EMAIL` (see `.env.example`) is copied into the
+page's JavaScript by Vite at build time, so every reader's browser receives
+it — it is a public contact address, never a private one. Prefer typing the
+address into **Server > Paper setup**: that is stored in the database, is used
+in preference to the build-time value, and is the only one of the two that
+can be changed without rebuilding. A paper that has not completed first-run
+setup shows readers no address at all.
 
 ---
 
