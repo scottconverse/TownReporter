@@ -115,7 +115,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       const data = DATA[queryKey[0]];
       // A query that exhausted its retries: not pending, no data, in error.
       const failed = queryKey[0] === "first-run-setup" && data === undefined;
-      return { data, isPending: false, isLoading: false, isError: failed, state: { data } };
+      return { data, isPending: false, isLoading: false, isError: failed, isFetchedAfterMount: true, state: { data } };
     }
     export function useMutation() {
       return { mutate() {}, mutateAsync: async () => {}, isPending: false, error: null };

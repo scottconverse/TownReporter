@@ -93,10 +93,16 @@ describe("the story page draws every publish answer at the bar", () => {
     /* The refusals, and the refresh that goes with each: the answer is written
        to the BAR's state (not to `msg`, which is the body Notice the owner
        never saw), and the lead the bar reads is refetched so the blocker list
-       stops saying "Nothing blocks Publish". */
+       stops saying "Nothing blocks Publish".
+
+       PUB2: the refresh is now the `refresh(...)` helper (or a bare `void
+       qc.invalidateQueries`) rather than an awaited call, and `refuse` is no
+       longer async -- awaiting it was what kept the bar on "Publishing…"
+       until the refetch returned. The property is unchanged: a refusal writes
+       the bar's state AND refreshes the lead query. */
     assert.match(
       source,
-      /const refuse = async \(text: string\) => \{[\s\S]{0,160}?setPublishRefusal\(text\);[\s\S]{0,160}?queryKey: \["lead", id\]/,
+      /const refuse = \(text: string\) => \{[\s\S]{0,160}?setPublishRefusal\(text\);[\s\S]{0,160}?refresh\(\["lead", id\]\)/,
       "the refusal writes the bar's state and refreshes the lead query",
     );
     assert.match(source, /refuse\(NO_ANSWER\)/, "the desk not answering is a refusal to report");

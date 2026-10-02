@@ -169,14 +169,34 @@ export function healthRows(health: OpsHealth): OpsRow[] {
   ];
 }
 
-/** Paper setup: the paper's own identity, as the reader sees it. */
-export function paperSetupRows(config: PaperConfig, sections: SectionConfig): OpsRow[] {
+/**
+ * Paper setup: the paper's own identity, as the reader sees it.
+ *
+ * `needsSetup` is the first-run answer (`firstRunSetupState`, which is the NOT
+ * of the `onboarded` flag and nothing else). On an install nobody has set up,
+ * `config` is the shipped fallback -- "Longmont, Colorado" and the build-time
+ * editor address -- and printing it here showed a new owner somebody else's
+ * town and inbox as if they were their own paper's (the auditor's finding on
+ * main 8b9b5fca). So those three rows say Not set until setup is done. It is
+ * deliberately NOT derived from whether the name or city is filled: the live
+ * paper is onboarded with an empty name, city and state, which merge with the
+ * shipped values, and it must read exactly as before.
+ */
+export function paperSetupRows(
+  config: PaperConfig,
+  sections: SectionConfig,
+  needsSetup = false,
+): OpsRow[] {
   const town = [config.city, config.state].map((part) => part?.trim()).filter(Boolean).join(", ");
   const visible = sections.sections.filter((section) => section.visible).length;
   return [
-    { label: "Name", value: config.name.trim() || NOT_SET, tone: "plain" },
-    { label: "Town", value: town || NOT_SET, tone: "plain" },
-    { label: "Editor email", value: config.editorEmail?.trim() || NOT_SET, tone: "plain" },
+    { label: "Name", value: needsSetup ? NOT_SET : config.name.trim() || NOT_SET, tone: "plain" },
+    { label: "Town", value: needsSetup ? NOT_SET : town || NOT_SET, tone: "plain" },
+    {
+      label: "Editor email",
+      value: needsSetup ? NOT_SET : config.editorEmail?.trim() || NOT_SET,
+      tone: "plain",
+    },
     { label: "Sections", value: `${visible} visible`, tone: "plain" },
   ];
 }

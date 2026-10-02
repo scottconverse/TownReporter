@@ -246,6 +246,46 @@ describe("Server card rows (CX2)", () => {
     assert.equal(value(rows, "Sections"), "2 visible");
   });
 
+  it("Paper setup on an install nobody has set up shows no Longmont and no address (F4)", () => {
+    // The config an un-onboarded desk reads falls back to the shipped Longmont
+    // constants and the build-time editor address; the card must not print them
+    // as if they were this paper's own.
+    const rows = paperSetupRows(
+      {
+        name: "TownReporter",
+        city: "Longmont",
+        state: "Colorado",
+        editorEmail: "townreporterlongmont@gmail.com",
+      } as never,
+      { revision: 1, sections: [{ visible: true }, { visible: true }] } as never,
+      true,
+    );
+    assert.equal(value(rows, "Name"), NOT_SET);
+    assert.equal(value(rows, "Town"), NOT_SET);
+    assert.equal(value(rows, "Editor email"), NOT_SET);
+    assert.equal(value(rows, "Sections"), "2 visible");
+    assert.doesNotMatch(JSON.stringify(rows), /Longmont|Colorado|townreporterlongmont/);
+  });
+
+  it("Paper setup on an onboarded paper (even with blank name, city, state: the live shape) is unchanged", () => {
+    // needsSetup is false for an onboarded paper. Live's row is onboarded with
+    // empty name/city/state, which merge with the shipped values: the card
+    // reads exactly as it did before F4.
+    const rows = paperSetupRows(
+      {
+        name: "TownReporter",
+        city: "Longmont",
+        state: "Colorado",
+        editorEmail: "townreporterlongmont@gmail.com",
+      } as never,
+      { revision: 1, sections: [{ visible: true }] } as never,
+      false,
+    );
+    assert.equal(value(rows, "Name"), "TownReporter");
+    assert.equal(value(rows, "Town"), "Longmont, Colorado");
+    assert.equal(value(rows, "Editor email"), "townreporterlongmont@gmail.com");
+  });
+
   it("Paper setup: a paper with no editor email says Not set, not a blank", () => {
     const rows = paperSetupRows(
       { name: "  ", city: "", state: "", editorEmail: null } as never,

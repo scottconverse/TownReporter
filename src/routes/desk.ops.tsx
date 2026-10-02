@@ -51,7 +51,9 @@ import { editorNamedOutlets } from "@/lib/news/named-outlets";
 import { editorSections } from "@/lib/news/sections";
 import { getDailyScanPolicy } from "@/lib/news/daily-scan";
 import { getMeetingSettingsFn } from "@/lib/news/meeting-settings";
-import { getPaperConfigForEditor } from "@/lib/news/paper-settings";
+import type { PaperConfig } from "@/lib/news/paper-settings";
+import type { SectionConfig } from "@/lib/news/section-types";
+import { firstRunSetupState, getPaperConfigForEditor } from "@/lib/news/paper-settings";
 import { getRoutineNoticeAutomation } from "@/lib/news/routine-notice-automation";
 import { getRoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
 import { getYouTubeKeyStateFn } from "@/lib/news/youtube-data-settings";
@@ -167,6 +169,26 @@ function pairBody<A, B>(
   return { state: "rows", rows: build(first.data, second.data) };
 }
 
+/**
+ * The Paper setup card. FAILS CLOSED: a missing or failed answer to "has this
+ * paper been set up" is not "it has been set up", because the config the card
+ * reads falls back to the shipped Longmont identity until setup is done. So the
+ * card waits for the answer (or says it could not check) instead of printing it.
+ */
+function paperSetupBody(
+  paper: UseQueryResult<PaperConfig>,
+  sections: UseQueryResult<SectionConfig>,
+  setupState: UseQueryResult<{ needsSetup: boolean }>,
+): CardBody {
+  if (setupState.isError) return { state: "error", message: messageOf(setupState.error) };
+  if (setupState.data === undefined && !paper.isError && !sections.isError) return { state: "loading" };
+  if (setupState.data === undefined) return pairBody(paper, sections, paperSetupRows);
+  const needsSetup = setupState.data.needsSetup === true;
+  return pairBody(paper, sections, (config, sectionConfig) =>
+    paperSetupRows(config, sectionConfig, needsSetup),
+  );
+}
+
 /** One read that answers `{ok:true, policy}` or `{ok:false, error}`. */
 function policyBody<T>(
   q: UseQueryResult<{ ok: true; policy: T } | { ok: false; code: string; error: string }>,
@@ -193,6 +215,18 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
   const paper = useQuery({
     queryKey: ["paper-config-for-setup"],
     queryFn: () => getPaperConfigForEditor(),
+    enabled: isOwner,
+  });
+  /*
+    F4: has the owner finished first-run setup? Same server answer and query key
+    as /desk/setup and the Server > Paper setup form, so one poll serves all
+    three. It decides whether the "Paper setup" card may print the identity the
+    desk would otherwise fall back to (Longmont, Colorado and the build-time
+    editor address) -- see `paperSetupRows`.
+  */
+  const setupState = useQuery({
+    queryKey: ["first-run-setup"],
+    queryFn: () => firstRunSetupState(),
     enabled: isOwner,
   });
   const sections = useQuery({ queryKey: ["editor-sections"], queryFn: () => editorSections() });
@@ -307,7 +341,7 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
   return {
     "writing-models": ladder,
     health: bodyOf(health, healthRows),
-    "paper-setup": pairBody(paper, sections, paperSetupRows),
+    "paper-setup": paperSetupBody(paper, sections, setupState),
     "recently-deleted": bodyOf(trash, recentlyDeletedRows),
     sections: bodyOf(sections, sectionsRows),
     "daily-scan": policyBody(scan, dailyScanRows),
