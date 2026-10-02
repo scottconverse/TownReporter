@@ -44,7 +44,7 @@ test("Story reload surfaces a durable failed job when no newer click message exi
   */
   assert.match(
     story,
-    /draftProblem\s*&&\s*!onPaper[\s\S]*?<Notice[\s\S]*?>\s*\{draftProblem\}/,
+    /draftProblem\s*&&\s*\(!onPaper\s*\|\|\s*Boolean\(publishedSlug\)\)[\s\S]*?<Notice[\s\S]*?>\s*\{draftProblem\}/,
     "the recovered failure must be rendered as an editor-visible notice",
   );
   assert.match(
