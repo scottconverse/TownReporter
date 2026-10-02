@@ -39,7 +39,11 @@ import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
-import { SERVER_FN_HEADER, createServerFnLog } from "./lib/serverfn-traffic.mjs";
+import {
+  SERVER_FN_HEADER,
+  awaitServerFnCall,
+  createServerFnLog,
+} from "./lib/serverfn-traffic.mjs";
 
 const base = checkedUrl(process.env.DELETE_CORR_BASE_URL || "http://127.0.0.1:8080").replace(
   /\/$/,
@@ -220,6 +224,13 @@ const SERVER_FN_CEILING_MS = 45_000;
  * (`serverFnSignature`), and reading one here does not disturb the page: the
  * browser context buffers response bodies for Playwright independently of
  * what the page's own `fetch` does with them.
+ *
+ * The Playwright `Request` object itself is the key: it is handed to
+ * `noteRequest`, and `response.request()` -- the SAME object, Playwright
+ * builds a response around the request it belongs to -- is handed back to
+ * `record`. So a reply lands on the call it answers even when two calls to
+ * one path are in flight and the later one replies first, which is precisely
+ * the shape a held press plus its refetches produce.
  */
 function watchServerFnTraffic() {
   const log = createServerFnLog();
@@ -227,6 +238,7 @@ function watchServerFnTraffic() {
     if (request.headers()[SERVER_FN_HEADER] !== "true") return;
     log.noteRequest({
       at: Date.now(),
+      key: request,
       method: request.method(),
       path: new URL(request.url()).pathname,
     });
@@ -242,6 +254,7 @@ function watchServerFnTraffic() {
     }
     log.record({
       at: Date.now(),
+      key: request,
       method: request.method(),
       path: new URL(response.url()).pathname,
       status: response.status(),
@@ -259,33 +272,14 @@ function watchServerFnTraffic() {
   };
 }
 
-/**
- * Wait for a server function call, decided by the LOG rather than by the wire.
- *
- * The difference is the whole of unit FLAKE1. `page.waitForResponse` sees one
- * moment forward: armed after a press, it cannot see a matching reply that
- * landed while the press was in flight, and the step then waits out its full
- * ceiling for a reply nothing will send again. `log.match` searches everything
- * recorded since the arm time -- and the log is armed BEFORE the press -- so a
- * reply that arrived between the press and the first poll is found exactly as
- * one that arrives later.
- *
- * Same ceiling as the waits it replaces, and a timeout now dumps every call
- * the page made since the press, in order, with the status of each and the
- * newest evidence token any reply carried.
- */
-async function awaitServerFnCall(log, match, { what, deadline }) {
-  for (;;) {
-    const found = log.match(match);
-    if (found) return found;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `${what} did not arrive within ${SERVER_FN_CEILING_MS / 1000}s.\n${log.table()}`,
-      );
-    }
-    await page.waitForTimeout(50);
-  }
-}
+/*
+  The wait itself lives in the traffic log (`scripts/lib/serverfn-traffic.mjs`,
+  `awaitServerFnCall`), where `node --test` can drive it with an injected clock:
+  the poll, the ceiling, the timeout dump, and the rule that an ANSWERED
+  non-2xx reply ends the wait at once and names its status are all pure and all
+  tested there. This walk passes the page clock in and the ceiling below; the
+  two call sites below say what a rejection means for each of them.
+*/
 
 async function callObservedAddCorrection(data) {
   if (!addCorrectionUrl) throw new Error("the correction server-function request was not observed");
@@ -1098,8 +1092,18 @@ async function main() {
     traffic.log,
     (call) => call.method === "POST" && call.ok,
     {
-      what: "the keep/remove decision's own reply",
+      what: "the keep/remove decision POST",
+      /*
+        A non-2xx answer is a REPLY. The old predicate waited only for a 2xx,
+        so a 500 from the decision -- which leaves the desk on "Your evidence
+        decision is still saving." just as a stalled request does -- burned the
+        full 45s and then reported that the reply "did not arrive", with the
+        status that would have explained it already in the log.
+      */
+      reject: (call) => call.method === "POST" && !call.ok,
       deadline: decisionTrafficArmedAt + SERVER_FN_CEILING_MS,
+      ceilingMs: SERVER_FN_CEILING_MS,
+      sleep: (ms) => page.waitForTimeout(ms),
     },
   );
   const refreshDeadline = Date.now() + SERVER_FN_CEILING_MS;
@@ -1115,7 +1119,16 @@ async function main() {
       call.body.includes(`TEST FIXTURE — Library recreation center update ${stamp}`),
     {
       what: "the finding review re-read that answers the decision",
+      /* No `reject` here, on purpose. The decision POST has exactly one meaning,
+         so a non-2xx answer to it is unambiguous and ends that wait at once. A
+         server-function GET does not: the page can poll other things during
+         this step, and the log cannot tell which GET is "the review read" until
+         its body matches, so a broad non-2xx rule here could fail a run that
+         would otherwise pass. If the refresh never arrives the ceiling dump
+         prints every call with its status, which says the same thing. */
       deadline: refreshDeadline,
+      ceilingMs: SERVER_FN_CEILING_MS,
+      sleep: (ms) => page.waitForTimeout(ms),
     },
   );
   traffic.detach();
@@ -1191,9 +1204,9 @@ async function main() {
     so none of them can miss a reply the way the decision step's listener could:
     a listener is only ever blind to what happened before it was armed. They
     are left as listeners. What they do NOT have is a dump on timeout -- if one
-    of them ever fails, move it onto `watchServerFnTraffic` + `awaitServerFnCall`
-    above, which is the same ceiling with the page's server-function calls
-    printed when it gives up.
+    of them ever fails, move it onto `watchServerFnTraffic` above plus
+    `awaitServerFnCall` (`scripts/lib/serverfn-traffic.mjs`), which is the same
+    ceiling with the page's server-function calls printed when it gives up.
   */
   const initialReviewResponse = secondTab.waitForResponse(
     async (response) => {

@@ -22,9 +22,9 @@
   page makes, and ASK THE LOG -- from the arm time forward -- instead of asking
   the wire from now forward. On a timeout, print the log.
 
-  Pure and browser-free on purpose: `node --test` drives the matching and the
-  dump (`serverfn-traffic.test.mjs`), which is the only part of this that a
-  test can reach -- the walk itself needs a browser and a database.
+  Pure and browser-free on purpose: `node --test` drives the matching, the
+  wait and the dump (`serverfn-traffic.test.mjs`), which is the only part of
+  this that a test can reach -- the walk itself needs a browser and a database.
 */
 
 /**
@@ -72,8 +72,9 @@ export function serverFnSignature(body) {
  * Read out of the serialized reply rather than off the screen: the desk never
  * prints the token anywhere, and the token is the whole reason a decision
  * press re-reads the finding review (a new token is a new query key). Both the
- * lead read and the review read carry the field, so the NEWEST one in the log
- * is the token the page is currently working from.
+ * lead read and the review read carry the field, so the token carried by the
+ * most recent REPLY is the one the page is currently working from (see
+ * `newestEvidenceToken`, which is careful about exactly that distinction).
  */
 export function evidenceTokenIn(body) {
   const match = /"evidenceToken"\s*:\s*"([^"]+)"/.exec(String(body ?? ""));
@@ -96,6 +97,14 @@ export function evidenceTokenIn(body) {
  *     body. `respondedAt` is this moment; the gap between the two is how long
  *     the call took.
  *
+ * A reply is filed against the request it ANSWERS -- by the request's own
+ * identity, never by "the oldest pending call to the same method and path".
+ * Two calls to one server-function path overlap constantly (a held press and
+ * the focus refetch beside it, two invalidations landing together), their
+ * replies need not come back in request order, and attaching by position
+ * swaps the two calls' statuses, timings and body signatures and leaves the
+ * request that actually completed reading `(no reply)`.
+ *
  * `match` searches the WHOLE log from `arm()` forward, so a reply that landed
  * before anyone started looking is still found. That is the FLAKE1 race: the
  * old code armed its listener after the press, so a matching read that
@@ -106,8 +115,18 @@ export function createServerFnLog() {
   const calls = [];
   let armedAt = null;
 
-  const findPending = (method, path) =>
-    calls.find((call) => call.method === method && call.path === path && !call.answered);
+  /*
+    The call this reply answers. `key` is opaque -- the collector hands over
+    the Playwright `Request` object itself, and `node --test` hands over a
+    string -- and identity is the whole of the match, so two calls to one path
+    can never be confused for each other. A reply the log has no request for
+    (a key nothing recorded) is filed as its own answered row rather than
+    guessed at.
+  */
+  const findPendingByKey = (key) => {
+    if (key === null || key === undefined) return null;
+    return calls.find((call) => call.key === key && !call.answered) ?? null;
+  };
 
   return {
     /**
@@ -120,11 +139,15 @@ export function createServerFnLog() {
       return at;
     },
 
-    /** Note a request the page made. Unanswered until a response is recorded for it. */
-    noteRequest({ at, method, path }) {
+    /**
+     * Note a request the page made. Unanswered until a response is recorded for
+     * it. `key` is its identity, handed back to `record` when the reply lands.
+     */
+    noteRequest({ at, key = null, method, path }) {
       if (armedAt === null) armedAt = at;
       calls.push({
         at,
+        key,
         method,
         path,
         status: null,
@@ -135,10 +158,13 @@ export function createServerFnLog() {
       });
     },
 
-    /** Record a reply. Fills the oldest unanswered call to the same place, or stands alone. */
-    record({ at, method, path, status, body }) {
+    /**
+     * Record a reply against the request it answers (`key`) -- or as a row of
+     * its own when the log holds no request with that key.
+     */
+    record({ at, key = null, method, path, status, body }) {
       if (armedAt === null) armedAt = at;
-      const pending = findPending(method, path);
+      const pending = findPendingByKey(key);
       if (pending) {
         pending.status = status;
         pending.ok = status >= 200 && status < 300;
@@ -149,6 +175,7 @@ export function createServerFnLog() {
       }
       calls.push({
         at,
+        key,
         method,
         path,
         status,
@@ -179,14 +206,32 @@ export function createServerFnLog() {
       return calls.filter((call) => armedAt === null || call.at >= armedAt);
     },
 
-    /** The newest evidence token any reply has carried, or null. */
+    /**
+     * The token carried by the most recent REPLY, or null.
+     *
+     * `since()` is in REQUEST order, and with concurrent lead and review reads
+     * an earlier request can be answered after a later one -- so walking the
+     * log in request order and keeping the last token seen names an older
+     * token as the newest. The newest is the ANSWERED call with the greatest
+     * `respondedAt`; a tie goes to the later request (the later of two replies
+     * that landed at the same moment). This is the line a timeout dump turns
+     * on: it is how a reader decides which token the page was actually working
+     * from when the review read never came.
+     */
     newestEvidenceToken() {
-      let token = null;
+      let newest = null;
       for (const call of this.since()) {
-        const found = evidenceTokenIn(call.body);
-        if (found) token = found;
+        if (!call.answered) continue;
+        if (evidenceTokenIn(call.body) === null) continue;
+        if (
+          newest === null ||
+          call.respondedAt > newest.respondedAt ||
+          (call.respondedAt === newest.respondedAt && call.at >= newest.at)
+        ) {
+          newest = call;
+        }
       }
-      return token;
+      return newest === null ? null : evidenceTokenIn(newest.body);
     },
 
     /**
@@ -215,9 +260,72 @@ export function createServerFnLog() {
       });
       const token = this.newestEvidenceToken();
       lines.push(
-        `  the newest evidenceToken any reply carried: ${token ?? "(none seen)"}`,
+        `  the token carried by the most recent reply: ${token ?? "(none seen)"}`,
       );
       return [`server function calls since the press (${rows.length}):`, ...lines].join("\n");
     },
   };
+}
+
+/** How often the wait below re-asks the log. */
+const POLL_INTERVAL_MS = 50;
+
+/** The ceiling the wait below gives up at when the caller does not name one. */
+const DEFAULT_CEILING_MS = 45_000;
+
+const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Wait for a server function call, decided by the LOG rather than by the wire.
+ *
+ * The difference is the whole of unit FLAKE1. `page.waitForResponse` sees one
+ * moment forward: armed after a press, it cannot see a matching reply that
+ * landed while the press was in flight, and the step then waits out its full
+ * ceiling for a reply nothing will send again. `log.match` searches everything
+ * recorded since the arm time -- and the log is armed BEFORE the press -- so a
+ * reply that arrived between the press and the first poll is found exactly as
+ * one that arrives later.
+ *
+ * Three ways out, and the second is the one that matters to a failure:
+ *
+ *   - `accept` matches an answered call (a success): returned at once.
+ *   - `reject` matches an answered call that is a FAILURE -- a reply that
+ *     arrived and refused. That is thrown on immediately, naming the HTTP
+ *     status and dumping the log, because an HTTP error reply IS a reply: a
+ *     decision POST answering 500 leaves the desk stuck on "Your evidence
+ *     decision is still saving." exactly as a stalled request does, and
+ *     waiting out the ceiling before blaming silence reports the wrong cause
+ *     with the evidence already in hand.
+ *   - nothing matched by `deadline`: the timeout dump, as before.
+ *
+ * Pure and clock-injectable: `now` and `sleep` are the caller's, so a test
+ * drives the whole wait -- including the "stops at once" claim -- with no
+ * browser and no real time.
+ */
+export async function awaitServerFnCall(
+  log,
+  accept,
+  {
+    what,
+    deadline,
+    reject = null,
+    ceilingMs = DEFAULT_CEILING_MS,
+    now = Date.now,
+    sleep = realSleep,
+  } = {},
+) {
+  for (;;) {
+    const found = log.match(accept);
+    if (found) return found;
+    if (reject) {
+      const refused = log.match(reject);
+      if (refused) {
+        throw new Error(`${what} was answered with HTTP ${refused.status}.\n${log.table()}`);
+      }
+    }
+    if (now() >= deadline) {
+      throw new Error(`${what} did not arrive within ${ceilingMs / 1000}s.\n${log.table()}`);
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
 }
