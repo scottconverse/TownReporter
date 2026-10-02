@@ -656,7 +656,7 @@ prints the exact one-line command that does it:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File `
   "C:\Users\scott\Desktop\Code\townreporter-web\ops\promote.ps1" `
-  -RollbackDatabase townreporter_prerollout_20261001-120000
+  -RollbackDatabase townreporter_prerollout_20261001120000
 ```
 
 **It refuses while the paper is answering on its port.** A promotion that
@@ -676,8 +676,8 @@ holding this install's own port).
 console, with names and sizes -- which is what tells you that you picked the
 right copy:
 
-> townreporter_prerollout_20261001-120000 (570 MB) becomes townreporter; the
-> current townreporter (610.4 MB) is kept as townreporter_failed_<now>.
+> townreporter_prerollout_20261001120000 (570 MB) becomes townreporter; the
+> current townreporter (610.4 MB) is kept as townreporter_failed_20261001120000.
 
 It then waits for every connection to the live database to close (refusing
 rather than ending anyone's session), renames the live database aside as

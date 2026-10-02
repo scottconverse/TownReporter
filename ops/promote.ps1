@@ -175,7 +175,7 @@
   that undoes just the database half of it:
 
     powershell -NoProfile -ExecutionPolicy Bypass -File "...\ops\promote.ps1" `
-      -RollbackDatabase townreporter_prerollout_20261001-120000
+      -RollbackDatabase townreporter_prerollout_20261001120000
 
   IT REFUSES WHILE THE PAPER IS ANSWERING. The promotion's own health-check
   failure leaves the app UP and serving -- that is the case this command is
@@ -192,8 +192,8 @@
   Before it renames anything it prints, in plain words and with sizes, which
   database becomes live and which is set aside:
 
-    townreporter_prerollout_20261001-120000 (570.2 MB) becomes townreporter;
-    the current townreporter (610.4 MB) is kept as townreporter_failed_<stamp>.
+    townreporter_prerollout_20261001120000 (570.2 MB) becomes townreporter;
+    the current townreporter (610.4 MB) is kept as townreporter_failed_20261001120000.
 
   Under -WhatIf it prints that and changes nothing.
 
@@ -701,8 +701,15 @@ if ($resumeAt -and $resumePoint) {
     if (-not $resumePoint.Copy -or -not $resumePoint.Failed) {
       Die "The interrupted run's log does not say which database copy it took, so this run will not carry on from a step past that point." 'preflight' "Delete logs\promote-in-progress, then run this script again without -Resume. Nothing was changed and the paper was not touched."
     }
-    if (-not (Test-PromoteCopyFreshness -Copy $resumePoint.Copy -StopAt $resumePoint.StopAt)) {
-      Die "The interrupted run's log names the copy $($resumePoint.Copy), which was NOT taken after the paper was stopped ($($resumePoint.StopAt)), so putting it back could silently drop whatever the app was writing at the time." 'preflight' "Look at the databases on the server and delete anything you no longer want by hand, then delete logs\promote-in-progress and run this script again without -Resume. Nothing was changed and the paper was not touched."
+    <#
+      ...and the copy has to have been TAKEN after the stop, which is a
+      question about two times in the interrupted run's log: the stop's step
+      line and the copy's step line. NOT the stamp inside the copy's name --
+      that is the second the run STARTED, which is always before the stop by
+      however long the backup took.
+    #>
+    if (-not (Test-PromoteCopyFreshness -CopyAt $resumePoint.CopyAt -StopAt $resumePoint.StopAt)) {
+      Die "The interrupted run's log names the copy $($resumePoint.Copy), but does not show it being taken after the paper was stopped (stop at $($resumePoint.StopAt), copy step at $($resumePoint.CopyAt)), so putting it back could silently drop whatever the app was writing at the time." 'preflight' "Look at the databases on the server and delete anything you no longer want by hand, then delete logs\promote-in-progress and run this script again without -Resume. Nothing was changed and the paper was not touched."
     }
     <#
       The database must be the same one the interrupted run copied. .env is a
@@ -716,7 +723,7 @@ if ($resumeAt -and $resumePoint) {
     $dbFailed = $resumePoint.Failed
     $dbCopyFromPreviousRun = $true
 
-    $state = Invoke-PromoteDatabaseState -Log $log -App $app -Database $resumePoint.Database -Copy $dbCopy -Failed $dbFailed -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
+    $state = Invoke-PromoteDatabaseState -Log $log -App $app -Database $resumePoint.Database -Copy $dbCopy -Failed $dbFailed -Stamp $dbStamp -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
     $copyExists = $false
     if ($state.Ok -and $state.Data.databases.$dbCopy) { $copyExists = [bool]$state.Data.databases.$dbCopy.exists }
     $copySize = 0
@@ -955,7 +962,7 @@ function Invoke-PromoteRolloutFailure {
   $copy = $dbCopy
   if ($WhatIfPreference) { $copy = "" }   # -WhatIf never took one
   $result = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp } `
-    -Database $dbName -Copy $copy -Failed $dbFailed -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl `
+    -Database $dbName -Copy $copy -Failed $dbFailed -Stamp $dbStamp -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl `
     -Previous $Previous -MigrationsRan $MigrationsRan -BuildOutput $BuildOutput -Why $Why -RestoreBuild $RestoreBuild
   # Script scope, so the Die that follows this call can say in the log whether
   # the failed rollout's schema has a name of its own.

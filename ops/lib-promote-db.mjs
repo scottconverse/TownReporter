@@ -77,6 +77,11 @@ import { statfsSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "pg";
+import { effectivePort, LIVE_POSTGRES_PORT, parseConnectionString, targetsLivePostgres } from "./lib-postgres-url.mjs";
+
+// Re-exported so a caller (and the tests) can ask the same questions this
+// module asks, without having to know that the answers live in their own file.
+export { effectivePort, LIVE_POSTGRES_PORT, parseConnectionString, targetsLivePostgres };
 
 /**
  * Every database this module will copy, create or rename starts with this.
@@ -107,33 +112,13 @@ const FAILED_SUFFIX = "_failed_";
 const GIB = 1024 ** 3;
 
 /**
- * The port the live paper's Postgres listens on, on the production machine.
- *
- * It is 5433 rather than the usual 5432 because that box already had something
- * on 5432 when the paper was installed (see SELF-HOSTING.md). Which makes it
- * the one port number that means "this is the real paper's data", and the one
- * this module must not be able to reach by accident -- see the guard below.
- */
-export const LIVE_POSTGRES_PORT = 5433;
-
-/**
  * The variable that says "this call really is the live promotion".
  *
- * Set by ops\promote.ps1, for the run that actually promotes, and by nothing
- * else. A test does not set it. `-WhatIf` does not set it, because a dry run
- * renames nothing.
+ * Set by ops\promote.ps1, for the run that actually promotes. A test does not
+ * set it, and `-WhatIf` does not set it either, because a dry run renames
+ * nothing.
  */
 export const LIVE_PROMOTE_ENV = "PROMOTE_DB_LIVE_PROMOTE";
-
-/**
- * `:5433` in the authority part of a connection string, for the strings URL
- * parsing cannot read.
- *
- * The authority is everything between `://` and the first `/`, `?` or `#`, so
- * this cannot match a password that happens to contain those digits -- the
- * `:5433` it looks for has to be the last thing before the path.
- */
-const LIVE_PORT_IN_URL = /:\/\/[^/?#]*:5433(?:[/?#]|$)/;
 
 /**
  * A refusal: something is wrong and NOTHING has been touched.
@@ -175,29 +160,6 @@ export function formatStamp(date = new Date()) {
 }
 
 /**
- * The port a connection string dials, or null when it cannot be told.
- *
- * A URL with no port dials PostgreSQL's own default, 5432 -- and the live
- * machine is exactly the machine where that is NOT true, which is why the
- * guard below does not rely on this alone.
- *
- * @param {string} value
- * @returns {number|null}
- */
-export function urlPort(value) {
-  const raw = (value ?? "").trim();
-  if (!raw) return null;
-  try {
-    const url = new URL(raw);
-    if (url.port) return Number(url.port);
-    if (url.protocol === "postgres:" || url.protocol === "postgresql:") return 5432;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Would this call reach the live paper's Postgres? Returns a sentence when it
  * would, and "" when it would not.
  *
@@ -209,20 +171,29 @@ export function urlPort(value) {
  * that points at 5433 is refused unless the call says, explicitly, that it is
  * the live promotion.
  *
+ * WHICH PORT, EXACTLY, is the question this used to get wrong. It read the URL
+ * text, so `postgres://host/db?port=5433` and a shell that had exported
+ * `PGPORT=5433` both walked straight past it -- and pg dials 5433 for either.
+ * The answer now comes from ops\lib-postgres-url.mjs, which resolves a port
+ * exactly the way pg does, and is the same code the Postgres test lane's own
+ * guard uses. One implementation, so the two cannot disagree about which
+ * server they are looking at.
+ *
  * It applies to EVERY command, including the ones that only read. A rule with
  * "except the harmless ones" is a rule with a hole in it, and the harmless
  * list is exactly the thing that grows a destructive entry later.
  *
  * @param {Array<string|undefined>} urls every connection string this call would use
  * @param {boolean} [livePromote] the caller's "this really is the promotion"
+ * @param {NodeJS.ProcessEnv} [env] where PGPORT is read from
  * @returns {string} "" when the call may proceed
  */
-export function checkLivePortGuard(urls, livePromote) {
+export function checkLivePortGuard(urls, livePromote, env = process.env) {
   if (livePromote) return "";
   for (const value of urls) {
     const raw = (value ?? "").trim();
     if (!raw) continue;
-    if (urlPort(raw) !== LIVE_POSTGRES_PORT && !LIVE_PORT_IN_URL.test(raw)) continue;
+    if (!targetsLivePostgres(raw, env)) continue;
     return (
       `Refusing to work on the PostgreSQL server on port ${LIVE_POSTGRES_PORT}. That is the live paper's ` +
       "database on the machine that runs it, and only ops\\promote.ps1 running for real may copy, rename or " +
@@ -357,6 +328,95 @@ export function isCopyOf(copy, database) {
 }
 
 /**
+ * The naming rules, once, for EVERY command.
+ *
+ * WHY ONE FUNCTION. These rules used to be spelled out at each command, and
+ * they drifted: `copy` and `wait-for-zero` never checked the live database's
+ * name at all, so `copy` would happily rename a database called anything at
+ * all as long as the copy beside it looked like a copy of it, and
+ * `wait-for-zero` would wait on any name it was handed. `preflight` accepted
+ * an empty stamp that `names` refused, and built `townreporter_prerollout_`
+ * out of nothing. One rule, in one place, called before a command does
+ * anything -- including the commands that only read, because "the harmless
+ * ones" is the list a destructive entry gets added to later.
+ *
+ * A STAMP IS REQUIRED BY EVERY COMMAND, not just the two that build names from
+ * it. It is what every name in a run is derived from and what every log line
+ * and every report is tied to; a command running without one is a caller that
+ * has lost the thread of which run it belongs to, and the right answer is to
+ * stop rather than to proceed with a name nobody can trace.
+ *
+ * @param {{
+ *   database?: string,
+ *   copy?: string,
+ *   failed?: string,
+ *   stamp?: string,
+ *   deriveNames?: boolean,
+ *   requireCopy?: boolean,
+ *   requireFailed?: boolean,
+ * }} options
+ * @returns {string} "" when the names are all usable
+ */
+export function validateCommandNames(options) {
+  const database = String(options.database ?? "").trim();
+  const stamp = String(options.stamp ?? "").trim();
+  const copy = String(options.copy ?? "").trim();
+  const failed = String(options.failed ?? "").trim();
+
+  const nameRefusal = checkDatabaseName(database, "The database name");
+  if (nameRefusal) return nameRefusal;
+
+  if (!stamp) {
+    return (
+      "No stamp was given for this run, so the copy's name cannot be built and nothing can be named " +
+      "safely. Nothing was changed and the paper was not touched."
+    );
+  }
+
+  const copyName = options.deriveNames ? copyDatabaseName(database, stamp) : copy;
+  if (options.requireCopy && !copyName) {
+    return `No name was given for the copy of ${database}. Nothing was changed and the paper was not touched.`;
+  }
+  if (copyName && !isCopyOf(copyName, database)) {
+    return (
+      `"${copyName}" is not a copy of "${database}" (a copy is named "${database}${COPY_SUFFIX}<stamp>"). ` +
+      "Refusing, because renaming something else over the paper's database is how the wrong database gets " +
+      "served. Nothing was changed and the paper was not touched."
+    );
+  }
+
+  const failedName = options.deriveNames ? failedDatabaseName(database, stamp) : failed;
+  if (options.requireFailed && !failedName) {
+    return (
+      `No name was given for the database ${database} is set aside as when a rollout fails. ` +
+      "Nothing was changed and the paper was not touched."
+    );
+  }
+  if (failedName) {
+    const failedRefusal = checkDatabaseName(failedName, "The name the live database takes after a failed rollout");
+    if (failedRefusal) return failedRefusal;
+  }
+  if (copyName && failedName && copyName === failedName) {
+    return `The copy and the failed-rollout database would be the same name ("${copyName}"). Nothing was changed and the paper was not touched.`;
+  }
+  return "";
+}
+
+/**
+ * What each command needs of its names. Used by runCommand, so the command
+ * line cannot drift from what the function behind it enforces.
+ */
+const COMMAND_NAMES = {
+  names: { deriveNames: true },
+  preflight: { deriveNames: true },
+  copy: { requireCopy: true },
+  "wait-for-zero": {},
+  "swap-back": { requireCopy: true, requireFailed: true },
+  rollback: { requireCopy: true, requireFailed: true },
+  state: {},
+};
+
+/**
  * The room a copy needs beside the database itself: a quarter of its size or
  * two gigabytes, whichever is larger.
  *
@@ -421,13 +481,117 @@ export function quoteIdent(name) {
   return `"${String(name).replace(/"/g, '""')}"`;
 }
 
+/**
+ * A connection string with the password taken out.
+ *
+ * This module's output ends up in the promotion's log, and the log is what an
+ * operator pastes into a ticket. The admin URL has a password in it.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function redact(url) {
+  return String(url ?? "").replace(/:[^:@/]*@/, ":***@");
+}
+
 /** @param {number} ms */
 function defaultSleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Connect for one command, and always close.
+ * The databases this module will connect to in order to do its admin work.
+ *
+ * `postgres` is the maintenance database every PostgreSQL install has;
+ * `template1` is the one it is created from, and is the fallback for a server
+ * that has had `postgres` dropped or renamed.
+ */
+const MAINTENANCE_DATABASES = ["postgres", "template1"];
+
+/**
+ * The same connection string, pointed at one of the maintenance databases.
+ *
+ * User, password, host, port and query options are kept exactly as they were:
+ * this changes the database name and nothing else. A URL that cannot be parsed
+ * is handed back untouched, so the failure is the connection's own and not
+ * this function's.
+ *
+ * @param {string} adminUrl
+ * @param {string} database
+ * @returns {string}
+ */
+export function maintenanceUrl(adminUrl, database) {
+  const parsed = parseConnectionString(adminUrl);
+  if (!parsed.ok) return adminUrl;
+  const url = new URL(adminUrl);
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+/** PostgreSQL's code for "that database does not exist". */
+const INVALID_CATALOG_NAME = "3D000";
+
+/** PostgreSQL's code for "you may not do that". */
+const INSUFFICIENT_PRIVILEGE = "42501";
+
+/** @param {unknown} error */
+function errorCode(error) {
+  return error && typeof error === "object" && "code" in error ? String(error.code) : "";
+}
+
+/**
+ * Connect to the maintenance database on this server, and hand back the
+ * client plus the name of the database it landed on.
+ *
+ * WHY IT IS NEVER THE DATABASE THE URL NAMES. With
+ * `PROMOTE_ADMIN_DATABASE_URL` unset -- which is what .env.example
+ * recommends -- the admin connection IS `DATABASE_URL`, and on the machine
+ * that runs the paper that string names the paper's own database. PostgreSQL
+ * refuses `ALTER DATABASE <current database> RENAME` with "current database
+ * cannot be renamed", so a swap-back issued from there fails at the first
+ * rename: the recovery would leave the paper on a half-migrated database with
+ * nothing it could do about it. The copy worked, so the failure only appeared
+ * at the one moment the copy exists for.
+ *
+ * Connecting to `postgres` instead is what the `psql -U postgres -d postgres`
+ * in every tutorial is doing, and it is why the rest of this machine's
+ * scripts do their database-level work from there.
+ *
+ * @param {{ adminUrl: string, connectTimeoutMillis?: number }} options
+ * @returns {Promise<{ client: Client, database: string }>}
+ */
+async function connectForAdmin(options) {
+  // A bounded connect timeout, and it is not a detail: pg waits forever by
+  // default, and a promotion whose Postgres is not answering would then sit
+  // there holding the paper down until its step limit killed it -- with
+  // nothing in the log saying why. Ten seconds is long enough for a loaded
+  // local server and short enough to be a wait rather than a hang.
+  const connectTimeoutMillis = options.connectTimeoutMillis ?? 10_000;
+  /** @type {unknown} */
+  let lastError;
+  for (const database of MAINTENANCE_DATABASES) {
+    const client = new Client({
+      connectionString: maintenanceUrl(options.adminUrl, database),
+      connectionTimeoutMillis: connectTimeoutMillis,
+    });
+    try {
+      await client.connect();
+      return { client, database };
+    } catch (error) {
+      await client.end().catch(() => undefined);
+      lastError = error;
+      // Fall back ONLY for "that database is not there". Every other failure
+      // -- wrong password, no route, no such role -- would fail identically on
+      // template1, and trying twice would spend the step's time limit twice
+      // while the paper is stopped.
+      if (errorCode(error) !== INVALID_CATALOG_NAME) throw error;
+    }
+  }
+  throw lastError;
+}
+
+/**
+ * One connection to the maintenance database, closed again whatever happens.
  *
  * `statement_timeout` is set so a `CREATE DATABASE ... TEMPLATE` that a busy
  * cluster has stalled is stopped by the SERVER as well as by the promotion's
@@ -436,28 +600,47 @@ function defaultSleep(ms) {
  *
  * @template T
  * @param {{ adminUrl: string, timeoutSeconds?: number, connectTimeoutMillis?: number }} options
- * @param {(client: Client) => Promise<T>} body
+ * @param {(client: Client, maintenanceDatabase: string) => Promise<T>} body
  * @returns {Promise<T>}
  */
 async function withAdmin(options, body) {
-  // A bounded connect timeout, and it is not a detail: pg waits forever by
-  // default, and a promotion whose Postgres is not answering would then sit
-  // there holding the paper down until its step limit killed it -- with
-  // nothing in the log saying why. Ten seconds is long enough for a loaded
-  // local server and short enough to be a wait rather than a hang.
-  const client = new Client({
-    connectionString: options.adminUrl,
-    connectionTimeoutMillis: options.connectTimeoutMillis ?? 10_000,
-  });
-  await client.connect();
+  const { client, database } = await connectForAdmin(options);
   try {
     if (options.timeoutSeconds && options.timeoutSeconds > 0) {
       await client.query(`set statement_timeout = ${Math.floor(options.timeoutSeconds * 1000)}`);
     }
-    return await body(client);
+    return await body(client, database);
   } finally {
     await client.end().catch(() => undefined);
   }
+}
+
+/**
+ * Turn a connection failure into a sentence an operator can act on.
+ *
+ * Only used where the failure has already been caught: the raw pg message is
+ * a protocol detail ("permission denied for database postgres"), and the
+ * useful half of it is which setting to change.
+ *
+ * @param {unknown} error
+ * @param {string} adminUrl
+ * @returns {string}
+ */
+export function connectFailureSentence(error, adminUrl) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (errorCode(error) === INSUFFICIENT_PRIVILEGE) {
+    return (
+      `The role this install connects as may not open the "postgres" maintenance database on the server ` +
+      `(${message}). Every promotion does its database work from there, because renaming a database from ` +
+      "inside it is refused by PostgreSQL. Grant that role CONNECT on postgres, or set " +
+      "PROMOTE_ADMIN_DATABASE_URL in the install's .env to a connection for a role that may. " +
+      "Nothing was changed and the paper was not touched."
+    );
+  }
+  return (
+    `Could not reach the PostgreSQL server through ${redact(adminUrl)} (${message}). ` +
+    "Nothing was changed and the paper was not touched."
+  );
 }
 
 /**
@@ -566,6 +749,7 @@ export async function connectionsTo(client, name) {
  *   timeoutSeconds?: number,
  *   pollMs?: number,
  *   livePromote?: boolean,
+ *   stamp?: string,
  *   sleep?: (ms: number) => Promise<unknown>,
  *   onWait?: (connections: Array<{ pid: number, user: string, application: string, host: string, state: string }>, elapsedSeconds: number) => void,
  * }} options
@@ -576,6 +760,10 @@ export async function waitForZeroConnections(options) {
   // behind, and it is checked before a connection is even opened.
   const guard = checkLivePortGuard([options.adminUrl, options.databaseUrl], options.livePromote);
   if (guard) return { ok: false, connections: [], waitedSeconds: 0, refusal: guard };
+  // This command used to wait on any name it was handed, which meant the one
+  // gate in front of a rename did not apply the rule the rename itself does.
+  const namesRefusal = validateCommandNames({ database: options.databaseName, stamp: options.stamp });
+  if (namesRefusal) return { ok: false, connections: [], waitedSeconds: 0, refusal: namesRefusal };
   const timeoutSeconds = options.timeoutSeconds ?? 30;
   const pollMs = options.pollMs ?? 1000;
   const sleep = options.sleep ?? defaultSleep;
@@ -661,23 +849,20 @@ export async function preflight(options) {
 
   const database = deriveDatabaseName(options.databaseUrl);
   report.database = database;
-  const nameRefusal = checkDatabaseName(database, "The database named by DATABASE_URL");
-  if (nameRefusal) return refuse(nameRefusal);
+  // The same rules every other command runs, including the empty stamp this
+  // one used to accept -- and with them the copy and failed names it derives,
+  // which were previously checked twice and in a second place.
+  const namesRefusal = validateCommandNames({
+    database,
+    stamp: options.stamp,
+    deriveNames: true,
+  });
+  if (namesRefusal) return refuse(namesRefusal);
 
   const copy = copyDatabaseName(database, options.stamp);
   const failed = failedDatabaseName(database, options.stamp);
   report.copy = copy;
   report.failed = failed;
-  // Derived, so they start with the prefix by construction -- checked anyway,
-  // because "by construction" is how a name check ends up not being one.
-  for (const [name, what] of [
-    [copy, "The copy's name"],
-    [failed, "The failed-rollout database's name"],
-  ]) {
-    const derivedRefusal = checkDatabaseName(name, what);
-    if (derivedRefusal) return refuse(derivedRefusal);
-  }
-  if (copy === failed) return refuse("The copy and the failed-rollout database would have the same name.");
 
   /*
     One shape for every branch, so the code below never has to ask whether a
@@ -774,7 +959,7 @@ export async function preflight(options) {
  * processes, and refuses if either is not true. It never targets the copy of
  * a database it did not derive from the live name.
  *
- * @param {{ adminUrl: string, databaseUrl?: string, database: string, copy: string, timeoutSeconds?: number, livePromote?: boolean }} options
+ * @param {{ adminUrl: string, databaseUrl?: string, database: string, copy: string, stamp?: string, timeoutSeconds?: number, livePromote?: boolean }} options
  * @returns {Promise<Record<string, any>>}
  */
 export async function copyDatabase(options) {
@@ -788,12 +973,18 @@ export async function copyDatabase(options) {
   };
   const guard = checkLivePortGuard([options.adminUrl, options.databaseUrl], options.livePromote);
   if (guard) return refuse(guard);
-  if (!isCopyOf(options.copy, options.database)) {
-    return refuse(
-      `The copy was to be called "${options.copy}", which is not "${options.database}${COPY_SUFFIX}<stamp>". ` +
-        "Refusing. Nothing was changed and the paper was not touched.",
-    );
-  }
+  // The live database's name included. This command used to check only that
+  // the copy looked like a copy of WHATEVER the live name was, so a live name
+  // of `someotherpaper` with `someotherpaper_prerollout_<stamp>` beside it
+  // sailed through and `CREATE DATABASE ... TEMPLATE` ran against a database
+  // this module has no business touching.
+  const namesRefusal = validateCommandNames({
+    database: options.database,
+    copy: options.copy,
+    stamp: options.stamp,
+    requireCopy: true,
+  });
+  if (namesRefusal) return refuse(namesRefusal);
 
   const outcome = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: options.timeoutSeconds }, async (client) => {
     if (!(await databaseExists(client, options.database))) {
@@ -828,14 +1019,52 @@ export async function copyDatabase(options) {
 }
 
 /**
+ * One `ALTER DATABASE ... RENAME`, against the connection it is given.
+ *
+ * Its own exported function so a test can put a failing rename in its place
+ * and watch what the swap does about it -- see `swapBack`'s `rename` option.
+ *
+ * @param {Client} client
+ * @param {string} from
+ * @param {string} to
+ * @returns {Promise<void>}
+ */
+export async function renameDatabase(client, from, to) {
+  await client.query(`alter database ${quoteIdent(from)} rename to ${quoteIdent(to)}`);
+}
+
+/**
  * Put the copy back: rename the live database aside, then rename the copy into
  * its place.
  *
- * The order is the whole point and it is not interchangeable. Renaming the
- * live database ASIDE first means that at no moment is there no database under
- * the live name -- and if the second rename were to fail, the database the
- * paper was using is still on the server, under a name that says what happened
- * to it, rather than the promotion having overwritten it.
+ * WHAT IS ACTUALLY TRUE ABOUT THE WINDOW BETWEEN THE TWO RENAMES. Between
+ * rename 1 and rename 2 there is NO database under the paper's name, for as
+ * long as the second catalog update takes. That is unavoidable -- the two
+ * renames are two statements and PostgreSQL has no transaction that covers
+ * both (`ALTER DATABASE ... RENAME` cannot run inside one). What the ORDER
+ * buys is different and still worth having: the database the paper was using
+ * is never overwritten, so if rename 2 does not happen the data is all still
+ * there, under a name that says what became of it. (An earlier version of
+ * this comment claimed "at no moment is there no database under the live
+ * name", which was simply untrue, and the auditor was right to call it.)
+ *
+ * BECAUSE rename 2 CAN FAIL, it is compensated. PostgreSQL refuses to rename a
+ * database anybody is connected to, and the connection it is about to refuse
+ * over is usually the COPY's -- something attached to the copy is invisible to
+ * a check that only looks at the live database, which is what the first
+ * version of this did. So:
+ *
+ *   1. BOTH databases are checked for sessions before rename 1, and the swap
+ *      refuses, having renamed nothing, if either has one. A session is never
+ *      ended, here or anywhere in this module.
+ *   2. If rename 2 fails anyway -- a session that arrived in the gap, a name
+ *      that came back -- rename 1 is undone immediately, and both outcomes
+ *      are reported. The paper goes on serving the database it was serving.
+ *   3. If even that fails, the report says exactly which name holds the
+ *      paper's data and the one statement that puts it back.
+ *   4. A swap that stopped in the middle (no live name, the failed name
+ *      present, the copy present) is RESUMABLE: running it again finishes
+ *      rename 2 instead of refusing because there is nothing to move aside.
  *
  * `mode` only changes the wording: "recovery" is the promotion putting things
  * back by itself after a failed rollout, "manual" is an operator running
@@ -849,24 +1078,30 @@ export async function copyDatabase(options) {
  *   copy: string,
  *   failed: string,
  *   mode?: "recovery" | "manual",
+ *   stamp?: string,
  *   timeoutSeconds?: number,
  *   livePromote?: boolean,
+ *   rename?: (client: Client, from: string, to: string) => Promise<void>,
  * }} options
  * @returns {Promise<Record<string, any>>}
  */
 export async function swapBack(options) {
   const started = Date.now();
   const mode = options.mode ?? "recovery";
+  const rename = options.rename ?? renameDatabase;
   /** @type {Record<string, any>} */
   const report = {
     command: mode === "manual" ? "rollback" : "swap-back",
     ok: false,
     refusal: "",
+    error: "",
     database: options.database,
     copy: options.copy,
     failed: options.failed,
     steps: [],
-    sizeBytes: 0,
+    resumedFromHalfState: false,
+    sizeBytes: null,
+    sizeKnown: false,
     seconds: 0,
   };
   const refuse = (/** @type {string} */ sentence) => {
@@ -874,56 +1109,148 @@ export async function swapBack(options) {
     report.seconds = (Date.now() - started) / 1000;
     return report;
   };
+  /**
+   * Not a refusal: something WAS done, or was attempted and may have landed.
+   * Kept separate from `refusal` because the caller's sentence for the two is
+   * different -- "nothing was changed" is a lie for this one.
+   */
+  const broke = (/** @type {string} */ sentence) => {
+    report.error = sentence;
+    report.seconds = (Date.now() - started) / 1000;
+    return report;
+  };
+  /** What happened so far, for a sentence that has to carry it. */
+  const soFar = () => (report.steps.length ? ` What happened, in order: ${report.steps.join("; ")}.` : " Nothing had been renamed.");
+  const connectionsSentence = (
+    /** @type {Array<{ pid: number, user: string, application: string, host: string, state: string }>} */ rows,
+    /** @type {string} */ name,
+  ) =>
+    `${rows.length} connection(s) are still open to ${name} (${rows
+      .slice(0, 5)
+      .map((row) => `pid ${row.pid}${row.user ? `, ${row.user}` : ""}`)
+      .join("; ")}), and PostgreSQL will not rename a database while they are`;
 
   const guard = checkLivePortGuard([options.adminUrl, options.databaseUrl], options.livePromote);
   if (guard) return refuse(guard);
-  const nameRefusal = checkDatabaseName(options.database, "The live database's name");
-  if (nameRefusal) return refuse(nameRefusal);
-  if (!isCopyOf(options.copy, options.database)) {
-    return refuse(
-      `"${options.copy}" is not a copy of "${options.database}" ` +
-        `(a copy is named "${options.database}${COPY_SUFFIX}<stamp>"). Refusing, because renaming ` +
-        "something else over the paper's database is how the wrong database gets served. " +
-        "Nothing was changed and the paper was not touched.",
-    );
-  }
-  const failedRefusal = checkDatabaseName(options.failed, "The name the live database would take");
-  if (failedRefusal) return refuse(failedRefusal);
-
-  const outcome = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: options.timeoutSeconds }, async (client) => {
-    if (!(await databaseExists(client, options.database))) {
-      return `There is no database called "${options.database}" to move aside.`;
-    }
-    if (!(await databaseExists(client, options.copy))) {
-      return `The copy "${options.copy}" is not on the server, so there is nothing to put back.`;
-    }
-    if (await databaseExists(client, options.failed)) {
-      return `"${options.failed}" already exists, and this never overwrites a database.`;
-    }
-    const connections = await connectionsTo(client, options.database);
-    if (connections.length > 0) {
-      return (
-        `${connections.length} connection(s) are still open to ${options.database}, and PostgreSQL ` +
-        "will not rename a database while they are."
-      );
-    }
-    await client.query(`alter database ${quoteIdent(options.database)} rename to ${quoteIdent(options.failed)}`);
-    report.steps.push(`renamed ${options.database} -> ${options.failed}`);
-    await client.query(`alter database ${quoteIdent(options.copy)} rename to ${quoteIdent(options.database)}`);
-    report.steps.push(`renamed ${options.copy} -> ${options.database}`);
-    return null;
+  const namesRefusal = validateCommandNames({
+    database: options.database,
+    copy: options.copy,
+    failed: options.failed,
+    stamp: options.stamp,
+    requireCopy: true,
+    requireFailed: true,
   });
+  if (namesRefusal) return refuse(namesRefusal);
+
+  /** @type {string|null} */
+  let outcome = null;
+  try {
+    outcome = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: options.timeoutSeconds }, async (client) => {
+      const liveExists = await databaseExists(client, options.database);
+      const copyExists = await databaseExists(client, options.copy);
+      const failedExists = await databaseExists(client, options.failed);
+
+      /*
+        THE HALF STATE. An earlier swap got rename 1 done and rename 2 did not
+        happen: the paper's name is free, its data is under the failed name and
+        the copy is waiting. Finishing it is the only useful thing to do --
+        refusing here ("there is no database called X to move aside") is what
+        used to leave a promotion stuck with no way forward, because the retry
+        path could not resume either.
+      */
+      if (!liveExists && copyExists && failedExists) {
+        const onCopy = await connectionsTo(client, options.copy);
+        if (onCopy.length > 0) {
+          return `${connectionsSentence(onCopy, options.copy)}. This is the second half of a swap that stopped part way: ${options.failed} holds the database that was serving, and this finishes it by renaming ${options.copy} to ${options.database}`;
+        }
+        await rename(client, options.copy, options.database);
+        report.steps.push(`renamed ${options.copy} -> ${options.database} (finishing a swap that stopped part way)`);
+        report.resumedFromHalfState = true;
+        return null;
+      }
+
+      if (!liveExists) {
+        return `There is no database called "${options.database}" to move aside`;
+      }
+      if (!copyExists) {
+        return `The copy "${options.copy}" is not on the server, so there is nothing to put back`;
+      }
+      if (failedExists) {
+        return `"${options.failed}" already exists, and this never overwrites a database`;
+      }
+
+      // BOTH of them. The copy is the one PostgreSQL refuses over, and a check
+      // that only looked at the live database is how a swap got half done.
+      const onLive = await connectionsTo(client, options.database);
+      if (onLive.length > 0) return connectionsSentence(onLive, options.database);
+      const onCopy = await connectionsTo(client, options.copy);
+      if (onCopy.length > 0) return connectionsSentence(onCopy, options.copy);
+
+      await rename(client, options.database, options.failed);
+      report.steps.push(`renamed ${options.database} -> ${options.failed}`);
+      try {
+        await rename(client, options.copy, options.database);
+        report.steps.push(`renamed ${options.copy} -> ${options.database}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        /*
+          rename 2 did not happen. Undo rename 1, so the paper goes on serving
+          the database it was serving -- the alternative is a paper whose
+          database name does not exist.
+        */
+        try {
+          await rename(client, options.failed, options.database);
+          report.steps.push(`renamed ${options.failed} -> ${options.database} (put back after the next rename failed)`);
+          return (
+            `${options.copy} could not be renamed to ${options.database} (${message}). ${options.database} had already ` +
+            `been renamed to ${options.failed}, and that has been undone, so the database the paper serves is unchanged ` +
+            "and its data is where it was"
+          );
+        } catch (undoError) {
+          const undoMessage = undoError instanceof Error ? undoError.message : String(undoError);
+          report.steps.push(`putting ${options.failed} back as ${options.database} ALSO failed: ${undoMessage}`);
+          return (
+            `${options.copy} could not be renamed to ${options.database} (${message}), and putting ${options.failed} ` +
+            `back as ${options.database} failed too (${undoMessage}). THE PAPER'S DATABASE NAME IS GONE: its data is ` +
+            `under ${options.failed}. Put it back with: ALTER DATABASE ${quoteIdent(options.failed)} RENAME TO ` +
+            `${quoteIdent(options.database)};`
+          );
+        }
+      }
+      return null;
+    });
+  } catch (error) {
+    // A connection that failed, or anything else that escaped the closure.
+    // The steps taken so far are already recorded on the report and are
+    // carried out with the sentence -- an exception must not erase the record
+    // of a rename that really happened.
+    const message = error instanceof Error ? error.message : String(error);
+    return broke(`The swap did not finish: ${message}.${soFar()}`);
+  }
   if (outcome) {
     const manual = mode === "manual" ? "Nothing was rolled back. " : "Nothing was swapped. ";
     return refuse(
-      `${outcome} ${manual}The paper's database was not changed; see the log for what was still ` +
+      `${outcome}.${soFar()} ${manual}The paper's database was not changed; see the log for what was still ` +
         "connected. Nothing was changed and the paper was not touched.",
     );
   }
 
-  report.sizeBytes = await withAdmin({ adminUrl: options.adminUrl }, (client) =>
-    databaseSizeBytes(client, options.database),
-  );
+  /*
+    The size, AFTER both renames landed -- and a failure here must not turn a
+    swap that worked into a report that says it did not. The database the paper
+    serves is already the copy; the size is only something the log says.
+  */
+  try {
+    report.sizeBytes = await withAdmin({ adminUrl: options.adminUrl }, (client) =>
+      databaseSizeBytes(client, options.database),
+    );
+    report.sizeKnown = true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    report.sizeBytes = null;
+    report.sizeKnown = false;
+    report.sizeNote = `the swap is done, but the size of ${options.database} could not be read afterwards (${message})`;
+  }
   report.seconds = (Date.now() - started) / 1000;
   report.ok = true;
   return report;
@@ -936,12 +1263,19 @@ export async function swapBack(options) {
  * on it asks whether the copy the interrupted run made is still on the server
  * and how big it is. Read-only.
  *
- * @param {{ adminUrl: string, names: string[], livePromote?: boolean }} options
+ * @param {{ adminUrl: string, names: string[], stamp?: string, livePromote?: boolean }} options
  * @returns {Promise<Record<string, any>>}
  */
 export async function stateOf(options) {
   const guard = checkLivePortGuard([options.adminUrl], options.livePromote);
   if (guard) return { command: "state", ok: false, refusal: guard, databases: {} };
+  const namesRefusal = validateCommandNames({
+    database: options.names[0],
+    copy: options.names[1],
+    failed: options.names[2],
+    stamp: options.stamp,
+  });
+  if (namesRefusal) return { command: "state", ok: false, refusal: namesRefusal, databases: {} };
   const names = options.names.filter(Boolean);
   const found = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: 30 }, async (client) => {
     /** @type {Record<string, { exists: boolean, sizeBytes: number }>} */
@@ -1027,31 +1361,40 @@ export async function runCommand(command, config, measureFreeBytes) {
         "DATABASE_URL, in the install's .env. Nothing was changed and the paper was not touched.",
     };
   }
+
+  /*
+    THE NAMING RULES, HERE TOO. Each function below validates its own names as
+    well, because they are exported and a script or a test can call them
+    without a command line. This one is what makes the COMMAND LINE uniform:
+    a bad live name or an empty stamp is refused before the switch, whichever
+    command was asked for -- including `names`, which opens no connection.
+  */
+  const needs = COMMAND_NAMES[command] ?? { deriveNames: true, requireCopy: true, requireFailed: true };
+  const databaseForNames = config.database || deriveDatabaseName(config.databaseUrl);
+  const namesRefusal = validateCommandNames({
+    database: databaseForNames,
+    copy: config.copy,
+    failed: config.failed,
+    stamp: config.stamp,
+    deriveNames: needs.deriveNames,
+    requireCopy: needs.requireCopy,
+    requireFailed: needs.requireFailed,
+  });
+  if (namesRefusal) return { command, ok: false, refusal: namesRefusal };
+
   switch (command) {
     case "names": {
       // The three names and nothing else -- no connection, no checks against
       // the server. Used by a resumed run that is carrying on from a step
       // before the copy: it has no names in hand and must not invent them, so
-      // the rule stays here, where the copy command validates against it too.
-      const database = config.database || deriveDatabaseName(config.databaseUrl);
-      const refusal = checkDatabaseName(database, "The database named by DATABASE_URL");
-      if (refusal) return { command, ok: false, refusal };
-      if (!config.stamp) {
-        return {
-          command,
-          ok: false,
-          refusal:
-            "No stamp was given for this run, so the copy's name cannot be built. " +
-            "Nothing was changed and the paper was not touched.",
-        };
-      }
+      // the rule stays in validateCommandNames, which every command uses.
       return {
         command,
         ok: true,
         refusal: "",
-        database,
-        copy: copyDatabaseName(database, config.stamp),
-        failed: failedDatabaseName(database, config.stamp),
+        database: databaseForNames,
+        copy: copyDatabaseName(databaseForNames, config.stamp),
+        failed: failedDatabaseName(databaseForNames, config.stamp),
         stamp: config.stamp,
       };
     }
@@ -1070,8 +1413,9 @@ export async function runCommand(command, config, measureFreeBytes) {
     case "copy":
       return copyDatabase({
         adminUrl: config.adminUrl,
-        database: config.database,
+        database: databaseForNames,
         copy: config.copy,
+        stamp: config.stamp,
         timeoutSeconds: config.timeoutSeconds,
         livePromote: config.livePromote,
       });
@@ -1079,9 +1423,10 @@ export async function runCommand(command, config, measureFreeBytes) {
     case "rollback":
       return swapBack({
         adminUrl: config.adminUrl,
-        database: config.database,
+        database: databaseForNames,
         copy: config.copy,
         failed: config.failed,
+        stamp: config.stamp,
         mode: command === "rollback" ? "manual" : "recovery",
         timeoutSeconds: config.timeoutSeconds,
         livePromote: config.livePromote,
@@ -1089,7 +1434,8 @@ export async function runCommand(command, config, measureFreeBytes) {
     case "wait-for-zero": {
       const waited = await waitForZeroConnections({
         adminUrl: config.adminUrl,
-        databaseName: config.database,
+        databaseName: databaseForNames,
+        stamp: config.stamp,
         timeoutSeconds: config.waitSeconds,
         livePromote: config.livePromote,
       });
@@ -1098,7 +1444,8 @@ export async function runCommand(command, config, measureFreeBytes) {
     case "state":
       return stateOf({
         adminUrl: config.adminUrl,
-        names: [config.database, config.copy, config.failed],
+        names: [databaseForNames, config.copy, config.failed],
+        stamp: config.stamp,
         livePromote: config.livePromote,
       });
     default:
@@ -1128,16 +1475,34 @@ async function main() {
     process.exitCode = 2;
     return;
   }
+  let config = readConfig();
   let report;
   try {
-    report = await runCommand(command, readConfig());
+    report = await runCommand(command, config);
   } catch (error) {
+    /*
+      A failure this module did not turn into a sentence of its own. Two kinds
+      matter to an operator and they need different words:
+
+        - could not connect: nothing was touched, so the sentence may say so;
+        - anything else (a rename that failed half way, say): the promotion
+          must NOT be told "nothing was changed", because something was. Those
+          are carried up as the raw message and the caller's own wording.
+    */
+    const code = errorCode(error);
+    const connectionCodes = [
+      "ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "EHOSTUNREACH", "ECONNRESET", // node
+      "28P01", // invalid password
+      "28000", // invalid authorization
+      INSUFFICIENT_PRIVILEGE,
+      INVALID_CATALOG_NAME,
+    ];
     const message = error instanceof Error ? error.message : String(error);
     report = {
       command,
       ok: false,
       refusal: "",
-      error: message,
+      error: connectionCodes.includes(code) ? connectFailureSentence(error, config.adminUrl) : message,
     };
   }
   process.stdout.write(`${JSON.stringify(report)}\n`);

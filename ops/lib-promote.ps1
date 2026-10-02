@@ -537,10 +537,14 @@ function Get-PromoteResumePoint {
     Database  = $null
     Copy      = $null
     Failed    = $null
-    # When the previous run stopped the paper. A resumed run refuses to put a
-    # copy back that was taken BEFORE its own stop: that copy would predate
-    # whatever the app was doing when it went down.
+    # When the previous run stopped the paper, and when it took the copy. A
+    # resumed run refuses to put a copy back that was taken BEFORE its own
+    # stop: that copy would predate whatever the app was doing when it went
+    # down. Both are the timestamps of the log's own step lines -- NOT the
+    # stamp inside the copy's name, which is the second the RUN started and is
+    # therefore always earlier than the stop. See Test-PromoteCopyFreshness.
     StopAt    = $null
+    CopyAt    = $null
   }
 
   $file = Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
@@ -579,6 +583,13 @@ function Get-PromoteResumePoint {
     }
     if ($m.Groups['name'].Value -eq 'stop' -and $m.Groups['status'].Value -match '^(?i)ok$') {
       $point.StopAt = $m.Groups['ts'].Value
+    }
+    # Whatever status it has: a dbcopy line that only says "started" still
+    # records a time, and that time is after the stop -- which is all the
+    # freshness question needs. A line that is not there at all leaves this
+    # null, and null is a refusal rather than a pass.
+    if ($m.Groups['name'].Value -eq 'dbcopy') {
+      $point.CopyAt = $m.Groups['ts'].Value
     }
   }
   if (-not $last) { return $point }
@@ -1172,10 +1183,11 @@ function Invoke-PromoteDatabaseState {
     [string]$Database = "",
     [string]$Copy = "",
     [string]$Failed = "",
+    [string]$Stamp = "",
     [string]$DatabaseUrl = "",
     [string]$AdminUrl = ""
   )
-  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
   return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'state' -Step 'dbstate' -Environment $values
 }
 
@@ -1195,11 +1207,12 @@ function Invoke-PromoteDatabaseSwapBack {
     [Parameter(Mandatory = $true)][string]$Database,
     [Parameter(Mandatory = $true)][string]$Copy,
     [Parameter(Mandatory = $true)][string]$Failed,
+    [string]$Stamp = "",
     [string]$DatabaseUrl = "",
     [string]$AdminUrl = "",
     [ValidateSet('recovery', 'manual')][string]$Mode = 'recovery'
   )
-  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
 
   Write-PromoteLog $Log "waiting up to $(Get-PromoteDbWaitSeconds)s for every connection to $Database to close"
   $waited = Invoke-PromoteDbCommand -Log $Log -App $App -Command 'wait-for-zero' -Step 'dbswap' -Environment $values
@@ -1215,11 +1228,25 @@ function Invoke-PromoteDatabaseSwapBack {
   $command = if ($Mode -eq 'manual') { 'rollback' } else { 'swap-back' }
   $swapped = Invoke-PromoteDbCommand -Log $Log -App $App -Command $command -Step 'dbswap' -Environment $values
   if (-not $swapped.Ok) {
+    # The library records which renames it got through even when it reports a
+    # failure, and those lines belong in the log: a rename that really
+    # happened is the difference between "the database was not touched" and
+    # "the paper's data is under a different name now".
+    foreach ($step in @($swapped.Data.steps)) { Write-PromoteLog $Log "database: $step" }
     Write-PromoteLog $Log "the database was NOT swapped back: $($swapped.Failure)"
-    return [pscustomobject]@{ Ok = $false; Swapped = $false; Data = $null; Failure = $swapped.Failure }
+    return [pscustomobject]@{ Ok = $false; Swapped = $false; Data = $swapped.Data; Failure = $swapped.Failure }
   }
   foreach ($step in @($swapped.Data.steps)) { Write-PromoteLog $Log "database: $step" }
-  Write-PromoteLog $Log "the database the paper serves is $Database again; what the failed rollout did to it is kept as $Failed ($(Format-PromoteDbSize $swapped.Data.sizeBytes))"
+  if ($swapped.Data.resumedFromHalfState) {
+    Write-PromoteLog $Log "this swap had already been started once and stopped half way; it has been finished, so $Database is the copy again"
+  }
+  # A size that could not be read afterwards is not a swap that failed. The
+  # database the paper serves is already the copy; the number is only what the
+  # log says about it.
+  $size = "size unknown"
+  if ($swapped.Data.sizeKnown) { $size = Format-PromoteDbSize $swapped.Data.sizeBytes }
+  elseif ($swapped.Data.sizeNote) { Write-PromoteLog $Log "database: $($swapped.Data.sizeNote)" }
+  Write-PromoteLog $Log "the database the paper serves is $Database again; what the failed rollout did to it is kept as $Failed ($size)"
   return [pscustomobject]@{ Ok = $true; Swapped = $true; Data = $swapped.Data; Failure = "" }
 }
 
@@ -1258,24 +1285,36 @@ function Get-PromoteCopyStamp {
   out of a log file, and a log file can be a run that was renamed, copied or
   edited by hand between the two runs.
 
+  BOTH TIMES COME FROM THE LOG'S OWN STEP LINES, and that is the fix the
+  auditor's B3 was about. The obvious-looking version of this compared the
+  stamp inside the copy's NAME with the stop time -- but that stamp is the
+  second the RUN started, and the stop is however long later the backup took.
+  Measured on a promotion that takes its backup in 41 seconds, the copy's name
+  stamp is 41 seconds older than the stop, so the check said "not taken after
+  the paper was stopped" for every real run and `-Resume` could never get past
+  `dbcopy`. Only a run whose backup finished inside the same second as its
+  start ever passed, which is not a case that happens.
+
+  The `step=dbcopy` line's time is when the copy was actually made, on the same
+  clock as the `step=stop ok` line's. Those two are comparable, and their order
+  is what "taken after the stop" means.
+
   Returns $true only when the copy can be shown to be at or after the stop.
   Nothing to compare against is NOT a pass.
 #>
 function Test-PromoteCopyFreshness {
   param(
-    [Parameter(Mandatory = $true)][string]$Copy,
+    [string]$CopyAt = "",
     [string]$StopAt = ""
   )
-  $stamp = Get-PromoteCopyStamp -Copy $Copy
-  if (-not $stamp) { return $false }
-  if (-not $StopAt) { return $false }
+  if (-not $CopyAt -or -not $StopAt) { return $false }
   try {
-    $copyAt = [datetime]::ParseExact($stamp, 'yyyyMMddHHmmss', [System.Globalization.CultureInfo]::InvariantCulture)
-    $stoppedAt = [datetime]::ParseExact($StopAt, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $taken = [datetime]::ParseExact($CopyAt, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $stopped = [datetime]::ParseExact($StopAt, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
   } catch {
     return $false
   }
-  return ($copyAt -ge $stoppedAt)
+  return ($taken -ge $stopped)
 }
 
 <#
@@ -1344,6 +1383,7 @@ function Invoke-PromoteFailedRollout {
     [string]$Previous = "",
     [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
     [string]$BuildOutput = "",
+    [string]$Stamp = "",
     # $false for a failure that happened before anything touched .output -- the
     # fast-forward, or the dependency install. There the build ON DISK is still
     # the one that was serving, and restoring .output-previous (which is a build
@@ -1365,7 +1405,7 @@ function Invoke-PromoteFailedRollout {
 
   if ($Copy) {
     Write-PromoteLog $Log "putting the database back: $Database will become $Failed and $Copy will become $Database"
-    $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $Failed -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'recovery'
+    $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'recovery'
     $swapped = $result.Swapped
     $swapFailure = $result.Failure
   } else {
@@ -1493,8 +1533,30 @@ function Invoke-PromoteDatabaseRollback {
     [switch]$DryRun,
     [scriptblock]$Announce = $null
   )
-  if (-not $Stamp) { $Stamp = Get-Date -Format 'yyyyMMddHHmmss' }
-  $failed = "$Database`_failed_$Stamp"
+  <#
+    THE FAILED NAME COMES FROM THE COPY'S OWN STAMP, not from the clock.
+
+    A promotion names its copy and the database it sets aside after the same
+    second -- `<db>_prerollout_<stamp>` and `<db>_failed_<stamp>` -- so the
+    stamp inside the copy's name IS the name of the database that rollout
+    moved aside. Deriving it here rather than inventing a fresh one buys two
+    things:
+
+      - the two names pair up in the server's database list, which is how an
+        operator sees at a glance which copy belongs to which failure;
+      - a swap that stopped between its two renames can be FINISHED. In that
+        state the live name is free, the copy is waiting and its data is under
+        `<db>_failed_<the copy's stamp>` -- the only name this function could
+        look under. A fresh stamp would name a database that does not exist,
+        and the command the promotion tells the operator to run would refuse.
+
+    $Stamp is the fallback for a name that carries no stamp at all, which the
+    swap itself refuses anyway.
+  #>
+  $copyStamp = Get-PromoteCopyStamp -Copy $Copy
+  if (-not $copyStamp) { $copyStamp = $Stamp }
+  if (-not $copyStamp) { $copyStamp = Get-Date -Format 'yyyyMMddHHmmss' }
+  $failed = "$Database`_failed_$copyStamp"
 
   # --- the port, first, before anything is read or planned ------------------
   $paperUp = [bool](& $TestThePort)
@@ -1522,18 +1584,38 @@ function Invoke-PromoteDatabaseRollback {
   # --- what the swap would do, with the sizes -------------------------------
   $liveSize = "size unknown"
   $copySize = "size unknown"
-  $state = Invoke-PromoteDatabaseState -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl
+  $failedSize = "size unknown"
+  $state = Invoke-PromoteDatabaseState -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -Stamp $copyStamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl
+  $liveExists = $false
+  $failedExists = $false
   if ($state.Ok) {
     $live = $state.Data.databases.$Database
-    if ($live -and $live.exists) { $liveSize = Format-PromoteDbSize $live.sizeBytes }
+    if ($live -and $live.exists) { $liveExists = $true; $liveSize = Format-PromoteDbSize $live.sizeBytes }
     $copyEntry = $state.Data.databases.$Copy
     if ($copyEntry -and $copyEntry.exists) { $copySize = Format-PromoteDbSize $copyEntry.sizeBytes }
+    $failedEntry = $state.Data.databases.$failed
+    if ($failedEntry -and $failedEntry.exists) { $failedExists = $true; $failedSize = Format-PromoteDbSize $failedEntry.sizeBytes }
   } else {
     # Not fatal on its own: the swap below asks the same server the same
     # question and will refuse with its own sentence if it cannot be reached.
     Write-PromoteLog $Log "could not read the sizes before the rollback: $($state.Failure)"
   }
-  $plan = "$Copy ($copySize) becomes $Database; the current $Database ($liveSize) is kept as $failed."
+  <#
+    Two plans, because two different things can be about to happen.
+
+    An EARLIER SWAP THAT STOPPED HALF WAY -- no live name, the failed name
+    present, the copy waiting -- is finished rather than started: the database
+    that was serving is already under the failed name, and the only rename
+    left is the copy's. Printing the ordinary plan there would describe a
+    rename that is not going to happen, and would name the live database as
+    something it is not (it does not exist).
+  #>
+  $plan = ""
+  if (-not $liveExists -and $failedExists) {
+    $plan = "$Copy ($copySize) finishes a swap that stopped half way: $failed ($failedSize) already holds what was serving, and $Copy becomes $Database."
+  } else {
+    $plan = "$Copy ($copySize) becomes $Database; the current $Database ($liveSize) is kept as $failed."
+  }
   Write-PromoteLog $Log $plan
   if ($Announce) { & $Announce $plan }
 
@@ -1570,7 +1652,7 @@ function Invoke-PromoteDatabaseRollback {
   }
 
   # --- the swap -------------------------------------------------------------
-  $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'manual'
+  $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -Stamp $copyStamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'manual'
   if (-not $result.Swapped) {
     Write-PromoteLog $Log "the database was NOT rolled back: $($result.Failure)"
     <#
