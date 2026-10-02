@@ -1,7 +1,8 @@
 [
   {
     "route": "*",
-    "name": "TownReporter Desk",
-    "reason": "The wordmark in the desk header, and the one clickable on the desk that is deliberately NOT underlined (UI1b-3). It is a Link to the desk home, so the guard counts it as a link -- 18 times, once per route -- but the design system says the product name is the brand mark, not a text link: README section 9, \"There is no logo mark. The wordmark 'TownReporter' set in Bricolage 800 is the brand\", and section 6 keeps the underlined text link for a link inside a sentence, a list title, a heading or a table cell. Underlining the product name in the header would make the brand read as prose. Its bar stays a 44px target, so the exemption covers the underline only; the edge and target rules still apply to it."
+    "name": "TownReporter, the public news page",
+    "kinds": ["linkNotUnderlined"],
+    "reason": "The wordmark in the phone header, and the one clickable on the desk that is deliberately NOT underlined (UI1b-3). It is a Link to the public paper, so the guard counts it as a link -- 18 times, once per route that draws the phone bar -- but the design system says the product name is the brand mark, not a text link: README section 9, \"There is no logo mark. The wordmark 'TownReporter' set in Bricolage 800 is the brand\", and section 6 keeps the underlined text link for a link inside a sentence, a list title, a heading or a table cell. Underlining the product name in the header would make the brand read as prose. THIS ENTRY COVERS THE UNDERLINE ONLY (kinds: linkNotUnderlined): the edge and target rules are still enforced on this control, and UI1b-8 gave it `min-height: 44px` so the target rule actually holds -- UI1b-5..7 exempted the whole record, which is how a 24px wordmark target hid behind a reason that promised it did not."
   }
 ]

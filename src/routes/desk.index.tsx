@@ -201,7 +201,7 @@ function DeskHome() {
   */
   const { city, state, county, timezone } = usePaper();
   const paperPlace = useMemo(() => ({ city, state, county }), [city, state, county]);
-  const { formatDate, formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatDate, formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
   /*
@@ -710,7 +710,7 @@ function DeskHome() {
           s,
           tone: "same",
           label: "✓ Checked · no change",
-          note: `Checked ${formatDateTime(s.last_fetched_at)}`,
+          note: `Checked ${formatListDateTime(s.last_fetched_at)}`,
           rank: 2,
         };
       }
@@ -1878,7 +1878,7 @@ function DeskHome() {
                   <div className="today-leads-title">
                     <h2>New leads</h2>
                     <span>
-                      {last ? `${formatDateTime(last.started_at)} scan · best first` : "Best first"}
+                      {last ? `${formatListDateTime(last.started_at)} scan · best first` : "Best first"}
                     </span>
                   </div>
                   <div className="today-segs" role="group" aria-label="Which leads to show">
@@ -2385,7 +2385,7 @@ function DeskHome() {
               */
               sub={
                 wireScanLine(scanJob) ??
-                (last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet")
+                (last ? `Scan ${formatListDateTime(last.started_at)}` : "No scans yet")
               }
             />
             {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
@@ -2473,7 +2473,7 @@ function DeskHome() {
               {last ? (
                 <>
                   <p className="wire-line">
-                    <b>Last scan</b> · {formatDateTime(last.started_at)} ·{" "}
+                    <b>Last scan</b> · {formatListDateTime(last.started_at)} ·{" "}
                     {last.leads_created > 0 ? (
                       scanCountsLine(last)
                     ) : (

@@ -40,7 +40,7 @@ export function PageWatchPanel({
   onOpenFile: (id: number) => void;
 }) {
   const qc = useQueryClient(),
-    { formatDateTime } = usePaperDateFormatters();
+    { formatListDateTime } = usePaperDateFormatters();
   const sections = useEditorSections();
   const [sectionKey, setSectionKey] = useState("");
   const [expanded, setExpanded] = useState(false),
@@ -332,7 +332,7 @@ export function PageWatchPanel({
                   <p className="meta">
                     {w.watch_state} ·{" "}
                     {w.last_check_at
-                      ? `${WORDS[w.last_outcome ?? ""] ?? w.last_outcome} · ${formatDateTime(w.last_check_at)}`
+                      ? `${WORDS[w.last_outcome ?? ""] ?? w.last_outcome} · ${formatListDateTime(w.last_check_at)}`
                       : "First capture pending — not checked yet"}
                   </p>
                   <InkButton
@@ -363,15 +363,15 @@ export function PageWatchPanel({
               <p className="meta">
                 State: {row.watch_state}.{" "}
                 {row.last_check_at
-                  ? `Last checked ${formatDateTime(row.last_check_at)}.`
+                  ? `Last checked ${formatListDateTime(row.last_check_at)}.`
                   : "No completed check yet."}{" "}
                 {row.watch_state === "active"
-                  ? `Next scheduled check ${formatDateTime(row.next_check_at)} (the local scheduler must be running).`
+                  ? `Next scheduled check ${formatListDateTime(row.next_check_at)} (the local scheduler must be running).`
                   : "Automatic checks are stopped; history remains."}
               </p>
               {row.watch_check_started_at ? (
                 <p role="status">
-                  Check started {formatDateTime(row.watch_check_started_at)}. If interrupted, it can
+                  Check started {formatListDateTime(row.watch_check_started_at)}. If interrupted, it can
                   be retried after 30 minutes.
                 </p>
               ) : null}
@@ -512,7 +512,7 @@ export function PageWatchPanel({
               {detail.data?.history.map((h) => (
                 <details key={h.id} className="of-trail">
                   <summary>
-                    {formatDateTime(h.created_at)} · {WORDS[h.state] ?? h.state}
+                    {formatListDateTime(h.created_at)} · {WORDS[h.state] ?? h.state}
                     {h.state === "moved"
                       ? h.textChanged
                         ? " · Text changed"

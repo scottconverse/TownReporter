@@ -6,12 +6,13 @@ import {
   formatDate,
   formatDateTime,
   formatListDate,
+  formatListDateTime,
   formatShortDate,
   slugify,
 } from "./paper.ts";
 import { APP_VERSION } from "./version.ts";
 
-/** The year on the paper's own clock -- the one `formatDateTime` compares to. */
+/** The year on the paper's own clock -- the one `formatListDate` compares to. */
 const CURRENT_YEAR = Number(
   new Intl.DateTimeFormat("en-US", { year: "numeric", timeZone: "America/Denver" }).format(new Date()),
 );
@@ -67,18 +68,68 @@ describe("the designer's list dates", () => {
     assert.equal(formatListDate("2019-03-05T19:00:00.000Z"), "March 5, 2019");
   });
 
-  it("is the date half of the one desk date-time, with the desk's clock", () => {
-    assert.equal(formatDateTime(at(10)), "Oct. 15, 12:00 p.m.");
-    assert.equal(formatDateTime(at(10, 2019)), "Oct. 15, 2019, 12:00 p.m.");
+  it("is the date half of the desk's LIST date-time, with the desk's clock", () => {
+    assert.equal(formatListDateTime(at(10)), "Oct. 15, 12:00 p.m.");
+    assert.equal(formatListDateTime(at(10, 2019)), "Oct. 15, 2019, 12:00 p.m.");
     // The designer's own example, on the paper's clock: 12:43 UTC is 6:43 a.m. MDT.
-    assert.equal(formatDateTime(`${CURRENT_YEAR}-10-02T12:43:00.000Z`), "Oct. 2, 6:43 a.m.");
+    assert.equal(formatListDateTime(`${CURRENT_YEAR}-10-02T12:43:00.000Z`), "Oct. 2, 6:43 a.m.");
   });
 
   it("is never ISO, on any day of the year", () => {
     for (let month = 1; month <= 12; month += 1) {
-      const drawn = formatDateTime(at(month));
+      const drawn = formatListDateTime(at(month));
       assert.doesNotMatch(drawn, /\d{4}-\d{2}-\d{2}/, `${drawn} is an ISO string`);
       assert.match(drawn, /^[A-Z][a-z]+\.? \d{1,2}, \d{1,2}:\d{2} [ap]\.m\.$/, drawn);
+    }
+  });
+});
+
+/*
+  UI1b-8. THE YEAR BELONGS ON AN EVIDENCE RECORD.
+
+  UI1b-6 pushed the designer's list face ("Oct. 2, 6:43 a.m.", year dropped in
+  the current year) through `formatDateTime` itself. But `formatDateTime` is
+  not a desk-list formatter: the provenance block, `/evidence/$versionId` and
+  `/evidence/compare` print capture and observation times, which are immutable
+  archival facts. "Oct. 2" with no year on a captured record is ambiguous the
+  moment the desk has been running for a year -- a reader cannot tell this
+  year's capture from last year's. So the full date comes back and the list
+  face moves to its own function.
+*/
+describe("the full date-time keeps its year", () => {
+  const at = (month: number, year = CURRENT_YEAR) =>
+    `${year}-${String(month).padStart(2, "0")}-15T18:00:00.000Z`;
+
+  it("prints the year on a CURRENT-YEAR instant, which the list face drops", () => {
+    assert.equal(
+      formatDateTime(at(10)),
+      `Oct 15, ${CURRENT_YEAR}, 12:00 p.m.`,
+      "an archival capture time must carry its year even in the current year",
+    );
+    assert.equal(formatListDateTime(at(10)), "Oct. 15, 12:00 p.m.", "the list row still drops it");
+  });
+
+  it("is the old full date plus the desk's p.m. clock face", () => {
+    assert.equal(formatDateTime(at(10, 2019)), "Oct 15, 2019, 12:00 p.m.");
+    // The same instant the list face renders as "Oct 2, 6:43 a.m." keeps its year.
+    assert.equal(formatDateTime(`${CURRENT_YEAR}-10-02T12:43:00.000Z`), `Oct 2, ${CURRENT_YEAR}, 6:43 a.m.`);
+  });
+
+  it("keeps the reader-facing records off the LIST formatter", () => {
+    /*
+      A SOURCE PIN, not a render: the three archival surfaces must not import
+      `formatListDateTime` at all. A future screen that reached for the desk's
+      short face here would silently drop the year off a capture time, and no
+      unit test of the formatter itself would notice.
+    */
+    for (const file of [
+      "src/components/provenance.tsx",
+      "src/routes/evidence.$versionId.tsx",
+      "src/routes/evidence.compare.tsx",
+    ]) {
+      const text = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
+      assert.doesNotMatch(text, /formatListDateTime/, `${file} must print the full archival date`);
+      assert.match(text, /formatDateTime/, `${file} should still use the full-date formatter`);
     }
   });
 });

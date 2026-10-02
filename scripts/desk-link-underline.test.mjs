@@ -189,25 +189,31 @@ test("the keyboard focus ring is untouched by the underline work", () => {
 /* ─────────────────────── the one deliberate exception ───────────────────── */
 
 test("the brand mark stays a brand mark, and the allowlist says why", () => {
-  /* The wordmark "TownReporter Desk" is a Link to the desk home, so the guard
-     counts it as a link -- 18 times, once per desk route. README §9: "There is
-     no logo mark. The wordmark 'TownReporter' set in Bricolage 800 is the
-     brand" -- underlining the product name in the header is not what the
-     design system asks for, so it stays a brand mark and is exempted in
-     writing. Its bar is a 44px control, so it is not exempt from the target
-     rule; the allowlist entry covers the underline only. */
+  /* The wordmark is a Link to the public paper, so the guard counts it as a
+     link -- 18 times, once per route that draws the phone bar. README §9:
+     "There is no logo mark. The wordmark 'TownReporter' set in Bricolage 800
+     is the brand" -- underlining the product name in the header is not what
+     the design system asks for, so it stays a brand mark and is exempted in
+     writing. UI1b-8: the entry names the UNDERLINE kind only, and the target
+     rule is enforced on this link for real (`min-height: 44px`, asserted in
+     scripts/desk-menu-button.test.mjs). */
   assert.notEqual(
     declarations("astra-brand-bar", "text-decoration"),
     "underline",
     "the brand mark is not a text link and must not be underlined",
   );
-  const entry = ALLOWLIST.find((e) => e.name === "TownReporter Desk");
+  const entry = ALLOWLIST.find((e) => e.name === "TownReporter, the public news page");
   assert.ok(entry, "the brand mark is exempted in scripts/desk-clickable-allowlist.json");
   assert.ok(
     String(entry.reason || "").trim().length >= 20,
     "the exemption states a reason; an entry without one hides the defect",
   );
   assert.equal(entry.route, "*", "the wordmark is drawn on every desk route");
+  assert.deepEqual(
+    entry.kinds,
+    ["linkNotUnderlined"],
+    "the entry must cover the underline only -- anything wider hides a target-size failure",
+  );
 });
 
 test("the allowlist is well formed", () => {

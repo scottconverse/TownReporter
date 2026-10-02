@@ -829,7 +829,7 @@ export function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => v
  * and the two drafts on it" are different things to get back.
  */
 export function RecentlyDeletedPanel() {
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [confirmPurge, setConfirmPurge] = useState<number | null>(null);
@@ -919,7 +919,7 @@ export function RecentlyDeletedPanel() {
                   )}
                 </span>
               </div>
-              <p className="mt-1 text-sm text-muted">Deleted {formatDateTime(r.deleted_at)}</p>
+              <p className="mt-1 text-sm text-muted">Deleted {formatListDateTime(r.deleted_at)}</p>
               {confirmPurge === r.id ? (
                 <p className="mt-1 text-sm text-rust">
                   This is the copy. After this there is nothing to restore.

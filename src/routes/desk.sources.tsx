@@ -149,7 +149,7 @@ function SourcesPage() {
   );
   const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   /*
     The right column: what the scan last did, and "Run scan now".
 
@@ -837,7 +837,7 @@ function SourcesPage() {
                 {(scans.data?.rows ?? []).slice(0, 5).map((run) => (
                   <li key={run.id}>
                     <span className="astra-log-t">
-                      {run.started_at ? formatDateTime(run.started_at) : "—"}
+                      {run.started_at ? formatListDateTime(run.started_at) : "—"}
                     </span>
                     {/*
                       FB1, unit 4: A RUNNING ROW SHOWS ITS LIVE COUNT.
@@ -1420,7 +1420,7 @@ function WatchRows({
   /** `from` is the status the row was in, so the done toast can offer Undo. */
   onStatus: (id: number, status: SingleRowStatus, from?: string) => void;
 }) {
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   return (
     <div className="astra-rows">
       {rows.map((s) => {
@@ -1497,9 +1497,9 @@ function WatchRows({
               : failed
               ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
               : fresh > 0
-                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatListDateTime(s.last_fetched_at)}`
                 : s.last_fetched_at
-                  ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                  ? `Checked ${formatListDateTime(s.last_fetched_at)}`
                   : "Added, not fetched yet";
         const checking = checkingId === s.id;
         /*

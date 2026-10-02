@@ -120,7 +120,26 @@ test("the Desk tag is not drawn beside the Menu button", () => {
   );
   assert.match(
     CHROME,
-    /className="astra-brand astra-brand-bar"[\s\S]{0,200}aria-label="TownReporter Desk"/,
+    /className="astra-brand astra-brand-bar"[\s\S]{0,200}aria-label="TownReporter, the public news page"/,
     "the brand link lost the words a screen reader needs when the tag is hidden",
+  );
+
+  /*
+    UI1b-8: THE WORDMARK IS A 44px TARGET AT PHONE WIDTHS.
+
+    Hiding the "Desk" tag left the phone link as its ~24px `<strong>` line box:
+    `padding: 0`, no `min-height`, in a bar that centres its children. The
+    allowlist entry covers the underline only and its reason promises the
+    target rule still applies, so the rule has to hold.
+  */
+  assert.match(
+    DESK_CSS,
+    /\.desk-ltr\.astra \.astra-brand-bar \{[^}]*min-height: 44px/,
+    "the phone wordmark fell back under 44px",
+  );
+  assert.match(
+    DESK_CSS,
+    /\.desk-ltr\.astra \.astra-brand-bar \{[^}]*display: inline-flex/,
+    "the wordmark needs a box it can be 44px tall in",
   );
 });

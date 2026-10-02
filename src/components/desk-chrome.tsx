@@ -434,16 +434,28 @@ export function DeskShell({
             Menu
           </button>
           {/*
-            The accessible name is spelled out because the tag is hidden: on the
-            phone only the wordmark is drawn, and "TownReporter Desk" is what
-            tells a screen-reader user this link leads to the desk rather than
-            to the paper. It contains the visible word, so WCAG 2.5.3 holds.
+            UI1b-8: THE NAME NAMES WHERE THE LINK GOES.
+
+            The accessible name is spelled out because the tag is hidden on the
+            phone -- but this `to="/"` link does not go to the desk at all: it
+            leaves for the public paper, and its own `title` has always said so
+            ("Public news page"). The UI1b-5 name "TownReporter Desk" therefore
+            told a screen-reader user the opposite of what the press does, one
+            word before it took them out of the desk. The name now says the
+            destination and still contains the visible word "TownReporter"
+            (WCAG 2.5.3, Label in Name), and it matches the `title`.
+
+            The DESK's brand link is a different element -- `.astra-brand` in
+            the nav rail (`to="/"` as well, with the visible "TownReporter /
+            Editor's desk" tag). It draws on desktop and inside the phone
+            drawer; the walk skips `.astra-sidebar` entirely, so it is not in
+            the guard's report and keeps its drawn tag.
           */}
           <Link
             to="/"
             className="astra-brand astra-brand-bar"
             title="Public news page"
-            aria-label="TownReporter Desk"
+            aria-label="TownReporter, the public news page"
           >
             <strong>TownReporter</strong>
             <span>Desk</span>

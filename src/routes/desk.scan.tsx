@@ -41,7 +41,7 @@ function ScanPage() {
   // P0-2: saved packs.
   const [packId,setPackId]=useState<number | null>(null);
   const [packName,setPackName]=useState("");
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     P0-4: real offset paging. Each request is ONE bounded page (pageSize), and
@@ -293,7 +293,7 @@ function ScanPage() {
         </InkButton>
         <p className="meta">
           {watch} sources on watch
-          {last ? ` · last ran ${formatDateTime(last.started_at)}` : ""}
+          {last ? ` · last ran ${formatListDateTime(last.started_at)}` : ""}
         </p>
       </div>
       <PaperSetupGateNote gate={paperGate} />
@@ -470,7 +470,7 @@ function ScanPage() {
                 )}
               </div>
               <p className="meta">
-                {formatDateTime(s.started_at)} ·{" "}
+                {formatListDateTime(s.started_at)} ·{" "}
                 {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
               </p>
               {/*

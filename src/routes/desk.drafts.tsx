@@ -90,7 +90,7 @@ function draftOrigin(row: DraftRow, state: DeskDraftState): string {
 
 function DraftsPage() {
   const { sections } = useEditorSections();
-  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const navigate = useNavigate();
   const [filter, setFilter] = useState<DeskDraftFilter>("all");
   const [draftShown, setDraftShown] = useState(PAGE_SIZE);
@@ -167,25 +167,25 @@ function DraftsPage() {
   const metaFor = (row: DraftRow, state: DeskDraftState): string => {
     if (state.failed) {
       const why = String(row.job_error ?? "").split("\n")[0].trim();
-      const when = formatDateTime(row.job_updated_at ?? row.updated_at);
+      const when = formatListDateTime(row.job_updated_at ?? row.updated_at);
       return why ? `${why} · ${when}` : when;
     }
     if (state.running) return modelChoiceLabel(row.job_model_choice, "story");
     if (state.key === "names" && row.names_checked_at) {
-      return `checked ${formatDateTime(row.names_checked_at)}`;
+      return `checked ${formatListDateTime(row.names_checked_at)}`;
     }
     if (state.key === "evidence" && row.evidence_checked_at) {
-      return `checked ${formatDateTime(row.evidence_checked_at)}`;
+      return `checked ${formatListDateTime(row.evidence_checked_at)}`;
     }
     if (state.key === "ready") {
       const checked = row.evidence_checked_at ?? row.names_checked_at;
-      return checked ? `checked ${formatDateTime(checked)}` : `saved ${formatDateTime(row.updated_at)}`;
+      return checked ? `checked ${formatListDateTime(checked)}` : `saved ${formatListDateTime(row.updated_at)}`;
     }
     if (state.key === "imported") return `pasted ${formatShortDate(row.updated_at)}`;
     // The draft row is written with the lead, so its timestamp is the filing
     // time: "filed", not "saved", which would read as an editor's save.
-    if (state.key === "empty") return `filed ${formatDateTime(row.updated_at)}`;
-    return `saved ${formatDateTime(row.updated_at)}`;
+    if (state.key === "empty") return `filed ${formatListDateTime(row.updated_at)}`;
+    return `saved ${formatListDateTime(row.updated_at)}`;
   };
 
   const openWorkbench = (leadId: number) =>

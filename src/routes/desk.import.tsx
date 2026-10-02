@@ -575,7 +575,7 @@ function ImportPage() {
                     </legend>
                     <div className="mt-1 space-y-1">
                       {IMPORT_KINDS.map((option) => (
-                        <label key={option.key} className="flex items-start gap-2 text-sm">
+                        <label key={option.key} className="choice-row flex items-start gap-2 text-sm">
                           <input
                             type="radio"
                             name={`kind-${card.key}`}
@@ -663,7 +663,7 @@ function ImportPage() {
                         const missing =
                           choice.key !== "main" && !card.plainBrief.trim();
                         return (
-                          <label key={choice.key} className="flex items-start gap-2 text-sm">
+                          <label key={choice.key} className="choice-row flex items-start gap-2 text-sm">
                             <input
                               type="radio"
                               name={`body-${card.key}`}
@@ -700,7 +700,7 @@ function ImportPage() {
                       <ul className="mt-1 space-y-1">
                         {card.links.map((link, index) => (
                           <li key={`${card.key}-link-${index}`}>
-                            <label className="flex items-start gap-2 text-sm">
+                            <label className="choice-row flex items-start gap-2 text-sm">
                               <input
                                 type="checkbox"
                                 className="mt-1 h-4 w-4"
@@ -765,7 +765,7 @@ function ImportPage() {
                     </legend>
                     <div className="mt-1 space-y-1">
                       {IMPORT_DISCLOSURES.map((option) => (
-                        <label key={option.key} className="flex items-start gap-2 text-sm">
+                        <label key={option.key} className="choice-row flex items-start gap-2 text-sm">
                           <input
                             type="radio"
                             name={`who-${card.key}`}
@@ -849,7 +849,7 @@ function ImportPage() {
                           onChange={(e) => patch(card.key, { reporterNextStep: e.target.value })}
                         />
                       </label>
-                      <label className="flex items-start gap-2 text-sm">
+                      <label className="choice-row flex items-start gap-2 text-sm">
                         <input
                           type="checkbox"
                           className="mt-1 h-5 w-5"

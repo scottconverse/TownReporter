@@ -33,9 +33,13 @@
  *      added later is picked up without anybody remembering to add it here --
  *      in both themes at 1280, and in the light theme again at 390.
  *   3. On each page collects every clickable -- button, a[href], role=button,
- *      role=link, summary, input[type=button|submit], select, [onclick], and
- *      any element whose computed cursor is `pointer` -- skipping the sidebar
- *      nav, hidden elements and anything inside `[aria-hidden=true]`.
+ *      role=link, summary, every press-type input (button, submit, reset,
+ *      image, checkbox, radio, file, range), select, [onclick], and any element
+ *      whose computed cursor is `pointer` -- skipping the sidebar nav, hidden
+ *      elements and anything inside `[aria-hidden=true]`. A checkbox or radio
+ *      is measured together with its enclosing `<label>`, which is both what
+ *      the user sees when the native widget is replaced and the press target
+ *      the 44px rule is about (UI1b-8; see `collectClickables`).
  *   4. Classifies each one against the design system's rule (README §6, §2.6,
  *      §2.9): a link that goes somewhere is an UNDERLINED link in prose; a
  *      control that does something needs an EDGE or FILL at 3:1 (WCAG 1.4.11)
@@ -43,7 +47,9 @@
  *      still shows its edge and its reason. The arithmetic lives in
  *      `scripts/lib/clickable-guard.mjs`, where the unit tests drive it.
  *   5. Writes a machine-readable report to `$GUARD_OUT_DIR` (default
- *      `tmp-guard/`, gitignored, never committed) and prints a summary grouped
+ *      `tmp-guard/`, gitignored, never committed) -- `report.json`,
+ *      `report.md`, `failures.json` and `clickables.json`, the last being every
+ *      control measured, failing or not (UI1b-8) -- and prints a summary grouped
  *      by route and by accessible name with counts, plus the top 25 failing
  *      labels.
  *
@@ -676,6 +682,25 @@ function addressOf(routePath) {
  *   - anything inside `[aria-hidden=true]`, and anything CSS-hidden: nothing
  *     an editor can press.
  *   - a box with no pixels (0x0): not on the screen at all.
+ *
+ * WHAT COUNTS AS A CONTROL (UI1b-8). The tag list used to stop at
+ * button/submit inputs and the pointer-cursor fallback could not recover
+ * anything the browser draws with its DEFAULT cursor, so two whole families --
+ * the radio choices on /desk/import and the `.astra-check` checkbox rows -- were
+ * never classified at all: CI reported zero failures while those rows could
+ * violate the target rule freely. The list now carries every native input that
+ * DOES something when it is pressed:
+ *
+ *   INCLUDED: checkbox, radio, file, range, button, submit, reset, image,
+ *   `select`, `[onclick]`, and every tag the old list had.
+ *   EXCLUDED, deliberately: `textarea` and the typing inputs (text, search,
+ *   email, url, tel, password, number, date...) and `[contenteditable]`. A
+ *   field you TYPE in is not a control you PRESS -- the rule is about things
+ *   that do something when clicked, and a text box's height is a legibility and
+ *   layout question, not a hit-target one. Their 42px floor already lives in
+ *   `.desk-ltr.astra :where(input:not(...), textarea, select)`. (`select` stays
+ *   IN even though you choose a value through it: pressing it opens a listbox,
+ *   which is a press, and it was already in this list before UI1b-8.)
  */
 function collectClickables() {
   const SEL = [
@@ -686,6 +711,12 @@ function collectClickables() {
     "summary",
     'input[type="button"]',
     'input[type="submit"]',
+    'input[type="reset"]',
+    'input[type="image"]',
+    'input[type="checkbox"]',
+    'input[type="radio"]',
+    'input[type="file"]',
+    'input[type="range"]',
     "select",
     "[onclick]",
   ].join(", ");
@@ -732,6 +763,17 @@ function collectClickables() {
       return collapse(chosen || el.getAttribute("title") || el.getAttribute("name") || "(select)");
     }
     if (el.tagName === "INPUT") {
+      /*
+        UI1b-8: a checkbox or a radio is named by the words beside it, which is
+        what a screen reader reads -- `el.value` on a radio is the literal
+        string "on" and on the import cards it would file the row under
+        "on". The enclosing `<label>`, or a `<label for=...>`, is the name.
+      */
+      if (el.type === "checkbox" || el.type === "radio") {
+        const words = el.labels?.[0]?.innerText ?? el.closest("label")?.innerText ?? "";
+        const named = collapse(words);
+        if (named) return named;
+      }
       return collapse(el.value || el.getAttribute("title") || el.getAttribute("name") || "(input)");
     }
     const text = collapse(el.innerText || el.textContent);
@@ -749,6 +791,51 @@ function collectClickables() {
       if (sameTag.length > 1) out += `:nth-of-type(${sameTag.indexOf(el) + 1})`;
     }
     return out;
+  };
+
+  /*
+    UI1b-8. AN ENCLOSING `<label>` IS PART OF THE CONTROL.
+
+    A checkbox or a radio is drawn by the browser, not by the stylesheet: its
+    computed border is `0px none` and its fill is transparent, so the walk can
+    measure nothing about the native widget itself. What the user perceives is
+    the widget's own painted box, or -- when the native control is visually
+    replaced (`appearance: none`, `opacity: 0`, a sibling-drawn box like the
+    Queue's `.queue-pick`) -- whatever the enclosing `<label>` draws. And the
+    label is the PRESS TARGET: clicking anywhere on it toggles the control, so
+    its height is the hit target the 44px rule is about.
+
+    So a choice control is measured twice -- itself and its nearest `<label>`,
+    with the label's own ground behind it -- and both numbers go to
+    `classifyControl`, which decides. Labels are never rows themselves (the
+    `reportable` filter below drops any box that contains a matched tag).
+  */
+  const boxFor = (el) => {
+    const style = getComputedStyle(el);
+    const rect = el.getBoundingClientRect();
+    const ancestors = [];
+    for (let p = el.parentElement; p; p = p.parentElement) {
+      const bg = getComputedStyle(p).backgroundColor;
+      if (bg && bg !== "rgba(0, 0, 0, 0)") ancestors.push(bg);
+    }
+    const sides = [
+      ["top", "Top"],
+      ["right", "Right"],
+      ["bottom", "Bottom"],
+      ["left", "Left"],
+    ].map(([side, cap]) => ({
+      side,
+      width: parseFloat(style[`border${cap}Width`]) || 0,
+      style: style[`border${cap}Style`],
+      color: style[`border${cap}Color`],
+    }));
+    return {
+      height: Math.round(rect.height * 10) / 10,
+      minHeight: parseFloat(style.minHeight) || 0,
+      ownBackground: style.backgroundColor,
+      ancestorBackgrounds: ancestors,
+      borderSides: sides,
+    };
   };
 
   const rowFor = (el) => {
@@ -805,6 +892,15 @@ function collectClickables() {
       pageBackground:
         getComputedStyle(document.documentElement).backgroundColor || "#ffffff",
       borderSides: sides,
+      /*
+        UI1b-8: the choice-control half of the row. `isChoice` marks a native
+        checkbox or radio; `labelBox` is the enclosing `<label>`, measured the
+        same way, or null when there is none.
+      */
+      isChoice: el.tagName === "INPUT" && (el.type === "checkbox" || el.type === "radio"),
+      appearance: style.appearance,
+      opacity: Number(style.opacity),
+      labelBox: el.closest("label") ? boxFor(el.closest("label")) : null,
     };
   };
 
@@ -1251,6 +1347,18 @@ async function main() {
     await writeFile(join(OUT_DIR, "report.json"), JSON.stringify(report, null, 2), "utf8");
     await writeFile(join(OUT_DIR, "report.md"), markdown(report), "utf8");
     await writeFile(join(OUT_DIR, "failures.json"), JSON.stringify(failures, null, 2), "utf8");
+    /*
+      UI1b-8: EVERY control this run measured, not only the failing ones.
+
+      Asking "which controls did the guard ever look at?" used to mean reading
+      a red report: `seen` was counted and then thrown away, so the day a whole
+      family was missing from the collector (native checkboxes, radios, file
+      inputs, ranges -- the bot's finding) the only evidence was a number that
+      looked healthy. `report.json` carries the totals; this file carries the
+      rows, one per control per visit, so the next person can answer that
+      question without a rebuild.
+    */
+    await writeFile(join(OUT_DIR, "clickables.json"), JSON.stringify(seen, null, 2), "utf8");
 
     console.log("\n" + markdown(report));
     console.log(`\nReport: ${join(OUT_DIR, "report.json")} and ${join(OUT_DIR, "report.md")}`);

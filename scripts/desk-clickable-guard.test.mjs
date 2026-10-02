@@ -310,46 +310,283 @@ test("a disabled control with no edge is a failure and a missing reason is a NOT
   assert.ok(invisibleGate.failures.includes(FAIL_NO_EDGE));
 });
 
+/* ──────────────────── the native choice controls (UI1b-8) ───────────────── */
+
+/*
+  The bot's second finding: the collector stopped at button/submit inputs, so
+  native checkboxes, radios, file inputs and ranges were never classified at
+  all -- CI could report zero failures while a whole control family broke the
+  target rule. The radio choices on `/desk/import` and the `.astra-check`
+  checkbox rows in the Legal-removals dialog have no `cursor: pointer` rule
+  either, so the cursor fallback did not recover them.
+
+  The browser paints these widgets itself: their computed border is `0px none`
+  and their fill is transparent (measured in headless Chromium), so the numbers
+  have to come from the control AND from the `<label>` that takes the press.
+*/
+
+/** A native checkbox/radio, as the browser reports one, inside `label`. */
+function choice(over = {}, labelOver = null) {
+  return control({
+    tag: "input",
+    name: "Hold this on the desk",
+    selector: "input.queue-pick",
+    text: "",
+    isChoice: true,
+    appearance: "auto",
+    opacity: 1,
+    height: 17,
+    ownBackground: "rgba(0, 0, 0, 0)",
+    borderSides: [],
+    labelBox: labelOver,
+    ...over,
+  });
+}
+
+/** A `<label>` around a choice, measured the way the walk measures one. */
+function labelBox(over = {}) {
+  return {
+    height: 44,
+    minHeight: 44,
+    ownBackground: "rgba(0, 0, 0, 0)",
+    ancestorBackgrounds: [LIGHT.surface, LIGHT.bg],
+    borderSides: ["top", "right", "bottom", "left"].map((side) => ({
+      side,
+      width: 1,
+      style: "solid",
+      color: LIGHT.fg2,
+    })),
+    ...over,
+  };
+}
+
+test("a radio with no edge of its own and no label edge FAILS", () => {
+  /* This is the `/desk/import` "Import as" row: a native radio in a plain
+     `<label>` with no drawn box. It is a real choice, and nothing on screen
+     says so. */
+  const bare = classifyControl(
+    choice(
+      { name: "Story idea", height: 16 },
+      { height: 40, ownBackground: "rgba(0, 0, 0, 0)", borderSides: [], ancestorBackgrounds: [LIGHT.surface] },
+    ),
+  );
+  assert.equal(bare.pass, false, "a bare radio passed -- the whole family is still unguarded");
+  assert.ok(bare.failures.includes(FAIL_NO_EDGE), JSON.stringify(bare.failures));
+
+  /* And with no label at all it is a 17px target with no edge either. */
+  const orphan = classifyControl(choice({ labelBox: null }));
+  assert.equal(orphan.pass, false);
+  assert.deepEqual(orphan.failures, [FAIL_NO_EDGE, FAIL_TARGET_SMALL]);
+});
+
+test("a checkbox inside a label with a 3:1 edge and 44px height PASSES", () => {
+  const boxed = classifyControl(choice({ labelBox: labelBox() }));
+  assert.deepEqual(boxed.failures, [], JSON.stringify(boxed));
+  assert.ok(boxed.edgeRatio >= CONTRAST_FLOOR, `measured ${boxed.edgeRatio}`);
+  assert.equal(boxed.kind, "ok");
+
+  /* The label's own fill identifies it too -- the Queue's drawn 24px box. */
+  const filled = classifyControl(
+    choice({ labelBox: labelBox({ borderSides: [], ownBackground: LIGHT.fg }) }),
+  );
+  assert.deepEqual(filled.failures, [], JSON.stringify(filled));
+
+  /* A --line label edge is the same defect as a --line button edge. */
+  const hairlined = classifyControl(
+    choice({
+      labelBox: labelBox({
+        borderSides: [{ side: "top", width: 1, style: "solid", color: LIGHT.line }],
+      }),
+    }),
+  );
+  assert.ok(hairlined.failures.includes(FAIL_NO_EDGE), JSON.stringify(hairlined.failures));
+});
+
+test("a zero-opacity native input whose label is the visible control is judged on the label", () => {
+  /* The Queue's `.queue-pick`: the browser's widget is switched off
+     (`appearance: none`, `opacity: 0`) and the label's own drawn box is the
+     control the editor sees. */
+  const replaced = classifyControl(
+    choice({ appearance: "none", opacity: 0, labelBox: labelBox() }),
+  );
+  assert.deepEqual(replaced.failures, [], "the replaced native widget must not decide this");
+
+  /* Same control, label invisible: the failure is about the LABEL. */
+  const nothing = classifyControl(
+    choice({
+      appearance: "none",
+      opacity: 0,
+      labelBox: labelBox({ borderSides: [], ownBackground: "rgba(0, 0, 0, 0)" }),
+    }),
+  );
+  assert.ok(nothing.failures.includes(FAIL_NO_EDGE));
+});
+
+test("the 44px target is the control OR its label, and a short label still fails", () => {
+  const shortLabel = classifyControl(choice({ labelBox: labelBox({ height: 30, minHeight: 0 }) }));
+  assert.ok(shortLabel.failures.includes(FAIL_TARGET_SMALL), JSON.stringify(shortLabel.failures));
+
+  /* A tall control with no label of its own is its own target. */
+  const tall = classifyControl(
+    choice({
+      height: 44,
+      ownBackground: LIGHT.fg,
+      labelBox: null,
+    }),
+  );
+  assert.deepEqual(tall.failures, [], JSON.stringify(tall));
+});
+
 /* ────────────────────────────── the allowlist ───────────────────────────── */
 
 test("an allowlist entry without a reason is rejected", () => {
   assert.deepEqual(validateAllowlist([]), []);
   assert.deepEqual(
-    validateAllowlist([{ route: "/desk/queue", name: "More", reason: "the drawn caret carries it" }]),
+    validateAllowlist([
+      { route: "/desk/queue", name: "More", reason: "the drawn caret carries it", kinds: "all" },
+    ]),
     [],
   );
   const problems = validateAllowlist([
-    { route: "/desk/queue", name: "More" },
-    { route: "/desk/queue", name: "Edit", reason: "   " },
-    { route: "/desk/queue", reason: "no name" },
+    { route: "/desk/queue", name: "More", kinds: "all" },
+    { route: "/desk/queue", name: "Edit", reason: "   ", kinds: "all" },
+    { route: "/desk/queue", reason: "no name", kinds: "all" },
   ]);
   assert.equal(problems.length, 3, JSON.stringify(problems));
   assert.ok(problems.some((p) => /no "reason"/.test(p)));
 });
 
+/*
+  UI1b-8: AN ENTRY MUST SAY WHICH KINDS IT COVERS.
+
+  The bot's finding: the phone wordmark's entry exempted the WHOLE failing
+  record, so when the target fell to 24px the guard reported nothing -- while
+  the entry's own reason claimed the target rule still applied. A missing
+  `kinds` is now the failure mode, not the default.
+*/
+test("an entry with no kinds is rejected, and an unknown kind is rejected", () => {
+  const noKinds = validateAllowlist([{ route: "*", name: "Wordmark", reason: "brand mark, not a link" }]);
+  assert.equal(noKinds.length, 1, JSON.stringify(noKinds));
+  assert.match(noKinds[0], /no "kinds"/);
+  assert.match(noKinds[0], /linkNotUnderlined/, "the message names the keys that are allowed");
+
+  const badKind = validateAllowlist([
+    { route: "*", name: "Wordmark", reason: "x", kinds: ["underline"] },
+  ]);
+  assert.equal(badKind.length, 1);
+  assert.match(badKind[0], /not a failure kind/);
+
+  const empty = validateAllowlist([{ route: "*", name: "Wordmark", reason: "x", kinds: [] }]);
+  assert.equal(empty.length, 1);
+  assert.match(empty[0], /must be "all" or a non-empty list/);
+
+  assert.deepEqual(
+    validateAllowlist([
+      { route: "*", name: "A", reason: "x", kinds: ["linkNotUnderlined"] },
+      { route: "*", name: "B", reason: "x", kinds: "all" },
+    ]),
+    [],
+  );
+});
+
+test("kinds exempt ONLY those kinds: an underline entry does not cover a small target", () => {
+  const wordmark = { route: "*", name: "TownReporter, the public news page" };
+  const underlineOnly = [
+    {
+      route: "*",
+      name: "TownReporter, the public news page",
+      reason: "the brand mark is not a text link",
+      kinds: ["linkNotUnderlined"],
+    },
+  ];
+
+  /* The failure the entry was written for: covered. */
+  assert.deepEqual(
+    exemptFailures(underlineOnly, [{ ...wordmark, failures: [FAIL_LINK_PLAIN] }]),
+    [],
+  );
+
+  /* The same control, now also under 44px: NOT covered -- the entry promised
+     the target rule still applies, and this is that promise being kept. */
+  const both = { ...wordmark, failures: [FAIL_LINK_PLAIN, FAIL_TARGET_SMALL] };
+  const left = exemptFailures(underlineOnly, [both]);
+  assert.equal(left.length, 1, "a target failure hid behind an underline-only entry");
+  assert.deepEqual(left[0].failures, [FAIL_LINK_PLAIN, FAIL_TARGET_SMALL]);
+
+  /* And an entry that says "all" really does cover everything. */
+  const everything = [{ ...underlineOnly[0], kinds: "all" }];
+  assert.deepEqual(exemptFailures(everything, [both]), []);
+  assert.deepEqual(exemptFailures(everything, [{ ...wordmark, failures: [FAIL_NO_EDGE] }]), []);
+});
+
+test("two entries on one control pool their kinds", () => {
+  const failures = [
+    { route: "/desk/queue", name: "More", failures: [FAIL_LINK_PLAIN, FAIL_TARGET_SMALL] },
+  ];
+  const split = [
+    { route: "/desk/queue", name: "More", reason: "brand mark", kinds: ["linkNotUnderlined"] },
+    { route: "/desk/queue", name: "More", reason: "short but deliberate", kinds: ["targetUnder44"] },
+  ];
+  assert.deepEqual(exemptFailures(split, failures), [], "the two written decisions add up");
+});
+
 test("an allowlist entry that matches no failure any more is stale", () => {
   const failures = [
-    { route: "/desk/queue", name: "More" },
-    { route: "/desk/models", name: "Check now" },
+    { route: "/desk/queue", name: "More", failures: [FAIL_NO_EDGE] },
+    { route: "/desk/models", name: "Check now", failures: [FAIL_TARGET_SMALL] },
   ];
   const live = [
-    { route: "/desk/queue", name: "More", reason: "drawn caret" },
-    { route: "*", name: "Check now", reason: "every screen draws it" },
+    { route: "/desk/queue", name: "More", reason: "drawn caret", kinds: ["noEdgeOrFill"] },
+    { route: "*", name: "Check now", reason: "every screen draws it", kinds: "all" },
   ];
   assert.deepEqual(staleAllowlistEntries(live, failures), []);
   assert.deepEqual(exemptFailures(live, failures), []);
 
-  const withStale = [...live, { route: "/desk/queue", name: "Read report", reason: "fixed in UI1b" }];
+  const withStale = [
+    ...live,
+    { route: "/desk/queue", name: "Read report", reason: "fixed in UI1b", kinds: "all" },
+  ];
   const stale = staleAllowlistEntries(withStale, failures);
   assert.equal(stale.length, 1);
   assert.equal(stale[0].name, "Read report");
 
   /* A `*` entry is not stale just because the control only fails on one route. */
-  assert.deepEqual(staleAllowlistEntries([{ route: "*", name: "More", reason: "x" }], failures), []);
+  assert.deepEqual(
+    staleAllowlistEntries([{ route: "*", name: "More", reason: "x", kinds: "all" }], failures),
+    [],
+  );
   /* And an exemption really does exempt. */
-  assert.deepEqual(exemptFailures([{ route: "/desk/queue", name: "More", reason: "x" }], failures), [
-    { route: "/desk/models", name: "Check now" },
-  ]);
+  assert.deepEqual(
+    exemptFailures(
+      [{ route: "/desk/queue", name: "More", reason: "x", kinds: "all" }],
+      failures,
+    ),
+    [{ route: "/desk/models", name: "Check now", failures: [FAIL_TARGET_SMALL] }],
+  );
+
+  /*
+    A PARTIAL entry -- one that covers a kind this control still fails on, but
+    not all of them -- is not stale: it still names something the run found, and
+    the exemption it writes is still doing work. Staleness is for entries whose
+    kinds meet no failure at all.
+  */
+  const wordmarkish = { route: "*", name: "Wordmark", failures: [FAIL_LINK_PLAIN, FAIL_TARGET_SMALL] };
+  assert.deepEqual(
+    staleAllowlistEntries(
+      [{ route: "*", name: "Wordmark", reason: "x", kinds: ["linkNotUnderlined"] }],
+      [wordmarkish],
+    ),
+    [],
+    "a partial entry still matches a failure and is not stale",
+  );
+  assert.equal(
+    staleAllowlistEntries(
+      [{ route: "*", name: "Wordmark", reason: "x", kinds: ["targetUnder44"] }],
+      [{ route: "*", name: "Wordmark", failures: [FAIL_LINK_PLAIN] }],
+    ).length,
+    1,
+    "an entry whose kinds meet none of the control's failures IS stale",
+  );
 
   /*
     UI1b-3: the two readings must be given the SAME list, and it has to be the

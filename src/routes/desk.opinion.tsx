@@ -58,7 +58,7 @@ export const Route = createFileRoute("/desk/opinion")({
  * then shows the piece when it lands.
  */
 function OpinionPage() {
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
@@ -639,8 +639,8 @@ function OpinionPage() {
                     </span>
                   </span>
                   <span className="astra-row-meta">
-                    Asked {formatDateTime(r.created_at)}
-                    {r.finished_at ? ` · finished ${formatDateTime(r.finished_at)}` : ""}
+                    Asked {formatListDateTime(r.created_at)}
+                    {r.finished_at ? ` · finished ${formatListDateTime(r.finished_at)}` : ""}
                   </span>
                   {/*
                     Read, Edit, Delete -- always shown, never behind a hover.

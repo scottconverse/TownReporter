@@ -703,6 +703,27 @@
   resize: vertical;
   width: 100%;
 }
+/*
+  UI1b-8: THE FILE PICKER IS A PRESS, SO IT GETS THE SAME BOX.
+
+  `input[type=file]` is excluded from the field rule above (it is not a field
+  you type in), so on /desk/import it inherited `inputClass`'s `border-rule`
+  utility instead -- a 1px `--line` edge, measured 1.47:1 against the cream.
+  That is the exact defect UI1a fixed on `.btn.quiet` and the design system's
+  "never `--line`" rule for a control's edge; the guard found it the moment the
+  collector stopped skipping file inputs. It takes the field box's own
+  treatment, with `--fg2` for the edge.
+*/
+.desk-ltr.astra input[type="file"] {
+  background: var(--surface);
+  color: var(--fg);
+  border: 1px solid var(--fg2);
+  border-radius: 0;
+  padding: 11px 12px;
+  min-height: 44px;
+  max-width: 100%;
+  font: 400 calc(14px * var(--ts))/1.6 var(--fb);
+}
 .desk-ltr.astra input::placeholder,
 .desk-ltr.astra textarea::placeholder {
   color: var(--mut);
@@ -3131,6 +3152,20 @@
 /* Phone top bar (the whole `.astra-topbar` rule is inside the ≤700 block,
    so nothing here needs to hide it on desktop). */
 .desk-ltr.astra .astra-brand-bar {
+  /*
+    UI1b-8: THE WORDMARK IS A 44px TARGET AT EVERY WIDTH.
+
+    The "Desk" tag is hidden here (see `.astra-brand-bar span` below), so at
+    phone widths this link was only the ~24px `<strong>` line box: `padding: 0`
+    and no `min-height`, in a bar that centres rather than stretches its
+    children. README §2.9/§6: a hit target is at least 44px -- and the
+    allowlist entry that covers the underline says so in its reason, so the
+    target rule has to actually hold for it. `min-height` adds no width, and
+    the bar is already as tall as its two 44px buttons, so the phone header
+    does not grow.
+  */
+  min-height: 44px;
+  display: inline-flex;
   flex-direction: row;
   align-items: center;
   gap: 8px;
@@ -6710,6 +6745,7 @@
 .desk-ltr.astra summary,
 .desk-ltr.astra .np-link,
 .desk-ltr.astra .astra-check,
+.desk-ltr.astra .choice-row,
 .desk-ltr.astra .st-btn.ghost {
   min-height: 44px;
 }
@@ -7592,7 +7628,26 @@
   text. Same Quiet box as the disclosure toggles; the checkbox inside keeps its
   own drawn square, which is the row's STATE, not a second edge for the row.
 */
-.desk-ltr.astra .astra-check {
+.desk-ltr.astra .astra-check,
+/*
+  UI1b-8: THE SAME BOX FOR A RADIO OR A CHECKBOX IN A PLAIN LABEL.
+
+  The bot's finding: a native checkbox or radio is drawn by the BROWSER, so its
+  own computed edge is `0px none` and its fill is transparent -- the walk could
+  measure nothing about it, and its rows had no edge of their own either. The
+  guard now classifies them (and measures the `<label>`, which is the press
+  target), and these rows are what it found: the import cards' "Import as",
+  "The text this story carries" and "Who wrote this" choices, the source rows
+  they keep, and "Hold this on the desk".
+
+  `.choice-row` is that label. The Quiet box, the same one `.astra-check` takes,
+  and the same 44px floor: the row is the target, so the row is the control.
+  It is a class rather than a blanket `label:has(> input)` because a blanket
+  rule would also catch the Queue's `.queue-check` (a 44px grid box whose input
+  is absolutely positioned inside it) and every inline "Include in batch draft"
+  tick, and box them.
+*/
+.desk-ltr.astra .choice-row {
   border: 1px solid var(--fg2);
   border-radius: 0;
   padding: 8px 10px;

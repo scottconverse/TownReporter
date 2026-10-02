@@ -62,6 +62,32 @@ export const FAIL_NO_EDGE = "no edge/fill under 3:1";
 export const FAIL_LINK_PLAIN = "link not underlined";
 export const FAIL_TARGET_SMALL = "target under 44px";
 
+/**
+ * The three kinds, by the KEY the report already uses for them.
+ *
+ * UI1b-8. An allowlist entry used to exempt a failing RECORD -- every kind it
+ * carried. The wordmark's entry was the proof that this is too much: its
+ * reason says "the edge and target rules still apply to it", and the entry
+ * exempted those too, so the day the phone wordmark fell to 24px the guard
+ * said nothing. So an entry now names the kinds it covers, in these keys
+ * (`scripts/desk-clickable-allowlist.json`), and a wildcard `"kinds": "all"`
+ * is a written decision rather than the default.
+ */
+export const FAILURE_KINDS = {
+  noEdgeOrFill: FAIL_NO_EDGE,
+  linkNotUnderlined: FAIL_LINK_PLAIN,
+  targetUnder44: FAIL_TARGET_SMALL,
+};
+
+/** Every kind key an allowlist entry may name. */
+export const KIND_KEYS = Object.keys(FAILURE_KINDS);
+
+/** A failure label ("link not underlined") -> its key ("linkNotUnderlined"). */
+export function kindKeyOf(label) {
+  const found = KIND_KEYS.find((key) => FAILURE_KINDS[key] === label);
+  return found ?? null;
+}
+
 /* ─────────────────────────────── colour maths ───────────────────────────── */
 
 /**
@@ -236,6 +262,10 @@ export function strongestEdge(borderSides = [], ground) {
  *   - a disabled control is not exempt from the edge rule; the missing reason
  *     beside it is a NOTE, because a missing sentence is not the same defect
  *     as an invisible control and must not be counted as one.
+ *   - a native checkbox or radio (`isChoice`) is identified by its own edge or
+ *     fill OR by its enclosing `<label>`'s, and takes its target height from
+ *     itself or that label -- the browser paints the widget, not the
+ *     stylesheet, and the label is the element that takes the press (UI1b-8).
  */
 export function classifyControl(control) {
   const c = control ?? {};
@@ -254,8 +284,42 @@ export function classifyControl(control) {
         }
       : null;
 
-  const edgeRatio = edge ? edge.ratio : 0;
-  const fillRatio = fill ? fill.ratio : 0;
+  /*
+    UI1b-8. A CHECKBOX OR A RADIO IS JUDGED ON ITSELF OR ON ITS LABEL.
+
+    The browser paints a native checkbox/radio, not the stylesheet: its
+    computed border is `0px none` and its fill is transparent, so measuring the
+    element alone always says "nothing there". What the user perceives is
+    either the widget's own painted box, or -- when the native control is
+    visually replaced (`appearance: none`, `opacity: 0`, a sibling-drawn box) --
+    the `<label>` around it, which is also the element that takes the press.
+    Both are measured, and the control is identified by whichever is visible.
+
+    The LABEL's ground is its own, not the control's: the row usually sits on a
+    panel the input itself is not on.
+  */
+  const label = c.isChoice === true ? c.labelBox ?? null : null;
+  const labelGround = label
+    ? effectiveBackground({
+        layers: label.ancestorBackgrounds ?? [],
+        fallback: c.pageBackground ?? "#ffffff",
+      })
+    : null;
+  const labelEdge = label ? strongestEdge(label.borderSides ?? [], labelGround) : null;
+  const labelFillColour = label ? parseColor(label.ownBackground) : null;
+  const labelFill =
+    labelFillColour && labelFillColour.a > 0
+      ? {
+          drawn: labelFillColour.a < 1 ? blendOver(labelFillColour, labelGround) : labelFillColour,
+          ratio: ratio(
+            labelFillColour.a < 1 ? blendOver(labelFillColour, labelGround) : labelFillColour,
+            labelGround,
+          ),
+        }
+      : null;
+
+  const edgeRatio = Math.max(edge ? edge.ratio : 0, labelEdge ? labelEdge.ratio : 0);
+  const fillRatio = Math.max(fill ? fill.ratio : 0, labelFill ? labelFill.ratio : 0);
   const bestRatio = Math.max(edgeRatio, fillRatio);
   const identified = bestRatio >= CONTRAST_FLOOR;
 
@@ -272,7 +336,12 @@ export function classifyControl(control) {
     failures.push(kind);
   }
 
-  const height = Number(c.height) || 0;
+  /*
+    The target is the control OR its label: the label is what the thumb hits.
+    A bare 17px checkbox with no label of its own is still a 17px target and
+    still fails.
+  */
+  const height = Math.max(Number(c.height) || 0, label ? Number(label.height) || 0 : 0);
   if (!inlineLinkInProse && height < MIN_TARGET_PX) {
     failures.push(FAIL_TARGET_SMALL);
     if (kind === "ok") kind = FAIL_TARGET_SMALL;
@@ -304,12 +373,18 @@ export function classifyControl(control) {
 /* ─────────────────────────────── the allowlist ──────────────────────────── */
 
 /**
- * An allowlist entry is `{route, name, reason}`.
+ * An allowlist entry is `{route, name, reason, kinds}`.
  *
  * `reason` is REQUIRED and is the point of the file: an entry with no reason is
  * how a guard becomes a place to hide failures. `route` may be `*`, which
  * matches every route -- allowed, because some controls are drawn on every
  * screen, and a star with a reason is still a written decision.
+ *
+ * `kinds` is REQUIRED too (UI1b-8) and is either the string `"all"` or a
+ * non-empty list of keys from `FAILURE_KINDS`. There is no default: an entry
+ * that does not say which kinds it covers would exempt every rule for that
+ * control, which is exactly how the phone wordmark's 24px target hid behind an
+ * entry whose own reason promised the target rule still applied.
  */
 export function validateAllowlist(entries) {
   if (!Array.isArray(entries)) return ["the allowlist is not an array"];
@@ -325,16 +400,77 @@ export function validateAllowlist(entries) {
     if (!String(entry.reason ?? "").trim()) {
       problems.push(`${at} ("${entry.name ?? "?"}"): no "reason" -- an exemption without a reason hides the defect`);
     }
+    const kinds = entry.kinds;
+    if (kinds === undefined) {
+      problems.push(
+        `${at} ("${entry.name ?? "?"}"): no "kinds" -- say which failure kinds it exempts ` +
+          `(${KIND_KEYS.join(", ")}, or "all"). An entry with no kinds exempts the whole ` +
+          `control, so a target-size failure can hide behind an entry written about an underline`,
+      );
+    } else if (kinds !== "all") {
+      if (!Array.isArray(kinds) || !kinds.length) {
+        problems.push(
+          `${at} ("${entry.name ?? "?"}"): "kinds" must be "all" or a non-empty list of ${KIND_KEYS.join(", ")}`,
+        );
+      } else {
+        for (const kind of kinds) {
+          if (!KIND_KEYS.includes(kind)) {
+            problems.push(
+              `${at} ("${entry.name ?? "?"}"): "${kind}" is not a failure kind ` +
+                `(one of ${KIND_KEYS.join(", ")})`,
+            );
+          }
+        }
+      }
+    }
   });
   return problems;
 }
 
-/** Does this entry cover this failure? Route `*` covers every route. */
+/** Does this entry's `kinds` admit this failure kind? */
+export function entryCoversKind(entry, kind) {
+  const kinds = entry?.kinds;
+  if (kinds === "all") return true;
+  return Array.isArray(kinds) && kinds.includes(kind);
+}
+
+/**
+ * The failure-kind keys a measured record carries.
+ *
+ * A record carries `failures` (the labels it failed on). The fallback to
+ * `kind` reads a bare `{kind}` row -- the shape the margin tests use -- so the
+ * two halves of the report agree on what a record is.
+ */
+export function failureKindKeys(failure) {
+  const labels = Array.isArray(failure?.failures) && failure.failures.length
+    ? failure.failures
+    : failure?.kind
+      ? [failure.kind]
+      : [];
+  const keys = labels.map(kindKeyOf).filter(Boolean);
+  return [...new Set(keys)];
+}
+
+/** Same control on the same route? The name and route half of a match. */
+function namesTheSameControl(entry, failure) {
+  if (String(entry?.name ?? "") !== String(failure?.name ?? "")) return false;
+  const route = String(entry?.route ?? "");
+  return route === "*" || route === String(failure?.route ?? "");
+}
+
+/**
+ * Does this entry say anything about this failure?
+ *
+ * Used by the stale check: an entry is live while it still meets a failure it
+ * was written for. An entry that covers only the underline kind still "matches"
+ * a record that failed both the underline and the target rule -- it is not
+ * stale, it is simply partial, and `exemptFailures` below is where partial
+ * means partial.
+ */
 export function entryMatches(entry, failure) {
   if (!entry || !failure) return false;
-  if (String(entry.name ?? "") !== String(failure.name ?? "")) return false;
-  const route = String(entry.route ?? "");
-  return route === "*" || route === String(failure.route ?? "");
+  if (!namesTheSameControl(entry, failure)) return false;
+  return failureKindKeys(failure).some((kind) => entryCoversKind(entry, kind));
 }
 
 /**
@@ -353,11 +489,23 @@ export function staleAllowlistEntries(entries, failures) {
   );
 }
 
-/** The failures left once the allowlist has taken its share. */
+/**
+ * The failures left once the allowlist has taken its share.
+ *
+ * PER KIND, NOT PER RECORD (UI1b-8). A record with two failures is exempt only
+ * when the entries for that control cover BOTH kinds -- so the wordmark's
+ * underline entry cannot swallow a target-size failure on the same link. The
+ * kinds are pooled across the entries that name the same control, so two
+ * written decisions ("the underline, and the edge") still add up to one
+ * exemption.
+ */
 export function exemptFailures(entries, failures) {
-  return (failures ?? []).filter(
-    (failure) => !(entries ?? []).some((entry) => entryMatches(entry, failure)),
-  );
+  return (failures ?? []).filter((failure) => {
+    const kinds = failureKindKeys(failure);
+    if (!kinds.length) return true;
+    const forThisControl = (entries ?? []).filter((entry) => namesTheSameControl(entry, failure));
+    return !kinds.every((kind) => forThisControl.some((entry) => entryCoversKind(entry, kind)));
+  });
 }
 
 /* ───────────────────────────── the margins ──────────────────────────────── */

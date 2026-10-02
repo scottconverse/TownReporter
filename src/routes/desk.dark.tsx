@@ -99,7 +99,7 @@ export const Route = createFileRoute("/desk/dark")({
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
-  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     A hand-over the editor asked for on another screen -- an import's review
@@ -1082,7 +1082,7 @@ function DarkPage() {
                 {(runs.data ?? []).map((r) => (
                   <div key={r.id} className="run-row">
                     <p className="meta">
-                      {formatDateTime(r.started_at)}
+                      {formatListDateTime(r.started_at)}
                       {/*
                         Which model dug this round. A round that dug badly and a
                         round that dug on a different model are different facts
