@@ -4,6 +4,7 @@ import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
 import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
+import { paperSetUpRefusal } from "./paper-settings.ts";
 
 export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
 export type DraftBatchStoredRuntime =
@@ -57,7 +58,9 @@ export type DraftBatchFailure = {
     | "ineligible"
     | "already-running"
     | "runtime-unavailable"
-    | "rate-limited";
+    | "rate-limited"
+    /** SG1 / Option A: this install has not completed Paper setup yet. */
+    | "not-set-up";
   error: string;
   leadId?: number;
   jobId?: number;
@@ -158,6 +161,13 @@ export const startDraftBatch = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const input = cleanDraftBatchInput(data);
     if (!input.ok) return input;
+    /*
+      SG1 / Option A: a batch draft writes several stories at once with a model,
+      on this paper's behalf. An install that has not been set up has no town to
+      write about, so the batch is refused before anything is reserved.
+    */
+    const notSetUp = await paperSetUpRefusal(context.newsroomId ?? 1, "start a batch draft");
+    if (notSetUp) return { ok: false as const, code: "not-set-up" as const, error: notSetUp };
     const server = await import("./draft-batch.server.ts");
     const editorContext = { userId: context.userId, newsroomId: context.newsroomId };
     if (!(await server.isCurrentBatchEditor(editorContext))) {

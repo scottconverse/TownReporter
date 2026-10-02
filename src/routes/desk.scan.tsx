@@ -12,6 +12,8 @@ import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
+import { usePaperSetupGate } from "@/components/paper-setup-gate";
+import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { useEditorSections } from "@/lib/use-sections";
@@ -90,6 +92,8 @@ function ScanPage() {
   } | null>(null);
   // Per click, not persisted -- same as Story's picker (see model-choice.ts).
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  // SG1 / Option A: the Run scan press is gated on the paper being set up.
+  const paperGate = usePaperSetupGate("start the scan");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
 
   const history = loadedRows;
@@ -259,7 +263,13 @@ function ScanPage() {
       ) : null}
       <div className="scan-bar">
         <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scanning} compact />
-        <InkButton disabled={scanning} onClick={() => scan.mutate()}>
+        {/*
+          SG1 / Option A: an install nobody has set up has no town, and this
+          press searches one. It says so BEFORE the press, in words, with the
+          way to Paper setup -- the server refuses the same action with the
+          same sentence if this is somehow reached anyway.
+        */}
+        <InkButton disabled={scanning || paperGate.blocked} onClick={() => scan.mutate()}>
           {scanning ? "Scanning sources…" : "Run scan"}
         </InkButton>
         <p className="meta">
@@ -267,6 +277,7 @@ function ScanPage() {
           {last ? ` · last ran ${formatDateTime(last.started_at)}` : ""}
         </p>
       </div>
+      <PaperSetupGateNote gate={paperGate} />
       {/*
         FB1, unit 4 / FB1b, item 3: THE SCAN'S OWN CARD, IN THE PANEL.
 

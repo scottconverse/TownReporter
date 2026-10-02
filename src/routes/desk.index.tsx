@@ -97,6 +97,8 @@ import {
 import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { usePaperSetupGate } from "@/components/paper-setup-gate";
+import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import { Dialog } from "@/components/dialog";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -212,6 +214,8 @@ function DeskHome() {
     queryKey: ["first-run-setup"],
     queryFn: () => firstRunSetupState(),
   });
+  // SG1 / Option A: Today's own scan press, gated on the same query.
+  const paperGate = usePaperSetupGate("start the scan");
   useEffect(() => {
     if (setupState.data?.needsSetup) {
       void navigate({ to: "/desk/setup" });
@@ -2352,7 +2356,7 @@ function DeskHome() {
             <div className="wire-acts">
               <InkButton
                 onClick={() => scan.mutate()}
-                disabled={scanning}
+                disabled={scanning || paperGate.blocked}
                 pending={scan.isPending}
                 pendingLabel="Starting the scan…"
               >
@@ -2362,6 +2366,8 @@ function DeskHome() {
                 All sources
               </Link>
             </div>
+            {/* SG1 / Option A: the reason, in text, beside the disabled press. */}
+            <PaperSetupGateNote gate={paperGate} />
             {/*
               FB6, item 3. `Run scan now` used to be a label swap and nothing
               else: the button said "Scanning…" and the rail above it kept

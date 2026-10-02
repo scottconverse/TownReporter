@@ -12,7 +12,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
-import { getPaperConfig, getPaperPlace } from "./paper-settings";
+import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
@@ -1291,6 +1291,12 @@ export const runScan = createServerFn({ method: "POST" })
   // `input ?? {}` is preserved by the schema: a no-dial run is a real run.
   .validator((input: unknown) => runScanInput.parse(input))
   .handler(async ({ context, data }) => {
+    /*
+      SG1 / Option A: an install nobody has set up has NO town. Until the owner
+      finishes Paper setup this refuses in one plain sentence rather than
+      scanning Longmont's sources on a fresh install's behalf.
+    */
+    await requirePaperSetUp(owned(context), "start the scan");
     /*
       Check the model BEFORE spending the scan.
 
@@ -3873,6 +3879,9 @@ export const draftLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => draftLeadInput.parse(input))
   .handler(async ({ context, data }) => {
+    // SG1 / Option A: drafting spends a model on this paper's behalf, and an
+    // un-set-up install has no town to write about. Refused in one sentence.
+    await requirePaperSetUp(owned(context), "draft this story");
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
     const { commitStoryDraftForAuthenticatedEditor } =
@@ -4176,6 +4185,10 @@ export const pullTodo = createServerFn({ method: "POST" })
   .validator((input: unknown) => pullTodoInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
+      // SG1 / Option A: a Pull searches the web for this paper, so an install
+      // that has not been set up must not start one.
+      const notSetUp = await paperSetUpRefusal(owned(context), "start a Pull");
+      if (notSetUp) return { ok: false as const, error: notSetUp };
       await assertRate(context.userId, "pull", owned(context));
       await ensureDeskDraftMemoSchema();
       const sql = await getSql();
@@ -4548,7 +4561,15 @@ export const listFollowUps = createServerFn({ method: "GET" })
 export const createAiFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => aiFollowUpInput.parse(input))
-  .handler(async ({ context, data }) => _performCreateAiFollowUp(context, data));
+  .handler(async ({ context, data }) => {
+    /*
+      SG1 / Option A: an AI follow-up is an agent that will spend a model and
+      search the web for this paper on its own clock. An install that has not
+      been set up has no town for it to work, so it is not created at all.
+    */
+    await requirePaperSetUp(context.newsroomId ?? 1, "start a follow-up");
+    return _performCreateAiFollowUp(context, data);
+  });
 
 export const updateAiFollowUp = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
@@ -4594,6 +4615,10 @@ export const followUpAction = createServerFn({ method: "POST" })
       if (!result.ok) throw new Error(result.error);
       return { ok: true };
     }
+    // SG1 / Option A: only the press that STARTS a run spends anything; the
+    // other actions are status writes (pause, resume, stop, done) and are not
+    // gated, so an editor can always tidy up rows on an un-set-up install.
+    await requirePaperSetUp(context.newsroomId ?? 1, "run this follow-up");
     const { startFollowUpRun } = await import("./follow-up-scheduler.ts");
     const started = await startFollowUpRun(
       { userId: context.userId, newsroomId: context.newsroomId ?? 1 },

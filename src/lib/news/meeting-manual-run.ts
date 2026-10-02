@@ -12,6 +12,7 @@ export function isMeetingPassRunning(newsroomId: number): boolean { return runni
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
+import { paperSetUpRefusal } from "./paper-settings.ts";
 import type { MeetingAwarenessResult } from "./meeting-capture.ts";
 
 /*
@@ -142,6 +143,13 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
   .handler(async ({ context }): Promise<MeetingManualRunResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
+    /*
+      SG1 / Option A: a meeting pass reads the paper's own YouTube channels,
+      which on an install nobody has set up fall back to the shipped Longmont
+      channels. Refused in one plain sentence, the same as the scan.
+    */
+    const notSetUp = await paperSetUpRefusal(newsroomId, "run meeting capture");
+    if (notSetUp) return { ok: false, error: notSetUp };
     const sql = await getSql();
 
     const settings = await sql.query<{ enabled: boolean | null }>(
@@ -229,6 +237,9 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
   })
   .handler(async ({ context, data }): Promise<MeetingManualRunResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
+    // SG1 / Option A: same reason as runMeetingsNow above.
+    const notSetUp = await paperSetUpRefusal(newsroomId, "re-capture that meeting");
+    if (notSetUp) return { ok: false, error: notSetUp };
     if (!/^[\w-]{11}$/.test(data.videoId)) {
       return { ok: false, error: "A valid YouTube video id is required." };
     }

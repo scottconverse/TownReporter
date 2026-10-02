@@ -2,7 +2,7 @@ import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
 import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
-import { getPaperConfig } from "./paper-settings.ts";
+import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
   resolveAutomaticForcedRuntime,
   runForcedChat,
@@ -122,6 +122,22 @@ export async function tickDailyScans(
   );
   let reserved = 0;
   for (const p of ps) {
+    /*
+      SG1 / Option A: a scheduled scan on an install nobody has set up would
+      search the shipped Longmont sources on that owner's behalf and spend
+      their credit. The scheduler SKIPS QUIETLY -- one log line, no pause, no
+      error, no reservation -- so an install that is still being set up does
+      not wake up to a failed run it never asked for. It also FAILS CLOSED: if
+      the check itself cannot be read, the run is skipped rather than started.
+    */
+    try {
+      await requirePaperSetUp(p.newsroom_id, "run the scheduled scan");
+    } catch (err) {
+      console.log(
+        `[daily-scan] skipping newsroom ${p.newsroom_id}: ${err instanceof Error ? err.message : "the paper is not set up"}`,
+      );
+      continue;
+    }
     // Match the settings UI, including nullable or absent legacy settings.
     const { timezone } = await getPaperConfig(p.newsroom_id);
     let local: ReturnType<typeof localParts>;

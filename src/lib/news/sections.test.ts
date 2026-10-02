@@ -61,7 +61,7 @@ it("pins a section snapshot to the queued run and refuses a conflicting General 
   const initial=await getSections(761);
   await saveSections(761,{...initial,sections:initial.sections.map(s=>s.key==='schools'?{...s,brief:'Original brief',sourceIds:[source!.id]}:s)});
   const deps={probeProvider:async()=>({ok:true as const,label:'Mock Claude',choice:'claude-frontier' as const}),assertRate:async()=>undefined,enqueueJob:async(options:Parameters<typeof enqueueJob>[0])=>enqueueJob({...options,kick:false}),kickJobs:()=>undefined};
-  const result=await commitScanForAuthenticatedEditor({context:{userId:'section-commit',newsroomId:761},modelChoice:'claude-frontier',sectionKey:'schools'},deps);
+  await ensurePaperSettingsSchema();await sql`insert into paper_settings(newsroom_id,onboarded) values(761,true) on conflict (newsroom_id) do update set onboarded=true`;const result=await commitScanForAuthenticatedEditor({context:{userId:'section-commit',newsroomId:761},modelChoice:'claude-frontier',sectionKey:'schools'},deps);
   assert.equal(result.ok,true);
   const [row]=await sql<{section_snapshot:string}>`select section_snapshot from scan_runs where newsroom_id=761 order by id desc limit 1`;
   const snapshot=JSON.parse(row!.section_snapshot);
