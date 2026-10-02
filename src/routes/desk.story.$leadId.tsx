@@ -92,6 +92,7 @@ import {
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -277,6 +278,25 @@ function StoryPage() {
   const [modelResearchOpen, setModelResearchOpen] = useState(false);
   const modelResearchPanel = useRef<HTMLElement>(null);
   const modelChoiceTouched = useRef(false);
+  /*
+    F3b: on a fresh install that finished setup with a local model in memory,
+    "Draft with AI" opens on Local model instead of sending the literal "auto"
+    as an explicit pick -- which outranks the paper's stored assignment and
+    walked Automatic anyway. Declared BEFORE the effect below that hydrates the
+    picker from the job's remembered model, so a story that already has a model
+    on it still wins: both set the state in the same commit, and the later
+    effect is the one that sticks. The owner's own touch always wins too (see
+    first-run-picker-default.ts).
+  */
+  useFirstRunPickerSeed({
+    surface: "story",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.

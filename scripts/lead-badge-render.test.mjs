@@ -189,6 +189,19 @@ const modelChoiceStub = inlineModule(`
   }
 `);
 
+/*
+  F3b: LeadRowView now asks the server what its picker should open on. This
+  test is about the row's MARKUP, not about the seed, and a stub that did
+  nothing would leave the row rendering exactly the row these assertions
+  describe -- `auto` is what the row already starts on. It is stubbed shut
+  rather than left to resolve: `@/` is a bundler alias this harness has no
+  loader for, and reaching for it would fail the import with
+  ERR_UNSUPPORTED_RESOLVE_REQUEST, not a failed assertion.
+*/
+const firstRunPickerStub = inlineModule(`
+  export function useFirstRunPickerSeed() {}
+`);
+
 const statesStub = inlineModule(`
   import { createElement } from "react";
   export function Notice({ children }) {
@@ -248,6 +261,7 @@ const { LeadRowView } = await import(
       "@/lib/paper-context": paperContextStub,
       "@/lib/paper-context-state": paperContextStub,
       "@/components/model-picker": modelPickerStub,
+      "@/components/first-run-picker-default": firstRunPickerStub,
       "@/lib/news/model-choice": modelChoiceStub,
       "@/lib/news/provider-registry": providerRegistryStub,
       "@/lib/news/desk-copy": deskCopy,

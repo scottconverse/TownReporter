@@ -45,6 +45,7 @@ import { DeskShell, InkButton } from "@/components/desk-chrome";
 import { Dialog } from "@/components/dialog";
 import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
+import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { ProviderStatusCard } from "@/components/provider-status-card";
 import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
@@ -316,6 +317,13 @@ function ModelsPage() {
         aria-labelledby="models-tab-assign"
         hidden={tab !== "assign"}
       >
+        {/*
+          Unit F3 / Option A item 4: what is actually on this machine, in a
+          read-only list, whichever provider any picker is on. The Connections
+          tab has its own server cards; this is the Models tab's answer to
+          "which models could I run here at all".
+        */}
+        <LocalModelsOnThisComputer />
         <AssignmentsTab isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
       </div>
       <div

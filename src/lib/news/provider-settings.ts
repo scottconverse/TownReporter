@@ -51,6 +51,8 @@ import {
   refreshLocalCatalog,
   type LocalCatalog,
 } from "./local-models.ts";
+import { isFirstRunModelScope } from "./first-run-model.ts";
+import { supersedeFirstRunModelDefault } from "./first-run-marker.ts";
 import { isUseLoadedLocalModelPick, type LocalModelSource } from "./model-choice.ts";
 import { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
 export { cleanProviderTimeInput, type SaveProviderTimeInput } from "./provider-settings-input.ts";
@@ -557,6 +559,20 @@ export async function saveLocalModel(
   await ensureProviderSettingsSchema();
   const sql = await getSql();
   if (scope) {
+    /*
+      Read before the write, because F3c finding 2 turns on whether this save
+      actually MOVED the pick: a first-run paper's `stored` marker makes every
+      page send an explicit `local-model`, so a different per-scope pick is one
+      of the owner's own decisions that the seed would otherwise overrun. A
+      save that stores what was already there is not a change, and retires
+      nothing.
+
+      The legacy UNSCOPED row below needs no such rule: a seeded page resolves
+      its scope's row FIRST (`rawScopedLocalModel`, then the unscoped row), and
+      a first-run paper always has a row for all four scopes, so nothing an
+      unscoped save writes can move a seeded page.
+    */
+    const before = await rawScopedLocalModel(me.newsroomId, scope);
     if (choice) {
       await sql.query(`
         insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id)
@@ -566,6 +582,13 @@ export async function saveLocalModel(
       `, [me.newsroomId, scope, choice.baseUrl, choice.id]);
     } else {
       await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1 and scope = $2`, [me.newsroomId, scope]);
+    }
+    const moved =
+      choice === null
+        ? before !== null
+        : before?.baseUrl !== choice.baseUrl || before?.id !== choice.id;
+    if (moved && isFirstRunModelScope(scope)) {
+      await supersedeFirstRunModelDefault(me.newsroomId);
     }
     return { ok: true };
   }

@@ -12,6 +12,8 @@ import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
+import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
+import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -92,6 +94,23 @@ function ScanPage() {
   } | null>(null);
   // Per click, not persisted -- same as Story's picker (see model-choice.ts).
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  /*
+    F3b: a fresh install that finished setup with a local model in memory
+    opens this picker on Local model, so "Run scan" runs the model that is
+    loaded rather than sending the literal "auto" as an explicit pick. The
+    owner's own touch wins, and every other paper opens on Automatic as
+    before (see first-run-picker-default.ts).
+  */
+  const modelChoiceTouched = useRef(false);
+  useFirstRunPickerSeed({
+    surface: "scan",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current,
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
+  });
   // SG1 / Option A: the Run scan press is gated on the paper being set up.
   const paperGate = usePaperSetupGate("start the scan");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
@@ -262,7 +281,7 @@ function ScanPage() {
         />
       ) : null}
       <div className="scan-bar">
-        <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scanning} compact />
+        <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scanning} compact />
         {/*
           SG1 / Option A: an install nobody has set up has no town, and this
           press searches one. It says so BEFORE the press, in words, with the
@@ -278,6 +297,16 @@ function ScanPage() {
         </p>
       </div>
       <PaperSetupGateNote gate={paperGate} />
+      {/*
+        Unit F3 / Option A item 4: the read-only list of what is actually on
+        this machine. It draws whichever provider the picker is on -- before
+        this, the only local model list in the app was `LocalModelSelect`,
+        which renders only when "Local model" is the chosen provider, so a
+        fresh install (whose provider is Automatic) could not see its own
+        machine's models at all. Cloud models are marked in the list and never
+        counted as loaded.
+      */}
+      <LocalModelsOnThisComputer />
       {/*
         FB1, unit 4 / FB1b, item 3: THE SCAN'S OWN CARD, IN THE PANEL.
 
