@@ -41,17 +41,28 @@ test("neither lane guard will take an admin URL that dials the live paper", asyn
     // The two the first version of the guard could not see: the port in the
     // query string, and no port at all with PGPORT set in the shell.
     "postgres://postgres@127.0.0.1/postgres?port=5433",
+    // The production auditor's case (A-PR2 run 2): the authority says 5432 and
+    // the query says 5433. pg-connection-string lets the QUERY value win, so pg
+    // dials 5433. Both spellings of "two ports in one URL" are refused.
+    "postgres://postgres@127.0.0.1:5432/postgres?port=5433",
+    "postgres://postgres@127.0.0.1:5433/postgres?port=5432",
+    "postgres://postgres@127.0.0.1/postgres?host=x&port=5433",
   ];
   for (const url of live) {
     assert.equal(targetsLivePostgres(url, {}), true, `${url} is not recognised as the live server`);
   }
   assert.equal(targetsLivePostgres("postgres://postgres@127.0.0.1/postgres", { PGPORT: "5433" }), true, "an inherited PGPORT is dialled by pg but not seen");
   assert.equal(effectivePort("postgres://postgres@127.0.0.1/postgres?port=5433", {}), LIVE_POSTGRES_PORT);
+  // pg's precedence: the query value beats the authority port.
+  assert.equal(effectivePort("postgres://postgres@127.0.0.1:5432/postgres?port=5433", {}), LIVE_POSTGRES_PORT);
+  // ...and a throwaway server is still not mistaken for the live one.
+  assert.equal(targetsLivePostgres("postgres://postgres@127.0.0.1:55433/postgres", {}), false);
+  assert.equal(targetsLivePostgres("postgres://postgres@127.0.0.1:5546/postgres?port=5546", {}), false);
 
   // A URL the runner would otherwise accept -- loopback, the approved
   // database -- and only the port makes it wrong.
   const runner = await readFile(new URL("./run-postgres-integration.mjs", import.meta.url), "utf8");
-  assert.match(runner, /effectivePort\(requestedAdminUrl\) === LIVE_POSTGRES_PORT/, "the runner's own guard no longer checks the port");
+  assert.match(runner, /targetsLivePostgres\(requestedAdminUrl\)/, "the runner's own guard no longer checks the port");
   assert.match(runner, /Refusing a PostgreSQL integration admin URL on port \$\{LIVE_POSTGRES_PORT\}/);
 
   // The preload, run for real in a child: it must refuse before it touches

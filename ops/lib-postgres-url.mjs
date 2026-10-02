@@ -66,7 +66,7 @@ export function portFromAuthority(raw) {
  * The parts of a connection string these callers care about.
  *
  * @param {string} raw
- * @returns {{ ok: true, protocol: string, hostname: string, port: number|null, database: string, search: string, hash: string } | { ok: false, reason: string }}
+ * @returns {{ ok: true, protocol: string, hostname: string, port: number|null, authorityPort: number|null, queryPort: number|null, database: string, search: string, hash: string } | { ok: false, reason: string }}
  */
 export function parseConnectionString(raw) {
   const value = (raw ?? "").trim();
@@ -79,14 +79,19 @@ export function parseConnectionString(raw) {
   }
   const declared = url.port ? Number(url.port) : null;
   const fromQuery = Number(url.searchParams.get("port") ?? "");
+  const queryPort = Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery : null;
   return {
     ok: true,
     protocol: url.protocol,
     hostname: url.hostname,
-    // pg-connection-string puts `?port=` into the same field as `:port`, so
-    // the query option wins only when there is no explicit port -- exactly as
-    // pg resolves them.
-    port: declared ?? (Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery : null),
+    // pg-connection-string folds `?port=` into the same field as `:port`, and
+    // the QUERY value WINS: `...:5432/db?port=5433` dials 5433 (measured on the
+    // installed package by the production auditor, 2026-10-01). The first
+    // version here had it the other way round and let that URL past the guard.
+    port: queryPort ?? declared,
+    // Both sources, for callers that must be safe whichever one a driver reads.
+    authorityPort: declared,
+    queryPort,
     database: url.pathname.replace(/^\//, ""),
     search: url.search,
     hash: url.hash,
@@ -129,5 +134,11 @@ export function effectivePort(raw, env = process.env) {
  * @returns {boolean}
  */
 export function targetsLivePostgres(raw, env = process.env) {
+  // pg's precedence is query value, then authority, then PGPORT, then 5432. A
+  // string is treated as live when ANY of the sources a driver might read says
+  // 5433, so a different driver (or a different version of pg) cannot read a
+  // different answer out of the same text and walk past this.
+  const parsed = parseConnectionString(raw);
+  if (parsed.ok && (parsed.authorityPort === LIVE_POSTGRES_PORT || parsed.queryPort === LIVE_POSTGRES_PORT)) return true;
   return effectivePort(raw, env) === LIVE_POSTGRES_PORT;
 }

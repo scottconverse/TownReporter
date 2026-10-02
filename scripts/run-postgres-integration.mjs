@@ -18,7 +18,7 @@
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { effectivePort, LIVE_POSTGRES_PORT } from "../ops/lib-postgres-url.mjs";
+import { LIVE_POSTGRES_PORT, targetsLivePostgres } from "../ops/lib-postgres-url.mjs";
 import { postgresTestFiles } from "./postgres-test-discovery.mjs";
 import { safeTestEnvironment } from "./test-environment.mjs";
 
@@ -105,7 +105,7 @@ async function main() {
   // late preload in postgres-integration-opt-in.mjs, deliberately: this one
   // stops the run early, that one is the last line of defence, and both read
   // the port through ops\lib-postgres-url.mjs so they cannot disagree.
-  if (effectivePort(requestedAdminUrl) === LIVE_POSTGRES_PORT) {
+  if (targetsLivePostgres(requestedAdminUrl)) {
     throw new Error(
       `Refusing a PostgreSQL integration admin URL on port ${LIVE_POSTGRES_PORT}: that is the live paper's ` +
         "database on the machine that runs it, and this lane creates and drops databases. Point " +

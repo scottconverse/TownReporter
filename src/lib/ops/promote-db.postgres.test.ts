@@ -309,6 +309,9 @@ describe("the live paper's port", () => {
     // other way of writing it. An earlier version of this guard read the URL
     // text only and this line asserted the opposite.
     assert.match(checkLivePortGuard(["postgres://user@h.invalid/db?port=5433"], false), /port 5433/);
+    // The auditor's case: authority 5432, query 5433. pg lets the query win.
+    assert.match(checkLivePortGuard(["postgres://user@h.invalid:5432/db?port=5433"], false), /port 5433/);
+    assert.match(checkLivePortGuard(["postgres://user@h.invalid:5433/db?port=5432"], false), /port 5433/);
     assert.equal(checkLivePortGuard(["postgres://user@h.invalid/townreporter5433"], false), "");
     assert.equal(checkLivePortGuard(["postgres://user@h.invalid:54330/db"], false), "");
   });

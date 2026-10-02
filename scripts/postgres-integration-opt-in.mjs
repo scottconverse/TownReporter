@@ -15,7 +15,7 @@
  * string itself says nothing about a port. ops\lib-postgres-url.mjs is the one
  * implementation of that, and the promotion's own guard uses the same one.
  */
-import { effectivePort, LIVE_POSTGRES_PORT } from "../ops/lib-postgres-url.mjs";
+import { LIVE_POSTGRES_PORT, targetsLivePostgres } from "../ops/lib-postgres-url.mjs";
 
 if (process.env.TOWNREPORTER_RUN_POSTGRES_INTEGRATION !== "1") {
   throw new Error("PostgreSQL integration preload requires TOWNREPORTER_RUN_POSTGRES_INTEGRATION=1.");
@@ -26,7 +26,7 @@ if (!raw) {
   throw new Error("PostgreSQL integration preload requires TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL.");
 }
 
-if (effectivePort(raw) === LIVE_POSTGRES_PORT) {
+if (targetsLivePostgres(raw)) {
   throw new Error(
     `Refusing a PostgreSQL integration admin URL on port ${LIVE_POSTGRES_PORT}: that is the live paper's ` +
       "database on the machine that runs it, and this lane creates and drops databases. Point " +
