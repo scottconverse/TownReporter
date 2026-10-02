@@ -18,6 +18,7 @@ import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
 import { StoryBody } from "@/components/story-body";
 import { editorActionError } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
 import { publishBlockers, publishGateNote } from "@/lib/news/publish-blockers";
 import { lastDraftWhen, saveState } from "@/lib/news/writer-bar";
@@ -471,8 +472,17 @@ function EditorialPage() {
             <ActionButton
               tone="primary"
               small
-              phase={rowActionPhase({ isPending: remove.isPending })}
+              phase={rowActionPhase({
+                isPending: remove.isPending,
+                /* Unit UI1a3, finding 1: `deleteEditorial` answers
+                   `{ ok: false, error }` for its ordinary refusal ("That
+                   standalone editorial is gone."), which settles as a SUCCESS --
+                   read off the settled answer so the reason reaches the control
+                   instead of the button going quietly back to idle. */
+                problem: !remove.isPending ? refusedAnswer(remove.data) : null,
+              })}
               workingLabel="Deleting…"
+              reason={!remove.isPending ? refusedAnswer(remove.data) : null}
               onAct={() => remove.mutate()}
             >
               Yes, delete it
