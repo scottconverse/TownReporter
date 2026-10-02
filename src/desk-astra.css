@@ -4302,14 +4302,52 @@
     margin-top: 6px;
     min-width: 0;
   }
-  /* BF3: the drawn table is six columns wide; a phone is not. The row keeps
-     the checkbox and the score, the lead takes the rest, and the evidence,
-     filed age and actions drop under it in the lead's own column -- the same
-     shape the row had at this width before, minus the repeated controls. The
-     header keeps its select-all box (it is a real control now, not a label)
-     and drops the words, which name columns that no longer stand in columns.
-     The 3px rule stays, so the box still reads as sitting on the table's top
-     edge. */
+  /* The drawn phone header (Desk Command.dc.html line 215): the title drops to
+     28px and the rule gets closer to it. `.ov-head .h1` is two classes deep, so
+     the phone size has to be stated here rather than inherited from the
+     shallower `.h1` rule above. */
+  .desk-ltr.astra .ov-head {
+    padding-bottom: 12px;
+    margin-bottom: 20px;
+  }
+  .desk-ltr.astra .ov-head .h1 {
+    font-size: calc(28px * var(--ts));
+  }
+}
+
+/*
+  F6: THE QUEUE'S TABLE AND CONTROLS STOP BEING A TABLE EARLIER THAN A PHONE
+  (unit F6, auditor finding: `/desk/queue` was 64px wider than a 900px window).
+
+  The rule above says "At 701-1279px, the filters wrap below the strip; the
+  phone media block at the foot stacks them", and only the second half was ever
+  written: the base `.queue-controls` rule is `flex-wrap: nowrap`, nothing
+  un-set it between 701 and 1279, and every one of the six-column table's
+  stacked shapes lived in the `max-width: 700px` block. So between 701 and 1279
+  the Queue drew a table whose columns cannot be narrower than 756px of
+  content -- 44 + 52 + 180 + 150 + the 202px actions track, five 16px gaps and
+  the row's own 24px inset either side -- into a main column that is only
+  `viewport - 258px` wide once the 206px nav rail and the 26px page padding
+  have taken their share (766 at 1024, 642 at 900, 510 at 768).
+
+  WHY 1060 AND NOT 1014. 1014 is the exact width at which 756 fits the column
+  (1014 - 258 = 756), and a fit with no slack is not a fit: eight pixels is
+  inside the noise of a scrollbar, of the desk's own large-text size and of the
+  status chip's `auto` track. 1060 leaves 46px of it and costs the six-column
+  table between 1024 and 1060, where it had 10px of slack and no more.
+
+  Nothing here is a new look. Every declaration below is the one the phone
+  block already carried, moved to the width at which the thing it fixes
+  actually breaks; above 1060 the drawing's six-column row is untouched.
+*/
+@media (max-width: 1060px) {
+  /* BF3: the drawn table is six columns wide; a narrow window is not. The row
+     keeps the checkbox and the score, the lead takes the rest, and the
+     evidence, filed age and actions drop under it in the lead's own column --
+     the same shape the row had before, minus the repeated controls. The header
+     keeps its select-all box (it is a real control now, not a label) and drops
+     the words, which name columns that no longer stand in columns. The 3px
+     rule stays, so the box still reads as sitting on the table's top edge. */
   .desk-ltr.astra .queue-head {
     grid-template-columns: 44px minmax(0, 1fr);
     padding: 0 12px 8px;
@@ -4330,16 +4368,25 @@
     grid-column: 1 / -1;
     justify-content: flex-start;
   }
+  /* The row's presses now start at the row's LEFT edge, and `.more-menu` is
+     `right: 0` of its own summary -- so the 264px panel would be anchored to a
+     button near the left and hang off the left edge of the screen, where
+     nothing can scroll to it. It hangs rightward from the button instead; the
+     phone block below makes it static, where this has nothing to move. */
+  .desk-ltr.astra .queue-acts .more .more-menu {
+    right: auto;
+    left: 0;
+  }
   /* The controls row stacks: the strip on its own line, then search over the
      two selects. `nowrap` on the filters is what would push the page sideways
-     at 390 (the search box's 260px floor plus two selects is wider than the
-     screen), so it comes off here with the search box's floor. */
+     (the strip's max-content plus the search box's floor plus two selects is
+     wider than the column), so it comes off here with the search box's floor. */
   .desk-ltr.astra .queue-controls {
     flex-wrap: wrap;
   }
   /* `flex: 0 0 auto` on the strip is the desktop rule (it keeps the five tabs
      from being squeezed on the one-line row); here it would pin the strip at
-     its max-content 426px and push the page 53px wide, so it shrinks and the
+     its max-content 426px and push the page sideways, so it shrinks and the
      strip's own `flex-wrap` puts the tabs on a second line. */
   .desk-ltr.astra .queue-tabs {
     flex: 0 1 auto;
@@ -4362,17 +4409,38 @@
   .desk-ltr.astra .queue-sel {
     justify-content: space-between;
   }
-  /* The drawn phone header (Desk Command.dc.html line 215): the title drops to
-     28px and the rule gets closer to it. `.ov-head .h1` is two classes deep, so
-     the phone size has to be stated here rather than inherited from the
-     shallower `.h1` rule above. */
-  .desk-ltr.astra .ov-head {
-    padding-bottom: 12px;
-    margin-bottom: 20px;
-  }
-  .desk-ltr.astra .ov-head .h1 {
-    font-size: calc(28px * var(--ts));
-  }
+}
+
+/* ---------------------------------------------------------------------------
+   MODELS (unit F6)
+--------------------------------------------------------------------------- */
+/*
+  The Models table scrolls inside itself.
+
+  `.models-table-inner` is held at the row grid's own floor (MODEL_TABLE_MIN in
+  desk.models.tsx: the four measured column floors, the 110px the status chip's
+  `auto` track can need and the four 14px gaps -- 956px on this build), so the
+  five columns are drawn at the width they were measured to need whatever the
+  window is, and this wrapper is what moves. Without it the 927px of track ran
+  straight out of the page and took the whole document with it: 135px at 1024,
+  259px at 900, 554px at 390.
+
+  Both the header row and the job rows live inside the one inner block, so
+  their tracks cannot drift apart -- and because each row is drawn at the full
+  956px rather than clipped to the window, every row rule spans the table
+  instead of stopping at the screen edge.
+
+  `tabIndex` on the wrapper (set in the route) is what lets a keyboard reach the
+  sideways scroll without a pointer: a scroll region no key can move is a
+  region a keyboard-only editor cannot read. */
+.desk-ltr.astra .models-table {
+  overflow-x: auto;
+}
+.desk-ltr.astra .models-table-inner {
+  display: flex;
+  flex-direction: column;
+  /* The 12px the outer column's own `gap-3` gave the header and every row. */
+  gap: 12px;
 }
 
 /*
