@@ -13,9 +13,11 @@ import {
 import {
   publishBlockers,
   publishGateNote,
+  publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
+import { PublishBarResult } from "@/components/publish-bar-result";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
@@ -289,6 +291,24 @@ function StoryPage() {
   const [confirmingPublish, setConfirmingPublish] = useState(false);
   const [msg, setMsg] = useState("");
   const [publishedSlug, setPublishedSlug] = useState<string | null>(null);
+  /*
+    Whether the story on the paper got there from THIS page (unit PUB1).
+    `publishedSlug` alone cannot answer it: a page opened on an already
+    published story seeds it from the loader, and a green "Published." bar
+    greeting every visit would be the desk saying something happened that did
+    not happen just now.
+  */
+  const [justPublished, setJustPublished] = useState(false);
+  /*
+    What the sticky bar says about the last press (unit PUB1).
+
+    The server's own words for a refusal, held HERE rather than in `msg`,
+    because `msg` is drawn as a Notice in the page body -- and on the owner's
+    story the body Notice was far from the button he pressed, which is how a
+    refusal came to look like a dead button. Cleared by the next press and by
+    any edit to the story, so it can never describe a draft that has moved on.
+  */
+  const [publishRefusal, setPublishRefusal] = useState("");
   /*
     Whether a person has chosen the section on this page (0.6.67).
 
@@ -1189,25 +1209,47 @@ function StoryPage() {
       };
     },
     onSuccess: async ({ result, notesProblem }) => {
+      /*
+        ── EVERY ANSWER IS DRAWN AT THE BAR (UNIT PUB1) ──────────────────────
+
+        The owner pressed Publish, the server refused, and the refusal went to
+        a Notice in the page body while the bar showed the same button it had
+        shown before. The press looked dead. So a refusal is written to the bar
+        now, not to `msg`, and the lead query is invalidated: the refusal was
+        the server disagreeing with the page's stored state (an acceptance
+        recorded for a draft version that has since moved), and a page that
+        keeps saying "Nothing blocks Publish" after being told otherwise is the
+        same bug in a different coat.
+      */
+      const refuse = async (text: string) => {
+        setMsg("");
+        setPublishRefusal(text);
+        await qc.invalidateQueries({ queryKey: ["lead", id] });
+      };
       if (!answered(result)) {
-        setMsg(NO_ANSWER);
+        await refuse(NO_ANSWER);
         return;
       }
       if (!result.ok) {
-        setMsg(result.error);
+        await refuse(result.error);
         return;
       }
+      setPublishRefusal("");
       await qc.invalidateQueries({ queryKey: ["leads"] });
       await qc.invalidateQueries({ queryKey: ["paper"] });
       await qc.invalidateQueries({ queryKey: ["published-desk"] });
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
       setPublishedSlug(result.slug);
+      setJustPublished(true);
       setMsg(notesProblem ? `On the paper. ${notesProblem}` : "On the paper.");
     },
-    onError: (err) => {
-      setMsg(
+    onError: async (err) => {
+      setMsg("");
+      setPublishRefusal(
         editorActionError(err instanceof Error ? err.message : "", "publish that story") ??
           "Could not publish.",
       );
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
     },
   });
 
@@ -1359,6 +1401,15 @@ function StoryPage() {
     setReconcileNoteError(false);
     setReconcileNoteWarning(true);
   }, [evidenceReview]);
+
+  /*
+    A refusal describes a press against ONE version of the story (unit PUB1).
+    The moment the editor changes the words -- or the section -- it is about a
+    draft that no longer exists, so it goes. The next press clears it too, in
+    the button's own handler. Above the early returns, with the other hooks:
+    a hook that runs on some renders and not others is not a hook.
+  */
+  useEffect(() => setPublishRefusal(""), [headline, dek, body, topic]);
 
   if (isPending) {
     return (
@@ -1626,6 +1677,16 @@ function StoryPage() {
     does -- `namedOutlets` is the server's own answer to that question, so the
     desk cannot disagree with the refusal.
   */
+  /*
+    One value for what the bar says about the press (unit PUB1): pending, the
+    server's refusal, or the story that just printed. Derived, so the bar cannot
+    hold two answers at once -- see `publishPressState`.
+  */
+  const press = publishPressState({
+    publishing: publish.isPending,
+    refusal: publishRefusal,
+    publishedSlug: justPublished ? publishedSlug : null,
+  });
   const blockers = publishBlockers({
     headline,
     dek,
@@ -2568,7 +2629,15 @@ function StoryPage() {
             color below reads. The sentence stays the first thing inside the
             notice, where the editor reads it before the button under it.
           */}
-          {draftProblem && !onPaper ? (
+          {/*
+            Unit PUB1: the green "On the paper." used to be suppressed the
+            instant the lead became published (`!onPaper`), so the one sentence
+            that said the press worked was hidden -- and the bar it belonged to
+            had just unmounted. A story published FROM THIS PAGE keeps its
+            confirmation (`publishedSlug`); a story that arrived already on the
+            paper still says nothing, which is what `!onPaper` was for.
+          */}
+          {draftProblem && (!onPaper || Boolean(publishedSlug)) ? (
             <Notice kind={/^(Saved\.|On the paper\.)/.test(msg) ? "ok" : "err"}>
               {draftProblem}
               {/*
@@ -3255,7 +3324,22 @@ function StoryPage() {
           */}
         </section>
       </div>
-      {canPublish ? (
+      {/*
+        ── WHERE THE PRESS WAS MADE IS WHERE THE ANSWER IS DRAWN (PUB1) ───────
+
+        A print takes the bar away -- `canPublish` is false once the lead is on
+        the paper -- so the "Published." banner takes the bar's OWN place, at
+        the same spot on the page, and stays there for the rest of the visit
+        rather than being a note at the top the editor has to find. A refusal
+        keeps the bar where it is and is drawn next to the button that was
+        pressed. Both are `PublishBarResult`, so neither can drift from the
+        other or from `publishPressState`.
+      */}
+      {press.kind === "published" ? (
+        <div className="astra-publish-bar astra-publish-done" id="astra-publish-bar">
+          <PublishBarResult state={press} />
+        </div>
+      ) : canPublish ? (
         /*
           The sticky publish bar. What is drawn on it is what is true: the four
           chips read this page's own state, and the button keeps every rule it
@@ -3294,6 +3378,9 @@ function StoryPage() {
                     disabled={publish.isPending || blockers.length > 0}
                     onClick={() => {
                       setConfirmingPublish(false);
+                      /* The last answer is about to be replaced by this
+                         press's answer (unit PUB1). */
+                      setPublishRefusal("");
                       publish.mutate();
                     }}
                   >
@@ -3354,7 +3441,15 @@ function StoryPage() {
                     runs, at the head of that list, which is the one place it
                     was ever acted on.
                   */}
-                  {blockers.length > 0 ? (
+                  {/*
+                    Unit PUB1: while the press is in flight the bar says so once,
+                    through `PublishBarResult` below. The `publishing` blocker is
+                    real -- it is what disables the button -- but its sentence
+                    ("See the publish bar to publish.") is a way to the bar, and
+                    an editor already ON the bar reading it mid-press is the same
+                    dead-press feel this unit removes.
+                  */}
+                  {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
                       {publishGateNote(blockers)}{" "}
                       <button
@@ -3386,6 +3481,9 @@ function StoryPage() {
                 </>
               )
             ) : null}
+            {/* The bar's own answer to the press: "Publishing…", the server's
+                refusal, or nothing when there is nothing to say. */}
+            <PublishBarResult state={press} />
           </div>
         </div>
       ) : null}
