@@ -207,6 +207,7 @@ import {
   type DeskJob,
 } from "./jobs";
 import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
+import { providerFailureNotes } from "./pull-outcome.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
@@ -4297,6 +4298,7 @@ export const listPullJobs = createServerFn({ method: "GET" })
           stopRequested: receipt.stopRequested,
           counters: receipt.counters,
           errors: receipt.errors,
+          providerNotes: providerFailureNotes(receipt.providerFailures ?? []),
           startedAt: receipt.startedAt ?? job.started_at,
           updatedAt: receipt.updatedAt || job.updated_at,
           finishedAt: receipt.finishedAt ?? job.finished_at,

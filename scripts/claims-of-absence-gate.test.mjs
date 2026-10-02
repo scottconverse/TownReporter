@@ -142,15 +142,24 @@ test("the gate's claims survive a redraft until someone confirms them", () => {
 });
 
 test("a pull that returned nothing does not strike its line", () => {
+  // PULL1b moved the row edit into `markPulledTodo` so the rule could be
+  // tested without a database. The rule is unchanged and still pinned here:
+  // only a document reaches `toggleTodo`, and an empty pull leaves the row
+  // open with its reason in plain words.
   assert.match(
     pull,
-    /if \(receipt\.checkpoint\?\.documents\.length\) \{[\s\S]{0,180}?if \(!notes\.todo\[index\]!\.done\) notes = toggleTodo\(notes, index\);/,
+    /if \(!outcome\.documentFound\) \{[\s\S]{0,260}?done: false, q: outcome\.reason, triedAt: outcome\.at/,
     "only a pull that returned a document may mark the line done",
   );
   assert.match(
     pull,
-    /pull found nothing[\s\S]{0,260}?done: false/,
-    "an empty durable Pull must leave the reporting line open",
+    /reason: pullTodoReason\([\s\S]{0,80}?status: receipt\.status/,
+    "an empty durable Pull must leave the reporting line open, with a reason in plain words",
+  );
+  assert.doesNotMatch(
+    pull,
+    /pull found nothing/,
+    "the old counted reason told the editor nothing about whether to try again",
   );
 });
 

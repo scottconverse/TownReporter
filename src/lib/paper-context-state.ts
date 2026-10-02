@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo } from "react";
 import { formatDate, formatDayStamp, formatShortDate, formatDateTime } from "./paper";
+import { clockTextAt } from "./desk/ops-rows";
 import { DEFAULT_PAPER_IDENTITY, type PaperIdentity } from "./paper-identity";
 import { areaLabelsFor, type AreaLabels } from "./story-area";
 
@@ -37,6 +38,8 @@ export function usePaperDateFormatters() {
       formatDayStamp: (iso: string | Date | null | undefined) => formatDayStamp(iso, timezone),
       formatShortDate: (iso: string | Date | null | undefined) => formatShortDate(iso, timezone),
       formatDateTime: (iso: string | Date | null | undefined) => formatDateTime(iso, timezone),
+      /** "12:15 p.m." -- the desk's clock, for a moment that was tried. */
+      clockTime: (iso: string | Date | null | undefined) => clockTextAt(iso, timezone),
     }),
     [timezone],
   );

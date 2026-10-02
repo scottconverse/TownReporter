@@ -14,11 +14,15 @@
  *    of one 240-character run-on that matches only its own generic nouns.
  *  - `docCandidateHosts` / `docIndexPages` — a board packet is usually not in
  *    any search index. It lives behind the issuing body's own meetings page, so
- *    go there and read the links.
+ *    go there and read the links — but only on a government or registered
+ *    source's own host, because the guess is only ever right for a body that
+ *    publishes records. See `isOfficialDocHost`.
  *  - `isOnSubject` — a fetched document that never names the city or the
  *    subject is not the record, whatever it scored. Drop it and report nothing
  *    found rather than poisoning the notes.
  */
+
+import { isOnDomains } from "./absence-gate.ts";
 
 const STOP = new Set([
   "the", "and", "then", "those", "that", "with", "from", "for", "are", "was",
@@ -84,6 +88,87 @@ export function pullQueries(
 }
 
 /**
+ * Is this a government or official body's own address?
+ *
+ * The guess that follows this -- "read /meetings on the top three hosts" -- is
+ * only ever right for a body that publishes records. Ranked without this test,
+ * the live report's three hosts were `en.m.wikipedia.org`, `m.imdb.com` and
+ * `whitepalmapts.com`, and nine pages were fetched from them for nothing.
+ *
+ * `.us` is here for the town sites that use it (`longmont.co.us`), and
+ * `.gov.<cc>` for the state and national addresses outside the US. It is NOT
+ * here for every `.us` address: the TLD is not government-only, and taking it
+ * as one let `zoom.us` through and sent a Pull to guess `/meetings` and
+ * `/board-meetings` on a commercial host. Only the governmental shapes count --
+ * see `isGovernmentalUsHost`.
+ */
+export function isOfficialHost(host: string): boolean {
+  const h = String(host ?? "").trim().toLowerCase().replace(/^www\./, "");
+  if (!h || h.includes(" ")) return false;
+  if (/\.gov$/.test(h) || /\.gov\.[a-z]{2}$/.test(h) || /\.mil$/.test(h)) return true;
+  return isGovernmentalUsHost(h);
+}
+
+/**
+ * The USPS two-letter codes: the fifty states, DC and the territories.
+ *
+ * One small list, because the `<locality>.<state>.us` shape is the whole test
+ * for whether a `.us` address is a government body's.
+ */
+const US_STATE_CODES = new Set(
+  (
+    "al ak az ar ca co ct de dc fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt " +
+    "ne nv nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy " +
+    "as gu mp pr vi"
+  ).split(" "),
+);
+
+/**
+ * Second-level labels the federal government and tribal nations publish under,
+ * where the `.us` address is governmental by its own structure. `kids.us` is
+ * deliberately absent: it is a children's-content namespace, not a government.
+ */
+const US_GOV_SECOND_LEVEL = new Set(["fed", "nsn", "dni", "isa"]);
+
+/**
+ * Is this `.us` address a government body's own?
+ *
+ * Two shapes, and only two:
+ *
+ *  - `<locality>.<state>.us` -- `longmont.co.us`, `ci.boulder.co.us`,
+ *    `www.larimer.co.us`. The label immediately before `.us` is a state, DC or
+ *    territory code. This is what the Colorado town and county sites use, which
+ *    is what `.us` was added for.
+ *  - `<name>.<federal label>.us` -- `usgs.fed.us` and the other second-level
+ *    labels above.
+ *
+ * A bare `<name>.us` (`zoom.us`, `bit.us`) is a company or a person, not a
+ * government, and gets no guessed page unless the paper registered it as a
+ * source -- that path is `isOfficialDocHost`'s other half.
+ */
+function isGovernmentalUsHost(h: string): boolean {
+  if (!/\.us$/.test(h)) return false;
+  const parts = h.split(".").filter(Boolean);
+  if (parts.length < 3) return false;
+  const secondLevel = parts[parts.length - 2]!;
+  return US_STATE_CODES.has(secondLevel) || US_GOV_SECOND_LEVEL.has(secondLevel);
+}
+
+/**
+ * A host worth guessing an index page on: an official body, or a source the
+ * paper itself registered.
+ *
+ * The registered half is `absence-gate`'s `isOnDomains` -- the same suffix
+ * match the Sources desk and the claims-of-absence gate use, so a paper with
+ * `frprdistrict.com` on its watch list is treated the same way here as there.
+ */
+export function isOfficialDocHost(host: string, registered: string[] = []): boolean {
+  if (isOfficialHost(host)) return true;
+  if (!registered.length) return false;
+  return isOnDomains(`https://${String(host ?? "").trim()}`, registered);
+}
+
+/**
  * The hosts that plausibly published the record, best first.
  *
  * The story's own sources lead, because the body that issued the record is
@@ -96,11 +181,18 @@ export function pullQueries(
  * legislature's site — which has no meetings page — ahead of the rail
  * district's own.
  */
-export function docCandidateHosts(hitUrls: string[], storyUrls: string[]): string[] {
+export function docCandidateHosts(
+  hitUrls: string[],
+  storyUrls: string[],
+  registered: string[] = [],
+): string[] {
   const rank = new Map<string, number>();
   const add = (raw: string, base: number) => {
     try {
       const host = new URL(raw).hostname.toLowerCase();
+      // A commercial host is never the body that issues the record, however
+      // loudly a search engine ranked it, so it never gets a guessed page.
+      if (!isOfficialDocHost(host, registered)) return;
       const score = base + (host.endsWith(".gov") ? 1 : 0);
       if ((rank.get(host) ?? -1) < score) rank.set(host, score);
     } catch {
@@ -128,9 +220,16 @@ export const DOC_INDEX_PATHS = [
   "/news",
 ] as const;
 
-export function docIndexPages(hosts: string[], perHost = 3): string[] {
+export function docIndexPages(
+  hosts: string[],
+  perHost = 3,
+  registered: string[] = [],
+): string[] {
   const out: string[] = [];
-  for (const host of hosts.slice(0, 3)) {
+  // Filtered again here rather than trusting the caller: this is the function
+  // that decides what gets fetched, and a host that is not an official body is
+  // a page nobody asked for.
+  for (const host of hosts.filter((h) => isOfficialDocHost(h, registered)).slice(0, 3)) {
     for (const path of DOC_INDEX_PATHS.slice(0, perHost)) {
       out.push(`https://${host}${path}`);
     }
