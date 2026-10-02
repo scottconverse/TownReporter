@@ -68,6 +68,7 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
+import { failureSummary } from "@/lib/news/pull-outcome";
 import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
@@ -4563,6 +4564,18 @@ function TodoRow({
   onContinue: () => void;
 }) {
   const active = starting || run?.jobStatus === "queued" || run?.jobStatus === "running";
+  /*
+    What the last pull on this line did, in the editor's words and at the
+    paper's own clock: "Tried 12:15 p.m.: search unavailable". The reason is
+    `item.q` and the time is `item.triedAt`, both written by the pull that ended
+    without a document and stored together (PULL1b). It is deliberately NOT the
+    newest run's finish: after a successful retry the line is struck, and an
+    editor who restores it would read the retry's time beside the older failure.
+    A reason with no stamp -- a row from an earlier build -- is drawn on its own,
+    with no time. A struck line says nothing: it worked.
+  */
+  const { clockTime } = usePaperDateFormatters();
+  const triedAt = clockTime(item.triedAt ?? null);
   return (
     <div className="todo-pull-group">
       <div className={"todo-row" + (item.done ? " done" : "")}>
@@ -4584,6 +4597,11 @@ function TodoRow({
           </button>
         ) : null}
       </div>
+      {!item.done && item.q ? (
+        <p className="todo-q">
+          {triedAt ? `Tried ${triedAt}: ${item.q}` : item.q}
+        </p>
+      ) : null}
       {run ? (
         <PullProgress run={run} onStop={onStop} onContinue={onContinue} disabled={disabled} />
       ) : starting ? (
@@ -4646,10 +4664,25 @@ function PullProgress({
             Continue pull
           </button>
         ) : null}
-        {run.errors.length ? (
+        {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+        {run.providerNotes?.length ? (
+          <details>
+            <summary>{failureSummary(run.providerNotes ?? [])}</summary>
+            <ul>
+              {run.errors.map((error, index) => (
+                <li key={`${run.jobId}-pull-error-${index}`}>{error}</li>
+              ))}
+            </ul>
+          </details>
+        ) : run.errors.length ? (
           <details>
             <summary>
-              {run.errors.length} provider or page failure{run.errors.length === 1 ? "" : "s"}
+              {run.errors.length} page{run.errors.length === 1 ? "" : "s"} could not be opened
             </summary>
             <ul>
               {run.errors.map((error, index) => (

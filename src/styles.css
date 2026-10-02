@@ -1520,6 +1520,9 @@
 .desk-ltr .todo.done .todo-t {text-decoration:line-through;color:var(--mut)}
 .desk-ltr .todo-t {text-align:left;flex:1;min-width:0}
 .desk-ltr .todo-src {font-size:calc(0.875rem * var(--ts));color:var(--mut);text-transform:uppercase;letter-spacing:.12em;flex:none}
+/* PULL1: what the last pull on this line did, under the line itself, so a pull
+   that came back with nothing leaves a mark the editor can see. */
+.desk-ltr .todo-q {margin:4px 0 0 19px;font-size:calc(0.875rem * var(--ts));color:var(--warn);text-wrap:pretty}
 .desk-ltr .pull-progress {margin:8px 0 12px 19px;padding:10px 12px;border:1px solid var(--line);background:var(--bg2);font-size:calc(0.875rem * var(--ts));color:var(--fg2)}
 .desk-ltr .pull-progress.active {border-left:4px solid var(--adeep)}
 .desk-ltr .pull-progress-head {display:flex;align-items:baseline;justify-content:space-between;gap:12px;color:var(--fg)}
