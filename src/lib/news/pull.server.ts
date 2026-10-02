@@ -17,6 +17,7 @@ import {
   parseNotes,
   selectExcerpt,
   toggleTodo,
+  type NoteTodo,
   type ReportingNotes,
 } from "./notes.ts";
 import {
@@ -26,9 +27,10 @@ import {
   pullQueries,
   siteOwnDocLinks,
 } from "./pull-plan.ts";
-import { officialDomains } from "./absence-gate.ts";
+import { officialDomainsEvery } from "./absence-gate.ts";
 import {
   finalPullText,
+  isPullTodoReason,
   providerFailureNotes,
   pullTodoReason,
   type ProviderFailure,
@@ -747,14 +749,19 @@ async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<Pull
   `;
   /*
     The hosts a guessed index page may be fetched from, beyond government
-    addresses: the paper's own registered sources. `officialDomains` is the
-    app's existing answer to that question -- the Sources desk's Tier A rows are
-    taken at their word, and anything else has to be a `.gov`/`.us` address
-    carrying the city's name (see its note; the local newspaper is not the
-    city). Using it here means Pull guesses a page on exactly what the desk
-    already treats as an official source.
+    addresses: the paper's own registered sources. The Sources desk's Tier A
+    rows are taken at their word, and anything else has to be a `.gov`/`.us`
+    address carrying the city's name (see `officialDomains`'s note; the local
+    newspaper is not the city).
+
+    `officialDomainsEvery`, not `officialDomains`: the latter ends in
+    `.slice(0, 4)`, which is right for the claims-of-absence ladder and wrong
+    here. On a newsroom with more than four Tier A sources the fifth host was
+    rejected as a document candidate even though the operator had registered it.
+    Every registered host is eligible; the separate three-host cap on the pages
+    actually fetched stays where it is, in `docIndexPages`.
   */
-  const officialHosts = officialDomains(
+  const officialHosts = officialDomainsEvery(
     paper.city,
     watched.map((row) => row.url),
     watched.filter((row) => (row.tier ?? "").toUpperCase() === "A").map((row) => row.url),
@@ -887,6 +894,53 @@ async function savePulledDocument(job: DeskJob, receipt: PullReceipt, document: 
   });
 }
 
+/**
+ * The mark one finished Pull leaves on one to-do row.
+ *
+ * Extracted from `finishPullTodo` (PULL1b finding 3) so the rule is testable
+ * without a database -- the rule is the whole point, and it is:
+ *
+ *  - a document was found: strike the line, and clear any of our own
+ *    "found nothing" words and their stamp, so a line the editor later restores
+ *    starts clean rather than carrying a stale time;
+ *  - nothing was found: write the reason in plain words with the moment it
+ *    happened (`triedAt`, ISO UTC), and leave the line un-struck. The time is
+ *    stored beside the reason precisely because a later retry must not be able
+ *    to lend it a newer one.
+ *
+ * The stamp is what tells our reason from the gate's "searched ..." summary and
+ * from a detail line an editor typed; a row written by a build before the stamp
+ * existed is recognised by `isPullTodoReason`'s shapes instead. Nothing else on
+ * the row is touched.
+ */
+export function markPulledTodo(
+  notes: ReportingNotes,
+  index: number,
+  outcome: { documentFound: boolean; reason?: string; at?: string },
+): ReportingNotes {
+  const row = notes.todo[index];
+  if (!row) return notes;
+  if (!outcome.documentFound) {
+    return {
+      ...notes,
+      todo: notes.todo.map((r, i) =>
+        i === index ? { ...r, done: false, q: outcome.reason, triedAt: outcome.at } : r,
+      ),
+    };
+  }
+  const cleared = clearPullReason(row);
+  const next = { ...notes, todo: notes.todo.map((r, i) => (i === index ? cleared : r)) };
+  return next.todo[index]!.done ? next : toggleTodo(next, index);
+}
+
+/** Drop `q`/`triedAt` when they are a Pull's own words; leave anything else. */
+function clearPullReason(row: NoteTodo): NoteTodo {
+  if (!row.triedAt && !isPullTodoReason(row.q ?? "")) return row;
+  const next: NoteTodo = { t: row.t, done: row.done, src: row.src };
+  if (row.queries?.length) next.queries = row.queries;
+  return next;
+}
+
 async function finishPullTodo(job: DeskJob, receipt: PullReceipt) {
   await withClaimedLeadMutation(job, receipt.leadId, async (sql, notesJson) => {
     let notes = parseNotes(notesJson);
@@ -894,28 +948,29 @@ async function finishPullTodo(job: DeskJob, receipt: PullReceipt) {
     if (notes.todo[index]?.t !== receipt.query)
       index = notes.todo.findIndex((row) => row.t === receipt.query);
     if (index < 0 || !notes.todo[index]) return;
-    if (receipt.checkpoint?.documents.length) {
-      if (!notes.todo[index]!.done) notes = toggleTodo(notes, index);
-    } else {
-      /*
-        Point 3: the mark an editor reads on the line. Plain words, and no
-        count of our own bookkeeping -- a failure tally said nothing about
-        whether pressing Pull again was worth a minute of their morning. The
-        route prints the time in front of this. The line stays un-struck: only
-        a document strikes it.
-      */
-      const reason = pullTodoReason({
-        status: receipt.status,
-        failures: providerFailureNotes(receipt.providerFailures ?? []),
-        answered: receipt.searchAnswered === true,
-      });
-      notes = {
-        ...notes,
-        todo: notes.todo.map((row, rowIndex) =>
-          rowIndex === index ? { ...row, done: false, q: reason } : row,
-        ),
-      };
-    }
+    notes = markPulledTodo(
+      notes,
+      index,
+      receipt.checkpoint?.documents.length
+        ? { documentFound: true }
+        : {
+            documentFound: false,
+            /*
+              Point 3: the mark an editor reads on the line. Plain words, and no
+              count of our own bookkeeping -- a failure tally said nothing about
+              whether pressing Pull again was worth a minute of their morning.
+              The route prints the time in front of this, from `triedAt`.
+            */
+            reason: pullTodoReason({
+              status: receipt.status,
+              failures: providerFailureNotes(receipt.providerFailures ?? []),
+              answered: receipt.searchAnswered === true,
+            }),
+            // The run's own finish -- the moment this reason is written. A
+            // crash path that got here without one still stamps the write.
+            at: receipt.finishedAt ?? new Date().toISOString(),
+          },
+    );
     await sql`
       update leads set notes_json = ${packNotes(notes)}
       where id = ${receipt.leadId} and newsroom_id = ${job.newsroom_id}

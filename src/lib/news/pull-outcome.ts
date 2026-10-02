@@ -151,3 +151,29 @@ export function pullTodoReason(input: {
   if (failed) return `no relevant document found; some searches failed (${failed})`;
   return "no relevant document found";
 }
+
+/**
+ * Are these words a Pull's own "it found nothing" line?
+ *
+ * PULL1b finding 3: when a later Pull succeeds it clears the reason it is
+ * striking, so a restored line starts clean. Clearing has to recognise what to
+ * clear -- a to-do row's `q` is also where the claims-of-absence gate writes
+ * its "searched <domain> and 3 more ways" summary and where `request-input`
+ * carries a drafting detail line, and neither of those may be wiped.
+ *
+ * The two tests are the shapes `pullTodoReason` can print, and the row's own
+ * `triedAt` stamp (which only a Pull writes). A row from a build before the
+ * stamp existed still has one of these five shapes, so shape alone is enough;
+ * everything else is left alone.
+ */
+export function isPullTodoReason(text: string): boolean {
+  const s = String(text ?? "").trim();
+  if (!s) return false;
+  return (
+    s === "no relevant document found" ||
+    s.startsWith("no relevant document found; some searches failed (") ||
+    s.startsWith("search unavailable (") ||
+    s === "the two-minute limit was reached before a document was found" ||
+    s === "stopped before a document was found"
+  );
+}

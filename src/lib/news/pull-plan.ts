@@ -96,12 +96,62 @@ export function pullQueries(
  * `whitepalmapts.com`, and nine pages were fetched from them for nothing.
  *
  * `.us` is here for the town sites that use it (`longmont.co.us`), and
- * `.gov.<cc>` for the state and national addresses outside the US.
+ * `.gov.<cc>` for the state and national addresses outside the US. It is NOT
+ * here for every `.us` address: the TLD is not government-only, and taking it
+ * as one let `zoom.us` through and sent a Pull to guess `/meetings` and
+ * `/board-meetings` on a commercial host. Only the governmental shapes count --
+ * see `isGovernmentalUsHost`.
  */
 export function isOfficialHost(host: string): boolean {
   const h = String(host ?? "").trim().toLowerCase().replace(/^www\./, "");
   if (!h || h.includes(" ")) return false;
-  return /\.gov$/.test(h) || /\.gov\.[a-z]{2}$/.test(h) || /\.us$/.test(h) || /\.mil$/.test(h);
+  if (/\.gov$/.test(h) || /\.gov\.[a-z]{2}$/.test(h) || /\.mil$/.test(h)) return true;
+  return isGovernmentalUsHost(h);
+}
+
+/**
+ * The USPS two-letter codes: the fifty states, DC and the territories.
+ *
+ * One small list, because the `<locality>.<state>.us` shape is the whole test
+ * for whether a `.us` address is a government body's.
+ */
+const US_STATE_CODES = new Set(
+  (
+    "al ak az ar ca co ct de dc fl ga hi id il in ia ks ky la me md ma mi mn ms mo mt " +
+    "ne nv nh nj nm ny nc nd oh ok or pa ri sc sd tn tx ut vt va wa wv wi wy " +
+    "as gu mp pr vi"
+  ).split(" "),
+);
+
+/**
+ * Second-level labels the federal government and tribal nations publish under,
+ * where the `.us` address is governmental by its own structure. `kids.us` is
+ * deliberately absent: it is a children's-content namespace, not a government.
+ */
+const US_GOV_SECOND_LEVEL = new Set(["fed", "nsn", "dni", "isa"]);
+
+/**
+ * Is this `.us` address a government body's own?
+ *
+ * Two shapes, and only two:
+ *
+ *  - `<locality>.<state>.us` -- `longmont.co.us`, `ci.boulder.co.us`,
+ *    `www.larimer.co.us`. The label immediately before `.us` is a state, DC or
+ *    territory code. This is what the Colorado town and county sites use, which
+ *    is what `.us` was added for.
+ *  - `<name>.<federal label>.us` -- `usgs.fed.us` and the other second-level
+ *    labels above.
+ *
+ * A bare `<name>.us` (`zoom.us`, `bit.us`) is a company or a person, not a
+ * government, and gets no guessed page unless the paper registered it as a
+ * source -- that path is `isOfficialDocHost`'s other half.
+ */
+function isGovernmentalUsHost(h: string): boolean {
+  if (!/\.us$/.test(h)) return false;
+  const parts = h.split(".").filter(Boolean);
+  if (parts.length < 3) return false;
+  const secondLevel = parts[parts.length - 2]!;
+  return US_STATE_CODES.has(secondLevel) || US_GOV_SECOND_LEVEL.has(secondLevel);
 }
 
 /**

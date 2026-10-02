@@ -4547,11 +4547,15 @@ function TodoRow({
   /*
     What the last pull on this line did, in the editor's words and at the
     paper's own clock: "Tried 12:15 p.m.: search unavailable". The reason is
-    `item.q`, written by the pull when it ended without a document; the time is
-    the run's own finish. A struck line says nothing -- it worked.
+    `item.q` and the time is `item.triedAt`, both written by the pull that ended
+    without a document and stored together (PULL1b). It is deliberately NOT the
+    newest run's finish: after a successful retry the line is struck, and an
+    editor who restores it would read the retry's time beside the older failure.
+    A reason with no stamp -- a row from an earlier build -- is drawn on its own,
+    with no time. A struck line says nothing: it worked.
   */
   const { clockTime } = usePaperDateFormatters();
-  const triedAt = clockTime(run?.finishedAt ?? null);
+  const triedAt = clockTime(item.triedAt ?? null);
   return (
     <div className="todo-pull-group">
       <div className={"todo-row" + (item.done ? " done" : "")}>

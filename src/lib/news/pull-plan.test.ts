@@ -1,12 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   docCandidateHosts,
   docIndexPages,
+  isOfficialDocHost,
+  isOfficialHost,
   isOnSubject,
   pullQueries,
   siteOwnDocLinks,
 } from "./pull-plan.ts";
+import { officialDomains, officialDomainsEvery } from "./absence-gate.ts";
 
 /** The exact to-do line that returned three California school-district PDFs. */
 const REAL_LINE =
@@ -118,6 +122,111 @@ describe("docCandidateHosts", () => {
       ["frprdistrict.com"],
     );
     assert.deepEqual(hosts, ["frprdistrict.com"]);
+  });
+});
+
+/*
+  PULL1b finding 1. `.us` is not government-only, so `isOfficialHost` accepted
+  `zoom.us`, and a Pull then guessed `/meetings` and `/board-meetings` on a
+  commercial host -- exactly the unsolicited fetch the PULL1 change exists to
+  stop. The town and county sites the paper actually covers are still `.us`;
+  they are the ones with the `<locality>.<state>.us` shape.
+*/
+describe("a .us address is official only when it is governmental", () => {
+  it("rejects the commercial hosts plain `.us` let through", () => {
+    for (const host of ["zoom.us", "bit.us", "example.us"]) {
+      assert.equal(isOfficialHost(host), false, `${host} is not a government body`);
+    }
+  });
+
+  it("accepts the town, county and federal shapes the paper covers", () => {
+    for (const host of ["longmont.co.us", "ci.boulder.co.us", "www.larimer.co.us", "usgs.fed.us"]) {
+      assert.equal(isOfficialHost(host), true, `${host} is a government address`);
+    }
+  });
+
+  it("still accepts the paper's registered host, government or not", () => {
+    assert.equal(isOfficialHost("zoom.us"), false);
+    assert.equal(isOfficialDocHost("zoom.us", []), false);
+    assert.equal(isOfficialDocHost("zoom.us", ["zoom.us"]), true);
+  });
+
+  it("never guesses a page on a commercial .us host", () => {
+    assert.deepEqual(docCandidateHosts(["https://zoom.us/meetings"], [], []), []);
+    assert.deepEqual(docIndexPages(["zoom.us"]), []);
+  });
+
+  it("leaves .gov, .gov.<cc> and .mil exactly as they were", () => {
+    for (const host of ["longmontcolorado.gov", "abs.gov.au", "www.army.mil"]) {
+      assert.equal(isOfficialHost(host), true, host);
+    }
+  });
+
+  it("still rejects the three hosts the live pull reported", () => {
+    for (const host of ["en.m.wikipedia.org", "m.imdb.com", "whitepalmapts.com"]) {
+      assert.equal(isOfficialHost(host), false, host);
+    }
+  });
+});
+
+/*
+  PULL1b finding 2. `officialDomains` ends in `.slice(0, 4)` -- it is the
+  claims-of-absence gate's list, and the gate may legitimately want a short one.
+  Pull used it as the complete registered set, so on a newsroom with more than
+  four Tier A sources the fifth and later hosts were ineligible for index-page
+  discovery even though the operator had registered them.
+*/
+describe("every registered host reaches Pull, while the gate keeps its short list", () => {
+  const tierA = [
+    "https://one.example.com",
+    "https://two.example.com",
+    "https://three.example.com",
+    "https://four.example.com",
+    "https://five.example.com",
+    "https://six.example.com",
+  ];
+
+  it("hands Pull all six registered hosts", () => {
+    assert.deepEqual(officialDomainsEvery("Longmont", tierA, tierA), [
+      "one.example.com",
+      "two.example.com",
+      "three.example.com",
+      "four.example.com",
+      "five.example.com",
+      "six.example.com",
+    ]);
+  });
+
+  it("keeps the gate's own list capped at four, exactly as before", () => {
+    assert.deepEqual(officialDomains("Longmont", tierA, tierA), [
+      "one.example.com",
+      "two.example.com",
+      "three.example.com",
+      "four.example.com",
+    ]);
+  });
+
+  it("makes a story URL on the sixth Tier A host eligible", () => {
+    const story = ["https://six.example.com/story"];
+    assert.deepEqual(docCandidateHosts([], story, officialDomainsEvery("Longmont", tierA, tierA)), [
+      "six.example.com",
+    ]);
+    // The capped list is why it was dropped: the defect, pinned.
+    assert.deepEqual(docCandidateHosts([], story, officialDomains("Longmont", tierA, tierA)), []);
+  });
+
+  it("is the uncapped list the Pull context actually builds", () => {
+    // The defect the bot found was at the call site, not in the helper.
+    const source = readFileSync(new URL("./pull.server.ts", import.meta.url), "utf8");
+    assert.match(source, /const officialHosts = officialDomainsEvery\(/);
+    assert.doesNotMatch(source, /const officialHosts = officialDomains\(/);
+  });
+
+  it("still reads only three hosts' pages, the separate fetch cap", () => {
+    const hosts = officialDomainsEvery("Longmont", tierA, tierA);
+    const pages = docIndexPages(hosts, 3, hosts);
+    const read = new Set(pages.map((p) => new URL(p).hostname));
+    assert.equal(read.size, 3);
   });
 });
 

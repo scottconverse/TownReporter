@@ -22,24 +22,51 @@ const page = readFileSync(new URL("../../routes/desk.story.$leadId.tsx", import.
 
 describe("the mark a Pull leaves on its reporting line", () => {
   it("stores the reason in plain words, with no failure count", () => {
-    assert.match(pull, /const reason = pullTodoReason\(\{/);
+    assert.match(pull, /reason: pullTodoReason\(\{/);
     assert.doesNotMatch(pull, /provider or page failures/);
     assert.doesNotMatch(pull, /pull found nothing/);
-    assert.match(pull, /rowIndex === index \? \{ \.\.\.row, done: false, q: reason \}/);
-  });
-
-  it("still strikes the line when a document was found", () => {
     assert.match(
       pull,
-      /if \(receipt\.checkpoint\?\.documents\.length\) \{\s*if \(!notes\.todo\[index\]!\.done\) notes = toggleTodo\(notes, index\);/,
-      "only a pull that returned a document may mark the line done",
+      /i === index \? \{ \.\.\.r, done: false, q: outcome\.reason, triedAt: outcome\.at \} : r/,
     );
   });
 
+  it("stamps the reason with the moment it was written, not with a later run", () => {
+    // PULL1b finding 3: the time has to belong to the reason it is printed
+    // beside. It is written with the reason and cleared with it.
+    assert.match(
+      pull,
+      /at: receipt\.finishedAt \?\? new Date\(\)\.toISOString\(\)/,
+      "the failure's own moment is persisted with the reason",
+    );
+    assert.match(pull, /if \(!row\.triedAt && !isPullTodoReason\(row\.q \?\? ""\)\) return row;/);
+  });
+
+  it("still strikes the line when a document was found", () => {
+    // The rule now lives in `markPulledTodo`, which the new test file exercises
+    // directly; this pins that the pipeline still hands it the document count
+    // and that nothing but a document reaches `toggleTodo`.
+    assert.match(
+      pull,
+      /receipt\.checkpoint\?\.documents\.length\s*\?\s*\{ documentFound: true \}/,
+      "the pipeline tells the mark whether a document was really found",
+    );
+    assert.match(pull, /return next\.todo\[index\]!\.done \? next : toggleTodo\(next, index\);/);
+  });
+
   it("draws the reason on the row, with the clock time it was tried", () => {
-    assert.match(page, /const triedAt = clockTime\(run\?\.finishedAt \?\? null\);/);
+    // PULL1b finding 3: from the row's own stamp. `run.finishedAt` belongs to
+    // whichever run is newest, which after a retry is not this failure.
+    assert.match(page, /const triedAt = clockTime\(item\.triedAt \?\? null\);/);
+    assert.doesNotMatch(page, /clockTime\(run\?\.finishedAt/);
     assert.match(page, /\{triedAt \? `Tried \$\{triedAt\}: \$\{item\.q\}` : item\.q\}/);
     assert.match(page, /\{!item\.done && item\.q \? \(/);
+  });
+
+  it("draws a reason with no stamp as the reason alone", () => {
+    // A row written by an earlier build keeps its words and gets no invented
+    // time; the ternary above is what does it, and this pins the fallback.
+    assert.match(page, /\{triedAt \? `Tried \$\{triedAt\}: \$\{item\.q\}` : item\.q\}/);
   });
 
   it("never prints the raw failure count to the editor", () => {
