@@ -1265,7 +1265,13 @@ async function main() {
   await page.reload({ waitUntil: "networkidle" });
   await openShutReviewDisclosures();
   const queuedReview = page.locator("#finding-evidence-review");
-  await page.getByRole("button", { name: "Drafting…", exact: true }).waitFor();
+  /*
+    UI1a3: the working word depends on whether the story already has a draft
+    body -- "Redrafting…" for a story with one, "Drafting…" for one without
+    (`desk.story.$leadId.tsx`). This walk redrafts a story that already has a
+    draft, so the exact name "Drafting…" no longer exists; accept either.
+  */
+  await page.getByRole("button", { name: /^(Re)?drafting…$/i }).waitFor();
   if (!(await queuedReview.getByRole("button", { name: "Save judgment" }).first().isDisabled()))
     throw new Error("running replacement draft did not disable finding judgments");
   await pool.query(

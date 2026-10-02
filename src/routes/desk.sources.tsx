@@ -34,6 +34,7 @@ import { candidateIsWatchedSource } from "@/lib/news/source-replacements";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import type { SourceRow } from "@/lib/news/types";
@@ -960,19 +961,38 @@ function RemoveAction({
 }) {
   if (!armed) {
     return (
-      <InkButton tone="quiet" disabled={busy} aria-busy={busy || undefined} onClick={onAsk}>
+      <ActionButton
+        tone="quiet"
+        phase="idle"
+        disabled={busy}
+        disabledReason={busy ? "Another change to this source is still being saved." : null}
+        onAct={onAsk}
+      >
         {label}
-      </InkButton>
+      </ActionButton>
     );
   }
   return (
     <>
-      <InkButton tone="solid" disabled={busy} aria-busy={busy || undefined} onClick={onConfirm}>
-        {busy ? "Removing…" : "Yes, remove"}
-      </InkButton>
-      <InkButton tone="quiet" onClick={onCancel}>
+      {/*
+        Unit UI1a2. The second press is the one that does the work, so it is the
+        one that carries the states: "Removing…" with a spinner and the button
+        disabled while the write is in flight. Its DONE is the row's -- a
+        removed source leaves the watch list, and the list's own notice is what
+        says so; there is deliberately no second green "Removed" drawn on a
+        button that is about to be unmounted.
+      */}
+      <ActionButton
+        tone="primary"
+        phase={rowActionPhase({ isPending: busy })}
+        workingLabel="Removing…"
+        onAct={onConfirm}
+      >
+        Yes, remove
+      </ActionButton>
+      <ActionButton tone="quiet" phase="idle" onAct={onCancel}>
         Keep
-      </InkButton>
+      </ActionButton>
     </>
   );
 }
@@ -1520,13 +1540,8 @@ function WatchRows({
                   something" is visible on the row instead of only as a new
                   scan somewhere else on the page.
                 */}
-                {result ? (
-                  <span
-                    className={
-                      "astra-row-meta astra-row-result " + (result.ok ? "is-ok" : "is-fail")
-                    }
-                    role="status"
-                  >
+                {result?.ok ? (
+                  <span className="astra-row-meta astra-row-result is-ok" role="status">
                     {result.line}
                   </span>
                 ) : null}
@@ -1534,14 +1549,29 @@ function WatchRows({
               <div className="astra-row-acts">
                 {paused ? (
                   <>
-                    <InkButton
+                    {/*
+                      Unit UI1a2. Every press on this row is the shared
+                      `ActionButton` now, so Pause, Resume, Check now and
+                      Delete have the same four states as Publish does.
+
+                      The DONE state of Pause and Resume is the ROW's, not the
+                      button's: a pause that lands makes this row
+                      `status === "paused"`, so the chip above reads "Paused"
+                      and this very control is redrawn as "Resume". That is
+                      rule 3's "the new state, because the row's data now says
+                      so" -- a green "Paused" on the button beside a row still
+                      reading "Active" would be the desk contradicting itself
+                      for one refetch, which is the flicker FB6 opened this
+                      family of units about. See `rowActionPhase`.
+                    */}
+                    <ActionButton
                       tone="quiet"
-                      disabled={statusBusy}
-                      aria-busy={statusBusy || undefined}
-                      onClick={() => onStatus(s.id, "accepted")}
+                      phase={rowActionPhase({ isPending: statusBusy })}
+                      workingLabel="Resuming…"
+                      onAct={() => onStatus(s.id, "accepted")}
                     >
-                      {statusBusy ? "Resuming…" : "Resume"}
-                    </InkButton>
+                      Resume
+                    </ActionButton>
                     <RemoveAction
                       label="Remove"
                       armed={confirmRemoveId === s.id}
@@ -1565,21 +1595,45 @@ function WatchRows({
                   </>
                 ) : (
                   <>
-                    <InkButton
-                      tone={failed ? "solid" : "quiet"}
-                      disabled={checking}
-                      onClick={() => onCheck(s.id)}
+                    {/*
+                      "Check now" / "Retry" is the one control on this row whose
+                      answer STAYS with the button rather than with the row's
+                      own record: the press asks "can the desk read this page?",
+                      and the answer is about the press, so the button is where
+                      it belongs. It says "Checking…" with a spinner while it
+                      runs, then "Checked" in the success green with a check --
+                      and the row's own line ("Read OK now.") still carries the
+                      detail underneath, which is U24's answer, not a second
+                      one. A check that came back bad prints the desk's own
+                      sentence in red BESIDE the button and the button goes back
+                      to "Retry", pressable.
+                    */}
+                    <ActionButton
+                      tone={failed ? "primary" : "quiet"}
+                      phase={
+                        checking
+                          ? "working"
+                          : result && !result.ok
+                            ? "failed"
+                            : result?.ok
+                              ? "done"
+                              : "idle"
+                      }
+                      workingLabel={failed ? "Retrying…" : "Checking…"}
+                      doneLabel="Checked"
+                      reason={result && !result.ok ? result.line : null}
+                      onAct={() => onCheck(s.id)}
                     >
-                      {checking ? "Checking…" : failed ? "Retry" : "Check now"}
-                    </InkButton>
-                    <InkButton
+                      {failed ? "Retry" : "Check now"}
+                    </ActionButton>
+                    <ActionButton
                       tone="quiet"
-                      disabled={statusBusy}
-                      aria-busy={statusBusy || undefined}
-                      onClick={() => onStatus(s.id, "paused")}
+                      phase={rowActionPhase({ isPending: statusBusy })}
+                      workingLabel="Pausing…"
+                      onAct={() => onStatus(s.id, "paused")}
                     >
-                      {statusBusy ? "Pausing…" : "Pause"}
-                    </InkButton>
+                      Pause
+                    </ActionButton>
                     {keeps ? (
                       /*
                         SH0-3 / owner addendum item 1: a row that keeps failing
@@ -1596,10 +1650,15 @@ function WatchRows({
                         addendum is explicit that the desk flags and the editor
                         acts.
                       */
-                      <InkButton
-                        tone="quiet"
-                        disabled={checking || statusBusy}
-                        onClick={() => {
+                      <ActionButton
+                        tone="danger"
+                        phase={rowActionPhase({ isPending: statusBusy })}
+                        workingLabel="Deleting…"
+                        disabled={checking}
+                        disabledReason={
+                          checking ? "The desk is still reading this source." : null
+                        }
+                        onAct={() => {
                           if (
                             !confirm(
                               `Delete “${s.title}”? The desk stops fetching ${hostLabel(s.url)} and this source comes off the watch list. Pages already saved from it stay in the newsroom.`,
@@ -1610,7 +1669,7 @@ function WatchRows({
                         }}
                       >
                         Delete
-                      </InkButton>
+                      </ActionButton>
                     ) : (
                       /*
                         Remove, one click deeper.
@@ -1910,14 +1969,20 @@ function SourceTable({
               ) : null}
               <span className="row-acts">
                 {acts.includes("accepted") ? (
-                  <InkButton
+                  /*
+                    Unit UI1a2: the same shared piece as the watch list's
+                    presses. Its DONE is the row's -- an accepted source moves
+                    out of Suggested and into the watch list, which the tabs
+                    and the row's own chip say.
+                  */
+                  <ActionButton
                     tone="quiet"
-                    disabled={statusId === s.id}
-                    aria-busy={statusId === s.id || undefined}
-                    onClick={() => onStatus(s.id, "accepted", s.status)}
+                    phase={rowActionPhase({ isPending: statusId === s.id })}
+                    workingLabel="Accepting…"
+                    onAct={() => onStatus(s.id, "accepted", s.status)}
                   >
-                    {statusId === s.id ? "Accepting…" : "Accept"}
-                  </InkButton>
+                    Accept
+                  </ActionButton>
                 ) : null}
                 {acts.includes("rejected") ? (
                   <RemoveAction

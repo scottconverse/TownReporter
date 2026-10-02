@@ -247,6 +247,22 @@ const deskCopy = moduleUrl(
   },
 );
 
+/*
+  Unit UI1a2: `desk-leads.tsx` draws its Delete through the shared piece now.
+  `action-button.ts` imports nothing but React at runtime (its one other import
+  is `import type`, which the transpile drops), so the REAL module loads here
+  rather than a stub -- which means the render below exercises the button that
+  actually ships.
+*/
+const actionButtonUrl = moduleUrl(
+  await readFile(new URL("../src/components/action-button.ts", import.meta.url), "utf8"),
+  "action-button.ts",
+  {
+    react: import.meta.resolve("react"),
+    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+  },
+);
+
 const { LeadRowView } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
@@ -255,6 +271,7 @@ const { LeadRowView } = await import(
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
+      "@/components/action-button": actionButtonUrl,
 
       "@/components/desk-toaster": deskToasterStub,
       "@/lib/paper": paperStub,

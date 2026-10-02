@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { areaClass, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { DeskJobCard } from "@/components/JobCard";
@@ -19,6 +20,7 @@ import {
   startEditorial,
 } from "@/lib/news/opinion";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
@@ -714,27 +716,70 @@ function OpinionPage() {
                     ) : null}
                     {confirmId === r.id ? (
                       <>
-                        <InkButton
-                          tone="ghost"
-                          disabled={remove.isPending || discard.isPending}
-                          onClick={() =>
-                            r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id)
-                          }
+                        {/*
+                          Unit UI1a2: the confirm press is the one that does the
+                          work, so it carries the states -- "Deleting…" with a
+                          spinner, disabled, and the desk's own reason beside it
+                          if the call is refused. One of the two mutations is
+                          this row's, so `variables` says which.
+                        */}
+                        <ActionButton
+                          tone="danger"
+                          phase={rowActionPhase({
+                            isPending:
+                              (remove.isPending && remove.variables === r.draft_id) ||
+                              (discard.isPending && discard.variables === r.id),
+                            problem:
+                              remove.isError && remove.variables === r.draft_id
+                                ? remove.error instanceof Error
+                                  ? remove.error.message
+                                  : "That did not delete."
+                                : discard.isError && discard.variables === r.id
+                                  ? discard.error instanceof Error
+                                    ? discard.error.message
+                                    : "That did not clear."
+                                  : /* Unit UI1a3, finding 1: both of these server
+                                       functions answer `{ ok: false, error }`
+                                       for their ordinary refusal ("That
+                                       standalone editorial is gone."), which
+                                       settles as a SUCCESS. Read the refusal off
+                                       the settled answer, gated on `!isPending`
+                                       because React Query keeps the last answer
+                                       on `data` while a new press runs. */
+                                    remove.variables === r.draft_id && !remove.isPending
+                                    ? refusedAnswer(remove.data)
+                                    : discard.variables === r.id && !discard.isPending
+                                      ? refusedAnswer(discard.data)
+                                      : null,
+                          })}
+                          workingLabel="Deleting…"
+                          onAct={() => (r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id))}
                         >
-                          {remove.isPending || discard.isPending
-                            ? "Deleting…"
-                            : r.draft_id
-                              ? "Yes, delete"
-                              : "Yes, clear it"}
-                        </InkButton>
-                        <InkButton tone="quiet" onClick={() => setConfirmId(null)}>
+                          {r.draft_id ? "Yes, delete" : "Yes, clear it"}
+                        </ActionButton>
+                        <ActionButton
+                          tone="quiet"
+                          phase="idle"
+                          disabled={remove.isPending || discard.isPending}
+                          disabledReason={
+                            remove.isPending || discard.isPending
+                              ? "The delete is still being saved."
+                              : null
+                          }
+                          onAct={() => setConfirmId(null)}
+                        >
                           Keep
-                        </InkButton>
+                        </ActionButton>
                       </>
                     ) : (
-                      <InkButton tone="quiet" onClick={() => setConfirmId(r.id)}>
+                      <ActionButton
+                        tone="danger"
+                        phase="idle"
+                        disabled={remove.isPending || discard.isPending}
+                        onAct={() => setConfirmId(r.id)}
+                      >
                         {r.draft_id ? "Delete" : "Clear"}
-                      </InkButton>
+                      </ActionButton>
                     )}
                   </span>
                   {!r.finished_at && r.stalled ? (

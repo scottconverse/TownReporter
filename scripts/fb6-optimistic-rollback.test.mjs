@@ -63,6 +63,8 @@ const toast = await import(toastStub);
 
 const deskActionUrl = await moduleUrl("src/components/desk-action.ts", {
   "@/components/desk-toast": toastStub,
+  /* UI1a3: `deskAnswerFailure` delegates to the one refusal parser. */
+  "@/lib/news/refused-answer": await moduleUrl("src/lib/news/refused-answer.ts"),
 });
 const leadStatusUrl = await moduleUrl("src/components/desk-lead-status.ts", {});
 /*

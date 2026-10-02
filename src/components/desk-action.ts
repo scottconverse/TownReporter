@@ -28,6 +28,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
 import { deskErrorReason, deskToast, type DeskUndo } from "@/components/desk-toast";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 
 /** Where a press is between being pressed and answering. */
 export type DeskPhase = "idle" | "pending" | "done" | "failed";
@@ -87,12 +88,7 @@ export function deskActionDone<Result, Variables>(
  * refuse and there is nothing to report.
  */
 export function deskAnswerFailure(result: unknown): string | null {
-  if (!result || typeof result !== "object") return null;
-  if (!("ok" in result) || (result as { ok: unknown }).ok !== false) return null;
-  const error = (result as { error?: unknown }).error;
-  return typeof error === "string" && error.trim()
-    ? error.trim()
-    : "The desk refused that press and said nothing about why.";
+  return refusedAnswer(result);
 }
 
 /**

@@ -23,6 +23,9 @@
  * `performPublish`) and an unchosen section.
  */
 
+import { editorActionError } from "./desk-copy.ts";
+import { refusedAnswer } from "./refused-answer.ts";
+
 /**
  * Where a blocker's button goes. The page turns each of these into a real
  * press -- a focus, a scroll, or an existing mutation -- in
@@ -415,4 +418,95 @@ export function publishPressState(input: {
   if (input.refusal.trim()) return { kind: "refused", message: input.refusal.trim() };
   if (input.publishedSlug) return { kind: "published", slug: input.publishedSlug };
   return { kind: "idle" };
+}
+
+/**
+ * Unit UI1a3, finding 1: a REFUSAL is a failed press, not a finished one.
+ *
+ * The derivation below is the whole of the fix, and it is a pure function of
+ * what the three mutations report -- which is what makes the bug testable,
+ * because the page itself is a `.tsx` route no test can mount. `refusedAnswer`
+ * is re-exported so a test can read the rule from the same door the page's
+ * neighbours do.
+ */
+export { refusedAnswer };
+
+/** One blocker-row press, exactly as its mutation reports itself. */
+export type BlockerPressFacts = {
+  /** The request is in flight. */
+  isPending: boolean;
+  /** The request THREW (the rarer failure; a refusal resolves instead). */
+  isError: boolean;
+  /** The thrown error, when `isError`. */
+  error?: unknown;
+  /** The resolved answer, which may itself refuse (`{ ok: false, error }`). */
+  answer?: unknown;
+};
+
+export type BlockerPressState = {
+  busyTarget: PublishBlockerTarget["kind"] | null;
+  failedTarget: PublishBlockerTarget["kind"] | null;
+  /** The sentence printed beside the row that failed. */
+  failureReason: string | null;
+};
+
+/*
+  The words placed before a thrown error's reason, per row. The refusals carry
+  their own complete sentence and take no lead-in, which is why the map is read
+  only on the `isError` branch.
+*/
+const BLOCKER_FAILED_LEAD: Record<string, string> = {
+  "accept-unreviewed": "record that acceptance",
+  "override-outlet": "record the override",
+  "keep-evidence": "save the evidence review",
+};
+const BLOCKER_FAILED_FALLBACK: Record<string, string> = {
+  "accept-unreviewed": "Could not record that acceptance.",
+  "override-outlet": "Could not record the override.",
+  "keep-evidence": "Evidence review could not be saved.",
+};
+
+/**
+ * Which blocker row is running, which last failed, and why.
+ *
+ * One derivation for the whole list, so the three presses cannot disagree about
+ * what a settled refusal means -- which is the bug finding 1 named.
+ */
+export function blockerPressState(input: {
+  accept: BlockerPressFacts;
+  override: BlockerPressFacts;
+  keepEvidence: BlockerPressFacts;
+}): BlockerPressState {
+  const rows = [
+    ["accept-unreviewed", input.accept],
+    ["override-outlet", input.override],
+    ["keep-evidence", input.keepEvidence],
+  ] as const;
+
+  const busy = rows.find(([, facts]) => facts.isPending);
+  /*
+    A refusal outranks "in flight" only once its press has SETTLED. React Query
+    keeps the previous answer on `data` while a new press runs, so an ungated
+    read would paint the LAST refusal over THIS press's spinner.
+  */
+  const failed =
+    rows.find(([, facts]) => facts.isError) ??
+    rows.find(([, facts]) => !facts.isPending && refusedAnswer(facts.answer) !== null);
+
+  let failureReason: string | null = null;
+  if (failed) {
+    const [kind, facts] = failed;
+    failureReason = facts.isError
+      ? (editorActionError(
+          facts.error instanceof Error ? facts.error.message : "",
+          BLOCKER_FAILED_LEAD[kind],
+        ) ?? BLOCKER_FAILED_FALLBACK[kind])
+      : refusedAnswer(facts.answer);
+  }
+
+  return {
+    busyTarget: busy ? busy[0] : null,
+    failedTarget: failed ? failed[0] : null,
+    failureReason,
+  };
 }

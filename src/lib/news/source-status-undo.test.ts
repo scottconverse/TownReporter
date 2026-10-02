@@ -53,7 +53,14 @@ describe("the button carries the press and the row carries its old status", () =
 
   it("asks twice before removing, and says what the second press does", () => {
     assert.match(source, /function RemoveAction\(/, "one two-step control for every Remove on the screen");
-    assert.match(source, /"Yes, remove"/);
+    /*
+      Unit UI1a2 moved this press onto the shared `ActionButton`, where the word
+      is the button's CHILD rather than a quoted string -- and where the word it
+      draws while it works is `workingLabel`. What this reads is unchanged: the
+      second press says what it does, and says what it is doing while it does it.
+    */
+    assert.match(source, /Yes, remove/);
+    assert.match(source, /workingLabel="Removing…"/);
     assert.match(source, /onAsk=\{\(\) => onConfirmRemove\(s\.id\)\}/);
     assert.match(source, /onConfirm=\{\(\) => \{/, "and the second press is what calls the desk");
   });
