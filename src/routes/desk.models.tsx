@@ -472,28 +472,44 @@ function AssignmentsTab({
         </p>
       ) : null}
 
+      {/*
+        Unit F6: the table, in its own scroll container. `minWidth` is the
+        row grid's own floor (see MODEL_TABLE_MIN), so the block is drawn at
+        the width the five columns need however narrow the window is, and
+        `.models-table` does the scrolling. The header and the rows are inside
+        the SAME box, so their tracks cannot drift apart.
+      */}
       <div
-        className="text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
-        style={{ ...ROW_GRID, gap: "0 14px", padding: "10px 0", borderBottom: "2px solid var(--fg)" }}
+        className="models-table"
+        role="region"
+        aria-label="Which model does what"
+        tabIndex={0}
       >
-        <span>Job</span>
-        <span>First choice · effort</span>
-        <span>Fallback 1</span>
-        <span>Fallback 2</span>
-        <span />
-      </div>
+        <div className="models-table-inner" style={{ minWidth: MODEL_TABLE_MIN }}>
+          <div
+            className="text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
+            style={{ ...ROW_GRID, gap: "0 14px", padding: "10px 0", borderBottom: "2px solid var(--fg)" }}
+          >
+            <span>Job</span>
+            <span>First choice · effort</span>
+            <span>Fallback 1</span>
+            <span>Fallback 2</span>
+            <span />
+          </div>
 
-      {MODEL_JOBS.map((job) => (
-        <JobRow
-          key={job.key}
-          jobKey={job.key}
-          savedRows={rows}
-          draft={draft[job.key]}
-          connections={connections}
-          disabled={!isOwner}
-          onPatch={patch}
-        />
-      ))}
+          {MODEL_JOBS.map((job) => (
+            <JobRow
+              key={job.key}
+              jobKey={job.key}
+              savedRows={rows}
+              draft={draft[job.key]}
+              connections={connections}
+              disabled={!isOwner}
+              onPatch={patch}
+            />
+          ))}
+        </div>
+      </div>
 
       {err ? (
         <p className="text-sm" role="alert" style={{ color: "var(--danger)" }}>
@@ -849,6 +865,43 @@ const ROW_GRID: CSSProperties = {
   gap: "6px 14px",
   alignItems: "center",
 };
+
+/**
+ * The widest the status chip can be. It is the one `auto` track, so it is the
+ * one column no floor above pins down: the longest word it carries is
+ * "Sign-in" / "Saving…" at 14px/800 inside the chip's own 8px of padding.
+ * Measured on this build: 81px. 110 leaves room for the longest label the chip
+ * table can produce without guessing a number that only just holds.
+ */
+const STATUS_COLUMN_MAX = 110;
+/** The four 14px column gaps the row grid puts between its five tracks. */
+const ROW_GRID_GAPS = 4 * 14;
+
+/**
+ * The narrowest the table can be drawn, and the reason this file has a scroll
+ * container at all (unit F6).
+ *
+ * The auditor measured the page itself: `/desk/models` was 135px wider than a
+ * 1024px window, 259px wider at 900 and 554px at 390 -- the whole page scrolled
+ * sideways, so the right-hand columns (the status chip, and on a phone the
+ * model select itself) sat off the edge of the screen.
+ *
+ * The cause is the four floors above. They add up to 927px of track whatever
+ * the window is, and the desk's main column at 1024 is 766px, at 900 is 642
+ * and at 390 is 356 -- so the table was never going to fit, and there was
+ * nothing to make it fit: the floors are what stop a model name being painted
+ * as "Claude Sonnet · sig". Fitting by shrinking them is not fitting; it is
+ * clipping, which is the thing the floors exist to stop.
+ *
+ * So the table gets the other answer the brief allows: it SCROLLS INSIDE ITS
+ * OWN CONTAINER. `.models-table` (desk-astra.css) is `overflow-x: auto` and
+ * the block inside it is held at this width, so every row is drawn at the
+ * width the columns need, the row rules span the whole table, and the sideways
+ * movement is the table's own -- the page never moves. The select is still a
+ * 44px target and still reachable; it is one swipe away rather than off the
+ * screen.
+ */
+const MODEL_TABLE_MIN = 72 + FIRST_CELL_MIN + 2 * MODEL_COLUMN_MIN + STATUS_COLUMN_MAX + ROW_GRID_GAPS;
 
 /** Why the effort box has nothing to choose, on its `title`. */
 const PROVIDER_DEFAULT_HELP =
