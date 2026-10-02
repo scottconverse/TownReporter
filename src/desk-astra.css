@@ -4054,10 +4054,22 @@
    UI1b-5: `min-height: 0` made them 26px tall -- a third under the desk's
    floor, and the two controls the editor aims at on this bar. The select now
    fills the 46px box it sits in (44 content px inside the wrapper's 1px edge),
-   which costs no width and moves nothing: the wrapper was already 46px. */
+   which costs no width and moves nothing: the wrapper was already 46px.
+
+   UI1b-7: THE EDGE STAYS, THE SECOND INSET GOES. Taking the Quiet box put the
+   select's own 1px `--fg2` border and its 4px horizontal padding INSIDE a
+   wrapper that already has a 1px `--fg` border and 4px of its own, so each of
+   the two controls grew 10px -- 20px the bar did not have. Measured at 1280 in
+   Large text the row then needed 979.6px of a 970px column, and because
+   `.queue-filters` is `justify-content: flex-end` the 9.6px overflow came out
+   the LEFT side of that box: the search field slid back under the tab strip,
+   which is the `Queue search overlaps the tab strip by 3.1px` CI failure. The
+   select keeps its border -- it is the control's edge, the thing the guard
+   measures -- and the wrapper keeps the inset that places it, so this costs no
+   edge and no target: only the duplicated 4px inside the select is dropped. */
 .desk-ltr.astra .queue-sel select {
   min-height: 44px;
-  padding: 2px 4px;
+  padding: 2px 0;
   border: 1px solid var(--fg2);
   background: none;
   color: var(--fg);
@@ -4095,13 +4107,34 @@
 }
 /* Keep the compact one-line layout at desktop widths. The editor drawing's
    tab labels fit with this modest padding reduction, leaving enough room for
-   the populated Section selector and its selected value at 1280px. */
-@media (min-width: 1280px) and (max-width: 1339px) {
+   the populated Section selector and its selected value at 1280px.
+
+   UI1b-7: THE BAND RUNS TO 1439 AND THE GAPS COME DOWN WITH IT.
+
+   Where it stood (to 1339) was exactly where the strip's 14px tab padding
+   came back -- so the bar was at its WIDEST at 1340, the first width past the
+   band, in a column only a few pixels wider. Main's own measurement had 3.6px
+   of overflow there and only 8.4px of slack; the two selects' new edges
+   (UI1b-4, `+10px` each) turned that into a 11.6px overlap, and the same is
+   true at 1340 for the one-line row the walk pins at every width from 1280 up.
+   The band therefore covers the whole range where the row is one line and the
+   column is still narrow -- 1280 through 1439 -- and takes the three spacings
+   with it.
+
+   What these save, at 1280 in Large text: tab padding 7->6px is 10px of the
+   strip, the row's own gap 12->10 is 2, and the filters' three gaps 10->8 is
+   4. Together with the select's dropped inner padding that is 32px under the
+   bar's old 979.6px need, on a 970px column -- ~26px of slack on a machine
+   with the drawn font, against the `3.1px` overlap CI reported with none. */
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .desk-ltr.astra .queue-controls {
+    gap: 10px;
+  }
   .desk-ltr.astra .queue-controls .queue-tabs > button {
-    padding-inline: 7px;
+    padding-inline: 6px;
   }
   .desk-ltr.astra .queue-filters {
-    gap: 10px;
+    gap: 8px;
   }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
