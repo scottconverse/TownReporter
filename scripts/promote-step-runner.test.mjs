@@ -1945,6 +1945,400 @@ test("every rollback command the script or the docs print is one the parser acce
   }
 });
 
+/** Run git in a throwaway repository and hand back its output. */
+function git(args, cwd) {
+  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+}
+
+/**
+ * An install that is also a throwaway GIT repository, with two commits.
+ *
+ * `oldHead` is the release that is live; `newHead` is the one the promotion is
+ * walking into. This is the auditor's S3 shape: by the time the promotion
+ * starts, HEAD is ALREADY the new commit -- the keeper fast-forwarded the live
+ * checkout by hand first, because it was still running a promote script that
+ * hangs. So "the commit HEAD was at when the promote started" is the NEW one,
+ * and a fallback that resets to it puts the old build back on the new code.
+ */
+function makeGitInstall() {
+  const install = makeInstall();
+  const app = install.app;
+  git(["init", "--quiet"], app);
+  git(["config", "user.email", "promote-test@example.invalid"], app);
+  git(["config", "user.name", "Promote Test"], app);
+  writeFileSync(join(app, "tracked.txt"), "the old release\n");
+  writeFileSync(join(app, "migrations", "0100_old.sql"), "-- the old migration\n");
+  git(["add", "-A"], app);
+  git(["commit", "--quiet", "-m", "the old release"], app);
+  const oldHead = git(["rev-parse", "HEAD"], app);
+
+  writeFileSync(join(app, "tracked.txt"), "the new release\n");
+  writeFileSync(join(app, "migrations", "0999_new.sql"), "-- select 1/0;\n");
+  git(["add", "-A"], app);
+  git(["commit", "--quiet", "-m", "the new release"], app);
+  const newHead = git(["rev-parse", "HEAD"], app);
+
+  // The untracked file the owner put there. git reset --hard must not touch it.
+  writeFileSync(join(app, "untracked-note.txt"), "not in git at all\n");
+  return { ...install, oldHead, newHead };
+}
+
+/** The db answers a failed rollout needs, so the swap-back really happens. */
+function fakeSwapAnswers(install) {
+  fakeDbAnswer(install, "wait-for-zero", { command: "wait-for-zero", ok: true, connections: [], refusal: "" });
+  fakeDbAnswer(install, "swap-back", {
+    command: "swap-back",
+    ok: true,
+    refusal: "",
+    database: FAKE_DB,
+    copy: FAKE_COPY,
+    failed: FAKE_FAILED,
+    steps: [`renamed ${FAKE_DB} -> ${FAKE_FAILED}`, `renamed ${FAKE_COPY} -> ${FAKE_DB}`],
+    sizeBytes: 597688320,
+    seconds: 0.4,
+  });
+}
+
+test("a failed rollout puts the checkout, the build AND the database back, and starts without migrating", windowsOnly, async () => {
+  /*
+    GATE 3, SCENARIO S3 -- run for real by the auditor, and the whole reason
+    this unit exists.
+
+    The rollout died at the migration. The swap-back worked, the previous build
+    went back at .output -- and then the start script ran the migrations FROM
+    THE CHECKOUT, which was already fast-forwarded to the new code: 0109-0117
+    re-applied over the restored database, then the migration that had just
+    killed the rollout, three times, and the paper stayed down while the
+    promote printed "The paper is serving <db> again".
+
+    Three things were undone and the fourth was not. This is all four.
+  */
+  const install = makeGitInstall();
+  try {
+    fakeSwapAnswers(install);
+    mkdirSync(join(install.app, ".output-previous", "server"), { recursive: true });
+    writeFileSync(join(install.app, ".output-previous", "server", "index.mjs"), "// the build before\n");
+    writeFileSync(join(install.app, ".output-previous", "server", "version.txt"), "old");
+    writeFileSync(join(install.app, ".output", "server", "version.txt"), "new");
+    NewMarker(install);
+
+    const harness = writeHarness(install, "s3.ps1", [
+      "function Stop-TheApp {",
+      "  Add-Content -Path $env:FAKE_DB_LOG -Value 'app stop' -Encoding ASCII",
+      "  return [pscustomobject]@{ Stopped = @('PID 4242'); Foreign = '' }",
+      "}",
+      "$script:lastSkip = ''",
+      "function Start-TheApp {",
+      "  param([switch]$SkipMigrate)",
+      "  $script:lastSkip = \"$SkipMigrate\"",
+      "  Add-Content -Path $env:FAKE_DB_LOG -Value \"app start skipMigrate=$($script:lastSkip)\" -Encoding ASCII",
+      "  return $true",
+      "}",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      // The commit the promotion STARTED from. On the real first rollout this
+      // is not HEAD -- the keeper fast-forwarded by hand -- which is exactly
+      // what -PreviousHead exists for.
+      `$r = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp -SkipMigrate } ` +
+        `-Database '${FAKE_DB}' -Copy '${FAKE_COPY}' -Failed '${FAKE_FAILED}' ` +
+        "-DatabaseUrl 'postgres://promote:secret@127.0.0.1:5432/townreporter' " +
+        `-Why 'the build did not succeed' -MigrationsRan 'maybe' -HeadAtStart '${install.oldHead}'`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "paperUp=$($r.PaperUp);swapped=$($r.Swapped);skip=$($script:lastSkip)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    assert.equal(read(join(install.app, "result.txt")).trim(), "paperUp=True;swapped=True;skip=True", "the failed rollout did not put everything back and start without migrating");
+
+    // THE CHECKOUT: back at the commit the promotion started from.
+    assert.equal(git(["rev-parse", "HEAD"], install.app), install.oldHead, "the checkout was left on the new release");
+    // Trimmed: git checks the file out with this machine's line endings, and
+    // which ones those are is not what this test is about.
+    assert.equal(read(join(install.app, "tracked.txt")).trim(), "the old release", "the tracked files were not restored");
+    assert.ok(!existsSync(join(install.app, "migrations", "0999_new.sql")), "the new migration is still in the checkout, so the old build would run it again");
+    assert.ok(existsSync(join(install.app, "migrations", "0100_old.sql")), "the old migrations folder did not come back");
+    // ...and the owner's untracked file is untouched, as promised.
+    assert.equal(read(join(install.app, "untracked-note.txt")).trim(), "not in git at all", "an untracked file was destroyed by the reset");
+
+    // THE ORDER, which is the point: stop, swap the database back, put the
+    // code back, only then start -- and start without migrating.
+    const trace = dbTrace(install);
+    const stopped = traceIndex(trace, "app stop");
+    const swapped = traceIndex(trace, "db swap-back");
+    const started = traceIndex(trace, "app start skipMigrate=True");
+    assert.ok(stopped < swapped, "the app was not stopped before the database was swapped");
+    assert.ok(swapped < started, "the app was started before the database was put back");
+
+    const log = read(newestLog(install.app));
+    assert.match(log, /the checkout has been put back at [0-9a-f]{40}/, "the log does not say which commit the code went back to");
+    assert.match(log, /Untracked files were not touched\./);
+    assert.match(log, /The paper is serving townreporter again/, "the paper answered, so the serving sentence belongs here");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("a fallback whose paper never answers does not claim the paper is serving anything", windowsOnly, async () => {
+  const install = makeGitInstall();
+  try {
+    fakeSwapAnswers(install);
+    mkdirSync(join(install.app, ".output-previous", "server"), { recursive: true });
+    writeFileSync(join(install.app, ".output-previous", "server", "index.mjs"), "// the build before\n");
+    writeFileSync(join(install.app, ".output", "server", "version.txt"), "new");
+
+    const harness = writeHarness(install, "s3-down.ps1", [
+      "function Stop-TheApp { return [pscustomobject]@{ Stopped = @('PID 4242'); Foreign = '' } }",
+      "function Start-TheApp { param([switch]$SkipMigrate) return $false }",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$r = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp -SkipMigrate } ` +
+        `-Database '${FAKE_DB}' -Copy '${FAKE_COPY}' -Failed '${FAKE_FAILED}' ` +
+        "-DatabaseUrl 'postgres://promote:secret@127.0.0.1:5432/townreporter' " +
+        `-Why 'the build did not succeed' -MigrationsRan 'maybe' -HeadAtStart '${install.oldHead}'`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "paperUp=$($r.PaperUp)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    assert.equal(read(join(install.app, "result.txt")).trim(), "paperUp=False");
+    const log = read(newestLog(install.app));
+    // The auditor's run printed this and then the paper was down.
+    assert.doesNotMatch(log, /The paper is serving townreporter again/, "the log claims the paper is serving something it is not");
+    assert.match(log, /The database was put back -- townreporter is the copy taken before this rollout, and no data was lost -- but the paper did NOT start\./, `the true sentence is missing: ${log.slice(-600)}`);
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("the refusal restart skips the migration too", windowsOnly, async () => {
+  /*
+    ADDITION (a). The PR2d restart runs on a checkout the keeper may already
+    have fast-forwarded by hand, so it went through start-townreporter.ps1 and
+    ran the NEW migrations -- during a restart whose log says "nothing has
+    changed" (false), and which cannot come up at all if a migration is broken.
+  */
+  const install = makeInstall();
+  try {
+    const harness = writeHarness(install, "refusal-skip.ps1", [
+      "$script:skip = 'unset'",
+      "function Start-TheApp {",
+      "  param([switch]$SkipMigrate)",
+      "  $script:skip = \"$SkipMigrate\"",
+      "  Add-Content -Path $env:FAKE_DB_LOG -Value \"app start skipMigrate=$($script:skip)\" -Encoding ASCII",
+      "  return $true",
+      "}",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      "New-PromoteMarker -App $app | Out-Null",
+      "$r = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp -SkipMigrate } -Refusal 'the copy was refused'",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "skip=$($script:skip);up=$($r.PaperUp)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+    assert.equal(read(join(install.app, "result.txt")).trim(), "skip=True;up=True", "the refusal restart did not skip the boot migration");
+    const log = read(newestLog(install.app));
+    assert.match(log, /nothing has changed yet -- no copy, no fast-forward, no build, no migration/, "the log no longer says nothing changed");
+    assert.match(log, /The paper is back up on the version it was running, and nothing was changed\./);
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("-PreviousHead is checked before the stop, and is the commit a fallback returns to", windowsOnly, async () => {
+  /*
+    ADDITION (b). The keeper fast-forwards the live checkout BY HAND before
+    running the new promote, so HEAD is already the new commit when the promote
+    starts. "The commit it started from" is then the new release, and a
+    fallback resets to it -- the old migrations folder never comes back. The
+    operator says what the previous release was, and it is checked.
+  */
+  const install = makeGitInstall();
+  try {
+    const harness = writeHarness(install, "given-head.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$good = Resolve-PromoteGivenHead -App $app -Head '${install.oldHead}'`,
+      `$short = Resolve-PromoteGivenHead -App $app -Head '${install.oldHead.slice(0, 8)}'`,
+      `$typo = Resolve-PromoteGivenHead -App $app -Head 'not-a-commit-at-all'`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Encoding ASCII -Value (@(
+        "good=$($good.Ok);goodHead=$($good.Head)",
+        "short=$($short.Ok)",
+        "typo=$($typo.Ok);typoSays=$($typo.Message)"
+      ) -join ([char]10))`,
+    ]);
+    await runPowerShell(harness);
+    const result = read(join(install.app, "result.txt"));
+    const line = (name) => result.split(/\r?\n/).find((l) => l.startsWith(`${name}=`))?.slice(name.length + 1) ?? "(missing)";
+
+    assert.equal(line("good"), `True;goodHead=${install.oldHead}`, `a real ancestor commit was refused: ${line("good")}`);
+    assert.equal(line("short"), "True", "a short commit id was not resolved");
+    assert.match(line("typo"), /^False;typoSays=.*is not a commit in this checkout/, `a typo was accepted: ${line("typo")}`);
+    // The two keys are on one line, so this reads the second of them.
+    assert.match(line("typo"), /typoSays=.*is not a commit in this checkout/, `the refusal does not say what is wrong: ${line("typo")}`);
+    assert.match(line("typo"), /typoSays=.*Nothing was changed and the paper was not touched\./, "the refusal does not say the paper was untouched");
+  } finally {
+    await cleanup(install);
+  }
+
+  // ...and it is what a fallback actually resets to, which is the point.
+  const run = makeGitInstall();
+  try {
+    fakeSwapAnswers(run);
+    mkdirSync(join(run.app, ".output-previous", "server"), { recursive: true });
+    writeFileSync(join(run.app, ".output-previous", "server", "index.mjs"), "// the build before\n");
+    const harness = writeHarness(run, "given-head-reset.ps1", [
+      "function Stop-TheApp { return [pscustomobject]@{ Stopped = @('PID 1'); Foreign = '' } }",
+      "function Start-TheApp { param([switch]$SkipMigrate) return $true }",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$r = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp -SkipMigrate } ` +
+        `-Database '${FAKE_DB}' -Copy '${FAKE_COPY}' -Failed '${FAKE_FAILED}' ` +
+        "-DatabaseUrl 'postgres://promote:secret@127.0.0.1:5432/townreporter' " +
+        `-Why 'the build did not succeed' -HeadAtStart '${run.oldHead}'`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value $r.PaperUp -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+    assert.equal(git(["rev-parse", "HEAD"], run.app), run.oldHead, "the fallback did not reset to the given previous head");
+    assert.equal(read(join(run.app, "tracked.txt")).trim(), "the old release");
+  } finally {
+    await cleanup(run);
+  }
+});
+
+test("the normal start does not skip the migration, and the refusal-before-the-copy path keeps its own start", () => {
+  /*
+    Only the fallback passes the switch. A plain start, the watchdog, -Resume
+    and the success path all migrate exactly as they always have -- including
+    the PR2d refusal restart, which is a DIFFERENT path with its own start, and
+    which now also skips (addition (a)).
+  */
+  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
+  const at = (needle, what, from = 0) => {
+    const index = src.indexOf(needle, from);
+    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
+    return index;
+  };
+  // The success path's start.
+  const successStart = at("if (-not (Start-TheApp)) {", "the success-path start");
+  assert.doesNotMatch(
+    src.slice(successStart, successStart + 60),
+    /SkipMigrate/,
+    "the normal start now skips the migration, so a plain start would serve an unmigrated database",
+  );
+  // Every start that runs against a RESTORED database skips it.
+  const fallbackStarts = [...src.matchAll(/StartTheApp \{ Start-TheApp -SkipMigrate \}/g)].length;
+  assert.equal(fallbackStarts, 4, `expected the four restored-database starts to skip the migration, found ${fallbackStarts}`);
+  assert.match(src, /Invoke-PromoteNothingChanged -Log \$log -App \$app -StartTheApp \{ Start-TheApp -SkipMigrate \}/, "the refusal restart does not skip the migration (addition (a))");
+  // The refusal path does not touch the checkout: nothing moved, so there is
+  // nothing to put back.
+  const lib = readFileSync(join(OPS, "lib-promote.ps1"), "utf8");
+  const from = lib.indexOf("function Invoke-PromoteNothingChanged");
+  assert.ok(from > -1, "Invoke-PromoteNothingChanged is gone from the library");
+  const nothingChanged = lib.slice(from, lib.indexOf("function Start-PromoteApp", from));
+  assert.doesNotMatch(nothingChanged, /Restore-PromoteCheckout|git -C/, "the nothing-changed restart resets the checkout");
+});
+
+test("Start-PromoteApp passes the skip switch to the start script, and not when it is off", windowsOnly, async () => {
+  /*
+    The link in the middle of the chain, and the one the auditor's S3 died on:
+    promote.ps1 asks for -SkipMigrate, Start-PromoteApp has to put it on the
+    command line, and start-townreporter.ps1 has to act on it. A test of either
+    end alone would not notice this one being dropped.
+  */
+  const install = makeInstall();
+  try {
+    const fakeStart = join(install.app, "ops", "fake-start.ps1");
+    writeFileSync(
+      fakeStart,
+      ["param([switch]$SkipMigrate)", 'Add-Content -Path $env:FAKE_DB_LOG -Value "skipMigrate=$SkipMigrate" -Encoding ASCII', "exit 0", ""].join("\n"),
+    );
+    const harness = writeHarness(install, "start-app.ps1", [
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$a = Start-PromoteApp -Log $log -StartScript ${psLiteral(fakeStart)} -OutDir (Join-Path $app 'logs') -Port 9999 -HealthSeconds 1 -StartSeconds 20 -TestThePort { $false } -SkipMigrate`,
+      `$b = Start-PromoteApp -Log $log -StartScript ${psLiteral(fakeStart)} -OutDir (Join-Path $app 'logs') -Port 9999 -HealthSeconds 1 -StartSeconds 20 -TestThePort { $false }`,
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "a=$a;b=$b" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    assert.deepEqual(
+      dbTrace(install).filter((l) => l.startsWith("skipMigrate=")),
+      ["skipMigrate=True", "skipMigrate=False"],
+      "the skip switch did not reach the start script, or leaked into a normal start",
+    );
+    assert.equal(read(join(install.app, "result.txt")).trim(), "a=False;b=False", "the start script's own exit was not what the health probe decided");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+test("start-townreporter.ps1 only skips the migration when it is told to", () => {
+  const src = readFileSync(join(OPS, "start-townreporter.ps1"), "utf8");
+  assert.match(src, /param\(\s*\r?\n\s*\[switch\]\$SkipMigrate\s*\r?\n\)/, "start-townreporter.ps1 no longer takes -SkipMigrate");
+  // The migrate call is still there, and still the thing that runs by default.
+  assert.match(src, /Invoke-TownReporterMigrate -App \$app -Log \$appLog -Node \$node/, "the migration call is gone from the normal start");
+  const guard = src.indexOf("if ($SkipMigrate) {");
+  const call = src.indexOf("Invoke-TownReporterMigrate -App $app");
+  assert.ok(guard > -1 && guard < call, "the migrate call is not behind the -SkipMigrate guard");
+  assert.match(src.slice(guard, call), /elseif \(/, "the skip branch does not fall through to the normal migrate path");
+});
+
+test("the hand rollback starts without migrating, and finds the commit from the log that took the copy", windowsOnly, async () => {
+  const install = makeGitInstall();
+  try {
+    fakeSwapAnswers(install);
+    fakeDbAnswer(install, "state", {
+      command: "state",
+      ok: true,
+      refusal: "",
+      databases: { [FAKE_DB]: { exists: true, sizeBytes: 640000000 }, [FAKE_COPY]: { exists: true, sizeBytes: 597688320 } },
+    });
+    fakeDbAnswer(install, "rollback", {
+      command: "rollback",
+      ok: true,
+      refusal: "",
+      steps: [`renamed ${FAKE_DB} -> ${FAKE_FAILED}`, `renamed ${FAKE_COPY} -> ${FAKE_DB}`],
+      sizeBytes: 597688320,
+      seconds: 0.4,
+    });
+
+    // The promotion that took the copy, recorded the way promote.ps1 records
+    // it -- and it started from the OLD commit, which is what the rollback has
+    // to find.
+    const past = join(install.app, "logs", "promote-20260109-120000.log");
+    writeFileSync(
+      past,
+      [
+        "[2026-01-09 12:00:00] promote started: the install (port 9999), pid 1, arguments: ''",
+        `[2026-01-09 12:00:00] head at start: ${install.oldHead}`,
+        `[2026-01-09 12:00:30] promote-db: database=${FAKE_DB} copy=${FAKE_COPY} failed=${FAKE_FAILED}`,
+        "",
+      ].join("\n"),
+    );
+
+    const harness = writeHarness(install, "rollback-head.ps1", [
+      "$script:skip = 'unset'",
+      "function Start-TheApp {",
+      "  param([switch]$SkipMigrate)",
+      "  $script:skip = \"$SkipMigrate\"",
+      "  return $true",
+      "}",
+      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
+      `$r = Invoke-PromoteDatabaseRollback -Log $log -App $app -Port 9999 -TestThePort { $false } ` +
+        "-StopTheApp { [pscustomobject]@{ Stopped = @(); Foreign = '' } } -StartTheApp { Start-TheApp -SkipMigrate } " +
+        `-Copy '${FAKE_COPY}' -Database '${FAKE_DB}' -Stamp '20260110120000' ` +
+        "-DatabaseUrl 'postgres://promote:secret@127.0.0.1:5432/townreporter'",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "swapped=$($r.Swapped);up=$($r.PaperUp);skip=$($script:skip)" -Encoding ASCII`,
+    ]);
+    await runPowerShell(harness);
+
+    assert.equal(read(join(install.app, "result.txt")).trim(), "swapped=True;up=True;skip=True", "the hand rollback did not start without migrating");
+    assert.equal(git(["rev-parse", "HEAD"], install.app), install.oldHead, "the hand rollback did not return the checkout to the commit the log recorded");
+    // This run's own log: the test wrote a second, older promote log on
+    // purpose -- it is the one the rollback had to read the head out of.
+    const log = read(join(install.app, "logs", "promote-20260110-120000.log"));
+    assert.match(log, /the promotion that took townreporter_prerollout_20260110120000 started from commit/, "the log does not name the commit it found");
+  } finally {
+    await cleanup(install);
+  }
+});
+
+/** Put the in-progress marker in place, the way step 4 leaves it. */
+function NewMarker(install) {
+  writeFileSync(join(install.app, "logs", "promote-in-progress"), new Date().toISOString());
+}
+
 test("a refusal after the stop brings the paper back up instead of leaving it down", windowsOnly, async () => {
   /*
     FINDING B. The copy is refused after the app has been stopped -- the
@@ -2027,7 +2421,7 @@ test("the copy's refusal path starts the paper and still exits non-zero", () => 
     return index;
   };
   const refused = at("if (-not $copied.Ok) {", "the copy refusal branch");
-  const brought = at("Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal $copied.Failure", "the restart");
+  const brought = at("Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp -SkipMigrate } -Refusal $copied.Failure", "the restart");
   const died = at("Die \"$($copied.Failure) $($back.Sentence)\"", "the failure exit");
   assert.ok(refused < brought, "the restart is outside the copy refusal branch");
   assert.ok(brought < died, "the run ends before the paper is started again");

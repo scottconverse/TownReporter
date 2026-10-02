@@ -438,18 +438,24 @@ function Start-PromoteApp {
     [Parameter(Mandatory = $true)][int]$Port,
     [int]$HealthSeconds = 60,
     [int]$StartSeconds = 300,
-    [scriptblock]$TestThePort = $null
+    [scriptblock]$TestThePort = $null,
+    # Passed straight through to the start script. Only the fallback uses it:
+    # the database is the restored pre-rollout copy there, so the start script
+    # must not migrate it forward again. See ops\start-townreporter.ps1.
+    [switch]$SkipMigrate
   )
   if (-not $TestThePort) { $TestThePort = { param($p) Test-PromotePaperUp -Port $p } }
   New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $outFile = Join-Path $OutDir "promote-$stamp-start.out.log"
   $errFile = Join-Path $OutDir "promote-$stamp-start.err.log"
-  Write-PromoteLog $Log "step=start child: powershell -File $StartScript (output: $outFile)"
+  Write-PromoteLog $Log "step=start child: powershell -File $StartScript$(if ($SkipMigrate) { ' -SkipMigrate' }) (output: $outFile)"
   $proc = $null
   try {
+    $startArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $StartScript + '"'))
+    if ($SkipMigrate) { $startArgs += '-SkipMigrate' }
     $proc = Start-Process -FilePath 'powershell' `
-      -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $StartScript + '"')) `
+      -ArgumentList $startArgs `
       -WindowStyle Hidden -PassThru `
       -RedirectStandardOutput $outFile -RedirectStandardError $errFile
   } catch {
@@ -850,6 +856,12 @@ function Get-PromoteResumePoint {
     # therefore always earlier than the stop. See Test-PromoteCopyFreshness.
     StopAt    = $null
     CopyAt    = $null
+    # The commit the interrupted run started from, read out of its own
+    # "head at start" line. A resumed run puts the checkout back to THIS, not
+    # to its own HEAD -- which by then may already be the new release, because
+    # the interrupted run fast-forwarded it. See Resolve-PromoteGivenHead for
+    # the same trap on the first, hand-fast-forwarded rollout.
+    HeadAtStart = $null
   }
 
   $stepRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] step=(?<name>[a-z]+) (?<status>started|ok|failed)\b(?<rest>.*)$'
@@ -909,6 +921,10 @@ function Get-PromoteResumePoint {
     if ($m.Groups['name'].Value -eq 'dbcopy') {
       $point.CopyAt = $m.Groups['ts'].Value
     }
+    $hm = [regex]::Match("$line", 'head at start(?: \(given\))?: ([0-9a-fA-F]{7,40})')
+    if ($hm.Success -and -not $point.HeadAtStart) { $point.HeadAtStart = $hm.Groups[1].Value }
+    $gm = [regex]::Match("$line", 'head at start \(given\): ([0-9a-fA-F]{7,40})')
+    if ($gm.Success) { $point.HeadAtStart = $gm.Groups[1].Value }
   }
   if (-not $last) { return $point }
 
@@ -1074,6 +1090,191 @@ function Get-PromoteFallbackSentence {
 }
 
 <#
+  The commit the checkout is on, or "" when that cannot be read.
+#>
+function Get-PromoteCheckoutHead {
+  param([Parameter(Mandatory = $true)][string]$App)
+  try {
+    $head = (& git -C $App rev-parse HEAD)
+    if ($LASTEXITCODE -ne 0) { return "" }
+    return "$head".Trim()
+  } catch {
+    return ""
+  }
+}
+
+<#
+  `-PreviousHead <sha>`: the commit to put the checkout back to, given by hand.
+
+  WHY THIS EXISTS. The fallback resets the checkout to "the commit this
+  promotion started from", read from HEAD when the promote began. That is the
+  right answer for a promotion that does its own fast-forward -- and the wrong
+  one for the first real rollout, where the keeper has to fast-forward the live
+  checkout BY HAND first (`git merge --ff-only origin/main`), because the
+  checkout is still running an older promote script that hangs. By the time the
+  new promote starts, HEAD is ALREADY the new commit: "head at start" would be
+  the new release, a fallback would reset to the new release, and the old
+  migrations folder would never come back. The one rollout that has to work is
+  the one where the guess is exactly backwards.
+
+  So the operator can say what the previous release was. It is CHECKED, twice,
+  and both checks refuse with the paper untouched:
+
+    - it must resolve to a commit in this repository (`rev-parse --verify
+      <sha>^{commit}`), or a typo would reset the checkout to nothing;
+    - it must be an ancestor of HEAD (or HEAD itself). A commit that is not an
+      ancestor is some other line of history, and putting the live checkout on
+      it would serve code that never came from origin/main.
+
+  Returns @{ Ok; Head; Message }. Ok=$false is a refusal, not a warning.
+#>
+function Resolve-PromoteGivenHead {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Head,
+    [string]$Current = ""
+  )
+  $wanted = "$Head".Trim()
+  if (-not $wanted) {
+    return [pscustomobject]@{ Ok = $false; Head = ""; Message = "no commit was given." }
+  }
+  $commitSpec = $wanted + '^{commit}'
+  $resolved = ""
+  try {
+    $resolved = (& git -C $App rev-parse --verify $commitSpec)
+    if ($LASTEXITCODE -ne 0) { $resolved = "" }
+  } catch {
+    $resolved = ""
+  }
+  $resolved = "$resolved".Trim()
+  if (-not $resolved) {
+    return [pscustomobject]@{
+      Ok = $false
+      Head = ""
+      Message = "-PreviousHead '$wanted' is not a commit in this checkout, so there is nothing to put the code back to. Check the value (a full or short commit id, or a tag) and run this again. Nothing was changed and the paper was not touched."
+    }
+  }
+  $now = $Current
+  if (-not $now) { $now = Get-PromoteCheckoutHead -App $App }
+  if (-not $now) {
+    return [pscustomobject]@{
+      Ok = $false
+      Head = ""
+      Message = "the checkout's own commit could not be read, so -PreviousHead could not be checked against it. Nothing was changed and the paper was not touched."
+    }
+  }
+  if ($resolved -ne $now) {
+    & git -C $App merge-base --is-ancestor $resolved $now | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      return [pscustomobject]@{
+        Ok = $false
+        Head = ""
+        Message = "-PreviousHead '$wanted' is not an ancestor of what is checked out ($now), so it is some other line of history and putting the paper back on it would serve code that never came from origin/main. Nothing was changed and the paper was not touched."
+      }
+    }
+  }
+  return [pscustomobject]@{ Ok = $true; Head = $resolved; Message = "" }
+}
+
+<#
+  PUT THE CHECKOUT BACK WHERE THE PROMOTION FOUND IT.
+
+  FINDING C, from the auditor's clone lab (gate 3, scenario S3, run for real).
+  The rollout failed at the migration, the database swap-back worked, the
+  previous build was put back at .output -- and then the start script ran the
+  migrations FROM THE CHECKOUT, which the promotion had already fast-forwarded
+  to the new code. So it re-applied 0109-0117 (everything the swap-back had
+  just undone), hit the migration the rollout had died on, failed three times,
+  and the paper stayed down while the promote printed "The paper is serving
+  <db> again".
+
+  The fallback was undoing three things the promotion had changed (the
+  database, the build) and leaving the fourth (the checkout) at the new
+  release. This puts that one back too.
+
+  `git reset --hard` and not a checkout of the old tree into a side directory:
+  the preflight already guarantees the tracked tree is clean, so nothing of
+  anyone's is thrown away; untracked files are not touched at all (the extra
+  migration the auditor added is still on disk afterwards, which is right --
+  the owner put it there); it works in a detached HEAD, which is what the CI
+  and lab checkouts are; and it moves a checked-out branch back, which a later
+  `git merge --ff-only origin/main` needs in order to fast-forward again.
+
+  Returns @{ Ok; Reset; Head; Message }. Ok is $false only when the checkout is
+  in a state nobody should start an app on -- an unreadable HEAD, or a reset
+  that did not land. A run with no recorded head is Ok=$true and Reset=$false:
+  there is nothing to put back, and refusing to start at all would be worse
+  than starting the old build against the code that is there.
+#>
+function Restore-PromoteCheckout {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$Head = ""
+  )
+  if (-not $Head) {
+    Write-PromoteLog $Log "no commit was recorded for this run, so the checkout is left where it is"
+    return [pscustomobject]@{ Ok = $true; Reset = $false; Head = ""; Message = "no commit was recorded for this run" }
+  }
+  $current = Get-PromoteCheckoutHead -App $App
+  if (-not $current) {
+    $message = "the checkout's commit could not be read, so it was NOT put back at $Head"
+    Write-PromoteLog $Log $message
+    return [pscustomobject]@{ Ok = $false; Reset = $false; Head = $Head; Message = $message }
+  }
+  if ($current -eq $Head) {
+    Write-PromoteLog $Log "the checkout is already at $Head, the commit this promotion started from"
+    return [pscustomobject]@{ Ok = $true; Reset = $false; Head = $Head; Message = "already at $Head" }
+  }
+  & git -C $App reset --hard $Head | Out-Null
+  $after = Get-PromoteCheckoutHead -App $App
+  if ($LASTEXITCODE -ne 0 -or $after -ne $Head) {
+    $message = "the checkout could NOT be put back at $Head (it is at $after)"
+    Write-PromoteLog $Log $message
+    return [pscustomobject]@{ Ok = $false; Reset = $false; Head = $Head; Message = $message }
+  }
+  $message = "the checkout has been put back at $Head, where this promotion started (it was at $current). Untracked files were not touched."
+  Write-PromoteLog $Log $message
+  return [pscustomobject]@{ Ok = $true; Reset = $true; Head = $Head; Message = $message }
+}
+
+<#
+  Which commit to put the checkout back at, found from the promote log that
+  took a given copy.
+
+  The hand rollback (`-RollbackDatabase <copy>`) is run LATER, by an operator,
+  with no memory of the promotion that took the copy -- so it has to read the
+  answer out of the log, the same way a resumed run reads the copy's name out
+  of it. Newest log first, and only a log that mentions this copy.
+
+  Returns @{ Found; Head; LogPath }. Found=$false means no log names it, and
+  the caller must leave the checkout alone rather than guess: resetting a
+  checkout to a commit nobody recorded is how the wrong code ends up serving
+  the paper.
+#>
+function Get-PromoteHeadForCopy {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Copy
+  )
+  $logs = Join-Path $App "logs"
+  $files = @(Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)
+  $wanted = "copy=$Copy"
+  foreach ($file in $files) {
+    $names = $false
+    $head = ""
+    foreach ($line in @(Get-Content -Path $file.FullName -ErrorAction SilentlyContinue)) {
+      if ("$line" -like "*promote-db:*" -and "$line" -like "*$wanted*") { $names = $true }
+      $m = [regex]::Match("$line", 'head at start: ([0-9a-fA-F]{7,40})')
+      if ($m.Success -and -not $head) { $head = $m.Groups[1].Value }
+    }
+    if ($names) { return [pscustomobject]@{ Found = $true; Head = $head; LogPath = $file.FullName } }
+  }
+  return [pscustomobject]@{ Found = $false; Head = ""; LogPath = "" }
+}
+
+<#
   Put the previous build back and start it. $StartTheApp is the caller's "start
   the app and tell me whether it answers" -- a scriptblock so this can be
   driven by a fake in a test while the ordering that matters stays here.
@@ -1093,8 +1294,19 @@ function Invoke-PromoteFallback {
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
     [string]$Previous = "",
     [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
-    [string]$BuildOutput = ""
+    [string]$BuildOutput = "",
+    # The commit this promotion started from. Putting the BUILD back without
+    # putting the CHECKOUT back is what made the auditor's S3 fail: see
+    # Restore-PromoteCheckout.
+    [string]$HeadAtStart = ""
   )
+  if (-not (Restore-PromoteCheckout -Log $Log -App $App -Head $HeadAtStart).Ok) {
+    # A half-returned checkout is not somewhere to start an app: the build in
+    # .output would belong to a tree that is neither the old release nor the
+    # new one. Leave the paper down and let the caller print the way back up.
+    Write-PromoteLog $Log "the old build has NOT been started: the checkout could not be put back first"
+    return $false
+  }
   $resolved = Resolve-PromotePreviousBuild -App $App -Previous $Previous
   if (-not (Restore-PromotePreviousBuild -App $App -Previous $resolved)) {
     Write-PromoteLog $Log "there is no previous build to put back, so the paper stays down"
@@ -1710,6 +1922,10 @@ function Invoke-PromoteFailedRollout {
     [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
     [string]$BuildOutput = "",
     [string]$Stamp = "",
+    # The commit the promotion started from. The fallback puts the CHECKOUT
+    # back to it as well as the build and the database -- see FINDING C in
+    # Restore-PromoteCheckout.
+    [string]$HeadAtStart = "",
     # $false for a failure that happened before anything touched .output -- the
     # fast-forward, or the dependency install. There the build ON DISK is still
     # the one that was serving, and restoring .output-previous (which is a build
@@ -1753,15 +1969,33 @@ function Invoke-PromoteFailedRollout {
   if ($swapped) { $migrationsForFallback = 'none' }
 
   if ($RestoreBuild) {
-    $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $Previous -MigrationsRan $migrationsForFallback -BuildOutput $BuildOutput
+    $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $Previous -MigrationsRan $migrationsForFallback -BuildOutput $BuildOutput -HeadAtStart $HeadAtStart
   } else {
     Write-PromoteLog $Log "the build on disk is the one that was serving before this run, so it is started as it is"
-    $paperUp = [bool](& $StartTheApp)
+    # The checkout goes back BEFORE anything is started, for the same reason it
+    # does on the branch above: the start script reads migrations from the
+    # checkout, and a start from the new code migrates the restored database
+    # forward again.
+    $checkout = Restore-PromoteCheckout -Log $Log -App $App -Head $HeadAtStart
+    if (-not $checkout.Ok) {
+      Write-PromoteLog $Log "the app has NOT been started: the checkout could not be put back first"
+      $paperUp = $false
+    } else {
+      $paperUp = [bool](& $StartTheApp)
+    }
     if ($paperUp) { Write-PromoteLog $Log "the paper is back on the version it was running. The promote did NOT complete." }
   }
 
   $sentence = ""
-  if ($swapped) {
+  if ($swapped -and $paperUp) {
+    <#
+      ONLY once the paper has actually answered. An earlier version printed
+      this whenever the swap had worked, including when the start afterwards
+      had failed -- so the auditor's run read "The paper is serving
+      townreporter_prodclone again" and then found the paper DOWN. "The paper
+      is serving X" is a claim about a running process, and it is only true
+      once one is answering.
+    #>
     $sentence = Get-PromoteDbSwapSentence -Database $Database -Failed $Failed
     <#
       The failure happened BEFORE the build ran -- the fast-forward, or the
@@ -1777,7 +2011,14 @@ function Invoke-PromoteFailedRollout {
     if (-not $RestoreBuild) {
       $sentence = "$sentence The build had not started, so nothing had been migrated: that database holds exactly the same data as the one the paper is serving."
     }
-    if (-not $paperUp) { $sentence = "$sentence The app did not answer afterwards; read logs\townreporter.log." }
+  } elseif ($swapped) {
+    <#
+      The database went back and the paper did NOT come up. What is true, in
+      the order an operator needs it: the data is where it was before the
+      rollout, the paper is down, and where to read why. The command that
+      brings it back is printed by the caller, last.
+    #>
+    $sentence = "The database was put back -- $Database is the copy taken before this rollout, and no data was lost -- but the paper did NOT start. Read logs\townreporter.log for why."
   } elseif (-not $paperUp) {
     $sentence = "The paper is still down and the database was not put back. $swapFailure"
   } else {
@@ -2010,12 +2251,43 @@ function Invoke-PromoteDatabaseRollback {
     the build from before that release. When there is none, the current build
     stays -- the operator is told either way rather than left to guess.
   #>
+  <#
+    THE CHECKOUT GOES BACK TOO, and it is found rather than remembered: this
+    command is run by an operator, later, with no memory of the promotion that
+    took the copy. The promote log that names the copy is the record of which
+    commit that promotion started from -- and a checkout left at the NEW release
+    is what made the auditor's fallback migrate the restored database forward
+    again. With no log naming a head, the checkout is left alone and the
+    operator is told: guessing at a commit to reset a repository to is worse
+    than the checkout staying put.
+  #>
+  $tookIt = Get-PromoteHeadForCopy -App $App -Copy $Copy
+  if ($tookIt.Found) {
+    if ($tookIt.Head) {
+      Write-PromoteLog $Log "the promotion that took $Copy started from commit $($tookIt.Head) (its log: $($tookIt.LogPath))"
+      $checkout = Restore-PromoteCheckout -Log $Log -App $App -Head $tookIt.Head
+      if (-not $checkout.Ok) {
+        Die "The database was rolled back, but the checkout could not be put back at $($tookIt.Head)." '' "Read the log above. The database the paper is serving is $Database; what was serving it before this rollback is kept as $failed."
+      }
+    } else {
+      Write-PromoteLog $Log "the promote log that names $Copy records no commit, so the checkout is being left where it is"
+    }
+  } else {
+    Write-PromoteLog $Log "no promote log here names $Copy, so there is no commit to put the checkout back to; it is being left where it is"
+  }
+
   $previous = Resolve-PromotePreviousBuild -App $App
   if ($previous -and (Restore-PromotePreviousBuild -App $App -Previous $previous)) {
     Write-PromoteLog $Log "the build from before the promotion has been put back at .output"
   } else {
     Write-PromoteLog $Log "there is no previous build on disk to put back, so the current build stays"
   }
+  <#
+    Started WITHOUT migrating, for the same reason the promotion's own fallback
+    does: the database is the restored pre-rollout copy, so the start script
+    must not run the migrations from a checkout that may be at the new release.
+    The caller passes the switch in -StartTheApp.
+  #>
   $upAgain = [bool](& $StartTheApp)
   if (-not $upAgain) {
     Write-PromoteLog $Log "the app did not answer on port $Port after the database rollback"

@@ -240,7 +240,14 @@ param(
   # cannot see for itself: it refuses to roll back while the paper is
   # answering on its port, and this is the operator saying "stop it for me".
   # Without it the app has to be stopped first, by hand.
-  [switch]$StopApp
+  [switch]$StopApp,
+  # The commit to put the checkout back to if the rollout fails, when the
+  # checkout was fast-forwarded by hand BEFORE this script ran. See
+  # Resolve-PromoteGivenHead in ops\lib-promote.ps1 for why the first real
+  # rollout needs it: by the time the new promote starts, HEAD is already the
+  # new commit, so "the commit it started from" would put the old build back
+  # on the NEW code. Checked in preflight, before the paper is stopped.
+  [string]$PreviousHead = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -402,12 +409,19 @@ function Skip-Step([string]$name) {
   the note on the marker's 30-minute cap in ops\lib-promote.ps1.
 #>
 function Start-TheApp {
+  param(
+    # The fallback's start: the database is the restored pre-rollout copy, so
+    # the start script must not migrate it forward again. Every other caller
+    # leaves this off and gets exactly today's behaviour.
+    [switch]$SkipMigrate
+  )
   # NOT an inline `& powershell -File ...` here: a function's output is its
   # return value, and a native command whose output is captured is waited for
   # until every holder of its pipe has gone -- which includes the app it starts.
   # See Start-PromoteApp in ops\lib-promote.ps1 for the hang this replaced.
   return (Start-PromoteApp -Log $log -StartScript (Join-Path $ops "start-townreporter.ps1") `
-      -OutDir (Join-Path $app "logs") -Port ([int]$port) -HealthSeconds (Get-PromoteHealthTimeoutSeconds))
+      -OutDir (Join-Path $app "logs") -Port ([int]$port) -HealthSeconds (Get-PromoteHealthTimeoutSeconds) `
+      -SkipMigrate:$SkipMigrate)
 }
 
 <#
@@ -483,7 +497,7 @@ function Invoke-PromoteRollback {
   $result = Invoke-PromoteDatabaseRollback -Log $log -App $app -Port ([int]$port) `
     -TestThePort { Test-PromotePaperUp -Port ([int]$port) } `
     -StopTheApp { Stop-TheApp } `
-    -StartTheApp { Start-TheApp } `
+    -StartTheApp { Start-TheApp -SkipMigrate } `
     -Copy $Copy -Database $Database -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl `
     -StopApp:$StopApp -DryRun:$WhatIfPreference `
     -Announce {
@@ -554,6 +568,18 @@ Show "  ------------------------------------------------------------"
 
 $argNames = @($PSBoundParameters.Keys) -join ' '
 Write-PromoteLog $log "promote started: $app (port $port), pid $PID, arguments: '$argNames'"
+<#
+  WHERE THE CHECKOUT STARTED, recorded before anything can move it.
+
+  The fallback has to put the install back the way it was: the database, the
+  build, and -- since gate 3's S3 -- the CHECKOUT, because the start script
+  reads migrations from it. This line is where that commit comes from, for
+  this run and, later, for the hand rollback, which finds it by reading the
+  log that names the copy it was given.
+#>
+$headAtStart = Get-PromoteCheckoutHead -App $app
+$headWasGiven = $false
+Write-PromoteLog $log "head at start: $headAtStart"
 Write-PromoteLog $log "this run's log: $($log.Path)"
 Show "  Log: $($log.Path)"
 Show ""
@@ -639,6 +665,22 @@ if ($resumePoint) {
   New-PromoteMarker -App $app | Out-Null
   if ($resumeAt) {
     Write-PromoteLog $log "resuming with -Resume: every step before '$resumeAt' is skipped"
+    <#
+      A RESUMED RUN USES THE INTERRUPTED RUN'S HEAD, not its own.
+
+      The run that stopped had already fast-forwarded the checkout, so HEAD now
+      is the NEW commit -- and putting the old build back on the new code is
+      the whole of what this unit is fixing. The interrupted run wrote down the
+      commit it started from; that is the one a resumed fallback returns to,
+      and it is why a resumed run does not need -PreviousHead again.
+    #>
+    if ($resumePoint.HeadAtStart) {
+      $headAtStart = $resumePoint.HeadAtStart
+      Write-PromoteLog $log "resuming with the commit the interrupted run started from: $headAtStart"
+      Say "the interrupted run started from commit $headAtStart; that is where a fallback would put the code back to"
+    } else {
+      Write-PromoteLog $log "the interrupted run's log records no commit, so a fallback here would use the checkout as it stands ($headAtStart)"
+    }
     Say "resuming from '$resumeAt'"
   } else {
     Write-PromoteLog $log "resuming with -Resume, but the previous log does not say where it stopped; going through every step again"
@@ -851,6 +893,27 @@ if (Skip-Step 'preflight') {
 } else {
   Add-PromoteStep -Log $log -Name 'preflight' -Detail "checkout, fast-forward, the editor's jobs, and the database"
   $t0 = Get-Date
+
+  <#
+    -PreviousHead, checked HERE: before the paper is stopped, with everything
+    the operator can still fix by hand.
+
+    The commit a fallback puts the checkout back to. Left out, it is whatever
+    HEAD is now -- right for a promotion that does its own fast-forward, and
+    backwards for the first real rollout, where the keeper fast-forwards the
+    live checkout by hand first and HEAD is therefore already the new release.
+    A value that is not a commit in this repository, or is not an ancestor of
+    what is checked out, is refused rather than reset to.
+  #>
+  if ($PreviousHead) {
+    $given = Resolve-PromoteGivenHead -App $app -Head $PreviousHead
+    if (-not $given.Ok) { Die "$($given.Message)" 'preflight' "Correct -PreviousHead and run this script again. The paper was never stopped." }
+    $headAtStart = $given.Head
+    $headWasGiven = $true
+    Write-PromoteLog $log "head at start (given): $headAtStart"
+    Say "the code will be put back to $($headAtStart.Substring(0,7)) if this rollout fails"
+  }
+
   $dirty = (& git status --porcelain) | Where-Object { $_ -notmatch '^\?\?' }
   if ($dirty) {
     Say "uncommitted changes here:"
@@ -968,9 +1031,10 @@ function Invoke-PromoteRolloutFailure {
   )
   $copy = $dbCopy
   if ($WhatIfPreference) { $copy = "" }   # -WhatIf never took one
-  $result = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp } `
+  $result = Invoke-PromoteFailedRollout -Log $log -App $app -StopTheApp { Stop-TheApp } -StartTheApp { Start-TheApp -SkipMigrate } `
     -Database $dbName -Copy $copy -Failed $dbFailed -Stamp $dbStamp -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl `
-    -Previous $Previous -MigrationsRan $MigrationsRan -BuildOutput $BuildOutput -Why $Why -RestoreBuild $RestoreBuild
+    -Previous $Previous -MigrationsRan $MigrationsRan -BuildOutput $BuildOutput -Why $Why -RestoreBuild $RestoreBuild `
+    -HeadAtStart $headAtStart
   # Script scope, so the Die that follows this call can say in the log whether
   # the failed rollout's schema has a name of its own.
   $script:dbSwapped = [bool]$result.Swapped
@@ -1142,7 +1206,7 @@ if (Skip-Step 'dbcopy') {
         is still non-zero: the promote did not complete.
       #>
       Say "the copy was refused; nothing has changed, so the paper is being brought back up"
-      $back = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp } -Refusal $copied.Failure
+      $back = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp -SkipMigrate } -Refusal $copied.Failure
       Say $back.Sentence
       Die "$($copied.Failure) $($back.Sentence)" 'dbcopy' "Read the sentence above and the log at $($copied.OutFile), fix what it names, then run this script again. The backup is at $backupNote"
     }
@@ -1311,7 +1375,7 @@ if (Skip-Step 'build') {
       DO about it lives here, because it needs the app stop, the port and the
       copy's name, none of which a library about promotion steps should know.
     #>
-    $built = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp } -Previous $previousBuild -Recover {
+    $built = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp -SkipMigrate } -Previous $previousBuild -Recover {
       param($migrations, $output, $previous)
       Invoke-PromoteRolloutFailure -Why "the build did not succeed" -MigrationsRan $migrations -BuildOutput $output -Previous $previous
     }

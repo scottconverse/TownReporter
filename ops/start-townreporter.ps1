@@ -19,7 +19,30 @@
   its stderr cannot reach a PowerShell stream at all, retries it three times,
   and -- when it still cannot serve -- says so in plain words in the log and
   exits non-zero, which is the signal ops\watchdog.ps1 acts on.
+
+  -SkipMigrate: DO NOT RUN THE MIGRATIONS. This is for exactly one caller --
+  the promotion's fallback, which puts the pre-rollout database copy back and
+  the build from before the rollout back with it. In that state the database
+  and the build match each other by construction, and migrating would undo the
+  swap-back: the checkout is at the NEW code (the promotion fast-forwarded it),
+  so the migrations that run are the new ones, and the first thing they do is
+  re-apply everything the restore just removed -- and then fail, if a migration
+  is what the rollout died on. That is the failure this switch exists for; the
+  promote that hit it started the old build on a database it had just put back
+  and reported "the paper is serving <db> again" while the paper was down.
+
+  Every other caller -- the logon task, the watchdog, `restart-app.ps1`, a
+  plain start, a -Resume -- must keep migrating exactly as before. Pass
+  -SkipMigrate and nothing else changes.
+
+  A parameter rather than an environment variable on purpose: it is passed
+  through Start-PromoteApp's argument list, so it reaches this script and
+  nothing else. An env var would be inherited by every child the promotion
+  starts, including `npm run build`, which is the one that must migrate.
 #>
+param(
+  [switch]$SkipMigrate
+)
 
 . (Join-Path $PSScriptRoot "lib-port.ps1")
 . (Join-Path $PSScriptRoot "lib-ownership.ps1")
@@ -107,7 +130,12 @@ if (-not (Wait-TownReporterDatabase -Bin $bin -ConnectionString $dbUrl -Log $app
   "the paper was not started: Postgres is listening on $OwnedPgPort but would not answer a query. This is almost always crash recovery after an unclean shutdown; the next five-minute watchdog run will try again." | Add-Content $appLog
   exit 1
 }
-if (-not (Invoke-TownReporterMigrate -App $app -Log $appLog -Node $node)) {
+if ($SkipMigrate) {
+  # The promotion's fallback. The database is the restored pre-rollout copy and
+  # the build is the one that was serving against it, so there is nothing to
+  # migrate and migrating would be the bug -- see the header.
+  "[start] -SkipMigrate: not running the migrations. The database was put back to the pre-rollout copy, so the build being started here matches it already." | Add-Content $appLog
+} elseif (-not (Invoke-TownReporterMigrate -App $app -Log $appLog -Node $node)) {
   "the paper was not started: the database migrations did not apply after three attempts. Nothing about the app was touched." | Add-Content $appLog
   exit 1
 }
