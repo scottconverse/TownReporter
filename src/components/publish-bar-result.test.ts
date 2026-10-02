@@ -131,9 +131,28 @@ describe("the story page draws every publish answer at the bar", () => {
   });
 
   it("gives the printed banner the bar's own place, because a print takes the bar away", () => {
-    assert.match(source, /press\.kind === "published" \? \(/);
-    assert.match(source, /className="astra-publish-bar astra-publish-done"/);
-    assert.match(source, /id="astra-publish-bar"[\s\S]{0,120}PublishBarResult state=\{press\}/);
+    /*
+      UNIT UI1b-2 CHANGED THIS PIN, and this is why.
+
+      It used to read `press.kind === "published" ? (` -- the bar was drawn
+      only from the press's own last answer, so a story that was ALREADY on the
+      paper when the page opened drew no bar at all. The owner's request (the
+      auditor put PR 171 in front of him on his real story: after "Yes, print
+      it" the Publish button was GONE) is that the CONTROL changes and stays,
+      so the slot is a fact about the story and is drawn from `onPaper`.
+
+      The banner's own place is unchanged -- it is still the bar, at
+      `#astra-publish-bar`, and still the same words -- and it now shares that
+      place with the button's own done state (`PublishBarDone`, asserted in
+      `publish-bar-done.test.ts`).
+    */
+    assert.match(source, /\{onPaper \? \(\s*<PublishBarDone result=\{press\} \/>/);
+    assert.doesNotMatch(source, /press\.kind === "published" \? \(/);
+    /* And the bar it lands in is still the bar: the on-paper body is drawn
+       with `#astra-publish-bar`, and the banner is drawn inside it. */
+    const bar = readFileSync(new URL("./publish-bar-result.ts", import.meta.url), "utf8");
+    assert.match(bar, /className: "astra-publish-bar astra-publish-done", id: "astra-publish-bar"/);
+    assert.match(bar, /createElement\(PublishBarResult, \{ state: props\.result \}\)/);
   });
 
   it("only welcomes a story that printed here and now", () => {
