@@ -603,7 +603,7 @@ Names, numbers, and ordinance titles are exactly where it is most confident and
 most wrong. Play the tape before you print a quote or a name from one.
 
 **The desk says whether it is available.** **Server → Meeting capture** shows
-one line: *Speech-to-text: textflowkit 0.1.6 (model small, language en)* when it
+one line: *Speech-to-text: textflowkit 0.1.8 (model small, language en)* when it
 is there, or *not installed … meetings without captions stay audio-only* when it
 is not. If that line says not installed, a captionless meeting staying
 audio-only is the honest outcome, not a fault.
