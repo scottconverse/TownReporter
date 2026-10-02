@@ -796,6 +796,198 @@ it(
   },
 );
 
+/*
+  ── A PASS WHERE EVERY SOURCE IS PARKED ─────────────────────────────────────
+
+  A scan whose whole watch list is waiting -- every row has a future
+  `retry_after`, or every host has spent the day's allowance -- knocks on
+  nothing. Each worker returns through the skip branch, so no source text is
+  fetched, no source failed, `batchResults` stays empty, and the pass fell into
+  the ZERO-BATCH exit: "Scan fetched no source text, so no writing pass ran",
+  recorded as a FAILED run and thrown.
+
+  That is the wrong answer twice over. The desk did exactly what it was told --
+  it honoured the wait it had stored, which is the whole point of storing one --
+  and the run that resulted was recorded as a failure, so the desk's history
+  said a scan had gone wrong when nothing had. On the unattended lane that is
+  the only lane anybody reads.
+
+  The ending it should have instead is a recorded no-op: finished, nothing
+  fetched, nothing failed, nothing attempted, and a receipt that says in plain
+  words why nothing happened.
+
+  The genuine "fetched nothing" failure is a DIFFERENT shape and keeps its own
+  ending (B8F2, the test above): sources were attempted and every one of them
+  failed. What separates the two is whether anything was attempted at all.
+*/
+
+/** A newsroom of its own: `watchSlice` is every accepted source in the
+ *  newsroom, so "every source was parked" needs a watch list that is only
+ *  parked rows. */
+const PARKED_NEWSROOM = 4;
+const PARKED_URL = "https://example.test/all-parked";
+const PARKED_NOTE = "Asked us to come back at 3:40 PM — will retry then";
+
+/** The newsroom's WHOLE watch list, every row parked two hours out and given a
+ *  real history first, so "nothing moved" is a claim about a value rather than
+ *  about a null that was null already. Seeded in one call because `seedWatch`
+ *  replaces the list: parking them one at a time would delete the others. */
+async function seedParkedWatch(urls: string[], newsroomId: number): Promise<Map<string, number>> {
+  const ids = await seedWatch(urls.map((url) => ({ url })), newsroomId, null);
+  const sql = await db.getSql();
+  for (const url of urls) {
+    const id = ids.get(url)!;
+    await seedHistory(id, 0);
+    await sql.query(
+      "update sources set retry_after = now() + interval '2 hours', retry_after_note = $2 where id=$1",
+      [id, PARKED_NOTE],
+    );
+  }
+  return ids;
+}
+
+/** The run's own row, as the desk's history reads it. */
+async function runReceipt(runId: number): Promise<{
+  finished_at: string | null;
+  error: string | null;
+  summary: string | null;
+  sources_selected: number;
+  sources_attempted: number;
+  sources_fetched: number;
+  sources_failed: number;
+  model_batches_used: number;
+}> {
+  const sql = await db.getSql();
+  const [row] = await sql.query<{
+    finished_at: string | null;
+    error: string | null;
+    summary: string | null;
+    sources_selected: number;
+    sources_attempted: number;
+    sources_fetched: number;
+    sources_failed: number;
+    model_batches_used: number;
+  }>(
+    `select finished_at::text, error, summary, sources_selected, sources_attempted,
+            sources_fetched, sources_failed, model_batches_used
+     from scan_runs where id=$1`,
+    [runId],
+  );
+  return row!;
+}
+
+const NO_OP_ONCE = "Nothing was due: 1 source is waiting for its time to come back";
+
+it(
+  "a pass where every source is parked finishes as a recorded no-op, on both lanes",
+  { skip, timeout: 120000 },
+  async () => {
+    assert.equal(db.getDbSource(), "neon", "fixture must use the real pg adapter, not PGLite");
+    await seedScheduledNewsroom(PARKED_NEWSROOM);
+    const ids = await seedParkedWatch([PARKED_URL], PARKED_NEWSROOM);
+    const id = ids.get(PARKED_URL)!;
+    const sql = await db.getSql();
+    const before = await healthOf(id);
+
+    /* BOTH LANES. The scheduled one commits through the scheduler's
+       transaction and the editor's writes inline, and the audit's whole
+       complaint about earlier endings was that the two disagreed. */
+    for (const scheduled of [true, false]) {
+      const where = scheduled ? "scheduled" : "inline";
+      const job = await seedScanJob(PARKED_NEWSROOM);
+      let fetches = 0;
+      let modelCalls = 0;
+
+      /* No `scheduledCommit` on the second pass is what makes a run the
+         editor's lane; the marker is in the deps, not in the job. */
+      await scan(job, {
+        ingestUrl: async (url: string) => {
+          fetches += 1;
+          return { text: `The council meets on Tuesday (${url}).`, titleHint: "Fixture", extras: [] };
+        },
+        grokChat: async () => {
+          modelCalls += 1;
+          return {
+            ok: true as const,
+            text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: "Fixture." }),
+          };
+        },
+        setJobModelChoice: async () => {},
+        ...(scheduled ? { scheduledCommit: <T,>(write: (s: Sql) => Promise<T>) => write(sql) } : {}),
+      });
+
+      assert.equal(fetches, 0, `the ${where} pass knocked on a source that had asked to be left alone`);
+      assert.equal(modelCalls, 0, `the ${where} pass called a model for a pass in which nothing was due`);
+
+      const receipt = await runReceipt(job.subject_id);
+      assert.ok(receipt.finished_at, `the ${where} run is not recorded as finished`);
+      assert.equal(receipt.error, null, `the ${where} run was recorded as a FAILURE`);
+      assert.equal(receipt.summary, NO_OP_ONCE, `the ${where} run does not say why nothing happened`);
+      assert.equal(receipt.sources_selected, 1, `the ${where} run does not name the source it deferred`);
+      assert.equal(receipt.sources_attempted, 0, `the ${where} run counts an attempt that never happened`);
+      assert.equal(receipt.sources_fetched, 0);
+      assert.equal(receipt.sources_failed, 0, `the ${where} run blames a source for the desk's own patience`);
+      assert.equal(receipt.model_batches_used, 0);
+
+      /* And the row is exactly where it was: honouring the wait must not
+         rewrite the reason for it, and nothing about the source moved. */
+      const after = await healthOf(id);
+      assert.equal(after.retry_after, before.retry_after, `the ${where} pass moved the wait it was honouring`);
+      assert.equal(after.retry_after_note, PARKED_NOTE);
+      assert.equal(after.last_fetched_at, before.last_fetched_at, "nothing was fetched");
+      assert.equal(after.last_ok_at, before.last_ok_at);
+      assert.equal(after.consecutive_failures, before.consecutive_failures);
+      assert.equal(after.last_error, before.last_error);
+    }
+  },
+);
+
+it(
+  "one source due among parked ones runs the pass normally",
+  { skip, timeout: 120000 },
+  async () => {
+    await seedScheduledNewsroom(PARKED_NEWSROOM);
+    const due = "https://example.test/all-parked-due";
+    const ids = await seedParkedWatch([due, PARKED_URL], PARKED_NEWSROOM);
+    const dueId = ids.get(due)!;
+    const parkedId = ids.get(PARKED_URL)!;
+    const sql = await db.getSql();
+    /* The one source whose time has come. */
+    await sql.query("update sources set retry_after = null, retry_after_note = null where id=$1", [
+      dueId,
+    ]);
+    const parkedBefore = await healthOf(parkedId);
+    const job = await seedScanJob(PARKED_NEWSROOM);
+    let fetches = 0;
+
+    await scan(job, {
+      ingestUrl: async (url: string) => {
+        fetches += 1;
+        return { text: `The council meets on Tuesday (${url}).`, titleHint: "Fixture", extras: [] };
+      },
+      grokChat: async () => ({
+        ok: true as const,
+        text: JSON.stringify({ leads: [], proposed_sources: [], editor_summary: "One source was due." }),
+      }),
+      setJobModelChoice: async () => {},
+      scheduledCommit: <T,>(write: (s: Sql) => Promise<T>) => write(sql),
+    });
+
+    assert.equal(fetches, 1, "only the source whose time had come should have been knocked on");
+    const receipt = await runReceipt(job.subject_id);
+    assert.equal(receipt.error, null, "an ordinary pass with one due source is not a failure");
+    assert.notEqual(receipt.summary, NO_OP_ONCE, "the no-op ending swallowed a pass that did read a source");
+    assert.equal(receipt.sources_fetched, 1);
+    assert.equal(receipt.sources_attempted, 1, "the parked source is still not an attempt");
+    assert.equal(receipt.model_batches_used, 1, "the writing pass did not run");
+    /* The parked neighbour is untouched -- a pass that ran is not a licence to
+       knock on the rows that asked to be left alone. */
+    const parkedAfter = await healthOf(parkedId);
+    assert.equal(parkedAfter.retry_after, parkedBefore.retry_after);
+    assert.equal(parkedAfter.last_fetched_at, parkedBefore.last_fetched_at);
+  },
+);
+
 it(
   "a skipped source still moves the scan's progress count",
   { skip, timeout: 120000 },

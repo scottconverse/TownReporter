@@ -83,6 +83,43 @@ function New-PromoteLog {
 }
 
 <#
+  Append one line to the run's log, and do not lose it to a reader.
+
+  `Add-Content` opens the file EXCLUSIVELY, so on Windows a write that lands
+  while anyone else has the log open -- an operator tailing it, a text editor,
+  anything -- fails with a sharing violation. Write-PromoteLog swallows that
+  (it must: losing the log is bad, losing the paper is worse), so the line is
+  gone for good and the record quietly stops matching what happened. Measured
+  on 2026-10-01: a run that only polled the file with a reader dropped the
+  `step=build child pid N` line about one time in eleven, and the log simply
+  ended a line early.
+
+  So the file is opened here by hand, Append + FileShare.ReadWrite: a reader
+  can hold it open for as long as it likes and the append still lands. That is
+  the opposite of what Add-Content does, and it is the difference between a
+  log an operator can watch and one that erases itself while they watch it.
+
+  Best effort, like everything else on this path: a genuine failure to write is
+  still swallowed, because the promotion has a paper to bring back up and the
+  log is not worth stopping for.
+#>
+function Add-PromoteLogLine {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$Line
+  )
+  try {
+    $bytes = [System.Text.Encoding]::ASCII.GetBytes($Line + [Environment]::NewLine)
+    $stream = [System.IO.File]::Open(
+      $Path,
+      [System.IO.FileMode]::Append,
+      [System.IO.FileAccess]::Write,
+      [System.IO.FileShare]::ReadWrite)
+    try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+  } catch { }
+}
+
+<#
   One line per step, timestamped, written to the file AND shown on the
   console. The two are deliberately separate: the file is the record that
   outlives the console, and the console is what the operator watches.
@@ -90,7 +127,8 @@ function New-PromoteLog {
   Neither write may stop a promotion. A closed console pipe is exactly what
   this unit exists for, so a failed console write is swallowed; a failed log
   write is swallowed too, because losing the log is bad and losing the paper
-  is worse.
+  is worse. What must NOT happen is a line going missing because somebody had
+  the log open -- see Add-PromoteLogLine.
 #>
 function Write-PromoteLog {
   param(
@@ -98,7 +136,7 @@ function Write-PromoteLog {
     [Parameter(Mandatory = $true)][string]$Line
   )
   $stamped = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Line
-  try { Add-Content -Path $Log.Path -Value $stamped -Encoding ASCII -ErrorAction Stop } catch { }
+  Add-PromoteLogLine -Path $Log.Path -Line $stamped
   try { Write-Host "  $Line" } catch { }
   # Nothing is emitted to the pipeline, deliberately. In PowerShell a function
   # returns everything it did not capture, so a logging helper that returned
@@ -109,15 +147,48 @@ function Write-PromoteLog {
 }
 
 <#
+  One line into the log FILE, and deliberately not onto the console.
+
+  Only one caller needs this, and it is worth its own function rather than a
+  second Add-Content: Die's last act is to print the exact command that brings
+  the paper back, and scripts\promote-step-runner.test.mjs holds that as the
+  last thing an operator sees. The line written through here is the one that
+  has to come after it -- which database holds what -- because an operator
+  reading the tail of a failed run's log is asking exactly that question. It
+  goes in the record, not over the top of the command they are about to run.
+
+  Like Write-PromoteLog, a failed write is swallowed: losing the line is bad,
+  losing the promotion is worse. And like it, it emits nothing to the pipeline.
+#>
+function Write-PromoteLogFileOnly {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$Line
+  )
+  $stamped = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Line
+  Add-PromoteLogLine -Path $Log.Path -Line $stamped
+}
+
+<#
   The steps, in the order they must happen. Ranks drive -Resume: a run that
   resumes at a step skips every step ranked before it.
 
   `preflight` is everything that can fail without consequence (the checkout is
   clean, origin/main is a straight-line fast-forward away, no editor job is
-  running) and it stays before `stop` for exactly that reason.
+  running, and -- since the database copy landed -- the database name, the room
+  on the disk for a copy of it, and whether the role we connect as may create
+  one) and it stays before `stop` for exactly that reason.
+
+  `dbcopy` sits between `stop` and `ff` because a copy of a database can only be
+  taken with nobody connected to it: `CREATE DATABASE ... TEMPLATE` refuses
+  otherwise, and the app IS the connection. It is before `ff` and therefore
+  before `build`, which is the step that runs the migration -- the copy has to
+  exist before anything can move the database forward.
+
+  `deps` may or may not install anything; `build` always migrates.
 #>
 function Get-PromoteStepOrder {
-  return @('backup', 'preflight', 'stop', 'ff', 'deps', 'build', 'start', 'verify')
+  return @('backup', 'preflight', 'stop', 'dbcopy', 'ff', 'deps', 'build', 'start', 'verify')
 }
 
 function Get-PromoteStepRank {
@@ -233,14 +304,46 @@ function Get-PromoteRecoveryCommand {
 
   Read through a function rather than written at each call site so a test can
   ask what the limit is, and so the two places that use it cannot drift.
+
+  The database steps have their own numbers, and they are much smaller because
+  the work is a different size. Measured on a throwaway Postgres 18.6 with
+  nobody connected: copying a 545 MB database took 4.4 s, and the two
+  `ALTER DATABASE ... RENAME`s of a swap-back took 0.47 s together. Ten minutes
+  is therefore roughly a hundred times the measured cost -- a backstop, not a
+  budget, and the same reasoning as the npm steps: a database step that reaches
+  it has stopped, not slowed down. `preflight` only reads, so two minutes is
+  already generous for a connection that is refusing to answer.
+
+  Note what a COPY costs the machine, because it is not like the npm steps:
+  `CREATE DATABASE ... TEMPLATE` forces a checkpoint on the whole cluster. On a
+  shared server every other database waits for it.
 #>
 function Get-PromoteChildTimeoutSeconds {
   param([Parameter(Mandatory = $true)][string]$Step)
   switch ($Step) {
     'deps' { return 1200 }
     'build' { return 1200 }
+    'preflight' { return 120 }
+    'dbcopy' { return 600 }
+    'dbswap' { return 600 }
+    'dbstate' { return 120 }
     default { return 0 }
   }
+}
+
+<#
+  How long the copy and the swap wait for the app's connections to drain.
+
+  The app was stopped a couple of seconds earlier, so its sessions normally go
+  in about a second and this is invisible. It is bounded because the wait is
+  inside the stop-the-app window: past it the promotion refuses in plain words
+  rather than holding the paper down. It NEVER ends anybody's session -- see
+  the header of ops\lib-promote-db.mjs for why that is not this script's call
+  to make on a machine whose Postgres also serves the development copy and
+  thirty test databases.
+#>
+function Get-PromoteDbWaitSeconds {
+  return 30
 }
 
 <#
@@ -253,6 +356,258 @@ function Get-PromoteChildTimeoutSeconds {
 #>
 function Get-PromoteHealthTimeoutSeconds {
   return 60
+}
+
+<#
+  A refusal that changed NOTHING, after the paper has already been stopped.
+
+  FINDING B, from the auditor's clone lab. The copy is refused (the sessions
+  will not clear, the disk is full, the name is taken); the script wrote
+  "Nothing was changed and the paper was not touched. The paper is still down",
+  printed a command for a person to run, and EXITED. For a newspaper that is
+  the site offline until somebody notices -- and nothing about the state
+  justified it. At that moment no copy exists, nothing has been fast-forwarded,
+  nothing has been built and no migration has run: the build on disk is exactly
+  the one that was serving a minute ago.
+
+  So the paper is started again, and this function owns that decision because
+  it is the one place that knows both halves of it:
+
+    - the marker comes off when the paper answers. It has to: the marker
+      silences the watchdog, and leaving it while the paper is UP would mute
+      the one automatic thing that can help for the next half hour. A refusal
+      that ends with a running paper is not an unfinished promotion.
+
+    - the marker STAYS when the paper does not answer. Then the run really is
+      unfinished and the paper really is down, which is what -Resume and the
+      watchdog exist for.
+
+  The caller exits NON-ZERO either way: the promotion did not do what it was
+  asked to. Being up is not the same as having succeeded.
+
+  Returns @{ PaperUp; Sentence }, where Sentence is the plain-words line for
+  the operator.
+#>
+function Invoke-PromoteNothingChanged {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
+    [Parameter(Mandatory = $true)][string]$Refusal
+  )
+  Write-PromoteLog $Log "nothing has changed yet -- no copy, no fast-forward, no build, no migration -- so the paper is started again on the build it was already running"
+  if (& $StartTheApp) {
+    Clear-PromoteMarker -App $App
+    $sentence = "The paper is back up on the version it was running, and nothing was changed."
+    Write-PromoteLog $Log $sentence
+    Write-PromoteLog $Log "the promote did NOT complete: $Refusal"
+    return [pscustomobject]@{ PaperUp = $true; Sentence = $sentence }
+  }
+  Write-PromoteLog $Log "the paper did NOT come back up on the build it was already running"
+  return [pscustomobject]@{
+    PaperUp = $false
+    Sentence = "The paper is still down: it did not come back up on the build it was already running."
+  }
+}
+
+<#
+  Start the app, then wait for it to answer. Returns ONE boolean.
+
+  THE HANG THIS REPLACES (production auditor's lab, gate 3, 2026-10-01). The
+  start step used to be a function that ran
+      & powershell -File start-townreporter.ps1
+  inline. A function's output is its return value, so PowerShell read the native
+  command's stdout through a pipe and waited for end-of-file -- and the node
+  server that start script launches holds a copy of that pipe's write end, so the
+  wait lasted as long as the paper stayed up. The promote sat on
+  "step=start started" with the paper serving and the 30-minute marker in place.
+  A stand-in with a 25-second sleeper took 25 seconds and returned an ARRAY of
+  three things, so `-not (Start-TheApp)` did not mean what it looked like either.
+
+  So: the start script's output goes to FILES (there is no pipe for a child to
+  keep open), the wait is on that ONE process by PID (never on its descendants),
+  nothing it prints can reach the return value, and the answer is a boolean from
+  the port probe. A start script that has not finished by $StartSeconds is left
+  alone and the health wait decides: the paper either answers or it does not.
+#>
+function Start-PromoteApp {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$StartScript,
+    [Parameter(Mandatory = $true)][string]$OutDir,
+    [Parameter(Mandatory = $true)][int]$Port,
+    [int]$HealthSeconds = 60,
+    [int]$StartSeconds = 300,
+    [scriptblock]$TestThePort = $null,
+    # Passed straight through to the start script. Only the fallback uses it:
+    # the database is the restored pre-rollout copy there, so the start script
+    # must not migrate it forward again. See ops\start-townreporter.ps1.
+    [switch]$SkipMigrate
+  )
+  if (-not $TestThePort) { $TestThePort = { param($p) Test-PromotePaperUp -Port $p } }
+  New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+  $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+  $outFile = Join-Path $OutDir "promote-$stamp-start.out.log"
+  $errFile = Join-Path $OutDir "promote-$stamp-start.err.log"
+  Write-PromoteLog $Log "step=start child: powershell -File $StartScript$(if ($SkipMigrate) { ' -SkipMigrate' }) (output: $outFile)"
+  $proc = $null
+  try {
+    $startArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $StartScript + '"'))
+    if ($SkipMigrate) { $startArgs += '-SkipMigrate' }
+    $proc = Start-Process -FilePath 'powershell' `
+      -ArgumentList $startArgs `
+      -WindowStyle Hidden -PassThru `
+      -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+  } catch {
+    Write-PromoteLog $Log "step=start could not launch the start script: $($_.Exception.Message)"
+    return $false
+  }
+  Write-PromoteLog $Log "step=start child pid $($proc.Id)"
+  # That ONE process, by PID. Wait-Process does not wait for its descendants,
+  # which is the point: the app it launches is meant to outlive it.
+  try { $null = Wait-Process -Id $proc.Id -Timeout $StartSeconds -ErrorAction SilentlyContinue } catch { }
+  $finished = $false
+  try { $finished = [bool]$proc.HasExited } catch { $finished = $true }
+  if (-not $finished) {
+    Write-PromoteLog $Log "step=start the start script had not finished after $StartSeconds s; the health wait decides"
+  }
+  for ($i = 0; $i -lt $HealthSeconds; $i++) {
+    if ([bool](& $TestThePort $Port)) { break }
+    Start-Sleep -Seconds 1
+  }
+  return [bool](& $TestThePort $Port)
+}
+
+# --- what node_modules was installed from (the lockfile marker) -------------
+#
+# THE TRAP THIS CLOSES. Whether to run `npm ci` used to be decided from the
+# hash of package-lock.json before and after this script's own fast-forward:
+#
+#     $mustInstall = ($lockBefore -ne $lockAfter) -or ($resumeAt -eq 'deps')
+#
+# That answers "did THIS run move the lockfile". It is the wrong question, and
+# on the first rollout it is wrong in the worst possible way: the live checkout
+# is fast-forwarded BY HAND before the promotion (it has to be -- it is still
+# running the OLD promote script, which does not know about the copy), so
+# `before` is already the new lockfile, `after` is the same new lockfile, the
+# two are equal, and the promotion skips `npm ci` and then builds a release on
+# node_modules from the previous one. Nothing fails. The build succeeds. The
+# page serves whatever the old dependency tree happens to do.
+#
+# So the question asked now is the one that matters: WHAT WAS node_modules
+# ACTUALLY INSTALLED FROM? `npm ci` writes its answer to
+# node_modules\.promote-lock-hash when it succeeds, and the install runs unless
+# that file is there and holds exactly the hash of the lockfile on disk.
+#
+# A marker that is missing, unreadable or unparseable means INSTALL. That is
+# the direction to fail in: an unnecessary `npm ci` costs a few minutes with
+# the paper stopped, and a skipped one costs a release built on the wrong
+# dependency tree, quietly.
+
+<#
+  Where the marker lives. Inside node_modules on purpose: `npm ci` deletes
+  node_modules and recreates it, so a marker that survived an install that
+  failed half way cannot survive one that succeeded.
+#>
+function Get-PromoteLockMarkerPath {
+  param([Parameter(Mandatory = $true)][string]$App)
+  return (Join-Path (Join-Path $App "node_modules") ".promote-lock-hash")
+}
+
+<#
+  The hash of the lockfile node_modules was last installed from, or "" when
+  that is not knowable. "" always means install.
+#>
+function Get-PromoteInstalledLockHash {
+  param([Parameter(Mandatory = $true)][string]$App)
+  $path = Get-PromoteLockMarkerPath -App $App
+  if (-not (Test-Path $path)) { return "" }
+  try {
+    $value = (Get-Content -LiteralPath $path -Raw -ErrorAction Stop)
+    if ($null -eq $value) { return "" }
+    $value = "$value".Trim()
+    # A marker holding something that is not a hash is not a marker: treat it
+    # exactly like a missing one rather than trusting a half-written file.
+    if ($value -notmatch '^[0-9A-Fa-f]{64}$') { return "" }
+    return $value.ToUpperInvariant()
+  } catch {
+    return ""
+  }
+}
+
+<#
+  Write the marker, AFTER a successful install and never before.
+
+  Returns $true when it was written. A write that fails is not an error: the
+  next promotion installs again, which is slower and never wrong. Nothing is
+  ever reported as installed on the strength of this failing.
+#>
+function Set-PromoteInstalledLockHash {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$Hash = ""
+  )
+  if (-not $Hash) { return $false }
+  $path = Get-PromoteLockMarkerPath -App $App
+  try {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $path) | Out-Null
+    Set-Content -LiteralPath $path -Value $Hash -Encoding ASCII -ErrorAction Stop
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+<#
+  Should this run install dependencies? Returns @{ Needed; Reason }.
+
+  `Reason` is written into the promotion's log, because "the install was
+  skipped" is a sentence an operator reading a bad release needs to be able to
+  find and believe -- and it has to say WHICH of the two questions was asked,
+  not just that the answer was no.
+
+  The before/after pair is deliberately NOT the decider any more. It is still
+  computed by the caller (scripts\ci-hash-no-module.ps1 lifts those two lines
+  out and runs them in a PowerShell session that cannot reach Get-FileHash), and
+  it is still worth having in the log, but a run that fast-forwarded the
+  checkout by hand makes the two equal and that says nothing at all about what
+  node_modules holds.
+#>
+function Test-PromoteNeedsInstall {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$LockHash = "",
+    [string]$ResumeAt = ""
+  )
+  if ($ResumeAt -eq 'deps') {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "the previous run stopped at this step, so the install it started never finished"
+    }
+  }
+  if (-not $LockHash) {
+    return [pscustomobject]@{
+      Needed = $false
+      Reason = "there is no package-lock.json here, so there is nothing to install from"
+    }
+  }
+  $installed = Get-PromoteInstalledLockHash -App $App
+  if (-not $installed) {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "there is no record here of what node_modules was installed from (node_modules\.promote-lock-hash is missing), so it is installed again rather than guessed at"
+    }
+  }
+  if ($installed -ne $LockHash.ToUpperInvariant()) {
+    return [pscustomobject]@{
+      Needed = $true
+      Reason = "node_modules was installed from a different lockfile ($installed, now $($LockHash.ToUpperInvariant()))"
+    }
+  }
+  return [pscustomobject]@{
+    Needed = $false
+    Reason = "node_modules was installed from exactly this lockfile"
+  }
 }
 
 <#
@@ -442,18 +797,39 @@ function Wait-PromoteChildProcess {
 <#
   What did the last run reach, and where should a -Resume pick up?
 
-  Reads the newest logs\promote-*.log, not the marker alone: the marker says a
-  run is unfinished, the log says how far it got. The last step line decides:
+  Reads the newest logs\promote-*.log -- the newest one that is a PROMOTION,
+  and not the log of the run asking the question. The marker says a run is
+  unfinished; the log says how far it got. The last step line decides:
 
     ok       -> resume at the step after it
     started  -> it was interrupted mid-flight; run that step again
     failed   -> run that step again
 
+  $ExcludeLog is the caller's OWN log, and it is not optional in practice.
+  promote.ps1 opens its log as its first act -- so a run that dies on its first
+  check still leaves a file behind -- and only looks for an unfinished run
+  much later. By then its own log is the newest file in the directory, so
+  "read the newest log" answers with a file that has just been created and has
+  nothing in it: no step, no backup, no next step. The run then either refuses
+  to resume or starts from the beginning on top of the interrupted one, which
+  is the failure this parameter exists to prevent.
+
+  A log is only a candidate when it carries a `promote started` line. That is
+  what makes a `promote-*.log` a promotion at all: a hand-rollback
+  (Invoke-PromoteRollback) writes its own lines into a promote-*.log and
+  deliberately keeps them outside the step grammar, and a run killed before its
+  first line leaves an empty file. Neither can say where an interrupted run
+  stopped, so neither is allowed to hide the log that can.
+
   Returns $null when there is no marker, so the caller can tell "nothing to
   resume" from "a run is unfinished".
 #>
 function Get-PromoteResumePoint {
-  param([Parameter(Mandatory = $true)][string]$App)
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    # The log this run has already opened, to leave out of the search.
+    [string]$ExcludeLog = ""
+  )
 
   $logs = Join-Path $App "logs"
   if (-not (Test-Path (Join-Path $logs "promote-in-progress"))) { return $null }
@@ -465,15 +841,54 @@ function Get-PromoteResumePoint {
     StartedAt = $null
     Backup    = $null
     NextStep  = $null
+    # The database copy, since unit PR2. All three are read back out of the
+    # log's own "promote-db:" line, which is written as soon as the names are
+    # known -- before the app is stopped -- so a run that died anywhere after
+    # that can be picked up without deriving (or worse, guessing) them again.
+    Database  = $null
+    Copy      = $null
+    Failed    = $null
+    # When the previous run stopped the paper, and when it took the copy. A
+    # resumed run refuses to put a copy back that was taken BEFORE its own
+    # stop: that copy would predate whatever the app was doing when it went
+    # down. Both are the timestamps of the log's own step lines -- NOT the
+    # stamp inside the copy's name, which is the second the RUN started and is
+    # therefore always earlier than the stop. See Test-PromoteCopyFreshness.
+    StopAt    = $null
+    CopyAt    = $null
+    # The commit the interrupted run started from, read out of its own
+    # "head at start" line. A resumed run puts the checkout back to THIS, not
+    # to its own HEAD -- which by then may already be the new release, because
+    # the interrupted run fast-forwarded it. See Resolve-PromoteGivenHead for
+    # the same trap on the first, hand-fast-forwarded rollout.
+    HeadAtStart = $null
   }
-
-  $file = Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
-  if (-not $file) { return $point }
-  $point.LogPath = $file.FullName
 
   $stepRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] step=(?<name>[a-z]+) (?<status>started|ok|failed)\b(?<rest>.*)$'
   $startRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] promote started\b'
+
+  # Newest first, this run's own log left out, and the first one that is really
+  # a promotion taken. Compared by full path, case-insensitively, because
+  # Windows paths differ in case more often than they differ in meaning.
+  $exclude = ""
+  if ($ExcludeLog) { $exclude = [System.IO.Path]::GetFullPath($ExcludeLog) }
+  $file = $null
+  foreach ($candidate in @(Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)) {
+    if ($exclude -and [System.IO.Path]::GetFullPath($candidate.FullName) -ieq $exclude) { continue }
+    foreach ($line in @(Get-Content -Path $candidate.FullName -ErrorAction SilentlyContinue)) {
+      if ([regex]::Match($line, $startRe).Success) { $file = $candidate; break }
+    }
+    if ($file) { break }
+  }
+  if (-not $file) { return $point }
+  $point.LogPath = $file.FullName
+
+  # The line the promotion writes once the database names are settled:
+  #   promote-db: database=<db> copy=<copy> failed=<failed>
+  # The LAST one wins, so a resumed run's log carries the names of the run that
+  # actually took the copy rather than of the run that resumed it.
+  $dbRe = '^\[(?<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\] promote-db: database=(?<db>\S+) copy=(?<copy>\S+) failed=(?<failed>\S+)\s*$'
   # Fail-PromoteStep writes "FAILED" in capitals so a failure stands out in the
   # log; matching it case-insensitively keeps the two spellings one status.
   $opts = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
@@ -481,6 +896,12 @@ function Get-PromoteResumePoint {
   foreach ($line in @(Get-Content -Path $file.FullName -ErrorAction SilentlyContinue)) {
     $sm = [regex]::Match($line, $startRe)
     if ($sm.Success -and -not $point.StartedAt) { $point.StartedAt = $sm.Groups['ts'].Value }
+    $dm = [regex]::Match($line, $dbRe)
+    if ($dm.Success) {
+      $point.Database = $dm.Groups['db'].Value
+      $point.Copy = $dm.Groups['copy'].Value
+      $point.Failed = $dm.Groups['failed'].Value
+    }
     $m = [regex]::Match($line, $stepRe, $opts)
     if (-not $m.Success) { continue }
     $last = $m
@@ -490,6 +911,20 @@ function Get-PromoteResumePoint {
       # this path, so it has to come out exactly as the backup step wrote it.
       $point.Backup = ($m.Groups['rest'].Value -replace '^\s*(\([^)]*\))?\s*:?\s*', '')
     }
+    if ($m.Groups['name'].Value -eq 'stop' -and $m.Groups['status'].Value -match '^(?i)ok$') {
+      $point.StopAt = $m.Groups['ts'].Value
+    }
+    # Whatever status it has: a dbcopy line that only says "started" still
+    # records a time, and that time is after the stop -- which is all the
+    # freshness question needs. A line that is not there at all leaves this
+    # null, and null is a refusal rather than a pass.
+    if ($m.Groups['name'].Value -eq 'dbcopy') {
+      $point.CopyAt = $m.Groups['ts'].Value
+    }
+    $hm = [regex]::Match("$line", 'head at start(?: \(given\))?: ([0-9a-fA-F]{7,40})')
+    if ($hm.Success -and -not $point.HeadAtStart) { $point.HeadAtStart = $hm.Groups[1].Value }
+    $gm = [regex]::Match("$line", 'head at start \(given\): ([0-9a-fA-F]{7,40})')
+    if ($gm.Success) { $point.HeadAtStart = $gm.Groups[1].Value }
   }
   if (-not $last) { return $point }
 
@@ -655,6 +1090,191 @@ function Get-PromoteFallbackSentence {
 }
 
 <#
+  The commit the checkout is on, or "" when that cannot be read.
+#>
+function Get-PromoteCheckoutHead {
+  param([Parameter(Mandatory = $true)][string]$App)
+  try {
+    $head = (& git -C $App rev-parse HEAD)
+    if ($LASTEXITCODE -ne 0) { return "" }
+    return "$head".Trim()
+  } catch {
+    return ""
+  }
+}
+
+<#
+  `-PreviousHead <sha>`: the commit to put the checkout back to, given by hand.
+
+  WHY THIS EXISTS. The fallback resets the checkout to "the commit this
+  promotion started from", read from HEAD when the promote began. That is the
+  right answer for a promotion that does its own fast-forward -- and the wrong
+  one for the first real rollout, where the keeper has to fast-forward the live
+  checkout BY HAND first (`git merge --ff-only origin/main`), because the
+  checkout is still running an older promote script that hangs. By the time the
+  new promote starts, HEAD is ALREADY the new commit: "head at start" would be
+  the new release, a fallback would reset to the new release, and the old
+  migrations folder would never come back. The one rollout that has to work is
+  the one where the guess is exactly backwards.
+
+  So the operator can say what the previous release was. It is CHECKED, twice,
+  and both checks refuse with the paper untouched:
+
+    - it must resolve to a commit in this repository (`rev-parse --verify
+      <sha>^{commit}`), or a typo would reset the checkout to nothing;
+    - it must be an ancestor of HEAD (or HEAD itself). A commit that is not an
+      ancestor is some other line of history, and putting the live checkout on
+      it would serve code that never came from origin/main.
+
+  Returns @{ Ok; Head; Message }. Ok=$false is a refusal, not a warning.
+#>
+function Resolve-PromoteGivenHead {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Head,
+    [string]$Current = ""
+  )
+  $wanted = "$Head".Trim()
+  if (-not $wanted) {
+    return [pscustomobject]@{ Ok = $false; Head = ""; Message = "no commit was given." }
+  }
+  $commitSpec = $wanted + '^{commit}'
+  $resolved = ""
+  try {
+    $resolved = (& git -C $App rev-parse --verify $commitSpec)
+    if ($LASTEXITCODE -ne 0) { $resolved = "" }
+  } catch {
+    $resolved = ""
+  }
+  $resolved = "$resolved".Trim()
+  if (-not $resolved) {
+    return [pscustomobject]@{
+      Ok = $false
+      Head = ""
+      Message = "-PreviousHead '$wanted' is not a commit in this checkout, so there is nothing to put the code back to. Check the value (a full or short commit id, or a tag) and run this again. Nothing was changed and the paper was not touched."
+    }
+  }
+  $now = $Current
+  if (-not $now) { $now = Get-PromoteCheckoutHead -App $App }
+  if (-not $now) {
+    return [pscustomobject]@{
+      Ok = $false
+      Head = ""
+      Message = "the checkout's own commit could not be read, so -PreviousHead could not be checked against it. Nothing was changed and the paper was not touched."
+    }
+  }
+  if ($resolved -ne $now) {
+    & git -C $App merge-base --is-ancestor $resolved $now | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      return [pscustomobject]@{
+        Ok = $false
+        Head = ""
+        Message = "-PreviousHead '$wanted' is not an ancestor of what is checked out ($now), so it is some other line of history and putting the paper back on it would serve code that never came from origin/main. Nothing was changed and the paper was not touched."
+      }
+    }
+  }
+  return [pscustomobject]@{ Ok = $true; Head = $resolved; Message = "" }
+}
+
+<#
+  PUT THE CHECKOUT BACK WHERE THE PROMOTION FOUND IT.
+
+  FINDING C, from the auditor's clone lab (gate 3, scenario S3, run for real).
+  The rollout failed at the migration, the database swap-back worked, the
+  previous build was put back at .output -- and then the start script ran the
+  migrations FROM THE CHECKOUT, which the promotion had already fast-forwarded
+  to the new code. So it re-applied 0109-0117 (everything the swap-back had
+  just undone), hit the migration the rollout had died on, failed three times,
+  and the paper stayed down while the promote printed "The paper is serving
+  <db> again".
+
+  The fallback was undoing three things the promotion had changed (the
+  database, the build) and leaving the fourth (the checkout) at the new
+  release. This puts that one back too.
+
+  `git reset --hard` and not a checkout of the old tree into a side directory:
+  the preflight already guarantees the tracked tree is clean, so nothing of
+  anyone's is thrown away; untracked files are not touched at all (the extra
+  migration the auditor added is still on disk afterwards, which is right --
+  the owner put it there); it works in a detached HEAD, which is what the CI
+  and lab checkouts are; and it moves a checked-out branch back, which a later
+  `git merge --ff-only origin/main` needs in order to fast-forward again.
+
+  Returns @{ Ok; Reset; Head; Message }. Ok is $false only when the checkout is
+  in a state nobody should start an app on -- an unreadable HEAD, or a reset
+  that did not land. A run with no recorded head is Ok=$true and Reset=$false:
+  there is nothing to put back, and refusing to start at all would be worse
+  than starting the old build against the code that is there.
+#>
+function Restore-PromoteCheckout {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$Head = ""
+  )
+  if (-not $Head) {
+    Write-PromoteLog $Log "no commit was recorded for this run, so the checkout is left where it is"
+    return [pscustomobject]@{ Ok = $true; Reset = $false; Head = ""; Message = "no commit was recorded for this run" }
+  }
+  $current = Get-PromoteCheckoutHead -App $App
+  if (-not $current) {
+    $message = "the checkout's commit could not be read, so it was NOT put back at $Head"
+    Write-PromoteLog $Log $message
+    return [pscustomobject]@{ Ok = $false; Reset = $false; Head = $Head; Message = $message }
+  }
+  if ($current -eq $Head) {
+    Write-PromoteLog $Log "the checkout is already at $Head, the commit this promotion started from"
+    return [pscustomobject]@{ Ok = $true; Reset = $false; Head = $Head; Message = "already at $Head" }
+  }
+  & git -C $App reset --hard $Head | Out-Null
+  $after = Get-PromoteCheckoutHead -App $App
+  if ($LASTEXITCODE -ne 0 -or $after -ne $Head) {
+    $message = "the checkout could NOT be put back at $Head (it is at $after)"
+    Write-PromoteLog $Log $message
+    return [pscustomobject]@{ Ok = $false; Reset = $false; Head = $Head; Message = $message }
+  }
+  $message = "the checkout has been put back at $Head, where this promotion started (it was at $current). Untracked files were not touched."
+  Write-PromoteLog $Log $message
+  return [pscustomobject]@{ Ok = $true; Reset = $true; Head = $Head; Message = $message }
+}
+
+<#
+  Which commit to put the checkout back at, found from the promote log that
+  took a given copy.
+
+  The hand rollback (`-RollbackDatabase <copy>`) is run LATER, by an operator,
+  with no memory of the promotion that took the copy -- so it has to read the
+  answer out of the log, the same way a resumed run reads the copy's name out
+  of it. Newest log first, and only a log that mentions this copy.
+
+  Returns @{ Found; Head; LogPath }. Found=$false means no log names it, and
+  the caller must leave the checkout alone rather than guess: resetting a
+  checkout to a commit nobody recorded is how the wrong code ends up serving
+  the paper.
+#>
+function Get-PromoteHeadForCopy {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Copy
+  )
+  $logs = Join-Path $App "logs"
+  $files = @(Get-ChildItem -Path $logs -Filter 'promote-*.log' -File -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending)
+  $wanted = "copy=$Copy"
+  foreach ($file in $files) {
+    $names = $false
+    $head = ""
+    foreach ($line in @(Get-Content -Path $file.FullName -ErrorAction SilentlyContinue)) {
+      if ("$line" -like "*promote-db:*" -and "$line" -like "*$wanted*") { $names = $true }
+      $m = [regex]::Match("$line", 'head at start: ([0-9a-fA-F]{7,40})')
+      if ($m.Success -and -not $head) { $head = $m.Groups[1].Value }
+    }
+    if ($names) { return [pscustomobject]@{ Found = $true; Head = $head; LogPath = $file.FullName } }
+  }
+  return [pscustomobject]@{ Found = $false; Head = ""; LogPath = "" }
+}
+
+<#
   Put the previous build back and start it. $StartTheApp is the caller's "start
   the app and tell me whether it answers" -- a scriptblock so this can be
   driven by a fake in a test while the ordering that matters stays here.
@@ -674,8 +1294,19 @@ function Invoke-PromoteFallback {
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
     [string]$Previous = "",
     [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
-    [string]$BuildOutput = ""
+    [string]$BuildOutput = "",
+    # The commit this promotion started from. Putting the BUILD back without
+    # putting the CHECKOUT back is what made the auditor's S3 fail: see
+    # Restore-PromoteCheckout.
+    [string]$HeadAtStart = ""
   )
+  if (-not (Restore-PromoteCheckout -Log $Log -App $App -Head $HeadAtStart).Ok) {
+    # A half-returned checkout is not somewhere to start an app: the build in
+    # .output would belong to a tree that is neither the old release nor the
+    # new one. Leave the paper down and let the caller print the way back up.
+    Write-PromoteLog $Log "the old build has NOT been started: the checkout could not be put back first"
+    return $false
+  }
   $resolved = Resolve-PromotePreviousBuild -App $App -Previous $Previous
   if (-not (Restore-PromotePreviousBuild -App $App -Previous $resolved)) {
     Write-PromoteLog $Log "there is no previous build to put back, so the paper stays down"
@@ -703,6 +1334,16 @@ function Invoke-PromoteFallback {
   with the promote reporting failure. A copy of the logic in a test would
   prove nothing about the script that runs at 2 AM.
 
+  -Recover, when it is given, replaces the plain build fallback with the
+  caller's whole failure path -- since unit PR2 that is "stop whatever is
+  serving, put the database copy back, then restore the build and start it",
+  which has to happen in that order and cannot be assembled from here. It is
+  handed the three things this function knows and the caller does not: how far
+  the build's own output says the migration got ('none'/'maybe'), the child's
+  output file, and the build that was put aside. It returns @{ PaperUp;
+  Sentence }. Without it this falls back exactly as it always has, which is
+  what the fake-runner tests drive.
+
   Returns @{ Ok; ExitCode; Seconds; OutFile; Previous; Fallback; PaperUp;
   Failure }, where Failure is a plain-words sentence for the operator.
 #>
@@ -713,7 +1354,8 @@ function Invoke-PromoteBuild {
     [Parameter(Mandatory = $true)][string]$Command,
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
     [string]$Previous = "",
-    [int]$TimeoutSeconds = -1
+    [int]$TimeoutSeconds = -1,
+    [scriptblock]$Recover = $null
   )
   # `npm run build` is `vite build && ... && npm run db:migrate` (package.json),
   # so this step migrates the database too. It is named in the log for that
@@ -753,12 +1395,19 @@ function Invoke-PromoteBuild {
   # Did this build get as far as the migration before it died? Only the build's
   # own output can answer that -- see Test-PromoteMigrateRan.
   $migrations = if (Test-PromoteMigrateRan -BuildOutput $child.OutFile) { 'maybe' } else { 'none' }
-  $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $previous -MigrationsRan $migrations -BuildOutput $child.OutFile
 
   $outcome = "The paper is still down."
-  if ($paperUp) {
-    $outcome = Get-PromoteFallbackSentence -App $App -MigrationsRan $migrations -BuildOutput $child.OutFile
-    if (-not $outcome) { $outcome = "The paper is back on the OLD version; the promote did not complete." }
+  $paperUp = $false
+  if ($Recover) {
+    $recovered = & $Recover $migrations $child.OutFile $previous
+    $paperUp = [bool]$recovered.PaperUp
+    if ($paperUp -and $recovered.Sentence) { $outcome = "$($recovered.Sentence)" }
+  } else {
+    $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $previous -MigrationsRan $migrations -BuildOutput $child.OutFile
+    if ($paperUp) {
+      $outcome = Get-PromoteFallbackSentence -App $App -MigrationsRan $migrations -BuildOutput $child.OutFile
+      if (-not $outcome) { $outcome = "The paper is back on the OLD version; the promote did not complete." }
+    }
   }
   $failure = "$Command did not succeed ($code). $outcome"
   # The step's own FAILED line, written here rather than by the caller's
@@ -774,5 +1423,884 @@ function Invoke-PromoteBuild {
     Fallback = $paperUp
     PaperUp  = $paperUp
     Failure  = $failure
+  }
+}
+
+# --- the database copy, and the swap that puts it back ----------------------
+#
+# A failed promote can leave the live database half-migrated: `npm run build`
+# runs `db:migrate` before the new app starts, so a build that dies inside the
+# migration, or a new app that cannot read the schema the migration left, is a
+# state the previous build cannot serve from. Putting the previous build back
+# is then only half a rollback.
+#
+# So the promotion copies the database before it builds, and puts the copy back
+# when the rollout fails. ALL of the database work -- the name checks, the
+# connection wait, `CREATE DATABASE ... TEMPLATE`, the renames -- lives in
+# ops\lib-promote-db.mjs, where it is covered by a test against a real
+# Postgres. This section is the other half: it runs that library as a child
+# (so it gets the same time limit, the same detached output files and the same
+# kill-by-PID as every other long step), reads its one-line JSON answer, and
+# writes what happened into the log.
+
+<#
+  Where the database library is. Under this install's ops\ rather than beside
+  this file, because everything here already works from the app directory it
+  was handed ($App) -- Get-PromoteRecoveryCommand above does the same -- and
+  because the promotion is always run from the install it is promoting.
+
+  A test replaces this to drive the ordering below with a fake library; the
+  function exists for that, so that not one line of the ordering has to be
+  copied into a test to be covered.
+#>
+function Get-PromoteDbLibraryPath {
+  param([Parameter(Mandatory = $true)][string]$App)
+  return (Join-Path (Join-Path $App 'ops') 'lib-promote-db.mjs')
+}
+
+<#
+  Everything the database library needs, as environment variables.
+
+  NOT on the command line, deliberately: the admin connection string holds a
+  password, and every command a step runs is written into the promotion's log.
+
+  The admin connection is PROMOTE_ADMIN_DATABASE_URL from the install's .env
+  when it is set, and the app's own DATABASE_URL otherwise. The first is for an
+  install whose app role is deliberately not allowed to create databases --
+  see the role check in the library's preflight.
+#>
+function New-PromoteDbEnvironment {
+  param(
+    [string]$AdminUrl = "",
+    [string]$DatabaseUrl = "",
+    [string]$Database = "",
+    [string]$Copy = "",
+    [string]$Failed = "",
+    [string]$Stamp = ""
+  )
+  $admin = $AdminUrl
+  if (-not $admin) { $admin = $DatabaseUrl }
+  <#
+    THE LIVE-PROMOTE FLAG, and this is the only place in the tree that sets it.
+
+    ops\lib-promote-db.mjs refuses to touch a PostgreSQL on port 5433 -- the
+    live paper's, on the machine that runs it -- unless this is "1". The live
+    database's connection string is in the install's .env, which is exactly
+    what a test or a hand-typed command on that machine inherits, so the port
+    itself has to be the thing that is guarded, and the flag is the way past it.
+
+    The flag is set by ANY caller of this function that is not running under
+    -WhatIf, and it is not a secret or a signature: what it means is "the
+    caller has decided this is a real promotion". In the tree that is
+    ops\promote.ps1 -- the real promotion and the real `-RollbackDatabase` --
+    and the harnesses in scripts\promote-step-runner.test.mjs. What it
+    protects against is the thing that actually happens: a test, a hand-typed
+    command or a dry run inheriting .env, finding the live paper by accident,
+    and having no flag to say it meant to.
+
+    NOT under -WhatIf, EXCEPT for the three READ-ONLY commands: see
+    Get-PromoteDbCommandEnvironment below. A dry run renames nothing, so the
+    flag set here stays empty under -WhatIf, and the copy, the swap and the
+    hand rollback therefore still refuse a 5433 URL in a dry run. The
+    read-only commands (names, preflight, state) are let through by that
+    function so that a -WhatIf run on the production machine can still do its
+    read-only database checks -- the production auditor's call, 2026-10-01.
+
+    $WhatIfPreference is read here rather than passed in because it is the
+    script's own, set by [CmdletBinding(SupportsShouldProcess = $true)] on
+    ops\promote.ps1, and a function called from it sees it through the scope
+    chain. A caller that has no such preference (a test) gets the real flag,
+    which changes nothing for a test: no test points at 5433.
+  #>
+  $live = "1"
+  if ($WhatIfPreference) { $live = "" }
+  return @{
+    PROMOTE_DB_ADMIN_URL       = $admin
+    PROMOTE_DB_DATABASE_URL    = $DatabaseUrl
+    PROMOTE_DB_DATABASE        = $Database
+    PROMOTE_DB_COPY            = $Copy
+    PROMOTE_DB_FAILED          = $Failed
+    PROMOTE_DB_STAMP           = $Stamp
+    PROMOTE_DB_WAIT_SECONDS    = [string](Get-PromoteDbWaitSeconds)
+    PROMOTE_DB_TIMEOUT_SECONDS = [string](Get-PromoteChildTimeoutSeconds -Step 'dbcopy')
+    PROMOTE_DB_LIVE_PROMOTE    = $live
+  }
+}
+
+<#
+  The environment ONE database command runs with.
+
+  The live-promote flag is the only thing that lets ops\lib-promote-db.mjs
+  touch a PostgreSQL on port 5433. Under -WhatIf it is empty, which would make
+  a dry run on a 5433 install stop at the preflight. The three commands that
+  only READ -- names, preflight, state -- are therefore allowed to carry the
+  flag under -WhatIf; copy, wait-for-zero, swap-back and rollback never are, so
+  a dry run still cannot copy, rename or swap anything on 5433 (the library
+  refuses them, and the test pins it). Outside -WhatIf the environment is
+  returned untouched.
+#>
+function Get-PromoteDbCommandEnvironment {
+  param(
+    [Parameter(Mandatory = $true)][string]$Command,
+    [Parameter(Mandatory = $true)][hashtable]$Environment
+  )
+  $result = @{}
+  foreach ($name in @($Environment.Keys)) { $result[$name] = $Environment[$name] }
+  $readOnly = @('names', 'preflight', 'state') -contains $Command
+  if ($WhatIfPreference -and $readOnly) { $result['PROMOTE_DB_LIVE_PROMOTE'] = '1' }
+  return $result
+}
+
+<#
+  The library's answer: one JSON object on one line of its own stdout.
+
+  Read back out of the file the child's output was redirected to, not out of a
+  pipeline -- that is the whole point of the detached runner above, and it is
+  also why this reads the LAST line that parses: the wrapper .cmd appends its
+  own PROMOTE_EXIT line after the JSON.
+
+  Returns $null when there is no answer at all, which the caller must treat as
+  a failure rather than as an empty success.
+#>
+function Read-PromoteDbReport {
+  param([string]$Path)
+  if (-not $Path -or -not (Test-Path $Path)) { return $null }
+  $parsed = $null
+  foreach ($line in @(Get-Content -Path $Path -Tail 40 -ErrorAction SilentlyContinue)) {
+    $text = "$line".Trim()
+    if (-not $text.StartsWith('{')) { continue }
+    try { $parsed = $text | ConvertFrom-Json } catch { }
+  }
+  return $parsed
+}
+
+<#
+  Run one database command as a detached child and read its answer.
+
+  The environment is put back exactly as it was afterwards, so the app that
+  this promotion starts later does not inherit a promotion's connection
+  strings (the started app is handed the install's own .env, and a stale
+  admin URL in its environment would be a surprise nobody would look for).
+
+  Returns @{ Ok; Command; Data; Failure; ExitCode; OutFile; Seconds;
+  TimedOut }, where Failure is a plain sentence for the operator.
+#>
+function Invoke-PromoteDbCommand {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Command,
+    [Parameter(Mandatory = $true)][hashtable]$Environment,
+    [string]$Step = "",
+    [int]$TimeoutSeconds = -1
+  )
+  if (-not $Step) { $Step = $Command }
+  if ($TimeoutSeconds -lt 0) { $TimeoutSeconds = Get-PromoteChildTimeoutSeconds -Step $Step }
+  $Environment = Get-PromoteDbCommandEnvironment -Command $Command -Environment $Environment
+
+  $saved = @{}
+  foreach ($name in @($Environment.Keys)) {
+    $saved[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+    [Environment]::SetEnvironmentVariable($name, [string]$Environment[$name], 'Process')
+  }
+  $child = $null
+  try {
+    # Bare `node`, the way the npm steps use bare `npm`: it is what is on the
+    # machine's PATH, it is what the rest of ops\ uses, and it is what a test
+    # replaces to drive all of the ordering below with a fake library.
+    $library = Get-PromoteDbLibraryPath -App $App
+    $commandLine = "node `"$library`" $Command"
+    $child = Invoke-PromoteChild -Log $Log -Step $Step -Command $commandLine -TimeoutSeconds $TimeoutSeconds
+  } finally {
+    foreach ($name in @($saved.Keys)) {
+      [Environment]::SetEnvironmentVariable($name, $saved[$name], 'Process')
+    }
+  }
+
+  $report = Read-PromoteDbReport -Path $child.OutFile
+  $ok = ($null -ne $report) -and ($report.ok -eq $true)
+  $failure = ""
+  if (-not $ok) {
+    if ($child.TimedOut) {
+      $failure = "$Command ran past its $TimeoutSeconds-second limit and was stopped"
+    } elseif ($null -eq $report) {
+      $failure = "$Command did not produce an answer (exit $($child.ExitCode)); its output is in $($child.OutFile)"
+    } elseif ($report.refusal) {
+      $failure = "$($report.refusal)"
+    } elseif ($report.error) {
+      $failure = "$Command failed: $($report.error)"
+    } else {
+      $failure = "$Command did not succeed (exit $($child.ExitCode)); its output is in $($child.OutFile)"
+    }
+  }
+  return [pscustomobject]@{
+    Ok       = $ok
+    Command  = $Command
+    Data     = $report
+    Failure  = $failure
+    ExitCode = $child.ExitCode
+    OutFile  = $child.OutFile
+    Seconds  = $child.Seconds
+    TimedOut = $child.TimedOut
+  }
+}
+
+<#
+  The three names, and nothing else. No connection to the server is made.
+
+  Used by a resumed run that is carrying on from a step BEFORE the copy -- it
+  has no names in hand, and it must not invent them here, because the copy
+  command validates the name it is given against the same rule. One rule, one
+  place: ops\lib-promote-db.mjs.
+#>
+function Invoke-PromoteDatabaseNames {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+    [Parameter(Mandatory = $true)][string]$Stamp
+  )
+  $values = New-PromoteDbEnvironment -DatabaseUrl $DatabaseUrl -Stamp $Stamp
+  return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'names' -Step 'dbstate' -Environment $values
+}
+
+<#
+  Everything about the database that can be settled before the paper is
+  stopped: the names, whether the copy's name is free, whether the role may
+  create a database, and whether there is room on the disk for one.
+
+  Read-only, and it changes nothing. Run inside the promotion's own `preflight`
+  step, which is before `stop`, for the reason that step exists at all.
+#>
+function Invoke-PromoteDatabasePreflight {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$DatabaseUrl,
+    [Parameter(Mandatory = $true)][string]$Stamp,
+    [string]$AdminUrl = ""
+  )
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Stamp $Stamp
+  return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'preflight' -Step 'preflight' -Environment $values
+}
+
+<#
+  Take the copy. `Create database <copy> template <live>`.
+
+  Only reachable from the `dbcopy` step, which is after the app has been
+  stopped: PostgreSQL refuses to copy a database anybody is connected to, and
+  the app is the connection. The library checks that for itself as well, so a
+  session that arrives in the gap between the stop and this call is refused
+  rather than half-copied.
+#>
+function Invoke-PromoteDatabaseCopy {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$Copy,
+    [Parameter(Mandatory = $true)][string]$Failed,
+    [Parameter(Mandatory = $true)][string]$Stamp,
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = ""
+  )
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
+  return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'copy' -Step 'dbcopy' -Environment $values
+}
+
+<#
+  What exists on the server right now, by name and size. Read-only.
+
+  A resumed run asks this before it carries on: it must never take a second
+  copy, and it must never put a copy back that is not there.
+#>
+function Invoke-PromoteDatabaseState {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [string]$Database = "",
+    [string]$Copy = "",
+    [string]$Failed = "",
+    [string]$Stamp = "",
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = ""
+  )
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
+  return Invoke-PromoteDbCommand -Log $Log -App $App -Command 'state' -Step 'dbstate' -Environment $values
+}
+
+<#
+  The swap: rename the live database aside, then rename the copy into its
+  place. The library refuses unless nobody is connected to the live database,
+  so the wait below is what normally makes it succeed.
+
+  `-Mode 'manual'` is the operator's own rollback (`-RollbackDatabase`) rather
+  than the promotion putting things back by itself; it only changes the words
+  in the refusals.
+#>
+function Invoke-PromoteDatabaseSwapBack {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$Copy,
+    [Parameter(Mandatory = $true)][string]$Failed,
+    [string]$Stamp = "",
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = "",
+    [ValidateSet('recovery', 'manual')][string]$Mode = 'recovery'
+  )
+  $values = New-PromoteDbEnvironment -AdminUrl $AdminUrl -DatabaseUrl $DatabaseUrl -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp
+
+  Write-PromoteLog $Log "waiting up to $(Get-PromoteDbWaitSeconds)s for every connection to $Database to close"
+  $waited = Invoke-PromoteDbCommand -Log $Log -App $App -Command 'wait-for-zero' -Step 'dbswap' -Environment $values
+  if (-not $waited.Ok) {
+    # Refused, and NOTHING was renamed. This is the one case where the
+    # database keeps whatever the failed rollout did to it, so it has to be
+    # said in full rather than folded into a shorter sentence.
+    Write-PromoteLog $Log "the database was NOT swapped back: $($waited.Failure)"
+    return [pscustomobject]@{ Ok = $false; Swapped = $false; Data = $null; Failure = $waited.Failure }
+  }
+  Write-PromoteLog $Log "nobody is connected to $Database (waited $([math]::Round([double]$waited.Data.waitedSeconds,1))s)"
+
+  $command = if ($Mode -eq 'manual') { 'rollback' } else { 'swap-back' }
+  $swapped = Invoke-PromoteDbCommand -Log $Log -App $App -Command $command -Step 'dbswap' -Environment $values
+  if (-not $swapped.Ok) {
+    # The library records which renames it got through even when it reports a
+    # failure, and those lines belong in the log: a rename that really
+    # happened is the difference between "the database was not touched" and
+    # "the paper's data is under a different name now".
+    foreach ($step in @($swapped.Data.steps)) { Write-PromoteLog $Log "database: $step" }
+    Write-PromoteLog $Log "the database was NOT swapped back: $($swapped.Failure)"
+    return [pscustomobject]@{ Ok = $false; Swapped = $false; Data = $swapped.Data; Failure = $swapped.Failure }
+  }
+  foreach ($step in @($swapped.Data.steps)) { Write-PromoteLog $Log "database: $step" }
+  if ($swapped.Data.resumedFromHalfState) {
+    Write-PromoteLog $Log "this swap had already been started once and stopped half way; it has been finished, so $Database is the copy again"
+  }
+  # A size that could not be read afterwards is not a swap that failed. The
+  # database the paper serves is already the copy; the number is only what the
+  # log says about it.
+  $size = "size unknown"
+  if ($swapped.Data.sizeKnown) { $size = Format-PromoteDbSize $swapped.Data.sizeBytes }
+  elseif ($swapped.Data.sizeNote) { Write-PromoteLog $Log "database: $($swapped.Data.sizeNote)" }
+  Write-PromoteLog $Log "the database the paper serves is $Database again; what the failed rollout did to it is kept as $Failed ($size)"
+  return [pscustomobject]@{ Ok = $true; Swapped = $true; Data = $swapped.Data; Failure = "" }
+}
+
+<#
+  A size a person reads, out of the bytes the library reported.
+#>
+function Format-PromoteDbSize {
+  param($Bytes)
+  $value = 0.0
+  try { $value = [double]$Bytes } catch { $value = 0 }
+  if ($value -ge 1073741824) { return "$([math]::Round($value / 1073741824, 1)) GB" }
+  if ($value -ge 1048576) { return "$([math]::Round($value / 1048576, 1)) MB" }
+  if ($value -ge 1024) { return "$([math]::Round($value / 1024, 1)) KB" }
+  return "$([int]$value) bytes"
+}
+
+<#
+  The stamp inside a copy's name: `<database>_prerollout_<yyyyMMddHHmmss>`.
+  Returns $null when the name is not a copy's.
+#>
+function Get-PromoteCopyStamp {
+  param([string]$Copy)
+  $m = [regex]::Match("$Copy", '_prerollout_(\d{14})$')
+  if (-not $m.Success) { return $null }
+  return $m.Groups[1].Value
+}
+
+<#
+  Was this copy taken AFTER the paper was stopped?
+
+  A copy is a picture of the database. One taken before the app went down is a
+  picture of a database that was still being written to, so putting it back
+  would silently throw away whatever the app did between the copy and the stop.
+  The promotion never makes one in that order -- `dbcopy` is after `stop` --
+  which is exactly why a resumed run checks rather than assumes: the names come
+  out of a log file, and a log file can be a run that was renamed, copied or
+  edited by hand between the two runs.
+
+  BOTH TIMES COME FROM THE LOG'S OWN STEP LINES, and that is the fix the
+  auditor's B3 was about. The obvious-looking version of this compared the
+  stamp inside the copy's NAME with the stop time -- but that stamp is the
+  second the RUN started, and the stop is however long later the backup took.
+  Measured on a promotion that takes its backup in 41 seconds, the copy's name
+  stamp is 41 seconds older than the stop, so the check said "not taken after
+  the paper was stopped" for every real run and `-Resume` could never get past
+  `dbcopy`. Only a run whose backup finished inside the same second as its
+  start ever passed, which is not a case that happens.
+
+  The `step=dbcopy` line's time is when the copy was actually made, on the same
+  clock as the `step=stop ok` line's. Those two are comparable, and their order
+  is what "taken after the stop" means.
+
+  Returns $true only when the copy can be shown to be at or after the stop.
+  Nothing to compare against is NOT a pass.
+#>
+function Test-PromoteCopyFreshness {
+  param(
+    [string]$CopyAt = "",
+    [string]$StopAt = ""
+  )
+  if (-not $CopyAt -or -not $StopAt) { return $false }
+  try {
+    $taken = [datetime]::ParseExact($CopyAt, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+    $stopped = [datetime]::ParseExact($StopAt, 'yyyy-MM-dd HH:mm:ss', [System.Globalization.CultureInfo]::InvariantCulture)
+  } catch {
+    return $false
+  }
+  return ($taken -ge $stopped)
+}
+
+<#
+  The exact command that puts a copy back by hand, for printing to the
+  operator. Copy-and-paste ready, one line, like Get-PromoteRecoveryCommand.
+#>
+function Get-PromoteRollbackCommand {
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][string]$Copy
+  )
+  $script = Join-Path (Join-Path $App "ops") "promote.ps1"
+  return "powershell -NoProfile -ExecutionPolicy Bypass -File `"$script`" -RollbackDatabase $Copy"
+}
+
+<#
+  The plain words for an operator whose rollout failed and whose database has
+  been put back. Two facts have to survive into that sentence: which database
+  the paper is serving now, and where the failed rollout's schema went.
+#>
+function Get-PromoteDbSwapSentence {
+  param(
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$Failed
+  )
+  return "The paper is serving $Database again -- the copy taken before this rollout. No data was lost: the paper was stopped from before the copy was taken until now, so nothing was written in between. What the failed rollout did to the database is kept as $Failed and nothing has been deleted."
+}
+
+<#
+  The whole of the failure path once a copy exists: stop whatever is serving
+  the new build, put the copy back, restore the build that was running before,
+  start it, and check it answers.
+
+  This is the unit's reason for existing. Without it, a build that died inside
+  the migration leaves the old build serving a database that has moved on --
+  and a page reading a column a migration changed answers wrongly rather than
+  failing, which is the worst way for a newspaper to be wrong.
+
+  It runs on EVERY failure after the copy: the dependency install, the
+  fast-forward, the build/migration, and a new build that never answers. One
+  rule, because at 2 AM a rule with exceptions is a rule that gets applied
+  wrongly. It NEVER runs after the health checks pass -- by then the new app
+  has been serving and taking writes, and putting a picture of the database
+  back would throw those away. That case prints the command to do it by hand
+  instead, and says what it costs.
+
+  The two scriptblocks are the caller's stop and start, so the ordering that
+  matters lives here, where scripts\promote-step-runner.test.mjs can drive it
+  with fakes.
+
+  Returns @{ PaperUp; Swapped; SwappedOk; Database; Copy; Failed; Failure }
+  where Failure is a plain-words sentence for the operator.
+#>
+function Invoke-PromoteFailedRollout {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][scriptblock]$StopTheApp,
+    [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [Parameter(Mandatory = $true)][string]$Why,
+    [string]$Copy = "",
+    [string]$Failed = "",
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = "",
+    [string]$Previous = "",
+    [ValidateSet('none', 'maybe', 'yes')][string]$MigrationsRan = 'none',
+    [string]$BuildOutput = "",
+    [string]$Stamp = "",
+    # The commit the promotion started from. The fallback puts the CHECKOUT
+    # back to it as well as the build and the database -- see FINDING C in
+    # Restore-PromoteCheckout.
+    [string]$HeadAtStart = "",
+    # $false for a failure that happened before anything touched .output -- the
+    # fast-forward, or the dependency install. There the build ON DISK is still
+    # the one that was serving, and restoring .output-previous (which is a build
+    # from an EARLIER promotion) would replace a working build with an older one.
+    [bool]$RestoreBuild = $true
+  )
+  $swapped = $false
+  $swapFailure = ""
+
+  Write-PromoteLog $Log "the rollout failed ($Why); stopping anything left serving the new build"
+  $stopResult = & $StopTheApp
+  if ($stopResult -and $stopResult.Foreign) {
+    Write-PromoteLog $Log "port is held by $($stopResult.Foreign), which is not this app -- not touching it"
+  } elseif ($stopResult -and @($stopResult.Stopped).Count -gt 0) {
+    Write-PromoteLog $Log "stopped $((@($stopResult.Stopped)) -join ', ')"
+  } else {
+    Write-PromoteLog $Log "nothing was listening, so there was nothing to stop"
+  }
+
+  if ($Copy) {
+    Write-PromoteLog $Log "putting the database back: $Database will become $Failed and $Copy will become $Database"
+    $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $Failed -Stamp $Stamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'recovery'
+    $swapped = $result.Swapped
+    $swapFailure = $result.Failure
+  } else {
+    Write-PromoteLog $Log "there is no copy of $Database from this run, so the database is left exactly as it is"
+    $swapFailure = "There is no pre-rollout copy of $Database from this run, so the database could not be put back."
+  }
+
+  <#
+    'none' when the database was put back, and that is not a detail.
+
+    MigrationsRan exists to say "the old build you are about to serve is
+    sitting on a database that has moved on". Once the copy is back, the
+    database has NOT moved on -- it is the picture from before this rollout --
+    so telling the operator that migrations may have run would send them
+    looking for a problem that is not there. The warning is only true on the
+    path where the swap could not happen, which is the one it is kept for.
+  #>
+  $migrationsForFallback = $MigrationsRan
+  if ($swapped) { $migrationsForFallback = 'none' }
+
+  if ($RestoreBuild) {
+    $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $Previous -MigrationsRan $migrationsForFallback -BuildOutput $BuildOutput -HeadAtStart $HeadAtStart
+  } else {
+    Write-PromoteLog $Log "the build on disk is the one that was serving before this run, so it is started as it is"
+    # The checkout goes back BEFORE anything is started, for the same reason it
+    # does on the branch above: the start script reads migrations from the
+    # checkout, and a start from the new code migrates the restored database
+    # forward again.
+    $checkout = Restore-PromoteCheckout -Log $Log -App $App -Head $HeadAtStart
+    if (-not $checkout.Ok) {
+      Write-PromoteLog $Log "the app has NOT been started: the checkout could not be put back first"
+      $paperUp = $false
+    } else {
+      $paperUp = [bool](& $StartTheApp)
+    }
+    if ($paperUp) { Write-PromoteLog $Log "the paper is back on the version it was running. The promote did NOT complete." }
+  }
+
+  $sentence = ""
+  if ($swapped -and $paperUp) {
+    <#
+      ONLY once the paper has actually answered. An earlier version printed
+      this whenever the swap had worked, including when the start afterwards
+      had failed -- so the auditor's run read "The paper is serving
+      townreporter_prodclone again" and then found the paper DOWN. "The paper
+      is serving X" is a claim about a running process, and it is only true
+      once one is answering.
+    #>
+    $sentence = Get-PromoteDbSwapSentence -Database $Database -Failed $Failed
+    <#
+      The failure happened BEFORE the build ran -- the fast-forward, or the
+      dependency install -- so `npm run db:migrate` never ran and the two
+      databases hold the same data.
+
+      Said out loud because the rest of the sentence would otherwise read as
+      though something had gone wrong with the paper's data: an operator
+      looking at a `_failed_` database after a promote that failed at `git
+      merge` needs to know it is an exact duplicate of the one being served,
+      not a half-migrated one to go and inspect.
+    #>
+    if (-not $RestoreBuild) {
+      $sentence = "$sentence The build had not started, so nothing had been migrated: that database holds exactly the same data as the one the paper is serving."
+    }
+  } elseif ($swapped) {
+    <#
+      The database went back and the paper did NOT come up. What is true, in
+      the order an operator needs it: the data is where it was before the
+      rollout, the paper is down, and where to read why. The command that
+      brings it back is printed by the caller, last.
+    #>
+    $sentence = "The database was put back -- $Database is the copy taken before this rollout, and no data was lost -- but the paper did NOT start. Read logs\townreporter.log for why."
+  } elseif (-not $paperUp) {
+    $sentence = "The paper is still down and the database was not put back. $swapFailure"
+  } else {
+    $sentence = "$swapFailure $((Get-PromoteFallbackSentence -App $App -MigrationsRan $MigrationsRan -BuildOutput $BuildOutput))".Trim()
+    if (-not $sentence) { $sentence = "The paper is back on the OLD version and the database could not be put back." }
+  }
+  Write-PromoteLog $Log $sentence
+
+  return [pscustomobject]@{
+    PaperUp   = $paperUp
+    Swapped   = $swapped
+    Database  = $Database
+    Copy      = $Copy
+    Failed    = $Failed
+    Failure   = $sentence
+    SwapError = $swapFailure
+  }
+}
+
+<#
+  The whole of `ops\promote.ps1 -RollbackDatabase <copy>`: the promotion's
+  failure path, run afterwards, by an operator, on purpose.
+
+  It is the same swap as the automatic recovery and it is deliberately a
+  separate function, because the two differ in the one way that matters: this
+  one is reached when the new app HAS been serving and taking writes, so it
+  destroys those writes rather than rescuing them.
+
+  THE APP COMES FIRST. Before it reads anything, before it plans anything, this
+  asks whether the paper is answering on its port, and refuses if it is:
+
+    "The paper is answering on port N. Stop it first, or run the promote's own
+     recovery; nothing was changed."
+
+  The reason is not tidiness. A promotion that failed its own health checks
+  leaves the paper UP and serving -- that is the case this command is printed
+  for -- and an operator reaching for it while the new app is still running
+  gets a database swapped out from under a live process. The app holds
+  connections to the database being renamed, so the swap would refuse anyway;
+  but "refused because something is connected" is a worse sentence at 2 AM
+  than "the paper is answering on port 3000", and by then the operator has
+  already been told nothing about what they were about to do.
+
+  -StopApp is the deliberate exception: the operator has said so, the app is
+  stopped by PID exactly as the rest of this script stops it, and then it
+  continues.
+
+  WHAT IT PRINTS BEFORE IT CHANGES ANYTHING, in the log and wherever the
+  caller's -Announce points:
+
+    <copy> (597.7 MB) becomes <database>; the current <database> (610.2 MB)
+    is kept as <database>_failed_<stamp>
+
+  Names AND sizes, both, before a single rename: which database the paper is
+  about to serve is the whole of what this command decides, and the sizes are
+  what tell an operator whether they have picked the right copy.
+
+  -DryRun prints the same sentence and stops there. It is -WhatIf, and it
+  matters more here than anywhere else in the script: this is the only path in
+  it where the thing being undone cannot be re-done.
+
+  Returns @{ Refused; DryRun; Swapped; PaperUp; Database; Copy; Failed; Plan;
+  Failure }, where Refused means nothing was touched at all.
+#>
+function Invoke-PromoteDatabaseRollback {
+  param(
+    [Parameter(Mandatory = $true)]$Log,
+    [Parameter(Mandatory = $true)][string]$App,
+    [Parameter(Mandatory = $true)][int]$Port,
+    [Parameter(Mandatory = $true)][scriptblock]$TestThePort,
+    [Parameter(Mandatory = $true)][scriptblock]$StopTheApp,
+    [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
+    [Parameter(Mandatory = $true)][string]$Copy,
+    [Parameter(Mandatory = $true)][string]$Database,
+    [string]$DatabaseUrl = "",
+    [string]$AdminUrl = "",
+    [string]$Stamp = "",
+    [switch]$StopApp,
+    [switch]$DryRun,
+    [scriptblock]$Announce = $null
+  )
+  <#
+    THE FAILED NAME COMES FROM THE COPY'S OWN STAMP, not from the clock.
+
+    A promotion names its copy and the database it sets aside after the same
+    second -- `<db>_prerollout_<stamp>` and `<db>_failed_<stamp>` -- so the
+    stamp inside the copy's name IS the name of the database that rollout
+    moved aside. Deriving it here rather than inventing a fresh one buys two
+    things:
+
+      - the two names pair up in the server's database list, which is how an
+        operator sees at a glance which copy belongs to which failure;
+      - a swap that stopped between its two renames can be FINISHED. In that
+        state the live name is free, the copy is waiting and its data is under
+        `<db>_failed_<the copy's stamp>` -- the only name this function could
+        look under. A fresh stamp would name a database that does not exist,
+        and the command the promotion tells the operator to run would refuse.
+
+    $Stamp is the fallback for a name that carries no stamp at all, which the
+    swap itself refuses anyway.
+  #>
+  $copyStamp = Get-PromoteCopyStamp -Copy $Copy
+  if (-not $copyStamp) { $copyStamp = $Stamp }
+  if (-not $copyStamp) { $copyStamp = Get-Date -Format 'yyyyMMddHHmmss' }
+  $failed = "$Database`_failed_$copyStamp"
+
+  # --- the port, first, before anything is read or planned ------------------
+  $paperUp = [bool](& $TestThePort)
+  if ($paperUp -and -not $StopApp) {
+    $sentence = "The paper is answering on port $Port. Stop it first, or run the promote's own recovery; nothing was changed."
+    Write-PromoteLog $Log $sentence
+    return [pscustomobject]@{
+      Refused  = $true
+      DryRun   = $false
+      Swapped  = $false
+      PaperUp  = $true
+      Database = $Database
+      Copy     = $Copy
+      Failed   = $failed
+      Plan     = ""
+      Failure  = $sentence
+    }
+  }
+  if ($paperUp) {
+    Write-PromoteLog $Log "the paper is answering on port $Port, and -StopApp was passed, so it will be stopped by PID before anything is renamed"
+  } else {
+    Write-PromoteLog $Log "nothing is answering on port $Port, so there is no app to stop"
+  }
+
+  # --- what the swap would do, with the sizes -------------------------------
+  $liveSize = "size unknown"
+  $copySize = "size unknown"
+  $failedSize = "size unknown"
+  $state = Invoke-PromoteDatabaseState -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -Stamp $copyStamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl
+  $liveExists = $false
+  $failedExists = $false
+  if ($state.Ok) {
+    $live = $state.Data.databases.$Database
+    if ($live -and $live.exists) { $liveExists = $true; $liveSize = Format-PromoteDbSize $live.sizeBytes }
+    $copyEntry = $state.Data.databases.$Copy
+    if ($copyEntry -and $copyEntry.exists) { $copySize = Format-PromoteDbSize $copyEntry.sizeBytes }
+    $failedEntry = $state.Data.databases.$failed
+    if ($failedEntry -and $failedEntry.exists) { $failedExists = $true; $failedSize = Format-PromoteDbSize $failedEntry.sizeBytes }
+  } else {
+    # Not fatal on its own: the swap below asks the same server the same
+    # question and will refuse with its own sentence if it cannot be reached.
+    Write-PromoteLog $Log "could not read the sizes before the rollback: $($state.Failure)"
+  }
+  <#
+    Two plans, because two different things can be about to happen.
+
+    An EARLIER SWAP THAT STOPPED HALF WAY -- no live name, the failed name
+    present, the copy waiting -- is finished rather than started: the database
+    that was serving is already under the failed name, and the only rename
+    left is the copy's. Printing the ordinary plan there would describe a
+    rename that is not going to happen, and would name the live database as
+    something it is not (it does not exist).
+  #>
+  $plan = ""
+  if (-not $liveExists -and $failedExists) {
+    $plan = "$Copy ($copySize) finishes a swap that stopped half way: $failed ($failedSize) already holds what was serving, and $Copy becomes $Database."
+  } else {
+    $plan = "$Copy ($copySize) becomes $Database; the current $Database ($liveSize) is kept as $failed."
+  }
+  Write-PromoteLog $Log $plan
+  if ($Announce) { & $Announce $plan }
+
+  if ($DryRun) {
+    Write-PromoteLog $Log "database rollback: -WhatIf, so nothing was stopped, renamed or started."
+    return [pscustomobject]@{
+      Refused  = $false
+      DryRun   = $true
+      Swapped  = $false
+      PaperUp  = $paperUp
+      Database = $Database
+      Copy     = $Copy
+      Failed   = $failed
+      Plan     = $plan
+      Failure  = ""
+    }
+  }
+
+  # --- stop the app, only when the operator said so --------------------------
+  if ($StopApp) {
+    $stopResult = & $StopTheApp
+    if ($stopResult -and $stopResult.Foreign) {
+      $sentence = "Port $Port is held by $($stopResult.Foreign), which is not this app. Not touching it, and not rolling anything back. Nothing was changed."
+      Write-PromoteLog $Log $sentence
+      return [pscustomobject]@{
+        Refused = $true; DryRun = $false; Swapped = $false; PaperUp = $true
+        Database = $Database; Copy = $Copy; Failed = $failed; Plan = $plan; Failure = $sentence
+      }
+    }
+    $stoppedCount = 0
+    if ($stopResult) { $stoppedCount = @($stopResult.Stopped).Count }
+    if ($stoppedCount -gt 0) { Write-PromoteLog $Log "stopped $((@($stopResult.Stopped)) -join ', ')" }
+    else { Write-PromoteLog $Log "nothing was listening on port $Port" }
+  }
+
+  # --- the swap -------------------------------------------------------------
+  $result = Invoke-PromoteDatabaseSwapBack -Log $Log -App $App -Database $Database -Copy $Copy -Failed $failed -Stamp $copyStamp -DatabaseUrl $DatabaseUrl -AdminUrl $AdminUrl -Mode 'manual'
+  if (-not $result.Swapped) {
+    Write-PromoteLog $Log "the database was NOT rolled back: $($result.Failure)"
+    <#
+      Nothing was renamed, and the app may have been stopped a moment ago, so
+      put the paper back the way it was found: whatever is in .output is what
+      was serving before this command ran.
+    #>
+    $backUp = [bool](& $StartTheApp)
+    if ($backUp) { Write-PromoteLog $Log "the paper is back up on the version it was running; the database rollback did NOT happen." }
+    return [pscustomobject]@{
+      Refused  = $false
+      DryRun   = $false
+      Swapped  = $false
+      PaperUp  = $backUp
+      Database = $Database
+      Copy     = $Copy
+      Failed   = $failed
+      Plan     = $plan
+      Failure  = $result.Failure
+    }
+  }
+  Write-PromoteLog $Log "database: $Database -> $failed (kept, not deleted)"
+  Write-PromoteLog $Log "database: $Copy -> $Database, so the paper will be serving the copy"
+
+  <#
+    The BUILD half. The build that was serving before the promotion is still at
+    .output-previous (Save-PromotePreviousBuild puts it there and only a
+    fallback consumes it), and a database rolled back to before a release wants
+    the build from before that release. When there is none, the current build
+    stays -- the operator is told either way rather than left to guess.
+  #>
+  <#
+    THE CHECKOUT GOES BACK TOO, and it is found rather than remembered: this
+    command is run by an operator, later, with no memory of the promotion that
+    took the copy. The promote log that names the copy is the record of which
+    commit that promotion started from -- and a checkout left at the NEW release
+    is what made the auditor's fallback migrate the restored database forward
+    again. With no log naming a head, the checkout is left alone and the
+    operator is told: guessing at a commit to reset a repository to is worse
+    than the checkout staying put.
+  #>
+  $tookIt = Get-PromoteHeadForCopy -App $App -Copy $Copy
+  if ($tookIt.Found) {
+    if ($tookIt.Head) {
+      Write-PromoteLog $Log "the promotion that took $Copy started from commit $($tookIt.Head) (its log: $($tookIt.LogPath))"
+      $checkout = Restore-PromoteCheckout -Log $Log -App $App -Head $tookIt.Head
+      if (-not $checkout.Ok) {
+        Die "The database was rolled back, but the checkout could not be put back at $($tookIt.Head)." '' "Read the log above. The database the paper is serving is $Database; what was serving it before this rollback is kept as $failed."
+      }
+    } else {
+      Write-PromoteLog $Log "the promote log that names $Copy records no commit, so the checkout is being left where it is"
+    }
+  } else {
+    Write-PromoteLog $Log "no promote log here names $Copy, so there is no commit to put the checkout back to; it is being left where it is"
+  }
+
+  $previous = Resolve-PromotePreviousBuild -App $App
+  if ($previous -and (Restore-PromotePreviousBuild -App $App -Previous $previous)) {
+    Write-PromoteLog $Log "the build from before the promotion has been put back at .output"
+  } else {
+    Write-PromoteLog $Log "there is no previous build on disk to put back, so the current build stays"
+  }
+  <#
+    Started WITHOUT migrating, for the same reason the promotion's own fallback
+    does: the database is the restored pre-rollout copy, so the start script
+    must not run the migrations from a checkout that may be at the new release.
+    The caller passes the switch in -StartTheApp.
+  #>
+  $upAgain = [bool](& $StartTheApp)
+  if (-not $upAgain) {
+    Write-PromoteLog $Log "the app did not answer on port $Port after the database rollback"
+  }
+  return [pscustomobject]@{
+    Refused  = $false
+    DryRun   = $false
+    Swapped  = $true
+    PaperUp  = $upAgain
+    Database = $Database
+    Copy     = $Copy
+    Failed   = $failed
+    Plan     = $plan
+    Failure  = ""
   }
 }
