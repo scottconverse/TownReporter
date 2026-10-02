@@ -2129,20 +2129,18 @@ function StoryPage() {
           </InkButton>
         ) : null}
       </div>
-      {onPaper ? (
+      {/*
+        A story that was ALREADY on the paper when the page opened says so here.
+        One printed from this page says so in the bar's own place instead
+        (`PublishBarResult`, unit PUB1), so the same sentence and the same link
+        are never on the screen twice.
+      */}
+      {onPaper && !justPublished ? (
           <p className="note">
             On the paper.{" "}
             <Link to="/desk/published" className="inline-link">
               See it under Published
             </Link>
-            {publishedSlug ? (
-              <>
-                {" · "}
-                <Link to="/articles/$slug" params={{ slug: publishedSlug }} className="inline-link">
-                  Read it on the paper
-                </Link>
-              </>
-            ) : null}
           </p>
         ) : null}
       {comparePair && compareShown ? (
@@ -2637,7 +2635,7 @@ function StoryPage() {
             confirmation (`publishedSlug`); a story that arrived already on the
             paper still says nothing, which is what `!onPaper` was for.
           */}
-          {draftProblem && (!onPaper || Boolean(publishedSlug)) ? (
+          {draftProblem && (!onPaper || (justPublished && msg !== "On the paper.")) ? (
             <Notice kind={/^(Saved\.|On the paper\.)/.test(msg) ? "ok" : "err"}>
               {draftProblem}
               {/*

@@ -114,8 +114,14 @@ describe("the story page draws every publish answer at the bar", () => {
     );
   });
 
-  it("keeps the green 'On the paper.' visible for a story published from this page", () => {
-    assert.match(source, /draftProblem && \(!onPaper \|\| Boolean\(publishedSlug\)\)/);
+  it("shows a note about the printing only when it carries more than the banner already says", () => {
+    /* A story printed from this page says "Published." in the bar's own place;
+       the body Notice appears only for a message beyond that ("On the paper."
+       followed by a notes problem), and the old top note only for a story that
+       was already on the paper when the page opened. So the sentence and the
+       link are never on the screen twice. */
+    assert.match(source, /draftProblem && \(!onPaper \|\| \(justPublished && msg !== "On the paper\."\)\)/);
+    assert.match(source, /\{onPaper && !justPublished \? \(/);
   });
 
   it("gives the printed banner the bar's own place, because a print takes the bar away", () => {

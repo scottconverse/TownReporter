@@ -56,6 +56,8 @@ export function PublishBarResult(props: { state: PublishPressState }) {
             "Read it on the paper",
           )
         : null,
+      state.slug ? " · " : " ",
+      createElement("a", { className: "inline-link", href: "/desk/published" }, "See it under Published"),
     );
   }
   return null;
