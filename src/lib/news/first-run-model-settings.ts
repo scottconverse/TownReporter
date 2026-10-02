@@ -34,6 +34,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql } from "../db.ts";
 import { ForbiddenError, requireEditor } from "./membership.ts";
+import { readModelPromptState, writeModelPromptState } from "./first-run-marker.ts";
 import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 import {
   FIRST_RUN_MODEL_SCOPES,
@@ -98,26 +99,14 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 
 /* ------------------------------------------------------------------------- *
  * The marker
+ *
+ * The two queries and the one write live in ./first-run-marker.ts, so the
+ * Models page's assignment save and the local-model picker can retire the
+ * marker without importing this module (and this module's server functions).
+ * Re-exported here so every existing importer keeps one name for the read.
  * ------------------------------------------------------------------------- */
 
-export async function readModelPromptState(newsroomId: number): Promise<ModelPromptState> {
-  await ensurePaperSettingsSchema();
-  const sql = await getSql();
-  const rows = await sql<{ model_prompt_state: string | null }>`
-    select model_prompt_state from paper_settings where newsroom_id = ${newsroomId} limit 1
-  `;
-  const value = rows[0]?.model_prompt_state ?? null;
-  return value === "stored" || value === "offered" || value === "answered" ? value : null;
-}
-
-async function writeModelPromptState(newsroomId: number, state: Exclude<ModelPromptState, null>) {
-  await ensurePaperSettingsSchema();
-  const sql = await getSql();
-  await sql`
-    update paper_settings set model_prompt_state = ${state}, updated_at = now()
-    where newsroom_id = ${newsroomId}
-  `;
-}
+export { readModelPromptState } from "./first-run-marker.ts";
 
 /* ------------------------------------------------------------------------- *
  * Storing the writing choice, for every scope
@@ -259,6 +248,12 @@ export type AnswerFirstRunModelResult =
  * because they chose THAT model -- together with the provider choice that
  * makes the desk actually run it.
  *
+ * The two answers leave DIFFERENT markers (F3c finding 1). Keeping Automatic
+ * writes `answered`, and the pages open on Automatic. Picking a model writes
+ * `stored` -- the value the automatic first-run default writes -- so the pages
+ * seed from the model that was just chosen instead of sending an explicit
+ * Automatic pick that outranks it. Both make the card go away for good.
+ *
  * A cloud model is refused here as well as filtered in the chooser: the card
  * lists it (an owner may reasonably pick Ollama's hosted DeepSeek on purpose,
  * through the picker), but it must never become the FIRST-RUN default by
@@ -310,7 +305,23 @@ export async function answerFirstRunModelOffer(
       })),
     );
   }
-  await writeModelPromptState(me.newsroomId, "answered");
+  /*
+    F3c finding 1: `stored`, NOT `answered`.
+
+    The two answers to this card are not the same answer. "Keep the Automatic
+    ladder" leaves the pages opening on Automatic -- that is `answered`. A
+    picked model must leave them opening on the model the owner just chose,
+    which is exactly what the automatic first-run default writes: `stored`.
+    Writing `answered` here made the card's receipt a lie: the assignments
+    below were saved, and every hand-pressed Run then sent an explicit
+    Automatic choice, which outranks them.
+
+    It is written LAST, after the picks and the assignments this answer stores.
+    A marker written first would be retired by this door's own writes
+    (`supersedeFirstRunModelDefault`), and the pages would go back to
+    Automatic -- which is the bug this line fixes.
+  */
+  await writeModelPromptState(me.newsroomId, "stored");
   return { ok: true };
 }
 

@@ -25,6 +25,8 @@ import {
   type ModelAssignmentRow,
   type ModelJobKey,
 } from "./model-assignments.ts";
+import { firstRunAssignmentsChanged } from "./first-run-model.ts";
+import { supersedeFirstRunModelDefault } from "./first-run-marker.ts";
 
 /**
  * Idempotent runtime ensure for the PGLite preview and unit-test paths,
@@ -143,12 +145,29 @@ function cleanInput(rows: readonly ModelAssignmentInput[]): ModelAssignmentRow[]
  * The screen sends the rows it is holding, so this is a full replace: a rank
  * left empty is deleted, which is how "Automatic" is expressed (no row at
  * all rather than a row holding the word).
+ *
+ * F3c finding 2, and it belongs here rather than in the screen: a first-run
+ * paper's marker (`stored`) makes every page send an EXPLICIT `local-model`
+ * pick, which outranks whatever this table holds -- so a save that moves a
+ * writing job to another provider would be silently overridden by a seed the
+ * owner never asked for and cannot see. A save that differs from what is
+ * stored therefore retires the seed (`stored` -> `answered`,
+ * ./first-run-marker.ts): the pages open on Automatic again and run what was
+ * just saved. A save that changes nothing -- Save pressed with the values
+ * already there -- is not a change and retires nothing.
+ *
+ * The FIRST-RUN hook and the card call this too. Both write their marker
+ * AFTERWARDS (`stored`, last), so their own writes cannot retire the seed they
+ * are in the middle of creating: at that moment the marker is NULL (a fresh
+ * install) or `offered` (the card), and `supersededModelPromptState` moves
+ * neither.
  */
 export async function saveModelAssignments(
   newsroomId: number,
   rows: readonly ModelAssignmentInput[],
 ): Promise<ModelAssignmentRow[]> {
   const clean = cleanInput(rows);
+  const before = await readModelAssignments(newsroomId);
   await withTransaction(async (sql: Sql) => {
     await sql`delete from model_assignments where newsroom_id = ${newsroomId}`;
     for (const row of clean) {
@@ -158,5 +177,9 @@ export async function saveModelAssignments(
       `;
     }
   });
-  return readModelAssignments(newsroomId);
+  const after = await readModelAssignments(newsroomId);
+  if (firstRunAssignmentsChanged(before, after)) {
+    await supersedeFirstRunModelDefault(newsroomId);
+  }
+  return after;
 }

@@ -45,6 +45,7 @@
 import { pickLoadedLocalModelAcrossServers, type LocalCatalog, type LocalModelEntry, type LocalServer } from "./local-models.ts";
 import { providersFor, type ProviderSurface } from "./provider-registry.ts";
 import type { StoryModelChoice } from "./model-choice.ts";
+import { modelJob, type ModelAssignmentRow } from "./model-assignments.ts";
 
 /**
  * The values `paper_settings.model_prompt_state` may hold. `null` (no row
@@ -66,6 +67,11 @@ export type ModelPromptState = "stored" | "offered" | "answered" | null;
  */
 export const FIRST_RUN_MODEL_SCOPES = ["story", "scan", "opinion", "dark"] as const;
 export type FirstRunModelScope = (typeof FIRST_RUN_MODEL_SCOPES)[number];
+
+/** Is this scope (or a job's surface) one the first-run default covers? */
+export function isFirstRunModelScope(value: unknown): value is FirstRunModelScope {
+  return typeof value === "string" && (FIRST_RUN_MODEL_SCOPES as readonly string[]).includes(value);
+}
 
 /**
  * The provider id "Local model" has in the registry, derived rather than typed
@@ -237,4 +243,69 @@ export function localModelListRows(catalog: LocalCatalog | null): {
   return (catalog?.servers ?? [])
     .filter((server) => server.reachable)
     .map((server) => ({ serverKind: server.kind, baseUrl: server.baseUrl, models: server.models }));
+}
+
+/*
+  ---------------------------------------------------------------------------
+  F3c: when the first-run seed STOPS
+  ---------------------------------------------------------------------------
+
+  F3b made the pages seed from `stored`, which is right at first run and wrong
+  forever after: the seed is an EXPLICIT pick, and an explicit pick outranks
+  `model_assignments`. So an owner who later moves Story drafting, the daily
+  scan, the opinion or Dark Desk to another provider would still watch every
+  hand-pressed Run go to the local model the first run chose -- and nothing in
+  the Models page's save path said otherwise.
+
+  The marker therefore lives only as long as nothing else has moved. The rule
+  is one transition and it is written once, here:
+
+    `stored` -> `answered`        the owner has since decided for themselves
+    NULL      -> NULL             a paper that never ran the hook keeps its
+                                  silence (the live paper is exactly this row)
+    `offered` -> `offered`        the card is still on screen, unanswered
+    `answered` -> `answered`      nothing left to retire
+
+  `answered` is the honest value for a superseded paper: it is what "the card
+  was answered" means (the seed is over), and every reader of the marker --
+  `firstRunPickerDefault`, `firstRunModelCardState` -- already treats it as
+  "Automatic, and no card". Nothing new has to be taught to read it.
+*/
+
+/**
+ * The marker after the owner changes one of their own settings.
+ *
+ * ONLY `stored` moves. A save must never be what puts a marker onto a paper
+ * that had none: the live paper is `NULL`, and "onboarded with your own
+ * assignments" is a finished state, not a superseded first run.
+ */
+export function supersededModelPromptState(state: ModelPromptState): ModelPromptState {
+  return state === "stored" ? "answered" : state;
+}
+
+/**
+ * The stamp of one saved set, over the jobs the first-run seed can override:
+ * a job whose SURFACE is one of the four writing scopes. `ocr` and
+ * `transcript` are `forced` -- a run there must name one exact provider, no
+ * page seeds a picker for them, and so saving one cannot have overridden the
+ * seed.
+ */
+function firstRunAssignmentStamp(rows: readonly ModelAssignmentRow[]): string {
+  return rows
+    .filter((row) => isFirstRunModelScope(modelJob(row.jobKey)?.surface))
+    .map((row) => `${row.jobKey}:${row.rank}:${row.providerId}:${row.effort ?? ""}`)
+    .sort()
+    .join("|");
+}
+
+/**
+ * Did this save change anything the first-run seed covers? `false` for a Save
+ * pressed with the values already stored, which must not retire the seed --
+ * the owner changed nothing, so nothing has been superseded.
+ */
+export function firstRunAssignmentsChanged(
+  before: readonly ModelAssignmentRow[],
+  after: readonly ModelAssignmentRow[],
+): boolean {
+  return firstRunAssignmentStamp(before) !== firstRunAssignmentStamp(after);
 }

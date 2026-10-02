@@ -18,24 +18,33 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
-import { ensureProviderSettingsSchema } from "./provider-settings.ts";
-import { ensureModelAssignmentsSchema, readModelAssignments } from "./model-assignments-store.ts";
-import { resolveJobModel } from "./model-assignments.ts";
+import { ensureProviderSettingsSchema, saveLocalModel } from "./provider-settings.ts";
+import {
+  ensureModelAssignmentsSchema,
+  readModelAssignments,
+  saveModelAssignments,
+} from "./model-assignments-store.ts";
+import { resolveJobModel, type ModelAssignmentRow, type ModelJobKey } from "./model-assignments.ts";
 import { isUseLoadedLocalModelPick, USE_LOADED_LOCAL_MODEL } from "./model-choice.ts";
 import type { LocalCatalog, LocalModelEntry, LocalServer } from "./local-models.ts";
 import {
   FIRST_RUN_MODEL_SCOPES,
   LOCAL_MODEL_LIST_EMPTY,
+  firstRunPickerDefault,
+  isFirstRunModelScope,
   localModelListLabel,
   localModelListRows,
   localModelProviderId,
   planFirstRunModelDefault,
+  supersededModelPromptState,
   withoutCloudModels,
+  type ModelPromptState,
 } from "./first-run-model.ts";
 import {
   answerFirstRunModelOffer,
   applyFirstRunModelDefault,
   firstRunModelCardState,
+  firstRunPickerChoiceFor,
   readModelPromptState,
 } from "./first-run-model-settings.ts";
 
@@ -53,9 +62,30 @@ const SLOW = 900_707; // the probe never answers
 const PICKED = 900_708; // the card, answered with a model
 const KEPT = 900_709; // the card, answered with "keep Automatic"
 const CHOSEN = 900_710; // a paper that already chose: never overwritten
+const SUPER = 900_711; // `stored`, then the owner changes a writing assignment
+const SAME = 900_712; // `stored`, then the owner saves the SAME assignments
+const NULLSAVE = 900_713; // the live shape (NULL), then the owner saves assignments
+const OFFERSAVE = 900_714; // `offered`, then the owner saves assignments
+const FORCEDONLY = 900_715; // `stored`, then the owner changes OCR only
 
 const OWNER = "f3-owner";
-const ALL = [LIVE, FRESH, OFFER, CLOUD, LISTED, BROKEN, SLOW, PICKED, KEPT, CHOSEN];
+const ALL = [
+  LIVE,
+  FRESH,
+  OFFER,
+  CLOUD,
+  LISTED,
+  BROKEN,
+  SLOW,
+  PICKED,
+  KEPT,
+  CHOSEN,
+  SUPER,
+  SAME,
+  NULLSAVE,
+  OFFERSAVE,
+  FORCEDONLY,
+];
 
 function entry(over: Partial<LocalModelEntry> & { id: string }): LocalModelEntry {
   return {
@@ -420,8 +450,20 @@ describe("the card, answered", () => {
       assert.equal(row.baseUrl, LM_STUDIO);
       assert.equal(row.id, "halo/qwen3.6-35b-a3b");
     }
-    assert.equal(await readModelPromptState(PICKED), "answered");
+    /*
+      F3c finding 1: `stored`, NOT `answered`. `answered` is what "Keep the
+      Automatic ladder" records, and `firstRunPickerDefault` reads it as
+      Automatic -- so a card pick that wrote `answered` would leave every page
+      sending an explicit Automatic choice, which outranks the local-model
+      assignments this door just saved. The card would report the writing model
+      was set while every run walked the ladder instead.
+    */
+    assert.equal(await readModelPromptState(PICKED), "stored");
     assert.equal((await firstRunModelCardState(PICKED)).show, false, "the card does not come back");
+    // ...and the pages really do seed from it, on the owner's own model.
+    for (const surface of ["story", "scan", "opinion", "dark"] as const) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "local-model", surface);
+    }
   });
 
   it("'Keep the Automatic ladder' records the answer and stores nothing", async () => {
@@ -433,6 +475,12 @@ describe("the card, answered", () => {
     assert.deepEqual(await storedScopes(KEPT), []);
     assert.equal(await readModelPromptState(KEPT), "answered");
     assert.equal((await firstRunModelCardState(KEPT)).show, false);
+    // The two answers must NOT share one marker value: keeping Automatic is
+    // the one answer that leaves every page opening on Automatic.
+    for (const surface of ["story", "scan", "opinion", "dark"] as const) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "auto", surface);
+      assert.equal(firstRunPickerDefault("answered", surface), "auto");
+    }
   });
 
   it("refuses a cloud model as the default", async () => {
@@ -449,5 +497,222 @@ describe("the card, answered", () => {
     assert.equal(result.ok, false);
     assert.match(result.ok === false ? result.error : "", /spends your allowance/);
     assert.deepEqual(await storedScopes(KEPT), []);
+  });
+});
+
+/* ------------------------------------------------------------------------- *
+ * F3c finding 2: the first-run seed stops when the owner changes assignments
+ *
+ * `stored` is a picker OVERRIDE: every page sends `local-model` explicitly,
+ * which outranks whatever `model_assignments` holds. That is right at first
+ * run and wrong forever after -- an owner who moves Story drafting to another
+ * provider would still watch every hand-pressed Run go to the local model.
+ * The marker therefore lives only as long as nothing else has moved: the
+ * owner's own assignment save retires it (`stored` -> `answered`), and the
+ * pages go back to opening on Automatic and running what the owner saved.
+ * ------------------------------------------------------------------------- */
+
+/** Put one newsroom's row into the shape a case below needs. */
+async function setMarker(newsroomId: number, onboarded: boolean, marker: ModelPromptState) {
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  await sql`
+    update paper_settings set onboarded = ${onboarded}, model_prompt_state = ${marker}
+    where newsroom_id = ${newsroomId}
+  `;
+}
+
+/** Run F3's hook, so the newsroom is a `stored` paper with assignments. */
+async function runHook(newsroomId: number) {
+  await seatOwner(newsroomId);
+  const outcome = await applyFirstRunModelDefault({
+    newsroomId,
+    ownerUserId: OWNER,
+    alreadyOnboarded: false,
+    deps: { readCatalog: async () => ONE_LOADED },
+  });
+  assert.equal(outcome.kind, "stored", "the fixture needs a `stored` paper");
+  assert.equal(await readModelPromptState(newsroomId), "stored");
+}
+
+/** The saved set with one job's first choice moved to another provider. */
+function withJobChanged(
+  rows: readonly ModelAssignmentRow[],
+  jobKey: ModelJobKey,
+  providerId: string,
+): ModelAssignmentRow[] {
+  return rows.map((row) => ({
+    jobKey: row.jobKey,
+    rank: row.rank,
+    providerId: row.jobKey === jobKey && row.rank === 0 ? providerId : row.providerId,
+    effort: row.effort,
+  }));
+}
+
+const WRITING_SURFACES = ["story", "scan", "opinion", "dark"] as const;
+
+describe("F3c: the rule is `stored` -> `answered`, and nothing else moves", () => {
+  it("supersedes `stored` only: NULL stays NULL, `offered` and `answered` stay put", () => {
+    assert.equal(supersededModelPromptState("stored"), "answered");
+    assert.equal(supersededModelPromptState(null), null, "the live paper never gains a marker");
+    assert.equal(supersededModelPromptState("offered"), "offered", "the card is still unanswered");
+    assert.equal(supersededModelPromptState("answered"), "answered");
+    // The four scopes the rule covers, and the one it does not.
+    for (const scope of FIRST_RUN_MODEL_SCOPES) assert.equal(isFirstRunModelScope(scope), true);
+    assert.equal(isFirstRunModelScope("forced"), false);
+    assert.equal(isFirstRunModelScope(null), false);
+  });
+});
+
+describe("F3c: the owner's own assignment save retires the first-run seed", () => {
+  it("moving a writing job to another provider makes `stored` become `answered`, and the pages stop seeding", async () => {
+    await runHook(SUPER);
+    const before = await readModelAssignments(SUPER);
+    assert.ok(before.length > 0, "the hook assigned the jobs");
+
+    await saveModelAssignments(SUPER, withJobChanged(before, "story-draft", "claude-sonnet"));
+
+    assert.equal(
+      await readModelPromptState(SUPER),
+      "answered",
+      "the owner's newer choice supersedes the first-run pick",
+    );
+    // Every page opens on Automatic again, so the run uses what the owner just
+    // saved instead of the seed's explicit `local-model`.
+    for (const surface of WRITING_SURFACES) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "auto", surface);
+      assert.equal(firstRunPickerDefault(await readModelPromptState(SUPER), surface), "auto");
+    }
+    const after = await readModelAssignments(SUPER);
+    assert.equal(
+      resolveJobModel({ jobKey: "story-draft", explicit: null, assignments: after }).providerId,
+      "claude-sonnet",
+      "the assignment the owner saved is what runs",
+    );
+    // ...and the OTHER jobs the hook assigned are untouched by the supersession.
+    assert.equal(
+      resolveJobModel({ jobKey: "dark", explicit: null, assignments: after }).providerId,
+      localModelProviderId("story"),
+    );
+  });
+
+  it("a different local-model pick for a writing scope retires it too, and the same pick does not", async () => {
+    await runHook(SAME);
+    // Save pressed with the values already stored: not a change.
+    await saveLocalModel(OWNER, { baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL }, "story");
+    assert.equal(await readModelPromptState(SAME), "stored", "the same pick is not a change");
+
+    // The owner picks a DIFFERENT model for the story scope -- the pick the
+    // seeded story page would resolve, so it is one of the owner's own
+    // decisions the seed would otherwise overrun.
+    const saved = await saveLocalModel(OWNER, { baseUrl: LM_STUDIO, id: "halo/qwen3.6-35b-a3b" }, "story");
+    assert.deepEqual(saved, { ok: true });
+    assert.equal(await readModelPromptState(SAME), "answered");
+    for (const surface of WRITING_SURFACES) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "auto", surface);
+    }
+    // A scope the seeded pages never open a picker on (`forced`) changes nothing.
+    await runHook(FORCEDONLY);
+    await saveLocalModel(OWNER, { baseUrl: LM_STUDIO, id: "halo/qwen3.6-35b-a3b" }, "forced");
+    assert.equal(await readModelPromptState(FORCEDONLY), "stored");
+  });
+
+  it("pressing Save with the same values is not a change, and does not retire it", async () => {
+    await runHook(SAME);
+    const same = await readModelAssignments(SAME);
+    await saveModelAssignments(
+      SAME,
+      same.map((row) => ({ jobKey: row.jobKey, rank: row.rank, providerId: row.providerId, effort: row.effort })),
+    );
+    assert.equal(await readModelPromptState(SAME), "stored", "nothing moved, so nothing is superseded");
+  });
+
+  it("the live shape (onboarded, NULL marker, its own assignments) is left exactly as it was", async () => {
+    await seatOwner(NULLSAVE);
+    await setMarker(NULLSAVE, true, null);
+    const sql = await getSql();
+    await sql`update paper_settings set name = '', city = '', state = '' where newsroom_id = ${NULLSAVE}`;
+    await saveModelAssignments(NULLSAVE, [
+      { jobKey: "story-draft", rank: 0, providerId: "claude-sonnet", effort: null },
+      { jobKey: "scan", rank: 0, providerId: "claude-sonnet", effort: null },
+    ]);
+
+    await saveModelAssignments(NULLSAVE, [
+      { jobKey: "story-draft", rank: 0, providerId: "claude-sonnet", effort: null },
+      { jobKey: "scan", rank: 0, providerId: "claude-haiku", effort: null },
+    ]);
+
+    assert.equal(await readModelPromptState(NULLSAVE), null, "a save never gives the live paper a marker");
+    for (const surface of WRITING_SURFACES) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "auto", `${surface}: unchanged`);
+    }
+    assert.equal((await firstRunModelCardState(NULLSAVE)).show, false);
+    const assignments = await readModelAssignments(NULLSAVE);
+    assert.equal(resolveJobModel({ jobKey: "scan", explicit: null, assignments }).providerId, "claude-haiku");
+  });
+
+  it("an unanswered card stays unanswered: `offered` is not superseded", async () => {
+    await seatOwner(OFFERSAVE);
+    await setMarker(OFFERSAVE, true, "offered");
+    await saveModelAssignments(OFFERSAVE, [
+      { jobKey: "story-draft", rank: 0, providerId: "claude-sonnet", effort: null },
+    ]);
+    assert.equal(await readModelPromptState(OFFERSAVE), "offered");
+    assert.equal((await firstRunModelCardState(OFFERSAVE)).show, true, "the owner can still answer it");
+  });
+
+  it("a change to a job the seed cannot override (OCR, a forced run) does not retire it", async () => {
+    await runHook(FORCEDONLY);
+    const before = await readModelAssignments(FORCEDONLY);
+    await saveModelAssignments(FORCEDONLY, [
+      ...before.map((row) => ({ jobKey: row.jobKey, rank: row.rank, providerId: row.providerId, effort: row.effort })),
+      { jobKey: "ocr", rank: 0, providerId: "claude-sonnet", effort: null },
+    ]);
+    assert.equal(
+      await readModelPromptState(FORCEDONLY),
+      "stored",
+      "the seeded pages never send a forced job's choice, so nothing was overridden",
+    );
+  });
+});
+
+describe("F3c: the hook's and the card's own writes never supersede the marker they set", () => {
+  it("the hook's own writes leave the paper `stored` -- the marker is written LAST", async () => {
+    await seatOwner(FRESH);
+    // The shape that makes the ordering visible: a marker that is already
+    // `stored` when the hook runs, so a marker written BEFORE the hook's own
+    // assignments would be superseded by them and end up `answered`.
+    await setMarker(FRESH, false, "stored");
+    const outcome = await applyFirstRunModelDefault({
+      newsroomId: FRESH,
+      ownerUserId: OWNER,
+      alreadyOnboarded: false,
+      deps: { readCatalog: async () => ONE_LOADED },
+    });
+    assert.equal(outcome.kind, "stored");
+    assert.equal(await readModelPromptState(FRESH), "stored");
+    const assignments = await readModelAssignments(FRESH);
+    assert.ok(assignments.length > 0);
+    for (const row of assignments) assert.equal(row.providerId, localModelProviderId("story"));
+    for (const surface of WRITING_SURFACES) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "local-model", surface);
+    }
+  });
+
+  it("the card pick's own writes leave the paper `stored` too", async () => {
+    await seatOwner(PICKED);
+    await setMarker(PICKED, true, "stored");
+    const listed = catalog([
+      server({ baseUrl: LM_STUDIO, models: [entry({ id: "halo/qwen3.6-35b-a3b", loaded: false })] }),
+    ]);
+    assert.deepEqual(
+      await answerFirstRunModelOffer(OWNER, {
+        choice: { baseUrl: LM_STUDIO, id: "halo/qwen3.6-35b-a3b" },
+        catalog: listed,
+      }),
+      { ok: true },
+    );
+    assert.equal(await readModelPromptState(PICKED), "stored", "the answer is written after the picks it stores");
+    assert.equal((await firstRunModelCardState(PICKED)).show, false, "and the card never comes back");
   });
 });

@@ -46,7 +46,14 @@ import type { LocalCatalog, LocalModelEntry, LocalServer } from "./local-models.
 import { USE_LOADED_LOCAL_MODEL, type StoryModelChoice } from "./model-choice.ts";
 import type { ProviderSurface } from "./provider-registry.ts";
 import { firstRunPickerDefault, pickerSeedToApply, planFirstRunModelDefault } from "./first-run-model.ts";
-import { applyFirstRunModelDefault, firstRunPickerChoiceFor, readModelPromptState } from "./first-run-model-settings.ts";
+import {
+  answerFirstRunModelOffer,
+  applyFirstRunModelDefault,
+  firstRunModelCardState,
+  firstRunPickerChoiceFor,
+  readModelPromptState,
+} from "./first-run-model-settings.ts";
+import type { LocalModelScope } from "./request-input.ts";
 
 /*
   One newsroom per case. Node's runner does not order sibling `it`s inside a
@@ -57,7 +64,8 @@ const LIVE = 900_802; // the production shape: onboarded, marker NULL, own assig
 const OFFERED = 900_803; // marker `offered`: the card is showing
 const ANSWERED = 900_804; // marker `answered`: the card was answered
 const NOMARK = 900_805; // marker NULL and not onboarded: setup never ran the hook
-const ALL = [FRESH, LIVE, OFFERED, ANSWERED, NOMARK];
+const CARD = 900_806; // the card was answered with one concrete model
+const ALL = [FRESH, LIVE, OFFERED, ANSWERED, NOMARK, CARD];
 
 const OWNER = "f3b-owner";
 
@@ -102,6 +110,29 @@ function fakeLoaded(loadedId: string): typeof fetch {
     if (url === `${LM_BASE}/models`) return json({ data: [{ id: loadedId }] });
     if (url === `${LM_ROOT}/api/v0/models`) {
       return json({ data: [{ id: loadedId, state: "loaded", type: "llm" }] });
+    }
+    if (url === `${OLLAMA_BASE}/models`) return json({ data: [] });
+    if (url === `${OLLAMA_ROOT}/api/ps`) return json({ models: [] });
+    throw new Error(`unreachable: ${url}`);
+  }) as typeof fetch;
+}
+
+/**
+ * LM Studio listing BOTH models, with only `loadedId` in memory. The card-pick
+ * case below needs this: "the seeded choice resolves to the model the owner
+ * picked" is only a real assertion when a SECOND local model is loaded and
+ * would be the answer if the seed resolved the sentinel instead of the pick.
+ */
+function fakeListed(ids: readonly string[], loadedId: string): typeof fetch {
+  return (async (input: string | URL) => {
+    const url = String(input);
+    const json = (body: unknown) =>
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    if (url === `${LM_BASE}/models`) return json({ data: ids.map((id) => ({ id })) });
+    if (url === `${LM_ROOT}/api/v0/models`) {
+      return json({
+        data: ids.map((id) => ({ id, state: id === loadedId ? "loaded" : "not-loaded", type: "llm" })),
+      });
     }
     if (url === `${OLLAMA_BASE}/models`) return json({ data: [] });
     if (url === `${OLLAMA_ROOT}/api/ps`) return json({ models: [] });
@@ -345,6 +376,79 @@ describe("F3b (4): the owner's own pick always wins", () => {
     assert.equal(pickerSeedToApply({ seed: null, touched: false, current: "auto" }), null);
     // The ordinary case, once more, last: the untouched page opens on it.
     assert.equal(pickerSeedToApply({ seed, touched: false, current: "auto" }), "local-model");
+  });
+});
+
+describe("F3c (1): a model chosen on the first-run card seeds every page with THAT model", () => {
+  const PICKED_ID = "halo/qwen3.6-35b-a3b";
+  const OTHER_ID = "other-local-8b";
+
+  it("the marker is `stored`, every page opens on Local model, and the run resolves to the picked model", async () => {
+    await sql_marker(CARD, true, "offered");
+    await seatOwner(CARD);
+    const chosen = { baseUrl: LM_BASE, id: PICKED_ID };
+    // What the card's own list shows: both models, neither in memory.
+    const listed = {
+      servers: [server({ baseUrl: LM_BASE, models: [entry({ id: PICKED_ID }), entry({ id: OTHER_ID })] })],
+      defaultModel: null,
+      checkedAt: 0,
+    } satisfies LocalCatalog;
+
+    assert.deepEqual(await answerFirstRunModelOffer(OWNER, { choice: chosen, catalog: listed }), { ok: true });
+
+    /*
+      Finding 1: the SAME marker the automatic default writes. `answered`
+      (what this door used to write) means "Keep the Automatic ladder", so the
+      pages would have opened on Automatic and sent it explicitly -- outranking
+      the assignments this answer just saved.
+    */
+    assert.equal(await readModelPromptState(CARD), "stored", "the pick leaves the paper seeded, not answered");
+    assert.equal((await firstRunModelCardState(CARD)).show, false, "the card goes away and never returns");
+
+    const assignments = await readModelAssignments(CARD);
+    // At run time the OTHER model is the one in memory, so a seed that resolved
+    // "whatever is loaded" instead of the owner's pick would be visible here.
+    await withFetch(fakeListed([PICKED_ID, OTHER_ID], OTHER_ID), async () => {
+      resetLocalCatalogCacheForTests();
+      for (const { surface, jobKey } of SURFACES) {
+        const seed = await firstRunPickerChoiceFor(OWNER, surface);
+        assert.equal(seed, "local-model", `${surface}: the picker opens on Local model`);
+        assert.equal(
+          pickerSeedToApply({ seed, touched: false, current: "auto" }),
+          "local-model",
+          `${surface}: the untouched page adopts it`,
+        );
+
+        // What the page SENDS, at the server's own decision point.
+        const resolved = resolveJobModel({ jobKey, explicit: seed, assignments });
+        assert.equal(resolved.source, "explicit", `${jobKey}`);
+        assert.equal(resolved.providerId, "local-model", `${jobKey}: the run goes to the local provider`);
+
+        // ...and the model behind that choice is the one the owner picked.
+        const model = await resolveLocalModelChoice(CARD, surface as LocalModelScope);
+        assert.equal(
+          model.override?.id,
+          PICKED_ID,
+          `${surface}: the owner's chosen model, not the different local model that happens to be loaded`,
+        );
+        assert.equal(model.source, "stored");
+      }
+    });
+
+    // Dark Desk: `mustChooseReader = modelChoice === "auto"`, so the seed is
+    // what enables the starters after a card pick too.
+    const darkSeed = await firstRunPickerChoiceFor(OWNER, "dark");
+    assert.notEqual(pickerSeedToApply({ seed: darkSeed, touched: false, current: "auto" }), "auto");
+  });
+
+  it("the automatic first-run default still reaches `stored`, the same way", async () => {
+    // The OTHER way to `stored` -- the one F3 already had. Both must leave the
+    // pages seeding, or the two doors would disagree about the same paper.
+    await freshInstallWithLoadedModel();
+    assert.equal(await readModelPromptState(FRESH), "stored");
+    for (const { surface } of SURFACES) {
+      assert.equal(await firstRunPickerChoiceFor(OWNER, surface), "local-model", surface);
+    }
   });
 });
 
