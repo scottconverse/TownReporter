@@ -12,6 +12,7 @@ import {
   type CheckFacts,
 } from "@/lib/news/check-gates";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { SaveShortcut } from "@/components/desk-save-shortcut";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
@@ -78,6 +79,13 @@ function EditorialPage() {
   const [loaded, setLoaded] = useState(false);
   const [msg, setMsg] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /*
+    Unit UI1a2: has the preview actually been opened? The story page keeps the
+    same flag (and reads it into the Checks tab's "✓ Preview viewed" chip); this
+    screen has no gate chip, so the only reader of it is the control's own done
+    state -- "Preview opened", in the success green, with a check.
+  */
+  const [previewSeen, setPreviewSeen] = useState(false);
   const [confirmingPublish, setConfirmingPublish] = useState(false);
   /*
     The text as the server last had it. The save line says "Unsaved changes"
@@ -406,13 +414,29 @@ function EditorialPage() {
                 ⌘S
               </span>
             </InkButton>
-            <InkButton
+            {/*
+              Unit UI1a2. Same control as the story page's (`desk.story.$leadId`),
+              same four states: no `working` (the press is synchronous), a done
+              word once the preview has actually been opened, and a reason
+              beside it when there is nothing to preview yet.
+            */}
+            <ActionButton
               tone="quiet"
+              phase={previewSeen ? "done" : "idle"}
+              doneLabel="Preview opened"
               disabled={!headline.trim() && !body.trim()}
-              onClick={() => preview.current?.showModal()}
+              disabledReason={
+                !headline.trim() && !body.trim()
+                  ? "Write a headline or a body to preview."
+                  : null
+              }
+              onAct={() => {
+                setPreviewSeen(true);
+                preview.current?.showModal();
+              }}
             >
               Preview as reader
-            </InkButton>
+            </ActionButton>
           </>
         ) : (
           <p className="note">
@@ -437,17 +461,43 @@ function EditorialPage() {
         */}
         {confirmDelete ? (
           <span className="row-acts static">
-            <InkButton tone="ghost" small disabled={remove.isPending} onClick={() => remove.mutate()}>
-              {remove.isPending ? "Deleting…" : "Yes, delete it"}
-            </InkButton>
-            <InkButton tone="quiet" small onClick={() => setConfirmDelete(false)}>
+            {/*
+              Unit UI1a2: the second press is the one that does the work, so it
+              carries the states -- "Deleting…" with a spinner and the button
+              disabled. Its DONE is the draft leaving this screen, which the
+              screen's own removal already says; there is no second green
+              "Deleted" on a button that is about to be unmounted.
+            */}
+            <ActionButton
+              tone="primary"
+              small
+              phase={rowActionPhase({ isPending: remove.isPending })}
+              workingLabel="Deleting…"
+              onAct={() => remove.mutate()}
+            >
+              Yes, delete it
+            </ActionButton>
+            <ActionButton
+              tone="quiet"
+              small
+              phase="idle"
+              disabled={remove.isPending}
+              disabledReason={remove.isPending ? "The delete is still being saved." : null}
+              onAct={() => setConfirmDelete(false)}
+            >
               Keep it
-            </InkButton>
+            </ActionButton>
           </span>
         ) : (
-          <InkButton tone="quiet" small onClick={() => setConfirmDelete(true)}>
+          <ActionButton
+            tone="danger"
+            small
+            phase="idle"
+            disabled={remove.isPending}
+            onAct={() => setConfirmDelete(true)}
+          >
             Delete
-          </InkButton>
+          </ActionButton>
         )}
       </div>
 

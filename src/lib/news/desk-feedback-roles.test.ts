@@ -62,6 +62,12 @@ describe("the five single-row source controls have a pending state", () => {
   });
 
   it("each of Pause, Resume, Remove, Accept and Drop says what it is doing", () => {
+    /*
+      Unit UI1a2 moved these five presses onto the shared `ActionButton`, so the
+      word is the piece's `workingLabel` rather than a ternary drawn as the
+      button's own child. The FACT is unchanged and is what this still reads:
+      every one of the five has a word of its own while its write is out.
+    */
     for (const label of ["Pausing…", "Resuming…", "Removing…", "Accepting…"]) {
       assert.ok(source.includes(label), `${label} must be drawn while that press is in flight`);
     }
@@ -69,26 +75,34 @@ describe("the five single-row source controls have a pending state", () => {
     // the same two-step control and share its word -- see `RemoveAction`.
     assert.match(source, /label="Remove"/);
     assert.match(source, /label="Drop"/);
-    assert.match(source, /\{busy \? "Removing…" : "Yes, remove"\}/);
+    assert.match(source, /workingLabel="Removing…"/);
   });
 
   it("does not leave a second press possible on the pressed row", () => {
-    // disabled must be bound to the same condition as the label, or the row
-    // would say "Pausing…" and still be pressable.
-    const busy = source.match(/disabled=\{statusBusy\}/g) ?? [];
-    const busyAria = source.match(/aria-busy=\{statusBusy \|\| undefined\}/g) ?? [];
-    assert.ok(busy.length >= 2, `Pause and Resume are bound, found ${busy.length}`);
-    assert.equal(busyAria.length, busy.length, "disabled and aria-busy agree, button for button");
+    /*
+      The disabled half is now the shared piece's own rule rather than a
+      hand-written attribute at each call site: `phase="working"` draws the
+      button disabled, sets `aria-busy` on it and puts a spinner in it, all
+      from one place (`action-button.ts`, asserted separately in
+      `src/components/action-button.test.ts`). What this test still has to
+      prove is that each press on this screen FEEDS that phase from its own
+      row's in-flight state -- if a press passed `"idle"` while its write was
+      out, the row would say nothing and stay pressable.
+    */
+    assert.match(source, /phase=\{rowActionPhase\(\{ isPending: statusBusy \}\)\}/, "Pause and Resume");
+    assert.equal(
+      (source.match(/rowActionPhase\(\{ isPending: statusBusy \}\)/g) ?? []).length,
+      3,
+      "Pause, Resume and the keeps-failing row's Delete are all bound to the row that pressed",
+    );
 
-    const table = source.match(/disabled=\{statusId === s\.id\}/g) ?? [];
-    const tableAria = source.match(/aria-busy=\{statusId === s\.id \|\| undefined\}/g) ?? [];
+    const table = source.match(/isPending: statusId === s\.id/g) ?? [];
     assert.equal(table.length, 1, "Accept, in the suggested/rejected table");
-    assert.equal(tableAria.length, 1);
 
     // Remove goes through the one two-step control, which binds its own
     // pending state and its own disabled attribute together.
     assert.equal((source.match(/<RemoveAction/g) ?? []).length, 3, "three Remove buttons, one control");
-    assert.match(source, /disabled=\{busy\}\s*aria-busy=\{busy \|\| undefined\}/);
+    assert.match(source, /phase=\{rowActionPhase\(\{ isPending: busy \}\)\}/);
   });
 });
 

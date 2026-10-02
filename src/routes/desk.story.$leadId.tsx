@@ -18,6 +18,7 @@ import {
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { PublishBarResult } from "@/components/publish-bar-result";
+import { ActionButton } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
@@ -312,6 +313,25 @@ function StoryPage() {
   */
   const [publishRefusal, setPublishRefusal] = useState("");
   /*
+    Unit UI1a. The blocker row that just recorded an acceptance, so the control
+    that was pressed can say "Accepted" with a check instead of going quiet.
+    Held for as long as the row is on the page: the acceptance is recorded
+    against ONE review token, so any edit to the words clears it along with the
+    refusal (see the effect below) -- a check left standing beside a row that
+    has come back for a NEW review would be the desk claiming a decision nobody
+    made about this version.
+  */
+  const [acceptedUnreviewed, setAcceptedUnreviewed] = useState(false);
+  /*
+    Unit UI1a2. "Redraft started" / "Draft started": the press's own done word,
+    held only until the draft it started actually lands. Cleared by the effect
+    that seeds the box from the new draft, so the control goes back to reading
+    "Redraft" (or "Draft with AI") for the next press -- a done state latched
+    forever would rename the button out from under the walks that ask for it by
+    name.
+  */
+  const [redraftDone, setRedraftDone] = useState(false);
+  /*
     Whether a person has chosen the section on this page (0.6.67).
 
     The select shows a section from the moment the page loads: the model's when
@@ -551,6 +571,9 @@ function StoryPage() {
     setTopic(d.topic);
     appliedFp.current = fp;
     expectedDraftJobId.current = null;
+    /* Unit UI1a2: the draft this press started has arrived, so the control's
+       done word comes off and it reads "Redraft" again. */
+    setRedraftDone(false);
     priorDraftJobId.current = data.job?.id ?? null;
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
@@ -659,7 +682,11 @@ function StoryPage() {
     },
     onSuccess: async (res) => {
       setAwaitingDraftJobAck(false);
-      if (answered(res) && res.ok) expectedDraftJobId.current = res.jobId;
+      if (answered(res) && res.ok) {
+        expectedDraftJobId.current = res.jobId;
+        /* Unit UI1a2: the press took, so the control that made it says so. */
+        setRedraftDone(true);
+      }
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (!answered(res)) {
@@ -836,6 +863,7 @@ function StoryPage() {
         press and takes the accent; the refusal is a failure and takes the
         danger edge, so the reason is never painted as the next step.
       */
+      if (res.ok) setAcceptedUnreviewed(true);
       announceToDesk(
         res.ok
           ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
@@ -1429,7 +1457,10 @@ function StoryPage() {
     the button's own handler. Above the early returns, with the other hooks:
     a hook that runs on some renders and not others is not a hook.
   */
-  useEffect(() => setPublishRefusal(""), [headline, dek, body, topic]);
+  useEffect(() => {
+    setPublishRefusal("");
+    setAcceptedUnreviewed(false);
+  }, [headline, dek, body, topic]);
 
   if (isPending) {
     return (
@@ -1731,6 +1762,40 @@ function StoryPage() {
     reconcileActive,
     publishing: publish.isPending,
   });
+  /*
+    Unit UI1a: the three blocker presses that are a SERVER round trip, as the
+    facts the shared `ActionButton` needs -- which row is running, which last
+    failed, and the server's own reason for it. The other rows in the list are
+    a focus or a scroll and never leave idle, which is why this names three
+    targets and not all of them.
+  */
+  const blockerPress = {
+    busyTarget: acceptUnreviewed.isPending
+      ? ("accept-unreviewed" as const)
+      : overrideOutlet.isPending
+        ? ("override-outlet" as const)
+        : reviewEvidence.isPending
+          ? ("keep-evidence" as const)
+          : null,
+    failedTarget: acceptUnreviewed.isError
+      ? ("accept-unreviewed" as const)
+      : overrideOutlet.isError
+        ? ("override-outlet" as const)
+        : reviewEvidence.isError
+          ? ("keep-evidence" as const)
+          : null,
+    failureReason:
+      acceptUnreviewed.error instanceof Error
+        ? (editorActionError(acceptUnreviewed.error.message, "record that acceptance") ??
+          "Could not record that acceptance.")
+        : overrideOutlet.error instanceof Error
+          ? (editorActionError(overrideOutlet.error.message, "record the override") ??
+            "Could not record the override.")
+          : reviewEvidence.error instanceof Error
+            ? (editorActionError(reviewEvidence.error.message, "save the evidence review") ??
+              "Evidence review could not be saved.")
+            : null,
+  };
   /*
     One press per row of the "Before you can publish" list. Every target is
     the control that already existed -- the same mutation the mid-form button
@@ -2152,9 +2217,25 @@ function StoryPage() {
           real action heading toward removal that is not a confirm step.
         */}
         {!locked && !onPaper ? (
-          <InkButton tone="quiet-danger" small onClick={() => setKillOpen(true)}>
+          /*
+            Unit UI1a2: the shared piece, at the Kill level. This control's DONE
+            state is the page's own record of the kill -- a killed lead stops
+            being drawn here (`locked` turns the whole line off) and
+            `KilledLeadRecord` takes its place with the reason, the time and the
+            way back. That is the existing flow, and rule 3's "one confirmation"
+            (PUB2) means no second green "Killed" is drawn on a button that is
+            about to disappear. The press itself is the dialog's, which already
+            reports "The kill did not reach the desk. The lead is unchanged."
+            beside its own confirm.
+          */
+          <ActionButton
+            tone="quiet-danger"
+            small
+            phase="idle"
+            onAct={() => setKillOpen(true)}
+          >
             Kill this lead
-          </InkButton>
+          </ActionButton>
         ) : null}
       </div>
       {/*
@@ -2246,7 +2327,18 @@ function StoryPage() {
               contradicting itself.
             */}
             {showsPublishPrep(data.lead.status, Boolean(data.draft)) ? (
-              <BeforeYouCanPublish blockers={blockers} onAct={actOnBlocker} />
+              <BeforeYouCanPublish
+                blockers={blockers}
+                onAct={actOnBlocker}
+                busyTarget={blockerPress.busyTarget}
+                failedTarget={blockerPress.failedTarget}
+                failureReason={blockerPress.failureReason}
+                doneTarget={
+                  acceptedUnreviewed && blockers.some((b) => b.altAction?.target.kind === "accept-unreviewed")
+                    ? "accept-unreviewed"
+                    : null
+                }
+              />
             ) : null}
             {data.draft ? (
               /*
@@ -2997,7 +3089,7 @@ function StoryPage() {
         ) : null}
         {!locked && !onPaper ? (
           <>
-            <InkButton
+            <ActionButton
               /*
                 The drawing's tone rule, applied to this press too: the three
                 presses that change what is saved are the heavy 2px ink
@@ -3007,12 +3099,49 @@ function StoryPage() {
                 drawn fifth press. "Draft with AI" has no draft to sit beside
                 and is the only way forward, so it stays the heavy one.
               */
-              tone={data.draft?.body ? "quiet" : "solid"}
+              tone={data.draft?.body ? "quiet" : "primary"}
+              /*
+                Unit UI1a2: the four states, at the control.
+
+                WORKING is `waiting` -- the press latches it synchronously in
+                `onMutate`, so the button is disabled with a spinner in the same
+                paint as the click. DONE is "Redraft started" / "Draft started",
+                and it is deliberately SHORT-LIVED: `redraftDone` is cleared by
+                the effect that seeds the box when the new draft lands (line
+                ~563), because the button must go back to reading "Redraft" for
+                the next press. A done state that latched forever would rename
+                the control out from under every walk that asks for it by name
+                (`claim-sources-pull-walk` presses "Redraft" after having
+                pressed "Draft with AI" earlier in the same run). FAILED prints
+                the desk's own sentence beside the button -- the same sentence
+                the area above already carries (`msg` / `previousJobError`) --
+                and the button returns to idle and pressable.
+              */
+              phase={
+                waiting
+                  ? "working"
+                  : draft.isError && draftProblem
+                    ? "failed"
+                    : redraftDone
+                      ? "done"
+                      : "idle"
+              }
+              workingLabel={
+                jobState === "recovering"
+                  ? "Recovering…"
+                  : data.job?.failover_note
+                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                    : data.draft?.body
+                      ? "Redrafting…"
+                      : "Drafting…"
+              }
+              doneLabel={data.draft?.body ? "Redraft started" : "Draft started"}
+              reason={draft.isError && draftProblem ? draftProblem : null}
               /* SG1 / Option A: drafting spends a model on this paper's
                  behalf, so on an install nobody has set up the press is
                  disabled and the reason is drawn under it. */
               disabled={waiting || reconcileActive || paperGate.blocked}
-              onClick={() => {
+              onAct={() => {
                 if (waiting) return;
                 /*
                   Unit BH2 decision 6: when there is already a draft, the
@@ -3027,37 +3156,45 @@ function StoryPage() {
                 else draft.mutate(undefined);
               }}
             >
-              {jobState === "recovering"
-                ? "Recovering…"
-                : waiting
-                  ? data.job?.failover_note
-                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
-                    : "Drafting…"
-                  : data.draft?.body
-                    ? /*
-                        The drawn ellipsis, aria-hidden so the press's
-                        accessible name stays exactly "Redraft" -- the walks
-                        ask for it by that name.
-                      */
-                      <>
-                        Redraft
-                        <span aria-hidden="true">…</span>
-                      </>
-                    : "Draft with AI"}
-            </InkButton>
+              {data.draft?.body ? (
+                /*
+                  The drawn ellipsis, aria-hidden so the press's accessible
+                  name stays exactly "Redraft" -- the walks ask for it by that
+                  name. The shared piece's icon is `aria-hidden` for the same
+                  reason: the WORD is the name.
+                */
+                <>
+                  Redraft
+                  <span aria-hidden="true">…</span>
+                </>
+              ) : (
+                "Draft with AI"
+              )}
+            </ActionButton>
             <PaperSetupGateNote gate={paperGate} />
           </>
         ) : null}
         {body ? (
-          <InkButton
+          /*
+            Unit UI1a2. The press is synchronous -- it opens the preview dialog
+            -- so there is no `working` to show; what it HAS is a done state,
+            and the page already records it (`previewSeen`, which the Checks
+            tab's gate chip reads as "✓ Preview viewed"). The button says the
+            same thing: "Preview opened", in the success green, with a check.
+            No walk asks for this control by name, so the done word cannot
+            rename it out from under one.
+          */
+          <ActionButton
             tone="quiet"
-            onClick={() => {
+            phase={previewSeen ? "done" : "idle"}
+            doneLabel="Preview opened"
+            onAct={() => {
               setPreviewSeen(true);
               preview.current?.showModal();
             }}
           >
             Preview as reader
-          </InkButton>
+          </ActionButton>
         ) : null}
         <a className="btn astra-checks-jump" href="#story-inspector">
           Checks & sources
@@ -3405,9 +3542,19 @@ function StoryPage() {
                     named five states here and a sixth on the first press, and
                     only one of them had a sentence anywhere on the page.
                   */}
-                  <InkButton
+                  {/*
+                    Unit UI1a: the confirm press goes through the shared
+                    `ActionButton`, so a press in flight is a spinner and the
+                    word "Publishing…" at the control the editor just pressed,
+                    with the button disabled -- not a button that looks
+                    unchanged until the page swaps under it.
+                  */}
+                  <ActionButton
+                    tone="primary"
+                    phase={publish.isPending ? "working" : "idle"}
                     disabled={publish.isPending || blockers.length > 0}
-                    onClick={() => {
+                    workingLabel="Publishing…"
+                    onAct={() => {
                       setConfirmingPublish(false);
                       /* The last answer is about to be replaced by this
                          press's answer (unit PUB1). */
@@ -3416,19 +3563,26 @@ function StoryPage() {
                     }}
                   >
                     {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
-                  </InkButton>
-                  <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
+                  </ActionButton>
+                  <ActionButton
+                    tone="secondary"
+                    phase="idle"
+                    onAct={() => setConfirmingPublish(false)}
+                  >
                     Not yet
-                  </InkButton>
+                  </ActionButton>
                 </>
               ) : (
                 <>
-                  <InkButton
+                  <ActionButton
+                    tone="primary"
+                    phase={publish.isPending ? "working" : "idle"}
+                    workingLabel="Publishing…"
                     disabled={publish.isPending || blockers.length > 0}
-                    onClick={() => setConfirmingPublish(true)}
+                    onAct={() => setConfirmingPublish(true)}
                   >
                     {`Publish in ${sectionNameNow}`}
-                  </InkButton>
+                  </ActionButton>
                   {/*
                     The section is on the button, so the editor can read what
                     they are about to confirm. This is the way back to the

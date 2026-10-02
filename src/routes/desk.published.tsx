@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   addCorrection,
@@ -1084,16 +1085,37 @@ function PublishedPage() {
                 */}
                 {killFor === p.slug ? (
                   <>
-                    <InkButton
-                      tone="ghost"
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate(p.slug)}
+                    {/*
+                      Unit UI1a2: the confirm press carries the states --
+                      "Removing…" with a spinner while the write is in flight.
+                      Its DONE is the row leaving Published, which the list's
+                      own removal already says.
+                    */}
+                    <ActionButton
+                      tone="danger"
+                      phase={rowActionPhase({
+                        isPending: remove.isPending,
+                        problem:
+                          remove.isError && remove.variables === p.slug
+                            ? remove.error instanceof Error
+                              ? remove.error.message
+                              : "Could not take that story off the paper."
+                            : null,
+                      })}
+                      workingLabel="Removing…"
+                      onAct={() => remove.mutate(p.slug)}
                     >
-                      {remove.isPending ? "Removing…" : "Yes, take it off"}
-                    </InkButton>
-                    <InkButton tone="quiet" onClick={() => setKillFor(null)}>
+                      Yes, take it off
+                    </ActionButton>
+                    <ActionButton
+                      tone="quiet"
+                      phase="idle"
+                      disabled={remove.isPending}
+                      disabledReason={remove.isPending ? "The removal is still being saved." : null}
+                      onAct={() => setKillFor(null)}
+                    >
                       Keep it
-                    </InkButton>
+                    </ActionButton>
                   </>
                 ) : null}
                 {/*

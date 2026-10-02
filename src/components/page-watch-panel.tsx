@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "./desk-chrome";
+import { ActionButton, rowActionPhase } from "./action-button";
 import { ModelPicker } from "./model-picker";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
@@ -380,19 +381,61 @@ export function PageWatchPanel({
                 }}
               />
               <div className="np-acts">
-                <InkButton
+                {/*
+                  Unit UI1a2: Check now, Pause / Resume and Stop watching are
+                  the shared `ActionButton` here too. Pause's DONE is the row's
+                  own new state -- the button is redrawn as "Resume" because
+                  `row.watch_state` changed -- and Check now's is "Checked",
+                  with the row's own answer (`watch_last_error` /
+                  `watch_failover_note`) still printed above it, which is the
+                  existing flow and not a second confirmation.
+                */}
+                <ActionButton
+                  phase={
+                    check.isPending
+                      ? "working"
+                      : check.isError
+                        ? "failed"
+                        : check.isSuccess
+                          ? "done"
+                          : "idle"
+                  }
+                  workingLabel="Checking…"
+                  doneLabel="Checked"
+                  reason={
+                    check.isError
+                      ? check.error instanceof Error
+                        ? check.error.message
+                        : "Could not check that page."
+                      : null
+                  }
                   disabled={busy || row.watch_state !== "active"}
-                  onClick={() => {
+                  disabledReason={
+                    row.watch_state !== "active"
+                      ? "This page is paused, so the desk is not checking it."
+                      : null
+                  }
+                  onAct={() => {
                     clear();
                     check.mutate(row.id);
                   }}
                 >
-                  {check.isPending ? "Checking…" : "Check now"}
-                </InkButton>
-                <InkButton
+                  Check now
+                </ActionButton>
+                <ActionButton
                   tone="quiet"
+                  phase={rowActionPhase({
+                    isPending: state.isPending,
+                    problem:
+                      state.isError && state.variables?.state !== "stopped"
+                        ? state.error instanceof Error
+                          ? state.error.message
+                          : "Could not change that page's watch."
+                        : null,
+                  })}
+                  workingLabel={row.watch_state === "active" ? "Pausing…" : "Resuming…"}
                   disabled={busy}
-                  onClick={() => {
+                  onAct={() => {
                     clear();
                     state.mutate({
                       id: row.id,
@@ -401,17 +444,30 @@ export function PageWatchPanel({
                   }}
                 >
                   {row.watch_state === "active" ? "Pause" : "Resume"}
-                </InkButton>
-                <InkButton
+                </ActionButton>
+                <ActionButton
                   tone="danger"
+                  phase={rowActionPhase({
+                    isPending: state.isPending && state.variables?.state === "stopped",
+                    problem:
+                      state.isError && state.variables?.state === "stopped"
+                        ? state.error instanceof Error
+                          ? state.error.message
+                          : "Could not stop watching that page."
+                        : null,
+                  })}
+                  workingLabel="Stopping…"
                   disabled={busy || row.watch_state === "stopped"}
-                  onClick={() => {
+                  disabledReason={
+                    row.watch_state === "stopped" ? "This page is already stopped." : null
+                  }
+                  onAct={() => {
                     clear();
                     state.mutate({ id: row.id, state: "stopped" });
                   }}
                 >
                   Stop watching
-                </InkButton>
+                </ActionButton>
               </div>
               <h4>Capture history</h4>
               <p className="meta">

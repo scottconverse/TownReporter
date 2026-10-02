@@ -1085,6 +1085,16 @@ export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: Hold
       altLabel="Hold, no reason"
       onAlt={hold(false)}
       altDisabled={press.busy}
+      /*
+        Unit UI1a2: the press says what it is doing. Its DONE is the row's --
+        `done()` announces the hold and closes, and the lead then reads "Held"
+        with "Bring back"/"Release" where Hold was -- and its FAILED is
+        `HoldBody`'s own `press.problem`, which is already printed inside the
+        dialog rather than beside a button that has closed with it.
+      */
+      pending={press.busy}
+      primaryPendingLabel="Holding…"
+      altPendingLabel="Holding…"
     >
       <HoldBody
         state={state}

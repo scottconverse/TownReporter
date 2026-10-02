@@ -124,6 +124,16 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
       onPrimary={() => void kill(true)}
       primaryDisabled={busy || !trimmed}
       primaryTone="solid"
+      /*
+        Unit UI1a2: the press says what it is doing while it is out. Its FAILED
+        is the dialog's own `error` line above (already `role="alert"`), and its
+        DONE is the lead leaving this page for Killed, with `KilledLeadRecord`
+        in its place -- the existing flow, and the one confirmation rule PUB2
+        set means there is no second green "Killed" here.
+      */
+      pending={busy}
+      primaryPendingLabel="Killing…"
+      altPendingLabel="Killing…"
     >
       <div className="astra-field">
         <span className="astra-field-label" id="kill-quick-fill">

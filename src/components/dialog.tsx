@@ -74,6 +74,24 @@ export type DialogProps = {
    * the Cancel button instead of turning the footer into two blocks of color.
    */
   primaryTone?: "solid" | "danger" | "quiet-danger";
+  /**
+   * Unit UI1a2: this dialog's press is in flight.
+   *
+   * The dialog foot had a disabled half and no spoken half: pressing "Kill with
+   * this reason" or "Hold with this reason" greyed the button and left it
+   * wearing the same word, so the one thing the editor could see was that
+   * something had stopped working. `pending` with a label draws the word the
+   * press is actually doing ("Killing…", "Holding…"), which is the FB5 shape
+   * `InkButton` already had and no dialog was using.
+   *
+   * Optional and additive on purpose: a dialog that passes neither gets exactly
+   * the foot it has today, byte for byte.
+   */
+  pending?: boolean;
+  /** The word the PRIMARY press draws while pending. */
+  primaryPendingLabel?: string;
+  /** The word the ALT press draws while pending. */
+  altPendingLabel?: string;
 };
 
 export function Dialog({
@@ -92,6 +110,9 @@ export function Dialog({
   cancelLabel = "Cancel",
   closeLabel = "Close",
   primaryTone = "solid",
+  pending = false,
+  primaryPendingLabel,
+  altPendingLabel,
 }: DialogProps) {
   // Radix hands focus back through `DialogPrimitive.Trigger`: its close handler
   // focuses `context.triggerRef`, which only a rendered Trigger ever sets. This
@@ -187,11 +208,25 @@ export function Dialog({
                   {cancelLabel}
                 </InkButton>
                 {altLabel ? (
-                  <InkButton tone="ghost" onClick={onAlt} disabled={altDisabled}>
+                  <InkButton
+                    tone="ghost"
+                    onClick={onAlt}
+                    disabled={altDisabled}
+                    /* Unit UI1a2: a dialog whose press takes time says so at the
+                       button it was pressed -- see `pendingLabel` below. */
+                    pending={pending && altPendingLabel != null}
+                    pendingLabel={altPendingLabel}
+                  >
                     {altLabel}
                   </InkButton>
                 ) : null}
-                <InkButton tone={primaryTone} onClick={onPrimary} disabled={primaryDisabled}>
+                <InkButton
+                  tone={primaryTone}
+                  onClick={onPrimary}
+                  disabled={primaryDisabled}
+                  pending={pending && primaryPendingLabel != null}
+                  pendingLabel={primaryPendingLabel}
+                >
                   {primaryLabel}
                 </InkButton>
               </div>
