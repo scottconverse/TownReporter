@@ -396,17 +396,55 @@ export function DeskShell({
           and a theme toggle that now lives in the nav footer.
         */}
         <header className="astra-topbar">
+          {/*
+            UI1b-5: THE HAMBURGER SAYS ITS NAME.
+
+            The designer: "Phone menu = labelled 'Menu' button (Quiet, 44px),
+            not a bare hamburger + 'Desk' chip." This was the last control on
+            the desk with no edge of its own -- the guard measured it 18 times
+            (once per route, at 390) and it was the only "no edge/fill under
+            3:1" left in the build. It is now the Quiet level of the one button
+            family: 1px `--fg2` edge, 44px, the word "Menu" beside the icon the
+            drawing still draws. The icon stays; it is no longer the whole
+            label, so the button reads as a press before you press it.
+
+            The accessible name is the visible word. `aria-label="Open
+            navigation"` is gone rather than kept: WCAG 2.5.3 (Label in Name)
+            wants the spoken name to contain what is written on the control,
+            and "Open navigation" does not contain "Menu". `aria-expanded` and
+            `aria-controls` still say what the press opens, and the keyboard
+            behaviour is unchanged.
+
+            The "Desk" tag that used to sit beside the wordmark is dropped in
+            the phone bar (see `.astra-brand-bar span` in desk-astra.css): with
+            a labelled Menu button the bar read "Menu · TownReporter · DESK ·
+            + New", two labels for the same thing, and the row is 8px wider
+            than a 390px phone at Text: Large as it is. The wordmark already
+            says "TownReporter" and the desk's own `<title>` says Desk; the
+            drawer's own brand block (line 304) keeps its tag.
+          */}
           <button
             ref={menuButton}
-            className="astra-icon astra-menu"
-            aria-label="Open navigation"
+            className="btn quiet astra-menu"
             aria-expanded={menuOpen}
             aria-controls="desk-navigation"
             onClick={() => setMenuOpen(!menuOpen)}
           >
-            <Menu size={20} />
+            <Menu size={18} aria-hidden />
+            Menu
           </button>
-          <Link to="/" className="astra-brand astra-brand-bar" title="Public news page">
+          {/*
+            The accessible name is spelled out because the tag is hidden: on the
+            phone only the wordmark is drawn, and "TownReporter Desk" is what
+            tells a screen-reader user this link leads to the desk rather than
+            to the paper. It contains the visible word, so WCAG 2.5.3 holds.
+          */}
+          <Link
+            to="/"
+            className="astra-brand astra-brand-bar"
+            title="Public news page"
+            aria-label="TownReporter Desk"
+          >
             <strong>TownReporter</strong>
             <span>Desk</span>
           </Link>

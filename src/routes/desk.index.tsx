@@ -1199,6 +1199,20 @@ function DeskHome() {
       <nav className="today-steps" aria-label="Today’s work">
         {STEPS.map((step) => {
           const on = step.n === currentStep;
+          /*
+            UI1b-5: THE PAGE'S ONE PRIMARY IS "REVIEW LEADS".
+
+            The designer: "'Run scan now' on Today = Secondary; page Primary is
+            'Review leads'." This strip used to hand the yellow level to
+            whichever step was current, so the page's one primary moved with the
+            fixture and could be a step the editor has nothing to do on. Step 1
+            -- the leads waiting for a decision -- is the one press Today is
+            about; it keeps the yellow. Every other step's press is the
+            Secondary level. The CURRENT step is still marked, by the yellow
+            number square the design system gives it (README §6, "a number
+            square (yellow when current)"), and none of the four changes what it
+            opens.
+          */
           return (
             <div className={"today-step" + (on ? " now" : "")} key={step.n}>
               <span className="today-step-n" aria-hidden>
@@ -1207,7 +1221,7 @@ function DeskHome() {
               <span className="today-step-name">{step.name}</span>
               <span className="today-step-count">{step.count}</span>
               <span className="today-step-unit">{step.unit}</span>
-              <Link to={step.to} hash={step.hash} className={"btn" + (on ? " solid" : "")}>
+              <Link to={step.to} hash={step.hash} className={"btn" + (step.n === 1 ? " solid" : "")}>
                 {step.act}
               </Link>
             </div>
@@ -2409,7 +2423,18 @@ function DeskHome() {
               {writeStory.isPending ? "writing now" : "ready"}
             </p>
             <div className="wire-acts">
+              {/*
+                UI1b-5: SECONDARY, NOT PRIMARY. The designer: "'Run scan now'
+                on Today = Secondary; page Primary is 'Review leads'." It was
+                drawn `solid` -- the yellow level -- so Today carried two
+                primaries and neither of them was the next step the page is
+                about. `ghost` is the Secondary level of the one button family
+                (2px ink border, ink text, README §6), which is what a real
+                action that is not THE action wears. Nothing about what the
+                press does changes.
+              */}
               <InkButton
+                tone="ghost"
                 onClick={() => scan.mutate()}
                 disabled={scanning || paperGate.blocked}
                 pending={scan.isPending}

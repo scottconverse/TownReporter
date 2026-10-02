@@ -244,7 +244,9 @@ try {
 
   // The nav at phone width is the drawer, and the Running box is at the top of
   // it -- the narrowest place this card is ever drawn.
-  const phoneMenu = page.getByRole("button", { name: "Open navigation", exact: true });
+  /* UI1b-5: renamed from `{ name: "Open navigation" }` -- the phone menu is a
+     labelled "Menu" button now (see desk-chrome.tsx). */
+  const phoneMenu = page.getByRole("button", { name: "Menu", exact: true });
   if (await phoneMenu.count()) {
     await phoneMenu.click();
     await page.waitForTimeout(900);

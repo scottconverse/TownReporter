@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { formatDate, formatDateTime, formatShortDate, slugify } from "./paper.ts";
+import { formatClockTime, formatDate, formatDateTime, formatShortDate, slugify } from "./paper.ts";
 import { APP_VERSION } from "./version.ts";
 
 describe("Longmont dates", () => {
@@ -12,7 +12,17 @@ describe("Longmont dates", () => {
 
   it("keeps short dates and datetimes on Mountain Time", () => {
     assert.equal(formatShortDate("2026-08-27T02:10:00.000Z"), "Aug 26, 2026");
-    assert.match(formatDateTime("2026-08-27T02:10:00.000Z"), /Aug 26, 2026, 8:10 PM/);
+    /*
+      UI1b-5: "8:10 p.m.", not "8:10 PM". The desk's clock face is lower case
+      with periods (README §7 -- "6 p.m." on the paper, "8:14 a.m." on the
+      desk), and this pin used to encode `toLocaleString`'s upper-case
+      `en-US` form. See `formatClockTime` in ./paper.ts.
+    */
+    assert.equal(formatDateTime("2026-08-27T02:10:00.000Z"), "Aug 26, 2026, 8:10 p.m.");
+    assert.equal(formatClockTime("2026-08-27T02:10:00.000Z"), "8:10 p.m.");
+    // Midnight and noon are the two the 12-hour clock gets wrong by one.
+    assert.equal(formatClockTime("2026-08-27T06:00:00.000Z"), "12:00 a.m.");
+    assert.equal(formatClockTime("2026-08-27T18:00:00.000Z"), "12:00 p.m.");
   });
 });
 

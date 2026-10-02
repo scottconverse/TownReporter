@@ -1093,13 +1093,19 @@
   neutral "nothing to say" ones are the 1px `--fg2` outline. Only `new` is a
   filled chip -- yellow, with #111 text.
 
-  The uppercase + letter-spacing treatment is kept: it is this desk's chip
-  typography and the words are the label, so changing case would re-wrap every
-  list row (a layout change, which this pass is not allowed to make). What
-  changed here is the color, the weight (800, as the reference component) and
-  the padding the reference uses.
+  UI1b-5: THE UPPERCASE IS GONE. The designer: "Chips: sentence case, no ALL
+  CAPS." Every chip on the desk was drawn through this one `text-transform`,
+  so the words the desk stores ("Ready to check", "Could not check", "Held")
+  reached the editor as READY TO CHECK / COULD NOT CHECK / HELD -- shouting a
+  state is not the same as naming it, and README §7 is explicit: "Sentence case
+  everywhere except kickers, which are uppercase." Letter-spacing drops with
+  it, because +0.12em was tracking for capitals and reads as a gap between
+  letters in lower case. The words themselves were already the label, so no
+  text, no size and no wrapping rule changes -- only the case they are set in.
+
+  The size/weight/padding below are the reference Chip component's, unchanged.
 */
-.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
+.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:none;letter-spacing:0;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
 .desk-ltr .chip.st-new {background:var(--a);border-color:var(--a);color:#111}
 .desk-ltr .chip.st-drafted {border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .chip.st-published {border-color:var(--ok);color:var(--ok)}

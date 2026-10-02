@@ -266,17 +266,47 @@ export function formatDayStamp(iso: string | Date | null | undefined, timeZone: 
   });
 }
 
+/*
+  UI1b-5. "11:01 p.m.", NOT "11:01 PM".
+
+  The design system writes clock times in lower case with periods on BOTH
+  surfaces -- README §7: the paper takes AP style ("6 p.m."), the desk takes the
+  short form ("8:14 a.m.") -- and the desk already had a helper that printed
+  that face: `clockText` in `src/lib/desk/ops-rows.ts` ("6:00 a.m." from a stored
+  "06:00"). Every other desk clock went through `toLocaleString`, which is
+  `en-US` "11:01 PM". The Drafts list is where the auditor read it, but the same
+  call draws the scan line on Today, the watch-list times and the Opinion
+  queues, so the face is fixed once, here, rather than screen by screen.
+
+  `formatClockTime` is the one place that face is written for a real instant.
+  `formatDateTime` is its date plus that clock, unchanged in shape --
+  "Aug 26, 2026, 8:10 p.m." where it used to say "8:10 PM".
+*/
+export function formatClockTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")} ${
+    part("dayPeriod").toUpperCase() === "AM" ? "a.m." : "p.m."
+  }`;
+}
+
 export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";
-  return d.toLocaleString("en-US", {
+  const date = d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
     timeZone,
   });
+  return `${date}, ${formatClockTime(d, timeZone)}`;
 }
 
 export function formatAge(iso: string | Date | null | undefined) {

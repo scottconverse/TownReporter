@@ -30,7 +30,7 @@
 
 import type { DraftAuditFinding } from "./draft-audit.ts";
 import type { EvidenceCheckState } from "./evidence-check-state.ts";
-import { PAPER } from "../paper.ts";
+import { PAPER, formatClockTime } from "../paper.ts";
 import type {
   ClaimEvidenceRow,
   FindingCaptureEvidence,
@@ -209,19 +209,14 @@ export function citedCaptureCount(
 /**
  * "8:14 a.m." in the paper's own time zone, so the server, the reader's
  * browser and CI (which runs in UTC) all print the same clock.
+ *
+ * UI1b-5: this was a second copy of the same clock face. It delegates to
+ * `formatClockTime` (`src/lib/paper.ts`) now, so the desk has one place that
+ * turns an instant into "8:14 a.m." and one place to change if the face ever
+ * does.
  */
 function paperClock(iso: string | null, timeZone: string): string {
-  if (!iso) return "";
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return "";
-  const parts = new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-    timeZone,
-  }).formatToParts(at);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
-  return `${part("hour")}:${part("minute")} ${part("dayPeriod").toUpperCase() === "AM" ? "a.m." : "p.m."}`;
+  return formatClockTime(iso, timeZone);
 }
 
 /**

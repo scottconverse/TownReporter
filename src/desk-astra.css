@@ -530,12 +530,21 @@
     has. Nothing about the fill changes; this is the 2px border the level was
     always specified with.
   */
-  border-color: var(--fg);
+  border-color: var(--primary-edge, var(--fg));
   color: #111;
   font-weight: 800;
 }
 .desk-ltr.astra.night :is(.btn.solid, .document-add-button) {
   color: #111;
+  /* UI1b-5: in DARK the Primary's edge is the same colour as its fill
+     (README §6). `--primary-edge` is a token rather than a `.night`-scoped
+     `border-color` on purpose: the levels below this one -- `.btn.solid.danger`,
+     the Queue's ink bulk-bar press, the publish bar's done state -- each name
+     their own edge further down this file, and a border-color declared here at
+     this specificity would have overruled all three. A custom property is read
+     by whichever rule wins the cascade for `border-color`, so only the plain
+     Primary takes it, and in LIGHT the fallback keeps UI1a's 2px #111. */
+  --primary-edge: var(--a);
 }
 .desk-ltr.astra :is(.btn.solid, .document-add-button):hover:not(:disabled) {
   background: color-mix(in srgb, var(--a) 88%, #111);
@@ -2245,8 +2254,17 @@
     border: 0;
     z-index: 35;
   }
+  /* UI1b-5: the phone bar's Menu press. It is the Quiet level of the button
+     family now (see the header in desk-components/desk-chrome.tsx), so it
+     carries `.btn.quiet`'s 1px `--fg2` edge and its 44px height; this block
+     only has to un-hide it and stop the wordmark squeezing it. `flex: none`
+     is what keeps "Menu" whole while `.astra-brand-bar strong` takes the
+     shrink. */
   .desk-ltr.astra .astra-menu {
     display: inline-flex;
+    flex: none;
+    padding: 0 12px;
+    gap: 6px;
   }
   .desk-ltr.astra .astra-topbar {
     padding: 0 14px;
@@ -3136,6 +3154,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* UI1b-5: the "Desk" tag is dropped from the PHONE bar for the reason the
+   designer gave -- "not a bare hamburger + 'Desk' chip" -- now that the press
+   beside it is a labelled "Menu" button. Two labels for the same thing; and
+   the four drawn items did not fit a 390px phone at Text: Large (see the note
+   on `.astra-brand-bar` above), so the row gains 60px of slack it was buying
+   by shrinking the wordmark. The drawer's own brand block keeps its tag. */
+.desk-ltr.astra .astra-brand-bar span {
+  display: none;
+}
 .desk-ltr.astra .astra-bar-new {
   margin-left: auto;
   min-height: 44px;
@@ -3379,6 +3406,23 @@
   border-color: var(--fg2);
   color: var(--fg2);
 }
+/*
+  UI1b-5: "Ready to check" IS NOT GREEN, AND IT IS NOT YELLOW EITHER.
+
+  The designer: "'Ready to check' chip: neutral chip, 1px --ink2 border, ink
+  text, sentence case. Not yellow. Same chip for 'Ready to edit' and 'Ready to
+  print'." A finished draft that nobody has recorded anything against is not a
+  PASS -- the checks it still has to survive live on the story page and this row
+  cannot read them (see the note in `lib/news/desk-drafts.ts`) -- so `d-ok`'s
+  green ✓ border claimed a verdict the row does not have. It is the "Waiting"
+  level of README §6's table: 1px `--fg2`, and the TEXT is `--fg`, not `--fg2`,
+  because this chip is the row's headline state rather than a footnote about it.
+*/
+.desk-ltr.astra .chip.d-ready {
+  border: 1px solid var(--fg2);
+  background: transparent;
+  color: var(--fg);
+}
 
 /* ---------------------------------------------------------------------------
    TODAY
@@ -3570,7 +3614,11 @@
 }
 .desk-ltr.astra .today-card-stage {
   font: 700 calc(14px * var(--ts)) var(--fd);
-  text-transform: uppercase;
+  /* UI1b-5: the stage is a state in words, and the designer ruled the states
+     sentence case -- "Ready to edit" was arriving as READY TO EDIT. This is
+     the same one-CSS-rule case the chips had; the words in the markup were
+     already sentence case. */
+  text-transform: none;
   letter-spacing: 0.08em;
   color: var(--fg2);
 }
@@ -4001,9 +4049,14 @@
 /* UI1b-4: the Queue's Sort and Section selects were drawn borderless, so they
    read as bare words in the filter bar. They take the Quiet box -- 1px
    `--fg2` -- and keep their compact padding so the one-line controls bar still
-   fits at 1280. */
+   fits at 1280.
+
+   UI1b-5: `min-height: 0` made them 26px tall -- a third under the desk's
+   floor, and the two controls the editor aims at on this bar. The select now
+   fills the 46px box it sits in (44 content px inside the wrapper's 1px edge),
+   which costs no width and moves nothing: the wrapper was already 46px. */
 .desk-ltr.astra .queue-sel select {
-  min-height: 0;
+  min-height: 44px;
   padding: 2px 4px;
   border: 1px solid var(--fg2);
   background: none;
@@ -4172,29 +4225,74 @@
   height: 44px;
   min-height: 44px;
 }
-/* UI1b-4: the INPUT is the drawn square, not a transparent film over it. It
-   used to be stretched over the whole 44px label with `opacity: 0`, so the box
-   the editor sees was a sibling span and the control the guard measures -- the
-   one that owns the state, the label and the keyboard -- had no box of its own
-   at all. The label still supplies the 44px press area (a press anywhere in it
-   still toggles the box); the input is `appearance: none` at the drawn 24px and
-   carries the same 2px `--fg2` edge the span used to, and the ink fill when
-   it is picked. `.queue-box` keeps only the tick glyph, laid over it. */
+/* UI1b-5: THE 44px PRESS AREA BELONGS TO THE INPUT, AND THE 24px SQUARE IS THE
+   SQUARE.
+
+   UI1b-4 moved the drawn square onto the input, which was the right call for
+   the guard: the control that owns the state, the label and the keyboard is
+   the one whose box is measured. But it left the input 24px tall, so the guard
+   counted 15 "target under 44px" on this one control -- and the guard is right.
+   The label's 44px box is a press area, not the control's own box, and a
+   measured 24px control is a 24px control whatever sits behind it.
+
+   So the input takes the whole 44px and the square moves back to the sibling
+   span, where it is DRAWING rather than state: `appearance: none`, no border,
+   no fill, `position: absolute; inset: 0` over the label. `.queue-box` is the
+   drawn 24px square -- border, ink fill when picked, tick glyph on top -- and
+   it is `pointer-events: none`, so every press in the 44px box still lands on
+   the input. The editor sees the same 24px square in the same place; the
+   control the keyboard and the guard both address is 44px tall.
+
+   The desk's own `:focus-visible` rule paints the ring on the input, which is
+   now the 44px box: the ring says "this control", and the square inside it says
+   which lead.
+
+   WHAT THE EDITOR SEES, and the one thing that changed: the 24px square is
+   solid rather than a 2px outline. It has to be. The guard measures the
+   element that owns the state -- this input -- and asks it for BOTH a 44px
+   height and an edge or fill of its own at 3:1; a single rectangle cannot be
+   44px tall and draw a 24px outline ring, because a border follows the box's
+   edge and an `outline` is not an edge the guard can read (and would have been
+   a 44px ring or a transparent 24px one either way). `background-clip:
+   content-box` gives the input a 24px mark inside a 44px box: `--fg2` at rest,
+   `--fg` when picked, with the `--bg` tick on top -- the drawing's two states,
+   as two tones of the same square rather than an outline and a fill. */
 .desk-ltr.astra .queue-check > input {
   appearance: none;
   -webkit-appearance: none;
-  width: 24px;
-  height: 24px;
-  margin: 0;
-  border: 2px solid var(--fg2);
-  background: transparent;
-  cursor: pointer;
-}
-.desk-ltr.astra .queue-check > .queue-box {
   position: absolute;
   inset: 0;
+  box-sizing: border-box;
+  width: 44px;
+  height: 44px;
+  /*
+    The 24px square the design draws, kept at 24px and kept INSIDE the 44px
+    press area: 10px of transparent padding either side, with the paint clipped
+    to the content box. `background-clip` is the only way one rectangle can be
+    44px tall and draw a mark 24px wide -- a `height: 24px` box cannot, and a
+    border follows the box's edge wherever that is, which is what made UI1b-4
+    choose between a 24px target and a 44px square.
+  */
+  padding: 10px;
+  margin: 0;
+  border: 0;
+  background-color: var(--fg2);
+  background-clip: content-box;
+  cursor: pointer;
+  z-index: 1;
+}
+/* Picked: the square goes ink, like the drawing's `background:var(--ink)`. */
+.desk-ltr.astra .queue-check > input:checked {
+  background-color: var(--fg);
+}
+/* The tick glyph, on the square's centre. It is the only thing the sibling
+   span draws now -- the square itself is the input's own paint. */
+.desk-ltr.astra .queue-check > .queue-box {
+  position: relative;
   display: grid;
   place-items: center;
+  width: 24px;
+  height: 24px;
   border: 0;
   background: transparent;
   color: var(--bg);
@@ -4203,15 +4301,6 @@
   line-height: 1;
   pointer-events: none;
   user-select: none;
-}
-/* UI1b-4: the fill and the ring both belong to the input now, which is the
-   square the editor sees -- so the `:has(> input:focus-visible) > .queue-box`
-   ring that existed only because the input was invisible is gone, and the
-   desk's own `:focus-visible` rule (2px in the text colour, 2px offset) paints
-   the square directly. */
-.desk-ltr.astra .queue-check > input:checked {
-  background: var(--fg);
-  border-color: var(--fg);
 }
 /* The evidence cell: the drawn EvidenceMeter's squares plus the count. The
    drawing prints "3 opened · 1 could not"; the desk has no per-lead failure
@@ -5448,7 +5537,8 @@
    is a hairline RULE token (1.4:1 on the cream panel) and never a control
    edge -- the same swap `.btn.quiet` got in UI1a. */
 .desk-ltr.astra .st-btn.ghost {
-  min-height: 40px;
+  /* UI1b-5: the 40px here was the last thing keeping "Read report" under the
+     floor; the 44px blanket at the foot of this file raises it. */
   border: 1px solid var(--fg2);
   padding: 0 calc(12px * var(--ts));
   font-size: calc(14px * var(--ts));
@@ -6553,6 +6643,48 @@
 .desk-ltr.astra .astra-search-trigger,
 .desk-ltr.astra .astra-icon {
   min-height: 44px;
+}
+
+/* ---------------------------------------------------------------------------
+   UI1b-5: THE REST OF THE 44px FLOOR.
+
+   The guard's baseline (unit UI1b step 1) counted 67 targets drawn under 44px.
+   They are five kinds, and every one of them is a real press or a real choice:
+
+     - "All drafts" / "All follow-ups" (12) -- `.np-link`, 32.4px
+     - "Read report" (9) -- `.st-btn.ghost`, 40px
+     - the Model picker's model and effort selects (6) and the Daily scan's
+       source select (3) -- 40px and 43px
+     - the Queue's Sort and Section selects (6) -- 26px
+     - every disclosure toggle (`summary`) on the desk (11) -- 30-32.4px
+     - the Legal removals dialogs' checkbox rows (5) -- `.astra-check`, 40.4px
+
+   Height only. README §2.9 and §6: "hit targets at least 44px", "All buttons:
+   at least 44px tall". Widening any of them would push the Queue's one-line
+   controls bar and the phone header over 390px, which is the sideways scroll
+   the narrow-width walk exists to catch; nothing here changes a width, a
+   padding, or a colour.
+
+   `summary` is the one blanket rule, because a disclosure is a control on
+   every screen that draws one and they were all short. It cannot overflow
+   anything: a `min-height` on a `list-item` grows the line box downward and
+   the marker stays where it was.
+
+   The `.queue-pick` checkbox is NOT here -- it keeps its 24px drawn square and
+   takes its 44px in the label that owns the press (see `.queue-check`).
+*/
+.desk-ltr.astra select,
+.desk-ltr.astra summary,
+.desk-ltr.astra .np-link,
+.desk-ltr.astra .astra-check,
+.desk-ltr.astra .st-btn.ghost {
+  min-height: 44px;
+}
+/* The two inline-block links this raises, centred in their new box: with
+   `min-height` alone the word sat on the top edge of a 44px box. */
+.desk-ltr.astra .np-link {
+  display: inline-flex;
+  align-items: center;
 }
 
 /* --- the page header, as every drawing has it -------------------------------

@@ -58,7 +58,14 @@ function stateTone(state: DeskDraftState): string {
   if (state.failed) return "d-danger";
   if (state.running) return "d-run";
   if (state.needsYou) return "d-warn";
-  if (state.key === "ready") return "d-ok";
+  /*
+    UI1b-5. "Ready to check" was drawn in `d-ok` -- the green 1px border the
+    state table gives a ✓ that has been verified. This row has not been
+    verified: the checks it still faces are recorded on the story page, not
+    here, so green was a verdict the row could not read. The designer's ruling
+    is the neutral chip, which is the state table's "Waiting" level.
+  */
+  if (state.key === "ready") return "d-ready";
   return "d-quiet";
 }
 

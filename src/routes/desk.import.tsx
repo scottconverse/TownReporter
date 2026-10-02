@@ -347,6 +347,25 @@ function ImportPage() {
             <InkButton tone="solid" onClick={read} disabled={text.trim().length < 20 || structure.isPending}>
               {structure.isPending ? "Reading…" : "Read the stories"}
             </InkButton>
+            {/*
+              UI1b-5: A DISABLED PRESS SAYS WHY, BESIDE ITSELF.
+
+              Rule 4 of the design system: "a disabled button looks disabled and
+              says why beside it." The guard's baseline recorded this one three
+              times ("no reason printed beside the disabled control") -- it is
+              the only control on the desk that was greyed out with nothing
+              said about it, and the reason is entirely knowable: the box is
+              empty. It is a sentence, not a live region: nothing changed, the
+              editor simply has not pasted anything yet. When the press is
+              mid-read its own label ("Reading…") is the reason, so this line
+              stands down.
+            */}
+            {text.trim().length < 20 && !structure.isPending ? (
+              <span className="text-sm text-muted">
+                Nothing is in the box yet. Paste or drop a finished story above — at least 20
+                characters — and this press reads it.
+              </span>
+            ) : null}
             {text ? (
               <InkButton
                 tone="quiet"
