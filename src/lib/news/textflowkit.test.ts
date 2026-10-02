@@ -27,7 +27,7 @@ const {
   transcriptionTimeoutSeconds,
 } = await import("./textflowkit.ts");
 
-/** The measured 0.1.6 output shape: `metadata`, `segments` with `words`, no top-level `text`. */
+/** The measured output shape (identical on 0.1.6 and 0.1.8): `metadata`, `segments` with `words`, no top-level `text`. */
 function measuredJson(): string {
   return `${JSON.stringify({
     source: "C:\\meetings\\clip60b.webm",
@@ -111,8 +111,10 @@ describe("what the CLI is asked to do", () => {
   });
 
   it("reads the version the real CLI prints, and still says something when the line is not what was expected", () => {
+    assert.equal(parseTextflowkitVersion("textflowkit 0.1.8\n"), "0.1.8");
+    assert.equal(parseTextflowkitVersion("0.1.8"), "0.1.8");
+    // The version the install ran before 0.1.8 still reads the same way.
     assert.equal(parseTextflowkitVersion("textflowkit 0.1.6\n"), "0.1.6");
-    assert.equal(parseTextflowkitVersion("0.1.6"), "0.1.6");
     assert.equal(parseTextflowkitVersion("textflowkit 0.2\n"), "0.2");
     assert.equal(parseTextflowkitVersion("   \n"), null);
     assert.equal(parseTextflowkitVersion("textflowkit (unknown build)\n"), "textflowkit (unknown build)");
@@ -140,7 +142,7 @@ describe("how long a transcription may take", () => {
 });
 
 describe("what the tool's JSON means", () => {
-  it("reads the measured 0.1.6 shape, joining the segments because that version writes no top-level text", () => {
+  it("reads the measured shape (0.1.6 and 0.1.8), joining the segments because that version writes no top-level text", () => {
     const transcript = parseTextflowkitJson(measuredJson());
     assert.equal(transcript.text, "Good evening, the council will come to order.\nItem one is the minutes of the last meeting.");
     assert.equal(transcript.model, "small");
@@ -226,8 +228,8 @@ describe("the one line the desk shows", () => {
   });
 
   it("names the version, the path, the model and the language when it is there", () => {
-    const line = textflowkitStatusLine({ installed: true, version: "0.1.6", cliPath: "textflowkit", model: "small", language: "en" });
-    assert.match(line, /textflowkit 0\.1\.6/);
+    const line = textflowkitStatusLine({ installed: true, version: "0.1.8", cliPath: "textflowkit", model: "small", language: "en" });
+    assert.match(line, /textflowkit 0\.1\.8/);
     assert.match(line, /model small/);
     assert.match(line, /language en/);
     assert.doesNotMatch(line, /audio-only/);
@@ -292,4 +294,85 @@ describe("a run that will not stop", () => {
     }
   });
 
+});
+
+describe("a tool that talks on stderr while it works (0.1.7 and later)", () => {
+  /*
+    From 0.1.7 the real tool streams live progress lines ("transcribing...",
+    "rendering...") to stderr on a successful run; the JSON file and stdout are
+    exactly what 0.1.6 produced. Stderr on a run that exited 0 is therefore not
+    a failure and not part of the result: it is carried on the run for the log
+    and nothing else changes.
+  */
+  const FAKE_CLI = join(process.cwd(), "scripts", "fakes", "fake-textflowkit.mjs");
+  const saved = {
+    path: process.env.TEXTFLOWKIT_CLI_PATH,
+    stderr: process.env.FAKE_TEXTFLOWKIT_STDERR,
+    mode: process.env.FAKE_TEXTFLOWKIT_MODE,
+  };
+
+  after(() => {
+    for (const [name, value] of [
+      ["TEXTFLOWKIT_CLI_PATH", saved.path],
+      ["FAKE_TEXTFLOWKIT_STDERR", saved.stderr],
+      ["FAKE_TEXTFLOWKIT_MODE", saved.mode],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  async function transcribeWith(stderrMode: string | undefined) {
+    process.env.TEXTFLOWKIT_CLI_PATH = FAKE_CLI;
+    delete process.env.FAKE_TEXTFLOWKIT_MODE;
+    if (stderrMode === undefined) delete process.env.FAKE_TEXTFLOWKIT_STDERR;
+    else process.env.FAKE_TEXTFLOWKIT_STDERR = stderrMode;
+    const { transcribeAudioWithTextflowkit } = await import("./textflowkit-cli.server.ts");
+    const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const outputDir = mkdtempSync(join(tmpdir(), "textflowkit-stderr-"));
+    try {
+      const audioPath = join(outputDir, "audio.opus");
+      writeFileSync(audioPath, "opus-bytes");
+      const run = await transcribeAudioWithTextflowkit({ audioPath, outputDir, durationSeconds: 15 });
+      if (!run.ok) throw new Error(`the stand-in run failed: ${run.reason}`);
+      return { run, json: readFileSync(run.jsonPath, "utf8") };
+    } finally {
+      rmSync(outputDir, { recursive: true, force: true });
+    }
+  }
+
+  it("carries the progress lines but gives the same transcript, counts and bytes as a silent run", async () => {
+    const quiet = await transcribeWith(undefined);
+    const chatty = await transcribeWith("progress");
+
+    assert.equal(quiet.run.stderr, "", "the 0.1.6-style run says nothing on stderr");
+    assert.match(chatty.run.stderr, /transcribing\.\.\./);
+    assert.match(chatty.run.stderr, /rendering\.\.\./);
+
+    // Everything the product reads is unchanged by the noise.
+    // The one field that differs is `source`, the audio path inside each run's own temp folder.
+    const withoutSource = (text: string) => {
+      const { source: _source, ...rest } = JSON.parse(text) as Record<string, unknown>;
+      return rest;
+    };
+    assert.deepEqual(withoutSource(chatty.json), withoutSource(quiet.json), "the JSON the tool wrote is the same document");
+    assert.equal(chatty.run.wordCount, quiet.run.wordCount);
+    assert.equal(chatty.run.model, quiet.run.model);
+    assert.equal(chatty.run.device, quiet.run.device);
+    assert.equal(chatty.run.durationSeconds, quiet.run.durationSeconds);
+    // stdout names the JSON path inside each run's own temp folder, so it is compared by shape.
+    assert.match(chatty.run.stdout, /\.json/);
+    assert.match(quiet.run.stdout, /\.json/);
+  });
+
+  it("still reads the version when the probe runs against the 0.1.8 stand-in", async () => {
+    process.env.TEXTFLOWKIT_CLI_PATH = FAKE_CLI;
+    delete process.env.FAKE_TEXTFLOWKIT_MODE;
+    process.env.FAKE_TEXTFLOWKIT_STDERR = "progress";
+    const { probeTextflowkit } = await import("./textflowkit-cli.server.ts");
+    const probe = await probeTextflowkit();
+    assert.equal(probe.installed, true);
+    assert.equal(probe.version, "0.1.8");
+  });
 });

@@ -73,8 +73,8 @@ export function resolveTextflowkitConfig(env: NodeJS.ProcessEnv = {}): Textflowk
 }
 
 /**
- * `textflowkit --version` was measured against the real CLI (0.1.6, Windows
- * venv): it prints one line, `textflowkit 0.1.6`, and exits 0. `doctor` is not
+ * `textflowkit --version` was measured against the real CLI (0.1.6, and the same on 0.1.8, Windows
+ * venv): it prints one line, `textflowkit 0.1.8`, and exits 0. `doctor` is not
  * used -- `--version` is the smaller surface and it is what the tool's own
  * argparse defines as a top-level flag. A tool that answers with something
  * else still counts as installed; the line is recorded verbatim rather than
@@ -145,7 +145,7 @@ type RawSegment = {
  * Read the canonical transcript out of textflowkit's JSON.
  *
  * The shape that matters is `segments[] {start, end, text, words[]}` plus
- * `metadata {model, device}` -- measured against 0.1.6 output. There is no
+ * `metadata {model, device}` -- measured against 0.1.6 and 0.1.8 output. There is no
  * top-level `text` in that version, so the plain text is the segments joined;
  * inventing one from anywhere else would be a second copy of the same fact.
  *

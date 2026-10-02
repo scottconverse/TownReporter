@@ -103,7 +103,8 @@ async function runTextflowkit(
 /**
  * Is textflowkit there, and what does it say it is?
  *
- * Measured against the real CLI (0.1.6): `--version` prints `textflowkit 0.1.6`
+ * Measured against the real CLI (0.1.6, and again on 0.1.8, which is what the
+ * live install runs): `--version` prints `textflowkit 0.1.8`
  * on stdout and exits 0. `doctor` exists in the tool but is not used here --
  * `--version` is a top-level flag that answers in one line without loading a
  * model or a device, and a probe must not be expensive.

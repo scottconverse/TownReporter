@@ -3,10 +3,11 @@
  * A stand-in for the real `textflowkit` console script (unit R).
  *
  * Point `TEXTFLOWKIT_CLI_PATH` at this file. It answers the two invocations the
- * product makes, in the shapes the real 0.1.6 tool was measured to produce:
+ * product makes, in the shapes the real tool was measured to produce (0.1.6, and again on
+ * 0.1.8, whose JSON, stdout and exit codes are identical):
  *
  *   fake-textflowkit.mjs --version
- *     -> "textflowkit 0.1.6" on stdout, exit 0
+ *     -> "textflowkit 0.1.8" on stdout, exit 0
  *
  *   fake-textflowkit.mjs transcribe <audio> --formats json --output-dir <dir> \
  *        --model small --language en
@@ -19,7 +20,7 @@
  * mechanism `scripts/fakes/fake-env-cli.mjs` uses to prove a child sees no
  * secrets.)
  *
- * The JSON is deliberately the 0.1.6 shape rather than a convenient one: no
+ * The JSON is deliberately the measured shape rather than a convenient one: no
  * top-level `text`, `metadata.{model,device}`, and segments carrying
  * `start`/`end`/`text` plus per-word timings. A fake that returns an easier
  * document would let a parser pass here and fail on a real recording.
@@ -38,7 +39,7 @@ if (dump) writeFileSync(dump, JSON.stringify(process.env));
 const mode = process.env.FAKE_TEXTFLOWKIT_MODE ?? "ok";
 
 if (argv[0] === "--version" || argv.includes("--version")) {
-  process.stdout.write(`textflowkit ${process.env.FAKE_TEXTFLOWKIT_VERSION ?? "0.1.6"}\n`);
+  process.stdout.write(`textflowkit ${process.env.FAKE_TEXTFLOWKIT_VERSION ?? "0.1.8"}\n`);
   process.exit(mode === "version-fail" ? 1 : 0);
 }
 
@@ -70,6 +71,14 @@ if (mode === "hang") {
   process.stdout.write("");
   process.exit(0);
 } else {
+  // 0.1.7 and later stream live progress lines to STDERR while they work; the
+  // result is still the JSON file and stdout. FAKE_TEXTFLOWKIT_STDERR=progress
+  // reproduces that so a test can prove stderr noise on a successful run is
+  // carried, never read as a failure.
+  if (process.env.FAKE_TEXTFLOWKIT_STDERR === "progress") {
+    process.stderr.write("transcribing...\n");
+    process.stderr.write("rendering...\n");
+  }
   const segments = process.env.FAKE_TEXTFLOWKIT_SEGMENTS
     ? JSON.parse(process.env.FAKE_TEXTFLOWKIT_SEGMENTS)
     : [
