@@ -174,6 +174,15 @@ describe("a run that died mid-work", () => {
     const db = new Client({ connectionString: dbUrl });
     await db.connect();
     try {
+      // SG1: an install nobody has set up refuses to scan, and its Run scan
+      // button is disabled with a sentence beside it. This test is about a DEAD
+      // run on a paper that is in use, so the fixture marks the paper set up
+      // (the owner above was created, but this walk never presses through
+      // first-run setup).
+      await db.query(
+        `insert into paper_settings (newsroom_id, onboarded) values (1, true)
+         on conflict (newsroom_id) do update set onboarded = true`,
+      );
       // Keep the scan desk's newest row orphaned, then put an older open row
       // behind a fresh worker heartbeat and two older rows whose jobs are
       // terminal or absent. This covers the rendered history state as well as
@@ -237,8 +246,18 @@ describe("a run that died mid-work", () => {
     // because the page believes a scan is still in flight.
     const runButton = page.getByRole("button", { name: /^Run scan$/ });
     await runButton.waitFor({ state: "visible", timeout: 15_000 });
-    await assert.doesNotReject(
-      async () => assert.equal(await runButton.isDisabled(), false),
+    /*
+      SG1: the button is disabled for a moment while the desk asks whether the
+      paper has been set up ("checking"), so this waits for it to ENABLE rather
+      than reading it once. A dead run that left it disabled for good still
+      fails here after the wait, which is what this test is for.
+    */
+    for (let i = 0; i < 40 && (await runButton.isDisabled()); i++) {
+      await page.waitForTimeout(500);
+    }
+    assert.equal(
+      await runButton.isDisabled(),
+      false,
       "the Run scan button is still disabled -- the page thinks a dead run is live",
     );
 
