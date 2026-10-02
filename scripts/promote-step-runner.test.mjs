@@ -434,6 +434,67 @@ test("promote.ps1 keeps a log, offers -Resume, and prints the way back up", () =
 
 // --- the log ----------------------------------------------------------------
 
+test("-WhatIf lets only the READ-ONLY database commands carry the live-promote flag", windowsOnly, async () => {
+  const install = makeInstall();
+  try {
+    // Under -WhatIf: names / preflight / state carry the flag; copy, the
+    // connection wait, the swap and the hand rollback never do, so a dry run on
+    // a 5433 install still cannot copy, rename or swap anything. Outside
+    // -WhatIf every command carries the flag the real promotion set.
+    const harness = writeHarness(install, "whatif-flag.ps1", [
+      "$base = @{ PROMOTE_DB_LIVE_PROMOTE = '' }",
+      "$rows = @()",
+      "$WhatIfPreference = $true",
+      "foreach ($c in 'names','preflight','state','copy','wait-for-zero','swap-back','rollback') {",
+      "  $e = Get-PromoteDbCommandEnvironment -Command $c -Environment $base",
+      "  $rows += \"whatif:$c=$($e['PROMOTE_DB_LIVE_PROMOTE'])\"",
+      "}",
+      "$WhatIfPreference = $false",
+      "$real = @{ PROMOTE_DB_LIVE_PROMOTE = '1' }",
+      "foreach ($c in 'names','copy','swap-back','rollback') {",
+      "  $e = Get-PromoteDbCommandEnvironment -Command $c -Environment $real",
+      "  $rows += \"real:$c=$($e['PROMOTE_DB_LIVE_PROMOTE'])\"",
+      "}",
+      "# the caller's table is not changed",
+      "$WhatIfPreference = $true",
+      "$null = Get-PromoteDbCommandEnvironment -Command 'preflight' -Environment $base",
+      "$rows += \"caller-untouched=[$($base['PROMOTE_DB_LIVE_PROMOTE'])]\"",
+      // -WhatIf is a preference every cmdlet honours, Set-Content included: turn
+      // it off again or the result file is never written.
+      "$WhatIfPreference = $false",
+      "Set-Content -Path (Join-Path $app 'whatif.txt') -Value ($rows -join ';') -Encoding ASCII",
+    ]);
+    await runPowerShell(harness);
+    const out = read(join(install.app, "whatif.txt")).trim();
+    for (const c of ["names", "preflight", "state"]) {
+      assert.ok(out.includes(`whatif:${c}=1`), `-WhatIf must let the read-only ${c} carry the flag: ${out}`);
+    }
+    for (const c of ["copy", "wait-for-zero", "swap-back", "rollback"]) {
+      assert.ok(out.includes(`whatif:${c}=;`), `-WhatIf must NOT give ${c} the flag (a dry run may not touch 5433): ${out}`);
+    }
+    for (const c of ["names", "copy", "swap-back", "rollback"]) {
+      assert.ok(out.includes(`real:${c}=1`), `a real run keeps the flag for ${c}: ${out}`);
+    }
+    assert.ok(out.endsWith("caller-untouched=[]"), `the caller's table was modified: ${out}`);
+  } finally {
+    cleanup(install);
+  }
+});
+
+test("a 5433 URL without the flag is refused by copy, swap-back and rollback; -WhatIf only opens the read-only commands", async () => {
+  // The library half of the same guarantee, on the three commands -WhatIf must
+  // never open: with the flag empty (what -WhatIf leaves in place for them) each
+  // refuses before it dials anything. The host is .invalid so nothing is dialled
+  // even if the guard were gone.
+  const { runCommand } = await import("../ops/lib-promote-db.mjs");
+  const url = "postgres://u:p@db.invalid:5433/townreporter";
+  for (const command of ["copy", "wait-for-zero", "swap-back", "rollback"]) {
+    const answer = await runCommand(command, { adminUrl: url, databaseUrl: url, livePromote: false });
+    assert.equal(answer.ok, false, `${command} ran on a 5433 URL without the flag`);
+    assert.match(answer.refusal, /port 5433/, `${command} was refused for some other reason: ${answer.refusal}`);
+  }
+});
+
 test("every step lands in the log with its command, its exit code and its duration", windowsOnly, async () => {
   const install = makeInstall();
   try {

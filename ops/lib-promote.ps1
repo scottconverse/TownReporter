@@ -949,11 +949,13 @@ function New-PromoteDbEnvironment {
     itself has to be the thing that is guarded, and the flag is the way past
     it for the one caller that is allowed: this script, promoting for real.
 
-    NOT under -WhatIf. A dry run renames nothing, and the requirement is
-    explicit that the dry run does not carry the flag. The consequence is
-    worth knowing: on an install whose database IS on 5433, a -WhatIf run
-    stops at the database preflight with the guard's sentence. That is the
-    guard working, not a bug -- see SELF-HOSTING.md.
+    NOT under -WhatIf, EXCEPT for the three READ-ONLY commands: see
+    Get-PromoteDbCommandEnvironment below. A dry run renames nothing, so the
+    flag set here stays empty under -WhatIf, and the copy, the swap and the
+    hand rollback therefore still refuse a 5433 URL in a dry run. The
+    read-only commands (names, preflight, state) are let through by that
+    function so that a -WhatIf run on the production machine can still do its
+    read-only database checks -- the production auditor's call, 2026-10-01.
 
     $WhatIfPreference is read here rather than passed in because it is the
     script's own, set by [CmdletBinding(SupportsShouldProcess = $true)] on
@@ -974,6 +976,30 @@ function New-PromoteDbEnvironment {
     PROMOTE_DB_TIMEOUT_SECONDS = [string](Get-PromoteChildTimeoutSeconds -Step 'dbcopy')
     PROMOTE_DB_LIVE_PROMOTE    = $live
   }
+}
+
+<#
+  The environment ONE database command runs with.
+
+  The live-promote flag is the only thing that lets ops\lib-promote-db.mjs
+  touch a PostgreSQL on port 5433. Under -WhatIf it is empty, which would make
+  a dry run on a 5433 install stop at the preflight. The three commands that
+  only READ -- names, preflight, state -- are therefore allowed to carry the
+  flag under -WhatIf; copy, wait-for-zero, swap-back and rollback never are, so
+  a dry run still cannot copy, rename or swap anything on 5433 (the library
+  refuses them, and the test pins it). Outside -WhatIf the environment is
+  returned untouched.
+#>
+function Get-PromoteDbCommandEnvironment {
+  param(
+    [Parameter(Mandatory = $true)][string]$Command,
+    [Parameter(Mandatory = $true)][hashtable]$Environment
+  )
+  $result = @{}
+  foreach ($name in @($Environment.Keys)) { $result[$name] = $Environment[$name] }
+  $readOnly = @('names', 'preflight', 'state') -contains $Command
+  if ($WhatIfPreference -and $readOnly) { $result['PROMOTE_DB_LIVE_PROMOTE'] = '1' }
+  return $result
 }
 
 <#
@@ -1021,6 +1047,7 @@ function Invoke-PromoteDbCommand {
   )
   if (-not $Step) { $Step = $Command }
   if ($TimeoutSeconds -lt 0) { $TimeoutSeconds = Get-PromoteChildTimeoutSeconds -Step $Step }
+  $Environment = Get-PromoteDbCommandEnvironment -Command $Command -Environment $Environment
 
   $saved = @{}
   foreach ($name in @($Environment.Keys)) {
