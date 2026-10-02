@@ -6,6 +6,7 @@ import { writeStoryForAuthenticatedEditor } from "./model-request-commit.server.
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { emptyPlan, researchLoop, runDueMonitors, watchSource } from "./investigate.ts";
 import { tickAllDueMonitors } from "./monitors-cron.ts";
+import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 
 /**
  * GauntletGate ENG-04 proof test.
@@ -24,6 +25,9 @@ import { tickAllDueMonitors } from "./monitors-cron.ts";
 async function ensureScratchSchema() {
   const sql = await getSql();
   await ensureJobsSchema();
+  /* SG1b: the shared commit boundary refuses an un-set-up newsroom (paper-settings.ts). */
+  await ensurePaperSettingsSchema();
+  await sql.query("insert into paper_settings(newsroom_id,onboarded) values(1,true),(2,true) on conflict (newsroom_id) do update set onboarded=true");
   await sql.query(`
     create table if not exists leads (
       id serial primary key,

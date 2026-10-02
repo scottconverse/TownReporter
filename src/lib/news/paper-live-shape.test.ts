@@ -36,6 +36,8 @@ import {
   isOnboarded,
   paperSetUpRefusal,
   requirePaperSetUp,
+  PAPER_NOT_SET_UP_OWNER_SENTENCE,
+  PAPER_NOT_SET_UP_SENTENCE,
 } from "./paper-settings.ts";
 
 /*
@@ -193,6 +195,35 @@ describe("the Option A gate lets the LIVE row through every gated action", () =>
         `a fresh install must be refused "${action}" in one plain sentence`,
       );
     }
+  });
+
+  /*
+    SG1b finding 2. The button gate now reads a second, role-independent
+    function (`paperSetupCompleted`), and shows a second sentence to an editor
+    who cannot open Paper setup. Neither may change what the LIVE paper gets:
+    `onboarded` is true there, so every gated button is enabled and no refusal
+    sentence is ever drawn -- whatever role is looking.
+  */
+  it("is onboarded through the role-independent read too, so no gate blocks anyone", async () => {
+    await seedLiveShape();
+    assert.equal(await isOnboarded(LIVE_SHAPED), true, "the read the button gate blocks on");
+    assert.equal(await isOnboarded(UNSET), false);
+  });
+
+  it("keeps the owner sentence a variant, never a replacement, of the one the server returns", () => {
+    // The server still returns PAPER_NOT_SET_UP_SENTENCE; the ask-the-owner
+    // wording is only what the disabled button says BEFORE a press, and only to
+    // someone who cannot run setup themselves.
+    assert.equal(
+      PAPER_NOT_SET_UP_SENTENCE("draft this story"),
+      "This paper has not been set up yet. Finish Paper setup first (Server > Paper setup), then draft this story.",
+    );
+    assert.equal(
+      PAPER_NOT_SET_UP_OWNER_SENTENCE("draft this story"),
+      "This paper has not been set up yet. Ask the owner to finish Paper setup, then draft this story.",
+    );
+    assert.notEqual(PAPER_NOT_SET_UP_OWNER_SENTENCE("draft this story"), PAPER_NOT_SET_UP_SENTENCE("draft this story"));
+    assert.ok(!PAPER_NOT_SET_UP_OWNER_SENTENCE("draft this story").includes("\n"));
   });
 
   it("allows the live shape even though its city column is blank", async () => {

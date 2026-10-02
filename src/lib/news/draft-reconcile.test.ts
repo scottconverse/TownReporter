@@ -9,6 +9,7 @@ let getSql: typeof import("../db.ts").getSql;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
 let enqueueJob: typeof import("./jobs.ts").enqueueJob;
 let requestDraftReconciliation: typeof import("./draft-reconcile.server.ts").requestDraftReconciliation;
+let ensurePaperSettingsSchema: typeof import("./paper-settings.ts").ensurePaperSettingsSchema;
 
 before(async () => {
   vite = await createServer({ configFile: false, cacheDir: join(tmpdir(),`townreporter-reconcile-request-${process.pid}`), server: { middlewareMode: true, hmr: {port:0} }, resolve: { alias: { "@": join(process.cwd(), "src") } } });
@@ -25,6 +26,10 @@ test("queues the exact latest authorized draft version", async () => {
   await sql.query("create table if not exists newsroom_members(user_id text,newsroom_id integer,role text)");
   await sql.query("create table if not exists leads(id serial primary key,user_id text,newsroom_id integer,status text,headline text,why text,topic text,source_urls text,evidence text,newsworthiness integer,created_at timestamptz default now())");
   await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,dek text,body text,topic text,source_urls text default '[]',integrity_notes text,updated_at timestamptz default now(),provenance_json text,form text,found_note text,unanswered text,research_json text)");
+  /* SG1b: requestDraftReconciliation refuses an un-set-up newsroom. */
+  ({ ensurePaperSettingsSchema } = await vite.ssrLoadModule("/src/lib/news/paper-settings.ts"));
+  await ensurePaperSettingsSchema();
+  await sql.query("insert into paper_settings(newsroom_id,onboarded) values(88101,true) on conflict (newsroom_id) do update set onboarded=true");
   await sql.query("insert into newsrooms values(88101,'Reconcile room')");
   await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values('editor',88101,'editor')");
   const [lead] = await sql.query<{id:number}>("insert into leads(user_id,newsroom_id,status,headline,why,topic,source_urls,evidence,newsworthiness) values('editor',88101,'drafted','Lead','Why','council','[]','',1) returning id");

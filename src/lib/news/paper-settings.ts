@@ -601,6 +601,19 @@ export function PAPER_NOT_SET_UP_SENTENCE(action: string): string {
 }
 
 /**
+ * The same refusal, for an editor who CANNOT finish setup: `firstRunSetupState`
+ * only routes the owner, and Paper setup in the Server panel is owner-only, so
+ * "finish Paper setup" points an invited editor at a screen that will not open
+ * for them. `PAPER_NOT_SET_UP_SENTENCE` above is unchanged and still what the
+ * server returns; this variant is what the BUTTON gate says to a non-owner
+ * BEFORE the press (paper-setup-gate.ts), so the disabled control names the one
+ * thing that editor can actually do.
+ */
+export function PAPER_NOT_SET_UP_OWNER_SENTENCE(action: string): string {
+  return `This paper has not been set up yet. Ask the owner to finish Paper setup, then ${action}.`;
+}
+
+/**
  * The refusal when the desk could not even ASK. FAIL CLOSED: the same rule the
  * Server panel's Paper-setup section follows (ops-panels.tsx) -- "I could not
  * check whether this paper is set up" is not "it is set up", and treating a
@@ -685,6 +698,34 @@ export const firstRunSetupState = createServerFn({ method: "GET" })
     } catch (err) {
       if (err instanceof ForbiddenError) return { needsSetup: false as const };
       throw err;
+    }
+  });
+
+/*
+  SG1b finding 2: the BUTTON gate must read onboarding for EVERY role.
+
+  `firstRunSetupState` above answers a routing question ("should this person be
+  sent to the first-run form"), and only the owner can be sent there, so it
+  deliberately says `needsSetup: false` to everyone else. The button gate asked
+  the same question and therefore told an invited editor "ready" on a paper
+  nobody has set up -- every gated button enabled, no reason beside it -- and
+  the press was then refused server-side by `requirePaperSetUp`. That is exactly
+  the unexplained dead-end the client gate exists to prevent.
+
+  So this is a SECOND, narrower read: has THIS newsroom finished setup, asked by
+  any signed-in desk user, answered with one boolean and nothing else. No
+  identity fields, no owner-only settings, no "should you be routed to a form".
+  A failed read -- signed out, not a member, a broken database -- is `false`:
+  fail closed, the same rule the Server panel follows.
+*/
+export const paperSetupCompleted = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }): Promise<{ onboarded: boolean }> => {
+    try {
+      const me = await requireEditor(context.userId);
+      return { onboarded: await isOnboarded(me.newsroomId) };
+    } catch {
+      return { onboarded: false };
     }
   });
 
