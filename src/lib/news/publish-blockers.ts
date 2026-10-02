@@ -370,3 +370,49 @@ export function publishGateNote(blockers: readonly PublishBlocker[]): string {
   const first = blockers[0];
   return first ? `${first.action.label} to publish.` : "";
 }
+
+/**
+ * What the publish bar says about the press, in one value (unit PUB1).
+ *
+ * THE OWNER'S PRESS. He pressed "Publish in Elections" and the same button
+ * came back with no message; the refusal -- if it was drawn at all -- was a
+ * Notice in the page body, far from the sticky bar he was looking at. A press
+ * that answers nowhere is indistinguishable from a broken button, and it is
+ * the one thing the bar must not do: it is where the press was made, so it is
+ * where the answer belongs.
+ *
+ * This is the page's whole answer, derived rather than latched, so the bar
+ * cannot show two of them at once:
+ *
+ *   - `publishing`: the press is in flight. Nothing else is known yet, so
+ *     nothing else is said.
+ *   - `refused`: the server refused (or the request threw, or the desk did not
+ *     answer at all). The words are the server's own, which already name what
+ *     to do next for every gate it keeps.
+ *   - `published`: it printed. `slug` is the article, so the bar can offer the
+ *     way to read it.
+ *
+ * A refusal outranks a printed banner on purpose: if both were somehow set,
+ * the honest thing to show is the one that says nothing went to the paper.
+ * `idle` is the ordinary state -- the gate list and the button speak for
+ * themselves.
+ */
+export type PublishPressState =
+  | { kind: "idle" }
+  | { kind: "publishing" }
+  | { kind: "refused"; message: string }
+  | { kind: "published"; slug: string | null };
+
+export function publishPressState(input: {
+  /** The publish request is in flight. */
+  publishing: boolean;
+  /** The server's own words for the last refusal, or "" when there was none. */
+  refusal: string;
+  /** The article this session just printed, or null. */
+  publishedSlug: string | null;
+}): PublishPressState {
+  if (input.publishing) return { kind: "publishing" };
+  if (input.refusal.trim()) return { kind: "refused", message: input.refusal.trim() };
+  if (input.publishedSlug) return { kind: "published", slug: input.publishedSlug };
+  return { kind: "idle" };
+}
