@@ -43,14 +43,26 @@ describe("pullQueries", () => {
   });
 });
 
+/*
+  Point 2, and the ranking that was already here.
+
+  What the new rule changes in the cases below: a commercial host is no longer
+  a candidate at all, so the two cases that ranked `www.frprdistrict.com` (the
+  rail district's own Wix site) now say so out loud by listing it as a source
+  the paper has registered. What stays true: the story's own body still leads
+  the state legislature, `.gov` still leads within a group, and non-URLs are
+  still ignored.
+*/
+
 describe("docCandidateHosts", () => {
   it("puts the story's own hosts ahead of fresh search hits", () => {
     const hosts = docCandidateHosts(
       ["https://www.timescall.com/a", "https://ratpd.gov/news/", "https://www.timescall.com/b"],
       ["https://www.frprdistrict.com/about-the-district"],
+      ["frprdistrict.com"],
     );
     assert.equal(hosts[0], "www.frprdistrict.com");
-    assert.equal(hosts.filter((h) => h === "www.timescall.com").length, 1);
+    assert.equal(hosts.filter((h) => h === "www.timescall.com").length, 0, "the press is not the body");
   });
 
   it("prefers .gov within a group", () => {
@@ -63,6 +75,7 @@ describe("docCandidateHosts", () => {
     const hosts = docCandidateHosts(
       ["https://www.leg.colorado.gov/bills/SB26-172"],
       ["https://www.frprdistrict.com/about-the-district"],
+      ["frprdistrict.com"],
     );
     assert.equal(hosts[0], "www.frprdistrict.com");
   });
@@ -70,20 +83,63 @@ describe("docCandidateHosts", () => {
   it("ignores entries that are not URLs", () => {
     assert.deepEqual(docCandidateHosts(["not a url"], []), []);
   });
+
+  it("never guesses a page on the three hosts the live pull reported", () => {
+    // Story lead 406: "13 provider or page failures", nine of them these.
+    const live = ["https://en.m.wikipedia.org/wiki/Longmont", "https://m.imdb.com/title/tt1", "https://whitepalmapts.com/"];
+    assert.deepEqual(docCandidateHosts(live, [], []), []);
+    assert.deepEqual(docIndexPages(docCandidateHosts(live, [], [])), []);
+  });
+
+  it("keeps government hosts, including .co.us town sites", () => {
+    const hosts = docCandidateHosts(
+      [
+        "https://www.longmontcolorado.gov/records",
+        "https://longmont.co.us/meetings",
+        "https://www.bouldercounty.gov/agendas",
+        "https://www.leg.colorado.gov/bills/SB26-172",
+        "https://www.army.mil/packet",
+      ],
+      [],
+    );
+    assert.deepEqual(hosts.sort(), [
+      "longmont.co.us",
+      "www.army.mil",
+      "www.bouldercounty.gov",
+      "www.leg.colorado.gov",
+      "www.longmontcolorado.gov",
+    ].sort());
+  });
+
+  it("keeps a registered source host even when it is not a government address", () => {
+    const hosts = docCandidateHosts(
+      ["https://frprdistrict.com/board-meetings"],
+      [],
+      ["frprdistrict.com"],
+    );
+    assert.deepEqual(hosts, ["frprdistrict.com"]);
+  });
 });
 
 describe("docIndexPages", () => {
   it("builds meetings-style pages for the top hosts only", () => {
-    const pages = docIndexPages([
-      "ratpd.gov",
-      "frprdistrict.com",
-      "leg.colorado.gov",
-      "timescall.com",
-    ]);
+    const pages = docIndexPages(
+      ["ratpd.gov", "frprdistrict.com", "leg.colorado.gov", "timescall.com"],
+      3,
+      ["frprdistrict.com"],
+    );
     assert.ok(pages.includes("https://ratpd.gov/meetings"));
     assert.ok(pages.includes("https://frprdistrict.com/meetings"));
     // Only the top three hosts are read; this runs inside a reporter's click.
     assert.equal(pages.some((p) => p.includes("timescall.com")), false);
+  });
+
+  it("guesses nothing at all when no host is official", () => {
+    assert.deepEqual(docIndexPages(["en.m.wikipedia.org", "m.imdb.com", "whitepalmapts.com"]), []);
+  });
+
+  it("filters a commercial host even when a caller passes one in", () => {
+    assert.deepEqual(docIndexPages(["timescall.com"]), []);
   });
 });
 

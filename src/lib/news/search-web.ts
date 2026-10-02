@@ -1,4 +1,11 @@
 import { assertPublicHttpUrl, fetchPublicHttp, resolveFetch } from "./fetch-url.ts";
+import {
+  clearSearchCooldown,
+  cooldownSkipNote,
+  isCoolingDown,
+  parseRetryAfter,
+  startSearchCooldown,
+} from "./search-cooldown.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { classifySearchHtml, type SearchState } from "./fetch-outcome.ts";
 import { HaloGatewayProviderError, haloGatewaySearch } from "./halo-search.ts";
@@ -25,6 +32,12 @@ export type SearchAttempt = {
   provider: string;
   error?: string;
   errorCode?: string;
+  /** The provider's own `Retry-After`, in ms, when it sent one with a block. */
+  retryAfterMs?: number;
+  /** Providers left inside their cooldown (cooldown-aware callers only). */
+  skippedProviders?: { provider: string; note: string }[];
+  /** True when every provider was cooling, so no request was made at all. */
+  allProvidersCooling?: boolean;
   warnings?: string[];
   available?: number;
   complete?: boolean;
@@ -35,7 +48,11 @@ export type SearchAttempt = {
 
 export type SearchProgressEvent = {
   provider: string;
-  phase: "started" | "finished";
+  /**
+   * "skipped" is a provider inside its cooldown: no request was made, and
+   * `error` carries the run line's words ("blocked 3 minutes ago").
+   */
+  phase: "started" | "finished" | "skipped";
   state?: SearchState;
   error?: string;
 };
@@ -235,6 +252,7 @@ async function searchExa(query: string, signal?: AbortSignal): Promise<SearchAtt
         hits: [],
         provider,
         error: `HTTP ${res.status}`,
+        retryAfterMs: parseRetryAfter(res.headers.get("retry-after")) ?? undefined,
       };
     }
     const text = readMcpSseText(await res.text());
@@ -305,7 +323,14 @@ async function searchDdg(query: string, signal?: AbortSignal): Promise<SearchAtt
     const html = await res.text();
     const hits = parseDdgHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
-    return { state, hits: state.startsWith("SEARCH_SUCCESS") ? hits : [], provider: "ddg-html" };
+    return {
+      state,
+      hits: state.startsWith("SEARCH_SUCCESS") ? hits : [],
+      provider: "ddg-html",
+      retryAfterMs: state === "SEARCH_BLOCKED"
+        ? parseRetryAfter(res.headers.get("retry-after")) ?? undefined
+        : undefined,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "network";
     const timeout = /timeout|aborted/i.test(msg);
@@ -326,7 +351,14 @@ async function searchDdgLite(query: string, signal?: AbortSignal): Promise<Searc
     const html = await res.text();
     const hits = parseDdgHtml(html);
     const state = classifySearchHtml(res.status, html, hits.length);
-    return { state, hits: state.startsWith("SEARCH_SUCCESS") ? hits : [], provider: "ddg-lite" };
+    return {
+      state,
+      hits: state.startsWith("SEARCH_SUCCESS") ? hits : [],
+      provider: "ddg-lite",
+      retryAfterMs: state === "SEARCH_BLOCKED"
+        ? parseRetryAfter(res.headers.get("retry-after")) ?? undefined
+        : undefined,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "network";
     const timeout = /timeout|aborted/i.test(msg);
@@ -625,6 +657,24 @@ function refuseBoilerplateHits(attempt: SearchAttempt): SearchAttempt {
   };
 }
 
+/**
+ * A block, not a bad attempt: the provider answered and told this client to
+ * stop. Only these start a cooldown (see `search-cooldown.ts`); a timeout or a
+ * parse failure says nothing about the next request.
+ */
+function isBlockedAttempt(attempt: SearchAttempt): boolean {
+  if (attempt.state === "SEARCH_BLOCKED") return true;
+  return /\b429\b|rate.?limit/i.test(String(attempt.error ?? ""));
+}
+
+export type SearchFallbackOptions = {
+  /**
+   * Honour per-provider cooldowns (Pull opts in; the Dark Desk and the
+   * investigation engine keep their current behaviour).
+   */
+  respectCooldowns?: boolean;
+};
+
 export async function searchWithFallback(
   query: string,
   fallbackProviders: SearchProvider[] = [
@@ -638,6 +688,7 @@ export async function searchWithFallback(
   relevanceOptions?: SearchRelevanceOptions,
   onProgress?: SearchProgress,
   signal?: AbortSignal,
+  opts?: SearchFallbackOptions,
 ): Promise<SearchAttempt> {
   const q = query.trim().slice(0, 180);
   if (!q) return { state: "SEARCH_SUCCESS_ZERO_RESULTS", hits: [], provider: "none", lineage: [] };
@@ -645,6 +696,12 @@ export async function searchWithFallback(
   const providers = process.env.TOWNREPORTER_GATEWAY_MCP_URL?.trim()
     ? [searchHaloGateway, ...fallbackProviders]
     : fallbackProviders;
+  const cooling = opts?.respectCooldowns === true;
+  const skipped: { provider: string; note: string }[] = [];
+  const tail = () => ({
+    skippedProviders: skipped.length ? skipped : undefined,
+    allProvidersCooling: skipped.length > 0 && skipped.length === providers.length,
+  });
   const locality = new Set((relevanceOptions?.localityStopwords ?? []).flatMap(queryTokens));
   const meaningfulTokens = relevanceOptions
     ? [...new Set(queryTokens(q).filter((token) => !locality.has(token)))]
@@ -668,6 +725,17 @@ export async function searchWithFallback(
       )[fn.name] ??
       fn.name ??
       "search provider";
+    /*
+      A provider that blocked us minutes ago is asked for nothing. The run line
+      says so -- "Exa skipped, blocked 3 minutes ago" -- because a pull that
+      quietly stopped trying would read exactly like a pull that searched.
+    */
+    if (cooling && isCoolingDown(fn.name)) {
+      const note = cooldownSkipNote(fn.name) ?? "blocked a moment ago";
+      skipped.push({ provider, note });
+      await onProgress?.({ provider, phase: "skipped", error: note });
+      continue;
+    }
     await onProgress?.({ provider, phase: "started" });
     const attempt = refuseBoilerplateHits(await fn(q, signal));
     signal?.throwIfAborted();
@@ -677,9 +745,16 @@ export async function searchWithFallback(
       state: attempt.state,
       error: attempt.error,
     });
+    if (cooling) {
+      if (isBlockedAttempt(attempt)) {
+        startSearchCooldown(fn.name, { retryAfterMs: attempt.retryAfterMs });
+      } else if (attempt.state.startsWith("SEARCH_SUCCESS")) {
+        clearSearchCooldown(fn.name);
+      }
+    }
     lineage.push(attempt);
     if (attempt.state !== "SEARCH_SUCCESS_RESULTS") continue;
-    if (!relevanceOptions) return { ...attempt, lineage };
+    if (!relevanceOptions) return { ...attempt, lineage, ...tail() };
     if (!assessRelevance) {
       return {
         ...attempt,
@@ -739,9 +814,10 @@ export async function searchWithFallback(
     };
   }
   const picked = pickSearchResult(lineage);
-  if (!relevanceOptions) return picked;
+  if (!relevanceOptions) return { ...picked, ...tail() };
   return {
     ...picked,
+    ...tail(),
     relevance: {
       decision: "not-evaluated",
       reason: "No provider returned results to assess for relevance.",

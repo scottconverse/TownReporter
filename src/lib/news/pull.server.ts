@@ -26,6 +26,14 @@ import {
   pullQueries,
   siteOwnDocLinks,
 } from "./pull-plan.ts";
+import { officialDomains } from "./absence-gate.ts";
+import {
+  finalPullText,
+  providerFailureNotes,
+  pullTodoReason,
+  type ProviderFailure,
+  type ProviderFailureNote,
+} from "./pull-outcome.ts";
 import { audit } from "./ops.ts";
 import { pctFor, progressReporterFor, throwIfJobCancelled, type DeskJob } from "./jobs.ts";
 
@@ -54,6 +62,12 @@ export type PullCheckpoint = {
   queryResults?: Array<WebHit[] | null>;
   hits: WebHit[];
   storyUrls: string[];
+  /**
+   * The paper's own official or registered hosts (`absence-gate`'s
+   * `officialDomains` over the watch list), the only non-government hosts an
+   * index page may be guessed on. See `isOfficialDocHost`.
+   */
+  officialHosts?: string[];
   indexPagesPrepared: boolean;
   indexPages: string[];
   indexPageIndex: number;
@@ -89,6 +103,14 @@ export type PullReceipt = {
   stopRequested: boolean;
   counters: PullCounters;
   errors: string[];
+  /**
+   * Point 1: which providers refused and why, kept in the shape the editor's
+   * words are made from. The raw strings stay in `errors` for support; this is
+   * what the closing sentence and the Still-to-pull mark are computed from.
+   */
+  providerFailures?: ProviderFailure[];
+  /** True once a provider really answered a query, even with zero results. */
+  searchAnswered?: boolean;
   checkpoint?: PullCheckpoint;
   startedAt: string | null;
   updatedAt: string;
@@ -108,6 +130,8 @@ export type PullRunView = {
   stopRequested: boolean;
   counters: PullCounters;
   errors: string[];
+  /** Plain-words provider reasons for the run box (point 1). */
+  providerNotes: ProviderFailureNote[];
   startedAt: string | null;
   updatedAt: string;
   finishedAt: string | null;
@@ -144,6 +168,8 @@ export function newPullReceipt(input: {
     stopRequested: false,
     counters: { ...EMPTY_COUNTERS },
     errors: [],
+    providerFailures: [],
+    searchAnswered: false,
     startedAt: null,
     updatedAt: now,
     finishedAt: null,
@@ -169,6 +195,17 @@ export function parsePullReceipt(raw: string | null | undefined): PullReceipt | 
       ...value,
       counters: { ...EMPTY_COUNTERS, ...(value.counters ?? {}) },
       errors: Array.isArray(value.errors) ? value.errors.map(String).slice(-16) : [],
+      providerFailures: Array.isArray(value.providerFailures)
+        ? value.providerFailures
+            .map((row) => ({
+              provider: String(row?.provider ?? ""),
+              state: String(row?.state ?? ""),
+              error: row?.error == null ? undefined : String(row.error),
+            }))
+            .filter((row) => row.provider)
+            .slice(-16)
+        : [],
+      searchAnswered: value.searchAnswered === true,
       sourceUrl: typeof value.sourceUrl === "string" && value.sourceUrl ? value.sourceUrl : null,
     } as PullReceipt;
   } catch {
@@ -419,6 +456,23 @@ export async function runPullPipeline(
                   await save(
                     `Searching ${current + 1} of ${receipt.checkpoint!.queries.length} · ${event.provider}`,
                   );
+                } else if (event.phase === "skipped") {
+                  // Inside its cooldown: no request was made, and the run line
+                  // says which provider and how long ago it was blocked. It is
+                  // still a provider that could not be asked, so it is recorded
+                  // with the other failures -- otherwise a pull that skipped
+                  // every provider would close as if the searches had run.
+                  receipt.providerFailures = [
+                    ...(receipt.providerFailures ?? []),
+                    {
+                      provider: event.provider,
+                      state: "SEARCH_BLOCKED",
+                      error: event.error ?? "blocked a moment ago",
+                    },
+                  ].slice(-16);
+                  await save(
+                    `Searching ${current + 1} of ${receipt.checkpoint!.queries.length} · ${event.provider} skipped, ${event.error ?? "blocked a moment ago"}`,
+                  );
                 } else if (
                   event.state === "SEARCH_TIMEOUT" ||
                   event.state === "SEARCH_FAILED_NETWORK" ||
@@ -426,10 +480,22 @@ export async function runPullPipeline(
                   event.state === "SEARCH_BLOCKED" ||
                   event.state === "SEARCH_FAILED_PROVIDER"
                 ) {
+                  /*
+                    Two records of one failure. `errors` is the support copy,
+                    raw ("exa-mcp: HTTP 429"); `providerFailures` is what the
+                    editor's sentence is built from, so a pull that only failed
+                    cannot close with "no relevant public document found".
+                  */
                   addFailure(receipt, `${event.provider}: ${event.error || event.state}`);
+                  receipt.providerFailures = [
+                    ...(receipt.providerFailures ?? []),
+                    { provider: event.provider, state: event.state ?? "", error: event.error },
+                  ].slice(-16);
                   await save(
                     `Searching ${current + 1} of ${receipt.checkpoint!.queries.length} · ${event.provider} failed, trying the next source`,
                   );
+                } else if (event.state?.startsWith("SEARCH_SUCCESS")) {
+                  receipt.searchAnswered = true;
                 }
               },
               signal,
@@ -443,6 +509,22 @@ export async function runPullPipeline(
         // calling the provider again.
         queryResults[current] = attempt.hits;
         await save(`Saved search ${current + 1} of ${receipt.checkpoint.queries.length}`);
+        /*
+          Every provider is cooling, so the next query would ask the same
+          blocked providers again and the index pages below would fetch pages
+          for a search that never ran. Finish now, with the same honest
+          sentence, and make no further request.
+        */
+        if (attempt.allProvidersCooling) {
+          return finish(
+            "completed",
+            finalPullText({
+              documents: 0,
+              failures: providerFailureNotes(receipt.providerFailures ?? []),
+              answered: receipt.searchAnswered === true,
+            }),
+          );
+        }
       } catch (error) {
         if (error instanceof PullDeadlineError) throw error;
         addFailure(
@@ -457,15 +539,26 @@ export async function runPullPipeline(
     }
 
     if (!receipt.checkpoint.indexPagesPrepared) {
+      const registered = receipt.checkpoint.officialHosts ?? [];
       const hosts = docCandidateHosts(
         receipt.checkpoint.hits.map((hit) => hit.url),
         receipt.checkpoint.storyUrls,
+        registered,
       );
-      receipt.checkpoint.indexPages = docIndexPages(hosts);
+      receipt.checkpoint.indexPages = docIndexPages(hosts, 3, registered);
       receipt.checkpoint.indexPagesPrepared = true;
       fillMarkers(indexPageResults, receipt.checkpoint.indexPages.length);
       await save("Checking official document pages", phasePct(1, 0, receipt.checkpoint.indexPages.length));
-      await save(`Checking official document pages · 0 of ${receipt.checkpoint.indexPages.length}`);
+      /*
+        Nothing official to read. Say so rather than reporting "0 of 0" as if
+        pages had been tried and come back empty -- the story, not the search,
+        is why no page was guessed.
+      */
+      await save(
+        receipt.checkpoint.indexPages.length
+          ? `Checking official document pages · 0 of ${receipt.checkpoint.indexPages.length}`
+          : "Checking official document pages · none — the story names no official site, so no pages were guessed",
+      );
     }
     fillMarkers(indexPageResults, receipt.checkpoint.indexPages.length);
 
@@ -601,11 +694,20 @@ export async function runPullPipeline(
     // The last arrival: everything the pull found is written under the story
     // here, and on a slow disk that is long enough to be worth a chip.
     await save("Saving the documents", phasePct(2, 1, 1));
+    /*
+      The closing sentence is computed from what the providers actually did. A
+      pull where nothing answered and providers refused is "search is
+      unavailable", not "no relevant public document found" -- the old sentence
+      told three of Scott's pulls that the record did not exist when in fact
+      nobody had been asked.
+    */
     return finish(
       "completed",
-      receipt.checkpoint.documents.length
-        ? `Finished · ${receipt.checkpoint.documents.length} relevant document${receipt.checkpoint.documents.length === 1 ? "" : "s"} saved`
-        : "Finished · no relevant public document found",
+      finalPullText({
+        documents: receipt.checkpoint.documents.length,
+        failures: providerFailureNotes(receipt.providerFailures ?? []),
+        answered: receipt.searchAnswered === true,
+      }),
     );
   } catch (error) {
     if (error instanceof PullDeadlineError) {
@@ -640,9 +742,23 @@ async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<Pull
     [rows[0].headline, memo.news, memo.angle, memo.why, receipt.query].filter(Boolean).join("\n"),
     researchScopeOf(paper),
   );
-  const watched = await sql<{ url: string }>`
-    select url from sources where newsroom_id = ${job.newsroom_id}
+  const watched = await sql<{ url: string; tier: string | null }>`
+    select url, tier from sources where newsroom_id = ${job.newsroom_id}
   `;
+  /*
+    The hosts a guessed index page may be fetched from, beyond government
+    addresses: the paper's own registered sources. `officialDomains` is the
+    app's existing answer to that question -- the Sources desk's Tier A rows are
+    taken at their word, and anything else has to be a `.gov`/`.us` address
+    carrying the city's name (see its note; the local newspaper is not the
+    city). Using it here means Pull guesses a page on exactly what the desk
+    already treats as an official source.
+  */
+  const officialHosts = officialDomains(
+    paper.city,
+    watched.map((row) => row.url),
+    watched.filter((row) => (row.tier ?? "").toUpperCase() === "A").map((row) => row.url),
+  );
   const draft = await sql<{ source_urls: string }>`
     select source_urls from drafts
     where lead_id = ${receipt.leadId} and user_id = ${job.user_id}
@@ -671,6 +787,7 @@ async function loadPullContext(job: DeskJob, receipt: PullReceipt): Promise<Pull
     queryIndex: 0,
     hits: [],
     storyUrls,
+    officialHosts,
     indexPagesPrepared: false,
     indexPages: [],
     indexPageIndex: 0,
@@ -780,12 +897,18 @@ async function finishPullTodo(job: DeskJob, receipt: PullReceipt) {
     if (receipt.checkpoint?.documents.length) {
       if (!notes.todo[index]!.done) notes = toggleTodo(notes, index);
     } else {
-      const reason =
-        receipt.status === "deadline"
-          ? `pull reached its two-minute limit; ${receipt.counters.failures} provider or page failures`
-          : receipt.status === "stopped"
-            ? "pull stopped before finding a relevant document"
-            : `pull found nothing; ${receipt.counters.failures} provider or page failures`;
+      /*
+        Point 3: the mark an editor reads on the line. Plain words, and no
+        count of our own bookkeeping -- a failure tally said nothing about
+        whether pressing Pull again was worth a minute of their morning. The
+        route prints the time in front of this. The line stays un-struck: only
+        a document strikes it.
+      */
+      const reason = pullTodoReason({
+        status: receipt.status,
+        failures: providerFailureNotes(receipt.providerFailures ?? []),
+        answered: receipt.searchAnswered === true,
+      });
       notes = {
         ...notes,
         todo: notes.todo.map((row, rowIndex) =>
@@ -817,8 +940,13 @@ export async function performPullWork(job: DeskJob) {
   try {
     receipt.checkpoint ??= await loadPullContext(job, receipt);
     const final = await runPullPipeline(receipt as PullReceipt & { checkpoint: PullCheckpoint }, {
+      // Pull opts into the block cooldown: three pulls in a row must not ask a
+      // provider that answered 429 to the first one (see search-cooldown.ts).
+      // Every other caller of `searchWithFallback` keeps its current behaviour.
       search: (query, progress, signal) =>
-        searchWithFallback(query, undefined, undefined, progress, signal),
+        searchWithFallback(query, undefined, undefined, progress, signal, {
+          respectCooldowns: true,
+        }),
       // Pull is a mechanical public-record reader. A scanned PDF stays
       // `needs-ocr` for the editor instead of silently spending any model.
       ingest: (url, signal) => ingestDocument(url, { allowModelOcr: false }, signal),

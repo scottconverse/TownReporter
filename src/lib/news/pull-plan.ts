@@ -14,11 +14,15 @@
  *    of one 240-character run-on that matches only its own generic nouns.
  *  - `docCandidateHosts` / `docIndexPages` — a board packet is usually not in
  *    any search index. It lives behind the issuing body's own meetings page, so
- *    go there and read the links.
+ *    go there and read the links — but only on a government or registered
+ *    source's own host, because the guess is only ever right for a body that
+ *    publishes records. See `isOfficialDocHost`.
  *  - `isOnSubject` — a fetched document that never names the city or the
  *    subject is not the record, whatever it scored. Drop it and report nothing
  *    found rather than poisoning the notes.
  */
+
+import { isOnDomains } from "./absence-gate.ts";
 
 const STOP = new Set([
   "the", "and", "then", "those", "that", "with", "from", "for", "are", "was",
@@ -84,6 +88,37 @@ export function pullQueries(
 }
 
 /**
+ * Is this a government or official body's own address?
+ *
+ * The guess that follows this -- "read /meetings on the top three hosts" -- is
+ * only ever right for a body that publishes records. Ranked without this test,
+ * the live report's three hosts were `en.m.wikipedia.org`, `m.imdb.com` and
+ * `whitepalmapts.com`, and nine pages were fetched from them for nothing.
+ *
+ * `.us` is here for the town sites that use it (`longmont.co.us`), and
+ * `.gov.<cc>` for the state and national addresses outside the US.
+ */
+export function isOfficialHost(host: string): boolean {
+  const h = String(host ?? "").trim().toLowerCase().replace(/^www\./, "");
+  if (!h || h.includes(" ")) return false;
+  return /\.gov$/.test(h) || /\.gov\.[a-z]{2}$/.test(h) || /\.us$/.test(h) || /\.mil$/.test(h);
+}
+
+/**
+ * A host worth guessing an index page on: an official body, or a source the
+ * paper itself registered.
+ *
+ * The registered half is `absence-gate`'s `isOnDomains` -- the same suffix
+ * match the Sources desk and the claims-of-absence gate use, so a paper with
+ * `frprdistrict.com` on its watch list is treated the same way here as there.
+ */
+export function isOfficialDocHost(host: string, registered: string[] = []): boolean {
+  if (isOfficialHost(host)) return true;
+  if (!registered.length) return false;
+  return isOnDomains(`https://${String(host ?? "").trim()}`, registered);
+}
+
+/**
  * The hosts that plausibly published the record, best first.
  *
  * The story's own sources lead, because the body that issued the record is
@@ -96,11 +131,18 @@ export function pullQueries(
  * legislature's site — which has no meetings page — ahead of the rail
  * district's own.
  */
-export function docCandidateHosts(hitUrls: string[], storyUrls: string[]): string[] {
+export function docCandidateHosts(
+  hitUrls: string[],
+  storyUrls: string[],
+  registered: string[] = [],
+): string[] {
   const rank = new Map<string, number>();
   const add = (raw: string, base: number) => {
     try {
       const host = new URL(raw).hostname.toLowerCase();
+      // A commercial host is never the body that issues the record, however
+      // loudly a search engine ranked it, so it never gets a guessed page.
+      if (!isOfficialDocHost(host, registered)) return;
       const score = base + (host.endsWith(".gov") ? 1 : 0);
       if ((rank.get(host) ?? -1) < score) rank.set(host, score);
     } catch {
@@ -128,9 +170,16 @@ export const DOC_INDEX_PATHS = [
   "/news",
 ] as const;
 
-export function docIndexPages(hosts: string[], perHost = 3): string[] {
+export function docIndexPages(
+  hosts: string[],
+  perHost = 3,
+  registered: string[] = [],
+): string[] {
   const out: string[] = [];
-  for (const host of hosts.slice(0, 3)) {
+  // Filtered again here rather than trusting the caller: this is the function
+  // that decides what gets fetched, and a host that is not an official body is
+  // a page nobody asked for.
+  for (const host of hosts.filter((h) => isOfficialDocHost(h, registered)).slice(0, 3)) {
     for (const path of DOC_INDEX_PATHS.slice(0, perHost)) {
       out.push(`https://${host}${path}`);
     }

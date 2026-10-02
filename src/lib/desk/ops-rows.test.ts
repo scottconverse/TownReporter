@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   NOT_SET,
   clockText,
+  clockTextAt,
   dailyScanRows,
   editorsAccessRows,
   healthRows,
@@ -331,6 +332,23 @@ describe("Server card rows (CX2)", () => {
     assert.equal(clockText("12:00"), "12:00 p.m.");
     assert.equal(clockText("not a time"), "not a time");
     assert.equal(clockText("  "), NOT_SET);
+  });
+
+  it("clockTextAt reads a stored moment at the paper's own clock", () => {
+    // 18:15 UTC is 12:15 p.m. in Denver -- the Pull row's "Tried 12:15 p.m.".
+    assert.equal(
+      clockTextAt("2026-10-02T18:15:00.000Z", "America/Denver"),
+      "12:15 p.m.",
+    );
+    assert.equal(clockTextAt("2026-10-02T06:00:00.000Z", "America/Denver"), "12:00 a.m.");
+    // The same instant, a different paper.
+    assert.equal(clockTextAt("2026-10-02T18:15:00.000Z", "UTC"), "6:15 p.m.");
+  });
+
+  it("clockTextAt says nothing rather than inventing a time it cannot read", () => {
+    assert.equal(clockTextAt(null, "America/Denver"), "");
+    assert.equal(clockTextAt("not a date", "America/Denver"), "");
+    assert.equal(clockTextAt("2026-10-02T18:15:00.000Z", "Not/AZone"), "");
   });
 
   it("Meeting capture: the watched bodies are the channels, and the capture time is the record's own", () => {

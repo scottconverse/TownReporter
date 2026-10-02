@@ -143,8 +143,13 @@ test("a pull that returned nothing does not strike its line", () => {
   );
   assert.match(
     pull,
-    /pull found nothing[\s\S]{0,260}?done: false/,
-    "an empty durable Pull must leave the reporting line open",
+    /const reason = pullTodoReason\([\s\S]{0,300}?done: false, q: reason/,
+    "an empty durable Pull must leave the reporting line open, with a reason in plain words",
+  );
+  assert.doesNotMatch(
+    pull,
+    /pull found nothing/,
+    "the old counted reason told the editor nothing about whether to try again",
   );
 });
 
