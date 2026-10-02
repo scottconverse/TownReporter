@@ -2,7 +2,9 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "./desk-chrome";
+import { ActionButton, rowActionPhase } from "./action-button";
 import { ModelPicker } from "./model-picker";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -198,6 +200,15 @@ export function PageWatchPanel({
     setAttached(null);
   }
   const row = detail.data?.watch;
+  /*
+    Unit UI1a3, finding 1: `checkPageWatch` and `setPageWatchState` both answer
+    `{ ok: false, error }` for their ordinary refusals, which React Query
+    settles as a SUCCESS. Read once here, gated on `!isPending` -- React Query
+    keeps the last answer on `data` while a new press runs, so an ungated read
+    would paint the previous refusal over this press's spinner.
+  */
+  const checkRefusal = check.isPending ? null : refusedAnswer(check.data);
+  const stateRefusal = state.isPending ? null : refusedAnswer(state.data);
   return (
     <section className="tipbox page-watch" aria-label="Watched pages">
       <div className="np-acts">
@@ -380,19 +391,78 @@ export function PageWatchPanel({
                 }}
               />
               <div className="np-acts">
-                <InkButton
+                {/*
+                  Unit UI1a2: Check now, Pause / Resume and Stop watching are
+                  the shared `ActionButton` here too. Pause's DONE is the row's
+                  own new state -- the button is redrawn as "Resume" because
+                  `row.watch_state` changed -- and Check now's is "Checked",
+                  with the row's own answer (`watch_last_error` /
+                  `watch_failover_note`) still printed above it, which is the
+                  existing flow and not a second confirmation.
+                */}
+                <ActionButton
+                  phase={
+                    check.isPending
+                      ? "working"
+                      : check.isError || checkRefusal
+                        ? "failed"
+                        : check.isSuccess
+                          ? "done"
+                          : "idle"
+                  }
+                  workingLabel="Checking…"
+                  doneLabel="Checked"
+                  /*
+                    Unit UI1a3, finding 1: `checkPageWatch` answers
+                    `{ ok: false, error }` for a page it could not read, which
+                    settles as a SUCCESS -- so without this the control drew
+                    "Checked" in green over a refusal. The refusal outranks the
+                    success branch, and the reason is printed beside it.
+                  */
+                  reason={
+                    check.isError
+                      ? check.error instanceof Error
+                        ? check.error.message
+                        : "Could not check that page."
+                      : checkRefusal
+                  }
                   disabled={busy || row.watch_state !== "active"}
-                  onClick={() => {
+                  disabledReason={
+                    row.watch_state !== "active"
+                      ? "This page is paused, so the desk is not checking it."
+                      : null
+                  }
+                  onAct={() => {
                     clear();
                     check.mutate(row.id);
                   }}
                 >
-                  {check.isPending ? "Checking…" : "Check now"}
-                </InkButton>
-                <InkButton
+                  Check now
+                </ActionButton>
+                <ActionButton
                   tone="quiet"
+                  phase={rowActionPhase({
+                    /*
+                      Unit UI1a3, finding 3: Pause/Resume and Stop share ONE
+                      `state` mutation, so an unfiltered `isPending` put this
+                      button into its working phase whenever "Stop watching" was
+                      pressed -- the row said "Pausing." and "Stopping." at once.
+                      The pending phase is scoped to the states this button
+                      actually sends, exactly as the failure branch already was.
+                    */
+                    isPending: state.isPending && state.variables?.state !== "stopped",
+                    problem:
+                      state.variables?.state !== "stopped"
+                        ? state.isError
+                          ? state.error instanceof Error
+                            ? state.error.message
+                            : "Could not change that page's watch."
+                          : stateRefusal
+                        : null,
+                  })}
+                  workingLabel={row.watch_state === "active" ? "Pausing…" : "Resuming…"}
                   disabled={busy}
-                  onClick={() => {
+                  onAct={() => {
                     clear();
                     state.mutate({
                       id: row.id,
@@ -401,17 +471,34 @@ export function PageWatchPanel({
                   }}
                 >
                   {row.watch_state === "active" ? "Pause" : "Resume"}
-                </InkButton>
-                <InkButton
+                </ActionButton>
+                <ActionButton
                   tone="danger"
+                  phase={rowActionPhase({
+                    isPending: state.isPending && state.variables?.state === "stopped",
+                    problem:
+                      state.variables?.state === "stopped"
+                        ? state.isError
+                          ? state.error instanceof Error
+                            ? state.error.message
+                            : "Could not stop watching that page."
+                          : /* Unit UI1a3, finding 1: the same settled-refusal
+                               read as the Pause/Resume button above. */
+                            stateRefusal
+                        : null,
+                  })}
+                  workingLabel="Stopping…"
                   disabled={busy || row.watch_state === "stopped"}
-                  onClick={() => {
+                  disabledReason={
+                    row.watch_state === "stopped" ? "This page is already stopped." : null
+                  }
+                  onAct={() => {
                     clear();
                     state.mutate({ id: row.id, state: "stopped" });
                   }}
                 >
                   Stop watching
-                </InkButton>
+                </ActionButton>
               </div>
               <h4>Capture history</h4>
               <p className="meta">

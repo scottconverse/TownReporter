@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   addCorrection,
@@ -14,6 +15,7 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import { editorActionError } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { getViewStatsFn } from "@/lib/news/views";
 import { myDesk } from "@/lib/news/claim";
@@ -1084,16 +1086,48 @@ function PublishedPage() {
                 */}
                 {killFor === p.slug ? (
                   <>
-                    <InkButton
-                      tone="ghost"
-                      disabled={remove.isPending}
-                      onClick={() => remove.mutate(p.slug)}
+                    {/*
+                      Unit UI1a2: the confirm press carries the states --
+                      "Removing…" with a spinner while the write is in flight.
+                      Its DONE is the row leaving Published, which the list's
+                      own removal already says.
+                    */}
+                    <ActionButton
+                      tone="danger"
+                      phase={rowActionPhase({
+                        isPending: remove.isPending,
+                        problem:
+                          remove.isError && remove.variables === p.slug
+                            ? remove.error instanceof Error
+                              ? remove.error.message
+                              : "Could not take that story off the paper."
+                            : /* Unit UI1a3, finding 1: `deleteArticle` answers
+                                 `{ ok: false, error }` for its ordinary refusal
+                                 ("That story is already gone."), which settles
+                                 as a SUCCESS -- so the reason is read off the
+                                 settled answer too, or the control goes back to
+                                 idle with the server's sentence nowhere near
+                                 it. Gated on `!isPending` because React Query
+                                 keeps the last answer on `data` while a new
+                                 press runs. */
+                              !remove.isPending && remove.variables === p.slug
+                              ? refusedAnswer(remove.data)
+                              : null,
+                      })}
+                      workingLabel="Removing…"
+                      onAct={() => remove.mutate(p.slug)}
                     >
-                      {remove.isPending ? "Removing…" : "Yes, take it off"}
-                    </InkButton>
-                    <InkButton tone="quiet" onClick={() => setKillFor(null)}>
+                      Yes, take it off
+                    </ActionButton>
+                    <ActionButton
+                      tone="quiet"
+                      phase="idle"
+                      disabled={remove.isPending}
+                      disabledReason={remove.isPending ? "The removal is still being saved." : null}
+                      onAct={() => setKillFor(null)}
+                    >
                       Keep it
-                    </InkButton>
+                    </ActionButton>
                   </>
                 ) : null}
                 {/*

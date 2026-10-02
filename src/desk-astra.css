@@ -517,7 +517,20 @@
 }
 .desk-ltr.astra :is(.btn.solid, .document-add-button) {
   background: var(--a);
-  border-color: var(--a);
+  /*
+    UI1a: the family's 2px INK edge, not a yellow edge on a yellow fill.
+
+    design-system/README.md §6 gives the whole button family "square corners, a
+    2px emphasis border". The primary was the one level that did not take it --
+    `border-color: var(--a)` drew the edge in the same yellow as the fill, so
+    the button had no boundary of its own at all: the yellow on the cream page
+    is 1.42:1. Its #111 label (12.1:1 on the yellow) is what identified it, and
+    that is a real thing to lean on -- but Scott's whole complaint is controls
+    that do not look pressable, so the primary gets the edge every other level
+    has. Nothing about the fill changes; this is the 2px border the level was
+    always specified with.
+  */
+  border-color: var(--fg);
   color: #111;
   font-weight: 800;
 }
@@ -528,8 +541,27 @@
   background: color-mix(in srgb, var(--a) 88%, #111);
   color: #111;
 }
+/*
+  UI1a: THE QUIET EDGE WAS INVISIBLE, AND IT IS THE MOST PRESSED CONTROL HERE.
+
+  Scott: "There are a ton of these text strings with no identifying features
+  that it's an action. These are scattered throughout the interface and they're
+  landmines for humans." The auditor measured it: 463 controls on the desk
+  whose border or fill was under 3:1 against the surface behind it, and the
+  single biggest cause was this class. `.btn.quiet` drew a 1px `--line` edge,
+  and `--line` is a HAIRLINE token -- #d8d3c4 on the cream panel is 1.4:1, and
+  #3b3631 on the dark panel is 1.3:1. Pause, Check now, Hold, Open, Edit,
+  "Publish anyway" and the row actions are all drawn quiet, so all of them
+  read as stray text.
+
+  The edge is now `--fg2` -- 10.2:1 on the light panel, 8.1:1 on the dark one
+  -- which is the same "quiet" idea (1px, so it still reads lighter than the
+  2px ink of a secondary) without being invisible. `--line` keeps its job
+  everywhere it is a RULE (panel borders, dividers) rather than the edge of
+  something you are meant to press.
+*/
 .desk-ltr.astra .btn.quiet {
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
 }
@@ -538,8 +570,12 @@
   color: var(--danger);
   background: transparent;
 }
+/* The same hairline problem on the gated disabled press: a dashed `--line`
+   edge on a button that says "not yet" is indistinguishable from no button at
+   all. `--fg2` dashed keeps the "this exists but is not usable yet" reading
+   and clears the floor. */
 .desk-ltr.astra .btn.gated {
-  border: 2px dashed var(--line);
+  border: 2px dashed var(--fg2);
   color: var(--fg2);
 }
 .desk-ltr.astra .btn.solid.danger {
@@ -560,6 +596,60 @@
   min-height: 44px;
   padding: 7px 11px;
   font-size: calc(14px * var(--ts));
+}
+/*
+  UI1a: THE FOUR PHASES OF A PRESS, PAINTED IN ONE PLACE.
+
+  `src/components/action-button.ts` writes the phase and the colour TOKEN onto
+  the button as `data-phase` and `data-token`. These are the only rules that
+  read them, so a phase cannot be green on one screen and amber on the next,
+  and a theme swap needs no second list -- every token below is a desk token
+  that the `.night` block already redefines.
+
+  The done colour is `--ok` (the design's success green: #1e6b34 light,
+  #9fd4a8 dark) and it is never on its own: the shared piece also swaps the
+  word and draws a check, which is what Scott asked for -- "it publishes and
+  then CHANGES to say 'Published' with, say, a green color".
+*/
+.desk-ltr.astra .action-btn[data-token="fg2"] {
+  border-color: var(--fg2);
+  color: var(--fg2);
+}
+.desk-ltr.astra .action-btn[data-token="ok"],
+.desk-ltr.astra .action-btn[data-phase="done"] {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: transparent;
+}
+.desk-ltr.astra .action-btn[data-token="danger"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.desk-ltr.astra .action-btn .action-label {
+  display: inline;
+}
+.desk-ltr.astra .action-btn .action-icon {
+  flex: none;
+}
+/*
+  The reason a press failed, and the reason a control is off, said beside the
+  control rather than somewhere else on the page (rules 3 and 4). `--danger`
+  in both themes, and it wraps rather than pushing the row sideways.
+*/
+.desk-ltr.astra .action-reason {
+  display: inline-block;
+  min-width: 0;
+  font: 700 calc(14px * var(--ts))/1.5 var(--fd);
+  color: var(--danger);
+}
+@keyframes astra-action-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.desk-ltr.astra .action-icon-spin {
+  animation: astra-action-spin 0.9s linear infinite;
+  transform-origin: 50% 50%;
 }
 .desk-ltr.astra
   :where(input:not([type="checkbox"]):not([type="radio"]):not([type="file"]), textarea, select) {

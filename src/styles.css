@@ -1047,10 +1047,17 @@
 .desk-ltr .btn {display:inline-flex;align-items:center;justify-content:center;gap:6px;border:2px solid var(--fg);padding:8px 14px;font-size:calc(0.875rem * var(--ts));font-weight:700;font-family:var(--fd);white-space:nowrap;min-height:44px;transition:background var(--motion-fast),color var(--motion-fast),opacity var(--motion-fast)}
 .desk-ltr .btn:hover:not(:disabled) {background:color-mix(in srgb,var(--fg) 8%,transparent)}
 .desk-ltr .btn:active:not(:disabled) {background:color-mix(in srgb,var(--fg) 16%,transparent)}
-.desk-ltr .btn.solid {background:var(--a);border-color:var(--a);color:#111;font-weight:800}
+/* UI1a: the primary takes the family's 2px ink edge (see the same note in
+   desk-astra.css) -- a yellow edge on a yellow fill left the button with no
+   boundary of its own, 1.42:1 against the cream page. */
+.desk-ltr .btn.solid {background:var(--a);border-color:var(--fg);color:#111;font-weight:800}
 .desk-ltr .btn.solid:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 88%,#111)}
 .desk-ltr .btn.small {padding:6px 12px;font-size:calc(0.875rem * var(--ts));min-height:36px}
-.desk-ltr .btn.quiet {border:1px solid var(--line);color:var(--fg);padding:8px 14px}
+/* UI1a: the same fix as the one in desk-astra.css, kept in step so a screen
+   that is not inside the astra shell cannot keep the invisible edge. `--line`
+   is a hairline RULE token (1.4:1 on the light panel); the edge of something
+   you are meant to press is `--fg2` (10.2:1). */
+.desk-ltr .btn.quiet {border:1px solid var(--fg2);color:var(--fg);padding:8px 14px}
 .desk-ltr .btn.quiet:hover:not(:disabled) {background:color-mix(in srgb,var(--a) 12%,transparent)}
 /* Equal specificity between .btn.quiet (border-color: transparent) and
    .btn.danger (border-color: var(--danger)) let source order decide the
@@ -1068,7 +1075,7 @@
 .desk-ltr .btn.danger.solid {background:var(--danger);color:var(--bg);border-color:var(--danger)}
 /* The gated variant: a control that exists but cannot be used yet -- dashed,
    so it never reads as a second kind of disabled button. */
-.desk-ltr .btn.gated {border:2px dashed var(--line);color:var(--fg2)}
+.desk-ltr .btn.gated {border:2px dashed var(--fg2);color:var(--fg2)}
 .desk-ltr .btn.danger.solid:hover:not(:disabled) {opacity:.85}
 .desk-ltr .btn:disabled {opacity:.45;cursor:not-allowed}
 .desk-ltr .btn.queue-done {text-decoration:none;border-color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}

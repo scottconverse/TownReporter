@@ -74,6 +74,9 @@ const deskToastUrl = await moduleUrl("src/components/desk-toast.ts", { sonner: s
 const deskActionUrl = await moduleUrl("src/components/desk-action.ts", {
   "@/components/desk-toast": deskToastUrl,
   "@tanstack/react-query": reactQueryUrl,
+  /* UI1a3: `deskAnswerFailure` delegates to the one refusal parser (it has no
+     imports of its own), so the real module is loaded rather than stubbed. */
+  "@/lib/news/refused-answer": await moduleUrl("src/lib/news/refused-answer.ts"),
 });
 const deskAction = await import(deskActionUrl);
 

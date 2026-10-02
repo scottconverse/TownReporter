@@ -81,6 +81,9 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const deskToastUrl = await moduleUrl("src/components/desk-toast.ts", { sonner: sonnerUrl });
 const deskActionUrl = await moduleUrl("src/components/desk-action.ts", {
   "@/components/desk-toast": deskToastUrl,
+  /* UI1a3: `deskAnswerFailure` delegates to the one refusal parser, so the real
+     module is loaded here rather than stubbed -- it has no imports of its own. */
+  "@/lib/news/refused-answer": await moduleUrl("src/lib/news/refused-answer.ts"),
 });
 const deskAction = await import(deskActionUrl);
 

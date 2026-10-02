@@ -1,6 +1,7 @@
 import { createElement, Fragment, type ReactNode } from "react";
 import type { PublishBlocker, PublishBlockerTarget } from "../lib/news/publish-blockers.ts";
 import { publishBlockedSummary } from "../lib/news/publish-blockers.ts";
+import { ActionButton, type ActionPhase } from "./action-button.ts";
 
 /**
  * "Before you can publish" -- every reason Publish is off, each with its press
@@ -23,9 +24,30 @@ export function BeforeYouCanPublish(props: {
   blockers: readonly PublishBlocker[];
   /** Runs the row's press. The page owns every target; nothing here acts. */
   onAct: (target: PublishBlockerTarget) => void;
+  /**
+   * Unit UI1a. Which row's press is running, by target kind, and which one last
+   * failed with what reason. The page owns the mutations, so it owns these
+   * facts; this component only turns them into the phase each press is drawn
+   * in. Optional, and absent means every row sits at idle -- which is what a
+   * pure render should be.
+   */
+  busyTarget?: PublishBlockerTarget["kind"] | null;
+  doneTarget?: PublishBlockerTarget["kind"] | null;
+  failedTarget?: PublishBlockerTarget["kind"] | null;
+  /** The reason a failed press gave, printed beside the row that failed. */
+  failureReason?: string | null;
 }) {
   const { blockers, onAct } = props;
   const count = blockers.length;
+
+  /* One derivation, used by both presses on a row, so an alt press cannot be
+     left behind a main press that has moved on. */
+  const phaseFor = (kind: PublishBlockerTarget["kind"]): ActionPhase => {
+    if (props.failedTarget === kind) return "failed";
+    if (props.doneTarget === kind) return "done";
+    if (props.busyTarget === kind) return "working";
+    return "idle";
+  };
 
   const row = (blocker: PublishBlocker) =>
     createElement(
@@ -36,25 +58,38 @@ export function BeforeYouCanPublish(props: {
       createElement(
         "span",
         { className: "astra-blocker-acts" },
-        createElement(
-          "button",
-          {
-            type: "button",
-            className: "btn astra-blocker-act",
-            onClick: () => onAct(blocker.action.target),
-          },
-          blocker.action.label,
-        ),
+        /*
+          Unit UI1a. This row's second press -- "Publish anyway - I accept these
+          claims are unreviewed" -- is the control Scott pressed on the live
+          paper and could not tell was a button: it was drawn `.btn quiet`,
+          whose 1px `--line` edge is 1.4:1 against the panel behind it. It is
+          the design system's SECONDARY level now (a real 2px ink edge), and
+          both presses on the row go through the shared `ActionButton`, so a
+          press that is running says so at the control ("Accepting…", disabled,
+          with a spinner), a press that finished draws "Accepted" with a check
+          in the success green, and a press that failed prints the server's
+          reason in red right beside it.
+        */
+        createElement(ActionButton, {
+          tone: "secondary",
+          className: "astra-blocker-act",
+          phase: phaseFor(blocker.action.target.kind),
+          reason: props.failureReason ?? null,
+          onAct: () => onAct(blocker.action.target),
+          workingLabel: "Opening…",
+          children: blocker.action.label,
+        }),
         blocker.altAction
-          ? createElement(
-              "button",
-              {
-                type: "button",
-                className: "btn quiet astra-blocker-act",
-                onClick: () => onAct(blocker.altAction!.target),
-              },
-              blocker.altAction.label,
-            )
+          ? createElement(ActionButton, {
+              tone: "secondary",
+              className: "astra-blocker-act",
+              phase: phaseFor(blocker.altAction.target.kind),
+              reason: props.failureReason ?? null,
+              onAct: () => onAct(blocker.altAction!.target),
+              workingLabel: "Accepting…",
+              doneLabel: "Accepted",
+              children: blocker.altAction.label,
+            })
           : null,
       ),
     );

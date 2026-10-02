@@ -45,6 +45,7 @@ import { ChoiceCard, Dialog } from "@/components/dialog";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { dialogPressProps } from "@/lib/news/dialog-press";
 import { openDarkInvestigation } from "@/lib/news/dark";
 import {
   addSource,
@@ -1049,6 +1050,15 @@ export type HoldLeadDialogProps = {
 export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: HoldLeadDialogProps) {
   const press = usePress();
   const [state, set] = useDialogState<HoldState>(holdInitial, open, press.clear);
+  /*
+    Unit UI1a3, finding 4: WHICH press is out, not just "one is". `usePress`
+    reports a single `busy` for the whole dialog -- it is shared by twelve
+    dialogs and none of the others has two destructive presses -- so this
+    dialog records the press it fired itself. Without it both "Hold with this
+    reason" and "Hold, no reason" drew "Holding…" with a spinner, which says
+    two controls were activated when the editor pressed one.
+  */
+  const [pressed, setPressed] = React.useState<"primary" | "alt" | null>(null);
 
   const done = (text: string): PressAnswer => {
     announceToDesk(text);
@@ -1062,14 +1072,19 @@ export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: Hold
 
   const hold = (withReason: boolean) => () =>
     press.run(async () => {
-      const answer = await holdLead({
-        data: { id: leadId, ...holdRequest(state, withReason) },
-      });
-      if (!answer.ok) return { problem: answer.error };
-      return done(
-        answer.notice ??
-          `Held${headline ? ` "${headline}"` : ""}. It waits in Held with its score; Undo stays on the row.`,
-      );
+      setPressed(withReason ? "primary" : "alt");
+      try {
+        const answer = await holdLead({
+          data: { id: leadId, ...holdRequest(state, withReason) },
+        });
+        if (!answer.ok) return { problem: answer.error };
+        return done(
+          answer.notice ??
+            `Held${headline ? ` "${headline}"` : ""}. It waits in Held with its score; Undo stays on the row.`,
+        );
+      } finally {
+        setPressed(null);
+      }
     });
 
   return (
@@ -1085,6 +1100,14 @@ export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: Hold
       altLabel="Hold, no reason"
       onAlt={hold(false)}
       altDisabled={press.busy}
+      /*
+        Unit UI1a2: the press says what it is doing. Its DONE is the row's --
+        `done()` announces the hold and closes, and the lead then reads "Held"
+        with "Bring back"/"Release" where Hold was -- and its FAILED is
+        `HoldBody`'s own `press.problem`, which is already printed inside the
+        dialog rather than beside a button that has closed with it.
+      */
+      {...dialogPressProps(pressed, "Holding…")}
     >
       <HoldBody
         state={state}
