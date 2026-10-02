@@ -85,15 +85,27 @@ export async function completeFirstRunSetup(page, base, opts = {}) {
   await navigate(`${base}/desk/setup`, { waitUntil: "domcontentloaded" });
   await page.getByLabel("Paper name", { exact: true }).waitFor({ timeout: 45_000 });
 
+  /*
+    The time zone is typed too. Since F12 the first-run form starts it from the
+    BROWSER's own zone (so a paper in Ohio does not have to know its IANA name),
+    which made every walk that follows depend on the runner's zone: this one ran
+    on a machine in America/Denver, and CI's browser is UTC, so two walks that
+    read "Timezone: America/Denver" back off the Daily scan panel failed there
+    only. A fixed value keeps the fixtures deterministic wherever they run; pass
+    `opts.timezone` to test a different zone.
+  */
+  const timezone = opts.timezone ?? "America/Denver";
   for (let round = 0; round < 12; round++) {
     for (const [label, value] of fields) {
       await page.getByLabel(label, { exact: true }).fill(value);
     }
+    await page.getByLabel(/Timezone/).fill(timezone);
     await page.waitForTimeout(500);
     let survived = true;
     for (const [label, value] of fields) {
       if ((await page.getByLabel(label, { exact: true }).inputValue()) !== value) survived = false;
     }
+    if ((await page.getByLabel(/Timezone/).inputValue()) !== timezone) survived = false;
     if (survived) break;
   }
 
