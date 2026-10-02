@@ -4,12 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    # One PR per release: a docs-only pull request does not change what this job
-    # builds or installs, so it skips it. This filter is on pull_request only --
-    # push to main and workflow_dispatch still run unconditionally.
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -21,8 +15,54 @@ permissions:
   contents: read
 
 jobs:
+  # A docs-only pull request does not change what this workflow builds or
+  # installs, so the two heavy jobs below skip it. The skip has to happen INSIDE
+  # the workflow: a `paths-ignore` filter on the trigger stops the workflow from
+  # running at all, so its two required checks ("Package the exact source
+  # candidate" and "Fresh Windows ZIP install and persistent newsroom") never
+  # report and a docs-only pull request can never reach a mergeable state. A job
+  # skipped by `if:` reports as skipped, which satisfies a required check.
+  # Failure is safe: if this job cannot classify the change, `docs_only` is not
+  # "true" and both heavy jobs run. That depends on the status function in each
+  # heavy job's `if:` (`!cancelled()` / `always()`): GitHub SKIPS a job whose
+  # dependency failed unless its condition has one, and a skipped required job
+  # reports success, so without it a failed classifier would let a non-doc PR
+  # satisfy both required checks without running them. Do not remove it.
+  # push to main and workflow_dispatch always classify as not-docs-only.
+  changes:
+    name: Classify the change
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Is every changed file documentation?
+        id: classify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          docs_only=false
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            files="$(gh api --paginate "repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')"
+            # Documentation = anything under docs/ and any *.md file, the same two
+            # patterns the old trigger filter used.
+            if [ -n "$files" ] && ! echo "$files" | grep -v -E '^docs/|\.md$' | grep -q .; then
+              docs_only=true
+            fi
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "docs_only=$docs_only"
+
   package:
-    if: ${{ !inputs.release_tag }}
+    needs: changes
+    if: ${{ !cancelled() && !inputs.release_tag && needs.changes.outputs.docs_only != 'true' }}
     name: Package the exact source candidate
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -52,8 +92,8 @@ jobs:
 
   install:
     name: Fresh Windows ZIP install and persistent newsroom
-    needs: package
-    if: ${{ always() && (needs.package.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
+    needs: [changes, package]
+    if: ${{ always() && needs.changes.outputs.docs_only != 'true' && (needs.package.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
     runs-on: windows-latest
     timeout-minutes: 55
     env:

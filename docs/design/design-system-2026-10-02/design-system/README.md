@@ -111,9 +111,10 @@ The scale:
 ### Buttons (one family)
 | Kind | Look | Use |
 |---|---|---|
-| Primary | Yellow fill, `#111` text, 800 | The one next step. At most 1–2 per view. |
+| Primary | Yellow fill, `#111` text, 800. **Light: 2px `#111` edge** (yellow on cream is only 1.3:1). Dark: edge the same color as the fill. | The one next step. At most 1–2 per view. |
 | Secondary | 2px ink border, ink text, 700 | Other real actions. |
-| Quiet | 1px rule border, 700 | Minor or navigational actions (Open, More ▾, Edit). |
+| Quiet | **1px `--ink2` border** (`#3a3a3a` light, about 10:1; `#bdbab3` dark, about 8:1), 700. Never the `--line` rule color: 1.4:1 reads as text. | Minor or navigational actions (Open, More ▾, Edit). |
+| Text link | Ink text, always underlined (1px, offset 3px), 700 in UI | Only for going somewhere. Anything that *does* something is a button. |
 | Danger | 2px danger border and text | Kill, Stop, Cancel a job, Legal removal. The label says exactly what happens. |
 | Disabled gate | 2px dashed rule, `--ink2` text, `not-allowed` | Publish before every check passes. The reason is printed beside it. |
 
