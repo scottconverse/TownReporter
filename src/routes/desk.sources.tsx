@@ -1523,12 +1523,21 @@ function WatchRows({
             >
               <div className="astra-cell src-name">
                 <span className="astra-row-t">{s.title}</span>
-                <span className="astra-row-meta">
+                {/*
+                  UI1b-4: a <p>, not a <span>. The link inside goes somewhere,
+                  so it stays an underlined link (README §2) -- and an
+                  underlined link is only allowed to be plain text when it
+                  sits in prose, a list item, a table cell or a heading. This
+                  meta line is the source's own sentence, so it is drawn as
+                  one; the two host links on this screen were the last
+                  controls on the desk the guard still read as bare text.
+                */}
+                <p className="astra-row-meta">
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                     {hostLabel(s.url)} ↗
                   </a>
                   {s.kind ? ` · ${s.kind}` : ""}
-                </span>
+                </p>
               </div>
               <div className="astra-cell src-state">
                 <span className={"astra-chip " + chip.cls}>{chip.label}</span>

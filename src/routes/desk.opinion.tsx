@@ -308,9 +308,13 @@ function OpinionPage() {
       <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
         <b>The desk could not check the writing model.</b> Nothing can be queued until the check
         succeeds.{" "}
-        <button type="button" className="inline-link" onClick={() => void ready.refetch()}>
+        {/* UI1b-4: "Check again" runs a check -- it does something, so it is a
+            real button and wears the button family's Quiet edge, not the
+            underlined-link look (which is for controls that go somewhere).
+            Label, behaviour and the enclosing `role="alert"` are unchanged. */}
+        <InkButton tone="quiet" onClick={() => void ready.refetch()}>
           Check again
-        </button>
+        </InkButton>
       </div>
     ) : ready.data && !ready.data.ready ? (
       <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">

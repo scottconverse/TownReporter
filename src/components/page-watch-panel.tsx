@@ -307,10 +307,14 @@ export function PageWatchPanel({
                   Open the lead
                 </Link>
               ) : null}{" "}
+              {/* UI1b-4: opening the investigation file does something, so this
+                  is a button and wears the Quiet edge -- it was wearing
+                  `.inline-link`, the underlined look the desk reserves for
+                  controls that go somewhere. Label and behaviour unchanged. */}
               {attached ? (
-                <button className="inline-link" onClick={() => onOpenFile(attached)}>
+                <InkButton tone="quiet" small onClick={() => onOpenFile(attached)}>
                   Open investigation
-                </button>
+                </InkButton>
               ) : null}
             </p>
           ) : null}
@@ -541,10 +545,12 @@ export function PageWatchPanel({
                     .filter((a) => a.action === "attach")
                     .map((a) => (
                       <p key={`file-${a.target_id}`}>
+                        {/* UI1b-4: same as "Open investigation" above -- it
+                            opens a file, so it is a Quiet button. */}
                         {a.target_exists ? (
-                          <button className="inline-link" onClick={() => onOpenFile(a.target_id)}>
+                          <InkButton tone="quiet" small onClick={() => onOpenFile(a.target_id)}>
                             Open attached investigation
-                          </button>
+                          </InkButton>
                         ) : (
                           "The attached record or investigation was removed. Capture history remains."
                         )}

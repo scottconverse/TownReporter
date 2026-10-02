@@ -163,7 +163,7 @@ export function FirstRunModelCard() {
                   <li key={model.id}>
                     <button
                       type="button"
-                      className="inline-link"
+                      className="btn quiet"
                       style={{ minHeight: 44 }}
                       disabled={answer.isPending}
                       onClick={() => answer.mutate({ choice: { baseUrl: row.baseUrl, id: model.id } })}
@@ -180,7 +180,7 @@ export function FirstRunModelCard() {
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
-          className="inline-link"
+          className="btn quiet"
           style={{ minHeight: 44 }}
           disabled={answer.isPending}
           onClick={() => answer.mutate({ keepAutomatic: true })}

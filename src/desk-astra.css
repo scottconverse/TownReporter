@@ -1335,10 +1335,21 @@
   max-height: calc(100dvh - 112px);
   overflow: auto;
 }
+/* UI1b-4. A TAB IS A SEGMENT. The strip that switches the inspector's panels
+   was drawn as unselected words with no edge at all, so every tab measured as
+   plain text (327 "no edge/fill under 3:1" across the desk). It takes the
+   segmented filter's look from README §6 -- a 1px `--fg2` box with a rule
+   between the tabs and the SELECTED tab in ink fill with background-coloured
+   text -- rather than the panel's underline bar, which was drawn with
+   `box-shadow: inset 0 -4px 0` and so is not a border the eye (or the guard)
+   can pick out of the panel behind it. The ink fill is also what the Models
+   page's own tab strip already paints (desk.models.tsx), so the desk now has
+   one tab look instead of two. */
 .desk-ltr.astra .astra-inspector-tabs {
   display: flex;
   gap: 18px;
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-left: 0;
   padding: 0 20px;
   position: sticky;
   top: 0;
@@ -1348,15 +1359,19 @@
 .desk-ltr.astra .astra-inspector-tabs button {
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-left: 1px solid var(--fg2);
   padding: 15px 0;
   font-size: calc(14px * var(--ts));
   min-height: 46px;
   color: var(--mut);
 }
+.desk-ltr.astra .astra-inspector-tabs button:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
 .desk-ltr.astra .astra-inspector-tabs button[aria-selected="true"] {
-  border-bottom-color: var(--a);
-  color: var(--adeep);
+  background: var(--fg);
+  color: var(--bg);
   font-weight: 700;
 }
 .desk-ltr.astra .astra-inspector > section {
@@ -3592,9 +3607,32 @@
   font-size: calc(15px * var(--ts));
   color: var(--fg2);
 }
+/*
+  UI1b-4. A SEGMENTED FILTER IS A CONTROL, SO IT IS DRAWN AS ONE.
+
+  README §6: "Segmented filter: a 1px rule container with the selected segment
+  in ink fill and a count in the label". The container's rule was `--line`
+  (#d8d3c4 on the cream page, 1.4:1) and each segment drew no edge of its own
+  at all, so the guard measured every UNSELECTED segment as plain text -- 327
+  controls across the desk were "no edge/fill under 3:1", and the segmented
+  strips were the largest family after the models page's selects.
+
+  The reading kept is the design's own: the strip is one 1px box with a rule
+  between segments, and the selected segment is an ink fill with
+  background-coloured text (README §3, "the current one is an ink fill with
+  bg-colored text"). Only the TOKEN changes -- the rule is `--fg2` (the Quiet
+  button's edge: #3a3a3a light / #bdbab3 dark, 10.2:1 and 8.4:1 on the panel)
+  instead of the hairline `--line`, which is a RULE token and never a control
+  edge (README §6, the Quiet row).
+
+  The container gives up its left border and the FIRST segment draws it, so
+  each segment owns a drawn 1px edge without any edge being drawn twice --
+  the same collapsing shape `.astra-seg-opt + .astra-seg-opt` already used.
+*/
 .desk-ltr.astra .today-segs {
   display: flex;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-left: 0;
 }
 /* CY item 1. The drawing's header row wraps its three create buttons onto a
    second line and starts them at the LEFT (Desk Command.dc.html, the header
@@ -3625,14 +3663,23 @@
   min-height: 44px;
   padding: 0 14px;
   border: 0;
+  border-left: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
   font: 700 calc(15px * var(--ts)) var(--fd);
   cursor: pointer;
 }
+.desk-ltr.astra .today-seg:hover {
+  background: var(--bg2);
+}
 .desk-ltr.astra .today-seg.on {
   background: var(--fg);
   color: var(--bg);
+}
+/* README §6: "Focus: a 2px outline in the text color with a 2px offset." */
+.desk-ltr.astra .today-seg:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra :is(.today-legend, .queue-legend) {
   display: flex;
@@ -3951,10 +3998,14 @@
   color: var(--fg);
   flex: 0 0 auto;
 }
+/* UI1b-4: the Queue's Sort and Section selects were drawn borderless, so they
+   read as bare words in the filter bar. They take the Quiet box -- 1px
+   `--fg2` -- and keep their compact padding so the one-line controls bar still
+   fits at 1280. */
 .desk-ltr.astra .queue-sel select {
   min-height: 0;
-  padding: 0;
-  border: 0;
+  padding: 2px 4px;
+  border: 1px solid var(--fg2);
   background: none;
   color: var(--fg);
   font: inherit;
@@ -3962,6 +4013,10 @@
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.desk-ltr.astra .queue-sel select:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra .queue-sel select[aria-label="Sort"] {
   min-width: 6em;
@@ -4002,24 +4057,39 @@
    (styles.css:1769), both under the 44px tap target the design rules require,
    so the strip is its own class here rather than an edit to the shared rule a
    sibling lane is also touching. */
+/*
+  UI1b-4: the same segmented filter as Today's, and the same swap. The strip
+  the Queue and Drafts draw was a `--line` box with `--line` dividers (1.4:1 --
+  a hairline rule, never a control edge) and its LAST segment had no border at
+  all, so the closing segment of every strip measured as bare text. The rule is
+  `--fg2` now, the container gives up its right edge and the LAST segment draws
+  it -- the mirror of the `border-left` collapsing the other strips use, so no
+  edge is drawn twice and every segment owns one. The selected segment keeps the
+  design's ink fill.
+*/
 .desk-ltr.astra .seg-strip {
   display: flex;
   flex-wrap: wrap;
   align-self: flex-start;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-right: 0;
 }
 .desk-ltr.astra .seg-strip > button {
   min-height: 44px;
   padding: 0 14px;
   border: 0;
-  border-right: 1px solid var(--line);
+  border-right: 1px solid var(--fg2);
   background: none;
   color: var(--fg);
   font: 700 calc(14px * var(--ts)) var(--fd);
   cursor: pointer;
 }
-.desk-ltr.astra .seg-strip > button:last-child {
-  border-right: 0;
+.desk-ltr.astra .seg-strip > button:hover {
+  background: var(--bg2);
+}
+.desk-ltr.astra .seg-strip > button:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra .seg-strip > button.on,
 .desk-ltr.astra .seg-strip > button[aria-pressed="true"] {
@@ -4102,38 +4172,46 @@
   height: 44px;
   min-height: 44px;
 }
+/* UI1b-4: the INPUT is the drawn square, not a transparent film over it. It
+   used to be stretched over the whole 44px label with `opacity: 0`, so the box
+   the editor sees was a sibling span and the control the guard measures -- the
+   one that owns the state, the label and the keyboard -- had no box of its own
+   at all. The label still supplies the 44px press area (a press anywhere in it
+   still toggles the box); the input is `appearance: none` at the drawn 24px and
+   carries the same 2px `--fg2` edge the span used to, and the ink fill when
+   it is picked. `.queue-box` keeps only the tick glyph, laid over it. */
 .desk-ltr.astra .queue-check > input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
   margin: 0;
-  opacity: 0;
+  border: 2px solid var(--fg2);
+  background: transparent;
   cursor: pointer;
 }
 .desk-ltr.astra .queue-check > .queue-box {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
-  box-sizing: border-box;
-  border: 2px solid var(--fg2);
+  border: 0;
   background: transparent;
   color: var(--bg);
   font: 800 calc(14px * var(--ts))/1 var(--fd);
   /* The glyph sits on the drawn square's centre, not on the box's baseline. */
   line-height: 1;
+  pointer-events: none;
   user-select: none;
 }
-.desk-ltr.astra .queue-check > input:checked + .queue-box {
+/* UI1b-4: the fill and the ring both belong to the input now, which is the
+   square the editor sees -- so the `:has(> input:focus-visible) > .queue-box`
+   ring that existed only because the input was invisible is gone, and the
+   desk's own `:focus-visible` rule (2px in the text colour, 2px offset) paints
+   the square directly. */
+.desk-ltr.astra .queue-check > input:checked {
   background: var(--fg);
   border-color: var(--fg);
-}
-/* The native ring would draw on the invisible input, so focus paints the drawn
-   square instead. `:has` is already the desk's tool for this (styles.css:333). */
-.desk-ltr.astra .queue-check:has(> input:focus-visible) > .queue-box {
-  outline: 2px solid var(--fg);
-  outline-offset: 2px;
 }
 /* The evidence cell: the drawn EvidenceMeter's squares plus the count. The
    drawing prints "3 opened · 1 could not"; the desk has no per-lead failure
@@ -4894,22 +4972,33 @@
   align-items: center;
   gap: 10px;
 }
+/* UI1b-4: the same segmented strip as Today's -- 1px `--fg2` box, a rule
+   between segments, the selected segment an ink fill. See `.today-segs`. */
 .desk-ltr.astra .st-ranges {
   display: flex;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-left: 0;
 }
 .desk-ltr.astra .st-range {
   min-height: 44px;
   padding: 0 calc(14px * var(--ts));
   border: 0;
+  border-left: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
   font: 700 calc(15px * var(--ts)) var(--fd);
   cursor: pointer;
 }
+.desk-ltr.astra .st-range:hover {
+  background: var(--bg2);
+}
 .desk-ltr.astra .st-range.on {
   background: var(--fg);
   color: var(--bg);
+}
+.desk-ltr.astra .st-range:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra .st-export {
   min-height: 44px;
@@ -5355,9 +5444,12 @@
   font: 700 calc(15px * var(--ts)) var(--fd);
   cursor: pointer;
 }
+/* UI1b-4: "Read report" is a real press, so it wears the Quiet edge. `--line`
+   is a hairline RULE token (1.4:1 on the cream panel) and never a control
+   edge -- the same swap `.btn.quiet` got in UI1a. */
 .desk-ltr.astra .st-btn.ghost {
   min-height: 40px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
   padding: 0 calc(12px * var(--ts));
   font-size: calc(14px * var(--ts));
 }
@@ -5443,10 +5535,13 @@
   color: var(--fg2);
   max-width: 900px;
 }
+/* UI1b-4: the same segmented strip as Today's -- 1px `--fg2` box, a rule
+   between segments, the selected segment an ink fill. See `.today-segs`. */
 .desk-ltr.astra .fu-filters {
   display: flex;
   flex-wrap: wrap;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-left: 0;
   align-self: flex-start;
 }
 .desk-ltr.astra .fu-filter {
@@ -5458,8 +5553,13 @@
   color: var(--fg);
   background: transparent;
   border: 0;
+  border-left: 1px solid var(--fg2);
   white-space: nowrap;
   cursor: pointer;
+}
+.desk-ltr.astra .fu-filter:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
 }
 .desk-ltr.astra .fu-filter:hover {
   background: var(--hover);
@@ -5976,6 +6076,7 @@
 .desk-ltr.astra .astra-row.src .astra-row-t,
 .desk-ltr.astra .astra-row.src .astra-row-meta {
   display: block;
+  margin: 0;
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
@@ -6125,7 +6226,8 @@
 .desk-ltr.astra .astra-seg {
   display: inline-flex;
   flex-wrap: wrap;
-  border: 1px solid var(--line);
+  border: 1px solid var(--fg2);
+  border-left: 0;
   min-width: 0;
 }
 .desk-ltr.astra .astra-seg-opt {
@@ -6137,10 +6239,14 @@
   font-weight: 700;
   color: var(--fg);
   background: transparent;
+  border-left: 1px solid var(--fg2);
   white-space: nowrap;
 }
-.desk-ltr.astra .astra-seg-opt + .astra-seg-opt { border-left: 1px solid var(--line); }
 .desk-ltr.astra .astra-seg-opt:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-seg-opt:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
 .desk-ltr.astra .astra-seg-opt.on { background: var(--fg); color: var(--bg); }
 
 /* --- toolbar: filters left, search right (drawing: flex-wrap, space-between) */
@@ -6314,12 +6420,18 @@
    action, and a rule between rows. The row itself is the control, so
    .astra-file-open is a reset button that fills the row and inherits its
    type; .astra-file keeps the padding and the selected bar. */
+/* UI1b-4: the row IS the control, so the row is what carries the edge. It had
+   none -- title, metadata and a hairline rule that was not even drawn -- so
+   every file in the Dark Desk rail measured as plain text. It wears the Quiet
+   button's 1px `--fg2` box now, inset in the rail's own 16px padding, and the
+   row's actions sit below it as they did. One box, not two: `.astra-file` is
+   the plain wrapper, this button is the press target. */
 .desk-ltr.astra .astra-file-open {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 0;
-  border: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--fg2);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -6489,12 +6601,26 @@
    stretched over the card so the whole drawn box is clickable; the readiness
    notice below keeps its own controls above the stretch. */
 .desk-ltr.astra .astra-panel-open { position: relative; }
+/*
+  UI1b-4. The whole-card press target keeps its edge on the control itself.
+
+  The card is a door: `.astra-card-link` is the button and its `::after`
+  stretches the press target over the whole drawn card, so the card is what the
+  eye reads as clickable. The card's own border is the design's 2px yellow
+  (`--a`, README §5 "an emphasis panel gets a 2px yellow border"), which is
+  1.42:1 on the cream page in light -- a deliberate emphasis treatment, not an
+  identification, and it is not the border of the control the guard measures.
+  Rather than draw a second frame around the card, the button wears the Quiet
+  button's 1px `--fg2` box around its own label, so the door has one drawn edge
+  at 3:1 in both themes and the card's yellow stays an emphasis on top of it.
+*/
 .desk-ltr.astra .astra-card-link {
+  display: block;
   font: inherit;
   color: inherit;
   background: none;
-  border: 0;
-  padding: 0;
+  border: 1px solid var(--fg2);
+  padding: 8px 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -6830,8 +6956,9 @@
   color: var(--fg2);
 }
 
-/* The tabs: three equal cells, 48px, the active one a 4px yellow underline
-   sitting on the panel it names. */
+/* The tabs: three equal cells, 48px, the strip a 1px `--fg2` box and the
+   active cell an ink fill with background-coloured text (UI1b-4 -- see the
+   first `.astra-inspector-tabs` block for why the underline bar went). */
 .desk-ltr.astra .astra-inspector-tabs {
   gap: 0;
   padding: 0;
@@ -6845,10 +6972,8 @@
   text-align: center;
 }
 .desk-ltr.astra .astra-inspector-tabs button[aria-selected="true"] {
-  border-bottom-color: transparent;
-  background: var(--bg);
-  box-shadow: inset 0 -4px 0 var(--sel);
-  color: var(--fg);
+  background: var(--fg);
+  color: var(--bg);
   font-weight: 800;
 }
 
@@ -7228,3 +7353,110 @@
    with no pulsing or sliding. Nothing extra is needed here, and this note is
    here so the next person does not add an animation that assumes otherwise.
 */
+
+/* ===========================================================================
+   UI1b-4: EVERY CONTROL THAT DOES SOMETHING GETS A VISIBLE EDGE OR FILL.
+
+   The rule this section closes (brief: "if it does something, it is a button
+   ... nothing clickable is plain text") measured 327 controls on the built
+   desk whose edge or fill was under 3:1 against the surface behind them. The
+   segmented strips, the tabs, the selects, the Dark Desk file rows, the
+   Opinion door and the two Quiet-looking text buttons are fixed at their own
+   rules above and in styles.css. What is left is the two shapes the desk draws
+   over and over in markup rather than through a named class, so they get one
+   rule each here instead of twenty edits at twenty call sites.
+--------------------------------------------------------------------------- */
+
+/*
+  DISCLOSURE TOGGLES. A `<details>/<summary>` opens something, so it is a
+  control: README §6's Quiet button is "1px rule border, 700" and that is what
+  every summary the desk draws wears now -- keeping its disclosure arrow, which
+  is the marker the browser paints inside `<summary>` and which no border
+  touches.
+
+  Scoped `:not(.btn)` so the summaries that already ARE real buttons
+  (`.btn.quiet`, the "More ▾" toggles in desk-chrome.tsx and desk.dark.tsx)
+  keep the button family's own edge and padding rather than getting a second
+  frame. No `min-height`: the 44px target size is UI1b-5's job on this desk, not
+  this unit's, and adding it here would move layouts this unit did not measure.
+*/
+.desk-ltr summary:not(.btn) {
+  border: 1px solid var(--fg2);
+  border-radius: 0;
+  padding: 4px 10px;
+  cursor: pointer;
+  width: fit-content;
+  max-width: 100%;
+}
+.desk-ltr summary:not(.btn):focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+/*
+  NATIVE SELECTS. Every `<select>` on the desk is a control, and the desk draws
+  a dozen of them across Scan, Models, Queue, Stats and the settings panels.
+  Most were borderless for one of two reasons: Tailwind's preflight zeroes
+  `border-width` on every element, and a handful of the astra rules explicitly
+  set `border: 0` to make the control "just text". Both leave a control with no
+  identifiable edge.
+
+  This is the FALLBACK, not the authority: any `select` rule with a more
+  specific selector still wins its own border, and the desk's `.model-picker
+  select` / `.queue-sel select` rules above set their own `--fg2` edge. It
+  exists so a select added tomorrow without a bespoke rule is still a control
+  the editor can see.
+
+  The `--fg2` edge is README §6's Quiet level and the designer's "bordered
+  selects"; the 44px height that goes with it is UI1b-5's.
+*/
+.desk-ltr.astra select {
+  border: 1px solid var(--fg2);
+  border-radius: 0;
+}
+.desk-ltr.astra select:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+/*
+  DIALOG ROWS THAT ARE CHECKBOXES. `.astra-check` is the `<label>` around a
+  checkbox -- the whole row is the press target, so the row is the control. The
+  rows the Legal removals dialog draws ("A non-profit paper for Testerville,
+  Wyoming, edited by a human") had no edge of their own and measured as plain
+  text. Same Quiet box as the disclosure toggles; the checkbox inside keeps its
+  own drawn square, which is the row's STATE, not a second edge for the row.
+*/
+.desk-ltr.astra .astra-check {
+  border: 1px solid var(--fg2);
+  border-radius: 0;
+  padding: 8px 10px;
+}
+.desk-ltr.astra .astra-check:focus-within {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+
+/*
+  TAB STRIPS THAT ARE NOT THE INSPECTOR'S. A tabstrip drawn with
+  `role="tablist"` -- the Models page's "Assignments / Connections" pair -- is
+  the same control family as the inspector's tabs above, and it gets the same
+  treatment: a 1px `--fg2` box with a rule between the tabs, and the selected
+  tab in the ink fill its own markup already paints. The unselected tab had no
+  edge of its own, so half of every such strip measured as plain text. The
+  inspector's own rules are more specific than these and keep their shape.
+*/
+.desk-ltr.astra [role="tablist"] {
+  border: 1px solid var(--fg2);
+  border-left: 0;
+  border-radius: 0;
+}
+.desk-ltr.astra [role="tablist"] > [role="tab"] {
+  border: 0;
+  border-left: 1px solid var(--fg2);
+  border-radius: 0;
+}
+.desk-ltr.astra [role="tablist"] > [role="tab"]:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
