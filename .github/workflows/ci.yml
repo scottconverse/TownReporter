@@ -1950,3 +1950,28 @@ jobs:
           # the walk would refuse to start. This keeps the checkout clean.
           CP_SHOTS_OUT_DIR: ${{ github.workspace }}/../cp-desk-dialogs-evidence
         run: node scripts/cp-desk-dialogs-walk.mjs
+      # Unit F6. The auditor opened the dev copy in a real browser and measured
+      # the page against the window: `/desk/models` was 135px wider than a
+      # 1024px screen, 259px at 900 and 554px at 390, and `/desk/queue` was 64px
+      # too wide at 900 -- the whole page scrolled sideways, so the right-hand
+      # columns sat off the edge of a phone.
+      #
+      # This walk measures `documentElement.scrollWidth - clientWidth` (and
+      # body's) on every desk route it can reach, at 1280, 1024, 900, 768 and
+      # 390px, and asserts 0 for the two pages this unit owns; overflow on any
+      # other desk page is printed as a note rather than asserted, because the
+      # brief named two pages and a guard that fails on a screen nobody was
+      # asked to fix gets switched off instead of read. It also opens the
+      # Queue's row menu at 900 and 390, and reads the model select's height at
+      # 390 so that "it fits" cannot be satisfied by deleting the control.
+      #
+      # It runs inside this job rather than a new one: branch protection pins
+      # the current job set, the job already installs Chromium and builds the
+      # server, and its 20-minute ceiling has room. Its own process, its own
+      # port (3591) over in-memory PGlite, its own desk, and no model -- the
+      # provider ladder points at a port the walk proves is dead before it
+      # boots. ~4 min.
+      - name: No desk page scrolls sideways at 1280, 1024, 900, 768 or 390
+        env:
+          BETTER_AUTH_SECRET: ci-desk-narrow-width-secret-not-for-production
+        run: node scripts/desk-narrow-width-walk.mjs
