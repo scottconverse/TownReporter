@@ -123,6 +123,12 @@ const REQUIRED = [
   // anything at all, so losing it fails at the first line of the one script
   // that puts a release on the live paper.
   "lib-promote.ps1",
+  // The database half of a promotion: the copy taken before a rollout and the
+  // swap that puts it back (unit PR2). Not dot-sourced -- promote.ps1 runs it
+  // as a child -- but losing it fails the same way and at the same moment: the
+  // promotion builds the command from a path under this install's ops\, so a
+  // missing file is a failed step with the paper already stopped.
+  "lib-promote-db.mjs",
   // The Control page, and the launcher the Desktop icon runs. The page is the
   // operator's non-terminal way in now, so the same argument that put
   // status.ps1 in this list applies twice over: a missing file fails on the
