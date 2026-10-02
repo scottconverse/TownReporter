@@ -22,6 +22,49 @@ import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey } from "./sections.server.ts";
 import type { TopicSection } from "./desk-copy.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
+import { paperSetUpRefusal } from "./paper-settings.ts";
+
+/*
+  SG1b finding 1: enforce "refuse until set up" at the SHARED COMMIT BOUNDARY.
+
+  The gate used to live in `draftLead` alone (desk.ts). Every other user-facing
+  way to start paid drafting went straight past it -- the New story "Write
+  draft" box (`writeStoryFromInput` -> `writeStoryForAuthenticatedEditor`),
+  Retry on a failed draft (`retryStoryJob`), and Add lead with "then: draft"
+  (the editor dialog injects `commitStoryDraftForAuthenticatedEditor`) -- and on
+  a fresh install each queued model work against the shipped fallback town.
+  Gating each caller is how this rots again: the next caller forgets.
+
+  So the refusal lives here, in the one function every one of those paths
+  reaches. It is the same `paperSetUpRefusal` the rest of the desk uses (`ONE
+  CHECK, ONE PLACE`, paper-settings.ts) and it returns the same sentence, as a
+  RESULT rather than a throw: every function in this file already reports a
+  refusal by returning `{ ok: false, error }`, and `job-progress.ts`,
+  `editor-dialog-actions.server.ts` and the desk's forms all read it that way.
+  Nothing is enqueued, no rate unit is charged and no provider is probed before
+  this line.
+*/
+async function paperSetupRefusalFor(newsroomId: number, action: string) {
+  const refusal = await paperSetUpRefusal(newsroomId, action);
+  if (refusal === null) return null;
+  /*
+    The same fields the other refusals beside it carry, so a caller that reads
+    `detail`/`retryable` off `ok: false` (desk.scan.tsx) needs no special case.
+    `retryable: true` is honest: press it again once setup is finished.
+  */
+  return {
+    ok: false as const,
+    error: refusal,
+    detail: "",
+    retryable: true,
+    // Present-and-undefined so the union keeps the shape every caller narrows
+    // against (model-request-commit.test.ts reads `kind`/`jobId` off these).
+    kind: undefined,
+    modelChoice: undefined,
+    jobId: undefined,
+    pending: undefined,
+  };
+}
 
 async function resolveTechnicalPreflight(
   requested: StoryModelChoice,
@@ -79,6 +122,8 @@ export async function commitStoryDraftForAuthenticatedEditor(
   },
   deps: StoryDraftCommitDeps = {},
 ) {
+  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
+  if (refusal) return refusal;
   const sql = await (deps.getSql ?? getSql)();
   const leads = await sql<{ id: number; status: string; notes_json?: string }>`
     select id, status, to_jsonb(leads)->>'notes_json' as notes_json from leads
@@ -209,6 +254,8 @@ export async function commitScanForAuthenticatedEditor(
   },
   deps: ScanCommitDeps = {},
 ) {
+  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "start the scan");
+  if (refusal) return refusal;
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "scan"));
   const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
   const providerProbe = preflight.probe;
@@ -393,6 +440,8 @@ export async function commitOpinionForAuthenticatedEditor(
   },
   deps: OpinionCommitDeps = {},
 ) {
+  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "start an editorial");
+  if (refusal) return refusal;
   if ((input.documentIds?.length ?? 0) > 20 || new Set(input.documentIds ?? []).size !== (input.documentIds?.length ?? 0)) {
     return { ok: false as const, error: "Choose up to 20 different documents." };
   }
@@ -646,6 +695,14 @@ export async function writeStoryForAuthenticatedEditor(
   },
   deps: WriteStoryCommitDeps = {},
 ) {
+  /*
+    The gate comes FIRST, before the lead and its draft row are filed. The
+    commit it delegates to refuses too, but by then a lead would already be on
+    the Queue for a draft that can never start -- a dead row the editor never
+    asked for. One refusal, one sentence, and nothing written.
+  */
+  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
+  if (refusal) return refusal;
   if ((input.documentIds?.length??0)>20 || new Set(input.documentIds??[]).size!==(input.documentIds?.length??0)) return {ok:false as const,error:"Choose up to 20 different documents."};
   if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes."};
   /*

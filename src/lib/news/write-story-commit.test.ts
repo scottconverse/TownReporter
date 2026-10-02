@@ -4,6 +4,8 @@ import { getSql } from "../db.ts";
 import { ensureJobsSchema, enqueueJob } from "./jobs.ts";
 import { writeStoryForAuthenticatedEditor } from "./model-request-commit.server.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
+/* SG1b: this file drafts on fresh newsrooms, which the shared commit boundary now refuses. Mark them set up. */
+import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
 // applies migrations/*.sql before the file loads; the postgres-integration
@@ -34,11 +36,15 @@ const SECTION_LIST = [
 const ROOMS = [1, 811, 812, 813, 820];
 
 before(async () => {
+  await ensurePaperSettingsSchema();
   const sql = await getSql();
   for (const newsroomId of ROOMS) {
     await sql.query("insert into newsrooms(id,name) values($1,$2) on conflict (id) do nothing", [
       newsroomId,
       `Test room ${newsroomId}`,
+    ]);
+    await sql.query("insert into paper_settings(newsroom_id,onboarded) values($1,true) on conflict (newsroom_id) do update set onboarded=true", [
+      newsroomId,
     ]);
     await sql.query("insert into section_config(newsroom_id) values($1) on conflict do nothing", [
       newsroomId,
@@ -56,6 +62,9 @@ before(async () => {
 async function ensureWriteStorySchema() {
   const sql = await getSql();
   await ensureJobsSchema();
+  /* SG1b: the shared commit boundary refuses an un-set-up newsroom (paper-settings.ts), and every room this file writes into is set up. */
+  await ensurePaperSettingsSchema();
+  await sql.query("insert into paper_settings(newsroom_id,onboarded) select id,true from (values (1),(811),(812),(813),(815),(816),(817),(820)) as rooms(id) on conflict (newsroom_id) do update set onboarded=true");
   await sql.query(`
     create table if not exists leads (
       id serial primary key,
