@@ -368,16 +368,69 @@ function killTree(pid) {
  * thing that actually went wrong. Killing the child first, then retrying the
  * delete, keeps the real failure on screen.
  */
-function cleanup(install) {
-  const pid = Number(read(join(install.app, "hang-child-pid.txt")).trim());
-  if (Number.isFinite(pid) && pid > 0 && isRunning(pid)) {
+/**
+ * Wait until the operating system says a PID is gone.
+ *
+ * `taskkill /F` RETURNS BEFORE THE PROCESS IS ACTUALLY GONE. Measured on this
+ * machine: the call comes back, `Get-Process` still resolves the PID for a
+ * moment, and -- the part that matters here -- the file handles the process
+ * held are still open. That is what made this suite flaky: the fixture
+ * directory could not be deleted while a killed child's handle on its own log
+ * file was still being torn down, so `rmdir` failed with EBUSY, and a throw
+ * from a `finally` REPLACES the assertion error -- the run reported EBUSY
+ * instead of whatever actually happened. Seen in 2 runs out of 6.
+ */
+async function waitUntilGone(pid, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isRunning(pid)) return true;
+    await sleep(100);
+  }
+  return !isRunning(pid);
+}
+
+/**
+ * Delete a fixture directory, retrying with backoff for several seconds.
+ *
+ * A teardown that gives up loudly is worse than one that gives up quietly: a
+ * leftover directory in the OS temp folder is a tidiness problem, and an
+ * EBUSY thrown from a `finally` is a red suite that says nothing about the
+ * code under test. So this retries hard and then stops trying.
+ */
+async function removeTree(dir, timeoutMs = 20_000) {
+  const deadline = Date.now() + timeoutMs;
+  let delay = 100;
+  for (;;) {
     try {
-      killTree(pid);
+      rmSync(dir, { recursive: true, force: true });
+      return true;
+    } catch {
+      if (Date.now() >= deadline) return false;
+      await sleep(delay);
+      delay = Math.min(delay * 2, 1000);
+    }
+  }
+}
+
+/**
+ * Tear an install down: the child first, WAIT for it to really be gone, then
+ * the directory.
+ *
+ * The wait is the fix. Killing the process tree and deleting the directory in
+ * the same breath is a race against Windows' own process teardown, and the
+ * loser is whichever assertion happened to be in flight.
+ */
+async function cleanup(install) {
+  const pid = Number(read(join(install.app, "hang-child-pid.txt")).trim());
+  if (Number.isFinite(pid) && pid > 0) {
+    try {
+      if (isRunning(pid)) killTree(pid);
     } catch {
       // best effort: the test has already failed, and this is only tidying
     }
+    await waitUntilGone(pid);
   }
-  rmSync(install.root, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  await removeTree(install.root);
 }
 
 // --- always: the script is wired the way the tests below assume -------------
@@ -477,7 +530,7 @@ test("-WhatIf lets only the READ-ONLY database commands carry the live-promote f
     }
     assert.ok(out.endsWith("caller-untouched=[]"), `the caller's table was modified: ${out}`);
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -528,7 +581,7 @@ test("every step lands in the log with its command, its exit code and its durati
     assert.match(childOutput, /\[fake npm\] ci/, "npm's stdout is not in the file the log names");
     assert.match(childOutput, /PROMOTE_EXIT=0/, "the child did not record its own exit code in its output");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -577,7 +630,7 @@ test("a 20-second child survives its launcher's stdout pipe being closed", windo
     assert.match(text, /step=deps child: node .* exit 0 \(/, "the log has no exit code for the long child");
     assert.match(text, /step=deps ok \(/, "the deps step never completed");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -634,7 +687,7 @@ test("a build that fails after the stop leaves the paper on the OLD build and re
       "the failed build's stderr was not kept",
     );
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -689,8 +742,8 @@ test("a leftover marker leads to the resume path, and says which step to carry o
     assert.equal(read(join(finished.app, "no-marker.txt")).trim(), "null", "a place with no marker reported an unfinished run");
     assert.equal(read(join(finished.app, "cleared.txt")).trim(), "null", "the marker was not cleared");
   } finally {
-    rmSync(failed.root, { recursive: true, force: true });
-    rmSync(finished.root, { recursive: true, force: true });
+    await removeTree(failed.root);
+    await removeTree(finished.root);
   }
 });
 
@@ -743,7 +796,7 @@ test(
       assert.match(text, /step=build FAILED: .*did not reach its end/, "the step is not recorded as FAILED in the log");
       assert.match(text, /the paper is back on the OLD version/, "the log does not say which version the paper is on");
     } finally {
-      cleanup(install);
+      await cleanup(install);
     }
   },
 );
@@ -813,8 +866,8 @@ test("a step past its time limit is killed by PID; a step inside its limit is le
     assert.notEqual(read(join(under.app, "hang-child-survived.txt")), "", "the child under the limit did not get to finish");
     assert.doesNotMatch(read(newestLog(under.app)), /TIMED OUT/, "a step inside its limit was logged as timed out");
   } finally {
-    rmSync(over.root, { recursive: true, force: true });
-    rmSync(under.root, { recursive: true, force: true });
+    await removeTree(over.root);
+    await removeTree(under.root);
   }
 });
 
@@ -889,7 +942,7 @@ test(
         "the note does not tell the operator what to do about it",
       );
     } finally {
-      cleanup(install);
+      await cleanup(install);
     }
   },
 );
@@ -936,8 +989,8 @@ test(
       );
       assert.match(bundlerText, /step=build FAILED/, "the step is not recorded as FAILED in the log");
     } finally {
-      rmSync(migrated.root, { recursive: true, force: true });
-      rmSync(bundler.root, { recursive: true, force: true });
+      await removeTree(migrated.root);
+      await removeTree(bundler.root);
     }
   },
 );
@@ -968,7 +1021,7 @@ test("the built-in limits are the ones the operator is told about", windowsOnly,
       "the step limits changed without the operator-facing docs changing with them",
     );
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1022,7 +1075,7 @@ test("the promotion order puts the copy inside the stop-the-app window, before a
     assert.ok(recoveries >= 4, `only ${recoveries} failure paths put the database back; the fast-forward, the install, the build and the start all have to`);
     assert.match(src, /if \(\$RollbackDatabase\)/, "promote.ps1 no longer has a way to put a copy back by hand");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1124,7 +1177,7 @@ test("the copy is taken with the names, after a wait; a refused copy stops the p
       cleanup(refused);
     }
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1223,7 +1276,7 @@ test("a failed rollout stops the app, puts the database back, THEN starts the ol
     );
     assert.doesNotMatch(log, /secret/, "the database connection string is in the promotion's log");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1293,7 +1346,7 @@ test("a swap that could not run renames nothing, and the paper still comes back"
     // covered by the "prints the way back up" test above.
     assert.match(log, /The paper is back on the OLD version, but migrations may have run/, "a refused swap did not warn that the old build is on a migrated database");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1340,7 +1393,7 @@ test("a failure before the build says the two databases hold the same data", win
     assert.match(log, /that database holds exactly the same data as the one the paper is serving\./);
     assert.doesNotMatch(log, /migrations may have run|the database was already migrated to/, "a failure before the build warned about a migration that never ran");
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
@@ -1481,7 +1534,7 @@ test("the hand rollback refuses while the paper is answering, and says what it w
       assert.ok(!dbTrace(fresh).some((line) => line === "app stop"), "the rollback stopped an app that was not there");
       assert.equal(read(join(fresh.app, ".output", "server", "version.txt")).trim(), "old", "the build from before was not put back");
     } finally {
-      cleanup(fresh);
+      await cleanup(fresh);
     }
 
     // --- -StopApp: the operator said so, and it stops by PID first ------------
@@ -1529,40 +1582,70 @@ test("the hand rollback refuses while the paper is answering, and says what it w
       assert.ok(stopped < swapped, "the app was not stopped before the database was renamed under it");
       assert.ok(swapped < started, "the app was started before the database was put back");
     } finally {
-      cleanup(stopping);
+      await cleanup(stopping);
     }
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 
-test("a resumed run reads the copy out of the previous log, and refuses one older than the stop", windowsOnly, async () => {
+test("a resumed run takes the copy's freshness from the copy step, not from the run's start second", windowsOnly, async () => {
+  /*
+    BLOCKER B3, and the timestamps here are the whole test.
+
+    A promotion's copy is NAMED after the second the run started, and the stop
+    happens later -- 41 seconds later in this fixture, which is what a real
+    promotion's backup step costs. The freshness check used to compare the
+    stamp inside that NAME with the stop's time, so it asked "12:00:00 >=
+    12:00:41", answered no, and killed every `-Resume` that had reached the
+    copy. Only a run whose backup finished inside the same second as its own
+    start ever passed.
+
+    So this writes the log by hand with the three times spelled out, and
+    asserts BOTH answers: the old comparison says no (that is the bug, held
+    here so it cannot come back) and the real one says yes.
+  */
   const install = makeInstall();
   try {
+    const runStart = "2026-01-10 12:00:00";
+    const stopped = "2026-01-10 12:00:41";
+    const copied = "2026-01-10 12:00:44";
+    const copy = "townreporter_prerollout_20260110120000";
+    const failed = "townreporter_failed_20260110120000";
+    const logPath = join(install.app, "logs", "promote-20260110-120000.log");
+
     const harness = writeHarness(install, "resume-copy.ps1", [
-      "$log = New-PromoteLog -App $app -Stamp '20260110-120000'",
-      "Write-PromoteLog $log \"promote started: $app (port 9999), pid 1, arguments: '-Resume'\"",
-      "Add-PromoteStep -Log $log -Name 'backup' -Detail 'database townreporter'",
-      "Complete-PromoteStep -Log $log -Name 'backup' -Seconds 2 -Detail 'C:\\backups\\townreporter_2026-01-10_1200.sql (12 MB)'",
-      "Add-PromoteStep -Log $log -Name 'preflight' -Detail 'checkout and the database'",
-      "Complete-PromoteStep -Log $log -Name 'preflight' -Seconds 2 -Detail 'no uncommitted work'",
-      "Add-PromoteStep -Log $log -Name 'stop' -Detail 'the app on port 9999'",
-      "Complete-PromoteStep -Log $log -Name 'stop' -Seconds 3 -Detail 'stopped PID 5'",
-      "$stamp = (Get-Date).AddMinutes(1).ToString('yyyyMMddHHmmss')",
-      "$copy = \"townreporter_prerollout_$stamp\"",
-      "$failed = \"townreporter_failed_$stamp\"",
-      "Add-PromoteStep -Log $log -Name 'dbcopy' -Detail \"copy townreporter to $copy\"",
-      "Complete-PromoteStep -Log $log -Name 'dbcopy' -Seconds 4 -Detail \"copied townreporter -> $copy (570.0 MB)\"",
-      "Write-PromoteLog $log \"promote-db: database=townreporter copy=$copy failed=$failed\"",
-      "Add-PromoteStep -Log $log -Name 'ff' -Detail 'fetch and fast-forward to origin/main'",
-      "Fail-PromoteStep -Log $log -Name 'ff' -Detail 'the fast-forward could not run'",
+      "$dir = Join-Path $app 'logs'",
+      "New-Item -ItemType Directory -Force -Path $dir | Out-Null",
+      `$path = ${psLiteral(logPath)}`,
+      "$started = @(",
+      `  '[${runStart}] promote started: the install (port 9999), pid 1, arguments: ''-Resume'''`,
+      `  '[${stopped}] step=stop ok (3s): stopped PID 5'`,
+      `  '[${copied}] step=dbcopy ok (4s): copied townreporter -> ${copy} (570 MB)'`,
+      `  '[${copied}] promote-db: database=townreporter copy=${copy} failed=${failed}'`,
+      `  '[${copied}] step=ff started -- fetch and fast-forward to origin/main'`,
+      ")",
+      "Set-Content -Path $path -Value $started -Encoding ASCII",
       "New-PromoteMarker -App $app | Out-Null",
       "$p = Get-PromoteResumePoint -App $app",
-      "$fresh = Test-PromoteCopyFreshness -Copy $p.Copy -StopAt $p.StopAt",
-      "$stale = Test-PromoteCopyFreshness -Copy 'townreporter_prerollout_20200101000000' -StopAt $p.StopAt",
-      "$unprovable = Test-PromoteCopyFreshness -Copy $p.Copy -StopAt ''",
-      "$notACopy = Test-PromoteCopyFreshness -Copy 'townreporter_failed_20200101000000' -StopAt $p.StopAt",
-      `Set-Content -Path (Join-Path $app 'result.txt') -Value "next=$($p.NextStep);db=$($p.Database);copy=$($p.Copy);failed=$($p.Failed);stop=$($p.StopAt);fresh=$fresh;stale=$stale;unprovable=$unprovable;notACopy=$notACopy" -Encoding ASCII`,
+      "$fresh = Test-PromoteCopyFreshness -CopyAt $p.CopyAt -StopAt $p.StopAt",
+      // The bug, computed the way the old code computed it: the copy's NAME
+      // stamp against the stop. It must still say no -- that is why it was
+      // wrong, not a coincidence of this fixture.
+      "$oldStamp = Get-PromoteCopyStamp -Copy $p.Copy",
+      "$oldStyle = ([datetime]::ParseExact($oldStamp, 'yyyyMMddHHmmss', $null) -ge [datetime]::ParseExact($p.StopAt, 'yyyy-MM-dd HH:mm:ss', $null))",
+      "$noCopyAt = Test-PromoteCopyFreshness -CopyAt '' -StopAt $p.StopAt",
+      "$noStopAt = Test-PromoteCopyFreshness -CopyAt $p.CopyAt -StopAt ''",
+      // A copy the log shows being taken BEFORE the stop: still refused.
+      "$stale = @(",
+      `  '[${runStart}] promote started: the install (port 9999), pid 1, arguments: ''-Resume'''`,
+      `  '[2026-01-10 12:00:30] step=dbcopy ok (4s): copied townreporter -> ${copy} (570 MB)'`,
+      `  '[${stopped}] step=stop ok (3s): stopped PID 5'`,
+      ")",
+      "Set-Content -Path $path -Value $stale -Encoding ASCII",
+      "$p2 = Get-PromoteResumePoint -App $app",
+      "$staleFresh = Test-PromoteCopyFreshness -CopyAt $p2.CopyAt -StopAt $p2.StopAt",
+      `Set-Content -Path (Join-Path $app 'result.txt') -Value "next=$($p.NextStep);db=$($p.Database);copy=$($p.Copy);failed=$($p.Failed);stop=$($p.StopAt);copyAt=$($p.CopyAt);fresh=$fresh;oldStamp=$oldStamp;oldStyle=$oldStyle;noCopyAt=$noCopyAt;noStopAt=$noStopAt;staleFresh=$staleFresh;staleNext=$($p2.NextStep)" -Encoding ASCII`,
     ]);
 
     await runPowerShell(harness);
@@ -1570,14 +1653,30 @@ test("a resumed run reads the copy out of the previous log, and refuses one olde
 
     // The names survive the run that took them: a resumed run has to know what
     // to put back, and where.
-    assert.match(result, /^next=ff;db=townreporter;copy=townreporter_prerollout_\d{14};failed=townreporter_failed_\d{14};stop=\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2};/);
-    // A copy taken after the stop is usable; one taken before it is not, and
-    // neither is one there is nothing to compare against. "Cannot prove it is
-    // fresh" is not "fresh" -- putting a picture of a database from before the
-    // app went down back over it would silently drop the app's last writes.
-    assert.match(result, /;fresh=True;stale=False;unprovable=False;notACopy=False$/, `the freshness check is wrong: ${result}`);
+    assert.match(result, /^next=ff;db=townreporter;copy=townreporter_prerollout_\d{14};failed=townreporter_failed_\d{14};/);
+    // The two times are the log's own step lines, and they are not the same
+    // second -- which is the situation that used to be impossible to resume.
+    assert.ok(
+      result.includes(`stop=${stopped};copyAt=${copied}`),
+      `the resume point is not reading the stop and copy step times: ${result}`,
+    );
+
+    /*
+      The bug and the fix, side by side. `oldStyle` is the comparison that was
+      there before: the copy's name stamp (the run's START second) against the
+      stop. It says False. The real check, on the same log, says True.
+    */
+    assert.match(result, /oldStamp=20260110120000;oldStyle=False;/, `the fixture no longer reproduces B3: ${result}`);
+    assert.match(result, /fresh=True;/, `a copy taken 3s after the stop is still refused: ${result}`);
+
+    // Nothing to compare against is not a pass, and a copy the log shows being
+    // taken before the stop is refused.
+    assert.match(result, /noCopyAt=False;noStopAt=False;staleFresh=False;/, `the freshness check is wrong: ${result}`);
+    // ...and the stale log's own resume point is still readable, so the
+    // refusal above is about freshness and not about an unreadable log.
+    assert.match(result, /staleNext=dbcopy$/, `the stale log did not parse: ${result}`);
   } finally {
-    cleanup(install);
+    await cleanup(install);
   }
 });
 

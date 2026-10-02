@@ -9,9 +9,11 @@ import {
   checkLivePortGuard,
   copyDatabase,
   copyDatabaseName,
+  renameDatabase,
   defaultMeasureFreeBytes,
   deriveDatabaseName,
   diskMarginBytes,
+  effectivePort,
   failedDatabaseName,
   formatStamp,
   isCopyOf,
@@ -24,7 +26,6 @@ import {
   runCommand,
   stateOf,
   swapBack,
-  urlPort,
   waitForZeroConnections,
 } from "../../../ops/lib-promote-db.mjs";
 
@@ -269,14 +270,14 @@ describe("the live paper's port", () => {
   });
 
   it("knows which port a connection string dials", () => {
-    assert.equal(urlPort(LIVE), LIVE_POSTGRES_PORT);
-    assert.equal(urlPort(TEST_SERVER), 55433);
+    assert.equal(effectivePort(LIVE), LIVE_POSTGRES_PORT);
+    assert.equal(effectivePort(TEST_SERVER), 55433);
     // No port at all means PostgreSQL's own default -- which is 5432, and is
     // NOT the live machine's, so this can never be the answer that lets
     // something through.
-    assert.equal(urlPort(NO_PORT), 5432);
-    assert.equal(urlPort("nonsense"), null);
-    assert.equal(urlPort(""), null);
+    assert.equal(effectivePort(NO_PORT), 5432);
+    assert.equal(effectivePort("nonsense"), null);
+    assert.equal(effectivePort(""), null);
   });
 
   it("refuses 5433 without the flag, and takes it with the flag", () => {
@@ -303,7 +304,11 @@ describe("the live paper's port", () => {
     // refuses a working install, and the first thing anyone would do is
     // weaken it.
     assert.equal(checkLivePortGuard(["postgres://user:5433@h.invalid/db"], false), "");
-    assert.equal(checkLivePortGuard(["postgres://user@h.invalid/db?port=5433"], false), "");
+    // `?port=5433` is the port pg DIALS -- pg-connection-string folds the
+    // query option into the same field as `:5433` -- so it is refused like any
+    // other way of writing it. An earlier version of this guard read the URL
+    // text only and this line asserted the opposite.
+    assert.match(checkLivePortGuard(["postgres://user@h.invalid/db?port=5433"], false), /port 5433/);
     assert.equal(checkLivePortGuard(["postgres://user@h.invalid/townreporter5433"], false), "");
     assert.equal(checkLivePortGuard(["postgres://user@h.invalid:54330/db"], false), "");
   });
@@ -382,7 +387,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.ok(report.dataDirectory.length > 0, "the server must report where it keeps its data");
 
     // --- the copy ---------------------------------------------------------
-    const copied = await copyDatabase({ adminUrl, database: live, copy });
+    const copied = await copyDatabase({ adminUrl, database: live, copy, stamp });
     assert.equal(copied.ok, true, `the copy was refused: ${copied.refusal}`);
     assert.ok((await databaseNames()).includes(copy), "CREATE DATABASE ... TEMPLATE did not leave the copy on the server");
     assert.equal(await rowCount(copy, "articles"), 2, "the copy does not hold the rows the live database had");
@@ -397,7 +402,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.equal(await rowCount(live, "articles_v2"), 1, "the half-finished migration was not simulated");
 
     // --- the swap ---------------------------------------------------------
-    const swapped = await swapBack({ adminUrl, database: live, copy, failed });
+    const swapped = await swapBack({ adminUrl, database: live, copy, failed, stamp });
     assert.equal(swapped.ok, true, `the swap was refused: ${swapped.refusal}`);
     // The ORDER, which is the part that is not interchangeable: the live
     // database is moved aside FIRST, so there is never no database under the
@@ -422,7 +427,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.equal(await rowCount(failed, "articles"), 2);
 
     // --- what a resumed run asks ------------------------------------------
-    const state = await stateOf({ adminUrl, names: [live, copy, failed] });
+    const state = await stateOf({ adminUrl, names: [live, copy, failed], stamp });
     assert.equal(state.ok, true);
     assert.equal(state.databases[live]?.exists, true);
     assert.equal(state.databases[copy]?.exists, false, "the copy's old name must be gone after the swap");
@@ -451,7 +456,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     const pid = Number(backendPid.rows[0]?.pid);
 
     // The wait is short here on purpose; the promotion's own is 30s.
-    const waited = await waitForZeroConnections({ adminUrl, databaseName: live, timeoutSeconds: 2, pollMs: 200 });
+    const waited = await waitForZeroConnections({ adminUrl, databaseName: live, stamp, timeoutSeconds: 2, pollMs: 200 });
     assert.equal(waited.ok, false, "an open session must not be reported as a clear database");
     assert.equal(waited.connections.length, 1);
     assert.equal(waited.connections[0]?.pid, pid);
@@ -460,13 +465,13 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.match(waited.refusal, /Nothing was changed and the paper was not touched\./);
 
     // The copy refuses rather than forcing its way past the session...
-    const copied = await copyDatabase({ adminUrl, database: live, copy });
+    const copied = await copyDatabase({ adminUrl, database: live, copy, stamp });
     assert.equal(copied.ok, false, "the copy ran while a session was open");
     assert.match(copied.refusal, /connection\(s\) are still open/);
     assert.ok(!(await databaseNames()).includes(copy), "a refused copy still created a database");
 
     // ...and so does the swap. Nothing is renamed either.
-    const refused = await swapBack({ adminUrl, database: live, copy, failed });
+    const refused = await swapBack({ adminUrl, database: live, copy, failed, stamp });
     assert.equal(refused.ok, false, "the swap ran while a session was open");
     assert.deepEqual(refused.steps, [], "a refused swap must not have renamed anything");
 
@@ -478,7 +483,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     // With the session gone, the same calls work -- so the refusals above were
     // about the session and not about the arguments.
     await other.end();
-    const copiedNow = await copyDatabase({ adminUrl, database: live, copy });
+    const copiedNow = await copyDatabase({ adminUrl, database: live, copy, stamp });
     assert.equal(copiedNow.ok, true, `the copy was refused after the session closed: ${copiedNow.refusal}`);
   });
 
@@ -541,17 +546,17 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     const copy = copyDatabaseName(live, stamp);
     const failed = failedDatabaseName(live, stamp);
 
-    const first = await copyDatabase({ adminUrl, database: live, copy });
+    const first = await copyDatabase({ adminUrl, database: live, copy, stamp });
     assert.equal(first.ok, true, `the first copy was refused: ${first.refusal}`);
 
     // A resumed run asks what is there and finds the copy; the preflight it
     // would otherwise run refuses rather than making a second one, which is
     // the point: nothing is overwritten and nothing is deleted.
-    const state = await stateOf({ adminUrl, names: [live, copy] });
+    const state = await stateOf({ adminUrl, names: [live, copy], stamp });
     assert.equal(state.databases[copy]?.exists, true, "the resumed run must be able to see the copy it already took");
     assert.equal(state.databases[copy]?.sizeBytes, first.sizeBytes);
 
-    const again = await copyDatabase({ adminUrl, database: live, copy });
+    const again = await copyDatabase({ adminUrl, database: live, copy, stamp });
     assert.equal(again.ok, false, "a resumed run took a second copy");
     assert.match(again.refusal, /already exists/);
     assert.match(again.refusal, /never overwrites or deletes a database/);
@@ -583,7 +588,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
       await client.query("insert into articles values (1, 'before the rollout'), (2, 'also before')");
     });
     const copy = copyDatabaseName(live, rolloutStamp);
-    assert.equal((await copyDatabase({ adminUrl, database: live, copy })).ok, true);
+    assert.equal((await copyDatabase({ adminUrl, database: live, copy, stamp: rolloutStamp })).ok, true);
 
     // The rollout succeeded and then the new app took writes -- which is
     // exactly why nothing rolls back by itself at this point.
@@ -594,7 +599,7 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     // `ops\promote.ps1 -RollbackDatabase <copy>`: a NEW stamp for what is
     // being replaced, because this is a different moment from the rollout.
     const failed = failedDatabaseName(live, formatStamp());
-    const rolled = await swapBack({ adminUrl, database: live, copy, failed, mode: "manual" });
+    const rolled = await swapBack({ adminUrl, database: live, copy, failed, stamp: rolloutStamp, mode: "manual" });
     assert.equal(rolled.ok, true, `the manual rollback was refused: ${rolled.refusal}`);
     assert.equal(rolled.command, "rollback");
     assert.deepEqual(rolled.steps, [`renamed ${live} -> ${failed}`, `renamed ${copy} -> ${live}`]);
@@ -604,10 +609,258 @@ describe("the copy and the swap, on a real server", { skip }, () => {
 
     // Refusals in this mode say which of the two things went wrong, so an
     // operator mid-incident is not left guessing.
-    const badCopy = await swapBack({ adminUrl, database: live, copy: "something_else", failed, mode: "manual" });
+    const badCopy = await swapBack({ adminUrl, database: live, copy: "something_else", failed, stamp: rolloutStamp, mode: "manual" });
     assert.equal(badCopy.ok, false);
     assert.match(badCopy.refusal, /is not a copy of/);
     assert.match(badCopy.refusal, /Nothing was changed and the paper was not touched\./);
+  });
+
+  it("works when the admin URL's own database IS the one being renamed (the default configuration)", async () => {
+    /*
+      BLOCKER B1, in the configuration .env.example recommends.
+
+      With PROMOTE_ADMIN_DATABASE_URL unset -- which is the normal install --
+      the promotion's admin connection is DATABASE_URL, and that string names
+      the paper's OWN database. PostgreSQL refuses `ALTER DATABASE <current
+      database> RENAME` with "current database cannot be renamed", so a
+      swap-back issued from there failed at the first rename and left the paper
+      on the half-migrated database with no way back. The COPY worked, which is
+      why nothing caught it earlier: the failure only appears at the one moment
+      the copy exists for.
+
+      Every other test in this file points the admin URL at a maintenance
+      database, which is exactly why this one did not exist. Here the admin URL
+      IS the live database, for preflight, the copy and the swap.
+    */
+    const stamp = formatStamp();
+    const live = scratchName("selfadmin");
+    await createDatabase(live);
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles (id int primary key, headline text)");
+      await client.query("insert into articles values (1, 'before the rollout')");
+    });
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    // The admin connection points at the database that is about to be renamed.
+    const asTheAppRole = withDatabase(adminUrl, live);
+
+    const report = await preflight({
+      adminUrl: asTheAppRole,
+      databaseUrl: asTheAppRole,
+      stamp,
+      measureFreeBytes: () => ({ ok: true, freeBytes: Number.MAX_SAFE_INTEGER }),
+    });
+    assert.equal(report.ok, true, `preflight refused with the admin URL on the live database: ${report.refusal}`);
+    assert.equal(report.copy, copy);
+
+    const copied = await copyDatabase({ adminUrl: asTheAppRole, database: live, copy: copy, stamp });
+    assert.equal(copied.ok, true, `the copy failed with the admin URL on the live database: ${copied.refusal}`);
+
+    // The rollout fails; the database is now half-migrated.
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles_v2 (id int primary key)");
+    });
+
+    const swapped = await swapBack({ adminUrl: asTheAppRole, database: live, copy, failed, stamp });
+    assert.equal(
+      swapped.ok,
+      true,
+      `the swap-back failed with the admin URL on the live database -- this is the whole of B1: ${swapped.refusal || swapped.error}`,
+    );
+    assert.deepEqual(swapped.steps, [`renamed ${live} -> ${failed}`, `renamed ${copy} -> ${live}`]);
+    assert.equal(await rowCount(live, "articles"), 1, "the paper's database is not the copy again");
+    const columns = await onDatabase(live, async (client) => {
+      const result = await client.query<{ table_name: string }>(
+        "select table_name from information_schema.tables where table_schema = 'public'",
+      );
+      return result.rows.map((row) => row.table_name).sort();
+    });
+    assert.deepEqual(columns, ["articles"], "the half-migrated table is still in the database the paper serves");
+    assert.equal(await rowCount(failed, "articles_v2"), 0);
+  });
+
+  it("refuses when a session is attached to the COPY, and renames nothing", async (t) => {
+    /*
+      BLOCKER B2, first half. The old check looked at the live database only,
+      so a session on the copy was invisible: rename 1 went through, rename 2
+      threw "is being accessed by other users", and the server was left with a
+      failed database, a prerollout database and NO database under the paper's
+      name. Neither the retry nor -RollbackDatabase could resume, because both
+      refused with "there is no database to move aside".
+    */
+    const stamp = formatStamp();
+    const live = scratchName("busycopy");
+    await createDatabase(live);
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles (id int primary key)");
+      await client.query("insert into articles values (1)");
+    });
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    assert.equal((await copyDatabase({ adminUrl, database: live, copy, stamp })).ok, true);
+
+    // Somebody else's session, on the COPY.
+    const other = new Client({ connectionString: withDatabase(adminUrl, copy) });
+    await other.connect();
+    t.after(async () => {
+      await other.end().catch(() => undefined);
+    });
+
+    const refused = await swapBack({ adminUrl, database: live, copy, failed, stamp });
+    assert.equal(refused.ok, false, "a swap ran while a session was attached to the copy");
+    assert.deepEqual(refused.steps, [], "a refused swap renamed something");
+    assert.match(String(refused.refusal), /still open to /);
+    assert.match(String(refused.refusal), new RegExp(copy), "the refusal does not name the copy that is being used");
+
+    // NOTHING moved: the paper still has its own name, the copy still has its
+    // own name, and the failed name was never created.
+    const names = await databaseNames();
+    assert.ok(names.includes(live), "the paper's database name is gone");
+    assert.ok(names.includes(copy), "the copy's name is gone");
+    assert.ok(!names.includes(failed), "a failed database was created by a swap that refused");
+    assert.equal(await rowCount(live, "articles"), 1);
+
+    // ...and the session that caused it is still alive. Ending it would have
+    // made the assertions above pass.
+    assert.equal(Number((await other.query<{ n: string }>("select count(*)::text as n from pg_class")).rows[0]?.n) > 0, true);
+  });
+
+  it("puts the paper's name back when the second rename fails anyway", async () => {
+    /*
+      BLOCKER B2, second half. The connection check is a check, not a lock: a
+      session can arrive between it and the rename, and PostgreSQL will refuse
+      then. When it does, rename 1 has already happened -- so the swap undoes
+      it, and the paper goes on serving the database it was serving.
+
+      The failure is injected (the real one needs a session to arrive inside a
+      window of a few milliseconds, which cannot be made deterministic without
+      holding a session on a database this test does not own). EVERYTHING ELSE
+      IS REAL: the pre-checks, rename 1, the undo, and the verification that
+      the paper's database is where it was are all against a real Postgres.
+    */
+    const stamp = formatStamp();
+    const live = scratchName("renamefail");
+    await createDatabase(live);
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles (id int primary key)");
+      await client.query("insert into articles values (7)");
+    });
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    assert.equal((await copyDatabase({ adminUrl, database: live, copy, stamp })).ok, true);
+
+    let renames = 0;
+    const swapped = await swapBack({
+      adminUrl,
+      database: live,
+      copy,
+      failed,
+      stamp,
+      rename: async (client, from, to) => {
+        renames += 1;
+        // The first one is real. The second is the one that fails.
+        if (renames === 2) throw new Error(`database "${to}" is being accessed by other users`);
+        await renameDatabase(client, from, to);
+      },
+    });
+
+    assert.equal(swapped.ok, false, "a swap whose second rename failed was reported as done");
+    // (3) the record of what happened survives the failure.
+    assert.deepEqual(
+      swapped.steps,
+      [`renamed ${live} -> ${failed}`, `renamed ${failed} -> ${live} (put back after the next rename failed)`],
+      "the report does not carry both renames, so the log cannot say what happened",
+    );
+    assert.equal(renames, 3, "the undo did not run");
+    assert.match(String(swapped.error), /could not be renamed to /, `the failure sentence is missing: ${swapped.error}`);
+    assert.match(String(swapped.error), /has been undone/, "the sentence does not say the first rename was undone");
+
+    // The paper's database: same name, same rows, same table set.
+    const names = await databaseNames();
+    assert.ok(names.includes(live), "the paper's database name was not put back");
+    assert.ok(names.includes(copy), "the copy was consumed by a swap that failed");
+    assert.ok(!names.includes(failed), "the failed database was left behind after the undo");
+    assert.equal(await rowCount(live, "articles"), 1, "the paper's rows moved somewhere");
+  });
+
+  it("finishes a swap that stopped half way, including from the hand rollback", async () => {
+    /*
+      BLOCKER B2, third part: RESUMABLE.
+
+      The state an interrupted swap leaves is "no live name, the failed name
+      present, the copy present". Both the retry and `-RollbackDatabase` used
+      to refuse it -- "there is no database called townreporter to move aside"
+      -- which is how a paper stayed stuck with its data under a name nothing
+      was serving.
+
+      The half state is made here the way it is really made: rename 1, done by
+      hand against the server, and nothing else.
+    */
+    const stamp = formatStamp();
+    const live = scratchName("halfstate");
+    await createDatabase(live);
+    await onDatabase(live, async (client) => {
+      await client.query("create table articles (id int primary key, headline text)");
+      await client.query("insert into articles values (1, 'before the rollout')");
+    });
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    assert.equal((await copyDatabase({ adminUrl, database: live, copy, stamp })).ok, true);
+    // The half-migrated database: the rollout got as far as migrating.
+    await onDatabase(live, async (client) => {
+      await client.query("insert into articles values (2, 'written by the half-migrated schema')");
+    });
+
+    // Rename 1, on its own -- this is where a swap whose second rename failed
+    // leaves the server.
+    const raw = await admin();
+    try {
+      await raw.query(`alter database "${live}" rename to "${failed}"`);
+    } finally {
+      await raw.end();
+    }
+    const names = await databaseNames();
+    assert.ok(!names.includes(live) && names.includes(failed) && names.includes(copy), "the half state was not set up");
+
+    // A plain retry finishes it -- and says so, because a reader has to know
+    // this run did not do the first rename.
+    const finished = await swapBack({ adminUrl, database: live, copy, failed, stamp });
+    assert.equal(finished.ok, true, `the half state could not be finished: ${finished.refusal || finished.error}`);
+    assert.equal(finished.resumedFromHalfState, true, "the report does not say it was picking up a half-finished swap");
+    assert.deepEqual(finished.steps, [`renamed ${copy} -> ${live} (finishing a swap that stopped part way)`]);
+    assert.equal(await rowCount(live, "articles"), 1, "the paper's database is not the pre-rollout copy");
+    assert.equal(await rowCount(failed, "articles"), 2, "what the failed rollout wrote was not kept");
+
+    // And the hand rollback accepts the same state. `-RollbackDatabase` derives
+    // the failed name from the copy's own stamp, which is the only name the
+    // data could be under -- so this is the same call it makes.
+    const stamp2 = formatStamp();
+    const live2 = scratchName("halfrollback");
+    await createDatabase(live2);
+    await onDatabase(live2, async (client) => {
+      await client.query("create table articles (id int primary key)");
+      await client.query("insert into articles values (1)");
+    });
+    const copy2 = copyDatabaseName(live2, stamp2);
+    const failed2 = failedDatabaseName(live2, stamp2);
+    assert.equal((await copyDatabase({ adminUrl, database: live2, copy: copy2, stamp: stamp2 })).ok, true);
+    const admin2 = await admin();
+    try {
+      await admin2.query(`alter database "${live2}" rename to "${failed2}"`);
+    } finally {
+      await admin2.end();
+    }
+    const rolled = await swapBack({
+      adminUrl,
+      database: live2,
+      copy: copy2,
+      failed: failedDatabaseName(live2, parseCopyStamp(copy2) ?? ""),
+      stamp: stamp2,
+      mode: "manual",
+    });
+    assert.equal(rolled.ok, true, `the hand rollback cannot resume the half state: ${rolled.refusal || rolled.error}`);
+    assert.equal(rolled.command, "rollback");
+    assert.equal(await rowCount(live2, "articles"), 1);
   });
 
   it("answers the promotion's command line with one line of JSON", async () => {

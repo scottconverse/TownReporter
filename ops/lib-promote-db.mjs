@@ -406,6 +406,7 @@ export function validateCommandNames(options) {
  * What each command needs of its names. Used by runCommand, so the command
  * line cannot drift from what the function behind it enforces.
  */
+/** @type {Record<string, { deriveNames?: boolean, requireCopy?: boolean, requireFailed?: boolean }>} */
 const COMMAND_NAMES = {
   names: { deriveNames: true },
   preflight: { deriveNames: true },
@@ -1142,7 +1143,7 @@ export async function swapBack(options) {
   });
   if (namesRefusal) return refuse(namesRefusal);
 
-  /** @type {string|null} */
+  /** @type {string|{ happened: string }|null} */
   let outcome = null;
   try {
     outcome = await withAdmin({ adminUrl: options.adminUrl, timeoutSeconds: options.timeoutSeconds }, async (client) => {
@@ -1201,20 +1202,26 @@ export async function swapBack(options) {
         try {
           await rename(client, options.failed, options.database);
           report.steps.push(`renamed ${options.failed} -> ${options.database} (put back after the next rename failed)`);
-          return (
-            `${options.copy} could not be renamed to ${options.database} (${message}). ${options.database} had already ` +
-            `been renamed to ${options.failed}, and that has been undone, so the database the paper serves is unchanged ` +
-            "and its data is where it was"
-          );
+          // NOT a refusal: two renames really ran, and the caller's wording
+          // for a refusal ("nothing was changed") would be a lie about them.
+          // This travels back as an error with the sentence intact, and the
+          // steps above travel with it.
+          return {
+            happened:
+              `${options.copy} could not be renamed to ${options.database} (${message}). ${options.database} had already ` +
+              `been renamed to ${options.failed}, and that has been undone, so the database the paper serves is unchanged ` +
+              "and its data is where it was",
+          };
         } catch (undoError) {
           const undoMessage = undoError instanceof Error ? undoError.message : String(undoError);
           report.steps.push(`putting ${options.failed} back as ${options.database} ALSO failed: ${undoMessage}`);
-          return (
-            `${options.copy} could not be renamed to ${options.database} (${message}), and putting ${options.failed} ` +
-            `back as ${options.database} failed too (${undoMessage}). THE PAPER'S DATABASE NAME IS GONE: its data is ` +
-            `under ${options.failed}. Put it back with: ALTER DATABASE ${quoteIdent(options.failed)} RENAME TO ` +
-            `${quoteIdent(options.database)};`
-          );
+          return {
+            happened:
+              `${options.copy} could not be renamed to ${options.database} (${message}), and putting ${options.failed} ` +
+              `back as ${options.database} failed too (${undoMessage}). THE PAPER'S DATABASE NAME IS GONE: its data is ` +
+              `under ${options.failed}. Put it back with: ALTER DATABASE ${quoteIdent(options.failed)} RENAME TO ` +
+              `${quoteIdent(options.database)};`,
+          };
         }
       }
       return null;
@@ -1226,6 +1233,11 @@ export async function swapBack(options) {
     // of a rename that really happened.
     const message = error instanceof Error ? error.message : String(error);
     return broke(`The swap did not finish: ${message}.${soFar()}`);
+  }
+  if (outcome && typeof outcome === "object") {
+    // Something happened and was undone, or happened and could not be undone.
+    // Either way the sentence says so, and it carries the steps with it.
+    return broke(`${outcome.happened}.${soFar()}`);
   }
   if (outcome) {
     const manual = mode === "manual" ? "Nothing was rolled back. " : "Nothing was swapped. ";
