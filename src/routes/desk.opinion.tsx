@@ -20,6 +20,7 @@ import {
   startEditorial,
 } from "@/lib/news/opinion";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
@@ -737,7 +738,19 @@ function OpinionPage() {
                                   ? discard.error instanceof Error
                                     ? discard.error.message
                                     : "That did not clear."
-                                  : null,
+                                  : /* Unit UI1a3, finding 1: both of these server
+                                       functions answer `{ ok: false, error }`
+                                       for their ordinary refusal ("That
+                                       standalone editorial is gone."), which
+                                       settles as a SUCCESS. Read the refusal off
+                                       the settled answer, gated on `!isPending`
+                                       because React Query keeps the last answer
+                                       on `data` while a new press runs. */
+                                    remove.variables === r.draft_id && !remove.isPending
+                                    ? refusedAnswer(remove.data)
+                                    : discard.variables === r.id && !discard.isPending
+                                      ? refusedAnswer(discard.data)
+                                      : null,
                           })}
                           workingLabel="Deleting…"
                           onAct={() => (r.draft_id ? remove.mutate(r.draft_id) : discard.mutate(r.id))}

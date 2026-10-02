@@ -470,7 +470,9 @@ async function main() {
   // Not touching ModelPicker at all: its state defaults to "auto"
   // (Automatic), which is the whole point of this walk.
   await page.getByRole("button", { name: /^Draft with AI$/ }).click();
-  await page.getByRole("button", { name: /^Drafting…$/ }).waitFor({ timeout: 15_000 });
+  // UI1a3: the working word is "Redrafting…" when the story already has a draft
+  // body and "Drafting…" when it does not -- accept either.
+  await page.getByRole("button", { name: /^(Re)?drafting…$/i }).waitFor({ timeout: 15_000 });
   step("clicked Draft with AI on Automatic, with rung 1 answering 503");
 
   const first = await waitForDraft("the first draft", () => true);

@@ -260,9 +260,12 @@ const CONTROLS: Control[] = [
     working: "Holding…",
     reason: "The desk refused that hold. The lead is unchanged.",
     pins: [
-      'primaryPendingLabel="Holding…"',
-      'altPendingLabel="Holding…"',
-      "pending={press.busy}",
+      /* Unit UI1a3, finding 4: the pending word goes to the PRESSED button, so
+         the call site names which one is out rather than handing the same word
+         to both. The old pins ('primaryPendingLabel="Holding…"' and
+         'altPendingLabel="Holding…"') pinned the bug. */
+      '{...dialogPressProps(pressed, "Holding…")}',
+      'setPressed(withReason ? "primary" : "alt")',
       /* The done state is the ROW's: a held lead reads "Held" and offers the
          way back, which is what the announce and the row's own data say. */
       "Released leads return to the open list with their score.",
@@ -276,7 +279,12 @@ const CONTROLS: Control[] = [
     idle: "Kill with this reason",
     working: "Killing…",
     reason: "The kill did not reach the desk. The lead is unchanged.",
-    pins: ['primaryPendingLabel="Killing…"', 'altPendingLabel="Killing…"', "pending={busy}"],
+    pins: [
+      /* Unit UI1a3, finding 4 -- as above: one shared `busy` used to make both
+         destructive controls say "Killing…". */
+      '{...dialogPressProps(busy, "Killing…")}',
+      'setBusy(withReason ? "primary" : "alt")',
+    ],
   },
   {
     name: "Delete (Queue, lead row)",
@@ -445,8 +453,8 @@ describe("the scoped controls call sites really draw the shared piece", () => {
       if (control.viaDialog) {
         assert.match(
           text,
-          /primaryPendingLabel="[^"]+…"/,
-          `${control.file} no longer hands the shared Dialog foot a working word`,
+          /dialogPressProps\([^,]+,\s*"[^"]+…"\)/,
+          `${control.file} no longer hands the shared Dialog foot a working word for the button that was pressed`,
         );
       } else {
         assert.match(

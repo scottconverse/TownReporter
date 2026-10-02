@@ -11,6 +11,7 @@ import {
   type CheckFacts,
 } from "@/lib/news/check-gates";
 import {
+  blockerPressState,
   publishBlockers,
   publishGateNote,
   publishPressState,
@@ -1788,34 +1789,35 @@ function StoryPage() {
     failed, and the server's own reason for it. The other rows in the list are
     a focus or a scroll and never leave idle, which is why this names three
     targets and not all of them.
+
+    Unit UI1a3, finding 1: the derivation itself lives in
+    `blockerPressState` (`lib/news/publish-blockers.ts`), because the ordinary
+    failure of two of these three is a RESOLVED `{ ok: false, error }` -- a
+    stale evidence token, a draft that no longer names the outlet -- which
+    settles as a success and left `isError` false. Reading the refusal off the
+    settled answer is the whole of the fix, and it is a pure function of what
+    the mutations report, so it is testable without mounting this route.
   */
-  const blockerPress = {
-    busyTarget: acceptUnreviewed.isPending
-      ? ("accept-unreviewed" as const)
-      : overrideOutlet.isPending
-        ? ("override-outlet" as const)
-        : reviewEvidence.isPending
-          ? ("keep-evidence" as const)
-          : null,
-    failedTarget: acceptUnreviewed.isError
-      ? ("accept-unreviewed" as const)
-      : overrideOutlet.isError
-        ? ("override-outlet" as const)
-        : reviewEvidence.isError
-          ? ("keep-evidence" as const)
-          : null,
-    failureReason:
-      acceptUnreviewed.error instanceof Error
-        ? (editorActionError(acceptUnreviewed.error.message, "record that acceptance") ??
-          "Could not record that acceptance.")
-        : overrideOutlet.error instanceof Error
-          ? (editorActionError(overrideOutlet.error.message, "record the override") ??
-            "Could not record the override.")
-          : reviewEvidence.error instanceof Error
-            ? (editorActionError(reviewEvidence.error.message, "save the evidence review") ??
-              "Evidence review could not be saved.")
-            : null,
-  };
+  const blockerPress = blockerPressState({
+    accept: {
+      isPending: acceptUnreviewed.isPending,
+      isError: acceptUnreviewed.isError,
+      error: acceptUnreviewed.error,
+      answer: acceptUnreviewed.data,
+    },
+    override: {
+      isPending: overrideOutlet.isPending,
+      isError: overrideOutlet.isError,
+      error: overrideOutlet.error,
+      answer: overrideOutlet.data,
+    },
+    keepEvidence: {
+      isPending: reviewEvidence.isPending,
+      isError: reviewEvidence.isError,
+      error: reviewEvidence.error,
+      answer: reviewEvidence.data,
+    },
+  });
   /*
     One press per row of the "Before you can publish" list. Every target is
     the control that already existed -- the same mutation the mid-form button

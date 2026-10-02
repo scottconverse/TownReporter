@@ -15,6 +15,7 @@ import {
   updateArticleHeadline,
 } from "@/lib/news/desk";
 import { editorActionError } from "@/lib/news/desk-copy";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { getViewStatsFn } from "@/lib/news/views";
 import { myDesk } from "@/lib/news/claim";
@@ -1100,7 +1101,18 @@ function PublishedPage() {
                             ? remove.error instanceof Error
                               ? remove.error.message
                               : "Could not take that story off the paper."
-                            : null,
+                            : /* Unit UI1a3, finding 1: `deleteArticle` answers
+                                 `{ ok: false, error }` for its ordinary refusal
+                                 ("That story is already gone."), which settles
+                                 as a SUCCESS -- so the reason is read off the
+                                 settled answer too, or the control goes back to
+                                 idle with the server's sentence nowhere near
+                                 it. Gated on `!isPending` because React Query
+                                 keeps the last answer on `data` while a new
+                                 press runs. */
+                              !remove.isPending && remove.variables === p.slug
+                              ? refusedAnswer(remove.data)
+                              : null,
                       })}
                       workingLabel="Removing…"
                       onAct={() => remove.mutate(p.slug)}

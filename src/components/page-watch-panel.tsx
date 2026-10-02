@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "./desk-chrome";
 import { ActionButton, rowActionPhase } from "./action-button";
 import { ModelPicker } from "./model-picker";
+import { refusedAnswer } from "@/lib/news/refused-answer";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
@@ -199,6 +200,15 @@ export function PageWatchPanel({
     setAttached(null);
   }
   const row = detail.data?.watch;
+  /*
+    Unit UI1a3, finding 1: `checkPageWatch` and `setPageWatchState` both answer
+    `{ ok: false, error }` for their ordinary refusals, which React Query
+    settles as a SUCCESS. Read once here, gated on `!isPending` -- React Query
+    keeps the last answer on `data` while a new press runs, so an ungated read
+    would paint the previous refusal over this press's spinner.
+  */
+  const checkRefusal = check.isPending ? null : refusedAnswer(check.data);
+  const stateRefusal = state.isPending ? null : refusedAnswer(state.data);
   return (
     <section className="tipbox page-watch" aria-label="Watched pages">
       <div className="np-acts">
@@ -394,7 +404,7 @@ export function PageWatchPanel({
                   phase={
                     check.isPending
                       ? "working"
-                      : check.isError
+                      : check.isError || checkRefusal
                         ? "failed"
                         : check.isSuccess
                           ? "done"
@@ -402,12 +412,19 @@ export function PageWatchPanel({
                   }
                   workingLabel="Checking…"
                   doneLabel="Checked"
+                  /*
+                    Unit UI1a3, finding 1: `checkPageWatch` answers
+                    `{ ok: false, error }` for a page it could not read, which
+                    settles as a SUCCESS -- so without this the control drew
+                    "Checked" in green over a refusal. The refusal outranks the
+                    success branch, and the reason is printed beside it.
+                  */
                   reason={
                     check.isError
                       ? check.error instanceof Error
                         ? check.error.message
                         : "Could not check that page."
-                      : null
+                      : checkRefusal
                   }
                   disabled={busy || row.watch_state !== "active"}
                   disabledReason={
@@ -425,12 +442,22 @@ export function PageWatchPanel({
                 <ActionButton
                   tone="quiet"
                   phase={rowActionPhase({
-                    isPending: state.isPending,
+                    /*
+                      Unit UI1a3, finding 3: Pause/Resume and Stop share ONE
+                      `state` mutation, so an unfiltered `isPending` put this
+                      button into its working phase whenever "Stop watching" was
+                      pressed -- the row said "Pausing." and "Stopping." at once.
+                      The pending phase is scoped to the states this button
+                      actually sends, exactly as the failure branch already was.
+                    */
+                    isPending: state.isPending && state.variables?.state !== "stopped",
                     problem:
-                      state.isError && state.variables?.state !== "stopped"
-                        ? state.error instanceof Error
-                          ? state.error.message
-                          : "Could not change that page's watch."
+                      state.variables?.state !== "stopped"
+                        ? state.isError
+                          ? state.error instanceof Error
+                            ? state.error.message
+                            : "Could not change that page's watch."
+                          : stateRefusal
                         : null,
                   })}
                   workingLabel={row.watch_state === "active" ? "Pausing…" : "Resuming…"}
@@ -450,10 +477,14 @@ export function PageWatchPanel({
                   phase={rowActionPhase({
                     isPending: state.isPending && state.variables?.state === "stopped",
                     problem:
-                      state.isError && state.variables?.state === "stopped"
-                        ? state.error instanceof Error
-                          ? state.error.message
-                          : "Could not stop watching that page."
+                      state.variables?.state === "stopped"
+                        ? state.isError
+                          ? state.error instanceof Error
+                            ? state.error.message
+                            : "Could not stop watching that page."
+                          : /* Unit UI1a3, finding 1: the same settled-refusal
+                               read as the Pause/Resume button above. */
+                            stateRefusal
                         : null,
                   })}
                   workingLabel="Stopping…"

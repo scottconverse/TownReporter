@@ -293,7 +293,11 @@ async function runDraft(page, pool) {
     const deadline = Date.now() + 8 * 60_000;
     let landed = false;
     while (Date.now() < deadline) {
-      const stillDrafting = await page.getByRole("button", { name: /^Drafting…$/ }).count();
+      // UI1a3: "Redrafting…" when the story already has a draft body,
+      // "Drafting…" when it does not -- accept either.
+      const stillDrafting = await page
+        .getByRole("button", { name: /^(Re)?drafting…$/i })
+        .count();
       const done = await page.getByRole("button", { name: /^Redraft$/ }).count();
       if (!stillDrafting && done) {
         landed = true;

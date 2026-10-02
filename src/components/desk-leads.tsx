@@ -411,10 +411,17 @@ export function LeadRowView({
             phase={rowActionPhase({ isPending: deletePending, problem: deleteReason })}
             workingLabel="Deleting…"
             reason={deleteReason}
-            onAct={() => {
-              setConfirming(false);
-              onDelete();
-            }}
+            /*
+              Unit UI1a3, finding 2: the confirmation STAYS ARMED until the
+              press has settled. Clearing `confirming` here replaced the only
+              `ActionButton` that consumes `deletePending` and `deleteReason`
+              with the initial "Delete" button in the same paint as the click --
+              so on a slow request the editor never saw "Deleting." and on a
+              refused one never saw the reason. The row's own departure on
+              success is what unmounts this; a failure leaves it armed and
+              pressable, exactly as the source-removal path already does.
+            */
+            onAct={() => onDelete()}
           >
             Yes, delete
           </ActionButton>
