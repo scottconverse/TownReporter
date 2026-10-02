@@ -539,8 +539,9 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
    production installation, not a sequence of hand-typed build/restart steps.
    The script refuses tracked uncommitted changes and checks fast-forward
    conflicts before stopping the app.
-4. The script backs up the database, stops only this installation's server,
-   updates its checkout, builds while that server is down, and starts it again.
+4. The script backs up the database, copies it, stops only this
+   installation's server, updates its checkout, builds while that server is
+   down, and starts it again.
    It leaves the shared Postgres cluster running. Its promotion marker also
    tells the watchdog to stand down; it does not build in the development
    checkout on your behalf.
@@ -570,8 +571,134 @@ screens can be walked before anything is promoted. See `docs/staging.md`.
 6. Re-enable **TownReporter Watchdog** after the promotion has finished, or a
    failed promotion has been deliberately stopped and no build is still
    running. Keep the named backup and inspect the reported failure before
-   deciding how to recover. The script does not automatically roll back a
-   potentially applied migration.
+   deciding how to recover. A promotion that fails before the new build is
+   serving puts the database copy back by itself (see "The database copy taken
+   before every promotion" below); one that fails after it does not, and prints
+   the command that does.
+
+### The database copy taken before every promotion
+
+`npm run build` ends in the database migration, so a promotion that dies
+half way through one leaves the database moved on and the previous build
+unable to serve it -- a page reading a table or column a migration changed
+answers wrongly rather than failing. The previous-build fallback does not
+cover that; a copy of the database does.
+
+So the promotion copies the database before it builds:
+
+- **The name.** The copy is `<database>_prerollout_<yyyyMMddHHmmss>`, named
+  after the second the run started, where `<database>` is the last path
+  segment of `DATABASE_URL` in `.env` -- normally `townreporter`. If the
+  rollout fails, the database it was serving becomes
+  `<database>_failed_<same stamp>` and the copy takes its name back, so the
+  paper is serving exactly the data it had before the promotion started.
+  **Nothing is ever deleted**, by the promotion or by anything in this
+  repository. Old copies and `_failed_` databases are the owner's to remove
+  by hand; until they are, they take disk.
+- **When.** After the app is stopped and everybody has finished connecting to
+  the database, because PostgreSQL will not copy a database anybody is
+  connected to. The script waits up to 30 seconds for the connections to
+  close and then **refuses** -- it never ends another session. On a shared
+  server those sessions belong to the live paper, the development copy and
+  other people's tests.
+- **What it checks first**, all before the paper is stopped: that the name
+  starts with `townreporter` (so a typo cannot rename somebody else's
+  database on this machine), that neither the copy's name nor the failed
+  name is already taken, that the role it connects as may create databases
+  (`CREATEDB` or superuser -- an install whose app role is not allowed to can
+  set `PROMOTE_ADMIN_DATABASE_URL` in `.env` to a connection that is), and
+  that the drive holding PostgreSQL's data directory has room for the
+  database **plus a quarter of its size or 2 GB, whichever is larger**. When
+  PostgreSQL is on another machine and that drive cannot be read, the check
+  refuses with a sentence rather than skipping.
+- **The disk it needs.** The copy is a second database of the same size, and
+  the check asks for that plus a margin of a quarter of the database or 2 GB,
+  whichever is larger. For a 570 MB paper that is about 2.6 GB free (570 MB
+  for the copy itself, 2 GB of margin). A failed rollout uses no more: the
+  database that was live is renamed, not duplicated. Copies are never removed
+  automatically, so the free space they take is the owner's to reclaim.
+- **What it costs the machine.** `CREATE DATABASE ... TEMPLATE` forces a
+  checkpoint on the whole Postgres cluster, so every other database on the
+  box waits for it. Measured on a throwaway Postgres 18.6 with nobody
+  connected: 4.4 seconds to copy a 545 MB database and 0.47 seconds for the
+  two renames of a swap-back. **Expect more on a busy server** -- that is what
+  the step's ten-minute limit is for, not a budget.
+
+The step is not allowed to run forever. The copy and the swap-back each get
+ten minutes and the database checks two; past its limit the step is stopped
+the same way the npm steps are, by PID and never by name.
+
+**Nothing but the promotion can reach the paper's database.** The database
+work runs in `ops\lib-promote-db.mjs`, and every one of its commands refuses a
+connection string pointing at **port 5433** -- the port the live Postgres uses
+on the machine that runs it -- unless the call carries the flag that only
+`ops\promote.ps1` sets when it runs for real. The connection string lives in
+`.env`, which is exactly what a test or a hand-typed command on that machine
+inherits, so the port itself is what is guarded.
+
+Two things follow that an operator will notice on that machine:
+
+- `node ops\lib-promote-db.mjs ...` run by hand against 5433 is refused with a
+  sentence saying what to run instead. That is the point of it.
+- a `-WhatIf` promotion does NOT carry the flag -- a dry run renames nothing --
+  so **on an install whose database is on 5433, `-WhatIf` stops at the database
+  preflight** with that same refusal. The dry run is still a dry run; it just
+  cannot complete its read-only database checks. Everything after the checks is
+  skipped under `-WhatIf` anyway.
+
+### Rolling the database back by hand
+
+A promotion that gets as far as serving the new build and then fails its own
+checks is **not** rolled back -- by then the new app has been taking writes,
+and putting the copy back would throw them away silently. Instead the script
+prints the exact one-line command that does it:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  "C:\Users\scott\Desktop\Code\townreporter-web\ops\promote.ps1" `
+  -RollbackDatabase townreporter_prerollout_20261001120000
+```
+
+**It refuses while the paper is answering on its port.** A promotion that
+failed its own health checks leaves the app UP and serving -- that is the case
+this command is printed for -- and swapping a database out from under a running
+app is not something to arrive at by accident. So the first thing it does is
+ask, and if the paper answers it stops having changed nothing:
+
+> The paper is answering on port 3000. Stop it first, or run the promote's own
+> recovery; nothing was changed.
+
+Stop the app by hand and run it again, or add `-StopApp` and it will stop the
+app by PID itself (exactly as the promotion does, and only ever the process
+holding this install's own port).
+
+**It says what it is about to do before it does it**, in the log and on the
+console, with names and sizes -- which is what tells you that you picked the
+right copy:
+
+> townreporter_prerollout_20261001120000 (570 MB) becomes townreporter; the
+> current townreporter (610.4 MB) is kept as townreporter_failed_20261001120000.
+
+It then waits for every connection to the live database to close (refusing
+rather than ending anyone's session), renames the live database aside as
+`townreporter_failed_<now>`, puts the copy in its place, puts the build from
+before the promotion back and starts it. **Anything written since the new app
+started is lost** -- the copy is a picture of the database from before those
+writes. That is the whole reason nothing does this by itself.
+
+`-WhatIf` prints that same sentence and changes nothing at all, which on this
+path matters more than anywhere else in the script: it is the only place where
+the thing being undone cannot be redone.
+
+It runs immediately, whatever else is going on: it does not wait for an
+unfinished promotion's marker, check the checkout, or take a backup.
+
+The log names both databases at every database step, and the last line of a
+failed run's log says which database holds what. A promotion that fails
+anywhere after the copy -- the install, the fast-forward, the build, or a new
+build that never answers -- puts the copy back by itself, restores the
+previous build and says in plain words that no data was lost, because the
+paper was stopped from before the copy was taken.
 
 ### The promotion's own log
 
@@ -617,10 +744,20 @@ new build and then fails its own checks is NOT rolled back -- the app is up,
 and an automatic rollback of an already-applied migration would be worse than
 the thing being reported. That case still says so loudly and names the backup.
 
+**The database goes back with it.** Since the copy landed, this fallback puts
+the copy back *before* it starts the old build, and then says in plain words
+that no data was lost because the paper was stopped the whole time and where
+the failed rollout's schema is kept. See "The database copy taken before every
+promotion" above. If the copy could not be put back -- somebody was still
+connected to the database -- the message says that instead, in full, and the
+database keeps whatever the failed rollout did to it.
+
 **Then read the sentence after it about the database.** `npm run build` ends in
 the database migration, so an old build can be put back on top of a database
-that has already moved forward. When that has happened the message does not
-stop at "the OLD version"; it says which migration the database is at --
+that has already moved forward -- which is what happens when the copy could NOT
+be put back, and the build/migration failed. When that has happened the message
+does not stop at "the OLD version"; it says which migration the database is at
+--
 
 > the paper is back on the OLD version, but the database was already migrated
 > to 0117_source_replaces.sql; if this build reads a table or column a migration
