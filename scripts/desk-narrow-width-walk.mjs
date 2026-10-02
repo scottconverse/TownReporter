@@ -456,8 +456,8 @@ async function thePhoneStillHasItsControls() {
     `the model select is still a 44px touch target at 390 (measured ${Math.round(box.height)}px)`,
   );
   assert.ok(
-    (await first.isEnabled()) || true,
-    "and it is still on the page (enabled state is the owner's)",
+    await first.isEnabled(),
+    "and it is still usable: the walk signs in as the desk owner, so the select must be enabled",
   );
   facts.push({ phoneSelectHeight: Math.round(box.height), selectsAt390: count });
 
