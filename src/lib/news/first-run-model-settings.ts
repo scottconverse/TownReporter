@@ -38,24 +38,28 @@ import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 import {
   FIRST_RUN_MODEL_SCOPES,
   firstRunModelProviderIds,
+  firstRunPickerDefault,
   localModelProviderId,
   planFirstRunModelDefault,
+  type ModelPromptState,
 } from "./first-run-model.ts";
 import { ensureProviderSettingsSchema, saveLocalModel } from "./provider-settings.ts";
 import { ensureModelAssignmentsSchema, saveModelAssignments } from "./model-assignments-store.ts";
 import { MODEL_JOBS } from "./model-assignments.ts";
-import { USE_LOADED_LOCAL_MODEL } from "./model-choice.ts";
+import { USE_LOADED_LOCAL_MODEL, type StoryModelChoice } from "./model-choice.ts";
+import type { ProviderSurface } from "./provider-registry.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 import type { LocalModelScope } from "./request-input.ts";
 
 export { ensurePaperSettingsSchema };
 
 /**
- * The values `paper_settings.model_prompt_state` may hold. `null` (no row
- * value) means the offer never ran -- the live paper, and every install whose
- * setup finished with no local server answering.
+ * The marker's values. Defined in the pure half (`first-run-model.ts`) and
+ * re-exported here so every existing importer keeps one name, and so the rule
+ * that reads it can live beside the rules that write it without importing the
+ * database.
  */
-export type ModelPromptState = "stored" | "offered" | "answered" | null;
+export type { ModelPromptState };
 
 export type FirstRunModelDeps = {
   /** The live catalog. Production passes nothing and this is `refreshLocalCatalog`. */
@@ -311,6 +315,31 @@ export async function answerFirstRunModelOffer(
 }
 
 /* ------------------------------------------------------------------------- *
+ * F3b: what a page's picker opens on
+ * ------------------------------------------------------------------------- */
+
+/**
+ * What the calling editor's page should open its picker on, right now.
+ *
+ * The whole answer is `firstRunPickerDefault` over the F3 marker; this
+ * function only supplies the newsroom and checks that the caller may see it.
+ * `surface` is the picker's own surface, so the value is the local option the
+ * page actually draws.
+ *
+ * It is a READ and nothing else: no write, no probe, no catalog. A page load
+ * must never be what decides a paper's writing model, and this one cannot --
+ * the only thing that can write the marker is `applyFirstRunModelDefault`, at
+ * the false-to-true `onboarded` flip.
+ */
+export async function firstRunPickerChoiceFor(
+  userId: string,
+  surface: ProviderSurface = "story",
+): Promise<StoryModelChoice> {
+  const me = await requireEditor(userId);
+  return firstRunPickerDefault(await readModelPromptState(me.newsroomId), surface);
+}
+
+/* ------------------------------------------------------------------------- *
  * Server functions
  * ------------------------------------------------------------------------- */
 
@@ -325,6 +354,34 @@ export const getFirstRunModelCard = createServerFn({ method: "GET" })
       return await firstRunModelCardState(me.newsroomId);
     } catch (err) {
       if (err instanceof ForbiddenError) return { show: false };
+      throw err;
+    }
+  });
+
+export type FirstRunPickerDefault = { choice: StoryModelChoice };
+
+/**
+ * The seed every desk page reads once, on load.
+ *
+ * A refusal answers `auto` rather than throwing: this only ever moves a picker
+ * that is already on Automatic, so an editor who cannot be resolved to a
+ * newsroom has nothing to gain from an error page and nothing to lose from the
+ * default they already had.
+ */
+export const getFirstRunPickerDefault = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .validator((raw: unknown): { surface: ProviderSurface } => {
+    const value = (raw ?? {}) as { surface?: unknown };
+    const allowed: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
+    return {
+      surface: allowed.includes(value.surface as ProviderSurface) ? (value.surface as ProviderSurface) : "story",
+    };
+  })
+  .handler(async ({ context, data }): Promise<FirstRunPickerDefault> => {
+    try {
+      return { choice: await firstRunPickerChoiceFor(context.userId, data.surface) };
+    } catch (err) {
+      if (err instanceof ForbiddenError) return { choice: "auto" };
       throw err;
     }
   });

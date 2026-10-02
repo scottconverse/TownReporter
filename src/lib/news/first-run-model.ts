@@ -44,6 +44,19 @@
 
 import { pickLoadedLocalModelAcrossServers, type LocalCatalog, type LocalModelEntry, type LocalServer } from "./local-models.ts";
 import { providersFor, type ProviderSurface } from "./provider-registry.ts";
+import type { StoryModelChoice } from "./model-choice.ts";
+
+/**
+ * The values `paper_settings.model_prompt_state` may hold. `null` (no row
+ * value) means the offer never ran -- the live paper, and every install whose
+ * setup finished with no local server answering.
+ *
+ * It lives here, in the pure half, because the picker rule below turns on it
+ * and the pure half must not import the database half. `first-run-model-
+ * settings.ts` re-exports it, so there is still exactly one name for the
+ * marker and one place its literals are written.
+ */
+export type ModelPromptState = "stored" | "offered" | "answered" | null;
 
 /**
  * The scopes a first-run default is stored for: the four the owner can write
@@ -152,6 +165,68 @@ export function localModelListLabel(model: Pick<LocalModelEntry, "id" | "loaded"
 export const LOCAL_MODEL_LIST_TITLE = "Models on this computer";
 export const LOCAL_MODEL_LIST_EMPTY =
   "No local server found on this machine. Start LM Studio's server or Ollama, then click Refresh. See docs/local-models.md.";
+
+/*
+  ---------------------------------------------------------------------------
+  F3b: what a page's picker OPENS on
+  ---------------------------------------------------------------------------
+
+  F3 stored the default; the pages still opened on "auto" and SENT it as an
+  explicit pick, which `resolveJobModel` prefers over the stored assignment --
+  so a fresh install with a loaded local model walked the Automatic ladder on
+  every hand-pressed Run. The two functions below are the whole fix's rule:
+
+    - `firstRunPickerDefault` is the answer a page reads (the server function
+      `getFirstRunPickerDefault` is its door), and
+    - `pickerSeedToApply` is the one condition under which a page adopts it.
+
+  THE MARKER IS THE ONLY KEY. `stored` is written by F3 and by nothing else,
+  and it is NULL for every paper that existed before F3 -- including the live
+  one, which is onboarded with stored assignments of its own. Reading "the
+  stored assignment" here instead would move the live paper's pickers, which
+  is why this reads the marker and never the assignments.
+*/
+
+/**
+ * The choice a page's picker should open on: Local model for a paper F3
+ * stored a first-run default for, Automatic for every other paper.
+ *
+ * The value is the registry's local provider id for that surface (the same
+ * `local-model` id the picker's own option carries), so what the page sends as
+ * its explicit pick is the option the owner sees selected. What makes the run
+ * land on the model in memory is the pick behind it: F3 stored "Use whatever
+ * is loaded" for every scope, and the run resolves that sentinel against the
+ * live catalog at call time -- so a later, different model is what runs, and
+ * no name is frozen here.
+ */
+export function firstRunPickerDefault(
+  state: ModelPromptState,
+  surface: ProviderSurface = "story",
+): StoryModelChoice {
+  if (state !== "stored") return "auto";
+  return (localModelProviderId(surface) ?? "auto") as StoryModelChoice;
+}
+
+/**
+ * The choice a page adopts from the seed, or null when it must keep the one it
+ * has.
+ *
+ * Three ways to answer "keep what you have": the owner has touched this page's
+ * picker (their change always wins, and switching to Automatic and back works
+ * as before), the seed is nothing new (`auto`, or no answer yet), or the state
+ * already holds a real choice -- a story page hydrated from the job's
+ * remembered model is a choice, not an untouched default.
+ */
+export function pickerSeedToApply(input: {
+  seed: StoryModelChoice | null;
+  touched: boolean;
+  current: StoryModelChoice;
+}): StoryModelChoice | null {
+  if (input.touched) return null;
+  if (!input.seed || input.seed === "auto") return null;
+  if (input.current !== "auto") return null;
+  return input.seed;
+}
 
 /** Does this catalog have anything at all worth drawing a list for? */
 export function localModelListRows(catalog: LocalCatalog | null): {
