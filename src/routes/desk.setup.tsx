@@ -55,6 +55,16 @@ function SetupPage() {
   const setupState = useQuery({
     queryKey: ["first-run-setup"],
     queryFn: () => firstRunSetupState(),
+    /*
+      A cached answer is not an answer. "needsSetup: true" left in the cache from
+      earlier (another tab finished setup, or the entry went stale) is returned
+      with `isPending === false` while a background refetch runs, and drawing the
+      blank first-run form from it for an already-onboarded paper lets Save
+      overwrite the paper's identity. So the query refetches on every mount and
+      the screen treats the answer as unresolved until THIS mount has fetched it
+      (`isFetchedAfterMount`).
+    */
+    refetchOnMount: "always",
   });
 
   /*
@@ -68,7 +78,7 @@ function SetupPage() {
     if (alreadySetUp) void navigate({ to: "/desk" });
   }, [alreadySetUp, navigate]);
 
-  if (me.isPending || current.isPending || setupState.isPending) {
+  if (me.isPending || current.isPending || setupState.isPending || !setupState.isFetchedAfterMount) {
     return <ScreenPending title="Set up the paper" kicker="Editor desk" hint="Loading…" />;
   }
 

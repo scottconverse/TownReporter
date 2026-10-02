@@ -73,3 +73,21 @@ test("the decision never reads city or name", () => {
   );
   assert.doesNotMatch(code, /current\.data\?\.(city|name)\s*(\?\?|===|\|\|)/, "no such fallback");
 });
+
+test("a cached first-run answer is unresolved until THIS mount has refetched it (review-bot finding)", async () => {
+  /*
+    `needsSetup: true` left in the cache is returned with isPending === false
+    while a background refetch runs. Drawing the blank first-run form from it for
+    an already-onboarded paper lets Save overwrite the paper's identity, so the
+    route and the Server panel refetch on every mount and wait for that fetch.
+  */
+  const ops = await readFile(new URL("../src/components/ops-panels.tsx", import.meta.url), "utf8");
+  const panel = ops.slice(
+    ops.indexOf("export function PaperSetupPanel("),
+    ops.indexOf("export function DarkDeskCounty("),
+  );
+  for (const [name, source] of [["setup route", setup], ["Server panel", panel]]) {
+    assert.match(source, /refetchOnMount: "always"/, `${name}: the answer is refetched on every mount`);
+    assert.match(source, /!setupState\.isFetchedAfterMount/, `${name}: a cached answer is not drawn from`);
+  }
+});
