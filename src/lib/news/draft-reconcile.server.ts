@@ -15,6 +15,8 @@ import { modelEffort, providerEntry, type ModelEffort, type ProviderOverrides } 
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
+/* SG1b finding 1: the reconcile commit boundary refuses an un-set-up paper (see the gate inside requestDraftReconciliation). */
+import { requirePaperSetUp } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
 import type { DraftRow } from "./types.ts";
@@ -254,6 +256,16 @@ export async function requestDraftReconciliation(
   input: { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null },
   deps: Pick<ReconcileDeps,"enqueue"|"probe"> = {},
 ): Promise<DeskJob> {
+  /*
+    SG1b finding 1, the reconcile half. `requestDraftReconciliationFn` (the
+    desk’s own button) already refuses before it reaches this function, but
+    `retryStoryJob` calls this one directly for a failed reconcile row -- so the
+    check belongs at the boundary too, exactly as it does in
+    `model-request-commit.server.ts`. Thrown rather than returned because this
+    function’s contract is to throw its refusals ("No saved draft is available
+    to reconcile in this newsroom.") and both callers already surface that.
+  */
+  await requirePaperSetUp(context.newsroomId, "check this draft's evidence");
   const sql = await getSql();
   const [draft] = await sql<{id:number}>`select d.id from drafts d join leads l on l.id=d.lead_id and l.newsroom_id=d.newsroom_id join newsroom_members m on m.newsroom_id=d.newsroom_id and m.user_id=${context.userId} and m.role in ('owner','editor') where d.lead_id=${input.leadId} and d.newsroom_id=${context.newsroomId} order by d.updated_at desc,d.id desc limit 1`;
   if (!draft) throw new Error("No saved draft is available to reconcile in this newsroom.");

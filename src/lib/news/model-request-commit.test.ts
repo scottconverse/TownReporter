@@ -19,12 +19,19 @@ import {
   file sharing the same `node --test` process (see setup-code.server.ts).
 */
 before(() => forceSetupCodeSatisfiedForTests());
+before(async () => {
+  await ensurePaperSettingsSchema();
+  const sql = await getSql();
+  await sql.query("insert into paper_settings(newsroom_id,onboarded) values(1,true) on conflict (newsroom_id) do update set onboarded=true");
+});
 after(() => clearSetupCodeOverrideForTests());
 import {
   commitOpinionForAuthenticatedEditor,
   commitScanForAuthenticatedEditor,
   commitStoryDraftForAuthenticatedEditor,
 } from "./model-request-commit.server.ts";
+/* SG1b: these newsrooms have no paper_settings row, which the shared commit boundary now refuses. Mark room 1 set up, as the desk would. */
+import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";

@@ -1,0 +1,7 @@
+<!-- @dsCard group="Components" viewport="700x380" name="Paper" -->
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script><script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script><script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="../../_ds_bundle.js"></script><style>body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-display)}</style></head><body><div id="r"></div>
+<script type="text/babel">const NS = Object.values(window).find(v => v && typeof v === 'object' && v.JobCard && v.Button) || {};
+const { SectionTag, GeoPills, DatesPanel, StoryCell, StoryGrid } = NS;
+ReactDOM.createRoot(document.getElementById('r')).render(<div style={{padding:16,display:'flex',flexDirection:'column',gap:12}}><div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap'}}><SectionTag>Housing</SectionTag><GeoPills active="Longmont" /></div><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><DatesPanel items={[{dow:'Thu',day:'1',what:'Funding hearing: Education agencies',note:'6 p.m.'},{dow:'Tue',day:'6',what:'Council public hearing: Dry Creek'}]} /><StoryGrid columns={1}><StoryCell section="Planning" title="Council advances Dry Creek annexation" date="Sep 25" read="3 min" /></StoryGrid></div></div>);</script></body></html>

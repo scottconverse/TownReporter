@@ -1,0 +1,34 @@
+:root {
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-body: "Literata", Georgia, serif;
+  --text-scale: 1; /* Normal 1 · Large 1.2 (the app’s two sizes). Scales headlines, deks and body. */
+
+  /* paper */
+  --fs-wordmark: 56px;      --fs-wordmark-phone: 36px;
+  --fs-lead: calc(50px * var(--text-scale));          --fs-lead-phone: calc(32px * var(--text-scale));
+  --fs-article-h1: calc(56px * var(--text-scale));    --fs-article-h1-phone: calc(34px * var(--text-scale));
+  --fs-dek: calc(20px * var(--text-scale));           --fs-dek-article: calc(22px * var(--text-scale));
+  --fs-grid-head: calc(23px * var(--text-scale));     --fs-grid-head-phone: calc(21px * var(--text-scale));
+  --fs-section: 28px;
+  --fs-body-article: calc(20px * var(--text-scale));
+  --fs-body-article-phone: calc(18px * var(--text-scale));
+  --fs-nav: 16px;
+  --fs-label: 15px;
+  --fs-min: 14px;           /* floor: nothing informational below this */
+
+  /* desk */
+  --fs-desk-h1: 40px;
+  --fs-desk-h2: 24px;
+  --fs-panel-title: 20px;
+  --fs-lead-title: 19px;
+  --fs-desk-body: 16px;
+  --fs-button: 15px;
+
+  --lh-display: 1.02;
+  --lh-head: 1.15;
+  --lh-body: 1.5;
+  --lh-article: 1.65;
+  --ls-display: -0.028em;
+  --ls-head: -0.02em;
+  --ls-kicker: 0.05em;
+}

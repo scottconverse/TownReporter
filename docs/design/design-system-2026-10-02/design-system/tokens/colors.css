@@ -1,0 +1,53 @@
+/* TownReporter color tokens. Light is the paper default; the desk defaults to dark.
+   Dark = warm black, never pure black/white. Text on yellow is always #111. */
+:root {
+  /* base */
+  --tr-cream: #fffdf7;
+  --tr-cream-panel: #f6f2e7;
+  --tr-cream-rule: #d8d3c4;
+  --tr-ink: #111111;
+  --tr-ink-2: #3a3a3a;
+  --tr-warm-black: #1b1916;
+  --tr-warm-panel: #27231f;
+  --tr-warm-rule: #3b3631;
+  --tr-warm-deep: #0f0e0c;
+  --tr-bone: #e8e6e1;
+  --tr-bone-2: #bdbab3;
+  --tr-yellow: #ffd23f;
+  --tr-yellow-dark: #e6c35c;
+  --tr-on-yellow: #111111;
+
+  /* semantic, light */
+  --bg: var(--tr-cream);
+  --panel: var(--tr-cream-panel);
+  --line: var(--tr-cream-rule);
+  --ink: var(--tr-ink);
+  --ink2: var(--tr-ink-2);
+  --grid: var(--tr-ink);
+  --soft: var(--tr-cream-rule); /* light inner rules on the paper (region rows, jump-link rails) */
+  --block: var(--tr-ink);
+  --block-ink: #ffffff;
+  --yel: var(--tr-yellow);
+  --ok: #1e6b34;
+  --warn: #8a4b00;
+  --danger: #b3261e;
+  --dd: var(--tr-ink);
+  --sel: var(--tr-ink); /* selection marker (nav, selected lead, tabs): ink on cream for contrast */
+}
+[data-appearance="dark"], .tr-dark {
+  --bg: var(--tr-warm-black);
+  --panel: var(--tr-warm-panel);
+  --line: var(--tr-warm-rule);
+  --ink: var(--tr-bone);
+  --ink2: var(--tr-bone-2);
+  --grid: var(--tr-warm-rule);
+  --soft: var(--tr-warm-rule);
+  --block: var(--tr-warm-panel);
+  --block-ink: var(--tr-bone);
+  --yel: var(--tr-yellow-dark);
+  --ok: #9fd4a8;
+  --warn: #f0b27a;
+  --danger: #f0998c;
+  --dd: var(--tr-warm-deep);
+  --sel: var(--tr-yellow-dark);
+}

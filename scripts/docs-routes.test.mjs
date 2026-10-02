@@ -26,9 +26,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /*
   A design handoff (docs/design/handoff-*) is the designer's dated package. Its
   component notes use sample URLs such as /evidence/2504 that stand for a real
-  captured version, and the package is kept as delivered, not rewritten.
+  captured version, and the package is kept as delivered, not rewritten. The
+  dated design-system packages (docs/design/design-system-*) are the same kind
+  of thing: the 2026-10-02 SourceCard note uses /evidence/2504 as a sample.
 */
-const SKIP = /[\\/](archive|operations|proofs)[\\/]|[\\/]design[\\/]handoff-[^\\/]+[\\/]/;
+const SKIP = /[\\/](archive|operations|proofs)[\\/]|[\\/]design[\\/](handoff|design-system)-[^\\/]+[\\/]/;
 /** Served by the server rather than a file route, or a path *prefix* only. */
 const NOT_A_FILE_ROUTE = /^\/(feed|sitemap\.xml|robots\.txt)$/;
 

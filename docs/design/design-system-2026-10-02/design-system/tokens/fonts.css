@@ -1,0 +1,8 @@
+/* Self-hosted webfonts: the same files the production app serves from public/fonts. */
+@font-face{font-family:"Bricolage Grotesque";font-style:normal;font-weight:500;font-display:swap;src:url("../fonts/bricolage-grotesque-500-normal-latin.woff2") format("woff2")}
+@font-face{font-family:"Bricolage Grotesque";font-style:normal;font-weight:700;font-display:swap;src:url("../fonts/bricolage-grotesque-700-normal-latin.woff2") format("woff2")}
+@font-face{font-family:"Bricolage Grotesque";font-style:normal;font-weight:800;font-display:swap;src:url("../fonts/bricolage-grotesque-800-normal-latin.woff2") format("woff2")}
+@font-face{font-family:"Literata";font-style:normal;font-weight:400;font-display:swap;src:url("../fonts/literata-400-normal-latin.woff2") format("woff2")}
+@font-face{font-family:"Literata";font-style:italic;font-weight:400;font-display:swap;src:url("../fonts/literata-400-italic-latin.woff2") format("woff2")}
+@font-face{font-family:"Literata";font-style:normal;font-weight:500;font-display:swap;src:url("../fonts/literata-500-normal-latin.woff2") format("woff2")}
+@font-face{font-family:"Literata";font-style:normal;font-weight:600;font-display:swap;src:url("../fonts/literata-600-normal-latin.woff2") format("woff2")}
