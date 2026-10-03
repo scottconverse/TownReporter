@@ -171,7 +171,13 @@ export const Route = createFileRoute("/")({
         limit: RIVER_BATCH,
         // Everything the top of the page prints -- the lead, the six cells,
         // the band's piece, the lead column's own rows -- each story once.
-        exclude: [...above, ...opinion.stories.map((s) => s.id), ...also],
+        exclude: [
+          ...above,
+          ...opinion.stories.map((s) => s.id),
+          ...also,
+          // The region band prints only with two or more stories; when it does, the river skips them.
+          ...(region.length >= 2 ? region.map(({ story }) => story.id) : []),
+        ],
       },
     });
     return { listing: page, river, opinion, week, region };
