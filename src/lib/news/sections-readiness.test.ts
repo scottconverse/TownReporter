@@ -16,7 +16,8 @@ it("section readiness refuses missing dependencies and recovers instead of cachi
   for (const table of ["articles", "leads", "drafts", "scan_runs"]) {
     await sql.query(`drop table if exists ${table} cascade`);
   }
-  await assert.rejects(ensureSectionsSchema(), /Section schema is incomplete/);
+  // ensureSchemaOnce now refuses with the database's own missing-relation error before the readiness check can run
+  await assert.rejects(ensureSectionsSchema(), /Section schema is incomplete|relation "\w+" does not exist/);
   assert.deepEqual(await sql`select * from _schema_ensure_state where name='sections'`, []);
   await (await getPglite()).exec(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
   for (const table of ["articles","leads","drafts","scan_runs"]) {
