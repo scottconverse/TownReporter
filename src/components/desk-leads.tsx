@@ -36,6 +36,7 @@ export const SEEN_AGAIN_EXPLAINER =
 
 export function LeadRowView({
   lead,
+  sectionName,
   dup,
   onHold,
   onBack,
@@ -62,6 +63,8 @@ export function LeadRowView({
   onKillWithReason,
 }: {
   lead: LeadRow;
+  /** The newsroom's configured display name for the stored section key. */
+  sectionName?: string;
   dup?: PrintedDup | null;
   onHold?: () => void;
   onBack?: () => void;
@@ -522,7 +525,7 @@ export function LeadRowView({
               pins that order ("meta line should render before the lead-flags
               rail") -- the drawn order is put on with `order` in
               `desk-astra.css` instead of by moving this node. */}
-          <span className="meta">{lead.topic}</span>
+          <span className="meta">{sectionName ?? lead.topic}</span>
           <LeadFlags lead={lead} dup={dup} />
         </div>
         {/* UI1b-3: the row's list title. A heading, because that is the plain

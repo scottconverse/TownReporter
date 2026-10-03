@@ -488,6 +488,10 @@ try {
     const wasWrap = el.style.whiteSpace;
     const wasLarge = desk.classList.contains("large");
     menu.style.minWidth = "232px";
+    // The Queue acts column got wider in Group 2, so the menu has room it did not
+    // have; pin the old width so this still reproduces the owner's state.
+    const wasPin = menu.style.width;
+    menu.style.width = "232px";
     el.style.whiteSpace = "normal";
     desk.classList.add("large");
     const measure = () => {
@@ -499,6 +503,7 @@ try {
     desk.classList.remove("large");
     const normalText = measure();
     menu.style.minWidth = wasWidth;
+    menu.style.width = wasPin;
     el.style.whiteSpace = wasWrap;
     if (wasLarge) desk.classList.add("large");
     return { largeText, normalText };

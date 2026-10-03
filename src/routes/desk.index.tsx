@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
@@ -793,7 +794,7 @@ function DeskHome() {
   /* FB6, 7a: the held pile is read ONCE, below (`heldQueue`), and both the
      Held segment's count and its rows come from it so the two cannot disagree. */
   const sectionName = (topic: string | null) =>
-    (topic && sectionQuery.sections.find((s) => s.key === topic)?.name) || topic || "";
+    topic ? sectionDisplayName(topic, sectionQuery.sections) : "";
 
   /*
     The four steps of the strip, in the order the drawing draws them. The step
@@ -2075,7 +2076,7 @@ function DeskHome() {
                                 <b>{sources} opened</b>
                               </span>
                               <span className="meta">
-                                {l.topic} · {formatAge(l.created_at)} · {leadOrigin(l)}
+                                {sectionName(l.topic)} · {formatAge(l.created_at)} · {leadOrigin(l)}
                               </span>
                             </div>
                           </div>

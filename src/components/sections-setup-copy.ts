@@ -13,6 +13,28 @@
 /** How many source names the summary line lists before it starts counting. */
 const NAMES_IN_SUMMARY = 3;
 
+type SectionName = { key: string; name: string };
+
+/**
+ * The paper's configured name for a stored section key.
+ *
+ * Public pages resolve section keys through the same configured section rows.
+ * A legacy or newly imported key can briefly predate its row, so the desk still
+ * needs a readable fallback instead of exposing storage punctuation.
+ */
+export function sectionDisplayName(
+  key: string,
+  sections: readonly SectionName[],
+): string {
+  const configured = sections.find((section) => section.key === key)?.name;
+  if (configured) return configured;
+  return key
+    .trim()
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
+}
+
 /**
  * The `<summary>` of a section's source list.
  *
