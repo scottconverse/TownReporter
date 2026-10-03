@@ -953,12 +953,30 @@ function Get-PromoteResumePoint {
   Returns the rollback path, or $null when there was no build to keep.
 #>
 function Save-PromotePreviousBuild {
-  param([Parameter(Mandatory = $true)][string]$App)
+  param(
+    [Parameter(Mandatory = $true)][string]$App,
+    [ValidatePattern('^(\d{14})?$')][string]$CopyStamp = ""
+  )
   $out = Join-Path $App ".output"
   $previous = Join-Path $App ".output-previous"
+  $matching = if ($CopyStamp) { Join-Path $App ".output-prerollout-$CopyStamp" } else { $null }
+  # A resumed build must keep the snapshot from before THIS copy, not replace it.
+  if ($matching -and (Test-Path $matching)) {
+    if (Test-Path (Join-Path $matching "server\index.mjs")) { return $matching }
+    throw "The kept build at $matching is incomplete. Refusing to replace it."
+  }
   if (-not (Test-Path (Join-Path $out "server\index.mjs"))) { return $null }
-  if (Test-Path $previous) { Remove-Item $previous -Recurse -Force -ErrorAction SilentlyContinue }
-  Copy-Item -Path $out -Destination $previous -Recurse -Force
+  if (Test-Path $previous) { Remove-Item -LiteralPath $previous -Recurse -Force -ErrorAction Stop }
+  Copy-Item -LiteralPath $out -Destination $previous -Recurse -Force -ErrorAction Stop
+  if ($matching) {
+    # Only a fully copied tree gets the matching name. A partial copy from an
+    # interrupted run must never be mistaken for the build that belongs here.
+    $pending = "$matching.pending"
+    if (Test-Path $pending) { throw "An unfinished build snapshot exists at $pending. Check it before trying again." }
+    Copy-Item -LiteralPath $previous -Destination $pending -Recurse -ErrorAction Stop
+    Move-Item -LiteralPath $pending -Destination $matching -ErrorAction Stop
+    return $matching
+  }
   return $previous
 }
 
@@ -985,15 +1003,19 @@ function Restore-PromotePreviousBuild {
 <#
   Which build to fall back to.
 
-  Normally the one this run put aside. A run that RESUMED past the build step
-  never put one aside, but the run it resumed did -- so .output-previous on
-  disk is the second answer, and it is the right one.
+  Prefer the build kept with the database copy's stamp, then the one this run
+  put aside. Older runs only kept .output-previous, which is the last fallback.
 #>
 function Resolve-PromotePreviousBuild {
   param(
     [Parameter(Mandatory = $true)][string]$App,
-    [string]$Previous = ""
+    [string]$Previous = "",
+    [ValidatePattern('^(\d{14})?$')][string]$CopyStamp = ""
   )
+  if ($CopyStamp) {
+    $matching = Join-Path $App ".output-prerollout-$CopyStamp"
+    if (Test-Path (Join-Path $matching "server\index.mjs")) { return $matching }
+  }
   if ($Previous -and (Test-Path (Join-Path $Previous "server\index.mjs"))) { return $Previous }
   $candidate = Join-Path $App ".output-previous"
   if (Test-Path (Join-Path $candidate "server\index.mjs")) { return $candidate }
@@ -1354,6 +1376,7 @@ function Invoke-PromoteBuild {
     [Parameter(Mandatory = $true)][string]$Command,
     [Parameter(Mandatory = $true)][scriptblock]$StartTheApp,
     [string]$Previous = "",
+    [ValidatePattern('^(\d{14})?$')][string]$CopyStamp = "",
     [int]$TimeoutSeconds = -1,
     [scriptblock]$Recover = $null
   )
@@ -1363,9 +1386,9 @@ function Invoke-PromoteBuild {
   # sentence below can turn up when this step goes wrong.
   Add-PromoteStep -Log $Log -Name 'build' -Detail "$Command (this also runs the schema migration)"
 
-  $previous = Save-PromotePreviousBuild -App $App
+  $previous = Save-PromotePreviousBuild -App $App -CopyStamp $CopyStamp
   if ($previous) {
-    Write-PromoteLog $Log "kept the running build at .output-previous, in case this one does not work"
+    Write-PromoteLog $Log "kept the running build at $previous, in case this one does not work"
   } else {
     Write-PromoteLog $Log "there is no built output here to fall back to; a build that does not work would leave the paper down"
   }
@@ -2249,9 +2272,9 @@ function Invoke-PromoteDatabaseRollback {
 
   <#
     The BUILD half. The build that was serving before the promotion is still at
-    .output-previous (Save-PromotePreviousBuild puts it there and only a
-    fallback consumes it), and a database rolled back to before a release wants
-    the build from before that release. When there is none, the current build
+    .output-prerollout-<copy stamp>, and a database rolled back to before a release
+    wants the build from before that release. Older copies fall back to
+    .output-previous. When there is none, the current build
     stays -- the operator is told either way rather than left to guess.
   #>
   <#
@@ -2279,7 +2302,10 @@ function Invoke-PromoteDatabaseRollback {
     Write-PromoteLog $Log "no promote log here names $Copy, so there is no commit to put the checkout back to; it is being left where it is"
   }
 
-  $previous = Resolve-PromotePreviousBuild -App $App
+  $previous = Resolve-PromotePreviousBuild -App $App -CopyStamp $copyStamp
+  if ($previous -and (Split-Path $previous -Leaf) -eq '.output-previous') {
+    Write-PromoteLog $Log "no matching build was kept for copy stamp $copyStamp; falling back to .output-previous, which may belong to a different rollout"
+  }
   if ($previous -and (Restore-PromotePreviousBuild -App $App -Previous $previous)) {
     Write-PromoteLog $Log "the build from before the promotion has been put back at .output"
   } else {

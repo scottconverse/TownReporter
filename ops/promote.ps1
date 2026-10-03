@@ -1188,6 +1188,14 @@ if (Skip-Step 'dbcopy') {
   $t0 = Get-Date
   if ($PSCmdlet.ShouldProcess($dbName, "copy to $dbCopy with CREATE DATABASE ... TEMPLATE")) {
     Say "copying the database (this forces a checkpoint, so every database on the server waits for it)"
+    try {
+      $keptBuild = Save-PromotePreviousBuild -App $app -CopyStamp (Get-PromoteCopyStamp -Copy $dbCopy)
+      if ($keptBuild) { Write-PromoteLog $log "kept the build for $dbCopy at $keptBuild" }
+    } catch {
+      $reason = "The build for $dbCopy could not be kept: $($_.Exception.Message). No database copy or rollout was started."
+      $back = Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp -SkipMigrate } -Refusal $reason
+      Die "$reason $($back.Sentence)" 'dbcopy' "Read the log, fix the build snapshot, and run this again."
+    }
     $copied = Invoke-PromoteDatabaseCopy -Log $log -App $app -Database $dbName -Copy $dbCopy -Failed $dbFailed -Stamp $dbStamp -DatabaseUrl $dbUrl -AdminUrl $dbAdminUrl
     if (-not $copied.Ok) {
       Fail-PromoteStep -Log $log -Name 'dbcopy' -Detail $copied.Failure
@@ -1357,9 +1365,9 @@ $previousBuild = $null
 $buildOutputFile = $null
 if (Skip-Step 'build') {
   # A resumed run past this point already has a build it liked, and the run it
-  # resumed left the one before THAT at .output-previous -- which is what a
-  # failed start would fall back to.
-  $previousBuild = Resolve-PromotePreviousBuild -App $app
+  # resumed left the one before THAT alongside its database copy -- which is
+  # what a failed start would fall back to.
+  $previousBuild = Resolve-PromotePreviousBuild -App $app -CopyStamp (Get-PromoteCopyStamp -Copy $dbCopy)
 } else {
   if ($PSCmdlet.ShouldProcess("the app", "build")) {
     Say "building"
@@ -1375,7 +1383,7 @@ if (Skip-Step 'build') {
       DO about it lives here, because it needs the app stop, the port and the
       copy's name, none of which a library about promotion steps should know.
     #>
-    $built = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp -SkipMigrate } -Previous $previousBuild -Recover {
+    $built = Invoke-PromoteBuild -Log $log -App $app -Command 'npm run build' -StartTheApp { Start-TheApp -SkipMigrate } -Previous $previousBuild -CopyStamp (Get-PromoteCopyStamp -Copy $dbCopy) -Recover {
       param($migrations, $output, $previous)
       Invoke-PromoteRolloutFailure -Why "the build did not succeed" -MigrationsRan $migrations -BuildOutput $output -Previous $previous
     }
