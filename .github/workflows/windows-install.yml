@@ -116,14 +116,18 @@ jobs:
           $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.4.3.exe'
           Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_4_3/innosetup-6.4.3.exe' -OutFile $installer
           ./scripts/verify-inno-setup.ps1 -InstallerPath $installer
-          $install = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR="C:\Program Files (x86)\Inno Setup 6"' -WindowStyle Hidden -PassThru -Wait
+          $innoDirectory = Join-Path $env:RUNNER_TEMP 'Inno Setup 6.4.3'
+          $installLog = Join-Path $env:RUNNER_TEMP 'inno-install.log'
+          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /PORTABLE=1 /DIR=`"$innoDirectory`" /LOG=`"$installLog`"" -WindowStyle Hidden -PassThru -Wait
+          Get-Content -LiteralPath $installLog
           if ($install.ExitCode -ne 0) { throw "Pinned Inno Setup installation failed: $($install.ExitCode)." }
+          "INNO_ISCC_PATH=$(Join-Path $innoDirectory 'ISCC.exe')" >> $env:GITHUB_ENV
       - name: Prove installer download and runtime gates reject broken payloads
         shell: pwsh
-        run: ./scripts/windows-setup-checks.test.ps1
+        run: ./scripts/windows-setup-checks.test.ps1 -IsccPath $env:INNO_ISCC_PATH
       - name: Build the offline Windows installer and report part sizes
         shell: pwsh
-        run: ./scripts/build-windows-setup.ps1 -OutputDirectory "$env:RUNNER_TEMP\windows-setup"
+        run: ./scripts/build-windows-setup.ps1 -OutputDirectory "$env:RUNNER_TEMP\windows-setup" -IsccPath $env:INNO_ISCC_PATH
       # OPTIONAL SIGNING: unsigned by default. No certificate is supplied by this repo.
       - name: Optional signtool signing with the owner's certificate
         if: ${{ env.WINDOWS_SIGNING_PFX != '' }}

@@ -1,6 +1,6 @@
 param(
   [Parameter(Mandatory=$true)][string]$OutputDirectory,
-  [string]$IsccPath = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+  [Parameter(Mandatory=$true)][string]$IsccPath
 )
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -96,9 +96,7 @@ function Get-PartBytes([string]$Path) {
 }
 
 if (!$IsWindows -or ![Environment]::Is64BitProcess) { throw 'Build on Windows x64 with PowerShell 7.' }
-if (!(Test-Path -LiteralPath $IsccPath -PathType Leaf)) { throw 'Install pinned Inno Setup in CI before building.' }
-$compilerVersion = (Get-Item -LiteralPath $IsccPath).VersionInfo
-if ($compilerVersion.FileMajorPart -ne 6 -or $compilerVersion.FileMinorPart -ne 4 -or $compilerVersion.FileBuildPart -ne 3) { throw 'Expected exactly Inno Setup 6.4.3; refusing an unpinned compiler.' }
+& (Join-Path $PSScriptRoot 'verify-inno-compiler.ps1') -IsccPath $IsccPath
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
 if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Unsafe package version for the Setup filename.' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
