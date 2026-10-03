@@ -52,6 +52,19 @@ it("failed ensure logs, leaves no fingerprint, and retries", async () => {
   } finally { console.error = previous; }
 });
 
+// Bug (review): throwing on every error would break a module forever on a harmless duplicate (42P07 etc).
+it("a duplicate-object failure is tolerated and logged, the fingerprint is recorded", async () => {
+  const sql = await getSql();
+  const warns: unknown[][] = [], previous = console.warn;
+  console.warn = (...args) => { warns.push(args); };
+  try {
+    const statements = ["create table ensure_dup_fixture(id integer)", "create table ensure_dup_fixture(id integer)"];
+    assert.equal(await ensureSchemaOnce(sql, "dup-fixture", statements), "ran");
+    assert.equal(warns.length, 1);
+    assert.equal(await ensureSchemaOnce(sql, "dup-fixture", statements), "skipped");
+  } finally { console.warn = previous; }
+});
+
 // Bug 19b: ensure-created NOT VALID foreign keys stayed unvalidated after orphan data was repaired.
 it("investigation foreign keys log orphan data and validate after repair", async () => {
   const sql = await getSql();

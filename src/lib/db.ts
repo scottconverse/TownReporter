@@ -415,6 +415,9 @@ async function createEnsureStateTable(sql: Sql, attemptsLeft = 4): Promise<void>
   }
 }
 
+/** duplicate_table, duplicate_column, duplicate_object, duplicate_schema, and a unique_violation from two processes racing a CREATE. */
+const HARMLESS_ENSURE_CODES = new Set(["42P07", "42701", "42710", "42P06", "23505"]);
+
 /**
  * Run a batch of idempotent DDL statements (`create table if not exists`,
  * `alter table ... add column if not exists`, etc.) at most once per
@@ -472,6 +475,13 @@ export async function ensureSchemaOnce(
     try {
       await sql.query(stmt);
     } catch (error) {
+      // Already-exists style failures are harmless on a re-run (a changed statement list re-runs every
+      // statement); log them and carry on. Anything else leaves the fingerprint unrecorded and throws.
+      const code = String((error as { code?: unknown } | null)?.code ?? "");
+      if (HARMLESS_ENSURE_CODES.has(code) || (code === "0A000" && getDbSource() === "pglite")) {
+        console.warn(`[schema-ensure] ${name}: tolerated ${code}`);
+        continue;
+      }
       console.error(`[schema-ensure] ${name} failed; will retry`, error);
       throw error;
     }
