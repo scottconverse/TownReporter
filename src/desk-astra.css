@@ -4637,7 +4637,7 @@
 }
 
 /* Keep the lead copy useful before the action labels start squeezing it. */
-@media (max-width: 1280px) {
+@media (max-width: 1600px) {
   .desk-ltr.astra .today-lead {
     grid-template-columns: auto minmax(0, 1fr);
   }
@@ -4806,6 +4806,26 @@
 /* ---------------------------------------------------------------------------
    DRAFTS (unit PUB2)
 --------------------------------------------------------------------------- */
+/* Published and Drafts: below 1280px the actions drop under the story so the
+   title column keeps the free space instead of ~150-200px beside empty room. */
+@media (max-width: 1280px) {
+  .desk-ltr.astra .astra-row.pub {
+    grid-template-columns: 96px minmax(0, 1fr) 56px 110px;
+  }
+  .desk-ltr.astra .astra-row.pub > .astra-row-acts {
+    grid-column: 2 / -1;
+  }
+  .desk-ltr.astra .astra-row.pubhead > :last-child {
+    display: none;
+  }
+  .desk-ltr.astra .drafts-row {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+  .desk-ltr.astra .drafts-row > :nth-child(n + 3) {
+    grid-column: 2;
+  }
+}
+
 /*
   THE DRAFTS ROW STOPS BEING A FOUR-COLUMN GRID EARLIER THAN A PHONE.
 
@@ -4832,6 +4852,9 @@
 @media (max-width: 882px) {
   .desk-ltr.astra .drafts-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .drafts-row > :nth-child(n + 3) {
+    grid-column: auto;
   }
   .desk-ltr.astra .drafts-side {
     align-items: flex-start;
@@ -6162,7 +6185,10 @@
   min-width: 0;
 }
 .desk-ltr.astra .astra-row.opinion .astra-row-t { overflow-wrap: anywhere; }
-.desk-ltr.astra .astra-row.opinion {
+/* `.astra-plain > li` is a flex column and outranks `.astra-row.opinion`, so the grid
+   below only applies when it names the list item the same way. */
+.desk-ltr.astra .astra-plain > li.astra-row.opinion {
+  display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   text-align: left;
 }
@@ -6266,15 +6292,13 @@
   grid-column: 1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: fit-content(60%) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   align-items: baseline;
   gap: 8px;
 }
 .desk-ltr.astra .astra-row.src .src-name .astra-row-t {
-  white-space: nowrap;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .desk-ltr.astra .astra-row.src .src-name .astra-row-meta {
   display: block;
@@ -6933,6 +6957,7 @@
   .desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: auto; }
   .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
   .desk-ltr.astra .astra-piles { border-right: 0; border-bottom: 1px solid var(--line); }
+  .desk-ltr.astra .astra-plain > li.astra-row.opinion,
   .desk-ltr.astra .astra-row.opinion,
   .desk-ltr.astra .astra-row.pub,
   .desk-ltr.astra .astra-row.src {
@@ -6940,6 +6965,7 @@
     gap: 6px 0;
   }
   .desk-ltr.astra .astra-row.pubhead { display: none; }
+  .desk-ltr.astra .astra-row.pub > .astra-row-acts { grid-column: auto; }
   .desk-ltr.astra .astra-row.opinion > .astra-chip,
   .desk-ltr.astra .astra-row.pub > .astra-chip { margin-bottom: 2px; }
   .desk-ltr.astra .astra-search { min-width: 0; width: 100%; }

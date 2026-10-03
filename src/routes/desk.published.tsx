@@ -21,6 +21,8 @@ import { getViewStatsFn } from "@/lib/news/views";
 import { myDesk } from "@/lib/news/claim";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
+import { useEditorSections } from "@/lib/use-sections";
+import { sectionDisplayName } from "@/components/sections-setup-copy";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
 
@@ -28,6 +30,7 @@ function PublishedPage() {
   const { formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const deskRole = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const { sections } = useEditorSections();
   // Which of the design's four filters is on. "All" is the list as it was.
   const [pubFilter, setPubFilter] = useState<"all" | "week" | "corrections" | "opinion">("all");
   const [pubQuery, setPubQuery] = useState("");
@@ -613,7 +616,7 @@ function PublishedPage() {
                   lines at this width. Both are on the story itself, one press
                   of View away, and the score is on the story's own page.
                 */}
-                <p className="astra-row-meta pub-kick">{p.topic}</p>
+                <p className="astra-row-meta pub-kick">{sectionDisplayName(p.topic, sections)}</p>
                 {/*
                   h2, not h3. This list has no section heading of its own
                   above it (the page's only heading before it is the h1 in
