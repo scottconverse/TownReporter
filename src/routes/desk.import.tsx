@@ -518,7 +518,7 @@ function ImportPage() {
                   </div>
 
                   {!card.cleanSplit ? (
-                    <p className="mt-2 text-sm text-rust">
+                    <p className="mt-2 text-sm text-rust" role="alert">
                       Could not split this cleanly — check it. The text is kept exactly as pasted.
                     </p>
                   ) : null}
