@@ -454,7 +454,7 @@ test("a closed Dialog renders to static markup without throwing and paints no la
   assert.equal(openHtml, "");
 });
 
-test("the story page mounts the three dialogs, and the legal page still mounts the one flow", async () => {
+test("the story page mounts the three dialogs, and the legal page mounts the shared dialog", async () => {
   const story = await source("src/routes/desk.story.$leadId.tsx");
   for (const name of ["KillDialog", "RedraftDialog", "CompareVersionsDialog"]) {
     assert.match(story, new RegExp(`import \\{[^}]*${name}`), `the story page must import ${name}`);
@@ -462,8 +462,8 @@ test("the story page mounts the three dialogs, and the legal page still mounts t
   }
   assert.match(story, /<KillDialog[\s\S]{0,200}?leadId=\{/, "the Kill dialog takes the lead id");
   const route = await source("src/routes/desk.legal-removals.tsx");
-  assert.match(route, /import \{ LegalRemovalFlow \} from "@\/components\/dialogs\/LegalRemovalDialog"/);
-  assert.match(route, /<LegalRemovalFlow\b/);
+  assert.match(route, /import \{ LegalRemovalDialog \} from "@\/components\/dialogs\/LegalRemovalDialog"/);
+  assert.match(route, /<LegalRemovalDialog\b/);
   /*
     One gate, one flow. If a second copy of the REMOVE comparison appears, one of
     the two surfaces has quietly become the soft one.
@@ -486,21 +486,12 @@ test("the story page mounts the three dialogs, and the legal page still mounts t
   );
 });
 
-test("desk.published.tsx is left alone: it imports no dialog", async () => {
-  /* A claim of absence, with its instrument named: this reads that one file and
-     looks for the four spellings below. It says nothing about other pages. */
+test("Published opens Correction and Legal removal in the existing dialogs", async () => {
   const published = await source("src/routes/desk.published.tsx");
-  for (const needle of [
-    "@/components/dialogs/",
-    "CorrectionDialog",
-    "PublishedMoreMenu",
-    "LegalRemovalDialog",
-  ])
-    assert.equal(
-      published.split(needle).length - 1,
-      0,
-      `desk.published.tsx must not mention ${needle} -- unit BH2 leaves it to its owner`,
-    );
+  assert.match(published, /<Dialog\b[\s\S]*?title="Add a correction"/);
+  assert.match(published, /Preview · the note as readers will see it/);
+  assert.match(published, /<LegalRemovalDialog\b/);
+  assert.doesNotMatch(published, /href=\{`\/desk\/legal-removals\?article=/);
 });
 
 /* --------------------------------------------------------------------- kill */
@@ -863,9 +854,16 @@ test("legal removal cannot be pressed until the reason and REMOVE are both given
   assert.equal(press().disabled, true, "changing the rule clears the typed REMOVE");
   await page.typeInto(confirm2, "REMOVE");
   assert.equal(press().disabled, true, "destruction cannot proceed with review pending");
-  await page.click(radio("Keep a sealed copy for 12 months"));
+  await page.click(radio("Keep an owner-only copy for 12 months"));
   await page.typeInto(confirm2, "REMOVE");
   assert.equal(press().disabled, false, "a sealed copy may proceed with review pending");
+  await page.setChecked(field('input[type="checkbox"]'), true);
+  assert.equal(press().disabled, true, "a changed selection invalidates the measured scope");
+  assert.ok(button("Review connected copies"), "the dialog keeps the existing refresh action available");
+  await page.click(button("Review connected copies"));
+  assert.equal(legal.calls.at(-1).data.reviewedLegacy, true, "refresh measures the updated selection");
+  await page.typeInto(field('input[placeholder="REMOVE"]'), "REMOVE");
+  assert.equal(press().disabled, false, "only a fresh preview and retyped REMOVE reopen the gate");
   await page.close();
 });
 

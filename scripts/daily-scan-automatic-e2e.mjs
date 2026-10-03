@@ -548,6 +548,8 @@ async function theScanHistoryListsTheRun() {
   await page.goto(`${base}/desk/scan`, { waitUntil: "domcontentloaded" });
   // Substring, never exact: the row's meta line is "<date> · Scheduled daily
   // scan" and the exact string is that whole sentence.
+  // Group 4: each run is one row; its details (including the origin) sit behind "Open".
+  await page.locator("details.r2-scan-details > summary").first().click();
   await page.getByText("Scheduled daily scan").waitFor({ timeout: 45_000 });
   step("the scan history lists the scheduled run the tick reserved");
 }
@@ -649,17 +651,18 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
   await page.goto(`${base}/desk/scan`, { waitUntil: "domcontentloaded" });
   const latestRow = page.locator(".scan-hist .scan-row").first();
   await latestRow.waitFor({ state: "visible", timeout: 45_000 });
-  const latestMeta = latestRow.locator("p.meta");
+  // Group 4: one row per run (time, fetched, leads filed, status); the origin and the details sit behind "Open".
+  await latestRow.locator("details.r2-scan-details > summary").click();
+  const latestMeta = latestRow.locator(".r2-scan-report p").first();
   await latestMeta.waitFor({ state: "visible", timeout: 45_000 });
   const metaText = (await latestMeta.innerText()).replace(/\s+/g, " ").trim();
-  must(metaText.endsWith("· Manual scan"), `latest visible history row is not this manual scan: ${JSON.stringify(metaText)}`);
-  const latestChip = latestRow.locator(".astra-row-acts .astra-chip");
-  const expectedLeadChip = manualRun.leads_created > 0
-    ? `Filed ${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`
-    : "No leads";
+  must(metaText === "Manual scan", `latest visible history row is not this manual scan: ${JSON.stringify(metaText)}`);
+  const leadsFiledCell = (await latestRow.locator("span:has(> .r2-scan-label)").filter({ hasText: "Leads filed" }).first().innerText())
+    .replace("Leads filed", "")
+    .trim();
   must(
-    (await latestChip.innerText()).trim() === expectedLeadChip,
-    `latest manual result chip is ${JSON.stringify(await latestChip.innerText().catch(() => "missing"))}`,
+    leadsFiledCell === String(manualRun.leads_created),
+    `latest manual leads-filed column is ${JSON.stringify(leadsFiledCell)}, receipt says ${manualRun.leads_created}`,
   );
   const latestCoverage = (await latestRow.locator(".scan-line").innerText()).replace(/\s+/g, " ").trim();
   const leadLabel = `${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`;
@@ -667,7 +670,7 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
     latestCoverage === `1 selected · 1 fetched · 1 analyzed · ${leadLabel} · 1 batch.`,
     `latest manual coverage is ${JSON.stringify(latestCoverage)}`,
   );
-  const latestSummary = (await latestRow.locator(".wire-sum").innerText()).replace(/\s+/g, " ").trim();
+  const latestSummary = (await latestRow.locator(".r2-scan-report .wire-sum").first().innerText()).replace(/\s+/g, " ").trim();
   must(
     latestSummary.startsWith("Rung 1 read the fetched page and filed one lead"),
     `latest manual summary is ${JSON.stringify(latestSummary)}`,

@@ -294,16 +294,19 @@ function Login() {
 
   return (
     <main
-      className="grid min-h-dvh place-items-center bg-paper px-6 py-10 text-ink"
-      style={{ background: "#fffdf7", color: "#111111", minHeight: "100dvh" }}
+      className="r2-login min-h-dvh bg-paper text-ink"
     >
-      <div className="stagger-in w-full max-w-sm space-y-5">
+      <header className="r2-login-masthead">
+        <Link to="/" className="r2-login-brand">{PAPER.name}</Link>
+        <span>Editor desk</span>
+      </header>
+      <div className="r2-login-panel stagger-in space-y-5">
         {stalled ? (
           <p role="alert" className="border border-danger/35 bg-paper-2 px-3 py-2.5 text-sm text-danger">
             {claim.isError ? "The newsroom refused the request." : "No answer after ten seconds."}{" "}
             <button
               type="button"
-              className="underline"
+              className={inkGhost}
               onClick={() => {
                 setWaitedTooLong(false);
                 void claim.refetch();
@@ -314,11 +317,15 @@ function Login() {
           </p>
         ) : null}
         <div>
-          <p className="text-[11px] tracking-[0.18em] text-rust uppercase">
-            {PAPER.name}
-          </p>
+          <p className="r2-login-kicker">Editor access</p>
           <h1 className="mt-2 font-display text-3xl font-semibold">{heading}</h1>
-          <p className="mt-2 text-sm text-muted">{blurb}</p>
+          {!claim.isPending && !claimed && !invited ? (
+            <section className="r2-first-owner" aria-label="First owner">
+              <h2>First owner</h2>
+              <p>First person in owns the newsroom.</p>
+              <details><summary className="r2-login-quiet">About creating the desk</summary><p>{blurb}</p></details>
+            </section>
+          ) : <p className="mt-2 text-sm text-muted">{blurb}</p>}
         </div>
         {invite && inviteQ.data && !inviteQ.data.ok ? (
           <p className="border border-rust/40 bg-paper-2 px-3 py-2 text-sm text-ink">
@@ -462,7 +469,7 @@ function Login() {
 
         <Link
           to="/"
-          className="inline-flex min-h-11 items-center text-sm text-muted transition-[color] duration-150 ease-out hover:text-ink"
+          className="inline-flex min-h-11 items-center text-sm text-muted underline"
         >
           Back to the paper
         </Link>
@@ -490,7 +497,7 @@ function RecoveryCodeSignIn() {
     return (
       <button
         type="button"
-        className="text-sm text-muted underline"
+        className={inkGhost}
         onClick={() => setOpen(true)}
       >
         Lost your password? Use a recovery code.
@@ -500,7 +507,7 @@ function RecoveryCodeSignIn() {
 
   return (
     <div className="space-y-2 border-t border-rule pt-4">
-      <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Recovery code</p>
+      <p className="text-[11px] tracking-[0.14em] text-muted">Recovery code</p>
       {tempPassword ? (
         <div className="border border-rule bg-paper-2 p-3 text-sm">
           {/*

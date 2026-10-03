@@ -224,7 +224,7 @@ export function CorrectionDialog({
           type="text"
           readOnly
           value={reviewLabel ?? ""}
-          placeholder="Linked: 1 open request on this story"
+          placeholder="No linked reader request"
         />
       </label>
       <label className="astra-field">

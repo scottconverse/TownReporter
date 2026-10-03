@@ -2,7 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskShell, InkButton } from "@/components/desk-chrome";
-import { LegalRemovalFlow } from "@/components/dialogs/LegalRemovalDialog";
+import { LegalRemovalDialog } from "@/components/dialogs/LegalRemovalDialog";
+import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   legalCases,
   legalCase,
@@ -20,17 +21,15 @@ export const Route = createFileRoute("/desk/legal-removals")({
   component: LegalRemovalsPage,
 });
 const field = "w-full border border-rule bg-paper p-2 text-sm";
-/**
- * The flow itself -- preview, fingerprint, retain/destroy, REMOVE to confirm, the
- * danger press -- moved to `@/components/dialogs/LegalRemovalDialog` in unit BH2
- * (decision 3), so the drawn `dialog-15-legal.png` and this page run one
- * implementation instead of two that can drift. What stays here is the page: the
- * owner gate, the `?case=` detail, the case list, and the one thing a dialog
- * cannot do -- navigate away on success.
- */
+/** Case history comes first; a story search opens the existing removal dialog. */
 function LegalRemovalsPage() {
   const search = Route.useSearch();
   const qc = useQueryClient();
+  const { formatListDateTime } = usePaperDateFormatters();
+  const [query, setQuery] = useState("");
+  const [showAllCases, setShowAllCases] = useState(false);
+  const [showAllStories, setShowAllStories] = useState(false);
+  const [articleId, setArticleId] = useState<number | null>(search.article ?? null);
   const role = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const owner = role.data?.ok && role.data.role === "owner";
   const articles = useQuery({
@@ -43,6 +42,10 @@ function LegalRemovalsPage() {
     queryFn: () => legalCases(),
     enabled: owner,
   });
+  const matchingStories = query.trim()
+    ? (articles.data ?? []).filter((a) => a.headline.toLowerCase().includes(query.trim().toLowerCase()))
+    : [];
+  const caseRows = cases.data?.ok ? cases.data.value : [];
   return (
     <DeskShell
       title="Legal removals"
@@ -59,49 +62,67 @@ function LegalRemovalsPage() {
         </p>
       ) : (
         <>
-          {search.case ? (
-            <CaseDetail key={search.case} caseId={search.case} />
-          ) : (
-            <section className="legal-removal-flow space-y-4" aria-label="Legal removal preview">
-              {/*
-                The same component the dialog renders. Without `onPressChange` it
-                draws the danger press and the return link itself, exactly as this
-                page always has; the only new thing here is where the press goes
-                when it wins.
-              */}
-              <LegalRemovalFlow
-                articles={articles.data ?? null}
-                articlesPending={articles.isPending}
-                articlesError={articles.isError}
-                initialArticleIds={search.article ? [search.article] : []}
-                onConfirmed={async (caseId) => {
-                  await qc.invalidateQueries();
-                  window.location.assign(
-                    `/desk/legal-removals?case=${encodeURIComponent(caseId)}`,
-                  );
-                }}
-              />
-            </section>
-          )}
-          <section className="mt-8">
+          <section className="astra-panel" aria-label="Removal cases">
             <h2 className="font-display text-xl">Removal cases</h2>
             {cases.isPending ? (
               <p>Loading cases…</p>
             ) : cases.isError || cases.data?.ok === false ? (
               <p role="alert">Could not load removal cases. Reload to verify status.</p>
             ) : cases.data?.ok && cases.data.value.length ? (
-              cases.data.value.map((c) => (
-                <p key={c.id}>
+              <>
+              {caseRows.slice(0, showAllCases ? undefined : 5).map((c) => (
+                <div className="r2-case-row" key={c.id}>
                   <a className="underline" href={`/desk/legal-removals?case=${c.id}`}>
                     {c.case_ref}
                   </a>{" "}
-                  · {c.policy === "retain" ? "retained policy" : "destruction"} · {c.created_at}
-                </p>
-              ))
+                  <span className="astra-chip">{c.policy === "retain" ? "Retention policy" : "Destruction"}</span>
+                  <time dateTime={c.created_at}>{formatListDateTime(c.created_at)}</time>
+                </div>
+              ))}
+              {caseRows.length > 5 && !showAllCases ? (
+                <InkButton tone="quiet" onClick={() => setShowAllCases(true)}>Show all {caseRows.length}</InkButton>
+              ) : null}
+              </>
             ) : (
               <p>No removal cases yet.</p>
             )}
           </section>
+          {search.case ? <CaseDetail key={search.case} caseId={search.case} /> : null}
+          <section className="astra-panel mt-6" aria-label="Start a removal case">
+            <h2 className="font-display text-xl">Start a case</h2>
+            <p>Find a published story, or use More → Legal removal on <a className="underline" href="/desk/published">Published</a>.</p>
+            <label className="astra-field">
+              <span className="astra-field-label">Search published stories</span>
+              <input type="search" value={query} onChange={(event) => { setQuery(event.target.value); setShowAllStories(false); }} />
+            </label>
+            {query.trim() ? articles.isPending ? <p>Loading published stories…</p> : articles.isError ? (
+              <p role="alert">Could not load stories. Reload this page.</p>
+            ) : matchingStories.length ? (
+              <>
+                {matchingStories.slice(0, showAllStories ? undefined : 5).map((a) => (
+                  <div className="r2-case-row" key={a.id}>
+                    <span>{a.headline}</span>
+                    <InkButton tone="quiet" onClick={() => setArticleId(a.id)}>Start case</InkButton>
+                  </div>
+                ))}
+                {matchingStories.length > 5 && !showAllStories ? (
+                  <InkButton tone="quiet" onClick={() => setShowAllStories(true)}>Show all {matchingStories.length}</InkButton>
+                ) : null}
+              </>
+            ) : <p>No published stories match this search.</p> : null}
+          </section>
+          <LegalRemovalDialog
+            open={articleId !== null}
+            onOpenChange={(open) => { if (!open) setArticleId(null); }}
+            articleId={articleId ?? undefined}
+            articles={articles.data ?? null}
+            articlesPending={articles.isPending}
+            articlesError={articles.isError}
+            onConfirmed={async (caseId) => {
+              await qc.invalidateQueries();
+              window.location.assign(`/desk/legal-removals?case=${encodeURIComponent(caseId)}`);
+            }}
+          />
         </>
       )}
     </DeskShell>
@@ -109,6 +130,9 @@ function LegalRemovalsPage() {
 }
 function CaseDetail({ caseId }: { caseId: string }) {
   const qc = useQueryClient();
+  const { formatListDateTime } = usePaperDateFormatters();
+  const [showAllBackups, setShowAllBackups] = useState(false);
+  const [showAllEvents, setShowAllEvents] = useState(false);
   const detail = useQuery({
     queryKey: ["legal-case", caseId],
     queryFn: () => legalCase({ data: caseId }),
@@ -169,7 +193,7 @@ function CaseDetail({ caseId }: { caseId: string }) {
       </p>
       <p>
         {data.policy === "retain"
-          ? `Owner-only retention until ${data.expires_at}. ${data.purged_at ? "Copy purged." : "Expired copies cannot be opened."}`
+          ? `Owner-only retention until ${formatListDateTime(data.expires_at)}. ${data.purged_at ? "Copy purged." : "Expired copies cannot be opened."}`
           : "Destruction policy: no removed text was saved in the retained-copy table."}
       </p>
       <p>
@@ -183,11 +207,14 @@ function CaseDetail({ caseId }: { caseId: string }) {
           : "operator attested; not independently verified"}
         .
       </p>
+      <details>
+        <summary className="btn quiet">About external cleanup</summary>
       <p>
         Backups restored later can reintroduce removed content. The operator must apply this case to
         restored data before serving it. This application cannot inspect or erase external backups,
         provider history, existing caches or readers’ downloaded copies.
       </p>
+      </details>
       {data.policy === "retain" && !data.purged_at && (
         <InkButton disabled={busy} onClick={() => void viewCopy()}>
           Open owner-only retained text (audited)
@@ -220,10 +247,10 @@ function CaseDetail({ caseId }: { caseId: string }) {
       <InkButton disabled={busy || !identifier.trim()} onClick={() => void backup()}>
         Add pending backup action
       </InkButton>
-      {data.backups.map((b) => (
+      {data.backups.slice(0, showAllBackups ? undefined : 5).map((b) => (
         <div className="border border-rule p-3" key={b.id}>
           <p>
-            {b.identifier}: {b.confirmed_at ? `operator attested ${b.confirmed_at}` : "pending"}
+            {b.identifier}: {b.confirmed_at ? `operator attested ${formatListDateTime(b.confirmed_at)}` : "pending"}
           </p>
           {!b.confirmed_at && (
             <InkButton tone="ghost" disabled={busy} onClick={() => void backup(b.id)}>
@@ -232,14 +259,16 @@ function CaseDetail({ caseId }: { caseId: string }) {
           )}
         </div>
       ))}
+      {data.backups.length > 5 && !showAllBackups ? <InkButton tone="quiet" onClick={() => setShowAllBackups(true)}>Show all {data.backups.length}</InkButton> : null}
       <h3 className="font-display text-xl">Metadata audit</h3>
       <ul>
-        {data.events.map((e, index) => (
+        {data.events.slice(0, showAllEvents ? undefined : 5).map((e, index) => (
           <li key={index}>
-            {e.created_at} · {e.action}
+            {formatListDateTime(e.created_at)} · {e.action}
           </li>
         ))}
       </ul>
+      {data.events.length > 5 && !showAllEvents ? <InkButton tone="quiet" onClick={() => setShowAllEvents(true)}>Show all {data.events.length}</InkButton> : null}
       {message && <p role="status">{message}</p>}
       <a className="underline" href="/desk/published">
         Back to Published
