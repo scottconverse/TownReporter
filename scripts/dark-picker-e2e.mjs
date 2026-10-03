@@ -94,6 +94,8 @@ async function ownTheDesk() {
  */
 async function thePickerIsThere() {
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
+  // Group 3: the dig dials are in the panel the header's Settings button opens.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   const disclosure = page.locator("#dark-model-dig");
   await disclosure.waitFor({ timeout: 30_000 });
   await disclosure.locator("summary").first().click();
