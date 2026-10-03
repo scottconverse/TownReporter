@@ -28,6 +28,7 @@
   --block: var(--tr-ink);
   --block-ink: #ffffff;
   --yel: var(--tr-yellow);
+  --yel-edge: #111;
   --ok: #1e6b34;
   --warn: #8a4b00;
   --danger: #b3261e;
@@ -45,6 +46,7 @@
   --block: var(--tr-warm-panel);
   --block-ink: var(--tr-bone);
   --yel: var(--tr-yellow-dark);
+  --yel-edge: var(--tr-yellow-dark);
   --ok: #9fd4a8;
   --warn: #f0b27a;
   --danger: #f0998c;

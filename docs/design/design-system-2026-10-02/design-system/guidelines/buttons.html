@@ -1,8 +1,16 @@
-<!-- @dsCard group="Components" viewport="700x120" subtitle="Primary · secondary · quiet · danger · gated" name="Buttons" -->
+<!-- @dsCard group="Components" viewport="760x220" subtitle="Primary · secondary · quiet · danger · gated · link · checkbox (README §6, 2026-10-02)" name="Buttons" -->
 <!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="../styles.css">
-<style>body{margin:0;font-family:var(--font-display);color:var(--ink);background:var(--bg)}*{box-sizing:border-box}</style></head><body><div style="display:flex;gap:10px;flex-wrap:wrap;padding:16px;align-items:center">
-<a style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;background:var(--yel);color:#111;font-weight:800;font-size:15px">Start story <span style="font-size:14px;border:1px solid #111;padding:0 5px">S</span></a>
+<style>body{margin:0;font-family:var(--font-display);color:var(--ink);background:var(--bg)}*{box-sizing:border-box}</style></head><body>
+<div style="display:flex;gap:10px;flex-wrap:wrap;padding:16px 16px 8px;align-items:center">
+<a style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 16px;background:var(--yel);border:2px solid var(--yel-edge,#111);color:#111;font-weight:800;font-size:15px">Start story <span style="font-size:14px;border:1px solid #111;padding:0 5px">S</span></a>
 <a style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--ink);font-weight:700;font-size:15px">Hold</a>
-<a style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--line);font-weight:700;font-size:15px">More ▾</a>
+<a style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:1px solid var(--ink2);font-weight:700;font-size:15px">More ▾</a>
 <a style="display:flex;align-items:center;min-height:44px;padding:0 14px;border:2px solid var(--danger);color:var(--danger);font-weight:700;font-size:15px">Kill</a>
-<a style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px dashed var(--line);color:var(--ink2);font-weight:800;font-size:15px">Publish in Housing</a></div></body></html>
+<span style="display:flex;align-items:center;gap:10px"><a style="display:flex;align-items:center;min-height:44px;padding:0 16px;border:2px dashed var(--ink2);color:var(--ink2);font-weight:800;font-size:15px;cursor:not-allowed">Publish in Housing</a><span style="font-size:14px;color:var(--ink2)">1 claim needs review</span></span>
+</div>
+<div style="display:flex;gap:18px;flex-wrap:wrap;padding:0 16px 16px;align-items:center">
+<a href="#" style="font-weight:700;font-size:15px;color:var(--ink);text-decoration:underline;text-underline-offset:3px">Open the record</a>
+<label style="display:flex;align-items:center;gap:10px;min-height:44px;min-width:44px;padding:0 10px 0 10px;cursor:pointer;font-size:15px;font-weight:700"><span style="width:24px;height:24px;border:2px solid var(--ink);background:var(--bg)"></span>Unchecked</label>
+<label style="display:flex;align-items:center;gap:10px;min-height:44px;min-width:44px;padding:0 10px;cursor:pointer;font-size:15px;font-weight:700"><span style="display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:2px solid var(--ink);background:var(--ink);color:var(--bg);font-size:16px;font-weight:800">✓</span>Checked</label>
+<label style="display:flex;align-items:center;gap:10px;min-height:44px;min-width:44px;padding:0 10px;cursor:pointer;font-size:15px;font-weight:700"><span style="width:24px;height:24px;border:2px solid var(--ink);background:var(--bg);outline:2px solid var(--ink);outline-offset:2px"></span>Focused</label>
+</div></body></html>
