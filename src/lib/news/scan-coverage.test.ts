@@ -59,52 +59,16 @@ describe("scan run writes coverage accounting (P0-3)", () => {
     assert.match(block, /error = \$\{postgresText\(failure\)\.slice\(0, 800\)\}/);
   });
 
-  /*
-    The outage record must be written on BOTH commit paths.
-
-    The first version of this fix gated the write on `!deps.scheduledCommit`, so
-    only the manual path recorded a failed run. A SCHEDULED scan in which every
-    model batch failed threw before anything was persisted: no counts, no
-    coverage line, no error row, and the desk could not distinguish "ran and
-    everything failed" from "never ran". The assertion below is the one that
-    fails if that gate comes back.
-  */
-  it("records a total batch failure on the scheduled path too, not only manual", () => {
+  // Bug 17b: a failed scheduled pass completed its reservation before quota handling.
+  it("routes scheduled failures through failure settlement with queued touches", () => {
     const block = desk.slice(desk.indexOf("if (!batchResults.length)"), desk.indexOf("const merged = mergeScanBatchResults"));
-    /*
-      The property: the failure record is written on BOTH paths. The bug was a
-      guard of the shape `if (!deps.scheduledCommit) <write>`, which skipped the
-      write entirely for a scheduled run. So assert the branch AND its else --
-      any guard that writes on only one path loses the else and fails here.
-
-      This assertion is deliberately structural rather than a text match on the
-      old bug: an earlier version of this test matched a shape the mutation did
-      not produce and passed against the reintroduced bug (verified by
-      reintroducing the guard). That is the test theater this suite exists to
-      prevent, so the check below binds to the two-branch structure itself.
-
-      B8F2 widened the scheduled branch's body: the queued source writes are
-      consumed there too, because that ending is the ONLY one the scheduled lane
-      can reach in which every source failed -- and `commitResults`, the other
-      consumer, is never reached then. The pin follows the code and now holds
-      both halves: the failed run AND the source rows its receipt is about go
-      through the scheduler's own transaction, together.
-    */
-    const branch = /if \(deps\.scheduledCommit\) \{([\s\S]*?)\} else \{([\s\S]*?)\n {4}\}/.exec(block);
-    assert.ok(branch, "the outage write must branch on scheduledCommit with an else");
-    assert.match(
-      branch[1],
-      /deps\.scheduledCommit\(async \(writeSql\) => \{[\s\S]*recordFailedRun\(writeSql, error\)[\s\S]*writeQueuedSourceWrites\(writeSql\)/,
-      "the scheduled path commits the failed run AND the queued source writes through its own transaction",
-    );
-    assert.match(branch[2], /recordManualFailure\(error\)/, "manual path uses its claim-locked transaction");
-    assert.doesNotMatch(
-      block,
-      /if \(!deps\.scheduledCommit\)/,
-      "the write must not be gated on the ABSENCE of a scheduled commit",
-    );
+    assert.doesNotMatch(block, /await deps\.scheduledCommit/);
+    const settlement = desk.slice(desk.indexOf("const settle = async"), desk.indexOf("// PerformDraftWorkDeps"));
+    assert.match(settlement, /await writeQueuedSourceWrites\(receiptSql\)/);
+    assert.match(settlement, /deps\.scheduledFailure\(failure, settle\)/);
+    const daily = readFileSync(new URL("./daily-scan.server.ts", import.meta.url), "utf8");
+    assert.match(daily, /scheduledFailure:[\s\S]*?finalizeDailyScanFailure\(job, msg, write\)/);
   });
-
   it("locks the current manual job claim before committing scan results", () => {
     const block = desk.slice(desk.indexOf("const commitResults"), desk.indexOf("let committed"));
     assert.match(block, /lockManualScanClaim\(writeSql, job\)/);

@@ -30,10 +30,48 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { PGlite } from "@electric-sql/pglite";
-import { getSql } from "../db.ts";
+import { ensureSchemaOnce, getSql } from "../db.ts";
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
+import { ensureInvestigateSchema } from "./investigate.ts";
 
 const MARKER_TABLE = "_schema_ensure_state";
+
+// Bug 19a: failed schema batches were fingerprinted as successful and never retried.
+it("failed ensure logs, leaves no fingerprint, and retries", async () => {
+  const sql = await getSql();
+  const statements = ["create table ensure_retry_fixture(id integer references ensure_retry_parent(id))"];
+  const logs: unknown[][] = [], previous = console.error;
+  console.error = (...args) => { logs.push(args); };
+  try {
+    await assert.rejects(ensureSchemaOnce(sql, "retry-fixture", statements), /ensure_retry_parent/);
+    assert.equal((await sql`select * from _schema_ensure_state where name='retry-fixture'`).length, 0);
+    assert.equal(logs.length, 1);
+    await sql`create table ensure_retry_parent(id integer primary key)`;
+    assert.equal(await ensureSchemaOnce(sql, "retry-fixture", statements), "ran");
+    assert.equal(await ensureSchemaOnce(sql, "retry-fixture", statements), "skipped");
+  } finally { console.error = previous; }
+});
+
+// Bug 19b: ensure-created NOT VALID foreign keys stayed unvalidated after orphan data was repaired.
+it("investigation foreign keys log orphan data and validate after repair", async () => {
+  const sql = await getSql();
+  const previous = console.error, logs: unknown[][] = [];
+  console.error = (...args) => { logs.push(args); };
+  try {
+    await sql`alter table frontier_items drop constraint frontier_items_investigation_id_fkey`;
+    await sql`alter table artifacts drop constraint artifacts_investigation_id_fkey`;
+    await sql`insert into frontier_items(user_id,investigation_id,kind,label) values('validation-fixture',987654,'question','Fixture')`;
+    await sql`insert into artifacts(user_id,investigation_id,url,content_hash) values('validation-fixture',987654,'https://example.test/fixture','fixture')`;
+    await sql`delete from _schema_ensure_state where name='investigate'`;
+    await ensureInvestigateSchema();
+    const constraints = () => sql<{ convalidated: boolean }>`select convalidated from pg_constraint where conname in ('frontier_items_investigation_id_fkey','artifacts_investigation_id_fkey')`;
+    assert.deepEqual((await constraints()).map((c) => c.convalidated), [false, false]);
+    assert.equal(logs.length, 2);
+    await sql`insert into investigations(id,user_id,title) values(987654,'validation-fixture','Repaired')`;
+    await ensureInvestigateSchema();
+    assert.deepEqual((await constraints()).map((c) => c.convalidated), [true, true]);
+  } finally { console.error = previous; }
+});
 
 /**
  * Is this statement DDL against something other than the marker table itself?

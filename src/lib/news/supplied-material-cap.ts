@@ -50,12 +50,8 @@ export const SUPPLIED_MATERIAL_CHARS_PER_TOKEN = 4;
  * and never more than `SUPPLIED_MATERIAL_CAP`. An unknown or nonsense window
  * (null, 0, negative) keeps the constant; it is never read as "no limit".
  *
- * NOT YET WIRED INTO THE PROMPT PATH. Reading a live `contextLength` means a
- * catalog probe (`discoverLocalModels`) on the writing path -- a network call
- * inside prompt building, which the local pick does not carry today
- * (`LocalModelOverride` is `{baseUrl, id}`). The constant is what is enforced
- * everywhere; this helper is the smaller-of-the-two rule, available and tested
- * for whoever threads the catalog down. See the B8P report.
+ * Opinion's local prompt path reads the existing cached catalog and threads
+ * this cap into both its research and writing packs and the stored cut receipt.
  */
 export function suppliedMaterialCapFor(contextLength?: number | null): number {
   if (typeof contextLength !== "number" || !Number.isFinite(contextLength) || contextLength <= 0) {

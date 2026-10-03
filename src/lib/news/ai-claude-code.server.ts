@@ -374,8 +374,9 @@ export async function claudeCodeChat(opts: {
     //
     // `noTools` hides the surface (`--tools ""`) instead of denying an empty
     // allow-list (`--allowed-tools ""`) — see the `noTools` doc comment
-    // above for why the difference matters (Dark Desk F1). Every other
-    // caller keeps the old `--allowed-tools` behaviour unchanged.
+    // above for why the difference matters (Dark Desk F1). Explicit lists also
+    // restrict the surface, so Opinion's WebFetch block cannot be bypassed.
+    ...(!opts.noTools && opts.allowedTools ? ["--tools", opts.allowedTools.join(",")] : []),
     ...(opts.noTools ? ["--tools", ""] : ["--allowed-tools", (opts.allowedTools ?? []).join(",")]),
     "--model",
     opts.model,

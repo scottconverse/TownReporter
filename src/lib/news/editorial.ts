@@ -343,6 +343,7 @@ export function suppliedMaterialHeading(capped: CappedSuppliedMaterial): string 
 export function buildEditorialPack(input: {
   subject: string;
   sourceText?: string;
+  suppliedMaterialCap?: number;
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
@@ -353,7 +354,7 @@ export function buildEditorialPack(input: {
     "",
     `SUBJECT: ${input.subject}`,
   ];
-  const supplied = suppliedMaterialForPrompt(input);
+  const supplied = suppliedMaterialForPrompt({ ...input, cap: input.suppliedMaterialCap });
   if (supplied) parts.push("", suppliedMaterialHeading(supplied), supplied.text);
 
   if (input.ourStory) {
@@ -385,8 +386,8 @@ export function buildEditorialPack(input: {
   return parts.join("\n");
 }
 
-/** The tools the gathering pass needs. Its receipts posture collapses without them. */
-export const EDITORIAL_TOOLS = ["WebSearch", "WebFetch"];
+/** Opinion holds private pasted text: do not expose WebFetch's URL/prompt channel. */
+export const EDITORIAL_TOOLS = ["WebSearch"];
 
 /** The gathering pass supplies leads without the private editorial voice.
  * The writer can independently verify these leads using web tools. */
@@ -394,7 +395,7 @@ export const RESEARCH_INSTRUCTIONS = `You are the research pass for a TownReport
 its own voice, will write the piece from what you return here.
 You never see that voice and you are not writing the editorial.
 
-Use the web search and page-reading capabilities available to you to look
+Use the web search capabilities available to you to look
 into the subject and the document pointers below. Then return PLAIN TEXT findings: what you found, where
 (cite the URL inline for each claim), and anything you looked for but could
 not confirm. Do not write an editorial, a headline, or anything in any
@@ -815,17 +816,10 @@ export function buildWritingPack(input: {
     parts.push("", `WHAT THE EDITOR ASKED FOR: ${input.askedFor.trim()}`);
   }
 
-  /*
-    The one sentence that differs by capability (unit U31). A writer that has
-    the web tools is told to go and open the sources itself -- the pre-U12b
-    wording, restored with the tools. A writer that has none (the desk-run
-    research path: DeepSeek, the local model, a saved connection) is told to
-    cite what the record carries, because asking it to open a page it cannot
-    open is how an editorial ends up inventing a citation.
-  */
+  // Every writer cites the supplied record; opening sources is not a pack promise.
   const citationRule = input.deskResearch
     ? "Include each checkable factual claim with the source URL this record carries, or an exact supplied document filename and page/section locator. You cannot open a page in this pass: cite what the record shows, and where the record leaves a claim unconfirmed, say so in the piece or leave the claim out."
-    : "Open and verify the sources yourself using the available web tools. Include each checkable factual claim with its supporting source URL, or an exact supplied document filename and page/section locator.";
+    : "The sources are provided in this pack. Include each checkable factual claim with its supporting source URL, or an exact supplied document filename and page/section locator.";
 
   parts.push(
     "",

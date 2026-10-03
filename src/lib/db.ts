@@ -471,8 +471,9 @@ export async function ensureSchemaOnce(
   for (const stmt of statements) {
     try {
       await sql.query(stmt);
-    } catch {
-      /* already exists / older PGLite */
+    } catch (error) {
+      console.error(`[schema-ensure] ${name} failed; will retry`, error);
+      throw error;
     }
   }
 
