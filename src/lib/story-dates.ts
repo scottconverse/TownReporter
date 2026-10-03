@@ -705,6 +705,11 @@ function isBareFragment(line: string): boolean {
   if (/^\d/.test(words[0])) return true;
   const last = plain(words[words.length - 1]);
   if (TRAILING_FUNCTION_WORDS.has(last)) return true;
+  // A place's generic "event for …" stays a fragment even with ballot labels.
+  if (
+    words.some((word) => plain(word) === "event") &&
+    !words.some((word) => KNOWN_VERBS.has(plain(word)))
+  ) return true;
   if (words.length >= BARE_FRAGMENT_WORDS) return false;
   return !words.some((word) => KNOWN_VERBS.has(plain(word)));
 }

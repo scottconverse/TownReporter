@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { FirstRunModelCard } from "@/components/first-run-model";
 import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
-import { Busy, InkButton, Score, SecHead } from "@/components/desk-chrome";
+import { Busy, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import type { JobProgressView } from "@/lib/news/job-progress";
@@ -308,8 +308,8 @@ function DeskHome() {
     (`{ok:false}`) is reported rather than passing as a success.
   */
   const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new" }) =>
-      setLeadStatus({ data: input }),
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean }) =>
+      setLeadStatus({ data: { id: input.id, status: input.status } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take -- see `desk-lead-status.ts` for why
@@ -320,11 +320,13 @@ function DeskHome() {
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Saving…",
     done: (_result, input) =>
-      input.status === "new"
-        ? "Undone: the lead is back on the Queue."
-        : input.status === "held"
-          ? "The lead is on hold, off the Queue until you release it."
-          : "The lead moved to Killed, and its row keeps an Undo.",
+      input.release
+        ? "Released."
+        : input.status === "new"
+          ? "Undone: the lead is back on the Queue."
+          : input.status === "held"
+            ? "The lead is on hold, off the Queue until you release it."
+            : "The lead moved to Killed, and its row keeps an Undo.",
     /*
       L4 of the batch-6 pre-merge audit. The Kill sentence above names an Undo,
       and a killed row is exactly the one that may not be on screen to offer it
@@ -333,12 +335,12 @@ function DeskHome() {
       now has to go and find.
     */
     undo: (_result, input) =>
-      input.status === "new"
+      input.status === "new" && !input.release
         ? null
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              await setStatus.mutateAsync({ id: input.id, status: "new" });
+              await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new" });
             },
           },
     failedLead: "Could not change that lead. ",
@@ -988,7 +990,7 @@ function DeskHome() {
         if (lead) setKillLead({ id: lead.id, headline: lead.headline });
         break;
       case "undo":
-        if (lead) setStatus.mutate({ id: lead.id, status: "new" });
+        if (lead) setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
         break;
       case "open":
         if (lead) void navigate({ to: "/desk/story/$leadId", params: { leadId: String(lead.id) } });
@@ -2101,11 +2103,25 @@ function DeskHome() {
                                     second dead press.
                                   */
                                   pending={undoingThis}
-                                  pendingLabel="Putting it back…"
-                                  onClick={() => setStatus.mutate({ id: l.id, status: "new" })}
+                                  pendingLabel={held ? "Releasing…" : "Putting it back…"}
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "new", release: held })}
                                 >
-                                  Undo <kbd>U</kbd>
+                                  {held ? "Release" : "Undo"} <kbd>U</kbd>
                                 </InkButton>
+                                {held ? (
+                                  <DeskMoreMenu
+                                    ariaLabel={`More actions for ${l.headline}`}
+                                    items={[
+                                      { label: "Open", content: (
+                                        <Link className="more-item" to="/desk/story/$leadId" params={{ leadId: String(l.id) }}>
+                                          Open
+                                        </Link>
+                                      ) },
+                                      { label: "Kill with a reason", danger: true,
+                                        onSelect: () => setKillLead({ id: l.id, headline: l.headline }) },
+                                    ]}
+                                  />
+                                ) : null}
                               </>
                             ) : (
                               <>
@@ -2130,15 +2146,7 @@ function DeskHome() {
                                 </InkButton>
                               </>
                             )}
-                            {/*
-                              BF3, Today (b): no "More ▾" here. The drawing
-                              (cmp-today.png) gives each New leads row one
-                              horizontal group -- Start story S · Hold H ·
-                              Kill X -- and nothing else; the menu's two items
-                              are both already on the row (the headline opens
-                              the lead, the ≈ PRINTED chip opens the piece),
-                              so nothing left with it is unreachable.
-                            */}
+                            {/* Held rows keep Release and More on the row. */}
                           </span>
                         </div>
                       );

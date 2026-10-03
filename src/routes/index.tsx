@@ -16,8 +16,8 @@ import { thisWeekDates } from "@/lib/news/story-dates-public";
 import { storyDateRows } from "@/lib/story-dates";
 import { headlineWithTag, opinionHeadlineDisplay } from "@/lib/news/editorial";
 import { dekOrFallback } from "@/lib/news/dek-fallback";
-import { HOME_AREA, STORY_AREAS, type StoryArea } from "@/lib/story-area";
-import { readerSearch, readMinutes, type ReaderStory } from "@/lib/reader";
+import { HOME_AREA, STORY_AREAS } from "@/lib/story-area";
+import { readerSearch, readMinutes } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { topicReportingSentence } from "@/lib/paper-phrases";
@@ -48,8 +48,8 @@ const GRID_CELLS = 6;
  * printed twice.
  */
 const TOP_STORIES = 1 + GRID_CELLS;
-/** How many place rows the region band prints at most -- one per ground. */
-const REGION_ROWS = 3;
+/** The latest four published stories beyond the home town. */
+const REGION_ROWS = 4;
 /**
  * How many stories the lead column carries under "Read the story".
  *
@@ -165,13 +165,19 @@ export const Route = createFileRoute("/")({
       stories, so what the lead prints is exactly what the river does not.
     */
     const also = alsoUnderLead(page.stories, week, opinion.stories[0]?.slug).map((s) => s.id);
-    const region = await readRegion(above);
+    const region = await readRegion();
     const river = await readerArticles({
       data: {
         limit: RIVER_BATCH,
         // Everything the top of the page prints -- the lead, the six cells,
         // the band's piece, the lead column's own rows -- each story once.
-        exclude: [...above, ...opinion.stories.map((s) => s.id), ...also],
+        exclude: [
+          ...above,
+          ...opinion.stories.map((s) => s.id),
+          ...also,
+          // The region band prints only with two or more stories; when it does, the river skips them.
+          ...(region.length >= 2 ? region.map(({ story }) => story.id) : []),
+        ],
       },
     });
     return { listing: page, river, opinion, week, region };
@@ -180,27 +186,23 @@ export const Route = createFileRoute("/")({
 });
 
 /**
- * "Around the region": one story per ground the paper covers beyond the home
- * town.
- *
- * This used to be derived from the edition's own stories, which only worked
- * while the edition printed the whole paper. The edition is the home town's
- * read now, so a band derived from it would print its empty state on every
- * front page while the paper's own `nearby` and `county` stories sat one query
- * away. Each ground is read for itself instead: that ground's newest story,
- * minus whatever the top of the page already printed, and a ground with nothing
- * left is left out rather than filled with a story the reader has already read.
+ * The latest four published stories across Nearby, county and state.
+ * Four from each ground suffice to find the newest four across all three.
  */
-async function readRegion(exclude: number[]) {
+async function readRegion() {
   const grounds = STORY_AREAS.filter((area) => area !== HOME_AREA);
   const rows = await Promise.all(
-    grounds.map(async (area) => ({
-      area,
-      story: (await readerArticles({ data: { area, limit: 1, oldest: false, exclude } })).stories[0],
-    })),
+    grounds.map(async (area) =>
+      (await readerArticles({ data: { area, limit: REGION_ROWS, oldest: false } })).stories
+        .map((story) => ({ area, story })),
+    ),
   );
   return rows
-    .filter((row): row is { area: StoryArea; story: ReaderStory } => Boolean(row.story))
+    .flat()
+    .sort((a, b) =>
+      new Date(b.story.published_at!).getTime() - new Date(a.story.published_at!).getTime() ||
+      b.story.id - a.story.id,
+    )
     .slice(0, REGION_ROWS);
 }
 /**
@@ -289,7 +291,7 @@ function Home() {
     because the edition above it is the home town's read and prints no story
     from any other ground.
   */
-  const regionRows = initial.region ?? [];
+  const regionRows = (initial.region?.length ?? 0) >= 2 ? initial.region! : [];
   /*
     "This week". The loader server-renders it and the panel takes the rows
     already split into the weekday and day columns; see `story-dates.ts` for
@@ -579,8 +581,7 @@ function Home() {
             printed from stories already loaded, and neither repeats a story
             from above.
 
-            Either half may be missing (unit BX). No ground has a story the top
-            of the page has not already printed -> no "Around the region", and
+            Fewer than two regional stories hides "Around the region", and
             Opinion runs the full width; no opinion piece at all -> no Opinion
             panel, and the region column runs the full width. Neither absence
             gets a sentence: the reader is told what the paper has, not what it
@@ -595,11 +596,12 @@ function Home() {
                   </div>
                   <ul className="regionlist">
                     {regionRows.map(({ area, story }) => (
-                      <li key={area}>
+                      <li key={story.id}>
                         <span className="regionplace">{labels[area]}</span>
                         <Link to="/articles/$slug" params={{ slug: story.slug }}>
                           {story.headline}
                         </Link>
+                        <span className="meta">{formatShortDate(story.published_at)}</span>
                       </li>
                     ))}
                   </ul>

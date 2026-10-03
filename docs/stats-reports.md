@@ -65,6 +65,10 @@ Saved reports appear under **Saved reports**. Select **Read report** beside one
 to open its stored site total and per-story totals for that period. Saving and
 reading are editor-only and newsroom-scoped.
 
+Lists show five rows initially, with **Show all N** for the rest. Weekly reports
+read **Week of Sept. 28** rather than ISO dates. The privacy and location panels
+keep their counting details under **How we count**.
+
 The server also checks automatically after startup and then hourly. It creates
 the same completed-period files and skips files that already exist. This is an
 idempotent local archive, not a promise to reconstruct every period: if the

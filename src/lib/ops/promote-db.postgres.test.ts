@@ -1,4 +1,4 @@
-import { after, describe, it } from "node:test";
+import { after, describe, it, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { integrationRequested, probePostgres, resolveAdminUrl, withDatabase } from "../test-support/pg-admin.ts";
 import {
   checkDatabaseName,
+  checkDatabaseServer,
   checkLivePortGuard,
   copyDatabase,
   copyDatabaseName,
@@ -27,6 +28,7 @@ import {
   sessionBackends,
   stateOf,
   swapBack,
+  validateCommandNames,
   waitForZeroConnections,
 } from "../../../ops/lib-promote-db.mjs";
 
@@ -149,6 +151,38 @@ async function createOwnedDatabase(name: string): Promise<void> {
   }
 }
 
+async function memberPreflight(t: TestContext, tag: string, setup: (client: Client, live: string, role: string) => Promise<void>) {
+  const live = scratchName(tag);
+  await createOwnedDatabase(live);
+  const role = `${appRole}_${tag}`;
+  const client = await admin();
+  try {
+    await client.query(`create role "${role}" login createdb password 'x'`);
+    t.after(async () => {
+      const cleanup = await admin();
+      try {
+        await cleanup.query(`drop role "${role}"`);
+      } finally {
+        await cleanup.end();
+      }
+    });
+    await client.query(`grant "${appRole}" to "${role}"`);
+    await setup(client, live, role);
+  } finally {
+    await client.end();
+  }
+  const url = new URL(adminUrl);
+  url.username = role;
+  url.password = "x";
+  const options = {
+    adminUrl: url.toString(),
+    databaseUrl: withDatabase(adminUrl, live),
+    stamp: formatStamp(),
+    measureFreeBytes: () => ({ ok: true as const, freeBytes: Number.MAX_SAFE_INTEGER }),
+  };
+  return { report: await preflight(options), options, live };
+}
+
 async function databaseNames(): Promise<string[]> {
   const client = await admin();
   try {
@@ -200,6 +234,37 @@ after(async () => {
  * this file skips without an admin URL.
  */
 describe("what a promotion is allowed to name", () => {
+  // Bug: endpoint comparison could ignore query overrides or pg's host/port defaults.
+  it("compares effective endpoints while allowing different credentials and database names", () => {
+    const paper = "postgres://app@paper.invalid:6543/townreporter";
+    assert.equal(checkDatabaseServer("postgres://admin@PAPER.invalid:6543/postgres", paper), "");
+    assert.equal(checkDatabaseServer("postgres://admin@other.invalid:6544/postgres?host=paper.invalid&port=6543", paper), "");
+    assert.ok(checkDatabaseServer("postgres://admin@paper.invalid:6543/postgres?host=other.invalid", paper));
+    assert.ok(checkDatabaseServer("postgres://admin@paper.invalid:6543/postgres?port=6544", paper));
+    assert.equal(checkDatabaseServer("postgres:///postgres", paper, { PGHOST: "paper.invalid", PGPORT: "6543" }), "");
+    assert.equal(checkDatabaseServer("postgres://paper.invalid/postgres", "postgres://paper.invalid:5432/townreporter", {}), "");
+    assert.ok(checkDatabaseServer("not a URL", paper));
+  });
+
+  // Bug: the derived copy name could exceed PostgreSQL's 63-character identifier limit.
+  it("checks the derived copy name at the 63-character boundary", () => {
+    const database = `townreporter_${"x".repeat(24)}`;
+    const stamp = "20261001120000";
+    assert.equal(copyDatabaseName(database, stamp).length, 63);
+    assert.equal(validateCommandNames({ database, stamp, deriveNames: true }), "");
+    assert.match(validateCommandNames({ database: `${database}x`, stamp, deriveNames: true }), /copy.*64 characters.*63/);
+  });
+
+  // Bug: a different admin server could pass preflight and copy a different paper's database.
+  it("refuses a different admin host or port before connecting", async () => {
+    const databaseUrl = "postgres://app@paper.invalid:6543/townreporter";
+    for (const adminUrl of ["postgres://admin@other.invalid:6543/postgres", "postgres://admin@paper.invalid:6544/postgres"]) {
+      const report = await preflight({ adminUrl, databaseUrl, stamp: "20261001120000" });
+      assert.equal(report.ok, false);
+      assert.match(report.refusal, /same host and port.*Nothing was changed and the paper was not touched\.$/);
+    }
+  });
+
   it("reads the database name out of DATABASE_URL the way the install writes it", () => {
     assert.equal(deriveDatabaseName("postgres://user:pass@127.0.0.1:5432/townreporter"), "townreporter");
     // A query string is not part of the name -- the old split-on-slash rule
@@ -633,6 +698,44 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     }
     assert.equal(report.ok, false);
     assert.match(report.refusal, /cannot create a database owned by/);
+  });
+
+  // Bug: clone preflight let an owner-member role through without CONNECT on the source.
+  it("refuses a clone without CONNECT before downtime", async (t) => {
+    const { report } = await memberPreflight(t, "noconnect", async (client, live) => {
+      await client.query(`revoke connect on database "${live}" from public, "${appRole}"`);
+    });
+    assert.equal(report.ok, false);
+    assert.match(report.refusal, /cannot clone.*needs CONNECT.*Nothing was changed and the paper was not touched\.$/);
+  });
+
+  // Bug: SET ROLE membership without inherited owner privileges cannot clone an ordinary database.
+  it("refuses a clone when the owner's privileges are not inherited", async (t) => {
+    const { report } = await memberPreflight(t, "noinherit", async (client, _live, role) => {
+      await client.query(`revoke "${appRole}" from "${role}"`);
+      await client.query(`alter role "${role}" noinherit`);
+      await client.query(`grant "${appRole}" to "${role}"`);
+    });
+    assert.equal(report.ok, false);
+    assert.match(report.refusal, /cannot clone.*owner's inherited privileges/);
+  });
+
+  // Bug: permission denied reading data_directory surfaced as an unexplained database error.
+  it("explains the rights needed to read data_directory", async (t) => {
+    const { report } = await memberPreflight(t, "nosettings", async () => {});
+    assert.equal(report.ok, false);
+    assert.match(report.refusal, /data_directory.*pg_read_all_settings.*superuser.*PROMOTE_ADMIN_DATABASE_URL/);
+  });
+
+  // Bug: clone preflight must still allow a CREATEDB owner-member role with settings access.
+  it("allows an eligible admin role and really copies the source", async (t) => {
+    const { report, options, live } = await memberPreflight(t, "canclone", async (client, _live, role) => {
+      await client.query(`grant pg_read_all_settings to "${role}"`);
+    });
+    assert.equal(report.ok, true, report.refusal);
+    const copied = await copyDatabase({ adminUrl: options.adminUrl, database: live, copy: report.copy, stamp: options.stamp });
+    assert.equal(copied.ok, true, copied.refusal);
+    assert.equal(await databaseOwnerOf(report.copy), appRole);
   });
 
   it("refuses to copy or rename while a session is open, and never ends that session", async (t) => {

@@ -98,11 +98,11 @@ test("setup build and CI PowerShell parse without running the build or installer
   execFileSync("powershell.exe", ["-NoProfile", "-Command", `$e=$null; [void][Management.Automation.Language.Parser]::ParseFile('${script}',[ref]$null,[ref]$e); if($e){$e | Out-String | Write-Output; exit 1}`]);
   // Parse each pwsh run block. Expressions are substituted with inert strings.
   const workflow = readFileSync(".github/workflows/windows-install.yml", "utf8");
-  const steps = workflow.split(/\n      - /);
+  const steps = workflow.split(/\n {6}- /);
   for (const step of steps.filter((value) => /shell: pwsh/.test(value))) {
-    const run = step.match(/run: \|\r?\n([\s\S]*?)(?=\n        [a-z-]+:|$)/);
+    const run = step.match(/run: \|\r?\n([\s\S]*?)(?=\n {8}[a-z-]+:|$)/);
     if (!run) continue;
-    const body = run[1].split(/\r?\n/).map((line) => line.replace(/^          /, "")).join("\n").replace(/\$\{\{.*?\}\}/g, "fixture");
+    const body = run[1].split(/\r?\n/).map((line) => line.replace(/^ {10}/, "")).join("\n").replace(/\$\{\{.*?\}\}/g, "fixture");
     const encoded = Buffer.from(body, "utf16le").toString("base64");
     execFileSync("powershell.exe", ["-NoProfile", "-Command", `$s=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encoded}')); $e=$null; [void][Management.Automation.Language.Parser]::ParseInput($s,[ref]$null,[ref]$e); if($e){$e | Out-String | Write-Output; exit 1}`]);
   }
@@ -160,12 +160,100 @@ test("bundled Chromium path is passed to the runtime without changing the ZIP fa
   assert.match(output, /C:\\unused-fixture\\browsers/);
 });
 
+test("new installation paths are short and existing pointers are retained", () => {
+  const installer = readFileSync(resolve("installer/Install.ps1"), "utf8");
+  assert.match(installer, /if \(Test-Path -LiteralPath \$pointerFile\) \{ \$DataRoot = .*\.DataRoot \}/);
+  assert.match(installer, /'TownReporter\\' \+ \[guid\]::NewGuid\(\)\.ToString\('N'\)\.Substring\(0, 8\)/);
+  assert.match(installer, /'\.x' \+ \[guid\]::NewGuid\(\)\.ToString\('N'\)\.Substring\(0, 6\)/);
+  const pgPreflight = installer.indexOf("$pgDependency = Get-VerifiedDependency");
+  assert.ok(pgPreflight >= 0 && pgPreflight < installer.indexOf("$nodeRoot = Expand-VerifiedDependency"), "both archives must pass preflight before either extraction starts");
+});
+test(
+  "ZIP preflight enforces the Windows boundary and reports the first extraction error",
+  { skip: !windows && "Windows PowerShell required" },
+  () => {
+    // Load only function ASTs; never execute the installer or download anything.
+    const root = mkdtempSync(join(tmpdir(), "tr-zip-path-"));
+    try {
+      const command = `
+        $ErrorActionPreference='Stop'
+        $ast=[Management.Automation.Language.Parser]::ParseFile('${resolve("installer/Install.ps1").replaceAll("'", "''")}',[ref]$null,[ref]$null)
+        foreach($name in @('Get-ArchivePathInfo','Get-VerifiedDependency','Expand-VerifiedDependency')) {
+          $fn=$ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $name},$true)
+          if(!$fn){throw "Missing function $name"}; Invoke-Expression $fn.Extent.Text
+        }
+        Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+        $zipPath=Join-Path '${root.replaceAll("'", "''")}' 'fixture.zip'
+        $zip=[IO.Compression.ZipFile]::Open($zipPath,[IO.Compression.ZipArchiveMode]::Create)
+        $entryName='node/' + ('n'*121) + '.txt'
+        try { [void]$zip.CreateEntry('short.txt'); [void]$zip.CreateEntry($entryName) } finally { $zip.Dispose() }
+        function Get-ItemProperty { [pscustomobject]@{LongPathsEnabled=$script:longPaths} }
+        $script:longPaths=0
+        $staging='C:\\' + ('s'*125)
+        $info=Get-ArchivePathInfo $zipPath $staging 'C:\\TR\\tools' 'Node.js'
+        if($info.ExtractionPath.Length -ne 259){throw '259-character boundary was not measured correctly'}
+        $message=''
+        try { Get-ArchivePathInfo $zipPath ($staging+'s') 'C:\\TR\\tools' 'Node.js' } catch { $message=$_.Exception.Message }
+        if($message -notlike '*260 characters*Windows allows 259*shorter -DataRoot*C:\\TR*' -or !$message.Contains($entryName.Replace('/','\\'))){throw "Missing long-path refusal: $message"}
+        $message=''
+        try { Get-ArchivePathInfo $zipPath 'C:\\TR\\tools\\.x123456' ($staging+'s') 'PostgreSQL' } catch { $message=$_.Exception.Message }
+        if($message -notlike '*PostgreSQL*260 characters*'){throw "Runtime path was not checked: $message"}
+        $script:longPaths=1
+        [void](Get-ArchivePathInfo $zipPath ($staging+'s') 'C:\\TR\\tools' 'Node.js')
+        $script:longPaths=$null
+        $message=''
+        try { Get-ArchivePathInfo $zipPath ($staging+'s') 'C:\\TR\\tools' 'Node.js' } catch { $message=$_.Exception.Message }
+        if($message -notlike '*Windows allows 259*'){throw 'Missing registry setting must keep the limit'}
+        $exclusive=[IO.File]::Open($zipPath,'Open','ReadWrite','None'); $exclusive.Dispose()
+        $toolsRoot='${root.replaceAll("'", "''")}'; $DownloadCache=$null
+        $sha=[Security.Cryptography.SHA256]::Create(); $stream=[IO.File]::OpenRead($zipPath)
+        try { $digest=-join($sha.ComputeHash($stream) | ForEach-Object {$_.ToString('x2')}) } finally {$stream.Dispose();$sha.Dispose()}
+        $dependency=[pscustomobject]@{url='https://example.invalid/fixture.zip';sha256=$digest;directory='node';version='fixture'}
+        function Invoke-WebRequest { throw 'The fixture must never download' }
+        $plan=Get-VerifiedDependency $dependency 'Node.js'
+        if($plan.Staging -notmatch '\\\\.x[a-f0-9]{6}$' -or (Test-Path -LiteralPath $plan.Target) -or (Test-Path -LiteralPath $plan.Staging)){throw 'Preparation changed an existing directory or unpacked the ZIP'}
+        $env:PSModulePath=Join-Path $PSHOME 'Modules'
+        $target=Expand-VerifiedDependency $plan
+        if(!(Test-Path -LiteralPath (Join-Path $target $entryName.Substring(5)))){throw 'The prepared ZIP did not actually extract'}
+        if([IO.File]::ReadAllText((Join-Path $target '.townreporter-extracted.sha256')).Trim() -ne $digest){throw 'The completed runtime marker was not retained'}
+        if(!(Get-VerifiedDependency $dependency 'Node.js').Existing){throw 'A completed runtime was not reused'}
+        # The ZIP job CI preflight step was replaced by the Setup.exe job (W1); the preflight itself stays covered above.
+        function Expand-Archive { param($LiteralPath,$DestinationPath)
+          try { throw 'FIRST: original extraction failure' } catch {}
+          throw 'CLEANUP: missing file'
+        }
+        $plan=[pscustomobject]@{Name='Node.js';Archive=$zipPath;Staging='unused';Target='unused';Directory='node';Sha256='fixture';Existing=$false;Paths=[pscustomobject]@{ExtractionPath=('x'*260);RuntimePath='short'}}
+        $message=''
+        try { Expand-VerifiedDependency $plan } catch { $message=$_.Exception.Message }
+        if($message -notlike '*FIRST: original extraction failure*' -or $message -like '*CLEANUP*' -or $message -notlike '*path length*shorter -DataRoot*'){throw "Original failure was hidden: $message"}
+        function Expand-Archive { param($LiteralPath,$DestinationPath) [void][IO.Directory]::CreateDirectory((Join-Path $DestinationPath 'node')) }
+        function Move-Item { throw 'FIRST: move denied' }
+        $plan.Staging=Join-Path '${root.replaceAll("'", "''")}' '.x123456'
+        $plan.Paths.ExtractionPath='short'
+        $message=''
+        try { Expand-VerifiedDependency $plan } catch { $message=$_.Exception.Message }
+        if($message -notlike '*FIRST: move denied*' -or $message -like '*path length*' -or $message -like '*original extraction failure*'){throw "Move failure was hidden or misdiagnosed: $message"}
+        if(!(Test-Path -LiteralPath (Join-Path $plan.Staging 'node\\.townreporter-extracted.sha256'))){throw 'Failed move did not retain the marked runtime'}
+        $plan.Existing=$true; $plan.Target='kept-runtime'
+        if((Expand-VerifiedDependency $plan) -ne 'kept-runtime'){throw 'Existing runtime was not retained'}
+        'PASS ZIP boundary, runtime paths, registry branches, disposal and original error'
+      `;
+      const output = execFileSync("powershell.exe", ["-NoProfile", "-Command", command], { encoding: "utf8", stdio: "pipe" });
+      assert.match(output, /PASS ZIP boundary, runtime paths, registry branches, disposal and original error/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 test("candidate packaging checks out the exact pull-request head", () => {
   const workflow = readFileSync(resolve(".github/workflows/windows-install.yml"), "utf8");
   assert.match(
     workflow,
     /- uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4\.4\.0\s+with:\s+ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
   );
+  // W1: the install job pads its data root (>= 140 characters) and installs the built Setup.exe offline.
+  assert.match(workflow, /ci-long-path-/);
+  assert.match(workflow, /Long-path fixture must be at least 140 characters/);
 });
 test(
   "one source folder cannot be rebound to a different data directory",

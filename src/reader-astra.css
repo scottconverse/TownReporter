@@ -2162,6 +2162,8 @@
   font-family: var(--fd);
   font-size: 15px;
   font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .reader .geopill:hover {
   background: var(--soft);
@@ -2697,7 +2699,7 @@
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.1em;
-  text-transform: uppercase;
+  text-transform: none;
   color: var(--muted);
 }
 .reader .regionlist a {
@@ -2705,6 +2707,7 @@
   font-size: calc(20px * var(--reader-scale));
   line-height: 1.35;
   color: var(--ink);
+  text-decoration: underline;
 }
 .reader .regionlist a:hover {
   text-decoration: underline;
@@ -3499,14 +3502,9 @@
   .reader .topbar .btn {
     padding-inline: 9px;
   }
-  /* The pill row is ONE line that scrolls sideways (unit BX). The four pills
-     are wider than 390px, so the row used to wrap to two or three lines and
-     push the masthead down the page. The labels are unchanged and nothing is
-     dropped -- the row scrolls. `min-width: 0` is what lets a flex item scroll
-     at all instead of growing to its content. */
+  /* Wrap geography links so the state stays visible at phone widths. */
   .reader .geopills {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
     max-width: 100%;
     min-width: 0;
     padding-bottom: 2px;
