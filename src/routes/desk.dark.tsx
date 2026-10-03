@@ -214,12 +214,16 @@ function DarkPage() {
     queryFn: () => listInvestigations(),
   });
   const runs = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
+  // Open the most recently touched file once, when the list first arrives. Not on every
+  // openId change: "Close file" sets openId to null, and that choice must stick.
+  const autoOpened = useRef(false);
   useEffect(() => {
     const rows = investigations.data;
-    if (!rows?.length) return;
+    if (autoOpened.current || !rows?.length) return;
+    autoOpened.current = true;
     setOpenId((current) => current ??
       [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0].id);
-  }, [investigations.data, openId]);
+  }, [investigations.data]);
 
   /*
     Which model digs (0.6.2).
