@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useState } from "react";
+import { Children, Fragment, useState, type ReactNode } from "react";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton } from "@/components/states";
+import { formatListDate } from "@/lib/paper";
 import { getViewStatsFn } from "@/lib/news/views";
 import {
   exportReadingCsvFn,
@@ -43,6 +44,31 @@ export const Route = createFileRoute("/desk/stats")({
 
 /** How often the live panel re-reads the server's rolling window. */
 const LIVE_POLL_MS = 15_000;
+
+function StatsRows({ children }: { children: ReactNode }) {
+  const [showAll, setShowAll] = useState(false);
+  const rows = Children.toArray(children);
+  return (
+    <>
+      {showAll ? rows : rows.slice(0, 5)}
+      {!showAll && rows.length > 5 ? (
+        <button type="button" className="st-btn ghost" onClick={() => setShowAll(true)}>
+          Show all {rows.length}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function reportPeriodLabel(saved: { kind: string; periodStart: string }): string {
+  // Reports carry database calendar days, so formatting must keep that day.
+  const date = new Date(`${saved.periodStart}T12:00:00Z`);
+  if (saved.kind === "monthly") {
+    return date.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+  }
+  const day = formatListDate(date, "UTC");
+  return saved.kind === "weekly" ? `Week of ${day}` : day;
+}
 
 /**
  * The range filter's prior-period wording, one per range. "vs prior 7 days" is
@@ -148,6 +174,7 @@ function StatsPage() {
   const queryClient = useQueryClient();
   const [range, setRange] = useState<ReadingRange>("7d");
   const [selectedReport, setSelectedReport] = useState<string | null>(null);
+  const [showAllReports, setShowAllReports] = useState(false);
   const stats = useQuery({
     queryKey: ["read-stats", range],
     queryFn: () => getReadingStatsFn({ data: { range } }),
@@ -363,9 +390,9 @@ function StatsPage() {
                   <span>Read to the end</span>
                   <span>Read another</span>
                 </div>
-                {data.stories.map((story) => (
+                <StatsRows>{data.stories.map((story) => (
                   <div className="st-story" key={story.slug}>
-                    <div>
+                    <div data-label="Story · section · age">
                       <p className="st-story-sec">
                         {story.section} · {readAgeLabel(story.ageDays)}
                       </p>
@@ -382,9 +409,9 @@ function StatsPage() {
                         </Link>
                       </h3>
                     </div>
-                    <span className="st-num">{formatCount(story.loads)}</span>
-                    <span className="st-num">{formatClock(story.avgSeconds)}</span>
-                    <span className="st-depth">
+                    <span className="st-num" data-label="Visits">{formatCount(story.loads)}</span>
+                    <span className="st-num" data-label="Avg read">{formatClock(story.avgSeconds)}</span>
+                    <span className="st-depth" data-label="Read to the end">
                       {story.depth.map((value, index) => (
                         <i
                           key={index}
@@ -397,9 +424,9 @@ function StatsPage() {
                       ))}
                       <b className="st-depth-pct">{pct(story.endShare)}%</b>
                     </span>
-                    <span className="st-num">{pct(story.recircShare)}%</span>
+                    <span className="st-num" data-label="Read another">{pct(story.recircShare)}%</span>
                   </div>
-                ))}
+                ))}</StatsRows>
                 <p className="st-footnote">
                   Read to the end: share of visits that scrolled past 25%, 50%, 75% and 100% of the
                   story. Read another: share that opened a second story. Visits here are the
@@ -415,7 +442,7 @@ function StatsPage() {
               {data.sources.length === 0 ? (
                 <p className="st-empty">No arrivals recorded for this range yet.</p>
               ) : (
-                data.sources.map((row) => (
+                <StatsRows>{data.sources.map((row) => (
                   <div className="st-ref" key={row.refClass}>
                     <span>{row.label}</span>
                     <span className="st-track">
@@ -423,7 +450,7 @@ function StatsPage() {
                     </span>
                     <b className="st-num">{formatCount(row.visits)}</b>
                   </div>
-                ))
+                ))}</StatsRows>
               )}
               <p className="st-note">
                 &ldquo;Email, apps, texts&rdquo; is links shared privately. It usually means word of
@@ -452,12 +479,10 @@ function StatsPage() {
               */}
               {data.locations.length === 0 && data.otherVisits === 0 ? (
                 <p className="st-panel-body">
-                  No load in this range carried a place. A place is read only as a city and a
-                  country, from the network this paper is served through — an installation that is
-                  not behind Cloudflare has none at all, and the address itself is never stored.
+                  Not measured: we do not look up locations.
                 </p>
               ) : (
-                <>
+                <StatsRows>
                   {data.locations.map((row) => (
                     <div className="st-ref" key={`${row.country}/${row.city}`}>
                       <span>{locationName(row)}</span>
@@ -484,9 +509,12 @@ function StatsPage() {
                       <b className="st-num">{formatCount(data.otherVisits)}</b>
                     </div>
                   ) : null}
-                </>
+                </StatsRows>
               )}
-              <p className="st-note">
+              <p className="st-note">Places are counted by day and named only above the reader threshold.</p>
+              <details>
+                <summary className="btn quiet">How we count</summary>
+                <p className="st-note">
                 City and country only, counted by the day, and one count per reader rather than per
                 page they opened. A place is printed by name only on days when{" "}
                 {formatCount(LOCATION_MIN_READERS)} readers were counted there — the number beside
@@ -498,7 +526,8 @@ function StatsPage() {
                 so they are not kept one by one to be read later — but they are still there until
                 the day closes, and a backup taken before then still holds them. Read from this
                 paper&rsquo;s own network, and only when the request came through it.
-              </p>
+                </p>
+              </details>
 
               {/*
                 The visitor count, in the same panel because it answers the same
@@ -519,15 +548,19 @@ function StatsPage() {
               <p className="st-big">
                 {formatCount(data.visitors.today)} <span>today</span>
               </p>
-              <p className="st-note">
-                An estimate, not a headcount, and it can be wrong in both directions. The server
+              <p className="st-note">Visitor counts are estimates that can be wrong in both directions.</p>
+              <details>
+                <summary className="btn quiet">How we count</summary>
+                <p className="st-note">
+                The server
                 tells two readers apart for one day with a value held only in memory, thrown away at
                 midnight and again when the server restarts — so it keeps no identifier and cannot
                 follow anyone from one day to the next. A restart, or a day busy enough to evict the
                 oldest values, can count the same reader twice; and one address shared by a
                 household, an office or a phone carrier reads as one reader. Yesterday:{" "}
                 {formatCount(data.visitors.yesterday)}.
-              </p>
+                </p>
+              </details>
             </div>
 
             <div className="st-panel">
@@ -535,7 +568,7 @@ function StatsPage() {
               {data.sections.length === 0 ? (
                 <p className="st-empty">No reading time recorded for this range yet.</p>
               ) : (
-                data.sections.map((row) => (
+                <StatsRows>{data.sections.map((row) => (
                   <div className="st-ref" key={row.topic}>
                     <span>{row.label}</span>
                     <span className="st-track">
@@ -547,7 +580,7 @@ function StatsPage() {
                     </span>
                     <b className="st-num">{formatHours(row.seconds)}</b>
                   </div>
-                ))
+                ))}</StatsRows>
               )}
               <p className="st-note">Total reading time over {data.rangeLabel.toLowerCase()}, not clicks.</p>
             </div>
@@ -600,12 +633,12 @@ function StatsPage() {
             </div>
             <div className="st-panel">
               <h2 className="st-h3">Trust signals · {data.rangeLabel.toLowerCase()}</h2>
-              {data.trust.map((row) => (
+              <StatsRows>{data.trust.map((row) => (
                 <div className="st-trust" key={row.event}>
                   <span>{row.label}</span>
                   <b className="st-num">{trustValue(row)}</b>
                 </div>
-              ))}
+              ))}</StatsRows>
               <p className="st-note">
                 Counts of clicks on the paper&rsquo;s own controls. None is tied to a person. A row
                 reads 0 while the page it happens on has no counter yet.
@@ -649,11 +682,10 @@ function StatsPage() {
               ) : reports.data!.length === 0 ? (
                 <p className="st-empty">No reports have been saved yet.</p>
               ) : (
-                reports.data!.map((saved) => (
+                reports.data!.slice(0, showAllReports ? undefined : 5).map((saved) => (
                   <div className="st-report" key={saved.fileName}>
                     <span>
-                      <strong className="capitalize">{saved.kind}</strong> · {saved.periodStart} to{" "}
-                      {saved.periodEnd}
+                      {reportPeriodLabel(saved)}
                     </span>
                     <button
                       type="button"
@@ -665,6 +697,11 @@ function StatsPage() {
                   </div>
                 ))
               )}
+              {!showAllReports && (reports.data?.length ?? 0) > 5 ? (
+                <button type="button" className="st-btn ghost" onClick={() => setShowAllReports(true)}>
+                  Show all {reports.data!.length}
+                </button>
+              ) : null}
               {selectedReport ? (
                 <div className="st-report-reader" aria-live="polite">
                   {report.isPending ? (
@@ -675,18 +712,17 @@ function StatsPage() {
                     <>
                       <h3 className="st-h3 capitalize">{report.data.kind} report</h3>
                       <p className="st-note">
-                        {report.data.periodStart} to {report.data.periodEnd} · stored database
-                        calendar dates · anonymous page loads, not readers
+                        {reportPeriodLabel(report.data)} · anonymous page loads, not readers
                       </p>
                       <p className="st-big">
                         {formatCount(report.data.siteLoads)} <span>site loads</span>
                       </p>
-                      {report.data.stories.map((story) => (
+                      <StatsRows>{report.data.stories.map((story) => (
                         <div className="st-report" key={story.slug}>
                           <span>{story.headline}</span>
                           <b className="st-num">{formatCount(story.loads)}</b>
                         </div>
-                      ))}
+                      ))}</StatsRows>
                     </>
                   ) : null}
                 </div>
@@ -769,19 +805,19 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
               <span>Readers</span>
               <span>Avg time so far</span>
             </div>
-            {live.pages.map((page) => (
+            <StatsRows>{live.pages.map((page) => (
               <div className="st-liverow" key={page.path}>
-                <span className="st-livepage">{label(page.path)}</span>
-                <span>
+                <span className="st-livepage" data-label="Page">{label(page.path)}</span>
+                <span data-label="Readers">
                   <b className="st-num">{formatCount(page.readers)}</b>
                   <i
                     className="st-livebar"
                     style={{ width: `${Math.min(60, Math.max(2, page.readers * 6))}px` }}
                   />
                 </span>
-                <span className="st-num">{formatClock(page.avgSeconds)}</span>
+                <span className="st-num" data-label="Avg time so far">{formatClock(page.avgSeconds)}</span>
               </div>
-            ))}
+            ))}</StatsRows>
           </div>
         )}
         {/*
@@ -803,7 +839,7 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
           {live.arrivals.length === 0 ? (
             <p className="st-empty">No arrivals in the last half hour.</p>
           ) : (
-            live.arrivals.map((row) => (
+            <StatsRows>{live.arrivals.map((row) => (
               <div className="st-arrive" key={row.refClass}>
                 <span>{READ_REF_CLASS_LABELS[row.refClass]}</span>
                 <span className="st-track">
@@ -815,7 +851,7 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
                 </span>
                 <b className="st-num">{formatCount(row.count)}</b>
               </div>
-            ))
+            ))}</StatsRows>
           )}
         </div>
 
@@ -854,7 +890,12 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
           <h2 className="st-never-title">What we never collect</h2>
           <p className="st-never-body">
             No cookies, no accounts, no stored IP addresses, no fingerprinting, no identifier that
-            outlives the day. A reader cannot be followed from one visit to the next, which is why
+            outlives the day.
+          </p>
+          <details>
+            <summary className="btn quiet">How we count</summary>
+            <p className="st-never-body">
+            A reader cannot be followed from one visit to the next, which is why
             &ldquo;returning readers&rdquo; is not a number this page can show and does not guess
             — the visitors figure counts a day&rsquo;s readers and forgets them at midnight.
             <strong> How it&rsquo;s counted.</strong> Page loads come from the counter that has run
@@ -865,11 +906,12 @@ function LiveSection({ stats, live }: { stats: ReadingStats; live: ReadingStats[
             <strong> How visitors are counted.</strong> Two readers are told apart for one day by a
             value the server holds in memory and throws away: it is never written down, it is
             different for the same reader tomorrow, and it dies when the server restarts — so it
-            counts no one twice and can join no one across days. <strong>How a place is
+            can count a reader twice after a restart and can join no one across days. <strong>How a place is
             read.</strong> As a city and a country, from the network this paper is served through,
             counted by the day, and printed only once enough visits have landed there that a row
             cannot be one person. No location database is consulted and the address is never stored.
-          </p>
+            </p>
+          </details>
         </div>
       </div>
     </section>

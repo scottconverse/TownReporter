@@ -190,7 +190,13 @@ function QueuePage() {
       status: "held" | "killed" | "new";
       killReason?: string;
       killReasonUrl?: string;
-    }) => setLeadStatus({ data: input }),
+      release?: boolean;
+    }) => setLeadStatus({ data: {
+      id: input.id,
+      status: input.status,
+      killReason: input.killReason,
+      killReasonUrl: input.killReasonUrl,
+    } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take. `desk-lead-status.ts` owns the rule
@@ -209,11 +215,13 @@ function QueuePage() {
     muted: () => bulkMuted.current,
     pending: "Saving…",
     done: (_result, input) =>
-      input.status === "new"
-        ? "Undone: the lead is back on the Queue."
-        : input.status === "held"
-          ? "The lead is on hold, off the Queue until you release it."
-          : "The lead moved to Killed, and its row keeps an Undo.",
+      input.release
+        ? "Released."
+        : input.status === "new"
+          ? "Undone: the lead is back on the Queue."
+          : input.status === "held"
+            ? "The lead is on hold, off the Queue until you release it."
+            : "The lead moved to Killed, and its row keeps an Undo.",
     /*
       L4 of the batch-6 pre-merge audit: the Kill sentence names an Undo, and
       this toast now carries it. A killed lead leaves the "Open" tab on the
@@ -221,12 +229,12 @@ function QueuePage() {
       go and find; the way back belongs on the sentence that says so.
     */
     undo: (_result, input) =>
-      input.status === "new"
+      input.status === "new" && !input.release
         ? null
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              await setStatus.mutateAsync({ id: input.id, status: "new" });
+              await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new" });
             },
           },
     failedLead: "Could not change that lead. ",
@@ -258,6 +266,7 @@ function QueuePage() {
     onError: (e) => setDeleteError(e instanceof Error ? e.message : "That did not delete."),
   });
   const [deleteError, setDeleteError] = useState("");
+  const [bulkDeleteReasons, setBulkDeleteReasons] = useState<Record<number, string>>({});
   const [bulkDeleteNotice, setBulkDeleteNotice] = useState("");
   const [selectedDeleteLeadIds, setSelectedDeleteLeadIds] = useState<number[]>([]);
   const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
@@ -268,21 +277,28 @@ function QueuePage() {
    */
   const bulkMuted = useRef(false);
   const bulkRemove = useMutation({
+    onMutate: () => setBulkDeleteReasons({}),
     mutationFn: async (leadIds: number[]) => {
       const deletedIds: number[] = [];
       const failures: string[] = [];
+      const reasons: Record<number, string> = {};
       for (const leadId of leadIds) {
         try {
           const result = await deleteLead({ data: leadId });
           if (result?.ok) deletedIds.push(leadId);
-          else failures.push(result?.error ?? `Lead #${leadId} did not delete.`);
+          else {
+            reasons[leadId] = result?.error ?? `Lead #${leadId} did not delete.`;
+            failures.push(reasons[leadId]);
+          }
         } catch (cause) {
-          failures.push(cause instanceof Error ? cause.message : `Lead #${leadId} did not delete.`);
+          reasons[leadId] = cause instanceof Error ? cause.message : `Lead #${leadId} did not delete.`;
+          failures.push(reasons[leadId]);
         }
       }
-      return { deletedIds, failures };
+      return { deletedIds, failures, reasons };
     },
-    onSuccess: async ({ deletedIds, failures }) => {
+    onSuccess: async ({ deletedIds, failures, reasons }) => {
+      setBulkDeleteReasons(reasons);
       setConfirmingBulkDelete(false);
       setSelectedDeleteLeadIds((ids) => ids.filter((id) => !deletedIds.includes(id)));
       setUndo(null);
@@ -690,7 +706,7 @@ function QueuePage() {
         break;
       case "undo":
         if (lead && (lead.status === "held" || lead.status === "killed")) {
-          setStatus.mutate({ id: lead.id, status: "new" });
+          setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
@@ -1040,7 +1056,7 @@ function QueuePage() {
               setConfirmingBulkDelete(false);
               setBulkDeleteNotice("");
             }}
-            placeholder="Search leads, places, records…"
+            placeholder="Search"
           />
           <div className="queue-sel">
             <span className="queue-lab" aria-hidden="true">
@@ -1490,7 +1506,7 @@ function QueuePage() {
                     either: this menu's kill row is the drawn "Kill with a
                     reason" below.
                   */
-                  onBack={() => setStatus.mutate({ id: l.id, status: "new" })}
+                  onBack={() => setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" })}
                   /*
                     FB6, item 5: the row's own Release / Bring back says what it
                     is doing while it does it, and carries the failure sentence.
@@ -1541,6 +1557,7 @@ function QueuePage() {
                   deleteReason={
                     remove.variables === l.id && !remove.isPending ? deleteError || null : null
                   }
+                  bulkDeleteReason={bulkDeleteReasons[l.id] ?? null}
                   deleteSelected={selectedDeleteLeads.includes(l.id)}
                   onDeleteSelect={(selected) => {
                     setConfirmingBulkDelete(false);

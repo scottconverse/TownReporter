@@ -362,7 +362,8 @@ try {
   const heldRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
   await heldRow.locator(".today-lead-done").waitFor({ timeout: 15_000 });
   const heldWords = await heldRow.locator(".today-lead-done").innerText();
-  const undoThere = await heldRow.getByRole("button", { name: /^Undo/ }).isVisible();
+  // A Held row now carries Release (it moves the lead back to Open and the toast offers Undo).
+  const undoThere = await heldRow.getByRole("button", { name: /^(Undo|Release)/ }).isVisible();
   await page.screenshot({ path: shotPath("02-today-optimistic-hold-undo.png") });
   step(
     /held/i.test(heldWords) && undoThere
