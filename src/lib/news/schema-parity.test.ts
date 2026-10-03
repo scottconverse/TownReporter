@@ -37,9 +37,9 @@ import {
  * (where the migration glob is unavailable) each define their own scratch
  * table inline for exactly this reason -- grep `create table if not exists
  * leads` across `src/lib/news/*.test.ts`.
- * Sections/watch additionally require core tables in this parity fixture, so
- * their dependencies replay 0002 and its 0005 ops extension. These dependencies
- * still participate in the existing comparison; no column mismatch is waived.
+ * Investigation/sections/watch require migrations-owned core tables, so this
+ * fixture replays 0002 before any ensures. The mirrored schemas still come
+ * only from runtime ensures; no column mismatch is waived.
  *
  * Needs a real Postgres (`TEST_POSTGRES_ADMIN_URL` -- see pg-admin.ts); skips
  * with a reason otherwise. Named in the `postgres-integration` CI job in
@@ -215,6 +215,13 @@ if (dbProbe.ok) {
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
+    // Investigation alters snapshots/leads; 0002 owns those base tables.
+    // Load only that prerequisite, leaving mirrored schemas to the ensures.
+    const sectionSql = await db.getSql();
+    for (const file of CORE_DEPENDENCY_MIGRATIONS) {
+      await sectionSql.query(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
+    }
+
     // desk_rate / audit_events FIRST, and through the runtime calls that
     // create them (`ops.assertRate`, `ops.audit` -- no `ensure*Schema` name,
     // but the same create-table-if-not-exists-on-every-call shape, ENG-09).
@@ -252,10 +259,6 @@ if (dbProbe.ok) {
     await draftBatch.ensureDraftBatchSchema();
     // Sections depend on the actual migrations-owned newsroom tables, not a
     // sources(id) stand-in: verify the snapshot column and all filing triggers.
-    const sectionSql = await db.getSql();
-    for (const file of CORE_DEPENDENCY_MIGRATIONS) {
-      await sectionSql.query(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
-    }
     for (const table of ["sources", "snapshots", "leads", "drafts", "articles", "scan_runs", "beat_memory", "corrections"]) {
       await sectionSql.query(`alter table ${table} add column if not exists newsroom_id integer not null default 1`);
     }
