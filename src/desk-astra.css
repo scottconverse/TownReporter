@@ -4809,15 +4809,6 @@
 /* Published and Drafts: below 1280px the actions drop under the story so the
    title column keeps the free space instead of ~150-200px beside empty room. */
 @media (max-width: 1280px) {
-  .desk-ltr.astra .astra-row.pub {
-    grid-template-columns: 96px minmax(0, 1fr) 56px 110px;
-  }
-  .desk-ltr.astra .astra-row.pub > .astra-row-acts {
-    grid-column: 2 / -1;
-  }
-  .desk-ltr.astra .astra-row.pubhead > :last-child {
-    display: none;
-  }
   .desk-ltr.astra .drafts-row {
     grid-template-columns: 160px minmax(0, 1fr);
   }
@@ -6415,6 +6406,20 @@
   letter-spacing: 0.05em;
   color: var(--fg2);
 }
+/* Published below 1280px: actions drop under the story. Placed after the base
+   and 981-1200px rules above so this four-track grid (header too) wins. */
+@media (min-width: 981px) and (max-width: 1280px) {
+  .desk-ltr.astra .astra-row.pub,
+  .desk-ltr.astra .astra-row.pubhead {
+    grid-template-columns: 96px minmax(0, 1fr) 56px 110px;
+  }
+  .desk-ltr.astra .astra-row.pub > .astra-row-acts {
+    grid-column: 2 / -1;
+  }
+  .desk-ltr.astra .astra-row.pubhead > :last-child {
+    display: none;
+  }
+}
 .desk-ltr.astra .astra-cell { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .desk-ltr.astra .astra-row-t {
   font-weight: 700;
@@ -6965,7 +6970,6 @@
     gap: 6px 0;
   }
   .desk-ltr.astra .astra-row.pubhead { display: none; }
-  .desk-ltr.astra .astra-row.pub > .astra-row-acts { grid-column: auto; }
   .desk-ltr.astra .astra-row.opinion > .astra-chip,
   .desk-ltr.astra .astra-row.pub > .astra-chip { margin-bottom: 2px; }
   .desk-ltr.astra .astra-search { min-width: 0; width: 100%; }
