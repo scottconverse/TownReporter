@@ -656,6 +656,23 @@ export async function databaseExists(client, name) {
 }
 
 /**
+ * Who owns a database, or null when it is not there. A copy made over the admin
+ * URL is owned by the admin role, and on PostgreSQL 18 schema `public` belongs
+ * to `pg_database_owner`, so an app role that does not own its database cannot
+ * create in `public`: the paper answers 500 once such a copy takes the live name.
+ * @param {Client} client
+ * @param {string} name
+ * @returns {Promise<string|null>}
+ */
+export async function databaseOwner(client, name) {
+  const result = await client.query(
+    "select r.rolname from pg_database d join pg_roles r on r.oid = d.datdba where d.datname = $1",
+    [name],
+  );
+  return result.rowCount === 1 ? String(result.rows[0].rolname) : null;
+}
+
+/**
  * How big a database is, in bytes, as PostgreSQL itself measures it.
  * @param {Client} client
  * @param {string} name
@@ -698,6 +715,20 @@ export async function roleMayCreateDatabases(client) {
     mayCreate: Boolean(row.rolsuper) || Boolean(row.rolcreatedb),
     isSuperuser: Boolean(row.rolsuper),
   };
+}
+
+/**
+ * May the connected role create a database owned by `owner`? (PostgreSQL needs
+ * the creator to be able to SET ROLE to it; version 16 made that a separate
+ * privilege from membership.)
+ * @param {Client} client
+ * @param {string} owner
+ * @returns {Promise<boolean>}
+ */
+export async function roleMayAssignOwner(client, owner) {
+  const version = Number((await client.query("show server_version_num")).rows[0]?.server_version_num ?? 0);
+  const result = await client.query("select pg_has_role(current_user, $1, $2) as ok", [owner, version >= 160000 ? "SET" : "MEMBER"]);
+  return Boolean(result.rows[0]?.ok);
 }
 
 /**
@@ -977,6 +1008,20 @@ export async function preflight(options) {
         "Nothing was changed and the paper was not touched.";
       return out;
     }
+    // The copy is created OWNER <the live owner>, which PostgreSQL only allows a
+    // superuser or a role that can SET ROLE to it. Find out now, not at the copy.
+    if (!out.role.isSuperuser) {
+      const owner = await databaseOwner(client, database);
+      if (owner && !(await roleMayAssignOwner(client, owner))) {
+        out.refusal =
+          `The role this install connects as ("${out.role.role}") cannot create a database owned by ` +
+          `"${owner}", which owns the paper's database, and the copy has to be owned by it or the paper ` +
+          `answers 500 after a swap-back. Make PROMOTE_ADMIN_DATABASE_URL a superuser connection, or ` +
+          `grant "${owner}" to that role, and run this again. ` +
+          "Nothing was changed and the paper was not touched.";
+        return out;
+      }
+    }
     out.sizeBytes = await databaseSizeBytes(client, database);
     out.directory = await dataDirectory(client);
     return out;
@@ -1069,7 +1114,13 @@ export async function copyDatabase(options) {
         "will not copy a database while they are. Nothing was copied."
       );
     }
-    await client.query(`create database ${quoteIdent(options.copy)} template ${quoteIdent(options.database)}`);
+    // The copy gets the live database's owner, not the admin role's.
+    const owner = await databaseOwner(client, options.database);
+    report.owner = owner;
+    await client.query(
+      `create database ${quoteIdent(options.copy)} template ${quoteIdent(options.database)}` +
+        (owner ? ` owner ${quoteIdent(owner)}` : ""),
+    );
     return null;
   });
   if (outcome) {
@@ -1085,6 +1136,33 @@ export async function copyDatabase(options) {
   report.seconds = (Date.now() - started) / 1000;
   report.ok = true;
   return report;
+}
+
+/**
+ * After the copy takes the live name, give it back the owner the database it
+ * replaced had. Also covers copies taken before copyDatabase set the owner.
+ * Returns a sentence when it could not, null otherwise.
+ * @param {Client} client
+ * @param {string} name
+ * @param {string|null} owner
+ * @param {string[]} steps
+ * @returns {Promise<string|null>}
+ */
+async function restoreOwner(client, name, owner, steps) {
+  if (!owner) return null;
+  const current = await databaseOwner(client, name);
+  if (current === owner) return null;
+  try {
+    await client.query(`alter database ${quoteIdent(name)} owner to ${quoteIdent(owner)}`);
+    steps.push(`set the owner of ${name} to ${owner} (it was ${current ?? "unknown"})`);
+    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      `The swap landed but ${name} could not be given back its owner ${owner} (${message}); the paper will answer 500 ` +
+      `until you run: ALTER DATABASE ${quoteIdent(name)} OWNER TO ${quoteIdent(owner)};`
+    );
+  }
 }
 
 /**
@@ -1236,7 +1314,8 @@ export async function swapBack(options) {
         await rename(client, options.copy, options.database);
         report.steps.push(`renamed ${options.copy} -> ${options.database} (finishing a swap that stopped part way)`);
         report.resumedFromHalfState = true;
-        return null;
+        const ownerProblem = await restoreOwner(client, options.database, await databaseOwner(client, options.failed), report.steps);
+        return ownerProblem ? { happened: ownerProblem } : null;
       }
 
       if (!liveExists) {
@@ -1256,11 +1335,14 @@ export async function swapBack(options) {
       const onCopy = await connectionsTo(client, options.copy);
       if (onCopy.length > 0) return connectionsSentence(onCopy, options.copy);
 
+      const liveOwner = await databaseOwner(client, options.database);
       await rename(client, options.database, options.failed);
       report.steps.push(`renamed ${options.database} -> ${options.failed}`);
       try {
         await rename(client, options.copy, options.database);
         report.steps.push(`renamed ${options.copy} -> ${options.database}`);
+        const ownerProblem = await restoreOwner(client, options.database, liveOwner, report.steps);
+        if (ownerProblem) return { happened: ownerProblem };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         /*
