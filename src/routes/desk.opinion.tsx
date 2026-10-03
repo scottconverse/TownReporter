@@ -41,6 +41,18 @@ import {
   toggleEditorialReader,
 } from "@/lib/news/opinion-view";
 
+function failedOpinionTitle(value: string): string {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/[*_~`]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export const Route = createFileRoute("/desk/opinion")({
   head: () => ({ meta: [{ title: "Opinion — TownReporter" }] }),
   component: OpinionPage,
@@ -611,6 +623,9 @@ function OpinionPage() {
                 database rather than re-parsing every body on the list.
               */
               const claims = r.finished_at && !r.error && !r.published_slug ? r.integrity_notes || "" : "";
+              const shownTitle = r.error
+                ? failedOpinionTitle(r.headline || r.subject)
+                : r.headline || r.subject.slice(0, 90);
               return (
                 <li key={r.id} className="astra-row opinion">
                   {!r.finished_at && r.stalled ? (
@@ -631,16 +646,16 @@ function OpinionPage() {
                     <span />
                   )}
                   <span className="astra-cell">
-                    <span className="astra-row-t">{r.headline || r.subject.slice(0, 90)}</span>
+                    <span className="astra-row-t">{shownTitle}</span>
                     <span className="astra-row-meta">
                       {r.source_kind === "article" ? "from our story" : "from a note"}
                       {r.words ? ` · ${r.words} words` : ""}
                       {` · ${editorialAttribution(r)}`}
                     </span>
-                  </span>
-                  <span className="astra-row-meta">
-                    Asked {formatListDateTime(r.created_at)}
-                    {r.finished_at ? ` · finished ${formatListDateTime(r.finished_at)}` : ""}
+                    <span className="astra-row-meta">
+                      Asked {formatListDateTime(r.created_at)}
+                      {r.finished_at ? ` · finished ${formatListDateTime(r.finished_at)}` : ""}
+                    </span>
                   </span>
                   {/*
                     Read, Edit, Delete -- always shown, never behind a hover.
