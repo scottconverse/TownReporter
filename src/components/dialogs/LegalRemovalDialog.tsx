@@ -553,6 +553,11 @@ export function LegalRemovalDialog({
   onDone,
 }: LegalRemovalDialogProps) {
   const [press, setPress] = useState<LegalRemovalPress | null>(null);
+  // The flow unmounts on close but this state would keep the last enabled press (with its
+  // fingerprint); clear it so a reopened dialog cannot fire a cancelled removal.
+  useEffect(() => {
+    if (!open) setPress(null);
+  }, [open]);
 
   return (
     <Dialog
