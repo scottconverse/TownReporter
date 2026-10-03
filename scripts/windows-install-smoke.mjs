@@ -6,13 +6,14 @@ import { createHash, randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { verifyBuild } from "./install-build-manifest.mjs";
 
 const execute = promisify(execFile);
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const root = resolve(process.env.INSTALL_APP_ROOT || dirname(fileURLToPath(import.meta.url)) + "/..");
 const evidence = resolve(process.env.INSTALL_EVIDENCE_DIR || "");
 const started = Date.parse(process.env.INSTALL_ACCEPTANCE_STARTED_AT || "");
 const receipt = { ok: false, providerMode: "disabled; manual workflow only", checks: [] };
@@ -126,8 +127,9 @@ async function main() {
     resolve(config.NodeExe).toLowerCase(),
     "Smoke must run with the privately installed Node binary",
   );
-  assert.ok(inside(config.DataRoot, config.NodeExe), "Node was reused from the workstation");
-  assert.ok(inside(config.DataRoot, config.PgBin), "Postgres was reused from the workstation");
+  const payload = config.BrowsersPath ? resolve(root, "..") : config.DataRoot;
+  assert.ok(inside(payload, config.NodeExe), "Node was reused from the workstation");
+  assert.ok(inside(payload, config.PgBin), "Postgres was reused from the workstation");
   assert.ok(Number.isInteger(config.Port) && config.Port >= 1024 && config.Port <= 65535);
   assert.ok(Number.isInteger(config.PgPort) && config.PgPort >= 1024 && config.PgPort <= 65535);
   assert.notEqual(config.Port, config.PgPort);
@@ -145,7 +147,7 @@ async function main() {
   receipt.version = verifyBuild(root).version;
   const manifest = await readFile(join(root, ".output/install-build.json"), "utf8");
   await writeFile(join(evidence, "install-build.json"), manifest);
-  receipt.checks.push("Private Node/Postgres paths and downloaded source archive SHA verified");
+  receipt.checks.push("Private Node/Postgres paths and downloaded installation artifact SHA verified");
 
   const lifecycle = (name, expectedFailure = false) =>
     powershell(
@@ -188,8 +190,8 @@ async function main() {
     receipt.checks.push(
       "Owned listener PID, recorded running build, verified source/output and rendered newspaper version agree",
     );
-    process.env.PLAYWRIGHT_BROWSERS_PATH = join(config.DataRoot, "browsers");
-    const { chromium } = await import("playwright");
+    process.env.PLAYWRIGHT_BROWSERS_PATH = config.BrowsersPath || join(config.DataRoot, "browsers");
+    const { chromium } = createRequire(join(root, "package.json"))("playwright");
     browser = await chromium.launch();
     const context = await browser.newContext();
     const page = await context.newPage();
@@ -246,7 +248,7 @@ async function main() {
     await lifecycle("Stop");
     await lifecycle("Stop");
     assert.deepEqual(await sockets(config), [], "Stop left a configured listener behind");
-    const sourcePath = join(root, "src/lib/paper.ts");
+    const sourcePath = join(root, config.BrowsersPath ? "scripts/migration-plan.mjs" : "src/lib/paper.ts");
     const original = await readFile(sourcePath);
     try {
       await writeFile(

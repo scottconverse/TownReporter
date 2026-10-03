@@ -1,8 +1,31 @@
 # Install TownReporter on Windows
 
-Use this path to run a persistent newsroom on your own Windows computer. The source setup for macOS and Linux remains in [setup.md](setup.md).
+Use Setup.exe for the self-contained local newsroom. The older online source-ZIP path remains documented separately below. Source setup for macOS and Linux remains in [setup.md](setup.md).
 
-## Before you begin
+## Self-contained Setup.exe
+
+CI builds `TownReporter-<version>-Setup.exe` and its `.sha256` sidecar in the **windows-setup** Actions artifact. This change still needs a successful Windows build and offline acceptance run; it does not claim a published Setup.exe or human fresh-machine acceptance.
+
+1. On Windows 10/11 x64, obtain the **windows-setup** artifact from a successful **Windows packaged installation** Actions run. For a published release, use its Setup.exe asset only if that release actually provides one.
+2. Double-click Setup.exe and choose a folder. The default is `%LOCALAPPDATA%\Programs\TownReporter`. Node, PostgreSQL, app-local Visual C++ DLLs, Chromium and the compiled app are bundled. Installation needs no internet, npm, local build, preinstalled runtime or administrator rights.
+3. Wait for readiness. The finish page shows your one-time **first-owner setup code** and its protected file location. Select **Open TownReporter** or visit **http://127.0.0.1:4388/desk**, create your editor account using that code, then complete paper setup.
+4. Use the **TownReporter** Start menu controls, or `app\Start TownReporter.cmd` and `app\Stop TownReporter.cmd` under the chosen folder. **Configure AI** is optional for the first manual workflow. Remote research and hosted AI need connectivity separately.
+
+Default data lives separately at `%LOCALAPPDATA%\TownReporter\<8 hex characters>`. The paper uses port **4388**, the private database **15432**. The setup code is at `<data folder>\logs\SETUP-CODE.txt` and is deleted when used. Save recovery codes from **Server -> Recovery codes** after claiming the desk.
+
+If initialization fails, open `app\Install TownReporter.cmd` in the chosen folder for visible diagnostics. This launcher retries the offline FirstRun script. To choose unused alternative ports:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\installer\FirstRun.ps1 -Port 4390 -PgPort 15434
+```
+
+Setup.exe refuses an already configured application folder instead of overwriting its newsroom. Automatic upgrades and PostgreSQL major-version upgrades are outside this path. Uninstall stops the owned processes and retains the private data folder. Keep at least 8 GB free for the app, browser and database; keep the computer awake while the paper runs.
+
+## Older source-ZIP path (online)
+
+This historical path downloads prerequisites and builds on your computer. It remains supported, but does not meet the self-contained offline requirement.
+
+### Before source installation
 
 - Windows 10 or 11, 64-bit x64, with broadband internet and at least 8 GB of free disk space for the application, database, browser and downloaded prerequisites. Windows ARM is not a tested installer target.
 - For AI-assisted scans, drafts and Opinion, an AI account or endpoint you can already use: a signed-in Claude/Codex CLI, an Anthropic API key, or an OpenAI-compatible service or local model. You can file a lead yourself and edit, save and publish a story without AI; those AI-assisted workflows require a configured model. Creating an account or downloading a large model is separate from installing TownReporter.
@@ -12,7 +35,7 @@ The target is to finish installation and a first manual editorial workflow in un
 
 The repository includes automated Windows installer and package checks. The current software version is [0.6.82](releases/0.6.82.md); its package note names the expected tag and assets, while the JSON metadata and .sha256 sidecar are the authorities for source commit and ZIP hash. The [0.6.54 release guide](releases/0.6.54.md) records the published v0.6.54 release: tag, GitHub release, and the Windows x64 ZIP `TownReporter-0.6.54-windows-x64.zip` (SHA-256 `dfbeb9b9…`). A fresh-machine human acceptance result is still not documented here.
 
-## Download and install
+### Download and install the source ZIP
 
 1. Open [TownReporter 0.6.82](releases/0.6.82.md) for the release's limits and evidence boundaries. For an actual download, use the [latest published release](https://github.com/scottconverse/TownReporter/releases/latest). Download the Windows x64 asset named `TownReporter-<version>-windows-x64.zip` if that release provides it (for this guide, `TownReporter-0.6.82-windows-x64.zip`); do not use the source-code ZIP. Extract the ZIP completely into a folder you intend to keep. Do not run it from inside the ZIP. If the Windows asset is missing, stop and use a release that provides it.
 2. Open **Install TownReporter.cmd** in the extracted folder. It downloads pinned Node and PostgreSQL distributions, checks their hashes, installs the application dependencies and Chromium, creates a private database and authentication secret, and builds TownReporter.
@@ -56,7 +79,7 @@ The packaged server listens only on this computer. It does not register global W
 ## If something fails
 
 - **Port already in use or reserved by Windows:** leave the other program alone. Choose unused ports with the installer's PowerShell options; app and database ports must differ.
-- **Missing or stale build:** stop this instance and rerun its installation/build step. Do not build over a running server or copy an old `.output` directory into a new source release.
+- **Missing or changed bundled build:** stop this instance and obtain an intact Setup.exe. The offline path does not rebuild. On the older source-ZIP path, stop the instance before rerunning its installation/build step.
 - **No AI provider:** configure a key or endpoint, or sign in to a supported CLI under the Windows account running TownReporter. Retry a real draft after the provider becomes available.
 - **Cannot open the desk:** read the printed log location and readiness error. A process merely starting is not a successful installation.
 - **Forgot the only owner password:** if you saved an unused recovery code, use **Lost your password? Use a recovery code** on the sign-in screen, then sign in with the one-time temporary password and change it. TownReporter does not send email reset links. If you have no recovery code, stop TownReporter, preserve the data folder, and get operator or database help before changing anything. Do not use **Give up the desk** as recovery; it unclaims the newsroom, and the next owner must enter the setup code required for an unclaimed desk.
