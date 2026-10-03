@@ -12,7 +12,7 @@ The owner's reference for all visual work on the paper and the desk. Start with 
 ## Read this before copying components
 
 - `design-system/README.md` section 6 (Buttons) governs. It was updated on 2026-10-02: Primary has a 2px `#111` edge in light mode, Quiet has a 1px `--ink2` border, and the Disabled gate edge should clear 3:1.
-- `design-system/components/core/Button.jsx` and `design-system/guidelines/buttons.html` still draw the older buttons (Primary with no edge, Quiet with a `--line` edge). They predate section 6. Do not copy those two files into production as they are. The designer has been asked for updated versions (see question 9 in `reports/QUESTIONS-FOR-DESIGNER-2026-10-02.md`).
+- `design-system/components/core/Button.jsx`, `guidelines/buttons.html` and `tokens/colors.css` were updated on 2026-10-02 to match section 6 (see `DESIGNER-ANSWERS-Q1-Q4-2026-10-02.md`).
 - The compare-versions drawing lives at `docs/design/handoff-2026-09-26/screen-captures/dialog-12-compare.png` (source `docs/design/handoff-2026-09-26/design/Desk Dialogs.dc.html`).
 
 ## Reports (the fix list)
