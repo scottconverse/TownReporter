@@ -1,10 +1,11 @@
 param(
   [string]$InstallerPath = (Join-Path $env:RUNNER_TEMP 'innosetup-6.4.3.exe'),
   [Parameter(Mandatory=$true)][string]$IsccPath,
-  [string]$CompilerVerifierPath = (Join-Path $PSScriptRoot 'verify-inno-compiler.ps1')
+  [string]$CompilerVerifierPath = (Join-Path $PSScriptRoot 'verify-inno-compiler.ps1'),
+  [string]$RuntimeVerifierPath = (Join-Path $PSScriptRoot 'windows-runtime-check.ps1')
 )
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot 'windows-runtime-check.ps1')
+. $RuntimeVerifierPath
 function Assert-Rejected([scriptblock]$Check, [string]$Message) {
   try { & $Check } catch {
     if ($_ -notmatch $Message) { throw "Unexpected failure: $_" }
@@ -62,7 +63,7 @@ class CompilerFixture {
   foreach ($dll in @(Get-ChildItem (Join-Path $env:SystemRoot 'System32') -Filter '*.dll' | Where-Object Name -match '^(vcruntime|msvcp)[0-9].*\.dll$')) {
     Copy-Item -LiteralPath $dll.FullName -Destination $root
   }
-  $mode = [SetupLoaderErrors]::SetErrorMode(0x8003)
+  $mode = [SetupRuntimeLoader]::SetErrorMode(0x8003)
   try {
     foreach ($name in @('postgres.exe', 'initdb.exe', 'node.exe')) {
       $exe = Join-Path $root $name
@@ -76,27 +77,30 @@ class CompilerFixture {
       Move-Item -LiteralPath "$exe.saved" -Destination $exe
     }
     Assert-Rejected { Invoke-StagedVersion (Join-Path $env:SystemRoot 'System32\where.exe') $root } 'Runtime startup failed'
-    $slowSource = Join-Path $root 'slow.cs'
+    . (Join-Path $PSScriptRoot 'windows-runtime-fixture.ps1')
     $slowExe = Join-Path $root 'slow.exe'
-    [IO.File]::WriteAllText($slowSource, 'class Slow { static void Main() { System.Threading.Thread.Sleep(30000); } }')
-    & (Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe') /nologo "/out:$slowExe" $slowSource
-    if ($LASTEXITCODE -ne 0) { throw 'Could not compile the startup timeout fixture.' }
+    New-RuntimeFixture $slowExe -SleepMilliseconds 30000
     Assert-Rejected { Invoke-StagedVersion $slowExe $root 100 } 'Runtime startup timed out'
-  } finally { [void][SetupLoaderErrors]::SetErrorMode($mode) }
+    $faultExe = Join-Path $root 'fault.exe'
+    New-RuntimeFixture $faultExe
+    $faultBytes = [IO.File]::ReadAllBytes($faultExe)
+    $faultBytes[512] = 0xcc # program breakpoint, after the loader's initial breakpoint
+    [IO.File]::WriteAllBytes($faultExe, $faultBytes)
+    Assert-Rejected { Invoke-StagedVersion $faultExe $root } 'Runtime startup failed.*exit 0x80000003'
+  } finally { [void][SetupRuntimeLoader]::SetErrorMode($mode) }
 
-  $system = Join-Path $root 'fixture-system'
-  New-Item -ItemType Directory -Path $system | Out-Null
-  $dll = Join-Path $system 'vcruntime140.dll'
-  [IO.File]::WriteAllText($dll, 'fixture CRT')
-  Invoke-WithHiddenVcRuntime $system {
-    if (Test-Path -LiteralPath $dll) { throw 'Fixture CRT was not hidden.' }
-  }
-  Assert-Rejected { Invoke-WithHiddenVcRuntime $system { throw 'broken staged runtime' } } 'broken staged runtime'
-  if ([IO.File]::ReadAllText($dll) -cne 'fixture CRT' -or @(Get-ChildItem $system -File).Count -ne 1) {
-    throw 'CRT was not restored intact after success and failure.'
-  }
-  Assert-Rejected { Invoke-WithHiddenVcRuntime (Join-Path $root 'absent-system') {} } 'does not exist|cannot find'
-  [IO.File]::Delete($dll)
-  Assert-Rejected { Invoke-WithHiddenVcRuntime $system {} } 'No system VC runtime'
-  Write-Host 'Installer checksum, exact compiler version, executable startup, and CRT isolation/restoration behavioral checks PASS.'
+  # Load a real VC import, accept the adjacent DLL, then reject the host fallback.
+  $vcExe = Join-Path $root 'vc.exe'
+  New-RuntimeFixture $vcExe -ImportVcRuntime $true
+  Invoke-StagedVersion $vcExe $root
+  $vcDll = Join-Path $root 'vcruntime140.dll'
+  Move-Item -LiteralPath $vcDll -Destination "$vcDll.saved"
+  try {
+    Assert-Rejected { Invoke-StagedVersion $vcExe $root } 'Non-staged VC runtime loaded.*System32.*vcruntime140.dll'
+  } finally { Move-Item -LiteralPath "$vcDll.saved" -Destination $vcDll }
+  Invoke-StagedVersion $vcExe $root
+  Write-Host 'Installer checksum, exact compiler version, executable startup, and actual CRT loader isolation behavioral checks PASS.'
 } finally { [IO.Directory]::Delete($root, $true) }
+# Expected failing compiler probes leave LASTEXITCODE nonzero; all assertions
+# above completed successfully. GitHub's pwsh footer must receive that result.
+exit 0

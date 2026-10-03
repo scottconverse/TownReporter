@@ -100,10 +100,13 @@ if (!$IsWindows -or ![Environment]::Is64BitProcess) { throw 'Build on Windows x6
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
 if ($version -cnotmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$') { throw 'Unsafe package version for the Setup filename.' }
 $out = [IO.Path]::GetFullPath($OutputDirectory)
-$work = Join-Path $out ('build-' + [guid]::NewGuid().ToString('N'))
+# Inno 6.4.3 cannot read source paths beyond MAX_PATH (nor \\?\ paths).
+# Keep its stage independent of the potentially deep output directory.
+$work = Join-Path ([IO.Path]::GetTempPath()) ('tr-setup-' + [guid]::NewGuid().ToString('N'))
 $stage = Join-Path $work 'stage'
 $app = Join-Path $stage 'app'
 New-Item -ItemType Directory -Path $app -Force | Out-Null
+New-Item -ItemType Directory -Path $out -Force | Out-Null
 $dependencies = Get-Content -LiteralPath (Join-Path $repo 'installer\dependencies.json') -Raw | ConvertFrom-Json
 foreach ($part in @('node', 'postgres')) {
   $dependency = $dependencies.$part
@@ -198,8 +201,13 @@ Copy-Item -LiteralPath (Join-Path $repo 'installer\windows-setup\TownReporter.is
 #define StageDir "$stage"
 #define OutputDir "$out"
 "@ | Set-Content -LiteralPath (Join-Path $work 'candidate.iss') -Encoding UTF8
-& $IsccPath $iss
-if ($LASTEXITCODE -ne 0) { throw 'Inno Setup compilation failed.' }
+$compilerLog = Join-Path $work 'inno-compile.log'
+& $IsccPath $iss 2>&1 | Tee-Object -FilePath $compilerLog
+if ($LASTEXITCODE -ne 0) {
+  $compilerExit = $LASTEXITCODE
+  $details = (Get-Content -LiteralPath $compilerLog -Tail 20) -join [Environment]::NewLine
+  throw "Inno Setup compilation failed (exit $compilerExit); full log: $compilerLog`n$details"
+}
 $exe = Join-Path $out "TownReporter-$version-Setup.exe"
 if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Compiler did not produce the expected single Setup.exe.' }
 $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
