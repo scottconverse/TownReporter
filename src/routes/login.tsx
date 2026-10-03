@@ -171,7 +171,7 @@ function Login() {
     await navigate({ to: "/desk" });
   }
 
-  async function onEmailSignIn() {
+  async function onEmailSignIn(emailKnownToExist = false) {
     setError(null);
     setBusy("email-in");
     try {
@@ -194,7 +194,9 @@ function Login() {
         looksLikeMissingAccount(raw)
           ? claimed
             ? taken.signInFailed
-            : "No editor account with that email yet. Use Create editor account — this password is the one you set on this desk."
+            : emailKnownToExist
+              ? "That password is not right for this email."
+              : "No editor account with that email yet. Use Create editor account — this password is the one you set on this desk."
           : raw,
       );
     }
@@ -257,7 +259,7 @@ function Login() {
       if (authError) {
         const message = authError.message ?? "Could not create that account";
         if (looksLikeExistingAccount(message)) {
-          await onEmailSignIn();
+          await onEmailSignIn(true);
           return;
         }
         throw new Error(message);

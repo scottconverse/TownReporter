@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { registerHooks } from "node:module";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { getSql } from "../db.ts";
+import { getPglite, getSql } from "../db.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
 import { ingestUrl } from "./ingest.ts";
 import { sha256 } from "./url-guard.ts";
@@ -56,6 +56,61 @@ after(() => {
   setFetchImplForTests(null);
   hooks.deregister();
 });
+
+for (const ending of ["cancel", "cancel-after-model", "host", "stage", "leads", "quota"] as const) {
+  // Bug 17a/17b: scheduled early exits lost touches; all-failed quota runs completed instead of pausing.
+  it(`scheduled ${ending} exit preserves touches and settles the run`, async () => {
+    const sql = await getSql(), pg = await getPglite();
+    const room = roomCounter++, user = `settlement-${room}`;
+    await sql`insert into newsrooms(id,name) values(${room},'Settlement fixture')`;
+    await sql`insert into newsroom_members(user_id,newsroom_id,role) values(${user},${room},'owner')`;
+    await sql`insert into daily_scan_policies(newsroom_id,enabled,paused,revision,configured_by_user_id) values(${room},true,false,1,${user})`;
+    const sources = [];
+    for (let i = 0; i < (ending === "host" ? 7 : 1); i++) {
+      const [s] = await sql`insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values(${user},${room},${`https://example.test/${room}/${i}`},'Agenda','page','A','accepted') returning *`;
+      sources.push(s);
+    }
+    const model = { runtime: "codex-terra", modelChoice: "codex-balanced", transport: "codex", model: "fixture" };
+    const [r] = await sql`insert into daily_scan_reservations(newsroom_id,local_day,status,policy_revision,policy_snapshot,source_snapshot,model_snapshot) values(${room},current_date,'running',1,'{}',${JSON.stringify(sources)}::jsonb,${JSON.stringify(model)}::jsonb) returning id`;
+    const [run] = await sql`insert into scan_runs(user_id,newsroom_id,daily_reservation_id) values(${user},${room},${r.id}) returning id`;
+    const [job] = await sql`insert into desk_jobs(user_id,newsroom_id,subject_id,kind,model_choice,model_choice_source,status,claim_token) values(${user},${room},${run.id},'scan','codex-balanced','scheduled','running','settlement-lease') returning *`;
+    await sql`update daily_scan_reservations set scan_run_id=${run.id},desk_job_id=${job.id} where id=${r.id}`;
+    let fetched = false, injected = false;
+    const original = pg.query.bind(pg);
+    pg.query = (async (q: string, ...args: unknown[]) => {
+      const target = ending === "host" ? /select tries from source_host_tries/ : ending === "stage" ? /update desk_jobs/ : ending === "leads" ? /select id, status, headline, source_urls, created_at, why, evidence/ : /NEVER_MATCH/;
+      if (fetched && !injected && target.test(q)) { injected = true; throw new Error(`Injected ${ending} DB failure`); }
+      return original(q, ...args as [any]);
+    }) as typeof pg.query;
+    try {
+      const { runDailyScanWork } = await import("./daily-scan.server.ts");
+      await assert.rejects(runDailyScanWork(job as DeskJob, {
+        performScan: (j, d) => scan({ ...j, stages_json: '["Checking for meeting material","Reading the sources","Reading the sources with a model","Filing the leads"]' }, d),
+        scanDeps: { ingestUrl: async () => {
+          fetched = true;
+          if (ending === "cancel") await sql`update desk_jobs set cancel_requested=true where id=${job.id}`;
+          return { text: body, extras: [] };
+        } },
+        chatAdapters: {
+          claude: async () => { throw new Error("Unexpected Claude call"); },
+          local: async () => { throw new Error("Unexpected local call"); },
+          codex: async () => {
+            if (ending === "cancel-after-model") await sql`update desk_jobs set cancel_requested=true where id=${job.id}`;
+            return ending === "quota" ? { ok: false, error: "429 subscription quota reached" } : { ok: true, text: '{"leads":[],"proposed_sources":[],"editor_summary":"Read"}', provider: "codex", model: "fixture" };
+          },
+        },
+      }), ending.startsWith("cancel") ? /Cancelled/ : ending === "quota" ? /429/ : /Injected/);
+    } finally { pg.query = original; }
+    const [touch] = await sql`select last_fetched_at from sources where id=${sources[0].id}`;
+    const [receipt] = await sql`select finished_at,error from scan_runs where id=${run.id}`;
+    const [reservation] = await sql`select status from daily_scan_reservations where id=${r.id}`;
+    assert.ok(touch.last_fetched_at, "the queued touch must survive");
+    assert.ok(receipt.finished_at);
+    assert.ok(receipt.error);
+    assert.equal(reservation.status, "failed");
+    if (ending === "quota") assert.equal((await sql`select paused from daily_scan_policies where newsroom_id=${room}`)[0].paused, true);
+  });
+}
 async function modelPack(
   section: boolean,
   priorSection: boolean,

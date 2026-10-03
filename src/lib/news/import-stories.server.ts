@@ -29,6 +29,7 @@
 
 import { createHash } from "node:crypto";
 import { getSql, type Sql } from "../db.ts";
+import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { grokChat, probeProvider, parseJsonBlock } from "./ai.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
@@ -350,7 +351,9 @@ export async function performImportFinishedStories(
   const inputSha256 = importInputSha256(text);
   const importedAt = new Date().toISOString();
 
-  for (const story of accepted) {
+  for (const rawStory of accepted) {
+    // Verify verbatim input first, then sanitize the model-split card for storage.
+    const story = sanitizeJsonLeaves(rawStory);
     const idea = story.kind === "idea";
     const urls = sanitizePublicUrls(story.links.map((l) => cleanUrl(l.url)));
     const why = (story.dek.trim() || splitParagraphs(story.body)[0] || story.headline).slice(0, 800);
@@ -360,7 +363,7 @@ export async function performImportFinishedStories(
       importer: context.userId,
       importedAt,
       inputSha256,
-      tool: String(payload.tool ?? "").slice(0, 200),
+      tool: storableText(String(payload.tool ?? "")).slice(0, 200),
       kind: story.kind,
       disclosureKey: story.disclosureKey,
       disclosureLine: disclosure,

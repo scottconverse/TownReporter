@@ -4,6 +4,19 @@ import { getSql } from "../db.ts";
 import { saveDraftForEditor } from "./draft-edit.server.ts";
 import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { parseStyleRecord } from "./draft-audit-record.ts";
+
+// Bug 19c: style-repair output reached the editor-save writer with NULs intact.
+it("draft saves strip NUL from model repair text", async () => {
+  const sql = await getSql(), context = { newsroomId: 1, userId: "nul-repair" };
+  const [lead] = await sql`insert into leads(user_id,newsroom_id,headline,why,topic) values('nul-repair',1,'Repair','Fixture','council') returning id`;
+  const edit = { leadId: Number(lead.id), headline: "Before\u0000after", dek: "Before\u0000after", body: "Before\u0000after", topic: "council" };
+  await saveDraftForEditor(context, edit);
+  await saveDraftForEditor(context, edit);
+  const [saved] = await sql`select headline,dek,body from drafts where lead_id=${lead.id}`;
+  assert.deepEqual(saved, { headline: "Beforeafter", dek: "Beforeafter", body: "Beforeafter" });
+  await sql`delete from drafts where lead_id=${lead.id}`;
+  await sql`delete from leads where id=${lead.id}`;
+});
 import type { DraftRow } from "./types.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 

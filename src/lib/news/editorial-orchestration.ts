@@ -24,6 +24,7 @@ export type WriteEditorialInput = {
   subject: string;
   /** Complete private material pasted by the editor. */
   sourceText?: string;
+  suppliedMaterialCap?: number;
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
@@ -214,6 +215,7 @@ export async function orchestrateEditorial(
     paper: input.paper,
     subject: input.subject,
     sourceText: input.sourceText,
+    suppliedMaterialCap: input.suppliedMaterialCap,
     pointers: input.pointers,
     ourStory: input.ourStory,
     askedFor: input.askedFor,

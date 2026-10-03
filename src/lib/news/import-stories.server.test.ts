@@ -240,6 +240,18 @@ const HOLD_CARD = {
   disclosureOther: "",
 };
 
+// Bug 19c: model-split import cards wrote raw NUL-bearing prose and provenance.
+it("imported story rows strip NUL from prose and JSON leaves", async () => {
+  const sql = await ensureSchema();
+  const card = { ...CARD, headline: "Before\u0000after", body: "Before\u0000after", dek: "", citations: ["Before\u0000after"] };
+  const result = await performImportFinishedStories({ newsroomId: 1, userId: "nul-import" }, { text: card.body, stories: [card], tool: "Fixture" }, { capture: async () => ({ captured: 0, failed: 0 }) });
+  assert.equal(result.ok, true);
+  const [saved] = await sql`select headline,body,provenance_json::jsonb as provenance from drafts where lead_id=${result.imported[0].leadId}`;
+  assert.equal(saved.headline, "Beforeafter");
+  assert.equal(saved.body, "Beforeafter");
+  assert.doesNotMatch(JSON.stringify(saved.provenance), /\\u0000/);
+});
+
 /**
  * A lead the report wrote up short, with a description and a next step rather
  * than a story: step D's "story idea".

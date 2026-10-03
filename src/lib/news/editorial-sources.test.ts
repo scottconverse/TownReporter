@@ -7,18 +7,11 @@ test('the observed omitted-appendix delivery is incomplete even with a heading',
   assert.equal(editorialSourcesError('The city lists the former mayor. https://longmontcolorado.gov/government/mayors-of-longmont'),null);
   assert.equal(editorialSourcesError('The vote was unanimous. minutes.pdf, page 3.'),null);
 });
-/*
-  U31 restored the writer that holds the voice AND the tools, so the pack asks
-  it to do what it now can: open the sources itself (the pre-U12b wording,
-  restored with the capability). The no-tool path — DeepSeek, the local model, a
-  saved connection, where the DESK did the fetching — keeps the other wording,
-  because asking a model to open a page it cannot open is how an editorial ends
-  up inventing a citation.
-*/
+// Sources are supplied in the pack; the writer must not invent verification.
 test('all writing packs require claims and sources',()=>{
   const pack=buildWritingPack({subject:'Document preservation',research:'Archive lead'});
   assert.match(pack,/EVERY op-ed/); assert.match(pack,/Do not invent citations/);
-  assert.match(pack,/Open and verify the sources yourself using the available web tools/);
+  assert.match(pack,/The sources are provided in this pack/);
 });
 
 test('a pack for a writer with no web tools never asks it to open a page',()=>{

@@ -373,7 +373,11 @@ export async function commitDailyScanResults<T>(
   });
 }
 
-export async function finalizeDailyScanFailure(job: DeskJob, msg: string): Promise<void> {
+export async function finalizeDailyScanFailure(
+  job: DeskJob,
+  msg: string,
+  write?: (sql: Sql) => Promise<void>,
+): Promise<void> {
   await withTransaction(async (sql) => {
     const [ownedJob] = await sql.query(
       "select 1 from desk_jobs where id=$1 and newsroom_id=$2 and status='running' and claim_token=$3 for update",
@@ -385,6 +389,8 @@ export async function finalizeDailyScanFailure(job: DeskJob, msg: string): Promi
       [job.id, job.subject_id, job.newsroom_id],
     );
     if (!reservation || !["queued", "running"].includes(reservation.status)) return;
+    // Failed/cancelled work keeps its source observations under the current lease.
+    await write?.(sql);
     await sql.query(
       "update daily_scan_reservations set status='failed',error=$2,finished_at=now() where scan_run_id=$1 and newsroom_id=$3 and desk_job_id=$4",
       [job.subject_id, msg, job.newsroom_id, job.id],
@@ -618,6 +624,8 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
       beforeScheduledCommit: deps.beforeScheduledCommit,
       scheduledCommit: (write: (sql: Sql) => Promise<unknown>) =>
         commitDailyScanResults(job, write),
+      scheduledFailure: (msg: string, write: (sql: Sql) => Promise<void>) =>
+        finalizeDailyScanFailure(job, msg, write),
     } as any);
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Scheduled scan failed";

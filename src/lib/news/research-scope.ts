@@ -307,10 +307,10 @@ export function cityOfficialHost(
   return best;
 }
 
-/** The same rule over the paper's configured sources, official ones only. */
+/** Prefer inferred government hosts, then the configured city site on any TLD. */
 export function officialSiteHost(
   city: string,
-  sources: readonly { url: string; kind?: string | null }[],
+  sources: readonly { url: string; kind?: string | null; title?: string | null }[],
   state = "",
 ): string | null {
   const officialHosts: string[] = [];
@@ -319,14 +319,30 @@ export function officialSiteHost(
     const host = hostOf(source.url);
     if (host) officialHosts.push(host);
   }
-  return cityOfficialHost(city, officialHosts, state);
+  const inferred = cityOfficialHost(city, officialHosts, state);
+  if (inferred) return inferred;
+  const slug = citySlug(city);
+  if (!slug) return null;
+  for (const source of sources) {
+    if ((source.kind ?? "").trim().toLowerCase() !== "official") continue;
+    const host = hostOf(source.url);
+    if (!host || /\.(gov|us)$/.test(host)) continue;
+    const title = String(source.title ?? "");
+    // The configured title identifies abbreviated hosts such as fcgov.com.
+    const cityTitle = citySlug(title) === slug || citySlug(title) === `cityof${slug}`;
+    const label = registrableLabel(host).label;
+    // Initials alone are not unique (fcgov.com is Fort Collins, not Foster City), so an
+    // abbreviated host counts only when the source's own title names this city.
+    if (cityTitle || isCityLabel(label, slug, state)) return host;
+  }
+  return null;
 }
 
 /** The scope a PaperConfig describes. See the type note above. */
 export function researchScopeOf(paper: {
   city: string;
   state?: string | null;
-  seedSources?: readonly { url: string; kind?: string | null }[] | null;
+  seedSources?: readonly { url: string; kind?: string | null; title?: string | null }[] | null;
 }): ResearchScope {
   const city = paper.city.trim();
   const state = (paper.state ?? "").trim();

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { EDITORIAL_TOOLS } from "./editorial.ts";
 import {
   CLAUDE_CLI_MISSING,
   claudeCliCandidates,
@@ -15,6 +16,20 @@ import {
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const FAKE_CLAUDE = join(ROOT, "scripts/fakes/fake-claude-cli.mjs");
+
+// Bug 21a: Opinion WebFetch could exfiltrate private pasted material in a URL or prompt.
+it("Opinion removes WebFetch from the actual CLI tool surface", async () => {
+  const restore = withEnv({ CLAUDE_CLI_PATH: FAKE_CLAUDE, FAKE_CLAUDE_ECHO_TOOLS: "1" });
+  resetClaudeCliCache();
+  try {
+    const result = await claudeCodeChat({ system: "Research", user: "Private editor paste", model: "claude-opus-5", allowedTools: EDITORIAL_TOOLS, timeoutMs: 10000 });
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const echoed = JSON.parse(result.text);
+    assert.equal(echoed.flag, "--tools");
+    assert.equal(echoed.value, "WebSearch");
+  } finally { restore(); resetClaudeCliCache(); }
+});
 
 function withEnv(vars: Record<string, string | undefined>) {
   const before: Record<string, string | undefined> = {};
@@ -361,7 +376,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
     }
   });
 
-  it("a real allowedTools list still reaches the CLI as --allowed-tools, untouched by noTools", async () => {
+  it("a real allowedTools list also restricts the CLI tool surface", async () => {
     const restore = withEnv({
       CLAUDE_CLI_PATH: FAKE_CLAUDE,
       FAKE_CLAUDE_ECHO_TOOLS: "1",
@@ -378,7 +393,7 @@ describe("claudeCodeChat's noTools flag reaches the CLI as --tools, not --allowe
       assert.equal(result.ok, true);
       if (!result.ok) return;
       const echoed = JSON.parse(result.text) as { flag: string; value: string };
-      assert.equal(echoed.flag, "--allowed-tools");
+      assert.equal(echoed.flag, "--tools");
       assert.equal(echoed.value, "WebSearch,WebFetch");
     } finally {
       restore();

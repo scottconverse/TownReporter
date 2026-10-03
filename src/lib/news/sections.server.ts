@@ -59,9 +59,17 @@ export const SECTION_SCHEMA = [
 
 export async function ensureSectionsSchema() {
   const sql = await getSql();
-  await ensureSchemaOnce(sql, "sections", SECTION_SCHEMA);
-  // The shared legacy ensure helper tolerates DDL failures. Sections cannot:
-  // missing filing guards would silently revive retired keys or lose snapshots.
+  const incomplete = "Section schema is incomplete. Apply migrations and retry; no section changes were accepted.";
+  try {
+    await ensureSchemaOnce(sql, "sections", SECTION_SCHEMA);
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code !== "42P01") throw error;
+    // Preserve the sections refusal contract when a prerequisite table is
+    // missing. The failure remains fatal, with no success marker and its cause.
+    await sql`delete from _schema_ensure_state where name='sections'`;
+    throw new Error(incomplete, { cause: error });
+  }
+  // Even a matching marker must not hide missing filing guards or snapshots.
   const [ready] = await sql<{ ready: boolean }>`
     select
       (select count(*) from information_schema.tables where table_schema='public'
@@ -78,7 +86,7 @@ export async function ensureSectionsSchema() {
   `;
   if (!ready?.ready) {
     await sql`delete from _schema_ensure_state where name='sections'`;
-    throw new Error("Section schema is incomplete. Apply migrations and retry; no section changes were accepted.");
+    throw new Error(incomplete);
   }
 }
 

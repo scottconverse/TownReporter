@@ -95,3 +95,20 @@ it(
     assert.equal((await s.query<{ n: number }>("select count(*)::int n from desk_jobs"))[0].n, 1);
   },
 );
+
+// Bug (review): a changed statement list re-runs every ensure batch on live; a throw there breaks the module on every call.
+it("every registered ensure batch runs twice from a clean marker table on real Postgres without throwing", { skip }, async () => {
+  const s = await db.getSql();
+  // The modules use "@/" imports, so load them through Vite the way the registry test does.
+  const { createServer } = await import("vite");
+  const vite = await createServer({ configFile: false, server: { middlewareMode: true }, resolve: { alias: { "@": resolve(process.cwd(), "src") } } });
+  try {
+  const { SCHEMA_WARMUP_REGISTRY } = await vite.ssrLoadModule("/src/lib/schema-warmup.ts");
+  for (let pass = 1; pass <= 2; pass += 1) {
+    await s.query("delete from _schema_ensure_state");
+    for (const entry of SCHEMA_WARMUP_REGISTRY) {
+      await assert.doesNotReject(entry.run(), `pass ${pass}: ${entry.name} threw`);
+    }
+  }
+  } finally { await vite.close(); }
+});

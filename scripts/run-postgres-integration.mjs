@@ -64,6 +64,9 @@ function runFile(file, env, root, index, total) {
       // Loaded last, so the opt-in preload above has already decided what this
       // process is allowed to be; the seal only ever narrows.
       "--import", new URL("../src/lib/test-support/model-seal.ts", import.meta.url).href,
+      // The same migrated PGlite the unit runner gives every file. Without it a test that does not make its own
+      // database ran on an EMPTY schema, which only passed while ensureSchemaOnce swallowed the missing tables.
+      "--import", new URL("../src/lib/test-support/pglite-migrations.ts", import.meta.url).href,
       "--experimental-strip-types", "--test", "--test-reporter=tap", file,
     ], { cwd: root, env, stdio: ["ignore", "pipe", "pipe"] });
     let output = "";
