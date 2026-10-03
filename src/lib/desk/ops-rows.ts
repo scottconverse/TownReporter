@@ -43,6 +43,7 @@
 */
 
 import type { HealthCheck, HealthState } from "@/lib/ops/health";
+import { formatClockTime } from "../paper.ts";
 import type { DailyScanPolicy } from "@/lib/news/daily-scan";
 import type { LocalCatalog } from "@/lib/news/local-models";
 import type { MeetingOperatorSettings } from "@/lib/news/meeting-settings";
@@ -242,28 +243,15 @@ export function clockText(localTime: string): string {
  *
  * A moment ("when was this tried") has to read in the same voice as the desk's
  * other clock sentences, so the zone conversion is done here and the wording is
- * done by `clockText` above -- one clock, not two. An unreadable timestamp or
+ * done by `paper.formatClockTime` -- one clock face. An unreadable timestamp or
  * zone returns "" rather than a time nobody can check.
  */
 export function clockTextAt(
   iso: string | Date | null | undefined,
   timeZone: string,
 ): string {
-  if (!iso) return "";
-  const date = iso instanceof Date ? iso : new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
   try {
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: timeZone || undefined,
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).formatToParts(date);
-    const hour = parts.find((part) => part.type === "hour")?.value ?? "";
-    const minute = parts.find((part) => part.type === "minute")?.value ?? "";
-    if (!hour || !minute) return "";
-    // Some ICU builds print midnight as "24" under hourCycle h23.
-    return clockText(`${hour === "24" ? "00" : hour}:${minute}`);
+    return formatClockTime(iso, timeZone || undefined);
   } catch {
     /* an unknown time zone is not a time */
     return "";

@@ -143,7 +143,8 @@ test("Today: Start story and S show a pending state and a real failure", () => {
 test("Today: Undo and U show a pending state", () => {
   const today = read("src/routes/desk.index.tsx");
   assert.match(today, /const undoingThis =/);
-  assert.match(today, /pending=\{undoingThis\}\s*pendingLabel="Putting it back…"/);
+  // a Held row says "Releasing…" (the Release button), any other row "Putting it back…"
+  assert.match(today, /pending=\{undoingThis\}\s*pendingLabel=\{held \? "Releasing…" : "Putting it back…"\}/);
 });
 
 test("Today: Run scan now draws the scan's own card and reports a failure", () => {

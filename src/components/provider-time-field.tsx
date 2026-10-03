@@ -102,7 +102,7 @@ export function ProviderTimeField({
           </InkButton>
         ) : null}
       </p>
-      {err ? <p className="mt-1 text-sm text-rust">{err}</p> : null}
+      {err ? <p className="mt-1 text-sm text-rust" role="alert">{err}</p> : null}
     </div>
   );
 }

@@ -11,7 +11,7 @@ if ($DataRoot -and (Test-Path -LiteralPath $pointerFile)) {
 }
 if (!$DataRoot) {
   if (Test-Path -LiteralPath $pointerFile) { $DataRoot = (Get-Content -LiteralPath $pointerFile -Raw | ConvertFrom-Json).DataRoot }
-  else { $DataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\' + [guid]::NewGuid().ToString('N')) }
+  else { $DataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\' + [guid]::NewGuid().ToString('N').Substring(0, 8)) }
 }
 . "$PSScriptRoot\Common.ps1"
 $lifecycle = Enter-InstallLifecycle
@@ -45,6 +45,30 @@ $dependencies = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'dependencies.
 $toolsRoot = Join-Path $DataRoot 'tools'
 New-Item -ItemType Directory -Force -Path $toolsRoot | Out-Null
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+function Get-ArchivePathInfo([string]$archive, [string]$staging, [string]$runtimeRoot, [string]$name) {
+  Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+  $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+  try {
+    $longestEntry = ''
+    foreach ($entry in $zip.Entries) {
+      $entryPath = $entry.FullName.Replace('/', '\').TrimEnd('\')
+      if ($entryPath.Length -gt $longestEntry.Length) { $longestEntry = $entryPath }
+    }
+  } finally { $zip.Dispose() }
+  # Concatenate rather than resolve the full entry: .NET can itself reject a
+  # path over MAX_PATH before we can show the measured, actionable refusal.
+  $paths = [pscustomobject]@{
+    ExtractionPath = [IO.Path]::GetFullPath($staging).TrimEnd('\') + '\' + $longestEntry
+    RuntimePath = [IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\') + '\' + $longestEntry
+  }
+  $longPaths = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled -eq 1
+  if (!$longPaths) {
+    foreach ($path in @($paths.ExtractionPath, $paths.RuntimePath)) {
+      if ($path.Length -gt 259) { throw "$name path is too long: $path ($($path.Length) characters). Windows allows 259 characters when long paths are disabled. Choose a shorter -DataRoot such as C:\TR. No archive was extracted." }
+    }
+  }
+  return $paths
+}
 function Get-VerifiedDependency($dependency, [string]$name) {
   $zipName = [IO.Path]::GetFileName(([uri]$dependency.url).AbsolutePath)
   $archive = Join-Path $toolsRoot $zipName
@@ -74,21 +98,47 @@ function Get-VerifiedDependency($dependency, [string]$name) {
   }
   $target = Join-Path $toolsRoot $dependency.directory
   $marker = Join-Path $target '.townreporter-extracted.sha256'
-  if (Test-Path -LiteralPath $target) {
+  $existing = Test-Path -LiteralPath $target
+  $staging = $null; $paths = $null
+  if ($existing) {
     if (!(Test-Path -LiteralPath $marker) -or (Get-Content -LiteralPath $marker -Raw).Trim() -ne $dependency.sha256) { throw "Incomplete or unowned runtime directory: $target. Move that directory aside and retry; no files were overwritten." }
   } else {
-    $staging = Join-Path $toolsRoot ('.extract-' + [guid]::NewGuid().ToString('N'))
-    Expand-Archive -LiteralPath $archive -DestinationPath $staging
-    $extracted = Join-Path $staging $dependency.directory
-    if (!(Test-Path -LiteralPath $extracted)) { throw "Unexpected $name archive layout. Extracted files retained at $staging." }
-    # Mark the fully extracted directory before its atomic move into the runtime location.
-    $dependency.sha256 | Set-Content -LiteralPath (Join-Path $extracted '.townreporter-extracted.sha256') -Encoding ASCII
-    Move-Item -LiteralPath $extracted -Destination $target
+    $staging = Join-Path $toolsRoot ('.x' + [guid]::NewGuid().ToString('N').Substring(0, 6))
+    $paths = Get-ArchivePathInfo $archive $staging $toolsRoot $name
   }
-  return $target
+  return [pscustomobject]@{ Name=$name; Archive=$archive; Target=$target; Staging=$staging; Directory=$dependency.directory; Sha256=$dependency.sha256; Existing=$existing; Paths=$paths }
 }
-$nodeRoot = Get-VerifiedDependency $dependencies.node 'Node.js'
-$pgRoot = Get-VerifiedDependency $dependencies.postgres 'PostgreSQL'
+function Expand-VerifiedDependency($plan) {
+  if ($plan.Existing) { return $plan.Target }
+  $previousError = if ($Error.Count) { $Error[0] } else { $null }
+  try {
+    Expand-Archive -LiteralPath $plan.Archive -DestinationPath $plan.Staging -ErrorAction Stop
+    $extracted = Join-Path $plan.Staging $plan.Directory
+    if (!(Test-Path -LiteralPath $extracted)) { throw "Unexpected $($plan.Name) archive layout. Extracted files retained at $($plan.Staging)." }
+    # Mark the fully extracted directory before its atomic move into the runtime location.
+    $plan.Sha256 | Set-Content -LiteralPath (Join-Path $extracted '.townreporter-extracted.sha256') -Encoding ASCII
+    Move-Item -LiteralPath $extracted -Destination $plan.Target -ErrorAction Stop
+  } catch {
+    # Expand-Archive's finally can throw during cleanup and hide the original
+    # extraction exception. $Error is newest first; keep the earliest new record.
+    $firstError = $_
+    foreach ($record in $Error) {
+      if ([object]::ReferenceEquals($record, $previousError)) { break }
+      $firstError = $record
+    }
+    $hint = ''
+    if ($plan.Paths.ExtractionPath.Length -gt 259 -or $plan.Paths.RuntimePath.Length -gt 259 -or $firstError.Exception -is [IO.PathTooLongException] -or $firstError.Exception.Message -match 'path.*too long|MAX_PATH') {
+      $hint = ' Windows path length is the likely cause. Choose a shorter -DataRoot such as C:\TR.'
+    }
+    throw "$($plan.Name) extraction or move failed: $($firstError.Exception.Message).$hint Extracted files retained at $($plan.Staging)."
+  }
+  return $plan.Target
+}
+# Download, verify and preflight both ZIPs before unpacking either runtime.
+$nodeDependency = Get-VerifiedDependency $dependencies.node 'Node.js'
+$pgDependency = Get-VerifiedDependency $dependencies.postgres 'PostgreSQL'
+$nodeRoot = Expand-VerifiedDependency $nodeDependency
+$pgRoot = Expand-VerifiedDependency $pgDependency
 $nodeExe = Join-Path $nodeRoot 'node.exe'
 $pgBin = Join-Path $pgRoot 'bin'
 & $nodeExe --version

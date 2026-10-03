@@ -4,6 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+# A new push to a branch cancels the older run on that branch (pull requests only; every push to main and every nightly run has its own group, so none is dropped).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every job here only reads the repository: checkout, `npm ci`, build, test,
 # and upload run artifacts. Nothing opens a release, comments on a pull
@@ -14,6 +22,97 @@ permissions:
   contents: read
 
 jobs:
+  # Which of the not-required browser walks need to run on this change? A walk runs when its
+  # own script (or scripts/lib/, or this workflow) changed. The nightly run and a manual run
+  # execute everything, so app code that breaks a walk is caught within a day, not blocking a PR.
+  # The 12 required checks never depend on this job and always run under the same names.
+  changes:
+    name: Which browser walks need to run (nightly or manual only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run_lifecycle: ${{ steps.pick.outputs.run_lifecycle }}
+      run_smoke_dev: ${{ steps.pick.outputs.run_smoke_dev }}
+      run_desk_flows: ${{ steps.pick.outputs.run_desk_flows }}
+      run_desk_production_regression: ${{ steps.pick.outputs.run_desk_production_regression }}
+      run_scan_refresh_browser: ${{ steps.pick.outputs.run_scan_refresh_browser }}
+      run_provider_signin: ${{ steps.pick.outputs.run_provider_signin }}
+      run_failover: ${{ steps.pick.outputs.run_failover }}
+      run_story_quota_failover: ${{ steps.pick.outputs.run_story_quota_failover }}
+      run_custom_api_ui: ${{ steps.pick.outputs.run_custom_api_ui }}
+      run_dark_picker: ${{ steps.pick.outputs.run_dark_picker }}
+      run_scan_desk: ${{ steps.pick.outputs.run_scan_desk }}
+      run_sources_desk: ${{ steps.pick.outputs.run_sources_desk }}
+      run_sources_reach_the_reader: ${{ steps.pick.outputs.run_sources_reach_the_reader }}
+      run_sections_source_add: ${{ steps.pick.outputs.run_sections_source_add }}
+      run_named_outlets: ${{ steps.pick.outputs.run_named_outlets }}
+      run_batch_published_panel: ${{ steps.pick.outputs.run_batch_published_panel }}
+      run_import_stories: ${{ steps.pick.outputs.run_import_stories }}
+      run_paste_one_story: ${{ steps.pick.outputs.run_paste_one_story }}
+      run_import_any_format: ${{ steps.pick.outputs.run_import_any_format }}
+      run_front_page_river: ${{ steps.pick.outputs.run_front_page_river }}
+      run_import_civic_scanner_v26: ${{ steps.pick.outputs.run_import_civic_scanner_v26 }}
+      run_daily_scan_automatic: ${{ steps.pick.outputs.run_daily_scan_automatic }}
+      run_desk_dark_flash: ${{ steps.pick.outputs.run_desk_dark_flash }}
+      run_control_page: ${{ steps.pick.outputs.run_control_page }}
+      run_redraft_scan: ${{ steps.pick.outputs.run_redraft_scan }}
+      run_editor_controls_0667: ${{ steps.pick.outputs.run_editor_controls_0667 }}
+      run_claim_sources_pull_0674: ${{ steps.pick.outputs.run_claim_sources_pull_0674 }}
+      run_first_owner_setup_code: ${{ steps.pick.outputs.run_first_owner_setup_code }}
+      run_legal_gone_nav: ${{ steps.pick.outputs.run_legal_gone_nav }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.sha }}
+        run: |
+          set -eu
+          everything=false
+          if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then everything=true; fi
+          # Scott 2026-10-03: pull requests and pushes run ONLY the 12 required checks.
+          # The browser walks below run in the nightly run and on a manual run (workflow_dispatch), never per push.
+          check() {
+            name=$1; pattern=$2
+            if [ "$everything" = true ]; then
+              echo "$name=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$name=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          check run_lifecycle '^(scripts/lifecycle-e2e\.mjs)$'
+          check run_smoke_dev '^(scripts/astra-dialog-e2e\.mjs|scripts/smoke-built-server\.mjs)$'
+          check run_desk_flows '^(scripts/desk-flows-e2e\.mjs)$'
+          check run_desk_production_regression '^(scripts/desk-production-regression\.mjs)$'
+          check run_scan_refresh_browser '^(scripts/scan-refresh-old-merge-falsification\.mjs|scripts/scan-refresh-runtime-proof\.mjs)$'
+          check run_provider_signin '^(scripts/provider-signin-e2e\.mjs)$'
+          check run_failover '^(scripts/failover-e2e\.mjs)$'
+          check run_story_quota_failover '^(scripts/story-quota-failover-e2e\.mjs)$'
+          check run_custom_api_ui '^(scripts/custom-api-ui-acceptance\.mjs)$'
+          check run_dark_picker '^(scripts/dark-picker-e2e\.mjs)$'
+          check run_scan_desk '^(scripts/scan-desk-e2e\.mjs)$'
+          check run_sources_desk '^(scripts/sources-desk-e2e\.mjs)$'
+          check run_sources_reach_the_reader '^(scripts/paste-editorial-e2e\.mjs|scripts/sources-reach-the-reader\.mjs)$'
+          check run_sections_source_add '^(scripts/sections-source-add-e2e\.mjs)$'
+          check run_named_outlets '^(scripts/named-outlets-e2e\.mjs)$'
+          check run_batch_published_panel '^(scripts/batch-published-panel-e2e\.mjs)$'
+          check run_import_stories '^(scripts/co-transcript-walk\.mjs|scripts/import-stories-e2e\.mjs)$'
+          check run_paste_one_story '^(scripts/meeting-settings-e2e\.mjs|scripts/paste-one-story-e2e\.mjs)$'
+          check run_import_any_format '^(scripts/import-any-format-e2e\.mjs)$'
+          check run_front_page_river '^(scripts/front-page-river-e2e\.mjs|scripts/paper-panels\.mjs|scripts/stats-privacy-e2e\.mjs)$'
+          check run_import_civic_scanner_v26 '^(scripts/import-civic-scanner-v26-e2e\.mjs)$'
+          check run_daily_scan_automatic '^(scripts/daily-scan-automatic-e2e\.mjs)$'
+          check run_desk_dark_flash '^(scripts/desk-dark-flash-walk\.mjs|scripts/fb6-desk-feedback-walk\.mjs|scripts/walk-every-control-0681\.mjs)$'
+          check run_control_page '^(scripts/control-page-walk\.mjs)$'
+          check run_redraft_scan '^(scripts/redraft-scan-e2e\.mjs)$'
+          check run_editor_controls_0667 '^(scripts/editor-controls-0667-walk\.mjs)$'
+          check run_claim_sources_pull_0674 '^(scripts/claim-sources-pull-walk\.mjs)$'
+          check run_first_owner_setup_code '^(scripts/first-owner-setup-code-walk\.mjs)$'
+          check run_legal_gone_nav '^(scripts/cp-desk-dialogs-walk\.mjs|scripts/desk-clickable-guard-walk\.mjs|scripts/desk-narrow-width-walk\.mjs|scripts/legal-gone-nav-e2e\.mjs|scripts/publish-blockers-walk\.mjs)$'
+
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint
   # error nobody had seen yet held back every test in the repository. They are
@@ -129,6 +228,8 @@ jobs:
           fi
 
   lifecycle:
+    needs: changes
+    if: needs.changes.outputs.run_lifecycle == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -230,6 +331,8 @@ jobs:
           if-no-files-found: ignore
 
   smoke-dev:
+    needs: changes
+    if: needs.changes.outputs.run_smoke_dev == 'true'
     name: Documented dev path works in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -355,6 +458,8 @@ jobs:
   # falls back to in-memory PGLite, so every job starts on an empty database
   # and owns its own desk.
   desk-flows:
+    needs: changes
+    if: needs.changes.outputs.run_desk_flows == 'true'
     name: The 0.5.1 desk flows, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -396,6 +501,8 @@ jobs:
   # snapshots cannot be collected the run FAILS. Every request method is
   # recorded and any mutating method fails the run.
   desk-production-regression:
+    needs: changes
+    if: needs.changes.outputs.run_desk_production_regression == 'true'
     name: The production-desk regression, signed in (disclosed mutating setup)
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -449,6 +556,8 @@ jobs:
   # row's finished values. This job seeds and finishes one row directly: no
   # source fetch, model request, credential, or provider spending is involved.
   scan-refresh-browser:
+    needs: changes
+    if: needs.changes.outputs.run_scan_refresh_browser == 'true'
     name: An open Scan page observes its running row finish
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -512,6 +621,8 @@ jobs:
   # The CLI it drives is scripts/fakes/fake-claude-cli.mjs: nothing here spends,
   # and nothing here touches a real credential.
   provider-signin:
+    needs: changes
+    if: needs.changes.outputs.run_provider_signin == 'true'
     name: Signing in to a writing model, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -607,6 +718,8 @@ jobs:
   # here spends allowance or touches a real credential. See the walk under
   # scripts/, named for what it proves.
   failover:
+    needs: changes
+    if: needs.changes.outputs.run_failover == 'true'
     name: Automatic's ladder skips a dead rung and fails over on quota, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -655,6 +768,8 @@ jobs:
           kill_tree "$DEV_PID"
 
   story-quota-failover:
+    needs: changes
+    if: needs.changes.outputs.run_story_quota_failover == 'true'
     name: Story upload survives a first-rung quota failover to Codex Terra
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -700,6 +815,8 @@ jobs:
           kill_tree "$DEV_PID"
 
   custom-api-ui:
+    needs: changes
+    if: needs.changes.outputs.run_custom_api_ui == 'true'
     name: Saved custom connection reads Story documents and enqueues Batch
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -751,6 +868,8 @@ jobs:
   # calls a real provider. See the walk under scripts/, named for what it
   # proves.
   dark-picker:
+    needs: changes
+    if: needs.changes.outputs.run_dark_picker == 'true'
     name: The Dark Desk model picker and the time-per-call field, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -802,6 +921,8 @@ jobs:
   # Run scan is never clicked, and batch drafting only exercises that fake
   # runtime. Nothing here calls a real provider. See the walk under scripts/.
   scan-desk:
+    needs: changes
+    if: needs.changes.outputs.run_scan_desk == 'true'
     name: The Scan desk renders, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -857,6 +978,8 @@ jobs:
   # step, reloading after every write so the assertion can only be true if
   # the change is stored, not merely remembered in React state.
   sources-desk:
+    needs: changes
+    if: needs.changes.outputs.run_sources_desk == 'true'
     name: The Sources desk add/drop/restore, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -981,6 +1104,8 @@ jobs:
   # the draft it created did not, and publishing reads the draft. The data was
   # dropped between two tables, which no unit test on either table would see.
   sources-reach-the-reader:
+    needs: changes
+    if: needs.changes.outputs.run_sources_reach_the_reader == 'true'
     name: A source on a lead reaches the reader
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1153,6 +1278,8 @@ jobs:
   # is added, while the assignment to the section only lands on "Confirm and
   # apply".
   sections-source-add:
+    needs: changes
+    if: needs.changes.outputs.run_sections_source_add == 'true'
     name: A source added inside a section lands on the watch list first
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1205,6 +1332,8 @@ jobs:
   # beside it. The three stored states -- built-in list, the owner's own list,
   # "checks no outlet names" -- are each read back after a reload.
   named-outlets:
+    needs: changes
+    if: needs.changes.outputs.run_named_outlets == 'true'
     name: The named-outlet list, its removal preview, and its three states
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1247,6 +1376,8 @@ jobs:
           kill_tree "$DEV_PID"
 
   batch-published-panel:
+    needs: changes
+    if: needs.changes.outputs.run_batch_published_panel == 'true'
     name: The Queue's batch panel drops a story once the paper has printed it
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1294,6 +1425,8 @@ jobs:
   # HOST and empty DATABASE_URL), so the job builds and then runs the script --
   # no `npm start` step to keep alive, and nothing left listening afterwards.
   import-stories:
+    needs: changes
+    if: needs.changes.outputs.run_import_stories == 'true'
     name: Import finished stories, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1334,6 +1467,8 @@ jobs:
   # chooser the write box uses, so a story the chooser cannot place opens
   # "Section not chosen -- pick one" instead of a section nobody chose.
   paste-one-story:
+    needs: changes
+    if: needs.changes.outputs.run_paste_one_story == 'true'
     name: Paste one story, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1374,6 +1509,8 @@ jobs:
   # (a Claude-authored civic scanner report), plus the other shapes an editor
   # actually pastes -- plain text with no headings, markdown, a saved page.
   import-any-format:
+    needs: changes
+    if: needs.changes.outputs.run_import_any_format == 'true'
     name: Import a report in any of the formats an editor pastes
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1396,6 +1533,8 @@ jobs:
   # own stories in the order an editor sees them, with the section fix, and this
   # is the walk that pins the reader's page rather than the desk's.
   front-page-river:
+    needs: changes
+    if: needs.changes.outputs.run_front_page_river == 'true'
     name: The front-page river, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1443,6 +1582,8 @@ jobs:
   # PARTIAL run is bannered with its own "what remains" list. Port 3323, which
   # no other integration file may bind.
   import-civic-scanner-v26:
+    needs: changes
+    if: needs.changes.outputs.run_import_civic_scanner_v26 == 'true'
     name: Import a civic-scanner v2.6 report, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1471,6 +1612,8 @@ jobs:
   # and 3337 (the stubbed DeepSeek endpoint), which no other integration file
   # may bind.
   daily-scan-automatic:
+    needs: changes
+    if: needs.changes.outputs.run_daily_scan_automatic == 'true'
     name: The daily scan on Automatic, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1509,6 +1652,8 @@ jobs:
   # Port 3474, which no other integration file may bind. Boots its own copy of
   # the built server on in-memory PGlite, so there is no `npm start` step here.
   desk-dark-flash:
+    needs: changes
+    if: needs.changes.outputs.run_desk_dark_flash == 'true'
     name: No light frame in dark mode, in a browser
     runs-on: ubuntu-latest
     # 35, not 20, since Unit U5 added the whole-desk sweep below: two self-
@@ -1638,6 +1783,8 @@ jobs:
   # ops/control/control-server.mjs in-process -- so there is no `npm run build`
   # step and no `npm start`.
   control-page:
+    needs: changes
+    if: needs.changes.outputs.run_control_page == 'true'
     name: The Control page, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1677,6 +1824,8 @@ jobs:
   # (scripts/integration-ports-are-unique.test.mjs). The walk boots its own copy
   # of the built server on in-memory PGlite, so there is no `npm start` step here.
   redraft-scan:
+    needs: changes
+    if: needs.changes.outputs.run_redraft_scan == 'true'
     name: One press reads a long scanned packet to the end, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1729,6 +1878,8 @@ jobs:
   # (scripts/integration-ports-are-unique.test.mjs). The walk boots its own copy
   # of the built server on in-memory PGlite, so there is no `npm start` step here.
   editor-controls-0667:
+    needs: changes
+    if: needs.changes.outputs.run_editor_controls_0667 == 'true'
     name: A long to-do saves, a headline survives a redraft, and Publish confirms its section
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1767,6 +1918,8 @@ jobs:
   # leaves the runner and no credential is used. Port 3531 belongs to this walk
   # alone (scripts/integration-ports-are-unique.test.mjs).
   claim-sources-pull-0674:
+    needs: changes
+    if: needs.changes.outputs.run_claim_sources_pull_0674 == 'true'
     name: A claim's source reads as its site name, Pull fills the box, Add to notes writes one line, and the redraft carries it
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1817,6 +1970,8 @@ jobs:
   # `<cwd>/.townreporter-data/logs/SETUP-CODE.txt` is the one this server wrote
   # (the resolution order in scripts/first-run-setup-step.mjs).
   first-owner-setup-code:
+    needs: changes
+    if: needs.changes.outputs.run_first_owner_setup_code == 'true'
     name: A wrong setup code refuses, and the owner can retype it
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1881,6 +2036,8 @@ jobs:
   # Port 3523, which no other integration file may bind
   # (scripts/integration-ports-are-unique.test.mjs).
   legal-gone-nav:
+    needs: changes
+    if: needs.changes.outputs.run_legal_gone_nav == 'true'
     name: A legally removed story says so on in-app navigation, in a browser
     runs-on: ubuntu-latest
     timeout-minutes: 20

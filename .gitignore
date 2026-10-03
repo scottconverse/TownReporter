@@ -7,10 +7,12 @@ node_modules/
 logs/
 .output/
 # ops/promote.ps1 keeps the build that is running before it builds a new one,
-# so a build that does not work can be undone. One directory, replaced on each
-# promotion, never committed: it would otherwise sit in `git status` output and
-# be swept away by a `git clean -fd` on the machine serving the paper.
+# so a build that does not work can be undone. The latest fallback and the
+# snapshots kept by copy stamp are never committed: they would sit in
+# `git status` output and be swept away by a `git clean -fd` on the machine
+# serving the paper.
 .output-previous/
+.output-prerollout-*/
 
 # ops/stage.ps1 run state -- machine-local, never the deliverable.
 ops/.stage.pid

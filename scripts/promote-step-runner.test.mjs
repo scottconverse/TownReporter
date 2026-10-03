@@ -2219,7 +2219,8 @@ test("the normal start does not skip the migration, and the refusal-before-the-c
   );
   // Every start that runs against a RESTORED database skips it.
   const fallbackStarts = [...src.matchAll(/StartTheApp \{ Start-TheApp -SkipMigrate \}/g)].length;
-  assert.equal(fallbackStarts, 4, `expected the four restored-database starts to skip the migration, found ${fallbackStarts}`);
+  // five: the four fallbacks plus the refusal restart when a build snapshot cannot be kept (6b)
+  assert.equal(fallbackStarts, 5, `expected the five restored-database starts to skip the migration, found ${fallbackStarts}`);
   assert.match(src, /Invoke-PromoteNothingChanged -Log \$log -App \$app -StartTheApp \{ Start-TheApp -SkipMigrate \}/, "the refusal restart does not skip the migration (addition (a))");
   // The refusal path does not touch the checkout: nothing moved, so there is
   // nothing to put back.
@@ -2432,7 +2433,8 @@ test("the copy's refusal path starts the paper and still exits non-zero", () => 
     /The paper is still down and the database was not copied/,
     "the refusal still tells the operator the paper is down",
   );
-  assert.equal([...src.matchAll(/Invoke-PromoteNothingChanged/g)].length, 1, "the restart is wired in more than one place");
+  // two: the copy refusal, and the refusal when the build snapshot cannot be kept before the copy (6b)
+  assert.equal([...src.matchAll(/Invoke-PromoteNothingChanged/g)].length, 2, "the restart is wired somewhere other than the copy refusal and the snapshot refusal");
 });
 
 test("whether to install is decided by what node_modules was built from, not by this run's fast-forward", windowsOnly, async () => {
