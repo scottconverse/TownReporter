@@ -11,6 +11,11 @@ on:
         required: false
         type: string
 
+# A new push to a branch cancels the older run on that branch (pull requests only; main keeps every run).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
