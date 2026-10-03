@@ -502,6 +502,8 @@ async function main() {
   await page.getByRole("heading", { name: "Dark Desk", exact: true }).waitFor();
   step("Dark Desk renders");
 
+  // Group 3: "How hard to dig" is in the panel the header's Settings button opens.
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByText("How hard to dig").waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "Change", exact: true }).first().click();
   await page.getByText(/Dig — how far it chases/).waitFor({ timeout: 10_000 });

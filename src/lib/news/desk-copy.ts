@@ -2509,6 +2509,19 @@ export function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+/** Machine provenance belongs in the record, not in an editor's title. */
+export function editorTitle(text: string): string {
+  const title = text
+    .replace(/\s*\(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\)\s*/g, " ")
+    .trim()
+    .replace(/^\[discovery\]\s*/i, "");
+  return title === title.toUpperCase() ? agendaTitle(title) : title;
+}
+
+export function agendaTitle(text: string): string {
+  return sentenceCase(text === text.toUpperCase() ? text.toLowerCase() : text);
+}
+
 /**
  * The status words `Chip` draws (src/components/desk-chrome.tsx). These four
  * used to collapse onto one shared "set aside" or fall through to the raw
