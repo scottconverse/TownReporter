@@ -1401,7 +1401,10 @@ function Invoke-PromoteBuild {
   if ($Recover) {
     $recovered = & $Recover $migrations $child.OutFile $previous
     $paperUp = [bool]$recovered.PaperUp
-    if ($paperUp -and $recovered.Sentence) { $outcome = "$($recovered.Sentence)" }
+    # Invoke-PromoteRolloutFailure answers with `Failure`; the plain fallback answers with `Sentence`.
+    # Reading only `Sentence` left the default "The paper is still down." printed after a good rollback.
+    $recoveredSentence = if ($recovered.Sentence) { "$($recovered.Sentence)" } elseif ($recovered.Failure) { "$($recovered.Failure)" } else { "" }
+    if ($paperUp -and $recoveredSentence) { $outcome = $recoveredSentence }
   } else {
     $paperUp = Invoke-PromoteFallback -Log $Log -App $App -StartTheApp $StartTheApp -Previous $previous -MigrationsRan $migrations -BuildOutput $child.OutFile
     if ($paperUp) {
