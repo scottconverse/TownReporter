@@ -19,9 +19,8 @@
  *      `.astra-check` and `.st-btn.ghost`, plus the `.np-link` centring that a
  *      `min-height` on an `inline-block` needs;
  *   2. the Queue's Sort and Section selects, which said `min-height: 0`;
- *   3. the Queue's row checkbox: the INPUT takes the 44px box and the drawn
- *      24px square moves back to the sibling `.queue-box` -- the control the
- *      keyboard and the guard both address is the one that is 44px tall;
+ *   3. the Queue's row checkbox: a hollow 24px mark inside the 44px label, with
+ *      the system's ink focus ring (the designer's ruling on PR 173);
  *   4. the phone Menu button, which gets its 44px from `.btn` and is asserted
  *      in `scripts/desk-menu-button.test.mjs`.
  *
@@ -32,7 +31,8 @@
  * after `styles.css`. Test 2 asserts that order rather than assuming it.
  *
  * Mutations of the brief: drop `min-height: 44px` from the blanket and test 1
- * fails; put `.queue-check > input` back at 24px and test 3 fails.
+ * fails; put the checkbox's rest state back to a fill (`background: var(--fg2)`)
+ * or its focus ring back to `var(--a)` and test 3 fails.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -150,48 +150,15 @@ test("the Queue's Sort and Section selects fill their 46px box", () => {
   );
 });
 
-test("the Queue's row checkbox owns a 44px target and keeps its 24px square", () => {
-  const inputHeight = declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input", "height").at(-1);
-  const inputMin = declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input", "min-height").at(-1);
-  assert.equal(inputHeight, "44px", "the checkbox input is not 44px tall -- the guard measures it");
-  const inputBox = parseRules(DESK_CSS).find(
-    (rule) => rule.selector.trim() === ".desk-ltr.astra .queue-check > input",
-  );
-  assert.match(inputBox.body, /position:\s*absolute/, "the input no longer covers the label's box");
-  assert.match(inputBox.body, /inset:\s*0/, "the input is not stretched over the press area");
-  assert.match(inputBox.body, /border:\s*0/, "the input draws a 44px edge of its own");
-  /* The mark stays 24px: 10px of padding either side, painted only in the
-     content box. This is the declaration that makes one rectangle 44px tall
-     and 24px wide at once. */
-  assert.equal(
-    declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input", "padding").at(-1),
-    "10px",
-    "the 24px square is back to filling the whole 44px box",
-  );
-  assert.equal(
-    declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input", "background-clip").at(-1),
-    "content-box",
-    "the square's paint is no longer clipped to the 24px content box",
-  );
-  assert.equal(
-    declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input", "background-color").at(-1),
-    "var(--fg2)",
-    "the input has no fill of its own -- the guard reads it as an invisible control again",
-  );
-  const box = parseRules(DESK_CSS).find(
-    (rule) => rule.selector.trim() === ".desk-ltr.astra .queue-check > .queue-box",
-  );
-  assert.ok(box, ".queue-box is gone");
-  assert.match(box.body, /width:\s*24px/, "the drawn square is not 24px wide");
-  assert.match(box.body, /height:\s*24px/, "the drawn square is not 24px tall");
-  assert.match(box.body, /border:\s*0/, "the sibling span draws a second square");
-  assert.match(box.body, /pointer-events:\s*none/, "the drawn square can swallow the press");
-  assert.ok(inputMin === undefined || inputMin === "44px", `the input's min-height is ${inputMin}`);
-  assert.equal(
-    declarations(DESK_CSS, ".desk-ltr.astra .queue-check > input:checked", "background-color").at(-1),
-    "var(--fg)",
-    "the picked square is not the ink",
-  );
+test("the Queue's row checkbox is a hollow 24px mark in a 44px label, with an ink focus ring", () => {
+  /* Bug caught: a filled unchecked box (reads as checked), and a yellow focus ring (1.4:1 on cream). */
+  const input = ".desk-ltr.astra .queue-check > input";
+  assert.equal(declarations(DESK_CSS, ".desk-ltr.astra .queue-check", "min-height").at(-1), "44px");
+  assert.equal(declarations(DESK_CSS, input, "width").at(-1), "24px");
+  assert.equal(declarations(DESK_CSS, input, "border").at(-1), "2px solid var(--fg)");
+  assert.equal(declarations(DESK_CSS, input, "background").at(-1), "var(--bg)");
+  assert.equal(declarations(DESK_CSS, `${input}:checked`, "background").at(-1), "var(--fg)");
+  assert.equal(declarations(DESK_CSS, `${input}:focus-visible`, "outline").at(-1), "2px solid var(--fg)");
 });
 
 test("the two links the floor raises are the ones the guard measured", () => {

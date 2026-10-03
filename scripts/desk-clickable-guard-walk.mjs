@@ -93,6 +93,7 @@ import {
   classifyControl,
   closestMargins,
   exemptFailures,
+  markPaint,
   guardExitCode,
   planVisits,
   staleAllowlistEntries,
@@ -809,6 +810,16 @@ function collectClickables() {
     with the label's own ground behind it -- and both numbers go to
     `classifyControl`, which decides. Labels are never rows themselves (the
     `reportable` filter below drops any box that contains a matched tag).
+
+    UI1b-9, WHICH CHOICES THE 24px MARK RULE APPLIES TO. Only the Queue's two
+    boxes: `.queue-check > input` is the app's one `appearance: none` choice, so
+    it is the one whose own box the author draws, and `classifyControl` asks the
+    mark rules of a replaced choice only. `.astra-check` (18px) and
+    `.choice-row`'s radios in the import cards are NATIVE controls the browser
+    paints -- `appearance: auto` in the computed style -- so the marking rule is
+    about a widget the design system does not draw, and it is not applied to
+    them. The record still carries `checked` and the derived `uncheckedPaint`
+    for every choice, so the day one of them is replaced the evidence is there.
   */
   const boxFor = (el) => {
     const style = getComputedStyle(el);
@@ -880,6 +891,13 @@ function collectClickables() {
       reasonBeside,
       height: Math.round(rect.height * 10) / 10,
       /*
+        UI1b-9: the WIDTH matters for a choice the author drew, because there
+        the control's own box IS the 24px mark and `classifyControl` reads the
+        mark's size off it. Recording it on every row costs nothing and means
+        the mark rule can never fire on a missing measurement.
+      */
+      width: Math.round(rect.width * 10) / 10,
+      /*
         UI1b-6: the DECLARED floor, so the margin report can tell a control
         PINNED at 44px (`min-height: 44px`, the desk's own rule, which cannot
         drift) from one that happens to measure 44-45px because of its font
@@ -901,6 +919,10 @@ function collectClickables() {
       appearance: style.appearance,
       opacity: Number(style.opacity),
       labelBox: el.closest("label") ? boxFor(el.closest("label")) : null,
+      /* UI1b-9: the state the drawn-mark rules need. The rest paint is derived
+         from these numbers in Node (`markPaint`), not here: this function is
+         serialised into the page, where the guard's module is not present. */
+      checked: el.checked === true,
     };
   };
 
@@ -939,6 +961,49 @@ function collectClickables() {
     (el) => !inSet.has(el) && !el.closest(SEL) && !el.querySelector(SEL),
   );
   for (const el of reportable) rows.push(rowFor(el));
+
+  /*
+    UI1b-9b. THE FOCUS RING, MEASURED BY FOCUSING -- LAST, ON PURPOSE.
+
+    The ring a control draws when it takes the keyboard is a `:focus-visible`
+    style, and no stylesheet text can be asked what it paints: the browser has
+    to be put in that state. `el.focus({ focusVisible: true })` is the one way
+    a script can enter it (Chromium supports the option; a plain `.focus()`
+    from script does NOT match `:focus-visible`), so each choice control is
+    focused, its computed `outline-*` is read, and the focus is dropped again.
+
+    It runs AFTER every other measurement -- the rows above are already
+    measured, and `preventScroll: true` keeps the focus from scrolling the page
+    under a measurement still to come. `matched[i]` is `rows[i]`: the rows are
+    `matched.map(rowFor)` and the pointer-only rows are only appended after.
+
+    `visible` records whether `:focus-visible` actually matched. If this
+    Chromium does not honour the option, every record says `visible: false` and
+    the guard's yellow-ring rule is inert rather than wrong -- which is why the
+    flag is recorded instead of assumed. Only choices are focused: the rule is
+    about checkboxes, and focusing 300 buttons to learn nothing costs a page of
+    work.
+  */
+  matched.forEach((el, i) => {
+    const row = rows[i];
+    if (!row || row.isChoice !== true) return;
+    try {
+      el.focus({ focusVisible: true, preventScroll: true });
+      const focused = getComputedStyle(el);
+      row.focusRing = {
+        colour: focused.outlineColor,
+        width: parseFloat(focused.outlineWidth) || 0,
+        style: focused.outlineStyle,
+        offset: parseFloat(focused.outlineOffset) || 0,
+        visible: el.matches(":focus-visible"),
+      };
+      el.blur();
+    } catch {
+      /* A control that cannot take focus is a different finding, and this walk
+         is not the one that makes it. */
+      row.focusRing = null;
+    }
+  });
 
   return { rows, pointerOnly: reportable.length };
 }
@@ -1062,6 +1127,9 @@ async function measureEveryDeskPage(routes, allowlist) {
         theme: visit.theme,
         viewport: visit.viewport,
         ...row,
+        /* UI1b-9: the author-drawn rest paint, as evidence beside the verdict
+           ("fill" is the defect; "outline" is the ruled-looking state). */
+        uncheckedPaint: markPaint(row),
         kind: verdict.kind,
         failures: verdict.failures,
         notes: verdict.notes,
@@ -1126,12 +1194,17 @@ function buildReport({ routes, allowlistProblems, staleEntries }) {
       edgeRatios: [...new Set(examples.map((r) => r.edgeRatio))].sort((a, b) => a - b).slice(0, 6),
     };
   });
-  /* The two kinds that are not about an invisible edge, counted separately so
-     the conversion work can be sized per kind rather than as one number. */
+  /* The kinds that are not about an invisible edge, counted separately so the
+     conversion work can be sized per kind rather than as one number. */
   const kinds = {
     noEdgeOrFill: failing.filter((r) => r.failures.includes("no edge/fill under 3:1")).length,
     linkNotUnderlined: failing.filter((r) => r.failures.includes("link not underlined")).length,
     targetUnder44: failing.filter((r) => r.failures.includes("target under 44px")).length,
+    /* UI1b-9, the drawn checkbox mark. */
+    uncheckedFilled: failing.filter((r) => r.failures.includes("unchecked checkbox is filled")).length,
+    markNotCheckboxSize: failing.filter((r) => r.failures.includes("checkbox mark is not 24px")).length,
+    /* UI1b-9b, the yellow focus ring. */
+    focusRingYellow: failing.filter((r) => r.failures.includes("checkbox focus ring is yellow")).length,
   };
   const notes = tally(
     seen.filter((r) => r.notes.length),
@@ -1180,6 +1253,9 @@ function markdown(report) {
   lines.push(`- no edge/fill under 3:1: **${report.kinds.noEdgeOrFill}**`);
   lines.push(`- link not underlined: **${report.kinds.linkNotUnderlined}**`);
   lines.push(`- target under 44px: **${report.kinds.targetUnder44}**`);
+  lines.push(`- unchecked checkbox is filled: **${report.kinds.uncheckedFilled}**`);
+  lines.push(`- checkbox mark is not 24px: **${report.kinds.markNotCheckboxSize}**`);
+  lines.push(`- checkbox focus ring is yellow: **${report.kinds.focusRingYellow}**`);
   lines.push("");
   lines.push("## Failures by theme");
   lines.push("");

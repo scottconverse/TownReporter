@@ -4264,27 +4264,39 @@
 .desk-ltr.astra .queue-bulk .btn.solid:hover:not(:disabled) {
   background: color-mix(in srgb, #111 84%, var(--a));
 }
-/* BF4, defect 2: the row's selection box, drawn as the drawing draws it.
+/* BF4, defect 2 / UI1b-9: the row's selection box, to the designer's ruling.
 
-   The drawing puts a 24px square with a 2px edge in the row's 44px first
-   track, and fills it ink with a background-colored tick when the lead is
-   picked (`Desk Screens.dc.html`: `width:24px;height:24px;...border:2px solid
-   var(--ink2)` / `background:var(--ink);color:var(--bg)`). Measured before this
-   rule existed, the desk drew a 44px native box that filled the whole track --
-   it read as a button, not a tick.
+   The drawing puts a 24px square with a 2px edge in the row's 44px first track
+   (`Desk Screens.dc.html`: `width:24px;height:24px;...border:2px solid
+   var(--ink2)`), filled ink with a background-coloured tick when the lead is
+   picked (`background:var(--ink);color:var(--bg)`). Measured before that rule
+   existed, the desk drew a 44px native box that filled the whole track -- it
+   read as a button, not a tick.
 
-   The 44px PRESS AREA is kept: this element is the `<label>` around the input,
-   so a press anywhere in the 44px box toggles it, and that is also the desk's
-   minimum target size. The input itself is stretched over the whole label
-   rather than left at its 17px default, because a native control's own box
-   would otherwise draw on top of the drawn square.
+   THE DESIGNER'S RULING ON PR 173 fixes what UI1b-4/5 got wrong: the square was
+   painted SOLID in both states (`--fg2` at rest, `--fg` picked), and a filled
+   box reads as CHECKED. There are two states and they must look different:
+
+     - unchecked: a 2px `--fg` OUTLINE on `--bg` -- hollow, never filled
+       (about 18:1 in light, 14:1 in dark);
+     - checked: the `--fg` fill, with the tick drawn in `--bg` on top.
+   Hollow against solid is the difference an editor reads at a glance, in both
+   themes.
+
+   THE HIT AREA IS THE LABEL, NOT THE MARK. `.queue-check` is the `<label>`
+   around the input: 44x44, a press anywhere in it toggles the control, and
+   `scripts/lib/clickable-guard.mjs` takes an enclosing label's height as a
+   native choice's target (UI1b-8), so the 44px is still measured. The input
+   itself is the 24px MARK: its own 2px border is the outline the editor sees,
+   and it is the element the guard reads the edge off. The mark is NOT enlarged
+   to 44px -- a 44px square is not the drawing's tick, and the press area does
+   not need it to be.
 
    The tick is a character rather than a mask: the drawing draws "✓" as text
    (`box: selected ? "✓" : ""`), and a text glyph needs no data URI to keep its
-   color. It is `--fg` on `--bg` when picked -- ink on cream in light, light on
-   warm black in dark -- which is a stronger pair than the `--sel` this box used
-   to paint itself with through `accent-color` (contrast-audit.mjs checks
-   `--sel` on `--bg` as a 3:1 non-text indicator; see styles.css:587). */
+   colour. `.queue-box` is that glyph only -- centred over the mark, and
+   `pointer-events: none` so every press in the 44px label still lands on the
+   input. */
 .desk-ltr.astra .queue-check {
   position: relative;
   display: grid;
@@ -4293,79 +4305,54 @@
   height: 44px;
   min-height: 44px;
 }
-/* UI1b-5: THE 44px PRESS AREA BELONGS TO THE INPUT, AND THE 24px SQUARE IS THE
-   SQUARE.
-
-   UI1b-4 moved the drawn square onto the input, which was the right call for
-   the guard: the control that owns the state, the label and the keyboard is
-   the one whose box is measured. But it left the input 24px tall, so the guard
-   counted 15 "target under 44px" on this one control -- and the guard is right.
-   The label's 44px box is a press area, not the control's own box, and a
-   measured 24px control is a 24px control whatever sits behind it.
-
-   So the input takes the whole 44px and the square moves back to the sibling
-   span, where it is DRAWING rather than state: `appearance: none`, no border,
-   no fill, `position: absolute; inset: 0` over the label. `.queue-box` is the
-   drawn 24px square -- border, ink fill when picked, tick glyph on top -- and
-   it is `pointer-events: none`, so every press in the 44px box still lands on
-   the input. The editor sees the same 24px square in the same place; the
-   control the keyboard and the guard both address is 44px tall.
-
-   The desk's own `:focus-visible` rule paints the ring on the input, which is
-   now the 44px box: the ring says "this control", and the square inside it says
-   which lead.
-
-   WHAT THE EDITOR SEES, and the one thing that changed: the 24px square is
-   solid rather than a 2px outline. It has to be. The guard measures the
-   element that owns the state -- this input -- and asks it for BOTH a 44px
-   height and an edge or fill of its own at 3:1; a single rectangle cannot be
-   44px tall and draw a 24px outline ring, because a border follows the box's
-   edge and an `outline` is not an edge the guard can read (and would have been
-   a 44px ring or a transparent 24px one either way). `background-clip:
-   content-box` gives the input a 24px mark inside a 44px box: `--fg2` at rest,
-   `--fg` when picked, with the `--bg` tick on top -- the drawing's two states,
-   as two tones of the same square rather than an outline and a fill. */
+/* The 24px mark. `appearance: none` switches the browser's widget off; what is
+   left is a 2px `--fg` frame on `--bg`, which is the unchecked state: an
+   outline, not a fill. */
 .desk-ltr.astra .queue-check > input {
   appearance: none;
   -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  border: 2px solid var(--fg);
+  background: var(--bg);
+  cursor: pointer;
+}
+/* Picked: the mark goes ink inside its frame, like the drawing's
+   `background:var(--ink)`. */
+.desk-ltr.astra .queue-check > input:checked {
+  background: var(--fg);
+}
+/* The focus ring is the SYSTEM's ring -- a 2px `--ink` (`--fg`) outline, 2px
+   off the mark -- drawn on the MARK rather than on the 44px press area, so the
+   ring says "this box", not "this cell".
+
+   It is `--fg` and NOT the yellow (UI1b-9b, the designer's answer to Q5). The
+   yellow ring this rule first shipped was the designer's own error: it
+   contradicted the design system's one focus rule
+   (`tokens/base.css :focus-visible`, which every other desk control follows)
+   and it was 1.42:1 on cream -- a ring an editor could not see. `--fg` on
+   `--bg` is 18.56:1 in light and 14.06:1 in dark, the same pair every other
+   control's ring uses, and `scripts/lib/clickable-guard.mjs` now fails a
+   checkbox whose measured ring is the yellow. */
+.desk-ltr.astra .queue-check > input:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+/* The tick glyph, on the mark's centre. */
+.desk-ltr.astra .queue-check > .queue-box {
   position: absolute;
   inset: 0;
-  box-sizing: border-box;
-  width: 44px;
-  height: 44px;
-  /*
-    The 24px square the design draws, kept at 24px and kept INSIDE the 44px
-    press area: 10px of transparent padding either side, with the paint clipped
-    to the content box. `background-clip` is the only way one rectangle can be
-    44px tall and draw a mark 24px wide -- a `height: 24px` box cannot, and a
-    border follows the box's edge wherever that is, which is what made UI1b-4
-    choose between a 24px target and a 44px square.
-  */
-  padding: 10px;
-  margin: 0;
-  border: 0;
-  background-color: var(--fg2);
-  background-clip: content-box;
-  cursor: pointer;
-  z-index: 1;
-}
-/* Picked: the square goes ink, like the drawing's `background:var(--ink)`. */
-.desk-ltr.astra .queue-check > input:checked {
-  background-color: var(--fg);
-}
-/* The tick glyph, on the square's centre. It is the only thing the sibling
-   span draws now -- the square itself is the input's own paint. */
-.desk-ltr.astra .queue-check > .queue-box {
-  position: relative;
+  margin: auto;
   display: grid;
   place-items: center;
   width: 24px;
   height: 24px;
-  border: 0;
   background: transparent;
   color: var(--bg);
   font: 800 calc(14px * var(--ts))/1 var(--fd);
-  /* The glyph sits on the drawn square's centre, not on the box's baseline. */
+  /* The glyph sits on the mark's centre, not on the box's baseline. */
   line-height: 1;
   pointer-events: none;
   user-select: none;

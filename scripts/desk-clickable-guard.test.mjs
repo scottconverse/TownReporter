@@ -29,11 +29,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  CHECKBOX_MARK_PX,
   CONTRAST_FLOOR,
   DESK_THEMES,
+  FAIL_FOCUS_YELLOW,
   FAIL_LINK_PLAIN,
+  FAIL_MARK_SIZE,
   FAIL_NO_EDGE,
   FAIL_TARGET_SMALL,
+  FAIL_UNCHECKED_FILLED,
   MIN_TARGET_PX,
   blendOver,
   classifyControl,
@@ -420,6 +424,50 @@ test("a zero-opacity native input whose label is the visible control is judged o
     }),
   );
   assert.ok(nothing.failures.includes(FAIL_NO_EDGE));
+});
+
+/* ──────────────── the mark an author draws (UI1b-9, PR 173) ─────────────── */
+
+/* The designer's ruling on the Queue checkbox: a 24px mark, a 2px ink outline
+   when unchecked (a filled box reads as checked), an ink focus ring (the yellow
+   was withdrawn). One case per new guard rule. */
+function drawnMark(over = {}) {
+  const edge = (color) =>
+    ["top", "right", "bottom", "left"].map((side) => ({ side, width: 2, style: "solid", color }));
+  return choice({
+    appearance: "none",
+    opacity: 1,
+    width: CHECKBOX_MARK_PX,
+    height: CHECKBOX_MARK_PX,
+    checked: false,
+    ownBackground: LIGHT.bg,
+    borderSides: edge(LIGHT.fg),
+    labelBox: labelBox(),
+    ...over,
+  });
+}
+
+test("an unchecked mark painted solid FAILS as uncheckedFilled; the ruled outline passes", () => {
+  /* Bug caught: PR 173 shipped a solid unchecked square, which reads as checked. */
+  assert.deepEqual(classifyControl(drawnMark()).failures, []);
+  const solid = classifyControl(drawnMark({ ownBackground: LIGHT.fg, borderSides: [] }));
+  assert.ok(solid.failures.includes(FAIL_UNCHECKED_FILLED), JSON.stringify(solid.failures));
+});
+
+test("a mark that is not 24px square FAILS as markNotCheckboxSize", () => {
+  /* Bug caught: the mark enlarged to the 44px press area, or left at the browser's 17px. */
+  for (const size of [17, 44]) {
+    const wrong = classifyControl(drawnMark({ width: size, height: size }));
+    assert.ok(wrong.failures.includes(FAIL_MARK_SIZE), `${size}px passed: ${JSON.stringify(wrong.failures)}`);
+  }
+});
+
+test("a checkbox whose focus ring is the desk yellow FAILS as focusRingYellow; the ink ring passes", () => {
+  /* Bug caught: a yellow ring is 1.4:1 on the cream page and contradicts the system's focus rule. */
+  const ring = (colour) => ({ colour, width: 2, style: "solid", offset: 2, visible: true });
+  assert.deepEqual(classifyControl(drawnMark({ focusRing: ring(LIGHT.fg) })).failures, []);
+  const yellow = classifyControl(drawnMark({ focusRing: ring("#ffd23f") }));
+  assert.ok(yellow.failures.includes(FAIL_FOCUS_YELLOW), JSON.stringify(yellow.failures));
 });
 
 test("the 44px target is the control OR its label, and a short label still fails", () => {

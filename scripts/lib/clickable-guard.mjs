@@ -25,6 +25,10 @@
        sentence or a list title, and then it is ALWAYS underlined.
     4. a disabled control still shows its edge (the dashed gate) and the reason
        is printed beside it.
+    5. a checkbox the author draws (`appearance: none`) is the designer's 24px
+       mark, outline at rest and filled when picked -- a filled rest state reads
+       as checked (UI1b-9, the ruling on PR 173) -- and its focus ring is the
+       system's ink ring, never the yellow (UI1b-9b, the answer to Q5).
 
   WHY IT IS A SEPARATE MODULE. A rule with arithmetic in it can be wrong in
   ways only arithmetic can show -- a semi-transparent fill blended the wrong
@@ -61,9 +65,19 @@ export const PHONE_WIDTH = 390;
 export const FAIL_NO_EDGE = "no edge/fill under 3:1";
 export const FAIL_LINK_PLAIN = "link not underlined";
 export const FAIL_TARGET_SMALL = "target under 44px";
+export const FAIL_UNCHECKED_FILLED = "unchecked checkbox is filled";
+export const FAIL_MARK_SIZE = "checkbox mark is not 24px";
+export const FAIL_FOCUS_YELLOW = "checkbox focus ring is yellow";
 
 /**
- * The three kinds, by the KEY the report already uses for them.
+ * The drawn checkbox mark the designer's ruling on PR 173 fixes (UI1b-9): a
+ * 24px square. 17px is the browser's own widget; 44px was the press area
+ * standing in for the mark.
+ */
+export const CHECKBOX_MARK_PX = 24;
+
+/**
+ * The kinds, by the KEY the report already uses for them.
  *
  * UI1b-8. An allowlist entry used to exempt a failing RECORD -- every kind it
  * carried. The wordmark's entry was the proof that this is too much: its
@@ -77,6 +91,9 @@ export const FAILURE_KINDS = {
   noEdgeOrFill: FAIL_NO_EDGE,
   linkNotUnderlined: FAIL_LINK_PLAIN,
   targetUnder44: FAIL_TARGET_SMALL,
+  uncheckedFilled: FAIL_UNCHECKED_FILLED,
+  markNotCheckboxSize: FAIL_MARK_SIZE,
+  focusRingYellow: FAIL_FOCUS_YELLOW,
 };
 
 /** Every kind key an allowlist entry may name. */
@@ -244,6 +261,99 @@ export function strongestEdge(borderSides = [], ground) {
 }
 
 /**
+ * The paint an UNCHECKED choice shows: "fill", "outline" or "none" (UI1b-9).
+ *
+ * The designer's ruling on PR 173: the 24px mark is an outline at rest and a
+ * fill when picked, NEVER a filled square at rest, because a filled box reads
+ * as checked. This function is that sentence as arithmetic, and it lives here
+ * rather than in the walk so the walk records the LABEL ("this one is filled at
+ * rest") without re-implementing the contrast maths.
+ *
+ * It is only meaningful for a choice control the AUTHOR drew (`isChoice`): a
+ * native checkbox's computed background is transparent whatever the platform
+ * paints inside it, so asking a browser-drawn widget this question answers
+ * "none" about a widget the editor can plainly see. `classifyControl` therefore
+ * asks it only of a replaced choice (`appearance: none`).
+ *
+ *   "checked" -- the control is picked; the fill is the ruled-looking state.
+ *   "fill"    -- an opaque background that identifies the box at 3:1 or better
+ *                against the ground: a filled rest state.
+ *   "outline" -- a border side that identifies the box at 3:1 or better, with
+ *                no identifying fill: the ruled-looking rest state.
+ *   "none"    -- neither: an invisible box, which the edge rule catches.
+ */
+export function markPaint(control) {
+  const c = control ?? {};
+  if (c.isChoice !== true) return "n/a";
+  if (c.checked === true) return "checked";
+  const ground = effectiveBackground({
+    layers: c.ancestorBackgrounds ?? [],
+    fallback: c.pageBackground ?? "#ffffff",
+  });
+  const colour = parseColor(c.ownBackground);
+  if (colour && colour.a > 0) {
+    const drawn = colour.a < 1 ? blendOver(colour, ground) : colour;
+    if (ratio(drawn, ground) >= CONTRAST_FLOOR) return "fill";
+  }
+  const edge = strongestEdge(c.borderSides ?? [], ground);
+  if (edge && edge.ratio >= CONTRAST_FLOOR) return "outline";
+  return "none";
+}
+
+/**
+ * The desk's two yellows -- `--a` in light and in the `.night` block.
+ *
+ * Copied from `src/desk-astra.css` the way this file copies every token it
+ * needs (see the guard test's LIGHT/NIGHT table). The rule is about the COLOUR,
+ * not the variable name: a ring painted #ffd23f by any route is the yellow the
+ * designer withdrew.
+ */
+export const DESK_YELLOWS = ["#ffd23f", "#e6c35c"];
+
+/**
+ * How close to a yellow a ring has to be to BE that yellow, per channel.
+ *
+ * 64/255 is deliberately loose, because the question is what an editor sees and
+ * the desk's own two yellows are 29 apart (light #ffd23f against night
+ * #e6c35c): a ring a shade or two off the token is still "the yellow ring" to
+ * the eye. It is nowhere near loose enough to catch an ink ring -- #111111 is
+ * 213 away from the night yellow, and white is 192 away from the light one.
+ */
+const YELLOW_TOLERANCE = 64;
+
+/**
+ * Is this focus ring the yellow the designer withdrew (UI1b-9b)?
+ *
+ * The designer's answer to Q5: build the checkbox ring as the system's 2px ink
+ * outline, and "do NOT ship yellow, not even for now" -- the yellow ring was
+ * their own error, and on cream it is 1.42:1, a ring an editor cannot see.
+ * `classifyControl` asks this of a checkbox's measured ring; the walk supplies
+ * it by actually focusing the control (see `collectClickables`).
+ *
+ * `ring` is `{colour, width, style, visible}` as the walk records it. Only a
+ * ring the browser actually DREW while the control was focused counts: a
+ * `visible: false` record is a control whose `:focus-visible` state could not
+ * be reached, and failing it would be failing a measurement, not a colour.
+ */
+export function focusRingIsYellow(ring) {
+  if (ring?.visible === false) return false;
+  const width = Number(ring?.width);
+  if (Number.isFinite(width) && width <= 0) return false;
+  const colour = parseColor(ring?.colour ?? ring);
+  if (!colour || colour.a === 0) return false;
+  return DESK_YELLOWS.some((yellow) => {
+    const other = parseColor(yellow);
+    return (
+      Math.max(
+        Math.abs(colour.r - other.r),
+        Math.abs(colour.g - other.g),
+        Math.abs(colour.b - other.b),
+      ) <= YELLOW_TOLERANCE
+    );
+  });
+}
+
+/**
  * ONE CLICKABLE, CLASSIFIED. The whole rule, in the order the brief gives it.
  *
  * The input is what the browser measured (see the walk's `collect()`); nothing
@@ -266,6 +376,10 @@ export function strongestEdge(borderSides = [], ground) {
  *     fill OR by its enclosing `<label>`'s, and takes its target height from
  *     itself or that label -- the browser paints the widget, not the
  *     stylesheet, and the label is the element that takes the press (UI1b-8).
+ *   - a choice whose widget the AUTHOR drew (`isChoice` + `appearance: none`)
+ *     must draw the designer's 24px mark (`markNotCheckboxSize` when it is any
+ *     other size) and must NOT be filled while it is unchecked
+ *     (`uncheckedFilled`) -- a filled rest state reads as checked (UI1b-9).
  */
 export function classifyControl(control) {
   const c = control ?? {};
@@ -346,6 +460,56 @@ export function classifyControl(control) {
     failures.push(FAIL_TARGET_SMALL);
     if (kind === "ok") kind = FAIL_TARGET_SMALL;
   }
+
+  /*
+    UI1b-9. THE MARK AN AUTHOR DREW (the Queue's row tick, and only it today).
+
+    The designer's ruling on PR 173 is about a checkbox whose widget the
+    stylesheet has replaced (`appearance: none`): the control's own box IS the
+    24px mark, so both its size and its rest paint are measurable facts rather
+    than the platform's business. A widget the browser draws itself
+    (`appearance: auto`, the `.astra-check` and `.choice-row` rows) is left
+    alone: its paint is the platform's, and the ruling is about the drawn mark.
+
+      - `markNotCheckboxSize`: a mark that is not 24px square -- 17px is the
+        browser's widget, 44px is the press area standing in for the mark.
+      - `uncheckedFilled`: an unchecked box whose own paint identifies it at
+        3:1 or better, i.e. a SOLID rest state -- the exact defect the ruling
+        rejected, because a filled box reads as checked. `background: var(--bg)`
+        on the page ground is 1:1 and is therefore not a fill.
+
+    Both need numbers on the record (`width`, `height`, `checked`), which the
+    walk measures on every control; a record that carries no width is not
+    charged a size failure rather than being failed on a missing measurement.
+  */
+  const replacedChoice = c.isChoice === true && c.appearance === "none";
+  if (replacedChoice) {
+    const width = Number(c.width);
+    const markHeight = Number(c.height);
+    if (
+      Number.isFinite(width) &&
+      Number.isFinite(markHeight) &&
+      (width !== CHECKBOX_MARK_PX || markHeight !== CHECKBOX_MARK_PX)
+    ) {
+      failures.push(FAIL_MARK_SIZE);
+    }
+    if (markPaint(c) === "fill") failures.push(FAIL_UNCHECKED_FILLED);
+  }
+  /*
+    UI1b-9b. THE FOCUS RING IS THE SYSTEM'S INK RING, NOT THE YELLOW.
+
+    The designer's answer to Q5: "Do NOT ship yellow, not even for now" -- the
+    yellow ring contradicted the design system's own `:focus-visible` rule and
+    was 1.42:1 on cream. Any checkbox whose measured ring is that yellow fails,
+    whatever drew it. The walk supplies the ring by focusing the control; a
+    record without one is not charged.
+  */
+  if (c.isChoice === true && c.focusRing && focusRingIsYellow(c.focusRing)) {
+    failures.push(FAIL_FOCUS_YELLOW);
+  }
+  /* The report groups by the FIRST failure; a record that fails only one of
+     the rules above must not report its kind as "ok". */
+  if (kind === "ok" && failures.length) kind = failures[0];
 
   const notes = [];
   if (c.disabled === true) {
@@ -553,12 +717,27 @@ export function closestMargins(
       name: (control.name ?? "").slice(0, 60),
       selector: control.selector ?? "",
     };
-    const height = Number(control.height);
-    if (Number.isFinite(height)) {
+    /*
+      The target of a choice is the control OR its label, exactly as
+      `classifyControl` reads it (UI1b-8), and the declared floor can be the
+      label's too: the Queue's input is the 24px MARK since UI1b-9, so its own
+      height is 20px under the line while the 44px label it sits in is the
+      target. Measuring the mark here would file a passing control as both a
+      -20px margin and a flake risk.
+    */
+    const height = Math.max(
+      Number(control.height) || 0,
+      control.isChoice === true ? Number(control.labelBox?.height) || 0 : 0,
+    );
+    const minHeight = Math.max(
+      Number(control.minHeight) || 0,
+      control.isChoice === true ? Number(control.labelBox?.minHeight) || 0 : 0,
+    );
+    if (Number.isFinite(height) && height > 0) {
       heights.push({
         ...where,
         height,
-        minHeight: Number(control.minHeight) || 0,
+        minHeight,
         margin: Number((height - MIN_TARGET_PX).toFixed(2)),
       });
     }
