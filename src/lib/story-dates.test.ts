@@ -251,7 +251,7 @@ describe("the story's own words (unit BX2)", () => {
         ],
         ["2026-09-29", "Longmont Public Media lists beginner DaVinci Resolve editing class"],
         ["2026-10-01", "The board has posted a funding hearing packet ahead of the meeting"],
-        ["2026-10-03", "Brighton event for 3C and 3D"],
+        ["2026-10-03", "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D"],
         ["2026-10-06", "Council Weighs Rate Study Ahead Of Public Hearing"],
       ],
     );
@@ -273,13 +273,12 @@ describe("the story's own words (unit BX2)", () => {
     );
     // Unit CV, item 2, rule (a): the headline names both days, so each row is
     // the headline's own clause for its own day -- the 26th owns "canvassing
-    // day" and the 3rd owns "Brighton event for 3C and 3D". Two rows, two
-    // different events, where the old code printed the one headline twice.
+    // day"; the 3rd falls back to the headline because its clause is a fragment.
     assert.deepEqual(
       collectStoryDates([source]).map((i) => [i.date, i.what]),
       [
         ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
-        ["2026-10-03", "Brighton event for 3C and 3D"],
+        ["2026-10-03", "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D"],
       ],
     );
   });
@@ -429,7 +428,7 @@ describe("the story's own words (unit BX2)", () => {
         ),
         [
           ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
-          ["2026-10-03", "Brighton event for 3C and 3D"],
+          ["2026-10-03", "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D"],
         ],
       );
     }
@@ -748,14 +747,12 @@ describe("a row title must read as a headline, not a bare fragment (unit BZ, ite
     const items = collectStoryDates([
       story({ slug: "ranked", headline, published_on: "2026-09-25" }),
     ]);
-    // Rule (a) both times: the headline names both days, and each row is the
-    // headline's clause for its own -- "canvassing day" for the 26th, and for
-    // the 3rd the "Brighton event for 3C and 3D" the review could not read.
+    // The first clause stands alone; the second falls back to the headline.
     assert.deepEqual(
       items.map((i) => [i.date, i.what]),
       [
         ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
-        ["2026-10-03", "Brighton event for 3C and 3D"],
+        ["2026-10-03", "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D"],
       ],
     );
   });
@@ -917,7 +914,7 @@ describe("the five strings the review quoted (unit CV, item 2)", () => {
       }),
       [
         ["2026-09-26", "Ranked-choice campaign schedules canvassing day"],
-        ["2026-10-03", "Brighton event for 3C and 3D"],
+        ["2026-10-03", "Ranked-choice campaign schedules Sept. 26 canvassing day and Oct. 3 Brighton event for 3C and 3D"],
       ],
     ],
     [
