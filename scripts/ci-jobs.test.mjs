@@ -112,8 +112,13 @@ test("every job that runs a desk-claiming walk on the job's own server starts on
   assert.deepEqual(offenders, [], offenders.join("\n"));
 });
 
-test("the real-Postgres job uses the explicit runner for every discovered test", () => {
+test("the real-Postgres matrix uses the explicit runner for every discovered test", () => {
   const postgresJob = jobs(ci)["postgres-integration"]?.join("\n") ?? "";
+  assert.match(postgresJob, /^ {4}name: Every discovered PostgreSQL-capable test, on a real Postgres, part \$\{\{ matrix\.part \}\} of 3$/m);
+  assert.match(postgresJob, /fail-fast:\s*false/);
+  assert.match(postgresJob, /part:\s*\[1, 2, 3\]/);
+  assert.match(postgresJob, /TOWNREPORTER_POSTGRES_PART:\s*\$\{\{ matrix\.part \}\}/);
+  assert.match(postgresJob, /TOWNREPORTER_POSTGRES_PARTS:\s*["']?3/);
   assert.match(postgresJob, /TOWNREPORTER_RUN_POSTGRES_INTEGRATION:\s*["']?1/);
   assert.match(postgresJob, /TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL:/);
   assert.match(postgresJob, /node scripts\/run-postgres-integration\.mjs/);

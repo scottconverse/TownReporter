@@ -403,12 +403,16 @@ jobs:
   # without a replacement.
   #
   # Also runs the real migrations against `townreporter_ci` and re-runs the
-  # 20,000-story search benchmark from scratch, failing if the index does not
+  # 20,000-story search benchmark from scratch in part 1, failing if the index does not
   # help -- a property no single test file above measures.
   postgres-integration:
-    name: Every discovered PostgreSQL-capable test, on a real Postgres
+    name: Every discovered PostgreSQL-capable test, on a real Postgres, part ${{ matrix.part }} of 3
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3]
     services:
       postgres:
         image: postgres:18
@@ -423,6 +427,8 @@ jobs:
       DATABASE_URL: postgres://postgres:ci@127.0.0.1:5432/townreporter_ci
       TOWNREPORTER_RUN_POSTGRES_INTEGRATION: "1"
       TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL: postgres://postgres:ci@127.0.0.1:5432/postgres
+      TOWNREPORTER_POSTGRES_PART: ${{ matrix.part }}
+      TOWNREPORTER_POSTGRES_PARTS: "3"
       BETTER_AUTH_SECRET: ci-search-secret-not-for-production
       TOWNREPORTER_CLAUDE_CODE: "0"
       # Stream each spawned server's own stdout/stderr into the job log. A
@@ -440,6 +446,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node scripts/migrate.mjs
       - name: The index actually makes the search cheaper
+        if: matrix.part == 1
         run: node scripts/search-index-proof.mjs
       - name: Run every discovered database-capable test with per-file nonzero execution proof
         run: node scripts/run-postgres-integration.mjs

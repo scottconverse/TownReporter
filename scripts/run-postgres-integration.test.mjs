@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { assertPassingIntegrationSummary, parseTapSummary } from "./run-postgres-integration.mjs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as runner from "./run-postgres-integration.mjs";
+import { postgresTestFiles } from "./postgres-test-discovery.mjs";
+
+const { assertPassingIntegrationSummary, parseTapSummary } = runner;
 
 test("runner accepts a real nonzero TAP pass summary", () => {
   const summary = parseTapSummary("# tests 2\n# pass 2\n# fail 0\n# skipped 0\n# todo 0\n");
@@ -106,6 +111,56 @@ test("runner uses late isolation preload and executes the entire discovered set 
   assert.match(source, /postgresTestFiles\(root\)/);
   assert.match(source, /--import.*test-environment-guard/);
   assert.match(source, /--import.*postgres-integration-opt-in/);
-  assert.match(source, /selected = process\.argv\.slice\(2\)\.length \? process\.argv\.slice\(2\) : discovered/);
+  assert.match(source, /selectPostgresTests\(discovered, weights, process\.argv\.slice\(2\)\)/);
+  const files = ["src/a.test.ts", "src/b.test.ts"];
+  assert.deepEqual(runner.selectPostgresTests(files, {}, [], {}), files);
+  assert.deepEqual(runner.selectPostgresTests(files, {}, ["src\\b.test.ts"], {}), ["src/b.test.ts"]);
   assert.match(source, /assertPassingIntegrationSummary/);
+});
+
+test("three measured-time parts cover real discovery exactly once and stay within 15%", async () => {
+  // Bug: a file silently dropped from CI by a split.
+  assert.equal(typeof runner.selectPostgresTests, "function", "the runner needs a part selector");
+  const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const discovered = postgresTestFiles(root);
+  const weights = JSON.parse(await readFile(new URL("./postgres-integration-weights.json", import.meta.url), "utf8"));
+  const times = Object.values(weights).sort((a, b) => a - b);
+  const median = (times[Math.floor((times.length - 1) / 2)] + times[Math.floor(times.length / 2)]) / 2;
+  const parts = Array.from({ length: 3 }, (_, index) => runner.selectPostgresTests(discovered, weights, [], {
+    TOWNREPORTER_POSTGRES_PART: String(index + 1),
+    TOWNREPORTER_POSTGRES_PARTS: "3",
+  }));
+  for (const files of parts) assert.ok(files.length > 0, "a part must not pass without files");
+  const assigned = parts.flat();
+  assert.equal(new Set(assigned).size, assigned.length, "a file must not run in multiple parts");
+  assert.deepEqual([...assigned].sort(), [...discovered].sort(), "no discovered file may disappear from CI");
+  const totals = parts.map(files => files.reduce((sum, file) => sum + (weights[file] ?? median), 0));
+  assert.ok(Math.max(...totals) <= Math.min(...totals) * 1.15, `unbalanced parts: ${totals.join(", ")}`);
+  assert.deepEqual(runner.partitionPostgresTests([...discovered].reverse(), weights, 3).map(part => part.files), parts,
+    "discovery order must not change the partition");
+});
+
+test("part selection refuses configurations that can omit tests and gives new files the median weight", () => {
+  assert.equal(typeof runner.selectPostgresTests, "function", "the runner needs a part selector");
+  const files = ["a", "b", "new"];
+  const weights = { a: 20, b: 10 };
+  const env = { TOWNREPORTER_POSTGRES_PART: "2", TOWNREPORTER_POSTGRES_PARTS: "2" };
+  assert.deepEqual(runner.partitionPostgresTests(files, weights, 2), [
+    { files: ["a"], seconds: 20 },
+    { files: ["new", "b"], seconds: 25 },
+  ]);
+  assert.deepEqual(runner.selectPostgresTests(files, weights, [], env), ["new", "b"]);
+  for (const badEnv of [
+    { TOWNREPORTER_POSTGRES_PART: "1" },
+    { TOWNREPORTER_POSTGRES_PARTS: "3" },
+    { TOWNREPORTER_POSTGRES_PART: "0", TOWNREPORTER_POSTGRES_PARTS: "3" },
+    { TOWNREPORTER_POSTGRES_PART: "4", TOWNREPORTER_POSTGRES_PARTS: "3" },
+    { TOWNREPORTER_POSTGRES_PART: "1.5", TOWNREPORTER_POSTGRES_PARTS: "3" },
+    { TOWNREPORTER_POSTGRES_PART: "1", TOWNREPORTER_POSTGRES_PARTS: "0" },
+    { TOWNREPORTER_POSTGRES_PART: "1", TOWNREPORTER_POSTGRES_PARTS: "9007199254740992" },
+  ]) assert.throws(() => runner.selectPostgresTests(files, weights, [], badEnv), /must/);
+  assert.throws(() => runner.partitionPostgresTests(files, weights, 4), /empty/);
+  assert.throws(() => runner.selectPostgresTests(files, weights, ["a"], env), /positional/);
+  assert.throws(() => runner.selectPostgresTests(files, weights, ["missing"], {}), /not in PostgreSQL discovery/);
+  assert.throws(() => runner.selectPostgresTests(files, weights, ["a", "a"], {}), /Duplicate/);
 });
