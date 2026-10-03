@@ -718,6 +718,20 @@ export async function roleMayCreateDatabases(client) {
 }
 
 /**
+ * May the connected role create a database owned by `owner`? (PostgreSQL needs
+ * the creator to be able to SET ROLE to it; version 16 made that a separate
+ * privilege from membership.)
+ * @param {Client} client
+ * @param {string} owner
+ * @returns {Promise<boolean>}
+ */
+export async function roleMayAssignOwner(client, owner) {
+  const version = Number((await client.query("show server_version_num")).rows[0]?.server_version_num ?? 0);
+  const result = await client.query("select pg_has_role(current_user, $1, $2) as ok", [owner, version >= 160000 ? "SET" : "MEMBER"]);
+  return Boolean(result.rows[0]?.ok);
+}
+
+/**
  * The only `pg_stat_activity.backend_type` this module counts as a session.
  *
  * FINDING A, from the auditor's clone lab. A rollout aborted with the paper
@@ -993,6 +1007,20 @@ export async function preflight(options) {
         "may create databases, and run this again. " +
         "Nothing was changed and the paper was not touched.";
       return out;
+    }
+    // The copy is created OWNER <the live owner>, which PostgreSQL only allows a
+    // superuser or a role that can SET ROLE to it. Find out now, not at the copy.
+    if (!out.role.isSuperuser) {
+      const owner = await databaseOwner(client, database);
+      if (owner && !(await roleMayAssignOwner(client, owner))) {
+        out.refusal =
+          `The role this install connects as ("${out.role.role}") cannot create a database owned by ` +
+          `"${owner}", which owns the paper's database, and the copy has to be owned by it or the paper ` +
+          `answers 500 after a swap-back. Make PROMOTE_ADMIN_DATABASE_URL a superuser connection, or ` +
+          `grant "${owner}" to that role, and run this again. ` +
+          "Nothing was changed and the paper was not touched.";
+        return out;
+      }
     }
     out.sizeBytes = await databaseSizeBytes(client, database);
     out.directory = await dataDirectory(client);

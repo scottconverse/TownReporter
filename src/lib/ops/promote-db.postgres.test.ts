@@ -604,6 +604,37 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.ok(swapped.steps.some((step: string) => step.includes("set the owner")), "the owner repair was not logged");
   });
 
+  // Bug: a CREATEDB admin role that cannot SET ROLE to the owner passed preflight, then failed at the copy
+  // with the paper already stopped.
+  it("preflight refuses before downtime when the admin role cannot own the copy", async () => {
+    const live = scratchName("noset");
+    await createOwnedDatabase(live);
+    const limited = `${appRole}_lim`;
+    const client = await admin();
+    try {
+      await client.query(`create role "${limited}" login createdb password 'x'`);
+    } finally {
+      await client.end();
+    }
+    const url = new URL(adminUrl);
+    url.username = limited;
+    url.password = "x";
+    const report = await preflight({
+      adminUrl: url.toString(),
+      databaseUrl: withDatabase(adminUrl, live),
+      stamp: formatStamp(),
+      measureFreeBytes: () => ({ ok: true, freeBytes: Number.MAX_SAFE_INTEGER }),
+    });
+    const cleanup = await admin();
+    try {
+      await cleanup.query(`drop role if exists "${limited}"`);
+    } finally {
+      await cleanup.end();
+    }
+    assert.equal(report.ok, false);
+    assert.match(report.refusal, /cannot create a database owned by/);
+  });
+
   it("refuses to copy or rename while a session is open, and never ends that session", async (t) => {
     const stamp = formatStamp();
     const live = scratchName("busy");
