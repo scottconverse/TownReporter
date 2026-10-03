@@ -3898,15 +3898,14 @@
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 8px;
-  white-space: nowrap;
 }
 .desk-ltr.astra .today-lead-side > .btn,
 .desk-ltr.astra .lead-list.roomy .queue-acts > .btn,
 .desk-ltr.astra .lead-list.roomy .queue-acts > .more > .more-sum {
   white-space: nowrap;
 }
-.desk-ltr.astra .today-lead-side > *,
-.desk-ltr.astra .lead-list.roomy .queue-acts > * {
+.desk-ltr.astra .today-lead-side > .btn,
+.desk-ltr.astra .lead-list.roomy .queue-acts > .btn {
   flex-shrink: 0;
 }
 /* The drawing marks each press with its key: "Start story S", "Hold H", "Kill
@@ -4759,6 +4758,10 @@
     right: auto;
     left: 0;
   }
+}
+
+/* Toolbar stacking keeps its old 1060px breakpoint; only the lead rows moved to 1280px. */
+@media (max-width: 1060px) {
   /* The controls row stacks: the strip on its own line, then search over the
      two selects. `nowrap` on the filters is what would push the page sideways
      (the strip's max-content plus the search box's floor plus two selects is
