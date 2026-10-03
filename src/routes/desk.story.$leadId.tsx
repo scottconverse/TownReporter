@@ -2591,7 +2591,7 @@ function StoryPage() {
               aria-controls="story-model-research"
               onClick={() => setModelResearchOpen(true)}
             >
-              Effort…
+              Thinking effort
             </button>
             <span className={`astra-wb-ready astra-wb-ready-${readiness.tone}`} role="status">
               {readiness.label}

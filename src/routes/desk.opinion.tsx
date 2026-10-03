@@ -380,9 +380,7 @@ function OpinionPage() {
         </div>
       </div>
       <p className="lede">
-        Editorials run unsigned, as the paper's own position, with OPINION in the headline and the
-        receipts at the end. They are drafts until you publish one, and a published piece is never
-        edited — a correction runs as a dated note above it.
+        Editorials are unsigned drafts of the paper's own position until you publish them.
       </p>
       {/*
         CY item 8. These two live regions are the page's, not card one's. They

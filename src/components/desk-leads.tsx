@@ -47,6 +47,7 @@ export function LeadRowView({
   deleteSelected = false,
   deletePending = false,
   deleteReason = null,
+  bulkDeleteReason = null,
   onDeleteSelect,
   onDraft,
   drafting = false,
@@ -100,6 +101,8 @@ export function LeadRowView({
   deletePending?: boolean;
   /** The desk's own reason the delete failed, printed beside the press. */
   deleteReason?: string | null;
+  /** A bulk refusal belongs beside this lead's controls, outside its menu. */
+  bulkDeleteReason?: string | null;
   onDeleteSelect?: (selected: boolean) => void;
   /**
    * FB6, item 5: the Release/Bring-back press is in flight.
@@ -653,6 +656,7 @@ export function LeadRowView({
           </Link>
         )}
         <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={items} />
+        {bulkDeleteReason ? <p className="action-reason" role="alert">{bulkDeleteReason}</p> : null}
       </div>
     </div>
   );
