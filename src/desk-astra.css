@@ -6155,6 +6155,7 @@
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
+.desk-ltr.astra .astra-row.opinion .astra-row-t { overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-row.opinion {
   grid-template-columns: auto minmax(0, 1fr) auto;
   text-align: left;
@@ -6259,11 +6260,16 @@
   grid-column: 1;
   grid-row: 1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: fit-content(60%) minmax(0, 1fr);
   align-items: baseline;
   gap: 8px;
 }
-.desk-ltr.astra .astra-row.src .src-name .astra-row-t { white-space: nowrap; }
+.desk-ltr.astra .astra-row.src .src-name .astra-row-t {
+  white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .desk-ltr.astra .astra-row.src .src-name .astra-row-meta {
   display: block;
   margin: 0;
