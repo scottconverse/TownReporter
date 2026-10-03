@@ -122,6 +122,33 @@ async function onDatabase<T>(name: string, body: (client: Client) => Promise<T>)
   }
 }
 
+/** A non-superuser app role, like the live paper's `townreporter`. */
+const appRole = `townreporter_${RUN}_app`;
+
+async function databaseOwnerOf(name: string): Promise<string> {
+  const client = await admin();
+  try {
+    const result = await client.query<{ rolname: string }>(
+      "select r.rolname from pg_database d join pg_roles r on r.oid = d.datdba where d.datname = $1",
+      [name],
+    );
+    return result.rows[0]?.rolname ?? "";
+  } finally {
+    await client.end();
+  }
+}
+
+async function createOwnedDatabase(name: string): Promise<void> {
+  const client = await admin();
+  try {
+    await client.query(`do $$ begin if not exists (select 1 from pg_roles where rolname = '${appRole}') then create role "${appRole}" nologin; end if; end $$`);
+    await client.query(`create database "${name}" owner "${appRole}"`);
+    created.push(name);
+  } finally {
+    await client.end();
+  }
+}
+
 async function databaseNames(): Promise<string[]> {
   const client = await admin();
   try {
@@ -161,6 +188,7 @@ after(async () => {
       );
       await client.query(`drop database if exists "${name}"`);
     }
+    await client.query(`drop role if exists "${appRole}"`);
   } finally {
     await client.end();
   }
@@ -538,6 +566,42 @@ describe("the copy and the swap, on a real server", { skip }, () => {
     assert.equal(state.databases[live]?.exists, true);
     assert.equal(state.databases[copy]?.exists, false, "the copy's old name must be gone after the swap");
     assert.equal(state.databases[failed]?.exists, true);
+  });
+
+  // Bug: a copy made over the admin URL was owned by the admin role, so after a
+  // swap-back the app role lost CREATE on schema public (PG 18) and the paper answered 500.
+  it("gives the copy the live database's owner, and the swap-back keeps it", async () => {
+    const stamp = formatStamp();
+    const live = scratchName("owned");
+    await createOwnedDatabase(live);
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    const copied = await copyDatabase({ adminUrl, database: live, copy, stamp });
+    assert.equal(copied.ok, true, `the copy was refused: ${copied.refusal}`);
+    assert.equal(await databaseOwnerOf(copy), appRole, "the copy is not owned by the live database's owner");
+    const swapped = await swapBack({ adminUrl, database: live, copy, failed, stamp });
+    assert.equal(swapped.ok, true, `the swap was refused: ${swapped.refusal}`);
+    assert.equal(await databaseOwnerOf(live), appRole);
+  });
+
+  // Bug: copies taken before the owner fix are owned by the admin role; the swap-back must repair that.
+  it("swap-back restores the owner on a copy that was taken without it", async () => {
+    const stamp = formatStamp();
+    const live = scratchName("oldcopy");
+    await createOwnedDatabase(live);
+    const copy = copyDatabaseName(live, stamp);
+    const failed = failedDatabaseName(live, stamp);
+    const client = await admin();
+    try {
+      await client.query(`create database "${copy}" template "${live}"`);
+    } finally {
+      await client.end();
+    }
+    assert.notEqual(await databaseOwnerOf(copy), appRole, "the old-style copy should be owned by the admin role");
+    const swapped = await swapBack({ adminUrl, database: live, copy, failed, stamp });
+    assert.equal(swapped.ok, true, `the swap was refused: ${swapped.refusal}`);
+    assert.equal(await databaseOwnerOf(live), appRole, "the paper's database is not owned by the app role after the swap");
+    assert.ok(swapped.steps.some((step: string) => step.includes("set the owner")), "the owner repair was not logged");
   });
 
   it("refuses to copy or rename while a session is open, and never ends that session", async (t) => {
