@@ -30,10 +30,10 @@
  *      and the button comes on.
  *   3. With the list empty the story publishes, and the row the override wrote
  *      is in the database beside it.
- *   4. The red banner ("Draft saved - review required.") now carries "Review
- *      now": from the Sources tab, one press lands on the Checks tab with the
- *      list in view -- the banner used to tell the editor to review and give
- *      them nowhere to go.
+ *   4. The publish bar's own "Review" press: from the Sources tab, one press
+ *      lands on the Checks tab with the list in view. (The red "Draft saved -
+ *      review required" banner this step used to press is gone; the bar and the
+ *      Checks list carry the same reason.)
  *   5. Nothing informational in the block is under 14px and every text/backdrop
  *      pair in it clears WCAG AA (4.5:1), in both themes -- measured, not
  *      asserted from the stylesheet.
@@ -311,8 +311,8 @@ async function seedBlockedDraft() {
 
 /**
  * A second lead whose latest draft job completed with a receipt that says a
- * person must look at it. That receipt is what draws the red banner
- * ("Draft saved - review required."), and the banner is what this walk presses.
+ * person must look at it. That receipt leaves one reason standing on the
+ * Checks list, and the publish bar's "Review" press is what this walk presses.
  */
 async function seedReviewRequiredDraft() {
   const seeded = await seedLead({
@@ -683,15 +683,12 @@ async function publishing() {
   step(`the story published under ${SECTION_NAME} at /articles/${article.slug}`);
 }
 
-/** 8. The red banner's "Review now" reaches the list from wherever you are. */
+/** 8. The publish bar's "Review" press reaches the list from wherever you are. */
 async function theBannerHasAPress() {
   await page.goto(`${base}/desk/story/${reviewLeadId}`, { waitUntil: "domcontentloaded" });
   await page.locator("textarea.astra-headline").waitFor({ timeout: 45_000 });
-  const banner = page.locator("p.notice.notice-err");
-  await banner.waitFor({ timeout: 45_000 });
-  const text = await banner.innerText();
-  assert.match(text, /Draft saved — review required\./);
-  assert.match(text, /Review now/);
+  const bar = page.locator("#astra-publish-bar .publish-blocked");
+  await bar.waitFor({ timeout: 45_000 });
   assert.equal(await blockerKeys().then((k) => k.length), 1, "this draft has one reason standing");
   /*
     The bar's line, in the singular, is the same Unit CW rule as step 3: the
@@ -710,7 +707,7 @@ async function theBannerHasAPress() {
 
   // Stand somewhere else entirely, so the press has to do the navigating.
   await page.locator("#inspector-tab-sources").click();
-  await banner.getByRole("button", { name: "Review now" }).click();
+  await bar.getByRole("button", { name: "Review" }).click();
   await waitForTruth("the Checks tab to be selected", async () =>
     (await page.getAttribute("#inspector-tab-checks", "aria-selected")) === "true" ? true : null,
     15_000,
@@ -720,7 +717,7 @@ async function theBannerHasAPress() {
     return { top: Math.round(box.top), viewport: window.innerHeight };
   });
   assert.ok(shown.top >= 0 && shown.top < shown.viewport, `the list is in view (top ${shown.top})`);
-  step("the red banner's Review now opens the Checks tab on the list");
+  step("the publish bar's Review opens the Checks tab on the list");
 }
 
 let currentLeadId = 0;

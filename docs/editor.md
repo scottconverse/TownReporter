@@ -473,7 +473,7 @@ Typing while the check or its final reload is running does not silently replace 
 
 These controls are included in this release. A saved draft or completed check still needs editorial review.
 
-When the writer omits a usable claim ledger, the final reporting pass may run one citation-only repair against saved public captures. It accepts a source only when an exact clause from the finished draft is paired with an exact passage from that retained capture. If none can be proved, the story remains saved and the job says **Draft saved — review required**. Opened-but-uncited pages are never attached automatically.
+When the writer omits a usable claim ledger, the final reporting pass may run one citation-only repair against saved public captures. It accepts a source only when an exact clause from the finished draft is paired with an exact passage from that retained capture. If none can be proved, the story remains saved and the publish bar lists what still needs review before it can publish. Opened-but-uncited pages are never attached automatically.
 
 Reporter-notebook leftovers (`What is solid`, `Next checks are…`) are stripped from the body so they cannot leak onto the paper. If you need that thinking, put it in notes.
 
