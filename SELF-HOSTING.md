@@ -671,7 +671,7 @@ cover that; a copy of the database does.
 
 So the promotion copies the database before it builds:
 
-`PROMOTE_ADMIN_DATABASE_URL` is the admin connection used for the pre-rollout copy; it must be a superuser, or a CREATEDB role with `pg_read_all_settings` that can `SET ROLE` to the paper's database owner.
+`PROMOTE_ADMIN_DATABASE_URL` is the admin connection used for the pre-rollout copy; it must be a superuser, or a CREATEDB role with `pg_read_all_settings` that is a member of the paper's database owner role WITH inherit and SET (a plain `GRANT owner TO admin` does both; `NOINHERIT` is refused).
 
 - **The name.** The copy is `<database>_prerollout_<yyyyMMddHHmmss>`, named
   after the second the run started, where `<database>` is the last path
