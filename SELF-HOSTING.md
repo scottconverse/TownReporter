@@ -671,6 +671,8 @@ cover that; a copy of the database does.
 
 So the promotion copies the database before it builds:
 
+`PROMOTE_ADMIN_DATABASE_URL` is the admin connection used for the pre-rollout copy; it must be a superuser, or a CREATEDB role with `pg_read_all_settings` that can `SET ROLE` to the paper's database owner.
+
 - **The name.** The copy is `<database>_prerollout_<yyyyMMddHHmmss>`, named
   after the second the run started, where `<database>` is the last path
   segment of `DATABASE_URL` in `.env` -- normally `townreporter`. If the
@@ -686,16 +688,21 @@ So the promotion copies the database before it builds:
   close and then **refuses** -- it never ends another session. On a shared
   server those sessions belong to the live paper, the development copy and
   other people's tests.
-- **What it checks first**, all before the paper is stopped: that the name
+- **What it checks first**, all before the paper is stopped: that the admin
+  connection points at the same host and port as `DATABASE_URL`, that the name
   starts with `townreporter` (so a typo cannot rename somebody else's
-  database on this machine), that neither the copy's name nor the failed
-  name is already taken, that the role it connects as may create databases
+  database on this machine), that the derived copy name fits PostgreSQL's
+  63-character limit, that neither the copy's name nor the failed name is
+  already taken, that the role has CONNECT on the source and may clone it
+  and create databases
   (`CREATEDB` or superuser -- an install whose app role is not allowed to can
-  set `PROMOTE_ADMIN_DATABASE_URL` in `.env` to a connection that is), and
+  set `PROMOTE_ADMIN_DATABASE_URL` in `.env` to a connection that is), can assign
+  the copy to the paper's database owner, can read `data_directory`, and
   that the drive holding PostgreSQL's data directory has room for the
   database **plus a quarter of its size or 2 GB, whichever is larger**. When
   PostgreSQL is on another machine and that drive cannot be read, the check
   refuses with a sentence rather than skipping.
+- **The matching build.** Each copy's previous build is kept at `.output-prerollout-<copy stamp>`. A manual database rollback restores that build; when it is missing, the log warns before falling back to `.output-previous`, which may belong to another rollout.
 - **The disk it needs.** The copy is a second database of the same size, and
   the check asks for that plus a margin of a quarter of the database or 2 GB,
   whichever is larger. For a 570 MB paper that is about 2.6 GB free (570 MB
