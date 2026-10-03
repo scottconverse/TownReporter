@@ -165,13 +165,18 @@
 .desk-ltr.astra .astra-skip {
   position: fixed;
   left: 12px;
-  top: -100px;
+  top: 12px;
+  transform: translateY(calc(-100% - 24px));
   z-index: 1000;
   padding: 16px;
   background: var(--surface);
+  opacity: 0;
+  pointer-events: none;
 }
 .desk-ltr.astra .astra-skip:focus {
-  top: 12px;
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
 }
 /* The unsaved-changes bar spans the content column, not the viewport.
    It used to be `inset-x-0`, which put its left edge -- and the first six
@@ -1974,11 +1979,9 @@
   align-items: start;
   min-width: 0;
 }
-/* The drawing's `grid-row:span 2` on the Writing models card -- the one card
-   twice as long as its neighbours. Reset to `auto` in the one-column query
-   below, where spanning two rows would leave a hole in the column. */
+/* Every card occupies one grid cell, preserving left-to-right row order. */
 .desk-ltr.astra .astra-ops-card-tall {
-  grid-row: span 2;
+  grid-row: auto;
 }
 /* Owner-only panels (Writing models) return null; don't leave their box behind. */
 .desk-ltr.astra .astra-ops-card:empty {
@@ -2042,6 +2045,11 @@
 }
 .desk-ltr.astra[data-desk-page="ops"] .astra-settings-body {
   gap: 14px;
+}
+@media (max-width: 1099px) {
+  .desk-ltr.astra[data-desk-page="ops"] .astra-settings-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .desk-ltr.astra[data-desk-page="ops"] .astra-ops-card {
   padding-top: 16px;
@@ -3460,6 +3468,7 @@
   border: 1px solid var(--fg2);
   background: transparent;
   color: var(--fg);
+  text-transform: none;
 }
 
 /* ---------------------------------------------------------------------------
@@ -4656,9 +4665,11 @@
 }
 @media (max-width: 700px) {
   .desk-ltr.astra .today-cards,
-  .desk-ltr.astra .today-running,
-  .desk-ltr.astra .today-steps {
+  .desk-ltr.astra .today-running {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .desk-ltr.astra .today-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .desk-ltr.astra .today-lead {
     padding: 16px 8px;
@@ -5515,6 +5526,41 @@
   border-bottom: 1px solid var(--line);
   font: 500 calc(15px * var(--ts))/1.4 var(--fd);
 }
+@media (max-width: 699px) {
+  .desk-ltr.astra .st-story-head,
+  .desk-ltr.astra .st-livehead3 {
+    display: none;
+  }
+  .desk-ltr.astra .st-story,
+  .desk-ltr.astra .st-liverow {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    gap: 10px;
+  }
+  .desk-ltr.astra :is(.st-story, .st-liverow) > [data-label] {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .desk-ltr.astra :is(.st-story, .st-liverow) > [data-label]::before {
+    content: attr(data-label) ":";
+    font: 700 calc(14px * var(--ts))/1.4 var(--fd);
+    color: var(--fg2);
+    margin-right: auto;
+  }
+  .desk-ltr.astra .st-story > div[data-label] {
+    display: block;
+  }
+  .desk-ltr.astra .st-story > div[data-label]::before {
+    display: block;
+    margin-bottom: 8px;
+  }
+  .desk-ltr.astra .st-livepage {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
 .desk-ltr.astra .st-story-sec {
   margin: 0 0 4px;
   font: 800 calc(14px * var(--ts))/1.3 var(--fd);
@@ -5719,7 +5765,7 @@
   }
   .desk-ltr.astra .st-livehead3,
   .desk-ltr.astra .st-liverow {
-    grid-template-columns: minmax(0, 1fr) 60px 90px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .desk-ltr.astra .st-heat {
     grid-template-columns: 34px repeat(24, minmax(0, 1fr));

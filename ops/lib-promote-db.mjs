@@ -207,6 +207,30 @@ export function checkLivePortGuard(urls, livePromote, env = process.env) {
 }
 
 /**
+ * Compare the endpoints pg will use, including query overrides and environment
+ * defaults. Credentials and database names may differ; no connection is opened.
+ * @param {string} adminUrl
+ * @param {string} databaseUrl
+ * @param {NodeJS.ProcessEnv} [env]
+ * @returns {string}
+ */
+export function checkDatabaseServer(adminUrl, databaseUrl, env = process.env) {
+  const refusal =
+    "PROMOTE_ADMIN_DATABASE_URL and DATABASE_URL must point to the same host and port. " +
+    "Nothing was changed and the paper was not touched.";
+  try {
+    const host = (/** @type {string} */ raw) => {
+      const url = new URL(raw);
+      const value = url.searchParams.get("host") || decodeURIComponent(url.hostname) || env.PGHOST || "localhost";
+      return value.startsWith("/") ? value : value.toLowerCase();
+    };
+    return host(adminUrl) === host(databaseUrl) && effectivePort(adminUrl, env) === effectivePort(databaseUrl, env) ? "" : refusal;
+  } catch {
+    return refusal;
+  }
+}
+
+/**
  * The database name out of a `DATABASE_URL`.
  *
  * Read the way `ops\promote.ps1` has always read it -- the last path segment --
@@ -383,6 +407,10 @@ export function validateCommandNames(options) {
       "Refusing, because renaming something else over the paper's database is how the wrong database gets " +
       "served. Nothing was changed and the paper was not touched."
     );
+  }
+  if (copyName) {
+    const copyRefusal = checkDatabaseName(copyName, "The copy name");
+    if (copyRefusal) return copyRefusal;
   }
 
   const failedName = options.deriveNames ? failedDatabaseName(database, stamp) : failed;
@@ -947,6 +975,9 @@ export async function preflight(options) {
   const guard = checkLivePortGuard([options.adminUrl, options.databaseUrl], options.livePromote);
   if (guard) return refuse(guard);
 
+  const serverRefusal = checkDatabaseServer(options.adminUrl, options.databaseUrl);
+  if (serverRefusal) return refuse(serverRefusal);
+
   const database = deriveDatabaseName(options.databaseUrl);
   report.database = database;
   // The same rules every other command runs, including the empty stamp this
@@ -1022,8 +1053,32 @@ export async function preflight(options) {
         return out;
       }
     }
+    // SET ROLE permission alone does not supply the inherited ownership rights
+    // PostgreSQL checks when cloning an ordinary (non-template) database.
+    const privileges = await client.query(
+      "select has_database_privilege(current_user, oid, 'CONNECT') as connect, " +
+        "(datistemplate or pg_has_role(current_user, datdba, 'USAGE')) as clone " +
+        "from pg_database where datname = $1",
+      [database],
+    );
+    if (!privileges.rows[0]?.connect || (!out.role.isSuperuser && !privileges.rows[0]?.clone)) {
+      out.refusal =
+        `The role this install connects as ("${out.role.role}") cannot clone the paper's database "${database}". ` +
+        "It needs CONNECT on that database and CREATEDB, plus the database owner's inherited privileges or superuser rights. " +
+        "Set PROMOTE_ADMIN_DATABASE_URL to a role with those rights. " +
+        "Nothing was changed and the paper was not touched.";
+      return out;
+    }
     out.sizeBytes = await databaseSizeBytes(client, database);
-    out.directory = await dataDirectory(client);
+    try {
+      out.directory = await dataDirectory(client);
+    } catch (error) {
+      if (!/permission denied to examine ["']?data_directory/.test(String(error))) throw error;
+      out.refusal =
+        `The role this install connects as ("${out.role.role}") cannot read PostgreSQL's data_directory setting. ` +
+        "The role needs pg_read_all_settings or to be a superuser. Set PROMOTE_ADMIN_DATABASE_URL to such a role. " +
+        "Nothing was changed and the paper was not touched.";
+    }
     return out;
   });
 

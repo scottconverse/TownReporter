@@ -234,9 +234,9 @@ Shell for all desk screens:
 - **Four-step strip**: 4 equal cells with 1px `--line` gaps.
   - Each cell: a step number (a 30px square, yellow when it is the current step), the step name, a big count (40/800), a unit, and one button.
   - 1 Pick leads: “Review leads” (primary)
-  - 2 Draft: “Watch progress”
+  - 2 Draft: “Watch drafts”
   - 3 Check: “Check draft”
-  - 4 Publish: “Tonight’s edition”
+  - 4 Publish: “Review edition”
 - **Running now**, shown only when jobs exist: a 3-up grid of compact Job cards (spec below).
 - **Tonight’s edition**: a panel with a 2px yellow border.
   - One row per story ready or nearly ready: section, headline (Literata 17), check chips (`✓ Evidence checked`, `! Names: 1 needs review`, `✓ Section confirmed`, `✓ Preview viewed`, or `○ Not run` in dashed outline), then the one next-action button.

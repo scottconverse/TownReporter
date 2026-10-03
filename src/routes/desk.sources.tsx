@@ -498,8 +498,7 @@ function SourcesPage() {
         </div>
       </div>
       <p className="lede">
-        The pages the scanner reads on every pass. Add one, paste a whole registry, or review what
-        the machine proposes.
+        Manage the pages the scanner reads on every pass.
       </p>
       {/*
         The add dialog, behind the header's "+ Add a source" (BJ3 item 3).

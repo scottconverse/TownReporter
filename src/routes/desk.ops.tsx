@@ -568,15 +568,10 @@ function OpsPage() {
         </div>
       </div>
       <p className="lede">
-        Everything this machine is doing to keep the paper online, and the few buttons worth having.
-        Checks show what responds from this machine; they do not prove that a reader in another town
-        can reach your paper.
+        Check this machine's models, health and setup.
       </p>
       {/*
-        The drawn grid: ONE two-column grid with Writing models spanning both
-        rows on the left and the rest flowing after it, in the order the drawing
-        lists them. `OPS_CARDS` is that order and this map is the only place it
-        is read, so the page and the list cannot drift.
+        Cards flow left to right in the drawn order, with each row top-aligned.
       */}
       <div className="astra-settings">
         <div className="astra-settings-body">

@@ -245,7 +245,7 @@ export function ProviderStatusCard({
       ) : null}
 
       {login && !open && login.status !== "done" && login.detail ? (
-        <p className="mt-2 text-sm text-rust">{login.detail}</p>
+        <p className="mt-2 text-sm text-rust" role="alert">{login.detail}</p>
       ) : null}
 
       {lastTest ? (
@@ -260,7 +260,7 @@ export function ProviderStatusCard({
         </p>
       ) : null}
 
-      {err ? <p className="mt-2 text-sm text-rust">{err}</p> : null}
+      {err ? <p className="mt-2 text-sm text-rust" role="alert">{err}</p> : null}
 
       {/*
         What this sign-in can run, drawn by the caller. The Models screen fills

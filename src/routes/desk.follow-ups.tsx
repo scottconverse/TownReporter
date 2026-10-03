@@ -186,9 +186,7 @@ function FollowUpsPage() {
         (Desk Screens.dc.html:73); the desk had "tells you here".
       */}
       <p className="fu-intro mt-8">
-        Questions the AI keeps working on for you: re-checking pages, searching public records,
-        watching for the next agenda. When an agent finds something, it adds the finding to the
-        story’s reporting notes and flags it here. It never publishes.
+        AI follow-ups add findings to reporting notes and never publish.
       </p>
 
       <div className="fu-filters mt-4" role="group" aria-label="Filter follow-ups">
