@@ -30,12 +30,13 @@ It is MIT licensed, copyright Mario Zechner. Source:
 dependency sweep of its own, with a lockfile update, and is not part of the
 removal.
 
-## Downloaded at install time (not in the source archive)
+## Windows runtime distributions
 
-The Windows installation package provisions three runtimes that are not part
-of this source tree and are not covered by the repository's MIT license. Each
-is distributed under its own license, and the installer ships no copy of the
-license text, so the reference here is the project's own license:
+The self-contained Setup.exe downloads these runtimes at CI build time and
+bundles them for offline installation. The older source-ZIP installer downloads
+them on the user's computer. They are not covered by the repository's MIT
+license; each distribution has its own license and notices. Node's LICENSE,
+Chromium's bundled notices and the font licenses travel with the Setup payload.
 
 - **Node.js 22.23.2** — the private runtime the installer provisions, recorded
   in `installer/dependencies.json` against the official nodejs.org ZIP. MIT
@@ -43,12 +44,12 @@ license text, so the reference here is the project's own license:
 - **PostgreSQL 17.11** — the EnterpriseDB Windows x64 binaries recorded in the
   same file. The PostgreSQL License (a permissive BSD/MIT-style license); the
   EnterpriseDB ZIP carries its own copy.
-- **Chromium** — installed by Playwright (`npx playwright install chromium`,
-  `installer/Install.ps1`). BSD 3-Clause for Chromium's own code, plus the
+- **Chromium** — installed by Playwright (`playwright install chromium`) during
+  the Setup build or older source installation. BSD 3-Clause for Chromium's own code, plus the
   third-party licenses Chromium bundles.
 
-npm dependencies are a different case: `npm ci` installs them from the registry
-into `node_modules`, and each package carries its own license file there (for
+npm dependencies are a different case: CI uses `npm ci --omit=dev` for the Setup
+payload. Packages carry their own license files in `node_modules` (for
 example `node_modules/react/LICENSE`) and its own `license` field in
 `package.json`. Those licenses travel with the installed tree and are not
 restated in this file.
