@@ -2189,14 +2189,18 @@
   color: var(--fg2);
 }
 .desk-ltr.astra-modal-layer .astra-modal-actions {
-  display: grid;
-  grid-auto-flow: column;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
+  max-width: 100%;
 }
 /* The reference draws the dialog's actions 48px tall, one step up from the
    desk's 44px floor -- the same step `.composer-submit .btn` takes. */
 .desk-ltr.astra-modal-layer .astra-modal-actions .btn {
   min-height: 48px;
+  max-width: 100%;
+  white-space: normal;
 }
 /*
   ChoiceCard: the design system's desk/Dialog.jsx ChoiceCard. The mark is a

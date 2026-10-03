@@ -481,11 +481,9 @@ function AssignmentsTab({
       ) : null}
 
       {/*
-        Unit F6: the table, in its own scroll container. `minWidth` is the
-        row grid's own floor (see MODEL_TABLE_MIN), so the block is drawn at
-        the width the five columns need however narrow the window is, and
-        `.models-table` does the scrolling. The header and the rows are inside
-        the SAME box, so their tracks cannot drift apart.
+        Wide screens keep the measured five-column table. Below 1280px its
+        rows become labelled cards, so every assignment remains visible
+        without horizontal scrolling or clipped select text.
       */}
       <div
         className="models-table"
@@ -495,7 +493,7 @@ function AssignmentsTab({
       >
         <div className="models-table-inner" style={{ minWidth: MODEL_TABLE_MIN }}>
           <div
-            className="text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
+            className="models-table-head text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
             style={{ ...ROW_GRID, gap: "0 14px", padding: "10px 0", borderBottom: "2px solid var(--fg)" }}
           >
             <span>Job</span>
@@ -675,10 +673,11 @@ function JobRow({
 
   return (
     <div
+      className="model-job-row"
       style={{
         ...ROW_GRID,
         padding: "12px 0",
-        borderBottom: "1px solid var(--line)",
+        borderBottom: "1px solid var(--fg2)",
       }}
     >
       <div className="flex flex-col gap-0.5">
@@ -699,83 +698,95 @@ function JobRow({
           plan rather than a setting.
         </span>
       ) : (
-        <div className="flex gap-1.5">
-          <ModelSelect
-            label={`First choice for ${job?.label ?? jobKey}`}
-            value={draft.first.providerId}
-            options={menu}
-            emptyLabel={defaultFirstLabel}
-            disabled={disabled}
-            onChange={(next) =>
-              onPatch(jobKey, "first", {
-                providerId: next,
-                /* The design resets effort when the model changes, and it is
-                   the right thing to do: "high" on a model that does not take
-                   levels is a level for a run that cannot exist. */
-                effort: defaultModelEffort(next, exactModelFor(next)) ?? "",
-              })
-            }
-          />
-          <select
-            className="shrink-0"
-            style={{ ...SELECT_STYLE, width: EFFORT_WIDTH }}
-            aria-label={`Effort for ${job?.label ?? jobKey}`}
-            title={
-              efforts.length
-                ? shownEffort
-                  ? jobEffortOptionTitle(shownEffort)
-                  : "This model declares no effort levels; the desk sends none"
-                : PROVIDER_DEFAULT_HELP
-            }
-            disabled={disabled || !efforts.length}
-            value={efforts.length ? shownEffort : ""}
-            onChange={(event) => onPatch(jobKey, "first", { effort: event.target.value })}
-          >
-            {efforts.length ? (
-              /*
-                The drawn single word ("medium"), not the registry's sentence
-                ("Medium — balanced"): the sentence is 105px in a 130px box and
-                the word is 53px. Each option keeps the sentence as its `title`,
-                and the closed control wears the selected option's title.
-              */
-              efforts.map((effort: ModelEffort) => (
-                <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
-                  {jobEffortLabel(effort)}
-                </option>
-              ))
-            ) : (
-              /* No levels declared for this exact model: the desk sends
-                 nothing and the provider decides. Naming that beats an empty
-                 select, and it is the same answer the pickers give. */
-              <option value="">Default</option>
-            )}
-          </select>
+        <div className="model-job-first">
+          <div className="model-job-field">
+            <span className="model-job-label">First choice</span>
+            <ModelSelect
+              label={`First choice for ${job?.label ?? jobKey}`}
+              value={draft.first.providerId}
+              options={menu}
+              emptyLabel={defaultFirstLabel}
+              disabled={disabled}
+              onChange={(next) =>
+                onPatch(jobKey, "first", {
+                  providerId: next,
+                  /* The design resets effort when the model changes, and it is
+                     the right thing to do: "high" on a model that does not take
+                     levels is a level for a run that cannot exist. */
+                  effort: defaultModelEffort(next, exactModelFor(next)) ?? "",
+                })
+              }
+            />
+          </div>
+          <div className="model-job-field model-job-effort">
+            <span className="model-job-label">Effort</span>
+            <select
+              className="shrink-0"
+              style={{ ...SELECT_STYLE, width: EFFORT_WIDTH }}
+              aria-label={`Effort for ${job?.label ?? jobKey}`}
+              title={
+                efforts.length
+                  ? shownEffort
+                    ? jobEffortOptionTitle(shownEffort)
+                    : "This model declares no effort levels; the desk sends none"
+                  : PROVIDER_DEFAULT_HELP
+              }
+              disabled={disabled || !efforts.length}
+              value={efforts.length ? shownEffort : ""}
+              onChange={(event) => onPatch(jobKey, "first", { effort: event.target.value })}
+            >
+              {efforts.length ? (
+                /*
+                  The drawn single word ("medium"), not the registry's sentence
+                  ("Medium — balanced"): the sentence is 105px in a 130px box and
+                  the word is 53px. Each option keeps the sentence as its `title`,
+                  and the closed control wears the selected option's title.
+                */
+                efforts.map((effort: ModelEffort) => (
+                  <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
+                    {jobEffortLabel(effort)}
+                  </option>
+                ))
+              ) : (
+                /* No levels declared for this exact model: the desk sends
+                   nothing and the provider decides. Naming that beats an empty
+                   select, and it is the same answer the pickers give. */
+                <option value="">Default</option>
+              )}
+            </select>
+          </div>
         </div>
       )}
 
       {job && !job.built ? (
         <span />
       ) : (
-        <ModelSelect
-          label={`Fallback 1 for ${job?.label ?? jobKey}`}
-          value={draft.fallback1.providerId}
-          options={menu}
-          emptyLabel={jobSlotEmptyLabel("fallback1")}
-          disabled={disabled}
-          onChange={(next) => onPatch(jobKey, "fallback1", { providerId: next })}
-        />
+        <div className="model-job-field">
+          <span className="model-job-label">Fallback 1</span>
+          <ModelSelect
+            label={`Fallback 1 for ${job?.label ?? jobKey}`}
+            value={draft.fallback1.providerId}
+            options={menu}
+            emptyLabel={jobSlotEmptyLabel("fallback1")}
+            disabled={disabled}
+            onChange={(next) => onPatch(jobKey, "fallback1", { providerId: next })}
+          />
+        </div>
       )}
       {job && !job.built ? (
         <span />
       ) : (
-        <ModelSelect
-          label={`Fallback 2 for ${job?.label ?? jobKey}`}
-          value={draft.fallback2.providerId}
-          options={menu}
-          emptyLabel={jobSlotEmptyLabel("fallback2")}
-          disabled={disabled}
-          onChange={(next) => onPatch(jobKey, "fallback2", { providerId: next })}
-        />
+        <div className="model-job-field">
+          <span className="model-job-label">Fallback 2</span>
+          <ModelSelect
+            label={`Fallback 2 for ${job?.label ?? jobKey}`}
+            value={draft.fallback2.providerId}
+            options={menu}
+            emptyLabel={jobSlotEmptyLabel("fallback2")}
+            disabled={disabled}
+            onChange={(next) => onPatch(jobKey, "fallback2", { providerId: next })}
+          />
+        </div>
       )}
 
       <StatusChip
