@@ -27,7 +27,7 @@ jobs:
   # execute everything, so app code that breaks a walk is caught within a day, not blocking a PR.
   # The 12 required checks never depend on this job and always run under the same names.
   changes:
-    name: Which browser walks need to run
+    name: Which browser walks need to run (nightly or manual only)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -73,20 +73,11 @@ jobs:
           set -eu
           everything=false
           if [ "$EVENT" = schedule ] || [ "$EVENT" = workflow_dispatch ]; then everything=true; fi
-          changed=""
-          if [ "$everything" = false ]; then
-            if [ -z "$BASE" ] || [ "$BASE" = 0000000000000000000000000000000000000000 ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-              everything=true
-            else
-              changed=$(git diff --name-only "$BASE" "$HEAD")
-            fi
-          fi
-          # This list of shared walk helpers is kept by hand: a NEW helper that several walks import must be added here,
-          # or a change to it will not run the walks that depend on it (only the nightly run would catch it).
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|scripts/browser-guard\.mjs|scripts/confirm-section-step\.mjs|scripts/desk-appearance-fixture\.mjs|scripts/desk-production-regression-logic\.mjs|scripts/first-run-setup-step\.mjs|scripts/migration-plan\.mjs|scripts/postgres-test-discovery\.mjs|scripts/test-environment\.mjs)$|^scripts/lib/'; then everything=true; fi
+          # Scott 2026-10-03: pull requests and pushes run ONLY the 12 required checks.
+          # The browser walks below run in the nightly run and on a manual run (workflow_dispatch), never per push.
           check() {
             name=$1; pattern=$2
-            if [ "$everything" = true ] || printf '%s\n' "$changed" | grep -Eq "$pattern"; then
+            if [ "$everything" = true ]; then
               echo "$name=true" >> "$GITHUB_OUTPUT"
             else
               echo "$name=false" >> "$GITHUB_OUTPUT"
