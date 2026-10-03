@@ -92,9 +92,12 @@ async function pressInMore(row, name) {
   await item.click();
 }
 
+// Group 4: the correction form is the "Add a correction" pop-up (a portal on the page, not inside the row).
+const corrDialog = () => page.getByRole("dialog", { name: /Add a correction/ });
+
 async function openCorrectionForm(row) {
   await pressInMore(row, "Post correction");
-  await row.getByLabel("The correction").waitFor({ timeout: 15_000 });
+  await corrDialog().getByLabel("The correction").waitFor({ timeout: 15_000 });
 }
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -667,9 +670,9 @@ async function main() {
   // configured (no fake endpoint, TOWNREPORTER_CLAUDE_CODE=0), and the desk's
   // own sentence is the path that must work with none. The model path is held
   // by correction-fix-body.test.ts against the fake endpoint.
-  await pubRow.getByLabel("What was wrong").fill("the fee was $4,200");
-  await pubRow.getByLabel("What is right").fill("the fee is $2,400");
-  await pubRow.getByRole("button", { name: "Use a plain note" }).click();
+  await corrDialog().getByLabel("What was wrong").fill("the fee was $4,200");
+  await corrDialog().getByLabel("What is right").fill("the fee is $2,400");
+  await corrDialog().getByRole("button", { name: "Use a plain note" }).click();
   /*
     The box's own value, not the page's text: a filled textarea is text
     Playwright's getByText matches, which is the false-positive shape this walk
@@ -685,13 +688,13 @@ async function main() {
   );
   step("the desk writes the correction note from the editor's two lines, with no model");
 
-  await pubRow.getByLabel("The correction").fill(correctionText);
+  await corrDialog().getByLabel("The correction").fill(correctionText);
   // Deliberately NOT force-clicked: the button is disabled until React's
   // controlled-input state catches up with the fill above, and forcing the
   // click races that update. Plain click() waits for actionable (enabled,
   // visible) on its own, which is what a real editor's click implicitly
   // waits for too.
-  const publishBtn = pubRow.getByRole("button", { name: "Publish correction" });
+  const publishBtn = corrDialog().getByRole("button", { name: "Publish correction" });
   await publishBtn.waitFor({ state: "visible", timeout: 10_000 });
   const correctionRequest = page.waitForRequest(
     (request) => request.method() === "POST" && request.url().includes("/_serverFn/"),
@@ -721,8 +724,8 @@ async function main() {
   // cleared, which is what the owner's empty-box complaint is about.
   await openCorrectionForm(pubRow);
   await page.getByLabel("The correction").fill(fixNote);
-  await pubRow.getByLabel("Also fix the story text").check();
-  const fixBodyBox = pubRow.getByLabel(/The story text as it should read/);
+  await corrDialog().getByLabel("Also fix the story text").check();
+  const fixBodyBox = corrDialog().getByLabel(/The story text as it should read/);
   await fixBodyBox.waitFor({ timeout: 10_000 });
   const fixBodyShown = await fixBodyBox.inputValue();
   if (fixBodyShown !== body) {
@@ -744,7 +747,7 @@ async function main() {
     );
   }
   await fixBodyBox.fill(fixedBody);
-  await pubRow.getByRole("button", { name: "Publish correction" }).click();
+  await corrDialog().getByRole("button", { name: "Publish correction" }).click();
   await pubRow.locator(".pub-corr").getByText(fixNote).waitFor({ timeout: 20_000 });
   step("a correction can change the printed story text as well as publish the note");
 
