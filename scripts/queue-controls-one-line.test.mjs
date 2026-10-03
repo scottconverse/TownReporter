@@ -44,7 +44,12 @@ test("at 1280 in Large text the Queue's one-line controls bar fits its column wi
   /* Bug caught: the bar needed more than its 970px column, so the search field overlapped the tab strip
      (an overlap, not a wrap: .queue-filters is justify-content: flex-end). CI failed on PR 173 with it. */
   assert.ok(BAND, "no @media band compacts the bar between 1280 and 1340");
-  const px = (head, prop) => Number.parseFloat(declared(head, prop, BAND)) || 0;
+  const px = (head, prop) => {
+    /* A missing band declaration is not zero: the browser then uses the wider base rule, so fail loudly. */
+    const value = declared(head, prop, BAND);
+    assert.ok(value, `${head} no longer declares ${prop} in the compaction band`);
+    return Number.parseFloat(value);
+  };
   const tabPad = px(`${Q} .queue-controls .queue-tabs > button`, "padding-inline");
   const selectInset = Number.parseFloat((declared(`${Q} .queue-sel select`, "padding") ?? "0").split(/\s+/).pop()) || 0;
   /* Measured on the desk desk-uiux-walk seeds, 1280x1000, Large text: column 970; five tab labels 337.02 + 6 edges;
