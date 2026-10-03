@@ -186,6 +186,8 @@ foreach ($entry in $discard) {
 $images = @(Get-ChildItem -LiteralPath (Join-Path $stage 'pgsql') -Recurse -File | Where-Object Extension -in @('.exe', '.dll') | ForEach-Object FullName)
 $images += Join-Path $stage 'node\node.exe'
 $crt = Copy-AppLocalCrt $images @((Join-Path $stage 'node'), (Join-Path $stage 'pgsql\bin')) (Join-Path $env:SystemRoot 'System32')
+. (Join-Path $PSScriptRoot 'windows-runtime-check.ps1')
+Test-StagedWindowsRuntime $stage
 # Bind identity to the actual reduced runtime tree, not the source checkout.
 & $buildNode (Join-Path $app 'scripts\install-build-manifest.mjs') write $app
 if ($LASTEXITCODE -ne 0) { throw 'Staged build manifest failed.' }

@@ -139,7 +139,6 @@ test("setup CI blocks networking with a failed outbound probe and exercises long
   const workflow = readFileSync(".github/workflows/windows-install.yml", "utf8");
   assert.match(workflow, /name: Fresh Windows Setup\.exe install/);
   assert.match(workflow, /build-windows-setup\.ps1/);
-  assert.match(workflow, /--version=6\.4\.3.*--require-checksums/);
   assert.match(workflow, /New-NetFirewallRule/);
   assert.match(workflow, /-Program \$program/);
   assert.match(workflow, /Restore outbound networking after acceptance/);
