@@ -169,8 +169,15 @@ jobs:
           $appRoot = $entries[0].Directory.Parent.FullName
           "INSTALL_APP_ROOT=$appRoot" >> $env:GITHUB_ENV
           "INSTALL_SOURCE_ARCHIVE=$($archives[0].FullName)" >> $env:GITHUB_ENV
-          $dataRoot = Join-Path $env:LOCALAPPDATA ("TownReporter\ci-" + [guid]::NewGuid().ToString("N"))
+          $dataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\' + [guid]::NewGuid().ToString('N').Substring(0, 8))
           "INSTALL_DATA_ROOT=$dataRoot" >> $env:GITHUB_ENV
+          # A 140-character short staging prefix cannot fit Node's 130-character
+          # entry under MAX_PATH. Exercise its refusal separately using cached ZIPs.
+          $longRoot = Join-Path $env:LOCALAPPDATA 'TownReporter\ci-long-path-'
+          $padding = [Math]::Max(0, 140 - (Join-Path $longRoot 'tools\.x123456').Length)
+          $longRoot += 'p' * $padding
+          if ((Join-Path $longRoot 'tools\.x123456').Length -lt 140) { throw 'Long-path fixture is too short.' }
+          "INSTALL_LONG_DATA_ROOT=$longRoot" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
           @{ TOWNREPORTER_CLAUDE_CODE='0'; TOWNREPORTER_CODEX='0'; TOWNREPORTER_LOCAL='0' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'providers.json')
       - name: Run the default native installer with private downloads
@@ -246,6 +253,42 @@ jobs:
             if ($installer) { $installer.Dispose() }
             }
           }
+      - name: Refuse long ZIP paths before any extraction
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $env:INSTALL_APP_ROOT 'installer\Install.ps1'), [ref]$null, [ref]$null)
+          foreach ($name in @('Get-ArchivePathInfo', 'Get-VerifiedDependency')) {
+            $fn = $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $name}, $true)
+            if (!$fn) { throw "Missing installer function: $name" }
+            Invoke-Expression $fn.Extent.Text
+          }
+          # CI hosts may enable long paths. Model the Windows default without
+          # changing HKLM; the installer still generates its real short staging name.
+          function Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled=0 } }
+          function Expand-Archive { throw 'Preflight allowed extraction of an overlong path.' }
+          $toolsRoot = Join-Path $env:INSTALL_LONG_DATA_ROOT 'tools'
+          New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
+          $DownloadCache = Join-Path $env:INSTALL_DATA_ROOT 'tools'
+          $dependencies = Get-Content -LiteralPath (Join-Path $env:INSTALL_APP_ROOT 'installer\dependencies.json') -Raw | ConvertFrom-Json
+          foreach ($name in @('node', 'postgres')) {
+            $dependency = $dependencies.$name
+            $zipName = [IO.Path]::GetFileName(([uri]$dependency.url).AbsolutePath)
+            if (!(Test-Path -LiteralPath (Join-Path $DownloadCache $zipName))) { throw "Missing cached $name ZIP." }
+            $message = ''; $plan = $null
+            try { $plan = Get-VerifiedDependency $dependency $name } catch { $message = $_.Exception.Message }
+            if ($message -match 'path is too long:.*\\tools\\\.x[a-f0-9]{6}\\.*\([0-9]+ characters\).*Windows allows 259.*shorter -DataRoot.*C:\\TR') {
+              $message | Add-Content -LiteralPath (Join-Path $env:INSTALL_EVIDENCE_DIR 'long-path-preflight.log')
+            } elseif ($name -eq 'postgres' -and $plan -and $plan.Paths.ExtractionPath.Length -le 259 -and $plan.Paths.RuntimePath.Length -le 259) {
+              # PostgreSQL's entries can be shorter than Node's. Measure the
+              # actual ZIP rather than requiring a failure for a path that fits.
+              "PostgreSQL paths fit: extraction=$($plan.Paths.ExtractionPath.Length), runtime=$($plan.Paths.RuntimePath.Length)" | Add-Content -LiteralPath (Join-Path $env:INSTALL_EVIDENCE_DIR 'long-path-preflight.log')
+            } else {
+              throw "Expected actionable $name long-path refusal; got: $message"
+            }
+            if (Test-Path -LiteralPath (Join-Path $toolsRoot $dependency.directory)) { throw "$name was partially unpacked." }
+          }
+          if (@(Get-ChildItem -LiteralPath $toolsRoot -Directory -Force).Count) { throw 'Preflight created an extraction directory.' }
       - name: Verify browser workflow, stale-build refusal and restart persistence
         shell: pwsh
         run: |
