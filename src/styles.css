@@ -1093,13 +1093,19 @@
   neutral "nothing to say" ones are the 1px `--fg2` outline. Only `new` is a
   filled chip -- yellow, with #111 text.
 
-  The uppercase + letter-spacing treatment is kept: it is this desk's chip
-  typography and the words are the label, so changing case would re-wrap every
-  list row (a layout change, which this pass is not allowed to make). What
-  changed here is the color, the weight (800, as the reference component) and
-  the padding the reference uses.
+  UI1b-5: THE UPPERCASE IS GONE. The designer: "Chips: sentence case, no ALL
+  CAPS." Every chip on the desk was drawn through this one `text-transform`,
+  so the words the desk stores ("Ready to check", "Could not check", "Held")
+  reached the editor as READY TO CHECK / COULD NOT CHECK / HELD -- shouting a
+  state is not the same as naming it, and README §7 is explicit: "Sentence case
+  everywhere except kickers, which are uppercase." Letter-spacing drops with
+  it, because +0.12em was tracking for capitals and reads as a gap between
+  letters in lower case. The words themselves were already the label, so no
+  text, no size and no wrapping rule changes -- only the case they are set in.
+
+  The size/weight/padding below are the reference Chip component's, unchanged.
 */
-.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:uppercase;letter-spacing:.12em;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
+.desk-ltr .chip {font-size:calc(0.875rem * var(--ts));text-transform:none;letter-spacing:0;border:1px solid var(--fg2);padding:1px 8px;white-space:nowrap;align-self:start;color:var(--fg2);font-weight:800}
 .desk-ltr .chip.st-new {background:var(--a);border-color:var(--a);color:#111}
 .desk-ltr .chip.st-drafted {border-color:var(--fg2);color:var(--fg2)}
 .desk-ltr .chip.st-published {border-color:var(--ok);color:var(--ok)}
@@ -1221,7 +1227,18 @@
 .desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px;min-width:0;max-width:11rem}
 .desk-ltr .lead-row.dead {opacity:.5}
 .desk-ltr .lead-main {min-width:0}
-.desk-ltr .hl-link {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em}
+/*
+  Unit UI1b-3: every link that goes somewhere is underlined.
+
+  Scott's rule, and now the design system's (README section 6, "Text link"):
+  "If it goes somewhere, it is an underlined link." This class IS a desk
+  headline that goes to a story, and it drew no underline at all -- the single
+  biggest group in the measured baseline (unit UI1b step 1: 63 clickables
+  failed as "link not underlined", and this class is the shared one behind
+  most of them). The underline is the design's: 1px, 3px below the baseline.
+  The hover rule below stays, so pointing at it still deepens the colour.
+*/
+.desk-ltr .hl-link {font-family:var(--fd);font-weight:700;font-size:calc(0.96875rem * var(--ts));line-height:1.25;text-align:left;letter-spacing:-.01em;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
 .desk-ltr .hl-link:hover {color:var(--adeep)}
 .desk-ltr .hl-link.sm {font-size:calc(0.875rem * var(--ts))}
 .desk-ltr .lead-why {font-size:calc(0.875rem * var(--ts));color:var(--fg2);margin:6px 0 0;text-wrap:pretty}
@@ -1303,7 +1320,23 @@
 .desk-ltr .np-title {font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));line-height:1.3;margin:2px 0 0}
 .desk-ltr .np-meta {font-size:calc(0.875rem * var(--ts));color:var(--mut);margin:3px 0 0}
 .desk-ltr .np-acts {margin-top:7px;display:flex;gap:8px;flex-wrap:wrap}
-.desk-ltr .np-link {font-size:calc(0.875rem * var(--ts));color:var(--adeep);text-decoration:underline;text-underline-offset:3px;text-transform:none;letter-spacing:0;margin-left:6px}
+/*
+  UI1b-4. `.np-link` is the desk's "see all" link -- "All drafts", "All
+  follow-ups", "All sources" -- and it goes somewhere, so it stays an `<a>`
+  with an underline (README §2: "if it goes somewhere, it is an underlined
+  link"). What it may not be is a bare underlined word floating in a section
+  header: that is exactly the "plain text that is clickable" the rule is
+  against, and the guard measured all twelve instances of it as controls with
+  no edge or fill at all.
+
+  It wears the Quiet level instead -- README §6, "1px rule border, minor or
+  navigational actions (Open, More ▾, Edit)" -- so it reads as the navigational
+  control it is while keeping its underline and its `--adeep` link colour. No
+  `min-height`: the 44px target size belongs to UI1b-5, not here. The old 6px
+  left margin is now the box's own left padding, so the header spacing does not
+  move.
+*/
+.desk-ltr .np-link {display:inline-block;padding:4px 10px;border:1px solid var(--fg2);font-size:calc(0.875rem * var(--ts));color:var(--adeep);text-decoration:underline;text-underline-offset:3px;text-transform:none;letter-spacing:0}
 .desk-ltr .wirecol .sechead:first-child {margin-top:6px}
 .desk-ltr .wire-line {font-size:calc(0.875rem * var(--ts));margin:10px 0 0;color:var(--fg2)}
 .desk-ltr .wire-line b {color:var(--fg)}
@@ -1597,16 +1630,16 @@
 */
 .desk-ltr .model-picker.compact {margin:0;grid-template-columns:auto minmax(170px,300px)}
 .desk-ltr .model-picker-label {font-size:calc(0.875rem * var(--ts));letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-.desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+.desk-ltr .model-picker select {min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--fg2);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .model-picker select:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .model-picker-help {grid-column:1 / -1;font-size:calc(0.875rem * var(--ts));color:var(--mut)}
 .desk-ltr .queue-draft-controls {display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:9px}
 .desk-ltr .queue-draft-controls .model-picker {margin:0}
 @media (max-width:720px){.desk-ltr .model-picker,.desk-ltr .model-picker.compact{grid-template-columns:1fr;width:100%;max-width:none;min-width:0}.desk-ltr .model-picker-help{grid-column:1}}
 .desk-ltr .local-model-picker {display:grid;grid-template-columns:auto minmax(190px,1fr);align-items:center;gap:4px 9px;margin:8px 0 0;min-width:0}
-.desk-ltr .local-model-picker select {grid-column:2;min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
+.desk-ltr .local-model-picker select {grid-column:2;min-height:40px;width:100%;max-width:100%;min-width:0;border:1px solid var(--fg2);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));padding:6px 28px 6px 9px}
 .desk-ltr .local-model-picker .model-picker-help {grid-column:2}
-.desk-ltr .model-picker-refresh {grid-column:2;justify-self:start;min-height:44px;min-width:44px;padding:6px 14px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));cursor:pointer}
+.desk-ltr .model-picker-refresh {grid-column:2;justify-self:start;min-height:44px;min-width:44px;padding:6px 14px;border:1px solid var(--fg2);background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.875rem * var(--ts));cursor:pointer}
 .desk-ltr .model-picker-refresh:focus-visible {outline:2px solid var(--fg);outline-offset:2px}
 @media (max-width:720px){.desk-ltr .local-model-picker{grid-template-columns:1fr;min-width:0}.desk-ltr .local-model-picker select,.desk-ltr .local-model-picker .model-picker-help,.desk-ltr .model-picker-refresh{grid-column:1}}
 .desk-ltr .work-form {margin-top:16px;display:grid;gap:12px}

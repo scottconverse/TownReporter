@@ -201,7 +201,7 @@ function DeskHome() {
   */
   const { city, state, county, timezone } = usePaper();
   const paperPlace = useMemo(() => ({ city, state, county }), [city, state, county]);
-  const { formatDate, formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatDate, formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   const navigate = useNavigate();
   /*
@@ -710,7 +710,7 @@ function DeskHome() {
           s,
           tone: "same",
           label: "✓ Checked · no change",
-          note: `Checked ${formatDateTime(s.last_fetched_at)}`,
+          note: `Checked ${formatListDateTime(s.last_fetched_at)}`,
           rank: 2,
         };
       }
@@ -1199,6 +1199,20 @@ function DeskHome() {
       <nav className="today-steps" aria-label="Today’s work">
         {STEPS.map((step) => {
           const on = step.n === currentStep;
+          /*
+            UI1b-5: THE PAGE'S ONE PRIMARY IS "REVIEW LEADS".
+
+            The designer: "'Run scan now' on Today = Secondary; page Primary is
+            'Review leads'." This strip used to hand the yellow level to
+            whichever step was current, so the page's one primary moved with the
+            fixture and could be a step the editor has nothing to do on. Step 1
+            -- the leads waiting for a decision -- is the one press Today is
+            about; it keeps the yellow. Every other step's press is the
+            Secondary level. The CURRENT step is still marked, by the yellow
+            number square the design system gives it (README §6, "a number
+            square (yellow when current)"), and none of the four changes what it
+            opens.
+          */
           return (
             <div className={"today-step" + (on ? " now" : "")} key={step.n}>
               <span className="today-step-n" aria-hidden>
@@ -1207,7 +1221,7 @@ function DeskHome() {
               <span className="today-step-name">{step.name}</span>
               <span className="today-step-count">{step.count}</span>
               <span className="today-step-unit">{step.unit}</span>
-              <Link to={step.to} hash={step.hash} className={"btn" + (on ? " solid" : "")}>
+              <Link to={step.to} hash={step.hash} className={"btn" + (step.n === 1 ? " solid" : "")}>
                 {step.act}
               </Link>
             </div>
@@ -1313,13 +1327,24 @@ function DeskHome() {
                     <span className="today-edition-sec">
                       {sectionName(row.topic) || "No section"}
                     </span>
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(row.lead_id) }}
-                      className="today-edition-hl hl-link"
-                    >
-                      {row.headline}
-                    </Link>
+                    {/*
+                      UI1b-3: the headline is a HEADING, not a bare link
+                      floating in a div. The design system allows one plain
+                      form -- an underlined link inside a sentence, a list
+                      title, a heading or a table cell (README section 6) --
+                      and this is the list title of the row. Same shape as the
+                      today-card above, which has always wrapped its link in
+                      an h3.
+                    */}
+                    <h3 className="hl-head">
+                      <Link
+                        to="/desk/story/$leadId"
+                        params={{ leadId: String(row.lead_id) }}
+                        className="today-edition-hl hl-link"
+                      >
+                        {row.headline}
+                      </Link>
+                    </h3>
                   </div>
                   {/*
                     The checks are their own column, not a tail on the
@@ -1853,7 +1878,7 @@ function DeskHome() {
                   <div className="today-leads-title">
                     <h2>New leads</h2>
                     <span>
-                      {last ? `${formatDateTime(last.started_at)} scan · best first` : "Best first"}
+                      {last ? `${formatListDateTime(last.started_at)} scan · best first` : "Best first"}
                     </span>
                   </div>
                   <div className="today-segs" role="group" aria-label="Which leads to show">
@@ -2020,16 +2045,20 @@ function DeskHome() {
                               */}
                               <LeadFlags lead={l} dup={dup} />
                             </div>
-                            <Link
-                              to="/desk/story/$leadId"
-                              params={{ leadId: String(l.id) }}
-                              className={
-                                "today-lead-hl hl-link" +
-                                (l.status === "killed" ? " today-lead-struck" : "")
-                              }
-                            >
-                              {l.headline}
-                            </Link>
+                            {/* UI1b-3: the row's list title, in a heading --
+                                see the note on Tonight's edition above. */}
+                            <h3 className="hl-head">
+                              <Link
+                                to="/desk/story/$leadId"
+                                params={{ leadId: String(l.id) }}
+                                className={
+                                  "today-lead-hl hl-link" +
+                                  (l.status === "killed" ? " today-lead-struck" : "")
+                                }
+                              >
+                                {l.headline}
+                              </Link>
+                            </h3>
                             <p className="today-lead-why">{l.why}</p>
                             <div className="today-lead-row2">
                               {/*
@@ -2356,7 +2385,7 @@ function DeskHome() {
               */
               sub={
                 wireScanLine(scanJob) ??
-                (last ? `Scan ${formatDateTime(last.started_at)}` : "No scans yet")
+                (last ? `Scan ${formatListDateTime(last.started_at)}` : "No scans yet")
               }
             />
             {scanning ? <Busy label="Fetching the watch list, then one pass for leads." /> : null}
@@ -2394,7 +2423,18 @@ function DeskHome() {
               {writeStory.isPending ? "writing now" : "ready"}
             </p>
             <div className="wire-acts">
+              {/*
+                UI1b-5: SECONDARY, NOT PRIMARY. The designer: "'Run scan now'
+                on Today = Secondary; page Primary is 'Review leads'." It was
+                drawn `solid` -- the yellow level -- so Today carried two
+                primaries and neither of them was the next step the page is
+                about. `ghost` is the Secondary level of the one button family
+                (2px ink border, ink text, README §6), which is what a real
+                action that is not THE action wears. Nothing about what the
+                press does changes.
+              */}
               <InkButton
+                tone="ghost"
                 onClick={() => scan.mutate()}
                 disabled={scanning || paperGate.blocked}
                 pending={scan.isPending}
@@ -2433,7 +2473,7 @@ function DeskHome() {
               {last ? (
                 <>
                   <p className="wire-line">
-                    <b>Last scan</b> · {formatDateTime(last.started_at)} ·{" "}
+                    <b>Last scan</b> · {formatListDateTime(last.started_at)} ·{" "}
                     {last.leads_created > 0 ? (
                       scanCountsLine(last)
                     ) : (

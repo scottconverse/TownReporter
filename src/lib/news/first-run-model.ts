@@ -167,6 +167,50 @@ export function localModelListLabel(model: Pick<LocalModelEntry, "id" | "loaded"
   return parts.join(" · ");
 }
 
+/*
+  ---------------------------------------------------------------------------
+  UI1b-6: which rows on the card are a PICK, and which are only a LINE
+  ---------------------------------------------------------------------------
+
+  The card used to draw a "Use <model>" button for every model it listed, cloud
+  ones included -- and the server (`answerFirstRunModelOffer`) refuses a cloud
+  pick on purpose, because a model running on Ollama's hosted service is not
+  "on this computer" and spends the owner's allowance. So every cloud row's
+  button could only ever produce the refusal sentence: a control that exists to
+  fail is worse than no control.
+
+  Option A (agreed with the auditor): a cloud row is a plain labelled line that
+  says why it cannot be picked; a local row keeps its real button. The decision
+  is ONE pure function so the component, the tests and any later caller cannot
+  disagree about which row is which.
+*/
+
+/** Is this row a pick the server will accept, or a line that explains itself? */
+export function firstRunModelRowKind(model: Pick<LocalModelEntry, "cloud">): "local" | "cloud" {
+  return model.cloud ? "cloud" : "local";
+}
+
+/**
+ * What a cloud row says instead of a button. It names the three facts that
+ * decide the row: where it runs, what it costs, and why it is not a choice.
+ */
+export const FIRST_RUN_CLOUD_ROW_LINE =
+  "hosted by Ollama, spends credits, cannot be the desk's default";
+
+/**
+ * The words on a card row. A local row says what it is ("gemma4:12b ·
+ * loaded"), exactly as the read-only list does; a cloud row carries the
+ * explanation above in place of the duplicated "cloud — spends credits" tag,
+ * so the line reads once rather than twice.
+ */
+export function firstRunModelLine(model: Pick<LocalModelEntry, "id" | "loaded" | "cloud">): string {
+  if (firstRunModelRowKind(model) === "local") return localModelListLabel(model);
+  const parts = [model.id, FIRST_RUN_CLOUD_ROW_LINE];
+  if (model.loaded === true) parts.push("loaded");
+  if (model.loaded === false) parts.push("not loaded");
+  return parts.join(" · ");
+}
+
 /** The list's own heading and empty-state sentence, in one place. */
 export const LOCAL_MODEL_LIST_TITLE = "Models on this computer";
 export const LOCAL_MODEL_LIST_EMPTY =

@@ -34,6 +34,8 @@ import {
   FIRST_RUN_MODEL_KEEP_AUTOMATIC,
   LOCAL_MODEL_LIST_EMPTY,
   LOCAL_MODEL_LIST_TITLE,
+  firstRunModelLine,
+  firstRunModelRowKind,
   localModelListLabel,
   localModelListRows,
 } from "@/lib/news/first-run-model";
@@ -159,19 +161,32 @@ export function FirstRunModelCard() {
                 {localServerName(row.serverKind)} · {row.baseUrl}
               </div>
               <ul className="mt-1 space-y-1">
-                {row.models.map((model) => (
-                  <li key={model.id}>
-                    <button
-                      type="button"
-                      className="inline-link"
-                      style={{ minHeight: 44 }}
-                      disabled={answer.isPending}
-                      onClick={() => answer.mutate({ choice: { baseUrl: row.baseUrl, id: model.id } })}
-                    >
-                      Use {localModelListLabel(model)}
-                    </button>
-                  </li>
-                ))}
+                {row.models.map((model) =>
+                  /*
+                    UI1b-6 / Option A: a cloud row is a LINE, not a button.
+                    The server refuses a cloud pick on purpose (it spends the
+                    owner's Ollama allowance), so a "Use" button there could
+                    only ever fail -- see `firstRunModelRowKind`. The line
+                    carries the reason instead.
+                  */
+                  firstRunModelRowKind(model) === "local" ? (
+                    <li key={model.id}>
+                      <button
+                        type="button"
+                        className="btn quiet"
+                        style={{ minHeight: 44 }}
+                        disabled={answer.isPending}
+                        onClick={() => answer.mutate({ choice: { baseUrl: row.baseUrl, id: model.id } })}
+                      >
+                        Use {localModelListLabel(model)}
+                      </button>
+                    </li>
+                  ) : (
+                    <li key={model.id} className="text-muted">
+                      {firstRunModelLine(model)}
+                    </li>
+                  ),
+                )}
               </ul>
             </div>
           ))}
@@ -180,7 +195,7 @@ export function FirstRunModelCard() {
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
-          className="inline-link"
+          className="btn quiet"
           style={{ minHeight: 44 }}
           disabled={answer.isPending}
           onClick={() => answer.mutate({ keepAutomatic: true })}

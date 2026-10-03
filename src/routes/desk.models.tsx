@@ -810,8 +810,19 @@ const SELECT_STYLE: CSSProperties = {
   minHeight: "44px",
   padding: "0 8px",
   background: "var(--bg)",
-  color: "var(--ink)",
-  border: "1px solid var(--ink)",
+  /*
+    UI1b-4. `--ink` is the READER's token (`reader-astra.css`), not the desk's:
+    it is declared on `.reader` and its children only, so neither of these two
+    declarations ever resolved here. A `var()` that does not resolve makes the
+    whole declaration invalid at computed-value time, and for the `border`
+    shorthand that means `border-style: none` -- which is how the ten model
+    selects and the ten effort selects on this page ended up with NO border at
+    all (measured: 0px on all four sides, edge ratio 0) rather than with an ink
+    one. `--fg`/`--fg2` are the desk's own tokens, and `--fg2` is the Quiet
+    button's edge that README §6 gives a select.
+  */
+  color: "var(--fg)",
+  border: "1px solid var(--fg2)",
   borderRadius: 0,
   fontFamily: "inherit",
   fontWeight: 700,

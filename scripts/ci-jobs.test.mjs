@@ -53,6 +53,11 @@ const CLAIMERS = [
   // creates the first account, so it needs a virgin desk of its own -- which
   // it gets by booting its own server on its own port over in-memory PGlite.
   "scripts/desk-narrow-width-walk.mjs",
+  // Unit UI1b, step 1: every clickable on every desk route, measured for the
+  // 3:1 edge/fill rule, the 44px target and the underline rule. It creates the
+  // first account and seeds its own rows, so it carries its own desk -- booted
+  // by the walk itself on its own port over in-memory PGlite.
+  "scripts/desk-clickable-guard-walk.mjs",
 ];
 
 /**

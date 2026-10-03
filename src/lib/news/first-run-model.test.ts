@@ -30,6 +30,8 @@ import type { LocalCatalog, LocalModelEntry, LocalServer } from "./local-models.
 import {
   FIRST_RUN_MODEL_SCOPES,
   LOCAL_MODEL_LIST_EMPTY,
+  firstRunModelLine,
+  firstRunModelRowKind,
   firstRunPickerDefault,
   isFirstRunModelScope,
   localModelListLabel,
@@ -427,6 +429,30 @@ describe("the read-only 'Models on this computer' list", () => {
     const servers = [server({ kind: "ollama", baseUrl: OLLAMA, models: [entry({ id: "x:cloud", cloud: true, loaded: true })] })];
     assert.equal(withoutCloudModels(servers)[0].models.length, 0, "never counted as loaded");
     assert.deepEqual(planFirstRunModelDefault(servers), { kind: "offer-choice" });
+  });
+});
+
+/*
+  UI1b-6 / Option A. The card used to draw a "Use <model>" button for every
+  row it listed, cloud rows included -- and the server refuses a cloud pick on
+  purpose (test "refuses a cloud model as the default", below, is that door).
+  A control whose only possible outcome is the refusal sentence is worse than
+  no control, so a cloud row is a LINE. These two cases are the rule itself;
+  `src/components/first-run-model-card.test.ts` pins the card's call site.
+*/
+describe("the card's rows: which is a pick, and which is only a line", () => {
+  it("a cloud model is a line, never a pick", () => {
+    const cloud = entry({ id: "deepseek-v4.1-flash:cloud", cloud: true, loaded: false });
+    assert.equal(firstRunModelRowKind(cloud), "cloud");
+    assert.match(firstRunModelLine(cloud), /hosted by Ollama, spends credits, cannot be the desk's default/);
+    assert.match(firstRunModelLine(cloud), /deepseek-v4\.1-flash:cloud/);
+  });
+
+  it("a model on this computer is a pick", () => {
+    const local = entry({ id: "gemma4:12b", loaded: true });
+    assert.equal(firstRunModelRowKind(local), "local");
+    assert.equal(firstRunModelLine(local), "gemma4:12b · loaded");
+    assert.doesNotMatch(firstRunModelLine(local), /spends credits/);
   });
 });
 

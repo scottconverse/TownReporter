@@ -67,7 +67,13 @@ function step(name) {
   callers make is unchanged: the desk is in dark, large-text mode afterwards.
 */
 async function chooseDeskAppearance(who) {
-  await who.getByRole("button", { name: "Open navigation", exact: true }).click();
+  /*
+    UI1b-5: this used to look for `{ name: "Open navigation" }`. The designer
+    ruled the phone menu a labelled "Menu" button, so that `aria-label` is gone
+    and the visible word is the accessible name (WCAG 2.5.3 wants the spoken
+    name to contain what is written on the control). Same button, same press.
+  */
+  await who.getByRole("button", { name: "Menu", exact: true }).click();
   const drawer = who.getByRole("dialog", { name: "Newsroom navigation" });
   const dark = drawer.getByRole("button", { name: "Switch to dark appearance", exact: true });
   if (await dark.count()) await dark.click();

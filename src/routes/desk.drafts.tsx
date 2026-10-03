@@ -7,6 +7,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
+import { sentenceCase } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
   deskDraftElapsed,
@@ -58,7 +59,14 @@ function stateTone(state: DeskDraftState): string {
   if (state.failed) return "d-danger";
   if (state.running) return "d-run";
   if (state.needsYou) return "d-warn";
-  if (state.key === "ready") return "d-ok";
+  /*
+    UI1b-5. "Ready to check" was drawn in `d-ok` -- the green 1px border the
+    state table gives a ✓ that has been verified. This row has not been
+    verified: the checks it still faces are recorded on the story page, not
+    here, so green was a verdict the row could not read. The designer's ruling
+    is the neutral chip, which is the state table's "Waiting" level.
+  */
+  if (state.key === "ready") return "d-ready";
   return "d-quiet";
 }
 
@@ -82,7 +90,7 @@ function draftOrigin(row: DraftRow, state: DeskDraftState): string {
 
 function DraftsPage() {
   const { sections } = useEditorSections();
-  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const navigate = useNavigate();
   const [filter, setFilter] = useState<DeskDraftFilter>("all");
   const [draftShown, setDraftShown] = useState(PAGE_SIZE);
@@ -159,25 +167,25 @@ function DraftsPage() {
   const metaFor = (row: DraftRow, state: DeskDraftState): string => {
     if (state.failed) {
       const why = String(row.job_error ?? "").split("\n")[0].trim();
-      const when = formatDateTime(row.job_updated_at ?? row.updated_at);
+      const when = formatListDateTime(row.job_updated_at ?? row.updated_at);
       return why ? `${why} · ${when}` : when;
     }
     if (state.running) return modelChoiceLabel(row.job_model_choice, "story");
     if (state.key === "names" && row.names_checked_at) {
-      return `checked ${formatDateTime(row.names_checked_at)}`;
+      return `checked ${formatListDateTime(row.names_checked_at)}`;
     }
     if (state.key === "evidence" && row.evidence_checked_at) {
-      return `checked ${formatDateTime(row.evidence_checked_at)}`;
+      return `checked ${formatListDateTime(row.evidence_checked_at)}`;
     }
     if (state.key === "ready") {
       const checked = row.evidence_checked_at ?? row.names_checked_at;
-      return checked ? `checked ${formatDateTime(checked)}` : `saved ${formatDateTime(row.updated_at)}`;
+      return checked ? `checked ${formatListDateTime(checked)}` : `saved ${formatListDateTime(row.updated_at)}`;
     }
     if (state.key === "imported") return `pasted ${formatShortDate(row.updated_at)}`;
     // The draft row is written with the lead, so its timestamp is the filing
     // time: "filed", not "saved", which would read as an editor's save.
-    if (state.key === "empty") return `filed ${formatDateTime(row.updated_at)}`;
-    return `saved ${formatDateTime(row.updated_at)}`;
+    if (state.key === "empty") return `filed ${formatListDateTime(row.updated_at)}`;
+    return `saved ${formatListDateTime(row.updated_at)}`;
   };
 
   const openWorkbench = (leadId: number) =>
@@ -230,7 +238,11 @@ function DraftsPage() {
             return (
               <div className="drafts-row" key={row.id}>
                 <span className="drafts-state">
-                  <span className={"chip " + stateTone(state)}>{state.label}</span>
+                  {/* UI1b-6: sentence case, wherever the word came from. Most
+                      of `deskDraftState`'s labels are already capitalised; a
+                      running row's is the worker's own stage line, which is
+                      not. `sentenceCase` leaves a capital or a marker alone. */}
+                  <span className={"chip " + stateTone(state)}>{sentenceCase(state.label)}</span>
                 </span>
                 <div className="drafts-main">
                   {/* The origin drops out rather than leaving a hanging
@@ -238,13 +250,21 @@ function DraftsPage() {
                   <span className="drafts-overline">
                     {[sectionName(row.topic), draftOrigin(row, state)].filter(Boolean).join(" · ")}
                   </span>
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(row.lead_id) }}
-                    className="drafts-hl hl-link"
-                  >
-                    {row.headline}
-                  </Link>
+                  {/* UI1b-3: the row's list title, in a heading. The link was
+                      underlined on hover only before this unit -- and even
+                      with the underline always on, a link floating on its own
+                      is not the plain form the design system allows (README
+                      section 6: a sentence, a list title, a heading or a
+                      table cell). */}
+                  <h3 className="hl-head">
+                    <Link
+                      to="/desk/story/$leadId"
+                      params={{ leadId: String(row.lead_id) }}
+                      className="drafts-hl hl-link"
+                    >
+                      {row.headline}
+                    </Link>
+                  </h3>
                 </div>
                 {/* A meta cell with nothing to say still holds its column, so
                     the rows below it do not shift by a column. */}

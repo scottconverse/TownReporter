@@ -149,7 +149,7 @@ function SourcesPage() {
   );
   const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   /*
     The right column: what the scan last did, and "Run scan now".
 
@@ -837,7 +837,7 @@ function SourcesPage() {
                 {(scans.data?.rows ?? []).slice(0, 5).map((run) => (
                   <li key={run.id}>
                     <span className="astra-log-t">
-                      {run.started_at ? formatDateTime(run.started_at) : "—"}
+                      {run.started_at ? formatListDateTime(run.started_at) : "—"}
                     </span>
                     {/*
                       FB1, unit 4: A RUNNING ROW SHOWS ITS LIVE COUNT.
@@ -1420,7 +1420,7 @@ function WatchRows({
   /** `from` is the status the row was in, so the done toast can offer Undo. */
   onStatus: (id: number, status: SingleRowStatus, from?: string) => void;
 }) {
-  const { formatDateTime } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   return (
     <div className="astra-rows">
       {rows.map((s) => {
@@ -1497,9 +1497,9 @@ function WatchRows({
               : failed
               ? (editorFetchError(s.last_error, s.url) ?? s.last_error ?? "")
               : fresh > 0
-                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatDateTime(s.last_fetched_at)}`
+                ? `${fresh} new ${fresh === 1 ? "item" : "items"} · ${formatListDateTime(s.last_fetched_at)}`
                 : s.last_fetched_at
-                  ? `Checked ${formatDateTime(s.last_fetched_at)}`
+                  ? `Checked ${formatListDateTime(s.last_fetched_at)}`
                   : "Added, not fetched yet";
         const checking = checkingId === s.id;
         /*
@@ -1523,12 +1523,21 @@ function WatchRows({
             >
               <div className="astra-cell src-name">
                 <span className="astra-row-t">{s.title}</span>
-                <span className="astra-row-meta">
+                {/*
+                  UI1b-4: a <p>, not a <span>. The link inside goes somewhere,
+                  so it stays an underlined link (README §2) -- and an
+                  underlined link is only allowed to be plain text when it
+                  sits in prose, a list item, a table cell or a heading. This
+                  meta line is the source's own sentence, so it is drawn as
+                  one; the two host links on this screen were the last
+                  controls on the desk the guard still read as bare text.
+                */}
+                <p className="astra-row-meta">
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                     {hostLabel(s.url)} ↗
                   </a>
                   {s.kind ? ` · ${s.kind}` : ""}
-                </span>
+                </p>
               </div>
               <div className="astra-cell src-state">
                 <span className={"astra-chip " + chip.cls}>{chip.label}</span>

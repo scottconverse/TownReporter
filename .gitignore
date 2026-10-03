@@ -37,6 +37,13 @@ Thumbs.db
 .tmp-editorial-*/
 debug.log
 
+# Unit UI1b's clickable-controls guard writes its measured report here
+# (scripts/desk-clickable-guard-walk.mjs). It is evidence about one build, not
+# source: the run is repeatable and the numbers move with every conversion, so
+# the file must never be committed. The baseline a reader wants is quoted in
+# the unit's report, not read out of a stale copy in the checkout.
+tmp-guard/
+
 # Transient capture and build output. An audit found 150 screenshots (11 MB)
 # and 25 browser captures plus five duplicate source archives (3.9 MB) tracked
 # here (ENG-010). Clones pay for those forever, and a committed source archive

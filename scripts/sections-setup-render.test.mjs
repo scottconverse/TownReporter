@@ -112,6 +112,9 @@ const deskCopyStub = inlineModule(`
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
   export function kindFromSourceUrl() { return "official"; }
+  /* UI1b-6: the desk's chip component draws its word through chipLabel() (sentence case). */
+  export function sentenceCase(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
+  export function chipLabel(status) { return sentenceCase(status); }
   /* Redesign phase 2a: the shell counts Queue from openLeads(). */
   export function openLeads(leads) { return leads ?? []; }
   /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */

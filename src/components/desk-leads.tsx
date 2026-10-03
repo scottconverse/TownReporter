@@ -487,13 +487,15 @@ export function LeadRowView({
         bulk bar above the table is what they feed, and both of its presses
         take this box's state.
 
-        BF4, defect 2: the drawing draws the box SMALL inside the column -- a
-        24px square with a 2px edge, filled ink with a background-colored tick
-        when the lead is picked (`Desk Screens.dc.html`). The desk drew a 44px
-        native box that filled the whole track, which read as a button, not a
-        tick. The 44px *press area* is kept by making this element the label
-        around the input, so a press anywhere in the box toggles it; the drawn
-        square is `.queue-box` inside it. See `.queue-check` in desk-astra.css.
+        BF4, defect 2 / UI1b-9: the drawing draws the box SMALL inside the
+        column -- a 24px square with a 2px edge (`Desk Screens.dc.html`), filled
+        ink with a background-colored tick when the lead is picked. The desk
+        drew a 44px native box that filled the whole track, which read as a
+        button, not a tick. The 44px *press area* is this label, so a press
+        anywhere in it toggles the input; the 24px drawn mark is the INPUT
+        itself (an outline at rest, a fill when picked, never a filled square at
+        rest -- the designer's ruling on PR 173) and `.queue-box` is only the
+        tick glyph over it. See `.queue-check` in desk-astra.css.
       */}
       {onDeleteSelect ? (
         <label className="queue-check">
@@ -523,9 +525,16 @@ export function LeadRowView({
           <span className="meta">{lead.topic}</span>
           <LeadFlags lead={lead} dup={dup} />
         </div>
-        <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
-          {lead.headline}
-        </Link>
+        {/* UI1b-3: the row's list title. A heading, because that is the plain
+            form the design system allows a link to take (README section 6) --
+            an underlined link floating on its own is still a control with no
+            edge. Same shape as the today-card's `<h3 className="today-card-hl">`
+            link on Today. */}
+        <h3 className="hl-head">
+          <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
+            {lead.headline}
+          </Link>
+        </h3>
         {/*
           BF4, defect 1: the Queue row is chips + headline, as drawn. The "why"
           summary line the desk printed under the headline is not in the

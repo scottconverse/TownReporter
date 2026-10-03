@@ -55,6 +55,7 @@ import {
   redditFeedStatusLabel,
   redditPostStateLabel,
   redditResultHeadline,
+  sentenceCase,
   stalledRunCopy,
   worthItemOnDeskLine,
   worthItemOnDeskReason,
@@ -98,7 +99,7 @@ export const Route = createFileRoute("/desk/dark")({
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
-  const { formatDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     A hand-over the editor asked for on another screen -- an import's review
@@ -1081,7 +1082,7 @@ function DarkPage() {
                 {(runs.data ?? []).map((r) => (
                   <div key={r.id} className="run-row">
                     <p className="meta">
-                      {formatDateTime(r.started_at)}
+                      {formatListDateTime(r.started_at)}
                       {/*
                         Which model dug this round. A round that dug badly and a
                         round that dug on a different model are different facts
@@ -1380,7 +1381,10 @@ function RedditTipRows({
                 {p.coverage === "partial" ? " · some comments were unavailable" : ""}
               </span>
             </div>
-            <span className={"chip st-" + p.state}>{redditPostStateLabel(p.state)}</span>
+            {/* UI1b-6: the label function's words are stored lower case
+                ("filed", "already known", "below the line"); the chip is
+                sentence case, and the words are given their capital here. */}
+            <span className={"chip st-" + p.state}>{sentenceCase(redditPostStateLabel(p.state))}</span>
             {canFile ? (
               <InkButton
                 tone="quiet"

@@ -1419,9 +1419,12 @@ function QueuePage() {
             leads the table is showing, which is what the strip's label said.
           */}
           <div className="queue-head">
-            {/* BF4, defect 2: same box as every row's own -- the drawn 24px
-                square inside the 44px press area (see `.queue-check` in
-                desk-astra.css). */}
+            {/* BF4, defect 2 / UI1b-9: same box as every row's own -- the
+                drawn 24px mark (a 2px outline at rest, an ink fill when picked)
+                inside the 44px press area (see `.queue-check` in
+                desk-astra.css). This box has no indeterminate state: it is
+                `checked={allShownSelected}`, and the bulk bar already prints
+                the count when only some rows are picked. */}
             <label className="queue-check">
               <input
                 type="checkbox"

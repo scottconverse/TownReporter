@@ -79,15 +79,24 @@ const NIGHT = {
   ),
 };
 
-/** Follow `var(--x)` chains until a literal falls out. */
+/**
+ * Follow `var(--x)` chains until a literal falls out.
+ *
+ * UI1b-5: it reads the two-argument form too -- `var(--primary-edge,
+ * var(--fg))` -- because that is how the Primary's edge names a token the
+ * LIGHT theme does not define. The fallback is what the browser would use when
+ * the property is unset, so resolving it here is the same reading, not a
+ * shortcut.
+ */
 function resolve(value, tokens, depth = 0) {
   assert.ok(depth < 10, `custom property chain too deep: ${value}`);
   const v = value.trim();
-  const varMatch = v.match(/^var\(\s*(--[\w-]+)\s*\)$/);
+  const varMatch = v.match(/^var\(\s*(--[\w-]+)\s*(?:,\s*([\s\S]+))?\)$/);
   if (varMatch) {
     const next = tokens[varMatch[1]];
-    assert.ok(next, `token ${varMatch[1]} is not defined`);
-    return resolve(next, tokens, depth + 1);
+    if (next !== undefined) return resolve(next, tokens, depth + 1);
+    assert.ok(varMatch[2], `token ${varMatch[1]} is not defined and has no fallback`);
+    return resolve(varMatch[2], tokens, depth + 1);
   }
   return v;
 }
@@ -158,14 +167,31 @@ function declarationFor(css, selectorParts, property) {
   return found;
 }
 
+const PRIMARY_SELECTOR = ".desk-ltr.astra :is(.btn.solid, .document-add-button)";
+
 const LEVELS = [
   {
-    /* A filled control is still identified by its BOUNDARY: the yellow fill is
-       1.42:1 on the cream page, so before UI1a the primary had no boundary at
-       all. It carries the family's 2px ink edge now, and that edge is what is
-       measured here -- the label on the fill is asserted separately, below. */
+    /*
+      A filled control is still identified by its BOUNDARY: the yellow fill is
+      1.42:1 on the cream page, so before UI1a the primary had no boundary at
+      all. It carries the family's 2px ink edge now, and THAT EDGE is what the
+      light theme is measured on -- the label on the fill is asserted
+      separately, below.
+
+      UI1b-5: WHICH OF THE TWO CARRIES THE 3:1 IS A THEME QUESTION. README §6:
+      the Primary is "Yellow fill, #111 text" with a 2px #111 edge in LIGHT, and
+      in DARK "the edge is the same colour as the fill". So in the night theme
+      the edge IS the fill and the thing that separates the control from the
+      page is the yellow itself -- which is why `perTheme` names a different
+      declaration, and a different property, for each: the ink edge in light,
+      the fill in dark. The `edgeMatchesFill` check below is what stops the
+      dark edge from quietly going back to the text colour (bone #e8e6e1).
+    */
     name: "primary (.btn.solid)",
-    edge: { css: DESK_CSS, selector: ".desk-ltr.astra :is(.btn.solid, .document-add-button)", property: "border" },
+    perTheme: {
+      light: { css: DESK_CSS, selector: PRIMARY_SELECTOR, property: "border" },
+      night: { css: DESK_CSS, selector: PRIMARY_SELECTOR, property: "background" },
+    },
   },
   {
     name: "secondary (.btn)",
@@ -209,7 +235,7 @@ test("every button level's edge or fill clears 3:1 on both desk grounds, in both
     for (const ground of ["--bg", "--surface"]) {
       const groundColour = resolve(tokens[ground], tokens);
       for (const level of LEVELS) {
-        const spec = level.edge ?? level.fill;
+        const spec = level.perTheme ? level.perTheme[theme] : (level.edge ?? level.fill);
         const declared = declarationFor(spec.css, spec.selector, spec.property);
         assert.ok(declared, `${level.name}: no ${spec.property} declaration found in ${spec.selector}`);
         const colour = resolve(declared, tokens);

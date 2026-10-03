@@ -1975,3 +1975,37 @@ jobs:
         env:
           BETTER_AUTH_SECRET: ci-desk-narrow-width-secret-not-for-production
         run: node scripts/desk-narrow-width-walk.mjs
+      # Unit UI1b, step 1. Scott, on the live desk: "That DOES NOT look like
+      # something you can click... a ton of these text strings with no
+      # identifying features that it's an action. These are scattered
+      # throughout the interface and they're landmines for humans." The
+      # auditor measured 463 controls at 881cbfe8 whose border or fill was
+      # under 3:1 against the surface behind them.
+      #
+      # This walk measures EVERY clickable on EVERY desk route (derived from
+      # src/routes/desk*.tsx) in both themes at 1280 and in light at 390, and
+      # classifies each one against the design system's rule: a link that goes
+      # somewhere is an underlined link in prose; anything that does something
+      # needs an edge or fill at 3:1; a target is 44px; a disabled control
+      # still shows its edge and its reason. The arithmetic is in
+      # scripts/lib/clickable-guard.mjs and is unit-tested.
+      #
+      # ENFORCING. UI1b's last step removed the temporary
+      # `GUARD_BASELINE_ONLY=1` switch, so this step now FAILS THE BUILD when
+      # any clickable control is plain text, unreadable as a link, or under
+      # 44px. The one written exception is the header wordmark, in
+      # scripts/desk-clickable-allowlist.json with its reason; anything else
+      # that fails is a defect, not a baseline.
+      #
+      # It runs inside this job rather than a new one because branch protection
+      # pins the current job set, and the job already installs Chromium and
+      # builds the server.
+      #
+      # Its own process, its own port (3595 -- 3592 is desk-narrow-width's
+      # dead-model port and no two integration files may declare the same one),
+      # its own desk over in-memory PGlite, and no model: the provider ladder
+      # points at a port the walk proves is dead before it boots. ~3 min.
+      - name: Nothing clickable is plain text, in both themes
+        env:
+          BETTER_AUTH_SECRET: ci-desk-clickable-guard-secret-not-for-production
+        run: node scripts/desk-clickable-guard-walk.mjs

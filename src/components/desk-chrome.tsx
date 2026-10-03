@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth/client";
 import { leaveEditor } from "@/lib/news/claim";
 import { listInvestigations } from "@/lib/news/dark";
-import { createEditorCopy, openLeads, pileForStatus } from "@/lib/news/desk-copy";
+import { chipLabel, createEditorCopy, openLeads, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
@@ -396,17 +396,67 @@ export function DeskShell({
           and a theme toggle that now lives in the nav footer.
         */}
         <header className="astra-topbar">
+          {/*
+            UI1b-5: THE HAMBURGER SAYS ITS NAME.
+
+            The designer: "Phone menu = labelled 'Menu' button (Quiet, 44px),
+            not a bare hamburger + 'Desk' chip." This was the last control on
+            the desk with no edge of its own -- the guard measured it 18 times
+            (once per route, at 390) and it was the only "no edge/fill under
+            3:1" left in the build. It is now the Quiet level of the one button
+            family: 1px `--fg2` edge, 44px, the word "Menu" beside the icon the
+            drawing still draws. The icon stays; it is no longer the whole
+            label, so the button reads as a press before you press it.
+
+            The accessible name is the visible word. `aria-label="Open
+            navigation"` is gone rather than kept: WCAG 2.5.3 (Label in Name)
+            wants the spoken name to contain what is written on the control,
+            and "Open navigation" does not contain "Menu". `aria-expanded` and
+            `aria-controls` still say what the press opens, and the keyboard
+            behaviour is unchanged.
+
+            The "Desk" tag that used to sit beside the wordmark is dropped in
+            the phone bar (see `.astra-brand-bar span` in desk-astra.css): with
+            a labelled Menu button the bar read "Menu · TownReporter · DESK ·
+            + New", two labels for the same thing, and the row is 8px wider
+            than a 390px phone at Text: Large as it is. The wordmark already
+            says "TownReporter" and the desk's own `<title>` says Desk; the
+            drawer's own brand block (line 304) keeps its tag.
+          */}
           <button
             ref={menuButton}
-            className="astra-icon astra-menu"
-            aria-label="Open navigation"
+            className="btn quiet astra-menu"
             aria-expanded={menuOpen}
             aria-controls="desk-navigation"
             onClick={() => setMenuOpen(!menuOpen)}
           >
-            <Menu size={20} />
+            <Menu size={18} aria-hidden />
+            Menu
           </button>
-          <Link to="/" className="astra-brand astra-brand-bar" title="Public news page">
+          {/*
+            UI1b-8: THE NAME NAMES WHERE THE LINK GOES.
+
+            The accessible name is spelled out because the tag is hidden on the
+            phone -- but this `to="/"` link does not go to the desk at all: it
+            leaves for the public paper, and its own `title` has always said so
+            ("Public news page"). The UI1b-5 name "TownReporter Desk" therefore
+            told a screen-reader user the opposite of what the press does, one
+            word before it took them out of the desk. The name now says the
+            destination and still contains the visible word "TownReporter"
+            (WCAG 2.5.3, Label in Name), and it matches the `title`.
+
+            The DESK's brand link is a different element -- `.astra-brand` in
+            the nav rail (`to="/"` as well, with the visible "TownReporter /
+            Editor's desk" tag). It draws on desktop and inside the phone
+            drawer; the walk skips `.astra-sidebar` entirely, so it is not in
+            the guard's report and keeps its drawn tag.
+          */}
+          <Link
+            to="/"
+            className="astra-brand astra-brand-bar"
+            title="Public news page"
+            aria-label="TownReporter, the public news page"
+          >
             <strong>TownReporter</strong>
             <span>Desk</span>
           </Link>
@@ -1086,7 +1136,9 @@ export function Field({
   const wording = (
     <>
       {label}
-      {chip ? <span className="chip dnp">{chip}</span> : null}
+      {/* UI1b-6: "does not print" reached the editor in lower case once the
+          `.chip` transform went; the chip is sentence case like every other. */}
+      {chip ? <span className="chip dnp">{sentenceCase(chip)}</span> : null}
     </>
   );
   const tail = hint ? <p className="meta">{hint}</p> : null;
@@ -1153,24 +1205,22 @@ export function Score({ v }: { v: number }) {
   );
 }
 
-const CHIP_LABELS: Record<string, string> = {
-  aside: "set aside",
-  closed: "closed",
-  exhausted: "exhausted",
-};
-
 /**
  * Every real status renders its own word, styled -- nothing falls through to
  * the unstyled default look. "held", "aside", "closed", and "exhausted" used
  * to collapse onto one shared "set aside" label (or, for "held", no styled
  * chip at all besides the generic `.chip` gray), which read as the same
  * status even though an editor treats them differently: held is coming back,
- * aside/closed/exhausted are done. The visible word is uppercased by the
- * `.chip` CSS rule (text-transform), so "held" already renders HELD.
+ * aside/closed/exhausted are done.
+ *
+ * UI1b-6: the word comes from `chipLabel` (src/lib/news/desk-copy.ts), which
+ * gives it a capital first letter. The `.chip` CSS transform that used to do
+ * that is gone (UI1b-5, "sentence case, no ALL CAPS"), so "held" rendered as
+ * plain "held" -- see the note on `sentenceCase` for why this is a render-site
+ * helper rather than a `::first-letter` rule.
  */
 export function Chip({ s }: { s: string }) {
-  const label = CHIP_LABELS[s] ?? s;
-  return <span className={"chip st-" + s}>{label}</span>;
+  return <span className={"chip st-" + s}>{chipLabel(s)}</span>;
 }
 
 export function SecHead({

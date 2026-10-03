@@ -1,5 +1,12 @@
 import { createContext, useContext, useMemo } from "react";
-import { formatDate, formatDayStamp, formatShortDate, formatDateTime } from "./paper";
+import {
+  formatDate,
+  formatDayStamp,
+  formatShortDate,
+  formatDateTime,
+  formatListDateTime,
+  formatClockTime,
+} from "./paper";
 import { clockTextAt } from "./desk/ops-rows";
 import { DEFAULT_PAPER_IDENTITY, type PaperIdentity } from "./paper-identity";
 import { areaLabelsFor, type AreaLabels } from "./story-area";
@@ -37,7 +44,11 @@ export function usePaperDateFormatters() {
       /** "Sat, Sep 26" -- the paper's dateline. */
       formatDayStamp: (iso: string | Date | null | undefined) => formatDayStamp(iso, timezone),
       formatShortDate: (iso: string | Date | null | undefined) => formatShortDate(iso, timezone),
+      /** "Aug 26, 2026, 8:10 p.m." -- the full date, for readers and archives. */
       formatDateTime: (iso: string | Date | null | undefined) => formatDateTime(iso, timezone),
+      /** "Oct. 2, 6:43 a.m." -- the designer's list face, for desk rows. */
+      formatListDateTime: (iso: string | Date | null | undefined) => formatListDateTime(iso, timezone),
+      formatClockTime: (iso: string | Date | null | undefined) => formatClockTime(iso, timezone),
       /** "12:15 p.m." -- the desk's clock, for a moment that was tried. */
       clockTime: (iso: string | Date | null | undefined) => clockTextAt(iso, timezone),
     }),

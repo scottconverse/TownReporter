@@ -146,6 +146,13 @@ const deskCopyStub = inlineModule(`
   export function createEditorCopy() {
     return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
   }
+  /* UI1b-6: the desk's chip component draws its word through chipLabel() (sentence case). */
+  export function sentenceCase(text) {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  export function chipLabel(status) {
+    return sentenceCase(status);
+  }
 `);
 
 /*

@@ -541,6 +541,31 @@ describe("the publish family keeps its own path", () => {
     assert.equal(pressPhase(publishPressState({ publishing: false, refusal: "no", publishedSlug: null }).kind), "failed");
     assert.equal(pressPhase(publishPressState({ publishing: false, refusal: "", publishedSlug: null }).kind), "idle");
   });
+
+  /**
+   * Unit UI1b-2. Publish was the one press in this family whose DONE state was
+   * not the button's: a print took the bar away and the banner said everything,
+   * on UI1a's one-confirmation rule. The owner changed that rule on purpose --
+   * "click a publish button, it publishes and then CHANGES to say 'Published'"
+   * -- so the bar's own slot now wears the shared piece's `done` phase, and
+   * this is the pin that the call site still draws it.
+   *
+   * What is asserted here is only the call site: the word, the token, the icon
+   * and the settled (not pressable) state are rendered for real in
+   * `publish-bar-done.test.ts`.
+   */
+  it("UI1b-2: the bar's slot wears Publish's own done state, and it stays", () => {
+    const route = source("src/routes/desk.story.$leadId.tsx");
+    assert.match(
+      route,
+      /\{onPaper \? \(\s*<PublishBarDone result=\{press\} \/>/,
+      "the slot is drawn from the story, not from the press's last answer",
+    );
+    const bar = source("src/components/publish-bar-result.ts");
+    assert.match(bar, /phase: "done"/, "the shared piece, in its done phase");
+    assert.match(bar, /doneLabel: PUBLISHED_LABEL/, "and it says Published");
+    assert.match(bar, /disabled: true/, "a done state has no second press");
+  });
 });
 
 function escapeRe(value: string): string {

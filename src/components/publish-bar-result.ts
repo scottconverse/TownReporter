@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import type { PublishPressState } from "../lib/news/publish-blockers.ts";
-import { ActionIcon } from "./action-button.ts";
+import { ActionButton, ActionIcon } from "./action-button.ts";
 
 /**
  * The publish bar's answer to the press (unit PUB1).
@@ -50,17 +50,23 @@ export function PublishBarResult(props: { state: PublishPressState }) {
   }
   if (state.kind === "published") {
     /*
-      Unit UI1a, and the FOLD. Scott asked that pressing Publish "CHANGES to
-      say 'Published' with, say, a green color". This banner IS that change:
-      a print takes the publish bar away (`canPublish` goes false the moment
-      the lead is on the paper), so the button's done state and the banner
-      occupy the same place at the same moment and there is no way to draw both
-      without saying "it printed" twice. Rather than invent a second
-      confirmation, the banner is drawn with the shared piece's own done
-      icon -- the same check, from `ActionIcon` -- and carries the same
-      `data-phase`/`data-token` the button would have, so the two can never
-      drift apart and PUB2's rule (the banner is the ONLY confirmation on this
-      page) is kept exactly.
+      Unit UI1a drew this banner as the FOLD, on the rule that a print takes
+      the publish bar away (`canPublish` goes false the moment the lead is on
+      the paper) so the button's done state and the banner were the same place
+      at the same moment and there was no way to draw both without saying "it
+      printed" twice.
+
+      UNIT UI1b-2 CHANGES THAT RULE, on the owner's own words. The auditor put
+      PR 171 in front of Scott on his real story: after "Yes, print it" the
+      Publish button was GONE. What he asked for is the CONTROL changing --
+      "click a publish button, it publishes and then CHANGES to say 'Published'
+      with, say, a green color" -- so the control wears its own done state AND
+      this banner stays. The two agree because they are drawn from the same
+      answer (`press`), and both carry `data-phase="done"`/`data-token="ok"`
+      and the same check from `ActionIcon`, so neither can drift.
+
+      This banner keeps every word the walks pin: "Published.", "Read it on
+      the paper", "See it under Published".
     */
     return createElement(
       "span",
@@ -87,4 +93,62 @@ export function PublishBarResult(props: { state: PublishPressState }) {
     );
   }
   return null;
+}
+
+/**
+ * The word the settled control wears. No full stop: it is a button's label,
+ * not a sentence -- the banner beside it is the sentence.
+ */
+export const PUBLISHED_LABEL = "Published";
+
+/**
+ * ── UI1b-2: THE PRESS CHANGES, AND IT STAYS CHANGED ────────────────────────
+ *
+ * The bar a story on the paper leaves behind. Two things, in the bar's own
+ * place, at the same time, on purpose:
+ *
+ *   - the Publish button's own DONE state, in the slot the press was made in:
+ *     the shared `ActionButton` in phase `done`, so the word is "Published",
+ *     the token is the success green and the check is drawn -- all three, from
+ *     the one place, asserted separately. It is `disabled` because a done
+ *     state has no action, and the stylesheet keeps it at full strength: a
+ *     settled control, not a faded dead button.
+ *   - the banner (`PublishBarResult`, unit PUB1) with its own sentence and its
+ *     two ways on, unchanged.
+ *
+ * WHY IT IS DRIVEN BY `onPaper` AND NOT BY THE PRESS'S LAST ANSWER. This is
+ * the decision the unit asked to be made and said out loud: the green
+ * "Published" is a FACT ABOUT THE STORY, so it is drawn whenever the story is
+ * on the paper -- after the cache refreshes that follow a print, and on a page
+ * opened later on a story that went up days ago, where there was no press at
+ * all. The banner is the answer to a press, so it appears only right after
+ * one (`justPublished`, through `press`), exactly as PUB1 built it.
+ *
+ * A refusal never reaches here: `onPaper` is false for it (no slug is written
+ * on either refusal path), so a refused press draws the failure and no
+ * Published state.
+ */
+export function PublishBarDone(props: { result: PublishPressState }) {
+  return createElement(
+    "div",
+    { className: "astra-publish-bar astra-publish-done", id: "astra-publish-bar" },
+    createElement(
+      "div",
+      { className: "astra-publish-actions" },
+      createElement(ActionButton, {
+        /*
+          The same level the press was drawn at, so what the editor sees is
+          ONE control that changed rather than a different one that replaced
+          it. The `done` phase repaints it green whatever the level.
+        */
+        tone: "primary",
+        phase: "done",
+        disabled: true,
+        doneLabel: PUBLISHED_LABEL,
+        className: "astra-publish-published",
+        children: PUBLISHED_LABEL,
+      }),
+      createElement(PublishBarResult, { state: props.result }),
+    ),
+  );
 }

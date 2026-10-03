@@ -266,17 +266,144 @@ export function formatDayStamp(iso: string | Date | null | undefined, timeZone: 
   });
 }
 
+/*
+  UI1b-5. "11:01 p.m.", NOT "11:01 PM".
+
+  The design system writes clock times in lower case with periods on BOTH
+  surfaces -- README §7: the paper takes AP style ("6 p.m."), the desk takes the
+  short form ("8:14 a.m.") -- and the desk already had a helper that printed
+  that face: `clockText` in `src/lib/desk/ops-rows.ts` ("6:00 a.m." from a stored
+  "06:00"). Every other desk clock went through `toLocaleString`, which is
+  `en-US` "11:01 PM". The Drafts list is where the auditor read it, but the same
+  call draws the scan line on Today, the watch-list times and the Opinion
+  queues, so the face is fixed once, here, rather than screen by screen.
+
+  `formatClockTime` is the one place that face is written for a real instant.
+  `formatDateTime` is its date plus that clock, and the date is ALWAYS the full
+  one -- "Aug 26, 2026, 8:10 p.m." where it used to say "8:10 PM". See
+  `formatListDateTime` below for the desk's shorter list-row face.
+*/
+export function formatClockTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  const parts = new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone,
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${part("hour")}:${part("minute")} ${
+    part("dayPeriod").toUpperCase() === "AM" ? "a.m." : "p.m."
+  }`;
+}
+
+/*
+  UI1b-6. THE DESIGNER'S LIST-DATE STYLE: "Oct. 2, 6:43 a.m.", never ISO.
+
+  Three things were wrong with the list/row date-time the desk drew:
+
+    1. THE MONTH. `en-US` "short" gives "Mar", "Jun", "Sep" -- AP style
+       abbreviates Jan., Feb., Aug., Sept., Oct., Nov., Dec. and SPELLS OUT
+       March, April, May, June, July (they are short enough to write in full).
+       The desk's own dateline already reads "Sat, Sept. 26"; a row that said
+       "Sep 26" beside it was the same day spelled two ways.
+    2. THE YEAR. Every row carried it, all year long -- "Oct 2, 2026" on a
+       draft saved this morning. The year is only worth the space when it is
+       not the current one, and the reader is reading the paper's own clock,
+       so the comparison is made in the paper's timezone.
+    3. THE MERIDIEM is already the desk's "a.m." / "p.m." (UI1b-5).
+
+  UI1b-6 pushed this style through `formatDateTime` itself, and UI1b-8 takes it
+  back out. `formatDateTime` is not a list-row formatter: the provenance block
+  ("How we reported this"), `/evidence/$versionId` and `/evidence/compare` draw
+  capture and observation times that are immutable archival facts, and a reader
+  checking a record from an earlier year against one from this year needs the
+  year on BOTH -- a bare "Oct. 2" on a captured record is ambiguous the moment
+  the desk has been running for a year. So the list face now lives in its own
+  function, `formatListDateTime`, and `formatDateTime` keeps the full date it
+  has always printed for readers.
+
+  WHICH CALL SITE GETS WHICH. A screen that draws a LIST ROW of the editor's
+  own recent work -- Drafts, Opinion's queues, Sources, the scan lines on Today,
+  Dark Desk's run history, the watch list, Evidence-check rows, the Server
+  operations rows -- reads `formatListDateTime`. Anything a READER sees, or
+  anything archival (the provenance block, `/evidence/*`, corrections, article
+  pages, tooltips and machine-facing fields), keeps `formatDateTime`.
+*/
+const AP_MONTHS = [
+  "Jan.",
+  "Feb.",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "Aug.",
+  "Sept.",
+  "Oct.",
+  "Nov.",
+  "Dec.",
+] as const;
+
+/** The paper-calendar parts of an instant, in the paper's own timezone. */
+function calendarParts(d: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  }).formatToParts(d);
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return { month: Number(part("month")), day: Number(part("day")), year: Number(part("year")) };
+}
+
+/**
+ * The desk's date face for a list: "Oct. 2", or "Sept. 28, 2025" when the day
+ * is not in the current year (measured on the paper's clock, not the browser's).
+ */
+export function formatListDate(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  const { month, day, year } = calendarParts(d, timeZone);
+  const monthName = AP_MONTHS[month - 1] ?? "";
+  const thisYear = calendarParts(new Date(), timeZone).year;
+  return year === thisYear ? `${monthName} ${day}` : `${monthName} ${day}, ${year}`;
+}
+
+/**
+ * The full date and the desk's clock: "Aug 26, 2026, 8:10 p.m."
+ *
+ * THE YEAR IS ALWAYS PRINTED. This is the reader-facing and archival face --
+ * the provenance block on a story, `/evidence/$versionId`, `/evidence/compare`
+ * -- where a captured or observed time is a fact about the record and a bare
+ * "Oct. 2" would be ambiguous across years. Desk list rows use
+ * `formatListDateTime` below instead.
+ */
 export function formatDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
   const d = asDate(iso);
   if (!d) return "";
-  return d.toLocaleString("en-US", {
+  const date = d.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
     timeZone,
   });
+  return `${date}, ${formatClockTime(d, timeZone)}`;
+}
+
+/**
+ * The desk's list-row date-time: "Oct. 2, 6:43 a.m.", or "Sept. 28, 2025,
+ * 6:43 a.m." when the day is not in the current year.
+ *
+ * `formatListDate` plus `formatClockTime`, and nothing else -- the designer's
+ * list style, for rows of the editor's own recent work. See the note above:
+ * reader-facing and archival times use `formatDateTime` and keep the year.
+ */
+export function formatListDateTime(iso: string | Date | null | undefined, timeZone: string = PAPER.timezone) {
+  const d = asDate(iso);
+  if (!d) return "";
+  return `${formatListDate(d, timeZone)}, ${formatClockTime(d, timeZone)}`;
 }
 
 export function formatAge(iso: string | Date | null | undefined) {
