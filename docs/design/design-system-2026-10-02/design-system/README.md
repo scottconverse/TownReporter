@@ -118,7 +118,7 @@ The scale:
 | Danger | 2px danger border and text | Kill, Stop, Cancel a job, Legal removal. The label says exactly what happens. |
 | Disabled gate | **2px dashed `--ink2` edge** (about 10:1 light, 8:1 dark; never `--line`), `--ink2` text, 800, `not-allowed` | Publish before every check passes. The reason is printed beside it. |
 
-- **Checkboxes:** a 24px square mark inside a 44px hit area. Pad the label or the cell; don't enlarge the mark. Unchecked: a 2px `--ink` outline on the ground color (`--bg`), never filled. Checked: `--ink` fill with a ground-colored ✓. Focus: a 2px yellow outline, offset 2px. A filled unchecked box reads as checked, so it is not allowed.
+- **Checkboxes:** a 24px square mark inside a 44px hit area. Pad the label or the cell; don't enlarge the mark. Unchecked: a 2px `--ink` outline on the ground color (`--bg`), never filled. Checked: `--ink` fill with a ground-colored ✓. Focus: the standard ring (a 2px `--ink` outline, offset 2px; about 18:1 on cream). Never yellow: yellow on cream is about 1.4:1. A filled unchecked box reads as checked, so it is not allowed.
 - **The wordmark** ("TownReporter Desk" in the desk header, "TownReporter" in the masthead) is the one clickable item that is not underlined. It is the brand mark, and it always links home.
 
 - All buttons: at least 44px tall (48px for header primaries), 12–18px horizontal padding, 15px text, labels left-aligned in the button’s flow.

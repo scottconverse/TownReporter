@@ -7,7 +7,7 @@ These add to `DESIGNER-ANSWERS-2026-10-02.md`. Each answer is final; nothing is 
 - **Mark:** 24px square.
   - Unchecked: a 2px `--ink` outline on `--bg`, never filled. That is about 18:1 on cream and 14:1 on warm black, which passes the 3:1 edge rule.
   - Checked: `--ink` fill with a ✓ in `--bg`.
-  - Focus: a 2px yellow outline, offset 2px.
+  - Focus: a 2px `--ink` outline, offset 2px. This was corrected by Q5; it was yellow.
 
 These are now in README §6 and drawn in `guidelines/buttons.html`.
 
@@ -23,3 +23,5 @@ Delete the note in the repo and copy these three files over the old ones.
 **Q4. Disabled-gate edge: A.** The spec now matches the build. The edge is a 2px dashed `--ink2` line: about 10:1 in light and 8:1 in dark. Never use `--line`. This is updated in README §6, `Button.jsx` and `buttons.html`.
 
 **Skipped captures:** agreed. Capture Compare versions and a running scan once real model runs are available. They don't block anything.
+
+**Q5. Checkbox focus ring: B.** Use a 2px `--ink` outline, offset 2px: about 18:1 on cream and 14:1 on warm black. This is the same ring as every other control (`tokens/base.css` `:focus-visible`). The yellow ring was my error; it contradicted the system's own focus rule. Fixed in README §6 and `guidelines/buttons.html`. Build it in ink now, not yellow.
