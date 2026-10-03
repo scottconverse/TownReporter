@@ -470,9 +470,7 @@ function AssignmentsTab({
   return (
     <div className="mt-4 flex flex-col gap-3">
       <p className="max-w-[900px] text-base text-ink-2">
-        Choose which model does each job, how hard it works (effort) and what to fall back to when
-        it fails. The desk tries the first choice, then Fallback 1, then Fallback 2, and records
-        which one actually ran. A content refusal is final and never falls back.
+        Choose each job's model, thinking effort and fallbacks.
       </p>
       {!isOwner ? (
         <p className="text-base text-ink-2">
