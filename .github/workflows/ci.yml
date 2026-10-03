@@ -81,6 +81,8 @@ jobs:
               changed=$(git diff --name-only "$BASE" "$HEAD")
             fi
           fi
+          # This list of shared walk helpers is kept by hand: a NEW helper that several walks import must be added here,
+          # or a change to it will not run the walks that depend on it (only the nightly run would catch it).
           if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|scripts/browser-guard\.mjs|scripts/confirm-section-step\.mjs|scripts/desk-appearance-fixture\.mjs|scripts/desk-production-regression-logic\.mjs|scripts/first-run-setup-step\.mjs|scripts/migration-plan\.mjs|scripts/postgres-test-discovery\.mjs|scripts/test-environment\.mjs)$|^scripts/lib/'; then everything=true; fi
           check() {
             name=$1; pattern=$2
