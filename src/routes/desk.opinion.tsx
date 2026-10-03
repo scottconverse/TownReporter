@@ -836,7 +836,7 @@ function OpinionPage() {
                     </div>
                   ) : null}
                   {r.error ? (
-                    <div className="astra-span text-rust" role="alert">
+                    <div className="astra-span text-rust">
                       {editorDraftError(r.error) ?? r.error}
                       {looksLikeProviderAuthFailure(r.error) ? (
                         <ProviderSignInButton detail={r.error} />

@@ -499,7 +499,7 @@ function RecoveryCodeSignIn() {
   }
 
   return (
-    <div className="space-y-2 border-t border-rule pt-4" aria-live="polite" aria-atomic="true">
+    <div className="space-y-2 border-t border-rule pt-4">
       <p className="text-[11px] tracking-[0.14em] text-muted uppercase">Recovery code</p>
       {tempPassword ? (
         <div className="border border-rule bg-paper-2 p-3 text-sm">

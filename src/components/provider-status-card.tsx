@@ -211,7 +211,7 @@ export function ProviderStatusCard({
               </p>
             </>
           ) : (
-            <p className="text-sm" role="status">Waiting for {status.name} to print its link…</p>
+            <p className="text-sm">Waiting for {status.name} to print its link…</p>
           )}
           {login?.code ? (
             <div className="mt-3">
@@ -249,7 +249,7 @@ export function ProviderStatusCard({
       ) : null}
 
       {lastTest ? (
-        <p className="mt-2 text-sm" role={lastTest.ok ? "status" : "alert"}>
+        <p className="mt-2 text-sm">
           {lastTest.ok ? (
             <>Answered in {(lastTest.ms / 1000).toFixed(1)} s.</>
           ) : (

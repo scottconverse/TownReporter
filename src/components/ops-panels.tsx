@@ -870,7 +870,7 @@ export function RecentlyDeletedPanel() {
         count={rows.length || null}
         sub={`Anything deleted from the desk waits here for ${TRASH_DAYS} days, then goes for good. Restoring puts it back where it was.`}
       />
-      {note ? <p className="mt-3 text-sm text-muted" role="status">{note}</p> : null}
+      <p className={note ? "mt-3 text-sm text-muted" : "sr-only"} role="status">{note}</p>
       {list.isPending ? (
         <ListSkeleton rows={2} />
       ) : rows.length === 0 ? (
@@ -921,7 +921,7 @@ export function RecentlyDeletedPanel() {
               </div>
               <p className="mt-1 text-sm text-muted">Deleted {formatListDateTime(r.deleted_at)}</p>
               {confirmPurge === r.id ? (
-                <p className="mt-1 text-sm text-rust" role="status">
+                <p className="mt-1 text-sm text-rust" role="alert">
                   This is the copy. After this there is nothing to restore.
                 </p>
               ) : null}

@@ -319,12 +319,12 @@ export function PaperSetupForm({
 
       {/* UX-3: a first-run form that fails silently leaves the operator stuck. */}
       {error ? <FormError className="text-sm text-rust">{error}</FormError> : null}
-      {savedAt && !onDone ? (
-        <p className="text-sm text-ink-2" role="status">
-          Saved. The front page now shows the new name, city, kicker and
-          welcome article.
-        </p>
-      ) : null}
+      {/* Persistent so a screen reader announces the change, not a node that mounts full. */}
+      <p className={savedAt && !onDone ? "text-sm text-ink-2" : "sr-only"} role="status">
+        {savedAt && !onDone
+          ? "Saved. The front page now shows the new name, city, kicker and welcome article."
+          : ""}
+      </p>
 
       <InkButton type="submit" disabled={save.isPending}>
         {save.isPending ? "Saving…" : submitLabel}
