@@ -518,18 +518,18 @@ function ImportPage() {
                   </div>
 
                   {!card.cleanSplit ? (
-                    <p className="mt-2 text-sm text-rust">
+                    <p className="mt-2 text-sm text-rust" role="alert">
                       Could not split this cleanly — check it. The text is kept exactly as pasted.
                     </p>
                   ) : null}
-                  {card.warning ? <p className="mt-2 text-sm text-rust">{card.warning}</p> : null}
+                  {card.warning ? <p className="mt-2 text-sm text-rust" role="status">{card.warning}</p> : null}
                   {/*
                     A ledger with a claim the run could not verify is a visible
                     warning, not a line in a collapsed panel: the whole point of
                     the ledger is that the editor reads it before printing.
                   */}
                   {card.claimsWarning ? (
-                    <p className="mt-2 text-sm text-rust">{card.claimsWarning}</p>
+                    <p className="mt-2 text-sm text-rust" role="status">{card.claimsWarning}</p>
                   ) : null}
                   {card.unverified ? (
                     <p className="mt-2 text-sm text-ink-2">
@@ -551,7 +551,7 @@ function ImportPage() {
                     </p>
                   ) : null}
                   {warning ? (
-                    <p className="mt-2 text-sm text-rust">
+                    <p className="mt-2 text-sm text-rust" role="status">
                       {duplicateNote(warning)}{" "}
                       {warning.slug ? (
                         <Link to="/articles/$slug" params={{ slug: warning.slug }} className="inline-link">

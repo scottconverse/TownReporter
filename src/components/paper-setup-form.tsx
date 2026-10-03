@@ -320,7 +320,7 @@ export function PaperSetupForm({
       {/* UX-3: a first-run form that fails silently leaves the operator stuck. */}
       {error ? <FormError className="text-sm text-rust">{error}</FormError> : null}
       {savedAt && !onDone ? (
-        <p className="text-sm text-ink-2">
+        <p className="text-sm text-ink-2" role="status">
           Saved. The front page now shows the new name, city, kicker and
           welcome article.
         </p>

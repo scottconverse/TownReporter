@@ -211,7 +211,7 @@ export function ProviderStatusCard({
               </p>
             </>
           ) : (
-            <p className="text-sm">Waiting for {status.name} to print its link…</p>
+            <p className="text-sm" role="status">Waiting for {status.name} to print its link…</p>
           )}
           {login?.code ? (
             <div className="mt-3">
@@ -245,11 +245,11 @@ export function ProviderStatusCard({
       ) : null}
 
       {login && !open && login.status !== "done" && login.detail ? (
-        <p className="mt-2 text-sm text-rust">{login.detail}</p>
+        <p className="mt-2 text-sm text-rust" role="alert">{login.detail}</p>
       ) : null}
 
       {lastTest ? (
-        <p className="mt-2 text-sm">
+        <p className="mt-2 text-sm" role={lastTest.ok ? "status" : "alert"}>
           {lastTest.ok ? (
             <>Answered in {(lastTest.ms / 1000).toFixed(1)} s.</>
           ) : (
@@ -260,7 +260,7 @@ export function ProviderStatusCard({
         </p>
       ) : null}
 
-      {err ? <p className="mt-2 text-sm text-rust">{err}</p> : null}
+      {err ? <p className="mt-2 text-sm text-rust" role="alert">{err}</p> : null}
 
       {/*
         What this sign-in can run, drawn by the caller. The Models screen fills
