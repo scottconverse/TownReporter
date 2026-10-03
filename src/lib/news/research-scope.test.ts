@@ -233,7 +233,10 @@ describe("research scope", () => {
     assert.equal(officialSiteHost("Ada", [{ url: "https://ada.gov/", kind: "official" }]), null);
     // A site the editor configured as the city's official one (even on .com/.org, even
     // abbreviated like fcgov.com) is that city's own site: 21c, so other cities get site: scoping.
-    assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official" }]), "fcgov.com");
+    assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official", title: "City of Fort Collins" }]), "fcgov.com");
+    // Initials alone never pick a host: another "FC" city must not inherit fcgov.com.
+    assert.equal(officialSiteHost("Foster City", [{ url: "https://www.fcgov.com/", kind: "official", title: "City of Fort Collins" }]), null);
+    assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official" }]), null);
   });
 
   it("reads a hyphenated label as the city's name, not as a different host", () => {

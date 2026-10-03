@@ -331,8 +331,9 @@ export function officialSiteHost(
     // The configured title identifies abbreviated hosts such as fcgov.com.
     const cityTitle = citySlug(title) === slug || citySlug(title) === `cityof${slug}`;
     const label = registrableLabel(host).label;
-    const initials = city.trim().split(/\s+/).map((word) => word[0]).join("").toLowerCase();
-    if (cityTitle || label === `${initials}gov` || isCityLabel(label, slug, state)) return host;
+    // Initials alone are not unique (fcgov.com is Fort Collins, not Foster City), so an
+    // abbreviated host counts only when the source's own title names this city.
+    if (cityTitle || isCityLabel(label, slug, state)) return host;
   }
   return null;
 }
