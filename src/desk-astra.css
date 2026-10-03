@@ -7436,6 +7436,81 @@
   margin: 10px 0 4px;
 }
 
+
+/* R2 Group 4: compact case history, scan runs, and correction fields. */
+.desk-ltr.astra .r2-case-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+.desk-ltr.astra .r2-case-row > :first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.desk-ltr.astra .r2-case-row time { color: var(--fg2); }
+.desk-ltr.astra .astra-head-acts a[href="/desk/scan"] { text-decoration: underline; }
+.desk-ltr.astra .r2-scan-layout { display: flex; flex-direction: column; gap: 24px; }
+.desk-ltr.astra .r2-scan-history { order: -1; }
+.desk-ltr.astra .r2-scan-head,
+.desk-ltr.astra .r2-scan-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(70px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+}
+.desk-ltr.astra .r2-scan-head { font-weight: 600; border-bottom: 2px solid var(--fg); }
+.desk-ltr.astra .r2-scan-row { border-bottom: 1px solid var(--line); }
+.desk-ltr.astra .r2-scan-label { display: none; }
+.desk-ltr.astra .r2-scan-details { display: contents; }
+.desk-ltr.astra .r2-scan-details > summary { grid-column: 5; }
+.desk-ltr.astra .r2-scan-report { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+.desk-ltr.astra .r2-scan-details:not([open]) > .r2-scan-report { display: none; }
+.desk-ltr.astra .r2-scan-report p { margin: 8px 0; }
+.desk-ltr.astra .r2-scan-report .wire-sum { max-width: 70ch; }
+.desk-ltr .r2-correction-fields { display: grid; gap: 12px; }
+.desk-ltr .r2-correction-fields > label { font-weight: 600; }
+.desk-ltr .r2-correction-fields > input,
+.desk-ltr .r2-correction-fields > textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--fg2);
+  background: var(--bg);
+  color: var(--fg);
+  padding: 10px 12px;
+  font: inherit;
+}
+.desk-ltr .r2-correction-fields > .check-line { display: flex; align-items: center; gap: 10px; }
+@media (max-width: 699px) {
+  .desk-ltr.astra .r2-scan-head { display: none; }
+  .desk-ltr.astra .r2-scan-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px 0; }
+  .desk-ltr.astra .r2-scan-row > time,
+  .desk-ltr.astra .r2-scan-row > span,
+  .desk-ltr.astra .r2-scan-row > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
+  .desk-ltr.astra .r2-scan-label { display: inline; min-width: 100px; font-weight: 600; }
+  .desk-ltr.astra .r2-scan-details > summary { grid-column: 1; justify-self: start; }
+}
+
+/* Sign-in follows the paper's current palette without changing its fields. */
+.r2-login { --fg2: var(--color-ink-2); padding: 0 24px 48px; font-family: var(--font-serif); }
+.r2-login-masthead { max-width: 1100px; margin: 0 auto; padding: 24px 0; border-bottom: 3px solid var(--color-ink); display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.r2-login-brand { font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 4vw, 36px); text-decoration: underline; }
+.r2-login-masthead > span, .r2-login-kicker { color: var(--fg2); font-size: 14px; }
+.r2-login-panel { max-width: 520px; margin: 48px auto 0; padding: 32px; border: 1px solid var(--color-rule); background: var(--color-paper-2); }
+.r2-login-panel h1 { font-family: var(--font-display); font-size: 32px; line-height: 1.15; }
+.r2-login-panel input { display: block; width: 100%; background: var(--color-paper); border-color: var(--fg2); }
+.r2-login-panel button { border: 1px solid var(--fg2); }
+.r2-login-panel button[type="submit"] { border: 2px solid var(--color-ink); }
+.r2-login-panel :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 3px; }
+.r2-login-quiet { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 12px; border: 1px solid var(--fg2); cursor: pointer; }
+.r2-first-owner { margin-top: 20px; padding: 18px; border: 1px solid var(--fg2); background: var(--color-paper); }
+.r2-first-owner h2 { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
+.r2-first-owner p { margin: 10px 0; }
+@media (max-width: 699px) {
+  .r2-login { padding-inline: 16px; }
+  .r2-login-panel { margin-top: 24px; padding: 22px 18px; }
+}
+
 /* ---------------------------------------------------------------------------
    FB5: THE DESK'S TOAST, AND THE ONE THAT SPEAKS.
 
@@ -7770,78 +7845,4 @@
 .desk-ltr.astra [role="tablist"] > [role="tab"]:focus-visible {
   outline: 2px solid var(--fg);
   outline-offset: 2px;
-}
-
-/* R2 Group 4: compact case history, scan runs, and correction fields. */
-.desk-ltr.astra .r2-case-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-}
-.desk-ltr.astra .r2-case-row > :first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.desk-ltr.astra .r2-case-row time { color: var(--fg2); }
-.desk-ltr.astra .astra-head-acts a[href="/desk/scan"] { text-decoration: underline; }
-.desk-ltr.astra .r2-scan-layout { display: flex; flex-direction: column; gap: 24px; }
-.desk-ltr.astra .r2-scan-history { order: -1; }
-.desk-ltr.astra .r2-scan-head,
-.desk-ltr.astra .r2-scan-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 2fr) minmax(70px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) auto;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 0;
-}
-.desk-ltr.astra .r2-scan-head { font-weight: 600; border-bottom: 2px solid var(--fg); }
-.desk-ltr.astra .r2-scan-row { border-bottom: 1px solid var(--line); }
-.desk-ltr.astra .r2-scan-label { display: none; }
-.desk-ltr.astra .r2-scan-details { display: contents; }
-.desk-ltr.astra .r2-scan-details > summary { grid-column: 5; }
-.desk-ltr.astra .r2-scan-report { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
-.desk-ltr.astra .r2-scan-details:not([open]) > .r2-scan-report { display: none; }
-.desk-ltr.astra .r2-scan-report p { margin: 8px 0; }
-.desk-ltr.astra .r2-scan-report .wire-sum { max-width: 70ch; }
-.desk-ltr .r2-correction-fields { display: grid; gap: 12px; }
-.desk-ltr .r2-correction-fields > label { font-weight: 600; }
-.desk-ltr .r2-correction-fields > input,
-.desk-ltr .r2-correction-fields > textarea {
-  width: 100%;
-  min-height: 44px;
-  border: 1px solid var(--fg2);
-  background: var(--bg);
-  color: var(--fg);
-  padding: 10px 12px;
-  font: inherit;
-}
-.desk-ltr .r2-correction-fields > .check-line { display: flex; align-items: center; gap: 10px; }
-@media (max-width: 699px) {
-  .desk-ltr.astra .r2-scan-head { display: none; }
-  .desk-ltr.astra .r2-scan-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px 0; }
-  .desk-ltr.astra .r2-scan-row > time,
-  .desk-ltr.astra .r2-scan-row > span,
-  .desk-ltr.astra .r2-scan-row > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; }
-  .desk-ltr.astra .r2-scan-label { display: inline; min-width: 100px; font-weight: 600; }
-  .desk-ltr.astra .r2-scan-details > summary { grid-column: 1; justify-self: start; }
-}
-
-/* Sign-in follows the paper's current palette without changing its fields. */
-.r2-login { --fg2: var(--color-ink-2); padding: 0 24px 48px; font-family: var(--font-serif); }
-.r2-login-masthead { max-width: 1100px; margin: 0 auto; padding: 24px 0; border-bottom: 3px solid var(--color-ink); display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-.r2-login-brand { font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 4vw, 36px); text-decoration: underline; }
-.r2-login-masthead > span, .r2-login-kicker { color: var(--fg2); font-size: 14px; }
-.r2-login-panel { max-width: 520px; margin: 48px auto 0; padding: 32px; border: 1px solid var(--color-rule); background: var(--color-paper-2); }
-.r2-login-panel h1 { font-family: var(--font-display); font-size: 32px; line-height: 1.15; }
-.r2-login-panel input { display: block; width: 100%; background: var(--color-paper); border-color: var(--fg2); }
-.r2-login-panel button { border: 1px solid var(--fg2); }
-.r2-login-panel button[type="submit"] { border: 2px solid var(--color-ink); }
-.r2-login-panel :focus-visible { outline: 2px solid var(--color-ink); outline-offset: 3px; }
-.r2-login-quiet { display: inline-flex; align-items: center; min-height: 44px; padding: 8px 12px; border: 1px solid var(--fg2); cursor: pointer; }
-.r2-first-owner { margin-top: 20px; padding: 18px; border: 1px solid var(--fg2); background: var(--color-paper); }
-.r2-first-owner h2 { font-family: var(--font-display); font-size: 20px; font-weight: 600; }
-.r2-first-owner p { margin: 10px 0; }
-@media (max-width: 699px) {
-  .r2-login { padding-inline: 16px; }
-  .r2-login-panel { margin-top: 24px; padding: 22px 18px; }
 }
