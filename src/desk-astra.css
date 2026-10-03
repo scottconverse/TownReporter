@@ -3786,40 +3786,15 @@
   color: var(--fg);
 }
 .desk-ltr.astra .today-lead {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 10px 18px;
   align-items: start;
   padding: 18px 12px;
   border-bottom: 1px solid var(--line);
   cursor: pointer;
 }
-/*
-  CY item 5. The drawn row is a grid -- `52px minmax(0,1fr) auto`, score then
-  the title block then the presses (Desk Command.dc.html:112) -- and that is
-  exactly how it was built. The `auto` column is the presses, and at 1280 they
-  measured 342px of a 556px row, so `minmax(0, 1fr)` gave the middle column the
-  102px that was left over, with `overflow: visible` painting the headline and
-  the why line outside their own box. At 1100 the middle column was 40px; at
-  1024 it was 0px, and the lead's text was not narrow, it was absent. The grid
-  had no way to say "this does not fit": an explicit third column cannot wrap.
-
-  So the row is a wrapping flex line instead, and the middle column carries a
-  12rem flex-basis. Basis is what the wrap decision is made on, so the presses
-  move to their own line exactly when 52 + 192 + their own width + the gaps
-  stop fitting the row -- no breakpoint, and the same rule holds at every
-  width, under Large text, and with the nav collapsed. 12rem and not more
-  because the basis is also the floor the middle column can never go under,
-  and it has to stay small enough that the score badge keeps the title beside
-  it on a phone: 52 + 192 = 244, which still fits a 320px screen. Below 700
-  the presses are put on their own line outright, flush left (the media block
-  at the foot of this file): that is the phone shape, and it is unchanged.
-
-  What the drawing does NOT draw is the wrapped state -- it is a fixed-width
-  canvas with the presses on the row. Recorded in design/SPEC-GAPS-0681.md.
-*/
 .desk-ltr.astra .today-lead-main {
-  flex: 1 1 12rem;
   min-width: 0;
 }
 .desk-ltr.astra .today-lead.sel {
@@ -3901,6 +3876,11 @@
   text-decoration: none;
 }
 .desk-ltr.astra .today-lead-why {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
   font: 400 calc(16px * var(--ts))/1.45 var(--fb);
   color: var(--fg2);
   margin: 6px 0 0;
@@ -3909,16 +3889,25 @@
 /* BF3, Today (b): one horizontal group -- Start story S · Hold H · Kill X --
    at the right of the row, the way evidence\BF2\cmp-today.png draws it. It was
    a right-aligned COLUMN of stacked presses, which is where the row's height
-   went and what the side-by-side caught. `flex-wrap: wrap` keeps the three
-   inside the column when the row narrows; at 700 the whole group drops under
-   the lead instead (the @media block at the foot of this file). */
+   went and what the side-by-side caught. Below 1280px the whole group drops
+   under the lead; each action label stays on one line. */
 .desk-ltr.astra .today-lead-side {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
+  white-space: nowrap;
+}
+.desk-ltr.astra .today-lead-side > .btn,
+.desk-ltr.astra .lead-list.roomy .queue-acts > .btn,
+.desk-ltr.astra .lead-list.roomy .queue-acts > .more > .more-sum {
+  white-space: nowrap;
+}
+.desk-ltr.astra .today-lead-side > *,
+.desk-ltr.astra .lead-list.roomy .queue-acts > * {
+  flex-shrink: 0;
 }
 /* The drawing marks each press with its key: "Start story S", "Hold H", "Kill
    X" (cmp-today.png). The key is part of the button's own face in the copy, so
@@ -4390,7 +4379,7 @@
   gap: 8px;
 }
 /* BF3, defect 1: the drawn row is ONE line of a table -- 44px checkbox, 52px
-   score, the lead, 180px evidence, 150px filed, then the actions -- instead of
+   score, the lead, evidence, filed, then the actions -- instead of
    the tall card the desk printed (seven controls, each on its own line).
    The columns are named on the drawing's own measure (README 282-289) and the
    header below sits on the same track list with the same gap and inset, so
@@ -4404,16 +4393,16 @@
    the lead track is `1fr` the header's Evidence, Filed and Actions labels sat
    ~132px right of the cells they name -- measured at 1280 before this line
    existed: header lead track 346.188px against the rows' 212.438px. One
-   number for both keeps the labels over their cells. If a larger text size
-   outgrows it the presses wrap inside the cell (`flex-wrap` above) instead of
-   pushing the columns apart. */
+   number for both keeps the labels over their cells. Evidence and filed use
+   their compact drawn widths so the lead keeps about 390px at desktop sizes;
+   below 1280px the supporting cells move under the lead. */
 .desk-ltr.astra .lead-list.roomy,
 .desk-ltr.astra .queue-head {
-  --queue-acts-w: 202px;
+  --queue-acts-w: calc(202px * var(--ts));
 }
 .desk-ltr.astra .lead-list.roomy .lead-row {
-  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px var(--queue-acts-w);
-  column-gap: 16px;
+  grid-template-columns: 44px 52px minmax(0, 1fr) 140px 90px var(--queue-acts-w);
+  column-gap: 12px;
   /* BF4: the drawing centers the row's cells (`align-items:center`) so the 44px
      boxes -- the selection square and the score -- sit on the middle of the
      headline rather than on its top edge. BF3 left this at `start` when a row
@@ -4576,6 +4565,7 @@
   margin-top: 0;
   flex-wrap: nowrap;
   align-items: center;
+  white-space: nowrap;
 }
 /* BF4: no `padding-top` nudge on the age any more. It existed to push a
    top-aligned cell down onto the headline's line; with the row's cells centered
@@ -4588,8 +4578,8 @@
    column off from the cells below it. */
 .desk-ltr.astra .queue-head {
   display: grid;
-  grid-template-columns: 44px 52px minmax(0, 1fr) 180px 150px var(--queue-acts-w);
-  column-gap: 16px;
+  grid-template-columns: 44px 52px minmax(0, 1fr) 140px 90px var(--queue-acts-w);
+  column-gap: 12px;
   align-items: center;
   padding: 0 24px 8px;
   border-bottom: 2px solid var(--fg);
@@ -4647,6 +4637,17 @@
   }
 }
 
+/* Keep the lead copy useful before the action labels start squeezing it. */
+@media (max-width: 1280px) {
+  .desk-ltr.astra .today-lead {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .desk-ltr.astra .today-lead-side {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+}
+
 /* Fewer columns, same words, as the screen narrows. */
 @media (max-width: 1100px) {
   .desk-ltr.astra .today-cards,
@@ -4664,14 +4665,12 @@
     padding: 16px 8px;
   }
   .desk-ltr.astra .today-lead-side {
-    /* The phone shape, and now guaranteed rather than implied: a 100% basis
-       puts the presses on their own line whatever the row measures, flush
-       left, the way the drawing's phone frame draws them. It used to be
-       `grid-column: 1 / -1`, which stopped meaning anything when CY item 5
-       turned this row into a wrapping flex line. */
-    flex: 1 1 100%;
+    /* On a phone the actions use the full row rather than inheriting the
+       score column's inset. */
+    grid-column: 1 / -1;
     justify-content: flex-start;
     align-items: flex-start;
+    flex-wrap: wrap;
   }
   /* PUB2: the Drafts row's stacked shape moved to its own breakpoint (see the
      DRAFTS media block below); `.today-edition-row` still stacks here. */
@@ -4716,17 +4715,14 @@
   `viewport - 258px` wide once the 206px nav rail and the 26px page padding
   have taken their share (766 at 1024, 642 at 900, 510 at 768).
 
-  WHY 1060 AND NOT 1014. 1014 is the exact width at which 756 fits the column
-  (1014 - 258 = 756), and a fit with no slack is not a fit: eight pixels is
-  inside the noise of a scrollbar, of the desk's own large-text size and of the
-  status chip's `auto` track. 1060 leaves 46px of it and costs the six-column
-  table between 1024 and 1060, where it had 10px of slack and no more.
+  At 1280px and below, move the supporting cells and actions under the lead
+  to leave room for its headline and the paper's full section name.
 
   Nothing here is a new look. Every declaration below is the one the phone
   block already carried, moved to the width at which the thing it fixes
-  actually breaks; above 1060 the drawing's six-column row is untouched.
+  actually breaks; above 1280 the drawing's six-column row is untouched.
 */
-@media (max-width: 1060px) {
+@media (max-width: 1280px) {
   /* BF3: the drawn table is six columns wide; a narrow window is not. The row
      keeps the checkbox and the score, the lead takes the rest, and the
      evidence, filed age and actions drop under it in the lead's own column --
@@ -4751,10 +4747,10 @@
     grid-column: 3;
   }
   .desk-ltr.astra .lead-list.roomy .queue-acts {
-    grid-column: 1 / -1;
+    grid-column: 3;
     justify-content: flex-start;
   }
-  /* The row's presses now start at the row's LEFT edge, and `.more-menu` is
+  /* The row's presses now start under the lead, and `.more-menu` is
      `right: 0` of its own summary -- so the 264px panel would be anchored to a
      button near the left and hang off the left edge of the screen, where
      nothing can scroll to it. It hangs rightward from the button instead; the
@@ -4794,6 +4790,13 @@
   }
   .desk-ltr.astra .queue-sel {
     justify-content: space-between;
+  }
+}
+
+@media (max-width: 700px) {
+  .desk-ltr.astra .lead-list.roomy .queue-acts {
+    grid-column: 1 / -1;
+    flex-wrap: wrap;
   }
 }
 

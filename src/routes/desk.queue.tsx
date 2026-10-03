@@ -2,6 +2,7 @@ import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
+import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { ModelPicker } from "@/components/model-picker";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
@@ -1459,6 +1460,7 @@ function QueuePage() {
                 <LeadRowView
                   key={l.id}
                   lead={l}
+                  sectionName={sectionDisplayName(l.topic, sections)}
                   dup={dupMatch}
                   roomy
                   /*
@@ -1670,7 +1672,7 @@ function QueuePage() {
             <select value={topic} onChange={(e) => setTopic(e.target.value)}>
               {TOPICS.filter((t) => t !== "about").map((t) => (
                 <option key={t} value={t}>
-                  {sections.find((s) => s.key === t)?.name ?? t}
+                  {sectionDisplayName(t, sections)}
                 </option>
               ))}
             </select>
