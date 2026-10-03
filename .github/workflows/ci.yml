@@ -8,9 +8,9 @@ on:
     - cron: '17 9 * * *'
   workflow_dispatch:
 
-# A new push to a branch cancels the older run on that branch (pull requests only; main keeps every run).
+# A new push to a branch cancels the older run on that branch (pull requests only; every push to main and every nightly run has its own group, so none is dropped).
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Every job here only reads the repository: checkout, `npm ci`, build, test,
@@ -81,7 +81,7 @@ jobs:
               changed=$(git diff --name-only "$BASE" "$HEAD")
             fi
           fi
-          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|scripts/lib/)'; then everything=true; fi
+          if printf '%s\n' "$changed" | grep -Eq '^(\.github/workflows/ci\.yml|scripts/browser-guard\.mjs|scripts/confirm-section-step\.mjs|scripts/desk-appearance-fixture\.mjs|scripts/desk-production-regression-logic\.mjs|scripts/first-run-setup-step\.mjs|scripts/migration-plan\.mjs|scripts/postgres-test-discovery\.mjs|scripts/test-environment\.mjs)$|^scripts/lib/'; then everything=true; fi
           check() {
             name=$1; pattern=$2
             if [ "$everything" = true ] || printf '%s\n' "$changed" | grep -Eq "$pattern"; then
