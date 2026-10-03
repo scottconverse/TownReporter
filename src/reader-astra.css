@@ -569,6 +569,7 @@
   border-color: transparent;
 }
 .reader .newsrow .meta {
+  font-size: calc(14px * var(--reader-scale));
   margin-top: 11px;
 }
 .reader .sidebarcard {
@@ -2388,6 +2389,7 @@
   max-width: 60ch;
 }
 .reader .lead .meta {
+  font-size: calc(14px * var(--reader-scale));
   margin-top: 16px;
 }
 .reader .lead .leadbottom {
@@ -2653,7 +2655,7 @@
 .reader .storymeta {
   margin-top: auto;
   padding-top: 14px;
-  font-size: 14px;
+  font-size: calc(14px * var(--reader-scale));
   color: var(--muted);
 }
 
