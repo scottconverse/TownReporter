@@ -2,6 +2,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { Dialog } from "@/components/dialog";
+import { LegalRemovalDialog } from "@/components/dialogs/LegalRemovalDialog";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
@@ -85,6 +87,7 @@ function PublishedPage() {
   */
   const viewStats = useQuery({ queryKey: ["view-stats"], queryFn: () => getViewStatsFn() });
   const viewsBySlug = new Map((viewStats.data?.stories ?? []).map((s) => [s.slug, s.views]));
+  const [legalFor, setLegalFor] = useState<number | null>(null);
   const [corrFor, setCorrFor] = useState<string | null>(null);
   const [corrReviewFor, setCorrReviewFor] = useState<Record<string, number | undefined>>({});
   const [corrBySlug, setCorrBySlug] = useState<Record<string, string>>({});
@@ -603,6 +606,7 @@ function PublishedPage() {
           {shownRows.length === 0 ? <p className="wire-sum">Nothing matches that filter.</p> : null}
           {shownRows.map((p) => (
             <div key={p.id} className="astra-row pub">
+              <LegalRemovalDialog open={legalFor === p.id} onOpenChange={(open) => { if (!open) setLegalFor(null); }} articleId={p.id} articles={[{ id: p.id, headline: p.headline }]} onDone={() => { void qc.invalidateQueries(); }} />
               <div className="astra-cell">
                 <span className="astra-row-meta">{formatShortDate(p.published_at)}</span>
               </div>
@@ -875,7 +879,19 @@ function PublishedPage() {
                   </p>
                 ) : null}
                 {corrFor === p.slug ? (
-                  <div className="corr-form">
+                  <Dialog
+                    open
+                    onClose={() => { setCorrFor(null); setWordingFor(null); }}
+                    title="Add a correction"
+                    subtitle={p.headline}
+                    footNote="Appears on the story and in the public corrections log permanently."
+                    primaryLabel="Publish correction"
+                    primaryDisabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
+                    pending={corr.isPending}
+                    primaryPendingLabel="Publishing…"
+                    onPrimary={() => corr.mutate({ slug: p.slug, fixing: corrFixBySlug[p.slug] === true })}
+                  >
+                    <div className="r2-correction-fields">
                     {/*
                       The two lines the note is made of. An editor correcting a
                       story knows both of them -- they are looking at the wrong
@@ -999,26 +1015,13 @@ function PublishedPage() {
                         />
                       </>
                     ) : null}
-                    <div className="row-acts static">
-                      <InkButton
-                        disabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
-                        onClick={() =>
-                          corr.mutate({ slug: p.slug, fixing: corrFixBySlug[p.slug] === true })
-                        }
-                      >
-                        {corr.isPending ? "Publishing…" : "Publish correction"}
-                      </InkButton>
-                      <InkButton
-                        tone="quiet"
-                        onClick={() => {
-                          setCorrFor(null);
-                          setWordingFor(null);
-                        }}
-                      >
-                        Cancel
-                      </InkButton>
+                    <div className="astra-preview">
+                      <span className="astra-preview-kick">Preview · the note as readers will see it</span>
+                      <p className="astra-preview-body"><b>Correction, {formatShortDate(new Date())}:</b> {(corrBySlug[p.slug] ?? "").trim() || "—"}</p>
                     </div>
-                  </div>
+                    {note?.kind === "err" ? <p role="alert">{note.text}</p> : null}
+                    </div>
+                  </Dialog>
                 ) : null}
               </div>
               {/*
@@ -1149,7 +1152,9 @@ function PublishedPage() {
                       type="button"
                       className="btn quiet"
                       onClick={(event) => {
-                        event.currentTarget.closest("details")?.removeAttribute("open");
+                        const menu = event.currentTarget.closest("details");
+                        menu?.removeAttribute("open");
+                        menu?.querySelector<HTMLElement>("summary")?.focus();
                         setCorrFor(p.slug);
                       }}
                     >
@@ -1166,7 +1171,12 @@ function PublishedPage() {
                       Delete
                     </button>
                     {deskRole.data?.ok && deskRole.data.role === "owner" ? (
-                      <a href={`/desk/legal-removals?article=${p.id}`}>Legal removal</a>
+                      <button type="button" className="btn quiet" onClick={(event) => {
+                        const menu = event.currentTarget.closest("details");
+                        menu?.removeAttribute("open");
+                        menu?.querySelector<HTMLElement>("summary")?.focus();
+                        setLegalFor(p.id);
+                      }}>Legal removal</button>
                     ) : null}
                     {p.transcriptReviews.some(
                       (review) =>
