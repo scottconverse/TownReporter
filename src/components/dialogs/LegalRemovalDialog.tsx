@@ -92,6 +92,8 @@ export function LegalRemovalFlow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copiesOpen, setCopiesOpen] = useState(false);
+  const [showAllHistorical, setShowAllHistorical] = useState(false);
+  const [showAllSelected, setShowAllSelected] = useState(false);
 
   const currentPreview = preview && JSON.stringify(preview.selection) === JSON.stringify(selection);
 
@@ -249,7 +251,7 @@ export function LegalRemovalFlow({
             </span>
             <div className="astra-choice-set" role="radiogroup" aria-labelledby="legal-policy">
               <ChoiceCard
-                label="Keep a sealed copy for 12 months (default)"
+                label="Keep an owner-only copy for 12 months (default)"
                 note="Owner-only, never public. Deleted automatically after 12 months."
                 selected={policy === "retain"}
                 onSelect={() => {
@@ -259,7 +261,7 @@ export function LegalRemovalFlow({
               />
               <ChoiceCard
                 label="Keep nothing: a court order requires destruction"
-                note="No copy of the text is kept anywhere the desk controls."
+                note="No removed text is saved in the retained-copy table."
                 selected={policy === "destroy"}
                 onSelect={() => {
                   setPolicy("destroy");
@@ -332,9 +334,9 @@ export function LegalRemovalFlow({
             </div>
             <div className="astra-impact danger">
               <span className="astra-impact-what">
-                <b>Nightly backups</b>
+                <b>External backups</b>
                 <span className="astra-impact-note">
-                  Up to 30 days of backups still hold the story. Needs operator review.
+                  Existing backups may still hold the story. Needs operator review.
                 </span>
               </span>
               <span className="astra-impact-act">Review</span>
@@ -371,10 +373,17 @@ export function LegalRemovalFlow({
             </div>
           )}
           {!currentPreview && (
+            <>
             <p role="status">
               Selection changed. Use Review connected copies again to refresh counts before
               confirming.
             </p>
+            {autoPreview ? (
+              <InkButton tone="quiet" disabled={busy} onClick={() => void review()}>
+                Review connected copies
+              </InkButton>
+            ) : null}
+            </>
           )}
           {preview.blockers.map((message) => (
             <p role="alert" key={message}>
@@ -386,15 +395,18 @@ export function LegalRemovalFlow({
               ? "The retained copy expires automatically. Evidence review and external cleanup may remain pending."
               : "No removed text will enter the retained-copy table. Resolve the historical and shared-evidence review first. External erasure still needs operator verification."}
           </p>
+          <details>
+            <summary className="btn quiet">About historical records</summary>
           <p>
             Historical records do not always carry an article ID. Select only the drafts, memory
             entries, audit labels and trash copies that belong to these stories. Shared source
             documents remain independent evidence unless explicitly brought into the removal scope.
           </p>
+          </details>
           {preview.selectedHistorical.length > 0 && (
             <fieldset className="astra-fieldset">
               <legend>Selected historical records — uncheck to remove from scope</legend>
-              {preview.selectedHistorical.map((c) => (
+              {preview.selectedHistorical.slice(0, showAllSelected ? undefined : 5).map((c) => (
                 <label className="astra-check" key={`${c.kind}-${c.id}`}>
                   <input
                     type="checkbox"
@@ -411,11 +423,14 @@ export function LegalRemovalFlow({
                   </span>
                 </label>
               ))}
+              {preview.selectedHistorical.length > 5 && !showAllSelected ? (
+                <InkButton tone="quiet" onClick={() => setShowAllSelected(true)}>Show all {preview.selectedHistorical.length}</InkButton>
+              ) : null}
             </fieldset>
           )}
           <details>
-            <summary>Review historical candidates ({preview.candidates.length})</summary>
-            {preview.candidates.map((c) => (
+            <summary className="btn quiet">Review historical candidates ({preview.candidates.length})</summary>
+            {preview.candidates.slice(0, showAllHistorical ? undefined : 5).map((c) => (
               <label className="astra-check astra-check-wrap" key={`${c.kind}-${c.id}`}>
                 <input
                   type="checkbox"
@@ -434,6 +449,9 @@ export function LegalRemovalFlow({
                 </span>
               </label>
             ))}
+            {preview.candidates.length > 5 && !showAllHistorical ? (
+              <InkButton tone="quiet" onClick={() => setShowAllHistorical(true)}>Show all {preview.candidates.length}</InkButton>
+            ) : null}
           </details>
           {preview.sharedInvestigationIds.length > 0 && (
             <p>
@@ -535,6 +553,11 @@ export function LegalRemovalDialog({
   onDone,
 }: LegalRemovalDialogProps) {
   const [press, setPress] = useState<LegalRemovalPress | null>(null);
+  // The flow unmounts on close but this state would keep the last enabled press (with its
+  // fingerprint); clear it so a reopened dialog cannot fire a cancelled removal.
+  useEffect(() => {
+    if (!open) setPress(null);
+  }, [open]);
 
   return (
     <Dialog
@@ -542,7 +565,7 @@ export function LegalRemovalDialog({
       onClose={() => onOpenChange(false)}
       title="Legal removal"
       subtitle="This bypasses the recoverable trash. Removing a page does not prove every copy is gone."
-      footNote="The restricted record keeps who, when, why and what. The rule chosen above decides whether a sealed copy of the text is kept."
+      footNote="The restricted record keeps who, when, why and what. The rule chosen above decides whether an owner-only copy of the text is kept."
       cancelLabel="Cancel"
       primaryLabel="Remove permanently"
       primaryTone="quiet-danger"

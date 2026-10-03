@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { editorTitle } from "@/lib/news/desk-copy";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
@@ -1345,7 +1346,7 @@ function DeskHome() {
                         params={{ leadId: String(row.lead_id) }}
                         className="today-edition-hl hl-link"
                       >
-                        {row.headline}
+                        {editorTitle(row.headline)}
                       </Link>
                     </h3>
                   </div>
@@ -2336,7 +2337,7 @@ function DeskHome() {
                 {inbox.slice(0, 3).map((item) => (
                   <div key={item.id} className="np-item">
                     <p className="np-kind">{editorKindLabel(item.kind)}</p>
-                    <p className="np-title">{item.title}</p>
+                    <p className="np-title">{editorTitle(item.title)}</p>
                     {item.source_line ? <p className="np-meta">{item.source_line}</p> : null}
                     <div className="np-acts">
                       <InkButton

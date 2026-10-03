@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
@@ -49,14 +49,16 @@ function ScanPage() {
     than replacing the window. The old `limit: pageSize * pages` form could
     never reach row 51 once the server clamped `limit` to 50 — a permanent
     "Show more (1 older)" that re-fetched the same rows and never exhausted.
-    Show more only pages history; it never reruns a scan.
+    Show all only pages history; it never reruns a scan.
   */
   const [pages, setPages] = useState(1);
-  const pageSize = 12;
+  const pageSize = 5;
+  const [showAllHistory, setShowAllHistory] = useState(false);
   // Rows accumulated across every page loaded so far.
   const [loadedRows, setLoadedRows] = useState<import("@/lib/news/types").ScanRow[]>([]);
   const scans = useQuery({
     queryKey: ["scans", pages],
+    placeholderData: keepPreviousData,
     queryFn: () =>
       listScans({
         data: { limit: nextWindowSize(pageSize), offset: pageOffset(pages, pageSize) },
@@ -118,6 +120,13 @@ function ScanPage() {
   const history = loadedRows;
   const totalScans = scans.data?.total ?? history.length;
   const exhausted = isHistoryExhausted(history.length, totalScans);
+  useEffect(() => {
+    const page = scans.data;
+    if (showAllHistory && page && !scans.isFetching && !scans.isError &&
+        pageOffset(pages, pageSize) + page.rows.length < page.total) {
+      setPages((n) => n + 1);
+    }
+  }, [showAllHistory, scans.data, scans.isFetching, scans.isError, pages]);
   const watch = (sources.data ?? []).filter((s) => s.status === "accepted").length;
   const last = history[0];
   // A row can look open (no finished_at, no error) forever if the process
@@ -198,8 +207,8 @@ function ScanPage() {
     ) ?? null;
 
   return (
-    <DeskShell title="Scan" kicker="Reporter pass">
-      <div className="astra-split">
+    <DeskShell title="Scan history" kicker="Reporter pass">
+      <div className="r2-scan-layout">
         <div className="astra-col">
           {/*
             The run panel, drawn with the same yellow border the Sources screen
@@ -214,11 +223,8 @@ function ScanPage() {
           */}
           <div className="astra-panel hot">
             <h2 className="astra-panel-h lg">Run a scan</h2>
-            <p className="astra-note">
-              One pass over the watch list: fetch every accepted source, then one AI read for
-              leads and proposed sources. It runs only when you click — this is the expensive
-              button, not a loop.
-            </p>
+            <p className="astra-note">Fetch accepted sources and read them for leads.</p>
+            <details><summary className="btn quiet">About this scan</summary><p className="astra-note">One pass over the watch list: fetch every accepted source, then one AI read for leads and proposed sources. It runs only when you click — this is the expensive button, not a loop.</p></details>
             <div className="astra-toolbar">
         <label>Scan scope{" "}
           <select
@@ -419,124 +425,42 @@ function ScanPage() {
 
       <MeetingsActivity />
         </div>
-        {/*
-          Previous scans, in the right-hand column the design draws. The
-          `SecHead` stays: it carries the section's own count, which the
-          scan-desk walk reads as ".sechead .sec-count" and asserts is 0 on a
-          fresh desk. Paging stays here rather than becoming a link to itself
-          -- /desk/scan is where the full history lives.
-        */}
-        <aside className="astra-col">
+        <aside className="astra-col r2-scan-history">
           <div className="astra-panel">
-        <SecHead
-          title="Previous scans"
-          count={totalScans}
-          sub={`Showing latest ${history.length} of ${totalScans}`}
-        />
-      {scans.isError && history.length === 0 ? (
-        <ScreenError
-          message={scans.error instanceof Error ? scans.error.message : "Could not load previous scans."}
-          onRetry={() => void scans.refetch()}
-          retrying={scans.isRefetching}
-        />
-      ) : scans.isPending && history.length === 0 ? (
-        <ListSkeleton rows={3} />
-      ) : history.length === 0 ? (
-        <p className="wire-sum">No scans yet. Click Run scan when you want a new pass — not on a loop.</p>
-      ) : (
-        <div className="scan-hist">
-          {history.map((s) => (
-            <div key={s.id} className="scan-row">
-              {/*
-                The design puts a result chip on every previous scan, so the
-                one fact an editor is scanning for -- did it work -- is readable
-                without reading the line under it. The variants are the shared
-                chip family, not new colours: a failure keeps the danger
-                border, a stall the amber one, and a clean pass the plain rule.
-              */}
-              <div className="astra-row-acts">
-                {s.error ? (
-                  <span className="astra-chip fail">Failed</span>
-                ) : s.stalled ? (
-                  <span className="astra-chip warn">Stalled</span>
-                ) : !s.finished_at ? (
-                  <span className="astra-chip run">Running</span>
-                ) : s.leads_created > 0 ? (
-                  <span className="astra-chip found">
-                    Filed {s.leads_created} lead{s.leads_created === 1 ? "" : "s"}
-                  </span>
-                ) : (
-                  <span className="astra-chip">No leads</span>
-                )}
+            <SecHead title="Previous scans" count={totalScans} sub={`Showing latest ${history.length} of ${totalScans}`} />
+            {scans.isError && history.length === 0 ? (
+              <ScreenError message="Could not load previous scans." onRetry={() => void scans.refetch()} retrying={scans.isRefetching} />
+            ) : scans.isPending && history.length === 0 ? <ListSkeleton rows={3} /> : history.length === 0 ? (
+              <p className="wire-sum">No scans yet. Run a scan when you want a new pass.</p>
+            ) : (
+              <div className="scan-hist">
+                <div className="r2-scan-head" aria-hidden="true"><span>Time</span><span>Fetched</span><span>Leads filed</span><span>Status</span><span>Details</span></div>
+                {history.slice(0, showAllHistory ? undefined : 5).map((s) => (
+                  <div key={s.id} className="scan-row r2-scan-row">
+                    <time dateTime={s.started_at}><span className="r2-scan-label">Time</span>{formatListDateTime(s.started_at)}</time>
+                    <span><span className="r2-scan-label">Fetched</span>{s.sources_fetched}</span>
+                    <span><span className="r2-scan-label">Leads filed</span>{s.leads_created}</span>
+                    <div><span className="r2-scan-label">Status</span><span className={`astra-chip ${s.error ? "fail" : s.stalled ? "warn" : !s.finished_at ? "run" : ""}`}>{s.error ? "Failed" : s.stalled ? "Stalled" : !s.finished_at ? "Running" : "Complete"}</span></div>
+                    <details className="r2-scan-details">
+                      <summary className="btn quiet" aria-label={`Open scan from ${formatListDateTime(s.started_at)}`}>Open</summary>
+                      <div className="r2-scan-report">
+                        {s.execution_origin ? <p>{s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}</p> : null}
+                        <p className="scan-line">{scanRowLine(s)}</p>
+                        {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
+                        {s.finished_at || s.error ? <>
+                          {failedSourcesLine(parseFailedSources(s.failed_sources)) ? <p className="wire-warn">{failedSourcesLine(parseFailedSources(s.failed_sources))}</p> : null}
+                          {s.stalled ? <p className="wire-warn">{stalledRunCopy("scan")}</p> : s.leads_created === 0 ? <p className="wire-sum">{scanZeroWhy(s)}</p> : s.error ? <p className="wire-warn">{editorScanError(s.error)}</p> : null}
+                        </> : null}
+                      </div>
+                    </details>
+                  </div>
+                ))}
+                {!showAllHistory && totalScans > 5 ? <InkButton tone="quiet" onClick={() => setShowAllHistory(true)}>Show all {totalScans}</InkButton> : null}
+                {showAllHistory && !exhausted ? scans.isError ? (
+                  <ScreenError message="Could not load older scans." onRetry={() => void scans.refetch()} retrying={scans.isRefetching} />
+                ) : <p role="status">Loading older scans…</p> : null}
               </div>
-              <p className="meta">
-                {formatListDateTime(s.started_at)} ·{" "}
-                {s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}
-              </p>
-              {/*
-                ONE LINE, AND IT IS THE RUN'S OWN STATE (FB1b, item 2).
-
-                This used to hand an OPEN run to `scanCoverageLine` and
-                `scanZeroWhy`, which are sentences about a FINISHED run: a scan
-                thirty seconds into its fetch read "Partial coverage: 0 selected
-                · 2 fetched · 0 analyzed · 0 leads." and "Nothing in the fetched
-                pages crossed the filing bar." -- three claims about the end of
-                a run nobody had reached. `scanRowLine` answers for the running
-                case first and totally; the failed-source line and the "why"
-                below it are verdicts on a result and are gated on there being
-                one.
-              */}
-              <p className="scan-line">{scanRowLine(s)}</p>
-              {/*
-                WHAT THE RUN FOUND IS NOT A VERDICT ON HOW IT ENDED, so this
-                line sits OUTSIDE the gate below.
-
-                The gate is for the sentences that assert a RESULT -- the
-                failed-source line, the "why", the stall copy, the error. This
-                is not one of those: it is the run's own record, and a row that
-                has not settled is making no claim by carrying it. FB1b swept it
-                into the same fragment, which no scan this desk writes could
-                tell apart (the receipt sets `summary` and `finished_at` in one
-                statement) and every row a worker died on could:
-                `stalled-run.e2e.test.ts` (unit CR) seeds an orphan and rows
-                whose jobs are terminal or gone, identifies them by this column,
-                and drew four rows -- right chips, and none of them saying which
-                run it was.
-              */}
-              {s.leads_created > 0 && s.summary ? (
-                <p className="wire-sum">{s.summary}</p>
-              ) : null}
-              {s.finished_at || s.error ? (
-                <>
-                  {failedSourcesLine(parseFailedSources(s.failed_sources)) ? (
-                    <p className="wire-warn">
-                      {failedSourcesLine(parseFailedSources(s.failed_sources))}
-                    </p>
-                  ) : null}
-                  {s.stalled ? (
-                    <p className="wire-warn">{stalledRunCopy("scan")}</p>
-                  ) : s.leads_created === 0 ? (
-                    <p className="wire-sum">{scanZeroWhy(s)}</p>
-                  ) : s.error ? (
-                    <p className="wire-warn">{editorScanError(s.error)}</p>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-          ))}
-          {!exhausted ? (
-            <div className="mt-4">
-              <InkButton
-                tone="ghost"
-                disabled={scans.isFetching}
-                onClick={() => setPages((n) => n + 1)}
-              >
-                {scans.isFetching ? "Loading older scans…" : `Show more (${totalScans - history.length} older)`}
-              </InkButton>
-            </div>
-          ) : null}
-        </div>
-      )}
+            )}
           </div>
         </aside>
       </div>
@@ -575,6 +499,7 @@ function CustomSourcePicker(props: {
     kindFilter, setKindFilter, tierFilter, setTierFilter,
     packId, setPackId, packName, setPackName, disabled, onSaved,
   } = props;
+  const [showAllSources, setShowAllSources] = useState(false);
   const picked = new Set(pickedIds);
   const term = filter.trim().toLowerCase();
   const visible = sources.filter(
@@ -831,7 +756,7 @@ function CustomSourcePicker(props: {
       </div>
 
       <p className="mb-2 meta">
-        <b>{pickedIds.length} selected</b> · {visible.length} shown · only accepted sources are selectable
+        <b>{pickedIds.length} selected</b> · {visible.length} matching · only accepted sources are selectable
       </p>
       <div className="mb-2 flex flex-wrap gap-2">
         <button
@@ -840,7 +765,7 @@ function CustomSourcePicker(props: {
           disabled={disabled}
           onClick={() => setPickedIds([...new Set([...pickedIds, ...visible.map((s) => s.id)])])}
         >
-          Select all shown
+          Select all matching
         </button>
         <button type="button" className="btn" disabled={disabled || !pickedIds.length} onClick={() => setPickedIds([])}>
           Clear all
@@ -881,7 +806,7 @@ function CustomSourcePicker(props: {
         {visible.length === 0 ? (
           <p className="p-2 wire-sum">No accepted sources match this filter.</p>
         ) : (
-          visible.map((s) => (
+          visible.slice(0, showAllSources ? undefined : 5).map((s) => (
             <label key={s.id} className="flex items-start gap-2 border-b border-rule p-2 last:border-b-0">
               <input
                 type="checkbox"
@@ -903,6 +828,7 @@ function CustomSourcePicker(props: {
           ))
         )}
       </div>
+      {visible.length > 5 && !showAllSources ? <InkButton tone="quiet" onClick={() => setShowAllSources(true)}>Show all {visible.length}</InkButton> : null}
     </div>
   );
 }

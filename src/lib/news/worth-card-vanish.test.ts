@@ -75,7 +75,8 @@ describe("the Dark Desk draws the reason instead of a shorter list", () => {
 
   it("keeps the covered cards and renders them", () => {
     assert.match(dark, /const covered = worthRows\.filter\(\(row\) => row\.off\);/, "they are kept");
-    assert.match(dark, /covered\.map\(\(\{ item, off \}\)/, "and drawn");
+    // capped at 5 with "Show all N" (Group 3), so the map runs over covered or its first five
+    assert.match(dark, /\(expandedPiles\.covered \? covered : covered\.slice\(0, 5\)\)\.map\(\(\{ item, off \}\)/, "and drawn");
     assert.match(dark, /worthItemOnDeskLine\(off!\)/, "with the reason");
   });
 

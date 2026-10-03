@@ -74,7 +74,9 @@ function RefreshModels({ onNote }: { onNote: (text: string) => void }) {
  * picker, no save -- this is the answer to "what is on this machine", which
  * the Automatic provider never shows.
  */
-export function LocalModelsOnThisComputer({ title = LOCAL_MODEL_LIST_TITLE }: { title?: string }) {
+export function LocalModelsOnThisComputer({ title = LOCAL_MODEL_LIST_TITLE, headingLevel = 3 }: { title?: string; headingLevel?: 2 | 3 }) {
+  const Heading = headingLevel === 2 ? "h2" : "h3";
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [note, setNote] = useState("");
   const catalog = useQuery({ queryKey: CATALOG_KEY, queryFn: () => localModelCatalog() });
   const rows = localModelListRows(catalog.data ?? null);
@@ -82,7 +84,7 @@ export function LocalModelsOnThisComputer({ title = LOCAL_MODEL_LIST_TITLE }: { 
   return (
     <div className="astra-panel">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-display text-lg font-semibold">{title}</h3>
+        <Heading className="font-display text-lg font-semibold">{title}</Heading>
         <RefreshModels onNote={setNote} />
       </div>
       {rows.length === 0 ? (
@@ -90,7 +92,7 @@ export function LocalModelsOnThisComputer({ title = LOCAL_MODEL_LIST_TITLE }: { 
       ) : (
         <ul className="mt-2 space-y-1 text-sm">
           {rows.map((row) => (
-            <li key={row.baseUrl} className="break-all">
+            <li key={row.baseUrl} className="model-inventory-provider">
               <span className="model-picker-help">
                 {localServerName(row.serverKind)} · {row.baseUrl}
               </span>
@@ -98,11 +100,12 @@ export function LocalModelsOnThisComputer({ title = LOCAL_MODEL_LIST_TITLE }: { 
                 <div className="text-muted">No chat models found.</div>
               ) : (
                 <ul className="ml-4 list-disc">
-                  {row.models.map((model) => (
+                  {(expanded[row.baseUrl] ? row.models : row.models.slice(0, 5)).map((model) => (
                     <li key={model.id}>{localModelListLabel(model)}</li>
                   ))}
                 </ul>
               )}
+              {row.models.length > 5 ? <button type="button" className="btn quiet" onClick={() => setExpanded((prev) => ({ ...prev, [row.baseUrl]: !prev[row.baseUrl] }))}>{expanded[row.baseUrl] ? "Show fewer" : `Show all ${row.models.length}`}</button> : null}
             </li>
           ))}
         </ul>

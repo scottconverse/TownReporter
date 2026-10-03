@@ -66,7 +66,6 @@ import {
 import { isCustomModelChoice, modelChoiceLabel, type ModelChoiceOption } from "@/lib/news/model-choice";
 import type { LocalModelEntry, LocalServer } from "@/lib/news/local-models";
 import {
-  JOB_STATUS_LABEL,
   MODEL_JOBS,
   cleanJobEffort,
   connectionWord,
@@ -81,7 +80,6 @@ import {
   jobStatusKind,
   resolveJobModel,
   withCustomConnections,
-  type JobStatusKind,
   type ModelAssignmentRow,
   type ModelJobKey,
 } from "@/lib/news/model-assignments";
@@ -323,7 +321,7 @@ function ModelsPage() {
           tab has its own server cards; this is the Models tab's answer to
           "which models could I run here at all".
         */}
-        <LocalModelsOnThisComputer />
+        <LocalModelsOnThisComputer headingLevel={2} />
         <AssignmentsTab isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
       </div>
       <div
@@ -332,6 +330,7 @@ function ModelsPage() {
         aria-labelledby="models-tab-conn"
         hidden={tab !== "conn"}
       >
+        <h2 className="mt-4 text-2xl font-extrabold">Connections</h2>
         <ConnectionsTab isOwner={isOwner} onNote={setNote} onOpen={setConnDialog} />
 
         {/*
@@ -635,6 +634,31 @@ function JobRow({
     staleTime: 5 * 60 * 1000,
   });
 
+  const statuses = useQuery({
+    queryKey: ["provider-statuses"],
+    queryFn: () => getProviderStatuses(),
+    enabled: !disabled,
+    staleTime: 60_000,
+  });
+  const assignedConnection = connections.find((row) => `custom:${row.id}` === resolvedSaved.providerId);
+  const providerKind = providersFor(surface).find((row) => row.id === resolvedSaved.providerId)?.kind;
+  const statusProvider = providerKind === "claude-code" ? "claude" : providerKind === "codex" ? "codex" : null;
+  const status = statuses.data?.find((row) => row.provider === statusProvider);
+  const readinessLabel = (() => {
+    if (status) {
+      if (status.disabledByOperator) return "Turned off";
+      if (!status.installed) return "Not installed";
+      if (!status.signedIn) return "Sign in needed";
+      if (status.lastTest?.ok === false) return "Last test failed";
+      return "Ready";
+    }
+    if (assignedConnection) {
+      if (!assignedConnection.enabled) return "Turned off";
+      return assignedConnection.hasApiKey && assignedConnection.modelId ? "Ready" : null;
+    }
+    return resolvedSaved.providerId && availability.data?.[resolvedSaved.providerId] === true ? "Ready" : null;
+  })();
+
   const facts = {
     built: job?.built ?? true,
     providerId: resolvedSaved.providerId,
@@ -787,17 +811,12 @@ function JobRow({
         </div>
       )}
 
-      <StatusChip
-        kind={kind}
+      {job?.built && resolvedSaved.providerId && readinessLabel ? <StatusChip
+        label={readinessLabel}
         help={jobStatusHelp(facts)}
-        /*
-          With nothing saved the chip says "Default", and the line under it
-          names what that default IS -- the same answer `resolveJobModel` gave,
-          in the registry's own label. Without it "Default" is a word the editor
-          cannot act on.
-        */
+        /* Name the resolved default without making it a readiness state. */
         below={kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined}
-      />
+      /> : null}
     </div>
   );
 }
@@ -992,11 +1011,11 @@ function ModelSelect({
  * paper palette but not the state colors, and these four flip in night mode.
  */
 function StatusChip({
-  kind,
+  label,
   help,
   below,
 }: {
-  kind: JobStatusKind;
+  label: string;
   help: string;
   /**
    * A second line under the chip. Only "Default" uses it, and it carries the
@@ -1010,9 +1029,7 @@ function StatusChip({
     live in `chipLook` and the stacking lives in `Chip`, both below, and neither
     screen can drift from the other.
   */
-  const tone: ChipTone =
-    kind === "ready" ? "ready" : kind === "slow" ? "slow" : kind === "signin" ? "signin" : "quiet";
-  return <Chip tone={tone} label={JOB_STATUS_LABEL[kind] ?? "—"} help={help} below={below} />;
+  return <Chip tone="quiet" label={label} help={help} below={below} />;
 }
 
 /* --------------------------------------------------------------------------
@@ -1129,8 +1146,7 @@ type ConnectionChipKind =
   | "running"
   | "off"
   | "notset"
-  | "unreachable"
-  | "slow";
+  | "unreachable";
 
 const CONNECTION_CHIP: Readonly<
   Record<ConnectionChipKind, { tone: ChipTone; label: string; help: string }>
@@ -1164,11 +1180,6 @@ const CONNECTION_CHIP: Readonly<
     tone: "signin",
     label: "Could not reach",
     help: "This address did not answer. Check that the server is running and that the address in Settings is right.",
-  },
-  slow: {
-    tone: "slow",
-    label: "! Slow",
-    help: "The server answers but nothing is in memory, so the first call loads a model and can take a minute or more. TownReporter never loads a model for you.",
   },
 };
 
@@ -1214,7 +1225,7 @@ function ConnectionCard({
       <div className="flex items-start justify-between gap-2.5">
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="text-lg font-extrabold">{title}</span>
-          <span className="text-sm break-all text-ink-2">{how}</span>
+          <span className="text-sm text-ink-2">{how}</span>
         </div>
         {chip}
       </div>
@@ -1273,23 +1284,23 @@ function EffortChips({
  * what the registry actually declares.
  */
 function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
+  const [showAll, setShowAll] = useState(false);
   return (
     <div className="flex flex-col">
-      {entries.map((entry) => (
+      {(showAll ? entries : entries.slice(0, 5)).map((entry) => (
         <div
           key={entry.id}
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0,1fr) auto",
+            gridTemplateColumns: "minmax(0,1fr)",
             gap: "2px 10px",
             padding: "8px 0",
             borderTop: "1px solid var(--line)",
           }}
         >
-          <span className="text-base font-bold break-words">{entry.label}</span>
+          <span className="text-base font-bold">{entry.label}</span>
           <span
-            className="text-right text-sm text-ink-2"
-            style={{ whiteSpace: "nowrap" }}
+            className="text-sm text-ink-2"
             title={entry.detail}
           >
             {entry.optionDetail ?? entry.detail} · {connectionWord(entry.kind)}
@@ -1297,6 +1308,7 @@ function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
           <EffortChips providerId={entry.id} />
         </div>
       ))}
+      {entries.length > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${entries.length}`}</InkButton> : null}
     </div>
   );
 }
@@ -1524,7 +1536,7 @@ function ConnectionGroup({
   return (
     <section role="group" aria-label={title} className="flex flex-col gap-3">
       <div className="flex flex-col gap-0.5 pb-2" style={{ borderBottom: "2px solid var(--fg)" }}>
-        <span className="text-2xl font-extrabold">{title}</span>
+        <h3 className="text-2xl font-extrabold">{title}</h3>
         <span className="text-base text-ink-2">{note}</span>
       </div>
       {/*
@@ -1586,7 +1598,7 @@ function LocalServers({ onNote }: { onNote: (text: string) => void }) {
             <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
               {refresh.isPending ? "Checking…" : "Check again"}
             </InkButton>
-            <a className="btn quiet" href="/desk/ops">
+            <a className="inline-link" href="/desk/ops">
               Settings
             </a>
           </>
@@ -1616,6 +1628,7 @@ const SERVER_KIND_LABEL: Record<string, string> = {
 };
 
 function LocalServerCard({ server }: { server: LocalServer }) {
+  const [showAll, setShowAll] = useState(false);
   const kindLabel = SERVER_KIND_LABEL[server.kind] ?? server.kind;
   const loopback = isLoopback(server.baseUrl);
   const origin = originOf(server.baseUrl);
@@ -1631,7 +1644,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
             : " · nothing in memory"
           : " · not reachable")
       }
-      chip={<ConnectionChip kind={!server.reachable ? "unreachable" : inMemory ? "running" : "slow"} />}
+      chip={<ConnectionChip kind={!server.reachable ? "unreachable" : "running"} label={server.reachable ? "Ready" : undefined} help={server.reachable ? "This server answers. Its models and load states are listed below." : undefined} />}
       actions={
         <>
           {/*
@@ -1643,7 +1656,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
           */}
           {server.reachable ? (
             <a
-              className="btn"
+              className="inline-link"
               href={origin}
               target="_blank"
               rel="noreferrer noopener"
@@ -1656,7 +1669,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
                   : `Open ${kindLabel} ↗`}
             </a>
           ) : null}
-          <a className="btn quiet" href="/desk/ops">
+          <a className="inline-link" href="/desk/ops">
             Settings
           </a>
         </>
@@ -1668,7 +1681,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
             {server.reachable ? "No chat models on this server." : "Nothing to list."}
           </p>
         ) : (
-          server.models.map((model) => (
+          (showAll ? server.models : server.models.slice(0, 5)).map((model) => (
             <div
               key={model.id}
               /*
@@ -1683,14 +1696,14 @@ function LocalServerCard({ server }: { server: LocalServer }) {
               */
               style={{
                 display: "grid",
-                gridTemplateColumns: "minmax(0,1.4fr) minmax(0,1fr)",
+                gridTemplateColumns: "minmax(0,1fr)",
                 gap: "2px 10px",
                 padding: "8px 0",
                 borderTop: "1px solid var(--line)",
               }}
             >
-              <span className="text-base font-bold break-words">{model.label || model.id}</span>
-              <span className="text-right text-sm text-ink-2">
+              <span className="text-base font-bold">{model.label || model.id}</span>
+              <span className="text-sm text-ink-2">
                 {model.loaded === null
                   ? "load state unknown"
                   : model.loaded
@@ -1705,6 +1718,7 @@ function LocalServerCard({ server }: { server: LocalServer }) {
           ))
         )}
       </div>
+      {server.models.length > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${server.models.length}`}</InkButton> : null}
     </ConnectionCard>
   );
 }

@@ -31,7 +31,8 @@ import { fileURLToPath } from "node:url";
  * justified or moved into a migration, and a fall is news the progress meter
  * has to record. Measured on the merged batch-7 tree: 30 files, 347
  * statements. Unit F3 added one more (paper_settings.model_prompt_state, in
- * paper-settings.ts, mirrored by migrations/0118): 348.
+ * paper-settings.ts, mirrored by migrations/0118): 348. Group 6a added one (investigate.ts re-validates
+ * its NOT VALID foreign keys once the data allows it): 349.
  *
  * What counts as a hit: the DDL verbs in `DDL_VERB`, in a non-test `.ts`/
  * `.tsx` file under `src/` or `server/`, on a line that is really code.
@@ -82,7 +83,7 @@ const ALLOWLIST: Record<string, { statements: number; reason: string }> = {
   "src/lib/db.ts": { statements: 2, reason: "the ensure* mechanism itself; deleted in U18a-10" },
 
   // U18a-5 -- the bulk and the pattern-setter.
-  "src/lib/news/investigate.ts": { statements: 154, reason: "runtime DDL, redundant with migrations; removed in U18a-5" },
+  "src/lib/news/investigate.ts": { statements: 155, reason: "runtime DDL, redundant with migrations; removed in U18a-5 (one is the FK re-validation added in 6a)" },
   "src/lib/news/dark.ts": { statements: 36, reason: "runtime DDL, redundant with migrations; removed in U18a-5" },
   "src/lib/news/page-watch.ts": { statements: 14, reason: "runtime DDL, redundant with migrations; removed in U18a-5" },
 
@@ -190,7 +191,7 @@ describe("no runtime DDL outside migrations/", () => {
 
   it("counts the whole surface, so the docstring's numbers are checkable", () => {
     /*
-      The header says "30 files, 348 statements", and this is what makes that
+      The header says "30 files, 349 statements", and this is what makes that
       sentence fail when it stops being true -- the count is the progress meter
       and a stale meter is worse than none.
     */
@@ -198,7 +199,7 @@ describe("no runtime DDL outside migrations/", () => {
     const files = Object.keys(ALLOWLIST).length;
     const statements = Object.values(measured).reduce((sum, n) => sum + n, 0);
     assert.equal(files, 30, "the allowlist header says 30 files");
-    assert.equal(statements, 348, "the allowlist header says 348 statements");
+    assert.equal(statements, 349, "the allowlist header says 349 statements");
   });
 });
 

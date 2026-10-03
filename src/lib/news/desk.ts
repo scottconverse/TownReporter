@@ -203,6 +203,7 @@ import {
   setJobModelRuntime,
   setJobStage,
   throwIfJobCancelled,
+  JobCancelledError,
   waitForModel,
   type DeskJob,
 } from "./jobs";
@@ -1560,6 +1561,7 @@ export type PerformScanWorkDeps = {
   };
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
+  scheduledFailure?: (msg: string, write: (sql: Sql) => Promise<void>) => Promise<void>;
 };
 
 /**
@@ -1646,6 +1648,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   deps: PerformScanWorkDeps = {},
 ) {
   let failureRunId = job.subject_id;
+  let writeQueuedSourceWrites = async (_sql: Sql): Promise<void> => {};
   const failureReceipt = {
     sourcesSelected: 0,
     sourcesAttempted: 0,
@@ -1871,7 +1874,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `writeSourceTouch` and nothing else: a source row must not depend on which
     path touched it (HIGH-1, A-B8). One rule, three write sites.
   */
-  const writeQueuedSourceWrites = async (writeSql: Sql) => {
+  writeQueuedSourceWrites = async (writeSql: Sql) => {
     for (const queued of pendingSourceTouches) {
       await writeSourceTouch(writeSql, {
         id: queued.id,
@@ -2005,7 +2008,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // 14" is a different sentence from "0 fetched" with no denominator.
   await writeLiveRunRow(true);
   await reportStage("Reading the sources");
+  let fetchLoopError: unknown;
   await mapLimit(watchSlice, 6, async (src) => {
+    if (fetchLoopError) return;
+    try {
     await deps.scheduledGuard?.();
     /*
       SH-B items 2 and 3, the half that makes them real: a row the site asked
@@ -2165,7 +2171,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       // right up to the failure.
       await noteSourceProgress();
     }
+    } catch (error) {
+      // Drain in-flight fetches before settling their queued observations.
+      fetchLoopError ??= error;
+    }
   });
+  if (fetchLoopError) throw fetchLoopError;
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
     `sources_selected` still counts it -- it was in scope -- so the receipt
@@ -2489,63 +2500,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   if (!batchResults.length) {
-    /*
-      A run with ZERO batches never reached a model at all: `buildScanBatches`
-      returns nothing when no source yielded text (scan-batches.ts), so the only
-      thing that failed is the fetch. Reporting the model-shaped fallback for
-      that case sent its reader to the provider when the source had simply not
-      resolved -- measured in Unit AA2, where a scheduled run recorded
-      `sources_fetched 0`, `model_batches_used 0` and zero chat calls at the
-      stubbed rung, yet failed as "Writing pass returned no usable JSON." The
-      first failed source's own message is the truth when there is one; the
-      model-shaped fallback stays for the batches-ran-and-were-unreadable case.
-    */
-    const error =
-      lastBatchError ??
-      (batches.length === 0
-        ? `Scan fetched no source text, so no writing pass ran.${
-            failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""
-          }`
-        : "Writing pass returned no usable JSON.");
-    /*
-      Record the failed run on BOTH commit paths.
-
-      This wrote the scan_runs row only when there was no scheduledCommit, so a
-      SCHEDULED scan in which every model batch failed threw before anything was
-      persisted: no counts, no coverage line, no error row. The desk then showed
-      nothing at all, and "the scan ran and everything failed" was
-      indistinguishable from "the scan never ran" -- the exact silent-failure
-      class the coverage accounting exists to eliminate.
-
-      The scheduled path commits through the caller-supplied transaction so the
-      write lands in the same unit of work as the rest of a scheduled run.
-
-      B8F2: the QUEUED SOURCE WRITES go in that same transaction, beside the
-      failed run. This ending never reaches `commitResults` -- it writes the run
-      row and throws -- so without this the whole unattended pass left every
-      source row untouched: a newsroom whose sources ALL failed during an
-      outage got no failure streak, no stored `retry_after`, no `blocked_*`,
-      and the desk kept knocking at full speed on the one lane no editor is
-      watching. The inline lane was never affected; it writes during the loop.
-
-      One transaction and not a second one, deliberately: the run row and the
-      rows it is a receipt FOR must not be able to disagree about whether the
-      pass settled. If the touch write fails, the whole unit rolls back and the
-      caller's own `finalizeDailyScanFailure` records the failed run -- which is
-      the way round that loses nothing an editor can see, and never the other
-      way (a source row written for a run that was never settled).
-
-      The fence is the one this lane already has: `deps.scheduledCommit` is the
-      scheduler's own transaction, which refuses a job whose claim token is no
-      longer the running one -- so a worker that lost this run to a newer one
-      writes neither the run row nor the sources.
-    */
-    if (deps.scheduledCommit) {
-      await deps.scheduledCommit(async (writeSql) => {
-        await recordFailedRun(writeSql, error);
-        await writeQueuedSourceWrites(writeSql);
-      });
-    } else {
+    const error = lastBatchError ?? (batches.length === 0
+      ? `Scan fetched no source text, so no writing pass ran.${failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""}`
+      : "Writing pass returned no usable JSON.");
+    // The outer failure settlement saves both the run and queued touches.
+    // It must not complete a daily reservation before quota handling runs.
+    if (!deps.scheduledCommit) {
       await recordManualFailure(error);
     }
     throw new Error(error);
@@ -2679,6 +2639,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       });
     }
   } catch (error) {
+    if (error instanceof JobCancelledError) throw error;
     // A check that could not run must not be able to change an answer: the
     // word rule stands, exactly as it did before this unit (see dup-check.ts).
     console.error("[scan] duplicate check could not run", error);
@@ -2897,11 +2858,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       owned(context),
     );
   } catch (error) {
-    if (!deps.scheduledCommit) {
-      const failure = postgresText(error instanceof Error ? error.message : String(error));
+    const failure = postgresText(error instanceof Error ? error.message : String(error));
+    {
       try {
-        await withTransaction(async (receiptSql) => {
-          if (!(await lockManualScanClaim(receiptSql, job))) return;
+        const settle = async (receiptSql: Sql) => {
+          if (!deps.scheduledCommit && !(await lockManualScanClaim(receiptSql, job))) return;
           await receiptSql`
             update scan_runs
             set finished_at = now(),
@@ -2921,8 +2882,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
                 error = coalesce(error, ${failure.slice(0, 800)})
             where id = ${failureRunId} and newsroom_id = ${job.newsroom_id} and finished_at is null
           `;
-          await refreshManualScanClaim(receiptSql, job);
-        });
+          await writeQueuedSourceWrites(receiptSql);
+          if (!deps.scheduledCommit) await refreshManualScanClaim(receiptSql, job);
+        };
+        if (deps.scheduledFailure) await deps.scheduledFailure(failure, settle);
+        else if (deps.scheduledCommit) await deps.scheduledCommit(settle);
+        else await withTransaction(settle);
       } catch (settleError) {
         const settleMessage = postgresText(
           settleError instanceof Error ? settleError.message : String(settleError),

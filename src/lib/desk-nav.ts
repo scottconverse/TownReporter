@@ -42,19 +42,6 @@ export const DESK_NAV: readonly DeskNavItem[] = [
   { to: "/desk/follow-ups", label: "Follow-ups" },
   { to: "/desk/dark", label: "Dark Desk" },
   { to: "/desk/sources", label: "Sources & scan" },
-  /*
-    UNIT U24 -- THE SCAN SCREEN IS IN THE NAV.
-
-    `/desk/scan` is where the scope and the effort dials live: General Scan
-    over every accepted source, one section, or a picked set, on an Automatic
-    or a named writer. The nav item above it is "Sources & scan", and that goes
-    to `/desk/sources`, which carries a "Run scan now" button but none of those
-    controls. So an editor looking for "a General Scan" had the Ctrl K palette
-    and nothing else -- the stand-in editorial day found it only that way. It
-    is a sub-item of the screen an editor would look under, not a twelfth
-    top-level destination.
-  */
-  { to: "/desk/scan", label: "Scan the wire", sub: true },
   { to: "/desk/ops", label: "Models", hash: "writing-models" },
   { to: "/desk/ops", label: "Server" },
   { to: "/desk/stats", label: "Stats" },
@@ -67,12 +54,10 @@ export const DESK_NAV: readonly DeskNavItem[] = [
  * navigate to, which is the design's own "find anything" mechanism. Not drawn
  * in the footer -- BF3 removed those links, and the capture has none.
  *
- * `/desk/scan` used to live here and in the palette only (unit U24). It is a
- * drawn sub-item now, so it is in `DESK_NAV` and NOT repeated below -- the
- * palette builds itself from both lists, and a page in both is a page the
- * palette offers twice.
+ * Scan history is reached from the Sources header and remains in the palette.
  */
 export const DESK_MORE: readonly { to: string; label: string }[] = [
+  { to: "/desk/scan", label: "Scan history" },
   { to: "/desk/import", label: "Import" },
   { to: "/desk/memory", label: "Beat memory" },
   { to: "/desk/legal-removals", label: "Legal removals" },

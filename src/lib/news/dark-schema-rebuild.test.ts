@@ -1,6 +1,7 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "pg";
+import { readFile } from "node:fs/promises";
 import {
   integrationRequested,
   probePostgres,
@@ -200,6 +201,16 @@ describe("ensureDarkSchema survives a database rebuilt underneath the running pr
       await admin.query(`DROP DATABASE ${dbName}`);
       await admin.query(`CREATE DATABASE ${dbName}`);
       await admin.end();
+
+      // Investigation alters snapshots/leads, whose base tables belong to
+      // 0002. Restore only that prerequisite; Dark's schema/marker stay absent.
+      const base = new Client({ connectionString: dbUrl });
+      await base.connect();
+      try {
+        await base.query(await readFile(new URL("../../../migrations/0002_newsroom.sql", import.meta.url), "utf8"));
+      } finally {
+        await base.end();
+      }
 
       // The property under test: the SAME process, calling the SAME function
       // through the SAME pool, must not report success while leaving the

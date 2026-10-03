@@ -1,3 +1,4 @@
+import { agendaTitle } from "@/lib/news/desk-copy";
 import { useQuery } from "@tanstack/react-query";
 import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
@@ -75,7 +76,7 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
       {row.aligned && row.chunks.length > 0 && (
         <ul className="mt-1 text-sm">
           {row.chunks.map((c) => (
-            <li key={`${c.item}-${c.startSeconds}`}>item {c.item}: {c.title} ({fmtTime(c.startSeconds)}–{fmtTime(c.endSeconds)})</li>
+            <li key={`${c.item}-${c.startSeconds}`}>item {c.item}: {agendaTitle(c.title)} ({fmtTime(c.startSeconds)}–{fmtTime(c.endSeconds)})</li>
           ))}
         </ul>
       )}

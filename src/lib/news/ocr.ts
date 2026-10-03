@@ -35,6 +35,7 @@ import {
 } from "./provider-registry.ts";
 import { automaticFailoverReason, looksLikeContentRefusal } from "./automatic-failover.ts";
 import { OCR_BATCH_PAGE_LIMIT } from "./ocr-batches.ts";
+import { storableText } from "./storable-text.ts";
 
 const JPEG_SOI = [0xff, 0xd8, 0xff];
 
@@ -665,7 +666,7 @@ async function transcribePage(
  * second, drifting copy of the same rules.
  */
 function stripNarration(text: string): string {
-  return text
+  return storableText(text)
     .split("\n")
     .filter((line) => !isSelfReferential(line))
     .join("\n")

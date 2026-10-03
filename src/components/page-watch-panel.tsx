@@ -43,6 +43,7 @@ export function PageWatchPanel({
     { formatListDateTime } = usePaperDateFormatters();
   const sections = useEditorSections();
   const [sectionKey, setSectionKey] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const [expanded, setExpanded] = useState(false),
     [selected, setSelected] = useState<number | null>(null),
     [offset, setOffset] = useState(0);
@@ -214,13 +215,46 @@ export function PageWatchPanel({
       <div className="np-acts">
         <h2>Watched pages · {watches.data?.length ?? 0}</h2>
         <InkButton tone="quiet" small onClick={() => setExpanded(!expanded)}>
-          {expanded ? "Close watches" : "Watch a page / view watches"}
+          {expanded ? "Close watch form" : "Watch a page"}
         </InkButton>
       </div>
       <p className="meta">
-        Keep a particular public page under observation without starting a dig. Daily checks keep
-        dated captures; a change never publishes or creates a lead by itself.
+        Daily checks keep dated captures of the public pages you watch.
       </p>
+          {watches.isError ? (
+            <p role="alert">Could not load watches. Reload this page.</p>
+          ) : watches.isPending ? (
+            <p>Loading watches…</p>
+          ) : !watches.data?.length ? (
+            <p>No pages watched yet.</p>
+          ) : (
+            <div className="watch-list">
+              {(showAll ? watches.data : watches.data.slice(0, 5)).map((w) => (
+                <div className="deskfile" key={w.id}>
+                  <h3>{w.title}</h3>
+                  <p className="meta">
+                    {w.watch_state} ·{" "}
+                    {w.last_check_at
+                      ? `${WORDS[w.last_outcome ?? ""] ?? w.last_outcome} · ${formatListDateTime(w.last_check_at)}`
+                      : "First capture pending — not checked yet"}
+                  </p>
+                  <InkButton
+                    small
+                    onClick={() => {
+                      clear();
+                      setExpanded(true);
+                      setSelected(w.id);
+                      setTarget(w.investigation_id ? String(w.investigation_id) : "");
+                      setOffset(0);
+                    }}
+                  >
+                    Open watch
+                  </InkButton>
+                </div>
+              ))}
+            </div>
+          )}
+          {(watches.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${watches.data?.length}`}</InkButton> : null}
       {expanded ? (
         <>
           <form
@@ -318,38 +352,6 @@ export function PageWatchPanel({
               ) : null}
             </p>
           ) : null}
-          {watches.isError ? (
-            <p role="alert">Could not load watches. Reload this page.</p>
-          ) : watches.isPending ? (
-            <p>Loading watches…</p>
-          ) : !watches.data?.length ? (
-            <p>No pages watched yet.</p>
-          ) : (
-            <div className="watch-list">
-              {watches.data.map((w) => (
-                <div className="deskfile" key={w.id}>
-                  <h3>{w.title}</h3>
-                  <p className="meta">
-                    {w.watch_state} ·{" "}
-                    {w.last_check_at
-                      ? `${WORDS[w.last_outcome ?? ""] ?? w.last_outcome} · ${formatListDateTime(w.last_check_at)}`
-                      : "First capture pending — not checked yet"}
-                  </p>
-                  <InkButton
-                    small
-                    onClick={() => {
-                      clear();
-                      setSelected(w.id);
-                      setTarget(w.investigation_id ? String(w.investigation_id) : "");
-                      setOffset(0);
-                    }}
-                  >
-                    Open watch
-                  </InkButton>
-                </div>
-              ))}
-            </div>
-          )}
           {row ? (
             <article className="openfile">
               <h3>{row.title}</h3>

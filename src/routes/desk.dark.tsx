@@ -44,6 +44,7 @@ import {
   observedDarkJobFinished,
   looksLikeInternalSummary,
   organizationFromUrl,
+  editorTitle,
   pileForStatus,
   plainEditorText,
   plainFinding,
@@ -99,7 +100,7 @@ export const Route = createFileRoute("/desk/dark")({
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
-  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     A hand-over the editor asked for on another screen -- an import's review
@@ -112,6 +113,9 @@ function DarkPage() {
   const [seedFromImport, setSeedFromImport] = useState("");
   /** The header's "+ Start a file": the drawn dialog, open or shut. */
   const [startOpen, setStartOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedPiles, setExpandedPiles] = useState<Record<string, boolean>>({});
+  const togglePile = (key: string) => setExpandedPiles((prev) => ({ ...prev, [key]: !prev[key] }));
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
@@ -138,6 +142,7 @@ function DarkPage() {
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
       if (raw) setOpenId(Number(raw));
+      sessionStorage.removeItem(OPEN_KEY);
       // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
       // copy, so this holds the lead for the dialog and the next visit to the
       // desk opens its own empty one.
@@ -181,8 +186,7 @@ function DarkPage() {
     setFileFocusRequest(null);
     setOpenId(id);
     try {
-      if (id != null) sessionStorage.setItem(OPEN_KEY, String(id));
-      else sessionStorage.removeItem(OPEN_KEY);
+      sessionStorage.removeItem(OPEN_KEY);
     } catch {
       /* ignore */
     }
@@ -210,6 +214,16 @@ function DarkPage() {
     queryFn: () => listInvestigations(),
   });
   const runs = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
+  // Open the most recently touched file once, when the list first arrives. Not on every
+  // openId change: "Close file" sets openId to null, and that choice must stick.
+  const autoOpened = useRef(false);
+  useEffect(() => {
+    const rows = investigations.data;
+    if (autoOpened.current || !rows?.length) return;
+    autoOpened.current = true;
+    setOpenId((current) => current ??
+      [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0].id);
+  }, [investigations.data]);
 
   /*
     Which model digs (0.6.2).
@@ -761,7 +775,8 @@ function DarkPage() {
     claims: detail.data?.claims.length ?? 0,
   });
   const allInv = investigations.data ?? [];
-  const active = allInv.filter((row) => pileForStatus(row.status) === "desk");
+  const active = allInv.filter((row) => pileForStatus(row.status) === "desk" && row.status !== "investigating");
+  const waitingFiles = allInv.filter((row) => row.status === "investigating");
   const parked = allInv.filter((row) => pileForStatus(row.status) === "aside");
   /*
     FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened
@@ -808,6 +823,7 @@ function DarkPage() {
           <h1 className="h1">Dark Desk</h1>
         </div>
         <div className="astra-head-acts">
+          <button type="button" className="btn quiet" aria-expanded={settingsOpen} aria-controls="dark-settings" onClick={() => setSettingsOpen(!settingsOpen)}>Settings</button>
           {/* SG1 / Option A: starting a file is the start of a Dark Desk run,
               which searches and spends. Disabled, with the reason in text,
               until the paper is set up. */}
@@ -896,7 +912,7 @@ function DarkPage() {
                 Empty. Paste a tip above, or start digging on a signal.
               </p>
             ) : (
-              active.map((row) => (
+              (expandedPiles.open ? active : active.slice(0, 5)).map((row) => (
                 <DeskFileCard
                   key={row.id}
                   row={row}
@@ -918,6 +934,7 @@ function DarkPage() {
                 />
               ))
             )}
+            {active.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("open")}>{expandedPiles.open ? "Show fewer" : `Show all ${active.length}`}</InkButton> : null}
           </div>
 
           <div className="astra-pile">
@@ -947,7 +964,7 @@ function DarkPage() {
                 Nothing new tonight — everything interesting is already on the desk.
               </p>
             ) : (
-              inbox.map((item) => (
+              (expandedPiles.signals ? inbox : inbox.slice(0, 5)).map((item) => (
                 <WorthCard
                   key={item.id}
                   item={item}
@@ -966,14 +983,15 @@ function DarkPage() {
               file a tip is already on is one press away rather than a name the
               editor has to go and search for.
             */}
+            {inbox.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("signals")}>{expandedPiles.signals ? "Show fewer" : `Show all ${inbox.length}`}</InkButton> : null}
             {covered.length ? (
               <details className="wire-more astra-pile-pad">
                 <summary>
                   {covered.length} {covered.length === 1 ? "signal is" : "signals are"} not listed above
                 </summary>
-                {covered.map(({ item, off }) => (
+                {(expandedPiles.covered ? covered : covered.slice(0, 5)).map(({ item, off }) => (
                   <p key={item.id} className="wire-line">
-                    <b>{plainEditorText(item.title)}</b> — {worthItemOnDeskLine(off!)}
+                    <b>{editorTitle(plainEditorText(item.title))}</b> — {worthItemOnDeskLine(off!)}
                     {off!.kind === "covered" ? (
                       <>
                         {" "}
@@ -1004,6 +1022,7 @@ function DarkPage() {
                     ) : null}
                   </p>
                 ))}
+                {covered.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("covered")}>{expandedPiles.covered ? "Show fewer" : `Show all ${covered.length}`}</InkButton> : null}
               </details>
             ) : null}
             {reddit.isPending ? (
@@ -1042,6 +1061,14 @@ function DarkPage() {
           </div>
 
           <div className="astra-pile">
+            <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
+            {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
+              <DeskFileCard key={row.id} row={row} selected={row.id === openId} digging={true} locked={digging || busyStart} onOpen={() => rememberOpen(row.id)} onKeep={() => advance.mutate(row.id)} onPark={() => park.mutate(row.id)} />
+            )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
+            {waitingFiles.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("waiting")}>{expandedPiles.waiting ? "Show fewer" : `Show all ${waitingFiles.length}`}</InkButton> : null}
+          </div>
+
+          <div className="astra-pile">
             <div className="astra-pile-h">
               <span>Set aside</span>
               <span>{parked.length}</span>
@@ -1050,36 +1077,22 @@ function DarkPage() {
             {parked.length === 0 ? (
               <p className="meta astra-pile-pad">Nothing set aside yet.</p>
             ) : (
-              parked.map((row) => (
-                <div key={row.id} className="astra-file dim">
-                  <button type="button" className="astra-file-open" onClick={() => rememberOpen(row.id)}>
-                    <span className="astra-file-t">{row.title || `File ${row.id}`}</span>
-                    <span className="astra-file-m">
-                      {Number(row.records ?? 0)} records · last touched{" "}
-                      {formatShortDate(row.updated_at)}
-                    </span>
-                  </button>
-                  {!looksLikeInternalSummary(row.summary) && row.summary ? (
-                    <p className="astra-file-m">{plainEditorText(row.summary)}</p>
-                  ) : null}
-                  <div className="astra-file-acts">
-                    <InkButton
-                      disabled={pullBack.isPending}
-                      onClick={() => pullBack.mutate(row.id)}
-                    >
-                      {pullBack.isPending ? "Pulling back…" : "Pull back"}
-                    </InkButton>
-                    <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>
-                      Read
-                    </InkButton>
-                  </div>
+              (expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
+                <div key={row.id} className="astra-file dim astra-aside-file">
+                  <span className="astra-file-t" title={row.title}>{editorTitle(row.title) || `File ${row.id}`}</span>
+                  <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>Read</InkButton>
+                  <details className="row-more">
+                    <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
+                    <div className="row-more-panel"><InkButton tone="quiet" disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>{pullBack.isPending ? "Pulling back?" : "Pull back"}</InkButton></div>
+                  </details>
                 </div>
               ))
             )}
+            {parked.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("aside")}>{expandedPiles.aside ? "Show fewer" : `Show all ${parked.length}`}</InkButton> : null}
             {(runs.data ?? []).length > 0 ? (
               <details className="of-trail runs astra-pile-pad">
                 <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
-                {(runs.data ?? []).map((r) => (
+                {(expandedPiles.runs ? runs.data ?? [] : (runs.data ?? []).slice(0, 5)).map((r) => (
                   <div key={r.id} className="run-row">
                     <p className="meta">
                       {formatListDateTime(r.started_at)}
@@ -1104,6 +1117,7 @@ function DarkPage() {
                     <DarkRunMeter run={r} />
                   </div>
                 ))}
+                {(runs.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => togglePile("runs")}>{expandedPiles.runs ? "Show fewer" : `Show all ${runs.data?.length}`}</InkButton> : null}
               </details>
             ) : null}
           </div>
@@ -1154,6 +1168,20 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
+          <section id="dark-settings" hidden={!settingsOpen} aria-label="Dark Desk settings">
+          <DarkDialsPanel
+            modelChoice={modelChoice}
+            onModelChoice={(choice) => {
+              modelChoiceTouched.current = true;
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            modelEffort={modelEffort}
+            onModelEffort={setModelEffort}
+            modelDisabled={digging || busyStart}
+          />
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
+          </section>
           {/*
             FB7, item 1. Every notice on this screen was `<p className="note">`
             with no role at all (FB0-REPORT.md Table B, Dark Desk: "no role
@@ -1175,7 +1203,7 @@ function DarkPage() {
             read as a settings page rather than as a desk with no file on it.
             Both panels are still below, so nothing became unreachable.
           */}
-          {openId == null ? (
+          {openId == null && !investigations.data?.length && !investigations.isPending ? (
             <div className="astra-panel astra-empty">
               <h2 className="astra-panel-h">No file open</h2>
               <p className="astra-note">
@@ -1245,25 +1273,7 @@ function DarkPage() {
             />
           ) : null}
 
-          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
 
-          {/*
-            How hard to dig stays on the page, below the file rather than in a
-            settings route: it is a dial an editor turns mid-file, and the
-            walk that checks "How hard to dig" is on this screen. It is not in
-            the rail -- the rail is 320px and this panel is a form.
-          */}
-          <DarkDialsPanel
-            modelChoice={modelChoice}
-            onModelChoice={(choice) => {
-              modelChoiceTouched.current = true;
-              setModelChoice(choice);
-              setModelEffort(defaultModelEffort(choice));
-            }}
-            modelEffort={modelEffort}
-            onModelEffort={setModelEffort}
-            modelDisabled={digging || busyStart}
-          />
         </div>
       </div>
     </DeskShell>
@@ -1287,7 +1297,7 @@ function DeskFileCard({
   onKeep: () => void;
   onPark: () => void;
 }) {
-  const { formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
   const still = Number(row.still_open ?? 0);
   return (
@@ -1304,11 +1314,11 @@ function DeskFileCard({
         onClick={onOpen}
         aria-current={selected ? "true" : undefined}
       >
-        <span className="astra-file-t">{row.title || `File ${row.id}`}</span>
+        <span className="astra-file-t">{editorTitle(row.title) || `File ${row.id}`}</span>
         <span className="astra-file-m">
           {editorStatus(row.status)} · {digRailCounterLine(records)}
           {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
-          {formatShortDate(row.updated_at)}
+          {formatListDateTime(row.updated_at)}
         </span>
       </button>
       {/*
@@ -1506,7 +1516,7 @@ function WorthCard({
 }) {
   return (
     <div className="astra-file">
-      <p className="astra-file-t">{item.title}</p>
+      <p className="astra-file-t">{editorTitle(item.title)}</p>
       <p className="astra-file-m">
         {item.badge || editorKindLabel(item.kind)} · {item.why}
       </p>

@@ -7,7 +7,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
-import { sentenceCase } from "@/lib/news/desk-copy";
+import { editorTitle, sentenceCase } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
   deskDraftElapsed,
@@ -262,7 +262,7 @@ function DraftsPage() {
                       params={{ leadId: String(row.lead_id) }}
                       className="drafts-hl hl-link"
                     >
-                      {row.headline}
+                      {editorTitle(row.headline)}
                     </Link>
                   </h3>
                 </div>

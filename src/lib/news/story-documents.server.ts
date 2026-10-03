@@ -7,6 +7,7 @@ import {
   DOCUMENT_FILE_LIMIT,
 } from "./story-document-text.ts";
 import { grokChat, probeProvider, type EffectiveProviderChoice } from "./ai.ts";
+import { storableText } from "./storable-text.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { planAutomaticFailover, type AutomaticFailoverReason } from "./automatic-failover.ts";
@@ -590,7 +591,9 @@ export async function readStoryDocuments(
       },
     });
     active = attempt.snapshot;
-    return attempt.result;
+    return attempt.result.ok
+      ? { ...attempt.result, text: storableText(attempt.result.text) }
+      : attempt.result;
   };
   const evidence: string[] = [];
   const jobDeadline = Date.now() + DOCUMENT_READ_JOB_TIME_BUDGET_MS;
