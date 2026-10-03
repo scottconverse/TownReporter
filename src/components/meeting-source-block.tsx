@@ -1,3 +1,4 @@
+import { agendaTitle } from "@/lib/news/desk-copy";
 import { useEffect, useState } from "react";
 import type { ReportingNotes } from "@/lib/news/notes";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
@@ -201,7 +202,7 @@ export function MeetingSourceBlock({
             {citations.map((c) => (
               <li key={`${c.segmentIndex}-${c.item}`}>
                 <p className="meeting-citation-head">
-                  <b>Item {c.item || "unlabelled"}</b>
+                  <b>Item {agendaTitle(c.item || "unlabelled")}</b>
                   {" · "}
                   {videoId ? (
                     <a className="meeting-citation-time" href={meetingCitationUrl(videoId, c.timestampSeconds)} target="_blank" rel="noreferrer">
@@ -232,7 +233,7 @@ export function MeetingSourceBlock({
           <ul className="meeting-citations">
             {visibleCandidates.map((c) => (
               <li key={`candidate-${c.segmentIndex}-${c.item}`}>
-                <p className="meeting-citation-head"><b>Item {c.item || "unlabelled"}</b> · {c.timestamp ?? meetingClock(c.timestampSeconds)}</p>
+                <p className="meeting-citation-head"><b>Item {agendaTitle(c.item || "unlabelled")}</b> · {c.timestamp ?? meetingClock(c.timestampSeconds)}</p>
                 <p className="meeting-citation-excerpt">{c.excerpt}</p>
               </li>
             ))}

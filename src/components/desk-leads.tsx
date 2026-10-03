@@ -5,6 +5,7 @@ import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
+  editorTitle,
   cameBackLabel,
   DEVELOPING_LABEL,
   dupAiReason,
@@ -289,7 +290,7 @@ export function LeadRowView({
                   () => setDupKill("failed"),
                 );
               }}
-              ariaLabel={`Try killing ${lead.headline} as a duplicate again`}
+              ariaLabel={`Try killing ${editorTitle(lead.headline)} as a duplicate again`}
             >
               Try again
             </InkButton>
@@ -306,7 +307,7 @@ export function LeadRowView({
                 () => setDupKill("failed"),
               );
             }}
-            ariaLabel={`Kill ${lead.headline} as a duplicate of ${dup.headline}`}
+            ariaLabel={`Kill ${lead.headline} as a duplicate of ${editorTitle(dup.headline)}`}
           >
             {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
           </InkButton>
@@ -576,7 +577,7 @@ export function LeadRowView({
                   params={{ leadId: String(lead.possible_duplicate.id) }}
                   className="inline-link"
                 >
-                  {lead.possible_duplicate.headline}
+                  {editorTitle(lead.possible_duplicate.headline)}
                 </Link>{" "}
                 · {lead.possible_duplicate.status}
                 {/*

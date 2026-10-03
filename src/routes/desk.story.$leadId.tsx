@@ -42,6 +42,7 @@ import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { editorTitle } from "@/lib/news/desk-copy";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut } from "@/components/desk-save-shortcut";
@@ -248,6 +249,7 @@ function StoryPage() {
   const [headline, setHeadline] = useState("");
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
+  const [manualDraft, setManualDraft] = useState<"write" | "paste" | null>(null);
   useEffect(() => {
     const resize = () => {
       for (const el of document.querySelectorAll<HTMLTextAreaElement>(
@@ -825,6 +827,7 @@ function StoryPage() {
     },
     onSuccess: async ({ notesProblem }) => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setManualDraft(null);
       setMsg(notesProblem ? `Saved. ${notesProblem}` : "Saved.");
     },
     onError: (err) => {
@@ -1528,13 +1531,6 @@ function StoryPage() {
   // resolveDraftJobState in desk-copy.ts for why this replaced three
   // separately-latched pieces of local state.
   const jobState = resolveDraftJobState(data.job);
-  const draftCompletion = parseDraftCompletionReceipt(data.job?.result_json);
-  const completedDraftNeedsReview = Boolean(
-    data.job?.status === "completed" &&
-    data.draft?.id &&
-    draftCompletion?.finalDraftId === data.draft.id &&
-    draftCompletion.quality.reviewRequired,
-  );
   const sources = parseUrlList(data.lead.source_urls);
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -1622,7 +1618,7 @@ function StoryPage() {
       }
     : null;
   const hasUnsavedDraftEdits = Boolean(
-    savedDraftFields && !draftFieldsMatch(savedDraftFields, { headline, dek, body, topic }),
+    manualDraft || (savedDraftFields && !draftFieldsMatch(savedDraftFields, { headline, dek, body, topic })),
   );
   /*
     The line at the head of the Story editor: the drawn green "Saved 8:20 a.m.".
@@ -2152,43 +2148,14 @@ function StoryPage() {
   ) : null;
 
   return (
-    <DeskShell title={data.lead.headline} kicker="Workbench" hideTitle>
+    <DeskShell title={editorTitle(data.lead.headline)} kicker="Workbench" hideTitle>
       {/*
         The phase 3 progress card used to sit here, above the title. Phase 2b
         moves it down into the writing surface, under the action row, which is
         where the drawing puts it -- see the "under the actions" block below the
         form. The condition and the reassurance line traveled with it.
       */}
-      {/*
-        PUB2 item 1: NOT on a story that is already on the paper. The banner is
-        drawn from the last completion receipt, which does not change when the
-        article prints -- so on a published story it said "Draft saved — review
-        required" beside "Published.", a stale instruction to review something
-        that is already public. `onPaper` covers both the reload of a published
-        story and the moment just after a press on this page.
-      */}
-      {!onPaper && completedDraftNeedsReview ? (
-        <Notice kind="err">
-          <strong>Draft saved — review required.</strong> Check the source and name-verification findings before publication.{" "}
-          {/*
-            This banner told the editor to review and gave them nowhere to go.
-            The reasons are a list on the Checks tab now, so the way there is
-            one press (unit CT).
-          */}
-          <button
-            type="button"
-            className="inline-link"
-            onClick={() => {
-              setInspector("checks");
-              document
-                .getElementById("publish-blockers")
-                ?.scrollIntoView({ block: "start" });
-            }}
-          >
-            Review now
-          </button>
-        </Notice>
-      ) : null}
+
       <h1 className="astra-wb-title">Story workspace</h1>
       {/*
         The workbench's top bar (redesign phase 2b, "Desk Story.dc.html"): the
@@ -2536,7 +2503,7 @@ function StoryPage() {
             ) : null}
             <Chip s={data.lead.status} />
             <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
-            <h2 className="side-h">{data.lead.headline}</h2>
+            <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
               {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20
@@ -2636,18 +2603,6 @@ function StoryPage() {
               </p>
             ) : null}
           </div>
-          {!locked && !onPaper ? (
-            <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
-              <textarea
-                rows={2}
-                value={storyDirection}
-                onChange={(e) => setStoryDirection(e.target.value)}
-                maxLength={1000}
-                disabled={waiting}
-                placeholder="For example: Cover the vote on Ordinance 2026-57 and what changes for residents."
-              />
-            </Field>
-          ) : null}
           {modelResearchOpen && !locked && !onPaper ? (
             <section
               className="astra-model-research"
@@ -2810,7 +2765,7 @@ function StoryPage() {
             onReadRest={() => draft.mutate(undefined)}
           />
 
-          {data.draft || body ? (
+          {data.draft || body || manualDraft ? (
             <form className="work-form" onSubmit={(e) => e.preventDefault()}>
               {/*
                 THE HEADLINE IS AN EDITOR'S FIELD (0.6.67).
@@ -2867,7 +2822,7 @@ function StoryPage() {
                   type="button"
                   className="btn"
                   onClick={() => {
-                    setHeadline(data.lead.headline);
+                    setHeadline(editorTitle(data.lead.headline));
                     setHeadlineSuggestions([]);
                     setHeadlineNote(
                       onPaper
@@ -2997,6 +2952,7 @@ function StoryPage() {
                   ref={bodyField}
                   className="astra-story-body"
                   rows={16}
+                  placeholder={manualDraft === "paste" ? "Paste your story here." : manualDraft === "write" ? "Write your story here." : undefined}
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   disabled={onPaper}
@@ -3057,14 +3013,14 @@ function StoryPage() {
           save what the button would refuse, and it adds no announcement of its
           own: this save already answers visibly and out loud through `setMsg`.
         */}
-        {data.draft && !locked && !onPaper ? (
+        {(data.draft || manualDraft) && !locked && !onPaper ? (
           <>
             <SaveShortcut
               save={() => save.mutate()}
               enabled={!save.isPending && !reconcileActive}
             />
             <InkButton
-              tone="ghost"
+              tone={hasUnsavedDraftEdits || manualDraft ? "solid" : "quiet"}
               disabled={save.isPending || reconcileActive}
               onClick={() => save.mutate()}
             >
@@ -3101,15 +3057,6 @@ function StoryPage() {
           with that last condition: its row is drawn inside a draft that
           already has a body.
         */}
-        {data.draft && !locked && !onPaper ? (
-          <InkButton
-            tone="ghost"
-            disabled={waiting || reconcileActive}
-            onClick={() => setAddToOpen(true)}
-          >
-            + Add to story
-          </InkButton>
-        ) : null}
         {!locked && !onPaper ? (
           <>
             <ActionButton
@@ -3197,6 +3144,24 @@ function StoryPage() {
             <PaperSetupGateNote gate={paperGate} />
           </>
         ) : null}
+        {!data.draft && !locked && !onPaper ? (
+          <>
+            <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("write"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>Write it myself</InkButton>
+            <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("paste"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>Paste a story</InkButton>
+          </>
+        ) : null}
+        <details className="row-more story-more">
+          <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
+          <div className="row-more-panel">
+        {data.draft && !locked && !onPaper ? (
+          <InkButton
+            tone="ghost"
+            disabled={waiting || reconcileActive}
+            onClick={() => setAddToOpen(true)}
+          >
+            + Add to story
+          </InkButton>
+        ) : null}
         {body ? (
           /*
             Unit UI1a2. The press is synchronous -- it opens the preview dialog
@@ -3219,7 +3184,7 @@ function StoryPage() {
             Preview as reader
           </ActionButton>
         ) : null}
-        <a className="btn astra-checks-jump" href="#story-inspector">
+        <a className="inline-link astra-checks-jump" href="#story-inspector">
           Checks & sources
         </a>
         {/*
@@ -3250,6 +3215,8 @@ function StoryPage() {
             Compare
           </button>
         ) : null}
+          </div>
+        </details>
       </div>
       {/*
         The evidence check's own block, under the row: its progress, its
@@ -3297,7 +3264,7 @@ function StoryPage() {
         }
       />
       <StoryCheckJobProgress leadId={data.lead.id} />
-          {data.draft ? (
+          {data.draft || !locked ? (
             /*
               STORY DETAILS (unit CW2).
 
@@ -3314,6 +3281,19 @@ function StoryPage() {
             */
             <details className="astra-story-details" id="story-details">
               <summary>Story details</summary>
+          {!locked && !onPaper ? (
+            <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
+              <textarea
+                rows={2}
+                value={storyDirection}
+                onChange={(e) => setStoryDirection(e.target.value)}
+                maxLength={1000}
+                disabled={waiting}
+                placeholder="For example: Cover the vote on Ordinance 2026-57 and what changes for residents."
+              />
+            </Field>
+          ) : null}
+
               {/*
                 The section is a field an editor confirms, not a default a
                 machine left behind. Publish is where it is confirmed: the

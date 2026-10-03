@@ -4849,6 +4849,18 @@
   }
   .desk-ltr.astra .drafts-side {
     align-items: flex-start;
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra .drafts-row > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .desk-ltr.astra .drafts-side .more-menu {
+    position: static;
+    min-width: 0;
+    max-width: 100%;
   }
 }
 
@@ -7123,6 +7135,46 @@
   border-top: 1px solid var(--line);
   background: transparent;
 }
+/* Give the four story actions the work area's full width on laptops. */
+@media (min-width: 961px) and (max-width: 1280px) {
+  .desk-ltr.astra .story-grid { grid-template-columns: minmax(0, 1fr); }
+  .desk-ltr.astra .story-work { grid-column: 1; grid-row: 1; }
+  .desk-ltr.astra .story-side { grid-column: 1; grid-row: 2; }
+}
+.desk-ltr.astra .astra-story-actions .row-more-panel > :is(.btn, button),
+.desk-ltr.astra .astra-piles .row-more-panel > :is(.btn, button) {
+  border: 1px solid var(--fg2);
+}
+.desk-ltr.astra .astra-story-actions .row-more-panel > a {
+  padding: 12px 14px;
+  text-decoration: underline;
+}
+.desk-ltr.astra .astra-aside-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.desk-ltr.astra .astra-aside-file > .astra-file-t {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-ltr.astra .model-inventory-provider,
+.desk-ltr.astra #models-panel-conn {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.desk-ltr.astra .model-inventory-provider li {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-ltr.astra .astra-wb-ready {
+  border: 1px solid var(--fg2);
+  padding: 1px 8px;
+  color: var(--fg);
+}
 .desk-ltr.astra .astra-wb-kbd {
   margin-left: 8px;
   padding: 0 5px;
@@ -7171,9 +7223,11 @@
 }
 .desk-ltr.astra .astra-story-details > summary {
   cursor: pointer;
-  min-height: 28px;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   color: var(--adeep);
-  font: 700 calc(14px * var(--ts))/28px var(--fd);
+  font: 700 calc(14px * var(--ts)) var(--fd);
 }
 .desk-ltr.astra .astra-story-details > summary:hover,
 .desk-ltr.astra .astra-story-details > summary:focus-visible {

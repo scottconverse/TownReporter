@@ -37,6 +37,8 @@ let output = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.Rea
 const notesStub = "data:text/javascript;base64," + Buffer.from("export const emptyNotes=()=>({news:\"\",why:\"\",angle:\"\",todo:[],found:[],verify:[],opened:[],scratch:\"\"})").toString("base64");
 output = output
   .replaceAll(JSON.stringify("@/lib/news/notes"), JSON.stringify(notesStub))
+  // desk-copy pulls in half the desk, so stub agendaTitle as identity here (the render tests do not assert the agenda casing).
+  .replaceAll(JSON.stringify("@/lib/news/desk-copy"), JSON.stringify("data:text/javascript;base64," + Buffer.from("export const agendaTitle=(value)=>value;").toString("base64")))
   .replaceAll(JSON.stringify("react"), JSON.stringify(reactStub))
   .replaceAll(JSON.stringify("@/components/meeting-source-block-utils"), JSON.stringify(utilityStub))
   .replaceAll(JSON.stringify("@/lib/news/meeting-transcript-view"), JSON.stringify(viewStub))
