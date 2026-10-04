@@ -41,10 +41,13 @@ test("persists a writer checkpoint without completing the job when later reporti
     await deps!.onWriterDraft?.({headline:"Saved writer",dek:"Saved dek",body:"Expensive writer output",topic:"council",source_urls:["https://records.example/item"],integrity_notes:"Prior warning",form:"brief",found:null,unanswered:[],claims:[],reporting_trail:[],captures:[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55}]});
     return {error:"Later gate failed"};
   }}),/Later gate failed/);
-  const drafts=await sql.query<{headline:string;body:string;provenance_json:string;integrity_notes:string;research_json:string}>("select headline,body,provenance_json,integrity_notes,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
+  const drafts=await sql.query<{headline:string;body:string;model_body:string|null;provenance_json:string;integrity_notes:string;research_json:string}>("select headline,body,model_body,provenance_json,integrity_notes,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by id",[room,lead.id]);
   assert.equal(drafts.length,2);
   assert.equal(drafts[0].body,"Original saved data");
   assert.equal(drafts[1].body,"Expensive writer output");
+  // 0119: the writer's checkpoint row records the model's own body beside it, so
+  // the editor's later save on this row can be told apart from what the model wrote.
+  assert.equal(drafts[1].model_body,"Expensive writer output");
   assert.deepEqual(JSON.parse(drafts[1].provenance_json),[{url:"https://records.example/item",title:"Record",version_id:44,capture_event_id:55,role:"followed"}]);
   assert.match(drafts[1].integrity_notes,/Prior warning/);
   assert.match(drafts[1].integrity_notes,/Evidence reconciliation not completed/);

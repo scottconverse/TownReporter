@@ -172,6 +172,7 @@ import {
 import {
   buildScanUserMessage,
   composeZeroLeadSummary,
+  droppedCandidatesSentence,
   editorFetchError,
   kindFromSourceUrl,
   resurfacedSummarySentence,
@@ -2705,6 +2706,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -2777,6 +2781,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    /*
+      Scan quality (2026-10-03): a drop is a decision the editor must be able to
+      read. The candidates this pass left out for having no news event -- the
+      cheap standing-page rules plus the model's `is_event: false` verdict --
+      are named here with the first example and the reason, so a shorter Queue
+      is explained rather than mysterious.
+    */
+    const droppedSentence = droppedCandidatesSentence({
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
+    });
+    if (droppedSentence)
+      summary = summary ? `${summary} ${droppedSentence}`.slice(0, 1200) : droppedSentence;
     const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
     if (meetingCoverageLine)
       summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
@@ -3201,9 +3219,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true },
         }),
       );
+      /*
+        The model's own body, kept beside the editor's (0119). Written here and
+        at the final write below -- the two inserts the writer model's words
+        create -- and by no editor save. Hoisted so the same bytes go into both
+        columns: the editor's save overwrites `body` in place, and this is what
+        survives it.
+      */
+      const checkpointBody = storableText(checkpoint.body);
       const [saved] = await transactionSql<DraftRow>`
-        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source)
-        values(${context.userId},${owned(context)},${leadId},${storableText(checkpointHeadline.headline)},${storableText(checkpoint.dek)},${storableText(checkpoint.body)},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${storableText(integrityNotes)},${JSON.stringify(provenance)},${storableText(String(checkpoint.form ?? ""))},${JSON.stringify(sanitizeJsonLeaves(checkpoint.found ?? null))},${JSON.stringify(sanitizeJsonLeaves(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : []))},${checkpointResearchJson},${storableText(checkpointHeadline.modelHeadline)},${checkpointHeadline.source})
+        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source,model_body)
+        values(${context.userId},${owned(context)},${leadId},${storableText(checkpointHeadline.headline)},${storableText(checkpoint.dek)},${checkpointBody},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${storableText(integrityNotes)},${JSON.stringify(provenance)},${storableText(String(checkpoint.form ?? ""))},${JSON.stringify(sanitizeJsonLeaves(checkpoint.found ?? null))},${JSON.stringify(sanitizeJsonLeaves(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : []))},${checkpointResearchJson},${storableText(checkpointHeadline.modelHeadline)},${checkpointHeadline.source},${checkpointBody})
         returning *
       `;
       /*
@@ -3664,7 +3690,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
       provenance_json, form, found_note, unanswered, research_json,
-      model_headline, model_topic, headline_source
+      model_headline, model_topic, headline_source, model_body
     )
     values (
       ${context.userId}, ${owned(context)}, ${leadId}, ${storableText(headline.headline)},
@@ -3673,7 +3699,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       ${provenanceJson}, ${storableText(reported.form)}, ${storableText(reported.found_note)},
       ${unansweredJson},
       ${researchJson},
-      ${storableText(headline.modelHeadline)}, ${storableText(reported.topic)}, ${headline.source}
+      ${storableText(headline.modelHeadline)}, ${storableText(reported.topic)}, ${headline.source}, ${draftBody}
     )
     returning id
   `;

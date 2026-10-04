@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { fileScanLeads, type SqlTag } from "./lead-filing.ts";
-import { isIndexPageUrl, isMultiItemDocumentUrl } from "./lead-match.ts";
+import {
+  findMatchingLead,
+  isIndexPageUrl,
+  isMultiItemDocumentUrl,
+  matchStrength,
+} from "./lead-match.ts";
 
 /*
  * Unit AK item 1 and AK2 item 2 (2026-09-26): one story found twice in one
@@ -762,4 +767,403 @@ test("U26b: with no place passed at all, nothing is furniture and the same pair 
   } finally {
     await db.close();
   }
+});
+
+/*
+  Unit AN (2026-10-03): the live scan-66 repeats. On 2026-10-03 scan run 66
+  filed 20 leads, nearly all of them the same stories the preceding scans had
+  already filed, and only 4 carried a duplicate link at all. The owner named
+  them by id from the 30-day export:
+
+    416 / 422 / 430  North Pace Street Entrance ... Fox Creek Village reopens
+                      -- three sightings of ONE story inside ONE scan run
+    430              exact repeat (case and punctuation aside) of lead 412
+    418              exact repeat of lead 349
+    431              exact repeat of leads 316 and 238
+
+  WHY none of them was caught: every one of those headlines is Title Case and
+  made entirely of words four letters or longer that are capitalised, so
+  `contentTokens` (./lead-match.ts) -- which strips proper nouns, the paper's
+  own place, and civic furniture -- came back EMPTY for both sides of every
+  one of those pairs. An empty token set makes jaccard() and containment()
+  return 0 by definition, so all three of pairMatches' paths were unreachable
+  even for a byte-identical headline against a shared article URL (418/349).
+  The matcher's evidence gate was the same hole from the other side: it
+  required >= 1 shared content token, which a names-only pair can never have.
+  `distinguishingTokens` fixes both: when NEITHER headline has a content
+  token, a headline is scored on its own non-stoplisted proper nouns instead,
+  and the evidence gate accepts >= NAME_ONLY_MIN_SHARED (2) shared names.
+
+  The four cases below are the real scan-66 headlines, URLs and statuses, run
+  through the real filing path (fileScanLeads) against a real scratch
+  database. Each one is RED on the pre-fix matcher: without the fix every pair
+  is `null` and every candidate files as a new lead, so 416/422/430 become
+  three rows, 418 and 431 become new rows again, and the true repeat in the
+  last test never merges. The last test carries its own positive control (the
+  true repeat that MUST merge) next to the different-story pairs that must
+  not, which is what makes a negative case observable on the same run -- a
+  negative alone reads identically before and after the fix.
+
+  No test here passes a `dupCheck`: the desk's AI duplicate check is an
+  argument, not a model call, so nothing in this file can reach a model.
+*/
+
+const SCAN66_PLACE = { city: "Longmont", state: "Colorado", county: "Boulder" };
+// The real URLs the production rows carried (leads-30d.csv, source_urls).
+const FOX_CREEK_STORY = "https://longmontcolorado.gov/news/north-pace-entrance-fox-creek-village-reopens/";
+const CITY_FEED = "https://longmontcolorado.gov/news/?feed=rss2";
+const CITY_NEWS_INDEX = "https://longmontcolorado.gov/news/";
+const CALLAHAN_EVENT = "https://longmontcolorado.gov/event/callahan-house-video-release-party-at-tend-studio/";
+const LPM_CATEGORY = "https://longmontpublicmedia.org/category/news/";
+const LPM_WATCH = "https://longmontpublicmedia.org/watch/";
+
+const FOX_412 = "North Pace Street Entrance at Fox Creek Village and King Soopers Reopens";
+const FOX_416 =
+  "North Pace Street Entrance to Fox Creek Village Reopens; South Entrance Remains Closed";
+const FOX_422 =
+  "North Pace Street Entrance at Fox Creek Village and King Soopers Reopens; South Entrance Still Closed";
+const FOX_430 = "North Pace Street Entrance at Fox Creek Village and King Soopers Reopens";
+// Lead 412's own why/evidence, reused verbatim where a test needs the repeat
+// to carry NO fact the killed lead did not already have.
+const FOX_412_WHY = "The city said the north entrance had reopened.";
+const FOX_412_EVIDENCE = "City news release.";
+const CALLAHAN_418 = "Callahan House Video Release Party Set for Oct. 8 at Tend Studio";
+const LPM_431 = "Longmont Public Media Raising $24,000 for New Community Podcast Studio";
+// The killed leads' own words, reused verbatim so the repeats below carry no
+// fact their killed rows did not already have.
+const CALLAHAN_349_WHY = "The Callahan House video release party was announced for Oct. 8.";
+const LPM_316_WHY = "Longmont Public Media is raising money for a podcast studio.";
+
+test("scan 66: the three Fox Creek sightings in one run are one new lead plus one resurface, never three rows", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    // Lead 412, killed by scan 65 before this run -- the exact wording 430
+    // repeats. Its only source URL is the city news feed, an index page.
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(412,1,65,$1,$2,$3,'killed',$4,0)`,
+      [FOX_412, FOX_412_WHY, FOX_412_EVIDENCE, JSON.stringify([CITY_FEED])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      66,
+      [
+        {
+          headline: FOX_416,
+          why: "The north entrance to Fox Creek Village is open again.",
+          evidence: "City news release, Oct. 3.",
+          topic: "council",
+          source_urls: [FOX_CREEK_STORY],
+        },
+        {
+          headline: FOX_422,
+          why: "The reopening affects the Fox Creek Village entrance near King Soopers.",
+          evidence: "City news release, Oct. 3.",
+          topic: "council",
+          source_urls: [CITY_FEED, FOX_CREEK_STORY],
+        },
+        {
+          headline: FOX_430,
+          // The killed lead 412's own words: this sighting says nothing 412
+          // did not already say, so it is a resurface and not a development
+          // (see newFactsIn -- a new date or amount in `why`/`evidence` is
+          // what files the HELD case the last test in this block pins).
+          why: FOX_412_WHY,
+          evidence: FOX_412_EVIDENCE,
+          topic: "council",
+          source_urls: [CITY_NEWS_INDEX, CITY_FEED],
+        },
+      ],
+      [{ id: 412, status: "killed", headline: FOX_412, source_urls: [CITY_FEED], why: FOX_412_WHY, evidence: FOX_412_EVIDENCE }],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 1, "three sightings of one story are ONE new lead, not three");
+    assert.equal(result.mergedSameScan, 1, "422 is folded into 416 and counted, not silently dropped");
+    assert.equal(result.resurfacedKilled, 1, "430 is the killed lead's story coming back, not a new lead");
+    const rows = (
+      await db.query<{ id: number; headline: string; source_urls: string; possible_duplicate_of: number | null; status: string }>(
+        "select id, headline, source_urls, possible_duplicate_of, status from leads order by id",
+      )
+    ).rows;
+    assert.equal(rows.length, 2, "the killed row and the one new lead -- 422 and 430 add no rows");
+    const filed = rows.find((r) => r.id !== 412)!;
+    assert.equal(filed.headline, FOX_416, "the first sighting of the story is the one kept");
+    assert.equal(filed.status, "new");
+    assert.equal(filed.possible_duplicate_of, null, "a merged lead is not a duplicate of itself");
+    assert.deepEqual(
+      JSON.parse(filed.source_urls),
+      [FOX_CREEK_STORY, CITY_FEED],
+      "both sightings' URLs survive on the one lead -- merging must not drop evidence",
+    );
+    const killed = (
+      await db.query<{ resurfaced_count: number; last_resurfaced_scan_run_id: number }>(
+        "select resurfaced_count, last_resurfaced_scan_run_id from leads where id = 412",
+      )
+    ).rows;
+    assert.equal(killed[0]!.resurfaced_count, 1, "the killed row's came-back count stays true");
+    assert.equal(killed[0]!.last_resurfaced_scan_run_id, 66, "and says WHICH run saw it again");
+  } finally {
+    await db.close();
+  }
+});
+
+test("scan 66: lead 430's headline is an exact repeat of killed lead 412 -- stamped, not re-filed", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(412,1,65,$1,$2,$3,'killed',$4,0)`,
+      [FOX_412, FOX_412_WHY, FOX_412_EVIDENCE, JSON.stringify([CITY_FEED])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      66,
+      [
+        {
+          // Byte-identical to 412. Both sides cite only index pages, so there
+          // is no shared URL for the matcher to lean on -- the identity has to
+          // be read off the headline itself.
+          headline: FOX_430,
+          why: FOX_412_WHY,
+          evidence: FOX_412_EVIDENCE,
+          topic: "council",
+          source_urls: [CITY_NEWS_INDEX, CITY_FEED],
+        },
+      ],
+      [{ id: 412, status: "killed", headline: FOX_412, source_urls: [CITY_FEED], why: FOX_412_WHY, evidence: FOX_412_EVIDENCE }],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 0, "the same headline with nothing new is discarded, not re-filed");
+    assert.equal(result.resurfacedKilled, 1);
+    assert.equal(result.firstDiscardedHeadline, FOX_430, "the discard is named in the scan summary");
+    const rows = (await db.query<{ id: number }>("select id from leads order by id")).rows;
+    assert.deepEqual(rows, [{ id: 412 }], "the killed row is the only lead");
+    const killed = (await db.query<{ resurfaced_count: number }>("select resurfaced_count from leads where id = 412")).rows;
+    assert.equal(killed[0]!.resurfaced_count, 1, "the repeat still moves the came-back count");
+  } finally {
+    await db.close();
+  }
+});
+
+test("scan 66: when the repeat of a killed lead does carry a new fact, it is filed HELD and linked -- not as an unflagged new lead", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(412,1,65,$1,$2,$3,'killed',$4,0)`,
+      [FOX_412, FOX_412_WHY, FOX_412_EVIDENCE, JSON.stringify([CITY_FEED])],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      66,
+      [
+        {
+          headline: FOX_430,
+          // The same story, but the scan read a dated release 412 never had
+          // (date:10-03 -- 412's own evidence carries no date). Unit AK item
+          // 2: a killed story that has developed comes back for review rather
+          // than being discarded -- and, unlike what scan 66 actually did
+          // with 418 and 431, it now says on the row WHAT it repeats.
+          why: FOX_412_WHY,
+          evidence: "City news release, Oct. 3.",
+          topic: "council",
+          source_urls: [CITY_NEWS_INDEX, CITY_FEED],
+        },
+      ],
+      [{ id: 412, status: "killed", headline: FOX_412, source_urls: [CITY_FEED], why: FOX_412_WHY, evidence: FOX_412_EVIDENCE }],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 1);
+    assert.equal(result.developingFiled, 1, "a new fact on a killed story is a development, not a discard");
+    assert.equal(result.resurfacedKilled, 0, "a filed development is not a silent stamp");
+    const filed = (
+      await db.query<{ status: string; possible_duplicate_of: number | null; dup_kind: string | null }>(
+        "select status, possible_duplicate_of, dup_kind from leads where id <> 412",
+      )
+    ).rows;
+    assert.deepEqual(filed, [{ status: "held", possible_duplicate_of: 412, dup_kind: "developing" }]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("scan 66: leads 418 and 431 are exact repeats of killed leads -- both stamped, neither re-filed", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    await db.query(
+      `insert into leads(id,newsroom_id,scan_run_id,headline,why,evidence,status,source_urls,resurfaced_count)
+       values(349,1,62,$1,$2,$3,'killed',$4,0), (316,1,56,$5,$6,$7,'killed',$8,0)`,
+      [
+        CALLAHAN_418,
+        CALLAHAN_349_WHY,
+        "City events calendar.",
+        JSON.stringify([CALLAHAN_EVENT]),
+        LPM_431,
+        LPM_316_WHY,
+        "Station news page.",
+        JSON.stringify([LPM_CATEGORY]),
+      ],
+    );
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      66,
+      [
+        {
+          headline: CALLAHAN_418,
+          why: CALLAHAN_349_WHY,
+          evidence: "City events calendar.",
+          topic: "arts",
+          source_urls: [CALLAHAN_EVENT],
+        },
+        {
+          headline: LPM_431,
+          why: LPM_316_WHY,
+          evidence: "Station news page.",
+          topic: "arts",
+          source_urls: [LPM_CATEGORY, LPM_WATCH],
+        },
+      ],
+      [
+        { id: 349, status: "killed", headline: CALLAHAN_418, source_urls: [CALLAHAN_EVENT], why: CALLAHAN_349_WHY, evidence: "City events calendar." },
+        { id: 316, status: "killed", headline: LPM_431, source_urls: [LPM_CATEGORY], why: LPM_316_WHY, evidence: "Station news page." },
+      ],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.leadsCreated, 0, "both are stories the desk already killed, not fresh leads");
+    assert.equal(result.resurfacedKilled, 2);
+    const rows = (await db.query<{ id: number; status: string }>("select id, status from leads order by id")).rows;
+    assert.deepEqual(rows, [{ id: 316, status: "killed" }, { id: 349, status: "killed" }]);
+    const killed = (
+      await db.query<{ id: number; resurfaced_count: number; last_resurfaced_scan_run_id: number }>(
+        "select id, resurfaced_count, last_resurfaced_scan_run_id from leads order by id",
+      )
+    ).rows;
+    assert.deepEqual(killed, [
+      { id: 316, resurfaced_count: 1, last_resurfaced_scan_run_id: 66 },
+      { id: 349, resurfaced_count: 1, last_resurfaced_scan_run_id: 66 },
+    ]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("scan 66: one run merges the true Fox Creek repeat and still keeps three different stories apart on one index page", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(CREATE_LEADS);
+    const sql = makeSql(db);
+    const result = await fileScanLeads(
+      sql,
+      { userId: "test" },
+      1,
+      66,
+      [
+        {
+          headline: FOX_416,
+          why: "The north entrance to Fox Creek Village is open again.",
+          evidence: "City news release, Oct. 3.",
+          topic: "council",
+          source_urls: [FOX_CREEK_STORY],
+        },
+        {
+          // The positive control: the same story, reworded, in this same run.
+          headline: FOX_422,
+          why: "The reopening affects the Fox Creek Village entrance near King Soopers.",
+          evidence: "City news release, Oct. 3.",
+          topic: "council",
+          source_urls: [CITY_FEED, FOX_CREEK_STORY],
+        },
+        {
+          // A different story whose ONLY URL is the same generic city news
+          // index page 422 cites. Both headlines are names-only, so this is
+          // exactly the pair the fix could have over-merged.
+          headline: "Longmont Library to Close All Day Oct. 6 for Staff Training",
+          why: "The library will close for a staff training day.",
+          evidence: "Library page, Oct. 3.",
+          topic: "council",
+          source_urls: [CITY_NEWS_INDEX],
+        },
+        {
+          headline: "Longmont Museum Sets Oct. 17 Reopening After Nearly $10 Million Expansion",
+          why: "The museum reopens after an expansion.",
+          evidence: "Museum page, Oct. 3.",
+          topic: "arts",
+          source_urls: [CITY_NEWS_INDEX],
+        },
+        {
+          // Shares TWO non-stoplisted names with the museum lead -- the venue
+          // and the verb "Sets" -- which clears the names-only evidence bar.
+          // It is told apart by the score bars: 2 shared tokens out of a
+          // 10-token union is 0.2 Jaccard and 0.4 containment, under both.
+          headline: "Longmont Museum Sets Fall Docent Training for Oct. 20",
+          why: "The museum is training new docents.",
+          evidence: "Museum page, Oct. 3.",
+          topic: "arts",
+          source_urls: [CITY_NEWS_INDEX],
+        },
+      ],
+      [],
+      SCAN66_PLACE,
+    );
+    assert.equal(result.mergedSameScan, 1, "only the true same-story pair merges");
+    assert.equal(result.leadsCreated, 4, "416+422 is one lead; the other three stories stay three leads");
+    const rows = (
+      await db.query<{ headline: string; source_urls: string }>("select headline, source_urls from leads order by id")
+    ).rows;
+    assert.deepEqual(
+      rows.map((r) => r.headline),
+      [
+        FOX_416,
+        "Longmont Library to Close All Day Oct. 6 for Staff Training",
+        "Longmont Museum Sets Oct. 17 Reopening After Nearly $10 Million Expansion",
+        "Longmont Museum Sets Fall Docent Training for Oct. 20",
+      ],
+      "a shared generic index page is not evidence of one story, and neither is a shared venue name",
+    );
+    assert.deepEqual(
+      JSON.parse(rows[0]!.source_urls),
+      [FOX_CREEK_STORY, CITY_FEED],
+      "the merged lead keeps the index URL the second sighting brought",
+    );
+  } finally {
+    await db.close();
+  }
+});
+
+test("the names-only fallback needs BOTH headlines to be nameless: a names-only repeat still matches, but never against a headline with subject vocabulary", async () => {
+  // No database: this is the matcher's own gate, the thing that decides
+  // whether the four cases above are reachable at all.
+  const namesOnly = { headline: FOX_430, source_urls: [CITY_NEWS_INDEX, CITY_FEED] };
+  const exactRepeat = { headline: FOX_412, source_urls: [CITY_FEED] };
+  assert.equal(
+    matchStrength(namesOnly, exactRepeat, SCAN66_PLACE),
+    "strong",
+    "a byte-identical names-only headline is the strongest evidence there is",
+  );
+  const withSubjects = {
+    headline: "Council approves $180,000 police overtime contract at Sept. 12 meeting",
+    source_urls: [CITY_FEED],
+  };
+  assert.equal(
+    matchStrength(namesOnly, withSubjects, SCAN66_PLACE),
+    null,
+    "one nameless side is not a licence to score names: the pair has no shared subject at all",
+  );
+  assert.equal(findMatchingLead(namesOnly, [{ id: 1, status: "killed", ...withSubjects }], SCAN66_PLACE), null);
 });
