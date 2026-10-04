@@ -641,7 +641,15 @@ export async function applyCapturedMeetingTranscript(
     });
     const warnings = section5.aligned || !section5.unalignedLead ? [] : [section5.unalignedLead.leadWhy];
     if ((!hadCapture || signal) && section5.aligned && section5.citations.length) {
-      await fileMeetingLead(tx, {
+      /*
+        A capture whose record names no item and establishes no decision files no
+        lead. That is not an error and it must not read as one: an aligned
+        transcript of a meeting that decided nothing and named nothing is a
+        meeting-record, and the queue already has too many of those. The run says
+        so in `warnings` so an operator looking for the missing lead finds the
+        reason instead of an empty tab.
+      */
+      const filing = await fileMeetingLead(tx, {
         newsroomId: input.newsroomId,
         userId: input.userId,
         videoId: input.video.id,
@@ -662,6 +670,7 @@ export async function applyCapturedMeetingTranscript(
         })),
         artifactId: stored.id,
       });
+      if (!filing.filed) warnings.push(filing.reason);
     }
     if (signal) {
       await tx.query(

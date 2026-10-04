@@ -70,7 +70,9 @@ describe("meeting lead", () => {
       meetingDate: "2026-09-16",
       items: [{ item: "3", title: "Site Plan" }],
       establishedVotes: 0,
+      votes: [{ item: "3", established: false, motion: null, tally: null, result: "not established" }],
     });
+    assert.ok(copy);
     assert.match(copy.why, /no vote established from the structured record/i);
     assert.doesNotMatch(copy.why, /\d+ vote/i, "a zero must not read as a tally");
   });
@@ -81,7 +83,9 @@ describe("meeting lead", () => {
       meetingDate: "2026-09-15",
       items: [{ item: "9", title: "Second Reading" }, { item: "10", title: "Ordinance" }],
       establishedVotes: 2,
+      votes: [],
     });
+    assert.ok(copy);
     assert.match(copy.why, /2 votes established from the structured record/i);
     assert.match(copy.why, /item 9 Second Reading/);
   });
@@ -92,7 +96,9 @@ describe("meeting lead", () => {
       meetingDate: null,
       items: [{ item: "5", title: "Budget" }],
       establishedVotes: 0,
+      votes: [],
     });
+    assert.ok(copy);
     assert.match(copy.why, /Covered: item 5 Budget/);
     assert.match(copy.why, /resolves to an item, a timestamp and the verbatim words/);
   });
@@ -106,7 +112,11 @@ describe("meeting lead", () => {
     };
     await fileMeetingLead(sql, {
       newsroomId: 1, userId: "editor", videoId: "v", title: "T", meetingDate: null,
-      topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 1, votes: [],
+      topic: "council", sourceUrls: [],
+      items: [{ item: "3", title: "Site Plan" }],
+      establishedVotes: 0,
+      citations: [], artifactId: 1,
+      votes: [{ item: "3", established: false, motion: null, mover: null, seconder: null, tally: null, result: "not established", source: null }],
     });
     assert.equal(calls.length, 1, "only the idempotent lead insert; nothing else is touched");
     const params = calls[0]!.params;
@@ -123,12 +133,107 @@ describe("meeting lead", () => {
     };
     await fileMeetingLead(sql, {
       newsroomId: 1, userId: "editor", videoId: "same-video", title: "Council", meetingDate: "2026-09-22",
-      topic: "council", sourceUrls: [], items: [], establishedVotes: 0, citations: [], artifactId: 9, votes: [],
+      topic: "council", sourceUrls: [],
+      items: [{ item: "8", title: "Annexation" }],
+      establishedVotes: 0, citations: [], artifactId: 9, votes: [],
     });
     const write = calls[0]!.text;
     assert.match(write, /meeting_artifact_id=excluded\.meeting_artifact_id/i);
     assert.doesNotMatch(write, /status=excluded\.status/i, "drafted, killed, or assigned state must not reset to new");
     assert.doesNotMatch(write, /user_id=excluded\.user_id/i, "the revision must not reassign the editor's lead");
+  });
+});
+
+/**
+ * A capture lead is titled from what the meeting covered.
+ *
+ * The inputs below are capture-shaped: `title` is the recording's own title and
+ * `meetingDate` its publish date, which is exactly what `meeting-capture.ts` hands
+ * `fileMeetingLead`; `items` and `votes` are what section 5 returns. The agenda ids
+ * and ordinance ids are the ones a real Longmont transcript speaks ("Item 9B2 is
+ * ordinance 2026-47", "Item 9 C is ordinance 2026-48", "Item 9D, resolution
+ * 2026-43" -- see ./meeting-story-section5.ts).
+ *
+ * Before this, the headline was the recording's title and its date and nothing
+ * else: "City Council Regular Session - September 22, 2026 (2026-09-23)". A real
+ * dev scan filed five records of exactly that shape as leads.
+ */
+describe("a capture lead is titled from what the meeting covered", () => {
+  it("titles from the decision the structured record established", () => {
+    const copy = meetingLeadCopy({
+      title: "City Council Regular Session - September 22, 2026",
+      meetingDate: "2026-09-23",
+      items: [
+        { item: "9B2", title: "Ordinance 2026-47" },
+        { item: "9C", title: "Ordinance 2026-48" },
+      ],
+      establishedVotes: 1,
+      votes: [
+        { item: "9B2", established: true, motion: "Approve Ordinance O-2026-47", tally: "6-1", result: "Passed" },
+        { item: "9C", established: false, motion: null, tally: null, result: "not established" },
+      ],
+    });
+    assert.ok(copy);
+    assert.equal(
+      copy.headline,
+      "City Council Regular Session - September 22, 2026: item 9B2 Approve Ordinance O-2026-47 — Passed 6-1 (2026-09-23)",
+    );
+  });
+
+  it("keeps the agenda id exactly as the packet prints it", () => {
+    const copy = meetingLeadCopy({
+      title: "Historic Preservation Commission - October 1, 2026",
+      meetingDate: "2026-10-02",
+      items: [{ item: "9C", title: "Landmark Alteration at 350 Kimbark Street" }],
+      establishedVotes: 0,
+      votes: [{ item: "9C", established: false, motion: null, tally: null, result: "not established" }],
+    });
+    assert.ok(copy, "an item the transcript covered is enough to file");
+    assert.match(copy.headline, /item 9C Landmark Alteration at 350 Kimbark Street/, "9C must not be renumbered or lower-cased");
+    assert.match(copy.headline, /^Historic Preservation Commission - October 1, 2026/, "the desk still needs to know which session");
+    assert.match(copy.headline, /\(2026-10-02\)$/, "the capture stamp the R5 guard reads stays at the end");
+  });
+
+  it("falls back to the item when a vote was recorded without motion text", () => {
+    const copy = meetingLeadCopy({
+      title: "City Council Regular Session - September 22, 2026",
+      meetingDate: "2026-09-23",
+      items: [{ item: "9D", title: "Resolution 2026-43" }],
+      establishedVotes: 1,
+      votes: [{ item: "9D", established: true, motion: "   ", tally: "7-0", result: "Passed" }],
+    });
+    assert.ok(copy);
+    assert.match(copy.headline, /item 9D Resolution 2026-43/, "a vote with no motion text names nothing to put in the title");
+    assert.doesNotMatch(copy.headline, /7-0/, "the outcome belongs to a decision that was actually named");
+  });
+
+  it("files no lead at all when the record names no item and establishes no decision", async () => {
+    const calls: { text: string; params: unknown[] }[] = [];
+    const sql = (async () => [] as never[]) as unknown as Sql;
+    sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
+      calls.push({ text, params });
+      return [{ id: 7 }] as unknown as T[];
+    };
+    const filing = await fileMeetingLead(sql, {
+      newsroomId: 1,
+      userId: "editor",
+      videoId: "routine-1",
+      title: "City Council Regular Session - September 22, 2026",
+      meetingDate: "2026-09-23",
+      topic: "council",
+      sourceUrls: ["https://www.youtube.com/watch?v=routine-1"],
+      // Aligned to a packet item, but the packet gave it no title and no vote was
+      // established: the record names nothing.
+      items: [{ item: "9", title: "   " }],
+      establishedVotes: 0,
+      citations: [],
+      artifactId: 3,
+      votes: [{ item: "9", established: false, motion: null, mover: null, seconder: null, tally: null, result: "not established", source: null }],
+    });
+    assert.equal(filing.filed, false, "a meeting record with nothing to name is not a lead");
+    assert.equal(filing.leadId, null);
+    assert.match(filing.reason, /names no agenda item and establishes no vote/);
+    assert.equal(calls.length, 0, "nothing is written to the queue");
   });
 });
 
