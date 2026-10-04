@@ -248,6 +248,30 @@ export const COLD_CHECK_MAX = 15;
 export const NO_VOTE_SENTENCE =
   /\b(?:no\s+vote\b|vote\s+was\s+not\s+recorded|no\s+outcome\s+was\s+recorded|records?\s+no\s+vote)\b/i;
 
+/**
+ * A second big item gets its own section after the lead story, under a plain
+ * subhead, before ALSO AT THE MEETING. Run 5 moved 6B -- the 2027 budget and its
+ * first public hearing, the model's own second lead pick -- to the roundup and
+ * gave the whole item one short paragraph, losing the $511,000 shortfall, the
+ * $15,330 human services cut, the $495,670 savings, NextLight's 29,910
+ * subscribers and the second hearing date. At most this many items get a section.
+ */
+export const SECTION_MAX = 2;
+/** Dollar figures in an item's own source that earn it a section of its own. */
+export const SECTION_DOLLAR_MIN = 5;
+/** Seconds of tape an item must run to earn a section of its own (20 minutes). */
+export const SECTION_SECONDS_MIN = 1_200;
+/** The word cap on a section; the writer is told, and the code trims. */
+export const SECTION_WORD_CAP = 450;
+export const SECTION_REPLY_TOKENS = 1_200;
+/** How many tape windows the per-paragraph cold check may hand the reader. */
+export const COLD_WINDOW_HITS = 3;
+/** Packet pages the per-paragraph cold check adds, when the paragraph's item has them. */
+export const COLD_PACKET_CHARS = 8_000;
+/** A bare number next to one of these words and with no "$" is the editor's to check. */
+export const MONEY_WORD =
+  /\b(?:fare|fares|cost|costs|fee|fees|dollars?|price|prices|salary|salaries|wage|wages|shortfall|savings|subsidy|subsidies|payment|payments|rebate|rebates)\b/i;
+
 /** Seconds from `h:mm:ss`, `hh:mm:ss` or `mm:ss`. Null when the text is not a clock. */
 export function parseClock(text: string | null | undefined): number | null {
   if (!text) return null;
@@ -1340,13 +1364,120 @@ export function applyStatuses(
  * outranks one with a single vote, which outranks a long discussion with none.
  */
 export function leadRank(item: LedgerItem): [number, number, number] {
-  const evidence = item.evidence ?? [];
-  const dollars = [item.sourceExcerpt, ...evidence.map((entry) => entry.text)]
+  return [voteResultCount(item), dollarCountOf(item), Math.round(tapeSecondsOf(item) / 60)];
+}
+
+/** The dollar figures an item's own source and evidence state. */
+export function dollarCountOf(item: LedgerItem): number {
+  return [item.sourceExcerpt, ...(item.evidence ?? []).map((entry) => entry.text)]
     .map((text) => (text.match(/\$\s?\d[\d,]*(?:\.\d+)?/g) ?? []).length)
     .reduce((sum, count) => sum + count, 0);
+}
+
+/** The seconds of tape an item ran, or 0 when its span is not recorded. */
+export function tapeSecondsOf(item: LedgerItem): number {
   const end = item.endSeconds ?? null;
-  const seconds = item.startSeconds !== null && end !== null ? end - item.startSeconds : 0;
-  return [voteResultCount(item), dollars, Math.round(seconds / 60)];
+  return item.startSeconds !== null && end !== null ? end - item.startSeconds : 0;
+}
+
+/**
+ * Whether an item earns a section of its own after the lead story. Two ways in:
+ * the model picked it as a lead and the single-lead rule moved it (so the run's
+ * own reader thought it mattered), or the item is simply big -- five or more
+ * dollar figures in its own record, or twenty minutes of tape.
+ */
+export function deservesOwnSection(item: LedgerItem): boolean {
+  if (item.status !== "roundup") return false;
+  if (item.reason === SECOND_LEAD_REASON) return true;
+  return dollarCountOf(item) >= SECTION_DOLLAR_MIN || tapeSecondsOf(item) >= SECTION_SECONDS_MIN;
+}
+
+/**
+ * The items that get their own section, best first: money first, then minutes of
+ * tape, capped at SECTION_MAX. Chosen from the roundup candidates, so the lead
+ * is never re-written as a section and an excluded item is never resurrected.
+ */
+export function chooseSectionItems(items: LedgerItem[]): LedgerItem[] {
+  return items
+    .filter((item) => deservesOwnSection(item))
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const a = [dollarCountOf(left.item), Math.round(tapeSecondsOf(left.item) / 60)];
+      const b = [dollarCountOf(right.item), Math.round(tapeSecondsOf(right.item) / 60)];
+      return b[0] - a[0] || b[1] - a[1] || left.index - right.index;
+    })
+    .slice(0, SECTION_MAX)
+    .map((row) => row.item);
+}
+
+/** Trim prose to at most `max` words, cutting back to the last sentence when one is close. */
+export function capWords(text: string, max: number = SECTION_WORD_CAP): string {
+  const trimmed = text.trim();
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length <= max) return trimmed;
+  const cut = words.slice(0, max).join(" ");
+  const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf(".\n"));
+  return (stop > cut.length * 0.6 ? cut.slice(0, stop + 1) : cut).trim();
+}
+
+/**
+ * The lead item's motions as a numbered list, each with the words it decided,
+ * its own result, and the clock.
+ *
+ * Run 5 wrote of one airport motion: "A vote on a prior motion carried
+ * unanimously, with no tally recorded." -- a garbled blend of one motion's words
+ * and another's result, because the writer was handed the motions' results but
+ * not WHICH words each decided. A LedgerMotion carries no text, so the words are
+ * paired by time: the nearest preceding motion/amendment/vote line the run read
+ * under the item. Given the list, the writer states each motion's own result
+ * once, under its own words.
+ */
+export function motionLines(item: LedgerItem): string[] {
+  const motions = (item.motions ?? []).filter((motion) => motion.kind !== "procedural");
+  if (!motions.length) return [];
+  const words = (item.evidence ?? [])
+    .filter((entry) => STANDALONE_EVENT_KINDS.has(entry.kind) && entry.startSeconds !== null)
+    .sort((left, right) => (left.startSeconds ?? 0) - (right.startSeconds ?? 0));
+  return motions.map((motion, index) => {
+    const seconds = motion.seconds ?? null;
+    const decided =
+      seconds === null
+        ? null
+        : [...words].reverse().find((entry) => (entry.startSeconds ?? 0) <= seconds) ?? null;
+    const result = [
+      motion.result || "recorded",
+      motion.tally || motion.unanimous || "no tally",
+    ].join(", ");
+    const at = seconds === null ? "" : `, at ${clock(seconds)}`;
+    return `${index + 1}. ${decided ? decided.text.trim() : "a motion"} -- RESULT: ${result}${at}`;
+  });
+}
+
+/**
+ * Bare numbers sitting next to a money word with no "$" in front of them.
+ *
+ * The captions drop the dollar sign and the decimal point: the real run-5 tape
+ * says "135 for seniors" where the fare is $1.35, so the story printed "fares of
+ * $10 for adults and 135 for seniors". The fix is not to guess -- 135 could be
+ * $1.35 or $135 -- so each such number is surfaced for the editor, with the
+ * word that made it look like money. A year ("2027", "2026") and a clock
+ * ("5:37") are not money and are skipped.
+ */
+export function bareMoneyNumbers(body: string): string[] {
+  const found: string[] = [];
+  for (const match of body.matchAll(/\b(\d[\d,]*(?:\.\d+)?)\b/g)) {
+    const number = match[1]!;
+    const at = match.index ?? 0;
+    const before = body.slice(Math.max(0, at - 2), at);
+    if (before.includes("$")) continue;
+    if (/^(?:19|20)\d{2}$/.test(number)) continue;
+    if (body[at + number.length] === ":") continue;
+    const window = body.slice(Math.max(0, at - 60), at + number.length + 60);
+    const word = window.match(MONEY_WORD);
+    if (!word) continue;
+    found.push(`${number} (near "${word[0].toLowerCase()}")`);
+  }
+  return [...new Set(found)];
 }
 
 /** Every item the story might lead on, best first; the lead is the first. */
@@ -1419,6 +1550,7 @@ Captions are a map, not minutes: do not smooth fragments into facts that were no
 No quote without a check: quote only words that appear in the source text given; otherwise paraphrase.
 An unlabeled speaker is "staff"; never guess a title or a name.
 Never infer a vote or an outcome that is not recorded: "no vote was recorded" is a valid, correct sentence. If a vote was recorded, state the tally and the result exactly as the source states them.
+When the source lists more than one motion for the item, state each motion's OWN result once, in order, under that motion's own words -- never one motion's words with another's result.
 No outreach claims (do not say the city invited, urged, or encouraged unless the source says so). Use plain verbs; no verdict words (successful, failed to, controversial) except where the record itself uses them.
 Return compact valid JSON only: {"headline":"...","dek":"one sentence","lead":"the lead story body"}`;
 
@@ -1449,14 +1581,37 @@ export function parseRoundupReply(text: string): { valid: boolean; paragraph: st
 }
 
 /**
- * Assemble the finished body: the lead story, then the ALSO AT THE MEETING
- * heading, then the roundup paragraphs, each starting with its item name.
+ * The writer for a second section: the same lead-story writer, writing one other
+ * big item under its own plain subhead. The system prompt embeds the lead
+ * writer's, so the run's single reader writes both with the same rules.
+ */
+export const SECTION_WRITE_SYSTEM = `${LEAD_WRITE_SYSTEM}
+This call writes ONE SECOND SECTION of the same story, for one other big item, under its own plain subhead. Write only this item's own story: up to ${SECTION_WORD_CAP} words, plain verbs, no repeating the lead, no headline for the whole story.
+Return compact valid JSON only: {"headline":"the item's plain subhead","dek":"","lead":"this section's body"}`;
+
+export function parseSectionWriteReply(text: string): { valid: boolean; subhead: string; body: string } {
+  const value = parseJsonBlock<Record<string, unknown>>(text);
+  if (!value || typeof value !== "object" || Array.isArray(value)) return { valid: false, subhead: "", body: "" };
+  const body = String(value.lead ?? value.body ?? value.text ?? "").trim();
+  if (!body) return { valid: false, subhead: "", body: "" };
+  return { valid: true, subhead: String(value.headline ?? "").trim(), body };
+}
+
+/**
+ * Assemble the finished body: the lead story, then any second-section stories
+ * under their plain subheads, then the ALSO AT THE MEETING heading, then the
+ * roundup paragraphs, each starting with its item name.
  */
 export function assembleStory(input: {
   lead: string;
+  sections?: { name: string; text: string }[];
   roundups: { name: string; text: string }[];
 }): string {
   const parts = [input.lead.trim()];
+  for (const section of input.sections ?? []) {
+    if (!section.text.trim()) continue;
+    parts.push(`${section.name.trim()}\n\n${section.text.trim()}`);
+  }
   const roundups = input.roundups.filter((roundup) => roundup.text.trim());
   if (roundups.length) {
     parts.push(
@@ -1464,6 +1619,108 @@ export function assembleStory(input: {
     );
   }
   return parts.filter(Boolean).join("\n\n");
+}
+
+/**
+ * A term the packet spells its own way, for the writer to prefer over a
+ * sound-alike in the tape. Built from the packet: acronyms it prints in caps,
+ * and rare words (at least eight letters, twice or more, not everyday English).
+ */
+export function packetTerms(packetText: string, limit = 40): string[] {
+  const seen = new Map<string, { text: string; count: number }>();
+  for (const token of packetText.match(/[A-Za-z][A-Za-z'’-]*/g) ?? []) {
+    const key = token.toLowerCase();
+    const row = seen.get(key);
+    if (row) row.count += 1;
+    else seen.set(key, { text: token, count: 1 });
+  }
+  const terms = new Set<string>();
+  for (const [key, row] of seen) {
+    if (row.count < 2) continue;
+    if (/^[A-Z]{2,6}$/.test(row.text) && /^[a-z]{2,6}$/.test(key)) terms.add(row.text);
+    else if (key.length >= 8 && !COMMON_WORDS.has(key)) terms.add(row.text);
+  }
+  return [...terms].sort((left, right) => left.localeCompare(right)).slice(0, limit);
+}
+
+/** Everyday long words that are not the packet's own terms. */
+const COMMON_WORDS = new Set([
+  "council", "longmont", "meeting", "proposed", "presentation", "hearing", "members",
+  "manager", "department", "program", "information", "development", "residents",
+  "committee", "district", "comments", "discussion", "consideration", "approval",
+  "directed", "recommended", "purchase", "contract", "agreement", "ordinance",
+  "resolution", "amendment", "voluntary", "abatement", "monitoring", "easement",
+  "easements", "complete", "following", "community", "including", "available",
+]);
+
+/** The block every writer call gets: the packet's spellings for the tape's sound-alikes. */
+export function termSpellingBlock(terms: string[]): string {
+  if (!terms.length) return "";
+  return `PACKET SPELLINGS: when the tape has a sound-alike for one of these packet terms, use the packet's spelling: ${terms.join(", ")}.`;
+}
+
+/**
+ * Terms the packet prints one way and the captions reliably mishear. Mirrors
+ * CAPTION_NAME_ALIASES, and for the same reason: the packet's own text cannot
+ * always supply the term. The Sept. 29 packet's extracted text writes the
+ * airport's monitoring system as "AMS" and its easements as "Avigation", but
+ * never spells out the weather-message system the tape calls "AWAS".
+ */
+export const TERM_ALIASES: { captions: string[]; term: string }[] = [
+  { captions: ["awas"], term: "AWOS" },
+];
+
+/**
+ * Sweep the finished body for the caption's spellings of a packet term.
+ *
+ * Three passes: the curated aliases the packet cannot supply ("AWAS" -> "AWOS"),
+ * the positional easement rule ("navigation easement" -> "avigation easement",
+ * only when the packet itself writes "avigation"), and a general pass over the
+ * packet's acronyms that replaces a printed acronym whose sound key matches a
+ * packet acronym exactly and which is not itself a packet spelling. Each
+ * replacement is recorded so the editor sees what the code changed.
+ */
+export function applyPacketSpellings(text: string, packetText: string): { text: string; changes: string[] } {
+  const changes: string[] = [];
+  let out = text;
+  const record = (from: string, to: string): void => {
+    const line = `${from} -> ${to}`;
+    if (!changes.includes(line)) changes.push(line);
+  };
+
+  for (const alias of TERM_ALIASES) {
+    for (const spelling of alias.captions) {
+      const pattern = new RegExp(`\\b${spelling}\\b`, "gi");
+      if (pattern.test(out)) {
+        out = out.replace(pattern, alias.term);
+        record(spelling, alias.term);
+      }
+    }
+  }
+
+  if (/\bavigation easement\b/i.test(packetText)) {
+    const pattern = /\bnavigation easements?\b/gi;
+    if (pattern.test(out)) {
+      out = out.replace(pattern, (match) => (match.toLowerCase().endsWith("s") ? "avigation easements" : "avigation easement"));
+      record("navigation easement", "avigation easement");
+    }
+  }
+
+  const packetKeys = new Set((packetText.match(/[A-Za-z][A-Za-z'’-]*/g) ?? []).map((token) => token.toLowerCase()));
+  const acronyms = [...new Set(packetText.match(/\b[A-Z]{2,6}\b/g) ?? [])];
+  const seen = new Set<string>();
+  for (const token of out.match(/[A-Za-z][A-Za-z'’-]*/g) ?? []) {
+    const lower = token.toLowerCase();
+    if (seen.has(lower) || packetKeys.has(lower)) continue;
+    seen.add(lower);
+    if (token !== token.toUpperCase()) continue;
+    const key = soundKey(token);
+    const hit = acronyms.find((acronym) => soundKey(acronym) === key && acronym.toLowerCase() !== lower);
+    if (!hit) continue;
+    out = out.replace(new RegExp(`\\b${token}\\b`, "g"), hit);
+    record(token, hit);
+  }
+  return { text: out, changes };
 }
 
 /** Lowercase, strip punctuation, collapse spaces: the form the checks compare in. */
@@ -1693,6 +1950,22 @@ const NAME_STOPWORDS = new Set([
   "okay",
   "yeah",
   "hello",
+  "uh",
+  "um",
+  "er",
+  "oh",
+  "hmm",
+  "hey",
+  "hi",
+  "so",
+  "and",
+  "the",
+  "on",
+  "at",
+  "in",
+  "with",
+  "for",
+  "from",
   "good",
   "evening",
   "morning",
@@ -1847,15 +2120,24 @@ export function buildKnownNames(input: {
   // only when it sits where a person sits, in one of the two shapes a packet
   // writes a person in: after an office ("Mayor ..."), or before a role
   // ("..., Council member"). It must also be named more than once, because a
-  // person who appears once in a sixty-page packet is usually a heading.
+  // person who appears once in a sixty-page packet is usually a heading -- unless
+  // the packet prints the name with its role right after it, the "Name, Title"
+  // staff credit a sixty-page packet gives each presenter exactly once
+  // ("Sandra Sifuentes, Budget"). That shape names a person on its own.
   const packetText = input.packetText ?? "";
   for (const match of packetText.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z'-]+){1,2})\b/g)) {
     const name = match[1]!;
+    const at = match.index ?? 0;
     const words = name.split(/\s+/);
     if (words.some((word) => NAME_STOPWORDS.has(word.toLowerCase()))) continue;
-    if (!personContext(packetText, name, match.index ?? 0)) continue;
-    if (occurrencesOf(packetText, name) < 2) continue;
-    add(name, "", "packet");
+    if (!personContext(packetText, name, at)) continue;
+    // The shape this pass is for is "Name, Title" -- the staff credit a packet
+    // gives each presenter exactly once. A name that merely repeats with no
+    // office beside it is a heading or a themed area, not a person, so the role
+    // is what admits it, whether the name appears once or many times.
+    const role = roleAfterName(packetText, name, at);
+    if (!role) continue;
+    add(name, role, "packet");
   }
   for (const name of input.entityNames ?? []) add(name, "", "entities");
   return known;
@@ -1864,9 +2146,14 @@ export function buildKnownNames(input: {
 /** An office word immediately before a name, as a packet writes "Mayor Susie Hidalgo-Fahring". */
 const PERSON_TITLE_BEFORE =
   /(?:^|\s)(?:mayor(?: pro tem)?|council\s?members?|councilman|councilwoman|councilor|councillor|city manager|assistant city manager|manager|director|attorney|chief|clerk|superintendent|sheriff|ms|mr|mrs|dr)\s*$/i;
-/** A role immediately after a name, as a roster writes "Diane Crist, Council member". */
+/**
+ * A role immediately after a name, as a roster writes "Diane Crist, Council
+ * member" and a packet's staff credit writes "Sandra Sifuentes, Budget". The
+ * office words come first, then the department and program words a packet uses
+ * where a name is followed by its unit rather than by its rank.
+ */
 const PERSON_ROLE_AFTER =
-  /^\s*,\s*(?:mayor(?: pro tem)?|council\s?members?|councilman|councilwoman|city manager|assistant city manager|manager|director|attorney|chief|clerk|superintendent|sheriff|treasurer|secretary)\b/i;
+  /^\s*,\s*(?:[A-Za-z'’]+\s+){0,2}(?:mayor(?: pro tem)?|council\s?members?|councilman|councilwoman|city manager|assistant city manager|manager|director|attorney|chief|clerk|superintendent|sheriff|treasurer|secretary|budget|finance|planning|development|administration|department|division|office|program|analyst|coordinator|engineer|specialist|human|community|library|parks|recreation|police|fire|nextlight|utilit(?:y|ies))\b/i;
 
 /** Does this capitalized run sit where a packet writes a person? */
 function personContext(text: string, name: string, at: number): boolean {
@@ -1875,9 +2162,39 @@ function personContext(text: string, name: string, at: number): boolean {
   return PERSON_TITLE_BEFORE.test(before) || PERSON_ROLE_AFTER.test(after);
 }
 
-/** How many times the packet names this exact string. */
-function occurrencesOf(text: string, name: string): number {
-  return text.split(name).length - 1;
+/** Is the packet printing this name with its role right after it ("..., Budget")? */
+function roleAfterName(text: string, name: string, at: number): string {
+  const after = text.slice(at + name.length, at + name.length + 120);
+  const match = after.match(
+    /^\s*,\s*((?:[A-Za-z'’]+\s+){0,2}(?:mayor(?: pro tem)?|council\s?members?|councilman|councilwoman|city manager|assistant city manager|manager|director|attorney|chief|clerk|superintendent|sheriff|treasurer|secretary|budget|finance|planning|development|administration|department|division|office|program|analyst|coordinator|engineer|specialist|human|community|library|parks|recreation|police|fire|nextlight|utilit(?:y|ies)))\b/i,
+  );
+  if (!match) return "";
+  // The staff credit this pass is for ends its line, carries the person's email
+  // right after the title ("Levi Brown, Airport Manager, Levi.Brown@..."), or
+  // carries the person on in ordinary lowercase prose ("Jim Berthold, Council
+  // member, was recognized"). "All About Energy, Community Connections, Home
+  // Comfort" also reads as a name with a role word behind it and is none of
+  // those three -- the list runs on in more capitals -- so an entry has to
+  // close itself one of those ways to be a person. The name itself is guarded
+  // separately, by the function words no one is named.
+  const tail = after.slice(match[0].length);
+  if (!/^(?:[^\n]{0,40}@|\s*\n|\s*,\s*[a-z])/.test(tail)) return "";
+  return match[1]!.replace(/\s+/g, " ").trim();
+}
+
+/** The words a tape or packet uses for an office or a unit after a name. */
+const ROLE_WORDS =
+  /^(?:mayor|council|councilmember|councilman|councilwoman|councilor|city|assistant|manager|director|attorney|chief|clerk|superintendent|sheriff|treasurer|secretary|budget|finance|planning|development|administration|department|division|office|program|analyst|coordinator|engineer|specialist|human|community|library|parks|recreation|police|fire|nextlight|utilities?)$/;
+
+/** Does this phrase name a role, rather than whatever prose followed the name? */
+function roleLooksLikeRole(role: string): boolean {
+  const head = (role.toLowerCase().split(/\s+/)[0] ?? "").replace(/[^a-z']/g, "");
+  return ROLE_WORDS.test(head);
+}
+
+/** The first word of a title, lowercased and stripped, for comparing two offices. */
+function officeHead(title: string): string {
+  return (title.toLowerCase().split(/\s+/)[0] ?? "").replace(/[^a-z']/g, "");
 }
 
 /**
@@ -2011,6 +2328,47 @@ function titleHeadMatch(captionTitle: string, known: KnownName[]): string | null
 }
 
 /**
+ * The person the newsroom's list holds an office for, when the list holds that
+ * office for exactly one person.
+ *
+ * The tape introduces staff and speakers by their office: "Jan Newton, assistant
+ * city manager". A captioner hears "Ooton" as "Newton" -- a garble no consonant
+ * sound-alike reaches -- but the office beside the name is held by a single
+ * person on the newsroom's list, so the name written there is that person. An
+ * office several people hold ("council member") names nobody in particular, and
+ * the list says so by giving it more than one holder, so it is left alone.
+ */
+function soleHolderOf(captionTitle: string, known: KnownName[]): KnownName | null {
+  const lower = captionTitle.toLowerCase().replace(/\s+/g, " ").trim();
+  if (!lower || !SINGLE_OFFICE.test(lower)) return null;
+  const titles = [...new Set(known.map((person) => person.title.replace(/\s+/g, " ").trim()).filter(Boolean))];
+  const office = titles.find(
+    (title) => lower === title.toLowerCase() || lower.startsWith(`${title.toLowerCase()} `) || lower.startsWith(`${title.toLowerCase()},`),
+  );
+  if (!office) return null;
+  const holders = known.filter((person) => person.title.replace(/\s+/g, " ").trim() === office);
+  const names = new Set(holders.map((person) => normalizeForMatch(person.name)));
+  return names.size === 1 ? holders[0]! : null;
+}
+
+/**
+ * The person whose office a role names, when exactly one person on the list
+ * holds it. The tape writes the unit a speaker works in after the name
+ * ("Sandra Cu Fuentes, budget manager"), which is not one of the few offices
+ * that stand alone, so the office is matched by its head word against the
+ * words of each title: "budget manager" is the newsroom's "Budget".
+ */
+function soleHolderOfRole(role: string, known: KnownName[]): KnownName | null {
+  const head = officeHead(role);
+  if (!head) return null;
+  const holders = known.filter((person) =>
+    person.title.split(/\s+/).some((word) => officeHead(word) === head),
+  );
+  const names = new Set(holders.map((person) => normalizeForMatch(person.name)));
+  return names.size === 1 ? holders[0]! : null;
+}
+
+/**
  * Where a speaker's name shows up in a transcript: after a title, or as a label.
  *
  * Read case-insensitively, because the captioner writes the office and not the
@@ -2075,9 +2433,15 @@ export function mapCaptionNames(
   /** The newsroom's own title for a person, else the words the caption used. */
   const titleInFrontOf = (captionTitle: string, person: KnownName): string =>
     person.title.replace(/\s+/g, " ").trim() || captionTitle.replace(/\s+/g, " ").trim();
-  const bestBySound = (surname: string): { known: KnownName; score: number } | null => {
+  const bestBySound = (surname: string, rosterOnly = false): { known: KnownName; score: number } | null => {
     let best: { known: KnownName; score: number } | null = null;
     for (const person of known) {
+      // A packet's staff credits are admitted to the list so an exact spelling
+      // or the office beside a name can place a person. They are not a source
+      // for sound-alikes: a caption's stray word can sound like a staffer the
+      // newsroom has never seen speak ("said" for Molloy), and a wrong name is
+      // worse than a flagged one.
+      if (rosterOnly && person.from === "packet") continue;
       const score = nameMatchScore(surname, surnameOf(person.name));
       if (score === null) continue;
       if (!best || score < best.score) best = { known: person, score };
@@ -2085,6 +2449,8 @@ export function mapCaptionNames(
     return best;
   };
   const howFor = (score: number): string => (score === 0 ? "exact" : score === 1 ? "spelling" : "sound-alike");
+  /** Names already placed, so a later pass does not read the same words twice. */
+  const handled = new Set<string>();
 
   // A name written behind a title is the case that decides a garbled surname
   // from a garbled office. "Council member Marcin" is a person the newsroom
@@ -2092,20 +2458,26 @@ export function mapCaptionNames(
   // heard "Mayor Pro Tem" and wrote the office down as a name. The title in
   // front of the name is the only thing that tells the two apart, so these are
   // read whole, title and name together, before the bare names are read.
-  const handled = new Set<string>();
   for (const match of text.matchAll(TITLE_FOR_NAME)) {
     const whole = match[0].replace(/\s+/g, " ").trim();
     const name = (match[1] ?? "").replace(/\s+/g, " ").trim();
     if (name.length < 4) continue;
+    if (handled.has(name)) continue;
     handled.add(name);
     if (packet.includes(normalizeForMatch(name))) continue;
     const captionTitle = whole.endsWith(name) ? whole.slice(0, whole.length - name.length).trim() : "";
     const surname = surnameOf(name);
     const scored = surname.length >= 4 ? bestBySound(surname) : null;
+    const scoredRoster = surname.length >= 4 ? bestBySound(surname, true) : null;
     const exact = scored && scored.score === 0 ? scored : null;
     const alias = exact ? null : aliasFor(name, known);
     const officeGarble = exact || alias ? null : titleWordsMatch(whole, captionTitle, known);
-    const sound = exact || alias || officeGarble ? null : scored && scored.score >= 2 ? scored : null;
+    // A sound-alike needs a name the caption capitalized. The title pattern is
+    // case-insensitive because an office is spelled both ways, so without this
+    // "Manager or some" reads "some" as a surname and lands it on whoever the
+    // newsroom's list happens to have behind a matching office.
+    const sound =
+      exact || alias || officeGarble || !/^[A-Z]/.test(name) ? null : scoredRoster && scoredRoster.score >= 2 ? scoredRoster : null;
     const person = officeGarble ? null : exact?.known ?? alias ?? sound?.known ?? null;
     if (officeGarble) {
       const replacement = officeGarble.person
@@ -2130,6 +2502,16 @@ export function mapCaptionNames(
     // to flag. Only a capitalized spelling the newsroom cannot place is treated
     // as a name at all.
     if (!/^[A-Z]/.test(name)) continue;
+    // No surname match: the office in front of the name may still place it. When
+    // the newsroom's list holds that office for exactly one person, the name the
+    // caption wrote there is that person -- the "Assistant city manager Jan
+    // Newton" that is the assistant city manager the list names.
+    const adjacent = captionTitle ? soleHolderOf(captionTitle, known) : null;
+    if (adjacent) {
+      rewrite(whole, `${titleInFrontOf(captionTitle, adjacent)} ${adjacent.name}`);
+      record(whole, adjacent, "same office");
+      continue;
+    }
     // No person: then the caption wrote down an office. When the newsroom's own
     // list carries that office, the words are the office and not a guess -- the
     // title is written instead of the garble, and the editor is told.
@@ -2155,6 +2537,65 @@ export function mapCaptionNames(
     note(whole);
   }
 
+  // The tape also writes the name first and the office after it: "Jan Newton,
+  // assistant city manager", "Sandra Cu Fuentes, budget manager", or the name
+  // and then a spelled-out initialism ("Debbie Odman ODM"). Pass 1 above reads
+  // the office that comes before a name; this reads what comes after. A name is
+  // read here only when a role follows it -- prose that merely continues after a
+  // comma ("Valerie Dodd, the executive director of ...") is not a name to place
+  // or to flag. The office that follows is then the context that places a
+  // surname the caption garbled past every sound-alike ("Newton" for Ooton).
+  const NAME_THEN_TITLE =
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z'-]+){1,2})(?:\s*,\s*([^.;\n]{2,60})|\s+([A-Z]{2,5})\b)/g;
+  for (const match of text.matchAll(NAME_THEN_TITLE)) {
+    // A speaker who starts with a filled pause is captioned "Uh Debbie Odman";
+    // the interjection is not part of the name, and leaving it on would make
+    // the whole name read as prose and drop the person from the list entirely.
+    const words = (match[1] ?? "").replace(/\s+/g, " ").trim().split(/\s+/);
+    while (words.length > 1 && NAME_STOPWORDS.has((words[0] ?? "").toLowerCase())) words.shift();
+    const name = words.join(" ");
+    if (name.length < 4 || handled.has(name)) continue;
+    if (name.split(/\s+/).some((word) => NAME_STOPWORDS.has(word.toLowerCase()))) continue;
+    if (packet.includes(normalizeForMatch(name))) continue;
+    handled.add(name);
+    // The office is the first comma-separated phrase after the name that reads
+    // as a role; "Grant Penelman, uh, Planning and Development Services" keeps
+    // the interjection out of the office.
+    const phrase = match[2];
+    if (!phrase) {
+      // A name followed only by a spelled-out initialism ("Debbie Odman ODM") is
+      // a person the tape introduces by name; with no office beside it there is
+      // nothing to place it against, so it is reported, never guessed at.
+      note(name);
+      continue;
+    }
+    const role = phrase
+      .split(",")
+      .map((part) => part.replace(/\s+/g, " ").trim())
+      .find((part) => roleLooksLikeRole(part)) ?? "";
+    if (!role) continue;
+    const surname = surnameOf(name);
+    const scored = surname.length >= 4 ? bestBySound(surname) : null;
+    const scoredRoster = surname.length >= 4 ? bestBySound(surname, true) : null;
+    const exact = scored && scored.score === 0 ? scored : null;
+    const alias = exact ? null : aliasFor(name, known);
+    // A bare sound-alike is not enough behind an office: the person's own title
+    // has to be that office, or the caption's surname can sound like a stranger
+    // ("Valerie Dodd" for Molloy). The office held by one person on the list
+    // places the name on its own.
+    const sound =
+      exact || alias || !scoredRoster || scoredRoster.score < 2 || officeHead(scoredRoster.known.title) !== officeHead(role)
+        ? null
+        : scoredRoster;
+    const person = exact?.known ?? alias ?? sound?.known ?? soleHolderOf(role, known) ?? soleHolderOfRole(role, known);
+    if (!person) {
+      note(name);
+      continue;
+    }
+    rewrite(name, person.name);
+    record(name, person, exact ? "exact" : alias ? "sound-alike" : sound ? howFor(sound.score) : "same office");
+  }
+
   for (const candidate of captionNameCandidates(text)) {
     if (handled.has(candidate)) continue;
     // Pass 1 owns the lowercase spellings, matched or not: a bare lowercase
@@ -2167,9 +2608,10 @@ export function mapCaptionNames(
     const surname = surnameOf(candidate);
     if (surname.length < 4) continue;
     const scored = bestBySound(surname);
+    const scoredRoster = bestBySound(surname, true);
     const exact = scored && scored.score === 0 ? scored : null;
     const alias = exact ? null : aliasFor(candidate, known);
-    const sound = exact || alias ? null : scored && scored.score >= 2 ? scored : null;
+    const sound = exact || alias ? null : scoredRoster && scoredRoster.score >= 2 ? scoredRoster : null;
     const person = exact?.known ?? alias ?? sound?.known ?? null;
     if (!person) {
       const titled = matchKnownTitle(candidate, known);
@@ -2241,68 +2683,89 @@ export function checkDraftNames(input: {
   return checks;
 }
 
+/** Lines from a run of segments, each with its clock. */
+function tapeLines(segments: MeetingSegment[]): string {
+  return segments.map((segment) => `[${clock(segment.seconds)}] ${segment.text}`).join("\n");
+}
+
+/** The tape within an item's own span, up to `cap` characters. */
+function spanTape(item: LedgerItem | null, segments: MeetingSegment[], cap: number): string {
+  const start = item?.startSeconds ?? null;
+  const end = item?.endSeconds ?? null;
+  let used = 0;
+  const lines: string[] = [];
+  for (const segment of segments) {
+    if (start !== null && segment.seconds < start) continue;
+    if (end !== null && segment.seconds > end) break;
+    const line = `[${clock(segment.seconds)}] ${segment.text}`;
+    if (used + line.length > cap) break;
+    lines.push(line);
+    used += line.length + 1;
+  }
+  return lines.join("\n");
+}
+
 /**
- * The tape the cold reader is given, with the packet pages the written items
- * came from.
+ * The source the cold reader is given for ONE paragraph: the tape windows whose
+ * words overlap the paragraph most, plus the packet pages of the item it was
+ * written from.
  *
- * The check is only as good as what it can see. Run 4 handed it the ledger
- * digest -- headings and counts, no tape -- and it reported SBDC, Data Axle,
- * Kelly Sage, "20 to 60 students" and the staff quotation as "not in the
- * excerpts" when every one of them was in the tape it had not been shown. A
- * false alarm costs the editor the same attention as a real one, so the reader
- * gets the written items' own time ranges: the lead's span up to
- * COLD_LEAD_CHARS, each roundup item's span up to COLD_ROUNDUP_CHARS, and the
- * packet pages under them.
+ * The check is only as good as what it can see. The old reader was handed the
+ * lead item's whole span -- three hours of tape for the airport item -- and only
+ * the first 40,000 characters of it, so it called real tape facts "absent from
+ * the excerpts": the complaint system, the 88%/66% conformance figures, Crist's
+ * question. A paragraph is a small thing; the windows that share its words are
+ * the right source for it. When nothing overlaps, the item's own span stands in,
+ * and failing that a capped slice of the whole tape, so the reader is never
+ * handed nothing.
  */
-export function coldCheckExcerpts(input: {
-  leadItems: LedgerItem[];
-  roundups: LedgerItem[];
+export function coldCheckParagraphSource(input: {
+  paragraph: string;
+  item: LedgerItem | null;
   segments: MeetingSegment[];
   packetPages: PacketPage[];
   packetText: string;
+  maxWindowChars?: number;
 }): string {
-  const tapeOf = (item: LedgerItem, cap: number): string => {
-    const start = item.startSeconds;
-    const end = item.endSeconds ?? null;
-    let used = 0;
-    const lines: string[] = [];
-    for (const segment of input.segments) {
-      if (start !== null && segment.seconds < start) continue;
-      if (end !== null && segment.seconds > end) break;
-      const line = `[${clock(segment.seconds)}] ${segment.text}`;
-      if (used + line.length > cap) break;
-      lines.push(line);
-      used += line.length + 1;
-    }
-    return lines.join("\n");
-  };
-  const sections: string[] = [];
-  for (const item of input.leadItems) {
-    const tape = tapeOf(item, COLD_LEAD_CHARS);
-    if (tape) sections.push(`LEAD ITEM (${item.label || plainLabel(item)}):\n${tape}`);
-  }
-  for (const item of input.roundups) {
-    const tape = tapeOf(item, COLD_ROUNDUP_CHARS);
-    if (tape) sections.push(`ROUNDUP ITEM (${item.label || plainLabel(item)}):\n${tape}`);
-  }
-  const pages = new Set(
-    [...input.leadItems, ...input.roundups]
-      .map((item) => item.packetPage)
-      .filter((page): page is number => page !== null),
+  const paragraphWords = new Set(
+    normalizeForMatch(input.paragraph).split(" ").filter((word) => word.length >= 4),
   );
-  const packet = input.packetPages
-    .filter((page) => pages.has(page.page))
-    .map((page) => page.text)
-    .join("\n")
-    .slice(0, 12_000);
+  const windows = meetingWindows(input.segments, input.maxWindowChars ?? WINDOW_CHARS);
+  const scored = windows
+    .map((segments) => {
+      const words = new Set(normalizeForMatch(segments.map((segment) => segment.text).join(" ")).split(" "));
+      let overlap = 0;
+      for (const word of paragraphWords) if (words.has(word)) overlap += 1;
+      return { segments, overlap };
+    })
+    .filter((row) => row.overlap > 0)
+    .sort((left, right) => right.overlap - left.overlap)
+    .slice(0, COLD_WINDOW_HITS);
+  const sections: string[] = [];
+  for (const row of scored) {
+    const tape = tapeLines(row.segments);
+    if (tape) sections.push(`TAPE:\n${tape}`);
+  }
+  if (!sections.length) {
+    const tape = spanTape(input.item, input.segments, COLD_LEAD_CHARS) || input.segments.map((segment) => segment.text).join("\n").slice(0, COLD_LEAD_CHARS);
+    if (tape) sections.push(`TAPE:\n${tape}`);
+  }
+  const page = input.item?.packetPage ?? null;
+  const packet = page !== null
+    ? input.packetPages.filter((entry) => entry.page === page).map((entry) => entry.text).join("\n").slice(0, COLD_PACKET_CHARS)
+    : "";
   if (packet) sections.push(`PACKET PAGES:\n${packet}`);
   return sections.join("\n\n");
 }
 
-export const COLD_CHECK_SYSTEM = `You are a cold reader checking a finished meeting story against the tape and packet excerpts it was written from.
-The excerpts are the record. They are not the whole meeting, so a statement is only a mismatch when the excerpts CONTRADICT it, or when it is absent from the excerpts and the draft presents it as a quotation, a name, a title, or a vote.
+/** A cold-check line that denies a vote the code found. Dropped for a voted item. */
+const NO_TALLY_LINE = /\b(?:no\s+(?:vote\s+)?tally|without\s+a\s+tally|no\s+vote\s+(?:was\s+)?recorded|vote\s+was\s+not\s+recorded|no\s+vote\s+tally\s+recorded|does\s+not\s+(?:show|record)\s+(?:a\s+)?(?:vote|tally))\b/i;
+
+export const COLD_CHECK_SYSTEM = `You are a cold reader checking ONE paragraph of a meeting story against the tape and packet excerpts it was written from.
+The excerpts are this paragraph's record. They are not the whole meeting, so a statement is only a mismatch when the excerpts CONTRADICT it, or when it is absent from the excerpts and the paragraph presents it as a quotation, a name, a title, or a vote.
 Do not report a statement as missing merely because it is not in the excerpts when the excerpts cover only part of the item: an item's excerpt is up to its own span, and some spans are long. Read the excerpts you were given before you report anything absent.
-List at most ${COLD_CHECK_MAX} mismatches, the most serious first. Do not rewrite the story. Report each in one line.
+Do not report a vote as unrecorded when the excerpts show the paragraph's item recorded one.
+List at most ${COLD_WINDOW_HITS} mismatches, the most serious first. Do not rewrite the story. Report each in one line.
 Return compact valid JSON only: {"mismatches":["one line each"]}`;
 
 export function parseColdCheck(text: string): { valid: boolean; mismatches: string[] } {
@@ -2537,6 +3000,12 @@ export async function runWholeMeetingWriter(input: {
   const roundupCandidates = ledger.filter(
     (item) => item.status !== "unread" && item.status !== "excluded" && !leadNos.has(item.itemNo),
   );
+  // A second big item -- or one the run's own status pass called a lead -- gets
+  // its own section after the lead story, not one short roundup paragraph. It
+  // leaves the roundup list so it is written once, in full, under its subhead.
+  const sectionItems = chooseSectionItems(roundupCandidates);
+  const sectionNos = new Set(sectionItems.map((item) => item.itemNo));
+  const roundupOnly = roundupCandidates.filter((item) => !sectionNos.has(item.itemNo));
   /** The plain words a reader would call this item by. */
   const labelOf = (item: LedgerItem): string => item.label || plainLabel(item);
 
@@ -2611,6 +3080,16 @@ export async function runWholeMeetingWriter(input: {
       .filter(Boolean)
       .join("; "),
   );
+  // The packet's own spellings for the tape's sound-alikes, given to every
+  // writer call; and the lead item's motions as a numbered list, so each motion's
+  // words and its own result stay together.
+  const termBlock = termSpellingBlock(packetTerms(packetText));
+  const motionBlock = (item: LedgerItem): string => {
+    const lines = motionLines(item);
+    return lines.length
+      ? `MOTIONS UNDER THIS ITEM (state each motion's OWN result once, in order, under that motion's words):\n${lines.join("\n")}`
+      : "";
+  };
 
   // Fix 2's repair, in one place: a section that says the meeting did not vote
   // about an item whose record holds a result is wrong, and one more call tells
@@ -2640,7 +3119,9 @@ export async function runWholeMeetingWriter(input: {
     `${meetings}\n${LEAD_WRITE_SYSTEM}`,
     [
       `LEAD ITEM SOURCE (this is the record; write only from it):\n${sourceFor(leadItems)}`,
+      leadItems[0] ? motionBlock(leadItems[0]) : "",
       nameMapBlock,
+      termBlock,
       `TRANSCRIPT EXCERPTS:\n${nameMap.text.slice(0, 24_000)}`,
       `PACKET EXCERPTS:\n${packetExcerptFor(leadItems)}`,
       voteLines.length ? `VOTES FROM THE STRUCTURED RECORD:\n${voteLines.join("\n")}` : "VOTES: no vote was established from the structured record. Do not infer a vote or outcome.",
@@ -2655,6 +3136,36 @@ export async function runWholeMeetingWriter(input: {
   const headline = lead.headline || input.meeting.title;
   const dek = lead.dek;
 
+  // A second big item gets its own section: its own plain subhead and up to
+  // SECTION_WORD_CAP words, written from the item's full record and its packet
+  // pages, so the facts that made it big are not squeezed into one roundup line.
+  const sections: { name: string; text: string; item: LedgerItem }[] = [];
+  let sectionStubs = 0;
+  for (const item of sectionItems) {
+    const label = labelOf(item);
+    await stage(`Writing section: ${label}`);
+    const reply = await chat(
+      `${meetings}\n${SECTION_WRITE_SYSTEM}`,
+      [
+        `SECTION ITEM SOURCE (this is the record; write only from it):\n${sourceFor([item])}`,
+        motionBlock(item),
+        nameMapBlock,
+        termBlock,
+        `TRANSCRIPT EXCERPTS:\n${nameMap.text.slice(0, 24_000)}`,
+        `PACKET EXCERPTS:\n${packetExcerptFor([item])}`,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+      SECTION_REPLY_TOKENS,
+    );
+    const parsed = reply.ok ? parseSectionWriteReply(reply.text) : { valid: false, subhead: "", body: "" };
+    if (parsed.valid) sections.push({ name: label, text: capWords(parsed.body), item });
+    else {
+      sectionStubs += 1;
+      sections.push({ name: label, text: ROUNDUP_STUB, item });
+    }
+  }
+
   // Every roundup item keeps its own paragraph, under the plain words a reader
   // would call it by -- never the agenda's own heading, which is paperwork and
   // cut off mid-word ("2. ROLL CALL AND PLEDGE OF ALLEGIANCE City Council Study
@@ -2663,7 +3174,7 @@ export async function runWholeMeetingWriter(input: {
   // count them, so the editor sees the gap.
   const roundups: { name: string; text: string }[] = [];
   let roundupStubs = 0;
-  for (const item of roundupCandidates) {
+  for (const item of roundupOnly) {
     const label = item.label || plainLabel(item);
     await stage(`Writing roundup item: ${label}`);
     const reply = await chat(
@@ -2671,6 +3182,7 @@ export async function runWholeMeetingWriter(input: {
       [
         `ITEM SOURCE (this is the record):\n${sourceFor([item])}`,
         nameMapBlock,
+        termBlock,
       ]
         .filter(Boolean)
         .join("\n\n"),
@@ -2689,15 +3201,27 @@ export async function runWholeMeetingWriter(input: {
     leadItems[0] ?? null,
   );
   for (let index = 0; index < roundups.length; index += 1) {
-    const item = roundupCandidates[index] ?? null;
+    const item = roundupOnly[index] ?? null;
     if (!item) continue;
     roundups[index] = {
       ...roundups[index]!,
       text: await repairNoVote(roundups[index]!.name, roundups[index]!.text, item),
     };
   }
+  for (let index = 0; index < sections.length; index += 1) {
+    sections[index] = {
+      ...sections[index]!,
+      text: await repairNoVote(sections[index]!.name, sections[index]!.text, sections[index]!.item),
+    };
+  }
 
-  const body = assembleStory({ lead: repairedLead, roundups });
+  // The draft is assembled, then swept for the caption's spellings of the
+  // packet's own terms: the code's pass, recorded in the notes.
+  const spelled = applyPacketSpellings(
+    assembleStory({ lead: repairedLead, sections, roundups }),
+    packetText,
+  );
+  const body = spelled.text;
   // A vote word in the draft must match a vote the run FOUND -- a structured vote
   // row, or a result phrase read off the tape -- and both forms are offered: a
   // draft may write "5 to 2" where the tape said "5 to two", and "unanimously"
@@ -2751,31 +3275,58 @@ export async function runWholeMeetingWriter(input: {
   let mismatches: string[] = [];
   if (body.trim()) {
     await stage("Cold-reading the draft");
-    // The reader sees the tape of the items the story was written from, not the
-    // ledger's headings: a check that cannot see SBDC cannot clear it either.
-    const excerpts = coldCheckExcerpts({
-      leadItems,
-      roundups: roundupCandidates,
-      segments: input.segments,
-      packetPages: input.packetPages,
-      packetText,
-    });
-    const reply = await chat(
-      `${meetings}\n${COLD_CHECK_SYSTEM}`,
-      `LEDGER EXCERPTS:\n${excerpts || ledgerDigest(ledger)}\n\nDRAFT:\n${body}`,
-      1_500,
-    );
-    mismatches = reply.ok ? parseColdCheck(reply.text).mismatches : ["The cold check did not return a readable list."];
+    // The reader sees, for each paragraph, the tape windows whose words overlap
+    // that paragraph most -- not the item's whole three-hour span, which made it
+    // call real tape facts "absent from the excerpts".
+    const units: { text: string; label: string; item: LedgerItem | null }[] = [];
+    const pushParagraphs = (text: string, label: string, item: LedgerItem | null): void => {
+      for (const paragraph of text.split(/\n{2,}/)) {
+        const clean = paragraph.trim();
+        if (clean && clean !== ROUNDUP_HEADING) units.push({ text: clean, label, item });
+      }
+    };
+    pushParagraphs(repairedLead, leadItems[0] ? labelOf(leadItems[0]) : "the lead item", leadItems[0] ?? null);
+    for (const section of sections) pushParagraphs(section.text, section.name, section.item);
+    for (let index = 0; index < roundups.length; index += 1) {
+      pushParagraphs(roundups[index]!.text, roundups[index]!.name, roundupOnly[index] ?? null);
+    }
+    let coldReadable = 0;
+    for (const unit of units) {
+      if (mismatches.length >= COLD_CHECK_MAX) break;
+      const excerpts = coldCheckParagraphSource({
+        paragraph: unit.text,
+        item: unit.item,
+        segments: input.segments,
+        packetPages: input.packetPages,
+        packetText,
+      });
+      const reply = await chat(
+        `${meetings}\n${COLD_CHECK_SYSTEM}`,
+        `ITEM: ${unit.label}\nEXCERPTS:\n${excerpts}\n\nPARAGRAPH:\n${unit.text}`,
+        1_500,
+      );
+      if (!reply.ok) continue;
+      coldReadable += 1;
+      const parsed = parseColdCheck(reply.text);
+      const fact = unit.item ? voteFactFor(unit.item).trim() : "";
+      const holdsVote = Boolean(fact) && !/none recorded/i.test(fact);
+      const lines = holdsVote ? parsed.mismatches.filter((line) => !NO_TALLY_LINE.test(line)) : parsed.mismatches;
+      mismatches.push(...lines);
+    }
+    mismatches = mismatches.slice(0, COLD_CHECK_MAX);
+    if (units.length && !coldReadable) mismatches = ["The cold check did not return a readable list."];
   }
 
   const flagged = claims.filter((claim) => claim.checkStatus === "flagged");
   const ruleAssigned = ledger.filter((item) => item.reason === RULE_ASSIGNED_REASON).length;
   const overruledExcluded = ledger.filter((item) => item.reason === EXCLUDED_OVERRULED_REASON).length;
+  const bareMoney = bareMoneyNumbers(body);
   const integrityNotes = [
     input.meeting.title ? `Written from the captured meeting transcript: ${input.meeting.videoUrl}` : "",
     packetRead ? "" : "The meeting packet was not found; this story was written from the transcript alone.",
     lead.valid ? "" : "The lead-story reply was not readable; the draft may be incomplete.",
     roundupStubs ? `${roundupStubs} roundup item(s) got no paragraph from the model and need one.` : "",
+    sectionStubs ? `${sectionStubs} section(s) got no text from the model and need one.` : "",
     flagged.length ? `${flagged.length} claim(s) flagged for review (see meeting notes).` : "",
   ]
     .filter(Boolean)
@@ -2813,6 +3364,18 @@ export async function runWholeMeetingWriter(input: {
       : "",
     secondLeads
       ? `SECOND LEADS: ${secondLeads} item(s) the status pass called a lead moved to the roundup so exactly one item leads the story.`
+      : "",
+    sections.length
+      ? `SECTIONS: ${sections.length} item(s) got their own section after the lead (${sections.map((section) => section.name).join(", ")}).`
+      : "",
+    spelled.changes.length
+      ? `PACKET SPELLINGS: ${spelled.changes.join("; ")}.`
+      : "",
+    bareMoney.length
+      ? `NUMBER CHECK: a bare number sits next to a money word with no "$" (${bareMoney.join(", ")}); the captions drop the dollar sign and point, so verify each for the editor.`
+      : "",
+    sectionStubs
+      ? `SECTIONS: ${sectionStubs} section(s) got no text from the model and carry a placeholder.`
       : "",
     voteRepairs
       ? `VOTE REPAIRS: ${voteRepairs} paragraph(s) said no vote was recorded for an item with a recorded result and were rewritten from the record.`

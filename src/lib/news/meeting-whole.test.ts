@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   COLD_CHECK_MAX,
   COLD_CHECK_SYSTEM,
+  COLD_WINDOW_HITS,
   EXCLUDED_OVERRULED_REASON,
   INVENTORY_SYSTEM,
   LEAD_WRITE_SYSTEM,
@@ -12,23 +13,36 @@ import {
   ROUNDUP_WRITE_SYSTEM,
   RULE_ASSIGNED_REASON,
   SECOND_LEAD_REASON,
+  SECTION_DOLLAR_MIN,
+  SECTION_MAX,
+  SECTION_SECONDS_MIN,
+  SECTION_WORD_CAP,
   agendaRanges,
+  applyPacketSpellings,
   applyStatuses,
   assembleStory,
   attachVoteResults,
+  bareMoneyNumbers,
   buildKnownNames,
   buildLedger,
+  capWords,
   checkDraftNames,
+  chooseSectionItems,
+  coldCheckParagraphSource,
+  deservesOwnSection,
   editorNamesOneAgendaItem,
   isProceduralItem,
   mapCaptionNames,
   mergeNearDuplicates,
   mergeRelatedItems,
+  motionLines,
+  packetTerms,
   parseInventoryReply,
   plainLabel,
   rankLeadItems,
   runWholeMeetingWriter,
   scanVoteResults,
+  termSpellingBlock,
   usesWholeMeetingWriter,
   voteResultCount,
   voteWordsIn,
@@ -246,6 +260,7 @@ function run(
     votes?: Parameters<typeof runWholeMeetingWriter>[0]["votes"];
     agendaList?: AgendaListItem[];
     packetPages?: PacketPage[];
+    roster?: string;
   } = {},
 ) {
   return runWholeMeetingWriter({
@@ -254,6 +269,7 @@ function run(
     packetPages: over.packetPages ?? PACKET,
     votes: over.votes ?? [],
     agendaList: over.agendaList,
+    roster: over.roster,
     chat: fakeChat(handlers),
   });
 }
@@ -459,6 +475,198 @@ const COLD_STATUS = JSON.stringify({
   ],
 });
 
+/*
+  Fix 1 -- the second section. Run 5's status pass called 6B (the 2027 budget and
+  its first public hearing) a lead as well; the single-lead rule moved it to the
+  roundup, where it got one short line and every dollar figure the tape held --
+  the $511,000 shortfall, the $15,330 human services cut, the $495,670 savings,
+  NextLight's budget -- was lost. A moved lead pick, or any item with five dollar
+  figures or twenty minutes of tape, is written as its own short section under
+  its plain label, after the lead story and before ALSO AT THE MEETING, at most
+  two of them.
+*/
+const SECTIONS_AGENDA: AgendaListItem[] = [
+  { id: "6A", title: "Presentation Of Airport Monitoring Systems Recommendations" },
+  { id: "6B", title: "2027 Proposed Budget Presentation And First Public Hearing" },
+  { id: "3", title: "MOTIONS AND RESOLUTIONS Library Business Classes" },
+  { id: "5", title: "PROCLAMATIONS AND PRESENTATIONS" },
+];
+
+const SECTIONS_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Council Member Prieto: I move to approve the airport recommendation.", item: "6A", itemTitle: "Airport" },
+  { index: 1, seconds: 30, text: "Mayor: That carries unanimously.", item: "6A", itemTitle: "Airport" },
+  { index: 2, seconds: 1200, text: "Staff: the budget shortfall is $511,000.", item: "6B", itemTitle: "Budget" },
+  { index: 3, seconds: 2400, text: "Staff: the library classes cost $10,000.", item: "3", itemTitle: "Library" },
+  { index: 4, seconds: 3600, text: "Mayor: the proclamation was read.", item: "5", itemTitle: "Proclamations" },
+];
+
+const SECTIONS_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport recommendation", who: "Council Member Prieto", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the airport recommendation." },
+    { kind: "vote", text: "The airport recommendation carries unanimously", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+    { kind: "staff-report", text: "The property tax shortfall is $511,000", who: "staff", timestamp: "0:20:00", packet_page: 30, numbers: "$511,000", agenda: "6B", source_words: "a $511,000 shortfall." },
+    { kind: "staff-report", text: "A human services cut of $15,330", who: "staff", timestamp: "0:20:10", packet_page: 30, numbers: "$15,330", agenda: "6B", source_words: "a $15,330 cut." },
+    { kind: "staff-report", text: "Savings of $495,670", who: "staff", timestamp: "0:20:20", packet_page: 30, numbers: "$495,670", agenda: "6B", source_words: "$495,670 in savings." },
+    { kind: "staff-report", text: "NextLight's $24,907,816 budget", who: "staff", timestamp: "0:20:30", packet_page: 30, numbers: "$24,907,816", agenda: "6B", source_words: "$24,907,816." },
+    { kind: "staff-report", text: "The airport fund totals $733,170", who: "staff", timestamp: "0:20:40", packet_page: 30, numbers: "$733,170", agenda: "6B", source_words: "$733,170." },
+    { kind: "staff-report", text: "Library materials cost $10,000, and staffing $75,000", who: "staff", timestamp: "0:40:00", packet_page: 40, numbers: "$10,000", agenda: "3", source_words: "$10,000 and $75,000." },
+    { kind: "staff-report", text: "A second session adds $30,000, supplies $100,000, travel $1.6", who: "staff", timestamp: "0:40:10", packet_page: 40, numbers: "$30,000", agenda: "3", source_words: "$30,000, $100,000, $1.6." },
+    { kind: "proclamation", text: "Proclamation Declaring October 2026 Electrify Longmont Day", who: "", timestamp: "1:00:00", packet_page: 41, numbers: "", agenda: "5", source_words: "Proclamation Declaring October 2026 Electrify Longmont Day." },
+  ],
+});
+
+const SECTIONS_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the airport vote" },
+    { item_no: 2, status: "roundup", label: "2027 city budget", reason: "a budget hearing" },
+    { item_no: 3, status: "roundup", label: "Library business classes", reason: "library motions" },
+    { item_no: 4, status: "roundup", label: "Electrify Longmont Day", reason: "a proclamation" },
+  ],
+});
+
+const SECTIONS_PACKET: PacketPage[] = [
+  { page: 12, text: "AMS VOLUNTARY NOISE ABATEMENT" },
+  { page: 30, text: "2027 PROPOSED BUDGET" },
+  { page: 40, text: "LIBRARY BUSINESS CLASSES" },
+  { page: 41, text: "ELECTRIFY LONGMONT DAY" },
+];
+
+/*
+  Fix 2 -- names from the packet. The packet prints each presenter's staff credit
+  once ("Levi Brown, Airport Manager"; "Sandra Sifuentes, Budget"), and a person
+  of record is a person even when the tape introduces them once. A caption that
+  puts a different surname behind an office only one person holds ("Assistant
+  city manager Jan Newton") is that person; a name the record cannot place is
+  reported, never guessed at.
+*/
+const NAMES_PACKET = [
+  "AIRPORT MONITORING",
+  "Levi Brown, Airport Manager, Levi.Brown@longmontcolorado.gov",
+  "Sandra Sifuentes, Budget",
+  "",
+].join("\n");
+
+const NAMES_CAPTIONS = [
+  "Assistant city manager Jan Newton walked them through the numbers.",
+  "Sandra Cu Fuentes, budget manager, presented the fund.",
+  "Grant Penelman, Planning and Development Services, described the fair.",
+  "Debbie Odman ODM, sorry.",
+].join("\n");
+
+const NAMES_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Assistant city manager Jan Newton walked them through the numbers.", item: "6A", itemTitle: "Airport" },
+  { index: 1, seconds: 30, text: "Sandra Cu Fuentes, budget manager, presented the fund.", item: "6A", itemTitle: "Airport" },
+  { index: 2, seconds: 60, text: "Grant Penelman, Planning and Development Services, described the fair.", item: "6A", itemTitle: "Airport" },
+  { index: 3, seconds: 90, text: "Debbie Odman ODM, sorry.", item: "6A", itemTitle: "Airport" },
+];
+
+const NAMES_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "staff-report", text: "Assistant city manager Jan Newton walked them through the numbers", who: "", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "Assistant city manager Jan Newton walked them through the numbers." },
+    { kind: "staff-report", text: "Sandra Cu Fuentes presented the fund", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "Sandra Cu Fuentes, budget manager, presented the fund." },
+    { kind: "staff-report", text: "Grant Penelman described the fair", who: "", timestamp: "0:01:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "Grant Penelman, Planning and Development Services, described the fair." },
+    { kind: "staff-report", text: "Debbie Odman spoke", who: "", timestamp: "0:01:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "Debbie Odman ODM, sorry." },
+  ],
+});
+
+/*
+  Fix 3 -- the packet's spellings for the tape's sound-alikes, and fix 6 -- the
+  number the captions strip of its dollar sign and point. The packet writes the
+  airport's easements as "Avigation" (the captions hear "navigation easement"),
+  and the tape's "135 for seniors" is $1.35: a bare number beside a money word is
+  flagged for the editor, never silently guessed.
+*/
+const TERMS_PACKET_TEXT =
+  "AMS VOLUNTARY NOISE ABATEMENT\nThe Avigation easement protects the approach.\nAn avigation easement was recorded for the runway.";
+
+const TERMS_PACKET: PacketPage[] = [{ page: 12, text: TERMS_PACKET_TEXT }];
+
+const TERMS_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Council Member Prieto: I move to approve the airport recommendation.", item: "6A", itemTitle: "Airport" },
+  { index: 1, seconds: 30, text: "Mayor: That carries unanimously.", item: "6A", itemTitle: "Airport" },
+];
+
+const TERMS_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport recommendation", who: "Council Member Prieto", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the airport recommendation." },
+    { kind: "vote", text: "The airport recommendation carries unanimously", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+  ],
+});
+
+const TERMS_STATUS = JSON.stringify({
+  items: [{ item_no: 1, status: "lead", label: "Airport noise rules", reason: "the vote" }],
+});
+
+const TERMS_AGENDA: AgendaListItem[] = [
+  { id: "6A", title: "Presentation Of Airport Monitoring Systems Recommendations" },
+];
+
+/*
+  Fix 5 -- the motions of the lead item as a numbered list. Run 5's story said of
+  the AWOS motion that "a vote on a prior motion carried unanimously, with no
+  tally recorded" -- two motions blurred into one sentence. The writer is given
+  the item's motions in tape order, each with its own result, and states each
+  motion's own result once.
+*/
+const MOTIONS_AGENDA: AgendaListItem[] = [
+  { id: "6A", title: "Presentation Of Airport Monitoring Systems Recommendations" },
+];
+
+const MOTIONS_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 300, text: "Council Member Prieto: I move to approve the first AMS recommendation.", item: "6A", itemTitle: "Airport" },
+  { index: 1, seconds: 330, text: "Mayor: All in favor? That carries unanimously.", item: "6A", itemTitle: "Airport" },
+  { index: 2, seconds: 600, text: "Council Member Popkin: I move to approve the saturated pattern language.", item: "6A", itemTitle: "Airport" },
+  { index: 3, seconds: 630, text: "Mayor: The motion carries 5 to two.", item: "6A", itemTitle: "Airport" },
+];
+
+const MOTIONS_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the first AMS recommendation", who: "Council Member Prieto", timestamp: "0:05:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the first AMS recommendation." },
+    { kind: "vote", text: "The first AMS recommendation carries unanimously", who: "", timestamp: "0:05:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+    { kind: "motion", text: "Move to approve the saturated pattern language", who: "Council Member Popkin", timestamp: "0:10:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the saturated pattern language." },
+    { kind: "vote", text: "The saturated pattern language carries 5 to 2", who: "", timestamp: "0:10:30", packet_page: 12, numbers: "5-2", agenda: "6A", source_words: "The motion carries 5 to two." },
+  ],
+});
+
+const MOTIONS_PACKET: PacketPage[] = [{ page: 12, text: "AMS VOLUNTARY NOISE ABATEMENT" }];
+
+/*
+  Fix 4 -- the cold check's noise. Run 5's reader denied a tally the code had
+  found ("no vote tally recorded") and called real tape facts absent from
+  excerpts that were too narrow. The check runs paragraph by paragraph, and a
+  line that denies a vote the code found is dropped.
+*/
+const COLD2_AGENDA: AgendaListItem[] = [
+  { id: "6A", title: "Presentation Of Airport Monitoring Systems Recommendations" },
+  { id: "6B", title: "2027 Proposed Budget Presentation" },
+];
+
+const COLD2_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Council Member Prieto: I move to approve the airport recommendation.", item: "6A", itemTitle: "Airport" },
+  { index: 1, seconds: 30, text: "Mayor: That carries unanimously.", item: "6A", itemTitle: "Airport" },
+  { index: 2, seconds: 1200, text: "Staff: the property tax shortfall is $511,000.", item: "6B", itemTitle: "Budget" },
+];
+
+const COLD2_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport recommendation", who: "Council Member Prieto", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the airport recommendation." },
+    { kind: "vote", text: "The airport recommendation carries unanimously", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+    { kind: "staff-report", text: "The property tax shortfall is $511,000", who: "staff", timestamp: "0:20:00", packet_page: 30, numbers: "$511,000", agenda: "6B", source_words: "a $511,000 shortfall." },
+  ],
+});
+
+const COLD2_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the vote" },
+    { item_no: 2, status: "roundup", label: "2027 city budget", reason: "a budget" },
+  ],
+});
+
+const COLD2_PACKET: PacketPage[] = [
+  { page: 12, text: "AMS VOLUNTARY NOISE ABATEMENT" },
+  { page: 30, text: "2027 PROPOSED BUDGET\nBudget documents describe a $511,000 shortfall." },
+];
+
 describe("whole-meeting writer", () => {
   it("groups hundreds of raw inventory lines into one item per agenda item", async () => {
     /*
@@ -576,7 +784,10 @@ describe("whole-meeting writer", () => {
         inventory: () => OVERRULE_INVENTORY,
         status: () => OVERRULE_STATUS,
         lead: (user) => {
-          leadPrompt = user;
+          // The lead handler also writes the second-section stories (the section
+          // writer is the lead writer with a subhead), so the lead story's own
+          // call is the one that carries the lead item source.
+          if (user.includes("LEAD ITEM SOURCE")) leadPrompt = user;
           return JSON.stringify({ headline: "H", dek: "", lead: "The council acted." });
         },
         roundup: () => JSON.stringify({ paragraph: "The budget was presented." }),
@@ -1060,32 +1271,42 @@ describe("whole-meeting writer", () => {
     assert.match(items[1]!.text, /Airport fund budget/, "the different line stays its own item");
   });
 
-  it("leaves exactly one lead and moves the status pass's other picks to the roundup", async () => {
+  it("leaves exactly one lead and writes the status pass's other picks as their own short sections", async () => {
     /*
       Run 4's status pass called three items "lead" -- the library motions (1),
       the airport presentation (6A) and the budget (6B) -- and the story was
       written about the library while 6A, three unanimous results and the top
-      item by rank, appeared nowhere. Exactly one item leads: the top-ranked one,
-      and the two the model also picked become roundup paragraphs whose reason
-      says they were moved.
+      item by rank, appeared nowhere. Exactly one item leads: the top-ranked one.
+      The two the model also picked were moved into the roundup by run 5 and got
+      one short line each -- and 6B's budget facts were lost that way -- so each
+      moved pick is written as a short section of its own under its plain name,
+      after the lead story, up to two of them.
     */
-    let leadCalls = 0;
-    let leadPrompt = "";
+    const leadPrompts: string[] = [];
     const result = await run(
       {
         inventory: () => THREE_LEAD_INVENTORY,
         status: () => THREE_LEAD_STATUS,
         lead: (user) => {
-          leadCalls += 1;
-          leadPrompt = user;
-          return JSON.stringify({ headline: "Airport rules", dek: "", lead: "The council adopted the airport monitoring recommendations." });
+          leadPrompts.push(user);
+          // The section writer is the lead writer with a subhead, so this one
+          // handler answers both; its reply answers the call it was given.
+          return JSON.stringify({
+            headline: "Airport rules",
+            dek: "",
+            lead: user.includes("SECTION ITEM SOURCE")
+              ? "The item was discussed at length."
+              : "The council adopted the airport monitoring recommendations.",
+          });
         },
         roundup: () => JSON.stringify({ paragraph: "The item was discussed." }),
         cold: () => COLD_OK,
       },
       { segments: AIRPORT_SEGMENTS, agendaList: THREE_LEAD_AGENDA },
     );
-    assert.equal(leadCalls, 1, "the story is written from one item's evidence");
+    const leadPrompt = leadPrompts.find((prompt) => prompt.includes("LEAD ITEM SOURCE"))!;
+    const sectionPrompts = leadPrompts.filter((prompt) => prompt.includes("SECTION ITEM SOURCE"));
+    assert.equal(sectionPrompts.length, 2, "one lead story, and a section for each of the two moved picks");
     assert.match(leadPrompt, /6A\. Presentation Of Options/, "the lead source is the top-ranked item, not the model's first pick");
     assert.ok(
       result.body.startsWith("The council adopted the airport monitoring recommendations."),
@@ -1096,9 +1317,25 @@ describe("whole-meeting writer", () => {
     assert.equal(result.ledger[1]!.status, "lead");
     assert.equal(result.ledger[0]!.reason, SECOND_LEAD_REASON, "the library pick's reason says it was moved");
     assert.equal(result.ledger[2]!.reason, SECOND_LEAD_REASON, "the budget pick's reason says it was moved");
-    assert.match(result.body, /\n\nLibrary business classes: /, "the library pick is written in the roundup");
-    assert.match(result.body, /\n\n2027 city budget: /, "the budget pick is written in the roundup");
+    // A moved pick the model called a lead is an item it thought was big, so it
+    // is written as its own short section under its plain name -- not squeezed
+    // into one roundup line. At most two such sections.
+    assert.match(
+      result.body,
+      /\n\nLibrary business classes\n\nThe item was discussed at length\./,
+      "the library pick is written under its own subhead, not in the roundup list",
+    );
+    assert.match(
+      result.body,
+      /\n\n2027 city budget\n\nThe item was discussed at length\./,
+      "and so is the budget pick",
+    );
+    assert.ok(
+      result.body.indexOf("Library business classes") > result.body.indexOf("adopted the airport monitoring"),
+      "the sections come after the lead story",
+    );
     assert.match(result.meetingNotes, /SECOND LEADS: 2 item\(s\)/, "the run records the two moved picks");
+    assert.match(result.meetingNotes, /SECTIONS: 2 item\(s\)/, "and gives each a section of its own");
   });
 
   it("rewrites a paragraph that says no vote was recorded when the item holds a result", async () => {
@@ -1292,16 +1529,19 @@ describe("whole-meeting writer", () => {
     assert.ok(!knownFor.has("Hadel Fairing"), "no mapping names the garbled phrase as the person");
   });
 
-  it("hands the cold check the tape of the written items' own ranges and packet pages", async () => {
+  it("cold-reads one paragraph at a time against that paragraph's own tape windows and packet page", async () => {
     /*
       Run 4's cold check reported SBDC, Data Axle, "20 to 60 students" and a
       staff quote as "not in the excerpts" when every one was in the tape it had
-      never been shown: it was handed a ledger digest, not the tape. The reader
-      gets the lead item's span, each roundup item's span, and the packet pages
-      the written items came from -- so a fact at 10:20 under the budget is
-      visible to the check.
+      never been shown: it was handed a ledger digest, not the tape. Run 5's
+      reader was handed the lead item's whole span -- about three hours of tape
+      for the airport item -- and only its first 40,000 characters, so it called
+      the complaint system, the 88%/66% conformance figures and Crist's question
+      "absent from the excerpts". A paragraph is a small thing: each paragraph is
+      checked on its own, against the tape windows whose words overlap it most
+      and the packet page of the item it was written from.
     */
-    let coldUser = "";
+    const coldUsers: string[] = [];
     await run(
       {
         inventory: () => AIRPORT_INVENTORY,
@@ -1309,19 +1549,36 @@ describe("whole-meeting writer", () => {
         lead: () => JSON.stringify({ headline: "Airport rules", dek: "", lead: "The council acted." }),
         roundup: () => JSON.stringify({ paragraph: "The budget was presented." }),
         cold: (user) => {
-          coldUser = user;
+          coldUsers.push(user);
           return COLD_OK;
         },
       },
       { segments: COLD_SEGMENTS, packetPages: COLD_PACKET, agendaList: SEPT29_AGENDA },
     );
     assert.equal(COLD_CHECK_MAX, 15, "the reader's list is capped at 15, most serious first");
-    assert.match(coldUser, /LEAD ITEM \(Airport noise rules\):/, "the lead item's tape is labelled with its plain name");
-    assert.match(coldUser, /ROUNDUP ITEM \(2027 city budget\):/, "the roundup item's tape is labelled too");
-    assert.match(coldUser, /PACKET PAGES:\nAMS VOLUNTARY NOISE ABATEMENT/, "the written items' packet pages are handed over");
-    assert.match(coldUser, /\[00:00:00\] Council Member Prieto: I move to approve the first AMS recommendation\./, "the lead's tape includes its earliest line");
-    assert.match(coldUser, /\[00:01:30\] Mayor: And the third carries unanimously\./, "and its latest line");
-    assert.match(coldUser, /\[00:10:20\] Council Member Crist: SBDC can help 20 to 60 students\./, "the roundup's tape includes the line run 4 called absent");
+    assert.equal(coldUsers.length, 2, "each written paragraph is checked on its own, not as one digest");
+    const leadCheck = coldUsers.find((user) => user.startsWith("ITEM: Airport noise rules\nEXCERPTS:"));
+    const roundupCheck = coldUsers.find((user) => user.startsWith("ITEM: 2027 city budget\nEXCERPTS:"));
+    assert.ok(leadCheck, "the lead paragraph is checked under the lead item's plain name");
+    assert.ok(roundupCheck, "and the roundup paragraph under its own name");
+    assert.match(
+      leadCheck,
+      /\[00:00:00\] Council Member Prieto: I move to approve the first AMS recommendation\./,
+      "the lead paragraph's own tape windows are handed over",
+    );
+    assert.match(
+      roundupCheck,
+      /\[00:10:20\] Council Member Crist: SBDC can help 20 to 60 students\./,
+      "the paragraph's own tape windows reach the line run 4 called absent",
+    );
+    assert.match(leadCheck, /PACKET PAGES:\nAMS VOLUNTARY NOISE ABATEMENT/, "the lead item's packet page is handed over");
+    assert.match(roundupCheck, /PACKET PAGES:\n2027 PROPOSED BUDGET/, "and the roundup item's own packet page");
+    assert.equal(
+      (leadCheck.match(/TAPE:\n/g) ?? []).length <= COLD_WINDOW_HITS,
+      true,
+      "no more than the best few tape windows per paragraph",
+    );
+    assert.match(leadCheck, /PARAGRAPH:\nThe council acted\./, "the paragraph itself is what the reader is asked about");
   });
 
   it("counts a tally as a vote word only near a vote verb, and never a year range", async () => {
@@ -1337,5 +1594,344 @@ describe("whole-meeting writer", () => {
     assert.deepEqual(voteWordsIn("The council voted on the 20 to 60 plan in 2027."), [], "a tally beside a year is not the item's vote");
     assert.deepEqual(voteWordsIn("The council voted 5 to 2."), ["5 to 2"], "a tally next to a vote verb is a vote word");
     assert.deepEqual(voteWordsIn("The council acted unanimously."), ["unanimously"], "a unanimous vote is found too");
+  });
+
+  it("writes a big non-lead item as its own section after the lead, capped at two", async () => {
+    /*
+      Fix 1. Run 5 led on 6A and moved its own second lead pick, 6B, to the
+      roundup: a $511,000 shortfall, a $15,330 human services cut, a $495,670
+      savings and NextLight's budget became one short paragraph. An item the
+      status pass called a lead, or one with five dollar figures or twenty
+      minutes of tape, gets its own section -- a plain subhead and up to 450
+      words -- after the lead and before ALSO AT THE MEETING, at most two.
+    */
+    assert.equal(SECTION_MAX, 2, "at most two items get their own section");
+    assert.equal(SECTION_DOLLAR_MIN, 5, "five dollar figures earn a section");
+    assert.equal(SECTION_SECONDS_MIN, 1200, "and twenty minutes of tape earns one");
+
+    const small: LedgerItem = {
+      itemNo: 9,
+      kind: "staff-report",
+      text: "small",
+      startSeconds: 0,
+      endSeconds: 60,
+      packetPage: null,
+      status: "roundup",
+      reason: "",
+      sourceExcerpt: "one $5",
+      evidence: [],
+      motions: [],
+    };
+    assert.equal(deservesOwnSection(small), false, "one figure and a minute of tape do not earn a section");
+    assert.equal(
+      deservesOwnSection({ ...small, sourceExcerpt: "$1 $2 $3 $4 $5" }),
+      true,
+      "five dollar figures earn a section",
+    );
+    assert.equal(
+      deservesOwnSection({ ...small, sourceExcerpt: "", startSeconds: 0, endSeconds: 1300 }),
+      true,
+      "twenty minutes of tape earn a section",
+    );
+    assert.equal(
+      deservesOwnSection({ ...small, sourceExcerpt: "", reason: SECOND_LEAD_REASON }),
+      true,
+      "an item the status pass called a lead earns a section even with no figures",
+    );
+    assert.equal(
+      deservesOwnSection({ ...small, sourceExcerpt: "$1 $2 $3 $4 $5", status: "lead" }),
+      false,
+      "the lead itself is the lead, not a section",
+    );
+
+    const many = [1, 2, 3, 4].map((n) => ({
+      ...small,
+      itemNo: n,
+      sourceExcerpt: Array.from({ length: 4 + n }, (_, i) => `$${i}`).join(" "),
+    }));
+    const chosen = chooseSectionItems(many);
+    assert.equal(chosen.length, SECTION_MAX, "sections are capped at two");
+    assert.deepEqual(chosen.map((item) => item.itemNo), [4, 3], "the most-figured items are chosen first");
+    assert.equal(chooseSectionItems([]).length, 0, "nothing to choose when nothing deserves a section");
+
+    const long = Array.from({ length: 120 }, (_, i) => `Sentence number ${i} has several words in it.`).join(" ");
+    const capped = capWords(long);
+    assert.ok(capped.split(/\s+/).length <= SECTION_WORD_CAP, "a section is capped at 450 words");
+    assert.match(capped, /\.$/, "and the cap cuts back to a sentence end, not mid-word");
+
+    const sectionPrompts: string[] = [];
+    const leadPrompts: string[] = [];
+    const result = await run(
+      {
+        inventory: () => SECTIONS_INVENTORY,
+        status: () => SECTIONS_STATUS,
+        lead: (user) => {
+          if (user.includes("SECTION ITEM SOURCE")) {
+            sectionPrompts.push(user);
+            return JSON.stringify({ headline: "H", dek: "", lead: `Section body. ${user.includes("budget") ? "budget" : "library"}` });
+          }
+          leadPrompts.push(user);
+          return JSON.stringify({ headline: "Airport rules", dek: "", lead: "The council adopted the airport recommendation." });
+        },
+        roundup: () => JSON.stringify({ paragraph: "A short roundup line." }),
+        cold: () => COLD_OK,
+      },
+      { segments: SECTIONS_SEGMENTS, agendaList: SECTIONS_AGENDA, packetPages: SECTIONS_PACKET },
+    );
+    assert.equal(sectionPrompts.length, SECTION_MAX, "exactly two items were written as sections");
+    assert.equal(leadPrompts.length, 1, "the lead story is written once");
+    const budgetPrompt = sectionPrompts.find((prompt) => prompt.includes("$511,000"));
+    assert.ok(budgetPrompt, "the budget item, not just the smaller one, is written as a section");
+    assert.match(budgetPrompt, /\$511,000/, "the section writer sees the item's own dollar figures");
+    assert.ok(
+      !result.body.includes("$511,000"),
+      "the roundup line is short -- the figures live in the section, not the roundup",
+    );
+
+    const leadAt = result.body.indexOf("The council adopted the airport recommendation.");
+    const libraryAt = result.body.indexOf("Library business classes");
+    const budgetAt = result.body.indexOf("2027 city budget");
+    const roundupAt = result.body.indexOf(ROUNDUP_HEADING);
+    assert.ok(leadAt >= 0 && libraryAt > leadAt, "the sections come after the lead story");
+    assert.ok(budgetAt > leadAt, "both sections come after the lead story");
+    assert.ok(roundupAt > libraryAt && roundupAt > budgetAt, "and both come before ALSO AT THE MEETING");
+    assert.match(result.body.slice(roundupAt), /Electrify Longmont Day: A short roundup line\./, "the small item stays a short roundup line");
+    assert.match(
+      result.meetingNotes,
+      new RegExp(`SECTIONS: ${SECTION_MAX} item\\(s\\) got their own section after the lead`),
+      "the notes count the sections",
+    );
+  });
+
+  it("takes a name the packet prints once with its title, and maps a title to its one holder", async () => {
+    /*
+      Fix 2. The packet prints each presenter's staff credit exactly once
+      ("Levi Brown, Airport Manager"; "Sandra Sifuentes, Budget"), and that one
+      credit names a person of record. A caption that puts a strange surname
+      behind an office only one person holds -- "Assistant city manager Jan
+      Newton" -- is that person (Jenn Ooton). A name the record cannot place is
+      reported under "Names not verified", never printed as if sourced.
+    */
+    const known = buildKnownNames({ roster: REAL_ROSTER, packetText: NAMES_PACKET });
+    const packetPeople = known.filter((entry) => entry.from === "packet");
+    assert.deepEqual(
+      packetPeople.map((entry) => `${entry.name} <${entry.title}>`),
+      ["Levi Brown <Airport Manager>", "Sandra Sifuentes <Budget>"],
+      "a single \"First Last, Title\" staff credit is a person of record",
+    );
+
+    const mapped = mapCaptionNames(NAMES_CAPTIONS, known, NAMES_PACKET);
+    const knownFor = new Map(mapped.mappings.map((entry) => [entry.captioned, entry.known]));
+    assert.equal(knownFor.get("Assistant city manager Jan Newton"), "Jenn Ooton", "a title maps to the sole person who holds it");
+    assert.equal(knownFor.get("Sandra Cu Fuentes"), "Sandra Sifuentes", "a garbled caption surname maps to the packet's spelling");
+    assert.deepEqual(mapped.unverified, ["Grant Penelman", "Debbie Odman"], "a name the record cannot place is flagged, not invented");
+
+    const prompts: string[] = [];
+    const result = await run(
+      {
+        inventory: () => NAMES_INVENTORY,
+        status: () => TERMS_STATUS,
+        lead: (user) => {
+          prompts.push(user);
+          return JSON.stringify({ headline: "H", dek: "", lead: "Jenn Ooton and Sandra Sifuentes presented." });
+        },
+        cold: () => COLD_OK,
+      },
+      {
+        segments: NAMES_SEGMENTS,
+        agendaList: TERMS_AGENDA,
+        packetPages: [{ page: 12, text: NAMES_PACKET }],
+        roster: REAL_ROSTER,
+      },
+    );
+    assert.match(prompts[0]!, /NAMES AS THE RECORD SPELLS THEM[\s\S]*- Assistant city manager Jan Newton -> Jenn Ooton/, "the writer is given the corrected spelling");
+    assert.match(result.meetingNotes, /Names corrected from the newsroom's list: Assistant city manager Jan Newton -> Jenn Ooton/, "the notes record the correction");
+    assert.match(result.meetingNotes, /Names not verified: Grant Penelman, Debbie Odman\./, "and flag the names it could not place");
+  });
+
+  it("gives every writer the packet's spellings and sweeps a sound-alike from the body", async () => {
+    /*
+      Fix 3. The captions mishear the packet's terms: "AWAS" for AWOS, and
+      "navigation easement" for the packet's "avigation easement". The term list
+      is built from the packet (acronyms and rare words, named twice) and handed
+      to every writer; a code pass over the body then replaces a sound-alike and
+      records each replacement in the notes.
+    */
+    assert.deepEqual(packetTerms(TERMS_PACKET_TEXT), ["Avigation"], "the packet's rare term, named twice, is the term list");
+    assert.equal(
+      termSpellingBlock(["Avigation"]),
+      "PACKET SPELLINGS: when the tape has a sound-alike for one of these packet terms, use the packet's spelling: Avigation.",
+      "the term list becomes a block for the writer",
+    );
+
+    const spelled = applyPacketSpellings("The AWAS messages and a navigation easement were discussed.", TERMS_PACKET_TEXT);
+    assert.equal(spelled.text, "The AWOS messages and a avigation easement were discussed.", "the caption's sound-alikes are replaced with the packet's spellings");
+    assert.deepEqual(spelled.changes, ["awas -> AWOS", "navigation easement -> avigation easement"], "each replacement is recorded");
+
+    assert.equal(
+      applyPacketSpellings("The navigation system was upgraded.", "The packet describes the airport navigation.").text,
+      "The navigation system was upgraded.",
+      "a bare \"navigation\" is left alone -- only \"navigation easement\" is the packet's sound-alike",
+    );
+
+    const prompts: string[] = [];
+    const result = await run(
+      {
+        inventory: () => TERMS_INVENTORY,
+        status: () => TERMS_STATUS,
+        lead: (user) => {
+          prompts.push(user);
+          return JSON.stringify({ headline: "H", dek: "", lead: "The airport uses AWAS messages and a navigation easement." });
+        },
+        cold: () => COLD_OK,
+      },
+      { segments: TERMS_SEGMENTS, agendaList: TERMS_AGENDA, packetPages: TERMS_PACKET },
+    );
+    assert.match(prompts[0]!, /PACKET SPELLINGS:[\s\S]*Avigation/, "every writer call gets the packet's spellings");
+    assert.match(result.body, /The airport uses AWOS messages and a avigation easement\./, "the body carries the packet's spellings, not the captions'");
+    assert.match(
+      result.meetingNotes,
+      /PACKET SPELLINGS: awas -> AWOS; navigation easement -> avigation easement\./,
+      "the notes record each replacement",
+    );
+  });
+
+  it("flags a bare number beside a money word for the editor rather than guessing the fix", async () => {
+    /*
+      Fix 6. The tape says "135 for seniors"; the real fare is $1.35 -- the
+      captions drop the dollar sign and the point. The code cannot know which
+      bare number is money, so it flags every bare number next to a money word
+      that carries no "$", for the editor.
+    */
+    assert.deepEqual(
+      bareMoneyNumbers("Fares are $10 for adults and 135 for seniors."),
+      ['135 (near "fares")'],
+      "a bare number beside a money word is flagged",
+    );
+    assert.deepEqual(
+      bareMoneyNumbers("The adult fare is $2.50 and children ride free."),
+      [],
+      "a number that already carries its dollar sign is not flagged",
+    );
+    assert.deepEqual(
+      bareMoneyNumbers("The 2027 budget hearing was held in October."),
+      [],
+      "a year is not a money figure",
+    );
+
+    const result = await run(
+      {
+        inventory: () => TERMS_INVENTORY,
+        status: () => TERMS_STATUS,
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "Fares are $10 for adults and 135 for seniors." }),
+        cold: () => COLD_OK,
+      },
+      { segments: TERMS_SEGMENTS, agendaList: TERMS_AGENDA, packetPages: TERMS_PACKET },
+    );
+    assert.match(
+      result.meetingNotes,
+      /NUMBER CHECK: a bare number sits next to a money word with no "\$" \(135 \(near "fares"\)\)/,
+      "the notes hand the editor the bare number, not a guessed correction",
+    );
+    assert.match(result.body, /135 for seniors/, "the code does not silently rewrite the number");
+  });
+
+  it("hands the writer the lead item's motions in order, each with its own result", async () => {
+    /*
+      Fix 5. Run 5's story blurred two motions into one sentence: "A vote on a
+      prior motion carried unanimously, with no tally recorded." The lead item's
+      motions are given the writer as a numbered list in tape order, each with
+      its own mover, text, result and time, so each motion's own result is stated
+      once.
+    */
+    const result = await run(
+      {
+        inventory: () => MOTIONS_INVENTORY,
+        status: () => TERMS_STATUS,
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council approved the recommendations." }),
+        cold: () => COLD_OK,
+      },
+      { segments: MOTIONS_SEGMENTS, agendaList: MOTIONS_AGENDA, packetPages: MOTIONS_PACKET },
+    );
+    assert.equal(result.ledger[0]!.motions.length, 2, "both motions are found");
+    assert.deepEqual(
+      result.ledger[0]!.motions.map((motion) => [motion.seconds, motion.result, motion.tally || motion.unanimous]),
+      [
+        [330, "carries", "unanimous"],
+        [630, "carries", "5-2"],
+      ],
+      "each motion keeps its own result",
+    );
+
+    const lines = motionLines(result.ledger[0]!);
+    assert.equal(lines.length, 2, "the motions are a numbered list");
+    assert.match(lines[0]!, /^1\. .*unanimous, at 00:05:30$/, "the first motion states its own unanimous result");
+    assert.match(lines[1]!, /^2\. .*5-2, at 00:10:30$/, "the second motion states its own 5-2 result");
+
+    const prompts: string[] = [];
+    await run(
+      {
+        inventory: () => MOTIONS_INVENTORY,
+        status: () => TERMS_STATUS,
+        lead: (user) => {
+          prompts.push(user);
+          return JSON.stringify({ headline: "H", dek: "", lead: "The council approved the recommendations." });
+        },
+        cold: () => COLD_OK,
+      },
+      { segments: MOTIONS_SEGMENTS, agendaList: MOTIONS_AGENDA, packetPages: MOTIONS_PACKET },
+    );
+    assert.match(prompts[0]!, /MOTIONS UNDER THIS ITEM[\s\S]*1\. [\s\S]*unanimous, at 00:05:30[\s\S]*2\. [\s\S]*5-2, at 00:10:30/, "the writer is given the motions in order, each with its own result");
+  });
+
+  it("cold-reads each paragraph against its own tape windows and drops a line that denies a found vote", async () => {
+    /*
+      Fix 4. Run 5's reader called real tape facts "absent from the excerpts"
+      because it saw one item's first 40,000 characters, and it reported "no
+      vote tally" for a motion the code had found. The check runs paragraph by
+      paragraph against the windows that share the paragraph's words and the
+      item's packet page, and a line that denies a vote the code found is
+      dropped.
+    */
+    const budgetParagraph = "The proposed budget reflects NextLight expenses and a property tax shortfall.";
+    const budgetSource = coldCheckParagraphSource({
+      paragraph: budgetParagraph,
+      item: null,
+      segments: COLD2_SEGMENTS,
+      packetPages: COLD2_PACKET,
+      packetText: COLD2_PACKET.map((page) => page.text).join("\n"),
+      maxWindowChars: 120,
+    });
+    assert.match(budgetSource, /the property tax shortfall is \$511,000/, "the paragraph's own tape window is retrieved");
+    assert.ok(!budgetSource.includes("airport recommendation"), "and the windows it does not share words with are not");
+
+    const prompts: string[] = [];
+    const result = await run(
+      {
+        inventory: () => COLD2_INVENTORY,
+        status: () => COLD2_STATUS,
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council adopted the airport recommendation unanimously." }),
+        roundup: () => JSON.stringify({ paragraph: "The budget shortfall is $511,000." }),
+        cold: (user) => {
+          prompts.push(user);
+          if (user.includes("ITEM: Airport noise rules")) {
+            return JSON.stringify({ mismatches: ["the draft says no vote tally was recorded for the motion", "the draft gives a figure the packet does not hold"] });
+          }
+          return JSON.stringify({ mismatches: ["the draft says the hearing was Wednesday; the tape says Tuesday"] });
+        },
+      },
+      { segments: COLD2_SEGMENTS, agendaList: COLD2_AGENDA, packetPages: COLD2_PACKET },
+    );
+    assert.equal(prompts.length, 2, "each paragraph is checked on its own");
+    assert.ok(prompts[0]!.startsWith("ITEM: Airport noise rules\nEXCERPTS:"), "the lead paragraph is checked under the lead item's name");
+    assert.match(prompts[0]!, /PARAGRAPH:\nThe council adopted the airport recommendation unanimously\./, "the paragraph itself is what is asked about");
+    assert.match(prompts[0]!, /PACKET PAGES:\nAMS VOLUNTARY NOISE ABATEMENT/, "the item's packet page is handed over");
+    assert.match(result.meetingNotes, /the draft gives a figure the packet does not hold/, "a real mismatch is kept");
+    assert.match(result.meetingNotes, /the draft says the hearing was Wednesday; the tape says Tuesday/, "so is the other paragraph's");
+    assert.ok(
+      !result.meetingNotes.includes("no vote tally was recorded"),
+      "a line that denies a vote the code found is dropped",
+    );
+    assert.match(result.meetingNotes, /COLD CHECK:/, "the surviving mismatches are reported to the editor");
   });
 });
