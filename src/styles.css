@@ -1617,15 +1617,23 @@
 .desk-ltr .ledger-field {display:flex;align-items:center;gap:6px}
 .desk-ltr .ledger-field-label {color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:.1em;text-transform:uppercase}
 .desk-ltr .ledger-field select,
-.desk-ltr .ledger-field input {
+.desk-ltr .ledger-field input,
+.desk-ltr .ledger-field textarea {
   min-height:44px;padding:6px 9px;border:1px solid var(--line);border-radius:0;
   background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.9375rem * var(--ts));
 }
 .desk-ltr .ledger-field select:focus,
-.desk-ltr .ledger-field input:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .ledger-field input:focus,
+.desk-ltr .ledger-field textarea:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
 .desk-ltr .ledger-field-reason input {min-width:170px}
+/* The reason is a sentence, not a field label: give it the rest of the row and
+   let it wrap, so the editor reads the whole thing rather than a clipped sliver. */
+.desk-ltr .ledger-field-reason {flex:1 1 100%;align-items:flex-start}
+.desk-ltr .ledger-field-reason textarea {flex:1;width:100%;min-width:0;resize:vertical;overflow-wrap:anywhere}
 .desk-ltr .ledger-field select:disabled,
-.desk-ltr .ledger-field input:disabled {opacity:.6}
+.desk-ltr .ledger-field input:disabled,
+.desk-ltr .ledger-field textarea:disabled {opacity:.6}
+.desk-ltr .ledger-vote {margin:6px 0 0;padding:0;list-style:none;color:var(--fg2);font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums}
 .desk-ltr .ledger-saved {color:var(--ok);font-size:calc(0.875rem * var(--ts));font-weight:700}
 .desk-ltr .ledger-problem {margin:6px 0 0;color:var(--danger);font-size:calc(0.875rem * var(--ts))}
 /* The checked-claim rows: flagged first, and the mark is a real checkbox. */

@@ -2,25 +2,35 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   COLD_CHECK_SYSTEM,
+  EXCLUDED_OVERRULED_REASON,
   INVENTORY_SYSTEM,
   LEAD_WRITE_SYSTEM,
   LEDGER_STATUS_SYSTEM,
   ROUNDUP_HEADING,
   ROUNDUP_WRITE_SYSTEM,
   RULE_ASSIGNED_REASON,
+  agendaRanges,
+  applyStatuses,
   assembleStory,
+  attachVoteResults,
   buildKnownNames,
   buildLedger,
   checkDraftNames,
   editorNamesOneAgendaItem,
   mapCaptionNames,
+  mergeNearDuplicates,
   parseInventoryReply,
+  rankLeadItems,
   runWholeMeetingWriter,
+  scanVoteResults,
   usesWholeMeetingWriter,
+  voteResultCount,
+  type AgendaListItem,
+  type LedgerItem,
   type MeetingSegment,
   type PacketPage,
-  type LedgerItem,
   type WholeMeetingChat,
+  type WindowInventory,
 } from "./meeting-whole.ts";
 
 /**
@@ -212,15 +222,94 @@ const TALLY_INVENTORY = JSON.stringify({
 
 function run(
   handlers: Parameters<typeof fakeChat>[0],
-  over: { segments?: MeetingSegment[]; votes?: Parameters<typeof runWholeMeetingWriter>[0]["votes"] } = {},
+  over: {
+    segments?: MeetingSegment[];
+    votes?: Parameters<typeof runWholeMeetingWriter>[0]["votes"];
+    agendaList?: AgendaListItem[];
+  } = {},
 ) {
   return runWholeMeetingWriter({
     meeting: { title: "City Council Study Session", date: "2026-09-29", videoUrl: "https://youtu.be/example" },
     segments: over.segments ?? SEGMENTS,
     packetPages: PACKET,
     votes: over.votes ?? [],
+    agendaList: over.agendaList,
     chat: fakeChat(handlers),
   });
+}
+
+/*
+  The real Sept. 29 agenda as the packet prints it: whole-number items plus the
+  lettered sub-items -- 5A (the Electrify Longmont Day proclamation) and 6A/6B
+  (the airport monitoring presentation and the budget hearing) -- that the
+  capture's whole-number `meeting_agenda_chunks` alignment cannot represent.
+*/
+
+const SEPT29_AGENDA: AgendaListItem[] = [
+  { id: "1", title: "MEETING CALLED TO ORDER" },
+  { id: "5", title: "PROCLAMATIONS AND PRESENTATIONS" },
+  { id: "5A", title: "Proclamation Declaring October 2026 Electrify Longmont Day" },
+  { id: "6", title: "PRESENTATIONS" },
+  {
+    id: "6A",
+    title:
+      "Presentation Of Options To Implement The Airport Monitoring Systems (AMS) Voluntary Noise Abatement Procedures (VNAP) Recommendations For Vance Brand Municipal Airport",
+  },
+  {
+    id: "6B",
+    title:
+      "2027 Proposed Budget Presentation And First Public Hearing On The 2027 Proposed Budget And The Proposed 2027-2031 Capital Improvement Program",
+  },
+];
+
+/*
+  The Sept. 29 airport stretch of tape. Every line's capture alignment says item
+  "1" -- the whole-number alignment files the whole hour under "1. MEETING
+  CALLED TO ORDER" -- while the inventory pass, given the packet's agenda, tags
+  the airport lines 6A and the budget lines 6B. The tape holds three unanimous
+  results under 6A and one 5-2 tally under 6B.
+*/
+const AIRPORT_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Council Member Prieto: I move to approve the first AMS recommendation.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 1, seconds: 30, text: "Mayor: All in favor? That carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 2, seconds: 60, text: "Mayor: The second recommendation carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 3, seconds: 90, text: "Mayor: And the third carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 4, seconds: 600, text: "Council Member Crist: I move to approve the budget presentation.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 5, seconds: 630, text: "Mayor: The motion carries 5 to two.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+];
+
+const AIRPORT_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the first AMS recommendation", who: "Council Member Prieto", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the first AMS recommendation." },
+    { kind: "vote", text: "The first AMS recommendation carries unanimously", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+    { kind: "vote", text: "The second recommendation carries unanimously", who: "", timestamp: "0:01:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "The second recommendation carries unanimously." },
+    { kind: "vote", text: "The third recommendation carries unanimously", who: "", timestamp: "0:01:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "And the third carries unanimously." },
+    { kind: "motion", text: "Move to approve the 2027 budget presentation", who: "Council Member Crist", timestamp: "0:10:00", packet_page: 30, numbers: "$2,000,000", agenda: "6B", source_words: "I move to approve the $2,000,000 budget presentation." },
+    { kind: "vote", text: "The budget motion carries 5 to 2", who: "", timestamp: "0:10:30", packet_page: 30, numbers: "5-2", agenda: "6B", source_words: "The motion carries 5 to two." },
+  ],
+});
+
+/** The same six raw lines, handed straight to `buildLedger` as one window. */
+const AIRPORT_WINDOWS: WindowInventory[] = [
+  { windowIndex: 0, segments: [], items: parseInventoryReply(AIRPORT_INVENTORY).items },
+];
+
+/** A ledger row with the fields a merge or status test cares about. */
+function row(over: Partial<LedgerItem> & { kind: string; text: string }): LedgerItem {
+  return {
+    itemNo: 0,
+    startSeconds: null,
+    endSeconds: null,
+    packetPage: null,
+    status: "roundup",
+    reason: "",
+    sourceExcerpt: over.text,
+    evidence: [],
+    motions: [],
+    voteResult: "",
+    voteTally: "",
+    ...over,
+  };
 }
 
 describe("whole-meeting writer", () => {
@@ -668,5 +757,159 @@ describe("whole-meeting writer", () => {
     // The predicate the wiring reads must agree with the helper it names.
     assert.equal(editorNamesOneAgendaItem("Resolution 2026-12 sets the fee"), true);
     assert.equal(editorNamesOneAgendaItem("plain note with no item"), false);
+  });
+
+  it("groups by the inventory's own agenda label, so the airport lines become item 6A", () => {
+    /*
+      This is the run-3 failure itself. Every airport line's CAPTURE alignment
+      says agenda item "1" -- the capture knows whole-number items only, so the
+      whole airport hour was filed under "1. MEETING CALLED TO ORDER" and thrown
+      away as routine procedure. Grouping by the label the inventory pass put on
+      each line (from the packet's own agenda, sub-items included) is what fixes
+      it: the six raw lines become the meeting's two real items, 6A and 6B.
+
+      The same lines with no agenda list -- the old behaviour -- collapse into
+      the single misnamed "1. MEETING CALLED TO ORDER" item, which is the bug.
+    */
+    const ledger = buildLedger(AIRPORT_WINDOWS, [], agendaRanges(AIRPORT_SEGMENTS), SEPT29_AGENDA);
+    assert.equal(ledger.length, 2, "the airport lines are two agenda items, not one");
+    assert.deepEqual(ledger.map((item) => item.kind), ["agenda-item", "agenda-item"]);
+    assert.match(ledger[0]!.text, /^6A\. Presentation Of Options/, "6A is named by its own agenda title");
+    assert.match(ledger[1]!.text, /^6B\. 2027 Proposed Budget/, "and 6B by its own");
+    assert.deepEqual(
+      ledger.map((item) => item.evidence!.length),
+      [4, 2],
+      "all six raw lines survive under the item each belongs to",
+    );
+
+    // The bug, kept as a witness: without the labels the alignment buries them.
+    const withoutLabels = buildLedger(AIRPORT_WINDOWS, [], agendaRanges(AIRPORT_SEGMENTS), []);
+    assert.equal(withoutLabels.length, 1, "the old whole-number grouping makes one item of everything");
+    assert.match(withoutLabels[0]!.text, /MEETING CALLED TO ORDER/, "and names it routine procedure");
+  });
+
+  it("gives every inventory call the packet's own agenda, sub-items included", async () => {
+    /*
+      The label is only as good as the list the pass is handed: if the inventory
+      prompt does not name 6A, the model cannot tag a line 6A and the grouping
+      has nothing to work with. The agenda block must reach every inventory call
+      -- one per window -- with the lettered ids the capture cannot see.
+    */
+    const inventoryUsers: string[] = [];
+    await run(
+      {
+        inventory: (user) => {
+          inventoryUsers.push(user);
+          return AIRPORT_INVENTORY;
+        },
+        status: () => JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the airport vote" }] }),
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council acted." }),
+        cold: () => COLD_OK,
+      },
+      { segments: AIRPORT_SEGMENTS, agendaList: SEPT29_AGENDA },
+    );
+    assert.ok(inventoryUsers.length > 0, "the inventory pass ran");
+    for (const user of inventoryUsers) {
+      assert.match(user, /\b6A\b/, "6A is offered to the inventory pass");
+      assert.match(user, /\b6B\b/, "and 6B");
+      assert.match(user, /\b5A\b/, "and the proclamation sub-item 5A");
+    }
+  });
+
+  it("ranks an item holding three recorded votes above one holding a single vote", () => {
+    /*
+      The airport presentation carries three unanimous results; the budget item
+      one tally. How many times the meeting decided is what ranks the lead, so
+      the three-vote item outranks the one-vote item -- which is why 6A, not the
+      big-budget 6B, is the story's lead once the votes are counted.
+    */
+    const ledger = attachVoteResults(
+      buildLedger(AIRPORT_WINDOWS, [], agendaRanges(AIRPORT_SEGMENTS), SEPT29_AGENDA),
+      scanVoteResults(AIRPORT_SEGMENTS),
+    );
+    assert.equal(voteResultCount(ledger[0]!), 3, "6A holds all three unanimous results");
+    assert.equal(voteResultCount(ledger[1]!), 1, "6B holds one tally");
+    assert.equal(ledger[0]!.motions!.length, 3, "and the motions are kept in tape order");
+    // Statuses are assigned first, as the pipeline does before it ranks; every
+    // item still starts "excluded" straight out of `buildLedger`.
+    const statused = applyStatuses(ledger, []);
+    assert.match(rankLeadItems(statused)[0]!.text, /^6A\./, "the three-vote item ranks first");
+  });
+
+  it("overrules a model that excludes an item holding a recorded vote", async () => {
+    /*
+      The hard rule, in code: an item with a vote is reported. The model is
+      handed item 1 (6A, three votes) and drops it as "routine procedure" -- the
+      exact call run 3 made about the airport. The run keeps it, as the lead
+      because it outranks everything, and records that it overruled the model.
+    */
+    const result = await run(
+      {
+        inventory: () => AIRPORT_INVENTORY,
+        status: () =>
+          JSON.stringify({
+            items: [
+              { item_no: 1, status: "excluded", reason: "routine procedure" },
+              { item_no: 2, status: "roundup", reason: "a budget presentation" },
+            ],
+          }),
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council acted." }),
+        roundup: () => JSON.stringify({ paragraph: "The budget was presented." }),
+        cold: () => COLD_OK,
+      },
+      { segments: AIRPORT_SEGMENTS, agendaList: SEPT29_AGENDA },
+    );
+    const voted = result.ledger[0]!;
+    assert.notEqual(voted.status, "excluded", "an item with a vote is never dropped");
+    assert.equal(voted.status, "lead", "and it outranks the rest, so it leads");
+    assert.equal(voted.reason, EXCLUDED_OVERRULED_REASON, "the run records that it overruled the model");
+    assert.match(
+      result.meetingNotes,
+      /EXCLUDED OVERRULED: 1 item\(s\)/,
+      "the notes count how many excluded items were kept",
+    );
+  });
+
+  it("merges six near-identical fund rows into one and keeps every reading", () => {
+    /*
+      The inventory reads in overlapping windows, so the extraction's
+      "City Council Contingency Fund: $91,569" row comes back once per window
+      and became six separate ledger items in run 3. Six near-identical rows of
+      the same kind merge to one; the union of their evidence survives on the
+      one item. A same-kind row that is a different line -- the airport budget
+      figure -- stays separate.
+    */
+    const fund = "City Council Contingency Fund: $91,569";
+    const rows: LedgerItem[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      rows.push(
+        row({
+          kind: "staff-report",
+          text: i % 2 === 0 ? fund : "City Council Contingency Fund $91,569",
+          startSeconds: i * 600,
+          packetPage: 2,
+          // Each window read the row with a little of its own context around
+          // it, so the evidence differs even where the row text matches.
+          evidence: [{ kind: "staff-report", text: `${fund} (window ${i + 1})`, who: "staff", startSeconds: i * 600, packetPage: 2, numbers: "$91,569", sourceExcerpt: fund, agenda: "" }],
+        }),
+      );
+    }
+    rows.push(
+      row({
+        kind: "staff-report",
+        text: "Airport fund budget totals $733,170",
+        startSeconds: 7200,
+        evidence: [{ kind: "staff-report", text: "Airport fund budget totals $733,170", who: "staff", startSeconds: 7200, packetPage: 57, numbers: "$733,170", sourceExcerpt: "The 2027 proposed Airport Fund budget totals $733,170.", agenda: "" }],
+      }),
+    );
+
+    const { items, merged } = mergeNearDuplicates(rows);
+    assert.equal(merged, 5, "five of the six fund rows fold into the first");
+    assert.equal(items.length, 2, "one fund item and the unrelated airport row");
+    assert.equal(items[0]!.kind, "staff-report");
+    assert.match(items[0]!.text, /Contingency Fund/, "the fund item is the survivor");
+    assert.equal(items[0]!.evidence!.length, 6, "and it keeps every one of the six readings");
+    assert.deepEqual(items.map((item) => item.itemNo), [1, 2], "the kept items are renumbered in order");
+    assert.match(items[1]!.text, /Airport fund budget/, "the different line stays its own item");
   });
 });

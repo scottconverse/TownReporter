@@ -4,6 +4,7 @@ import { ingestDocument, type IngestDocument } from "./ingest.ts";
 import { primeGovDocumentsForTitle, compiledDocumentUrl, preferredDocuments, type PrimeGovMeeting } from "./primegov.ts";
 import { primeGovOriginForNewsroom } from "./primegov-source.ts";
 import { storableText } from "./storable-text.ts";
+import { packetAgendaFromPages } from "./meeting-agenda-items.ts";
 import type { ReportChat, ReportedDraft } from "./report.ts";
 import {
   runWholeMeetingWriter,
@@ -407,6 +408,16 @@ export async function runWholeMeetingDraft(
 
   const knownNames = await loadKnownNameSources(input.sql, input.newsroomId, input.userId);
 
+  // The packet's own agenda, from its first pages. This is the only source of
+  // the lettered sub-items (5A, 6A, 6B): the capture's `meeting_agenda_chunks`
+  // alignment knows whole-number items only, which is why the Sept. 29 airport
+  // presentation -- agenda item 6A, the meeting's main news -- had no id of its
+  // own and was filed under "1. MEETING CALLED TO ORDER".
+  const agendaList = packetAgendaFromPages(packet.pages).map((item) => ({
+    id: item.itemNumber,
+    title: item.title,
+  }));
+
   const result = await runWholeMeetingWriter({
     meeting: { title: material.meeting.title, date: material.meeting.date, videoUrl: material.meeting.videoUrl },
     segments: material.segments,
@@ -414,6 +425,7 @@ export async function runWholeMeetingDraft(
     votes: material.votes,
     chat,
     packetRead: packet.pages.length > 0,
+    agendaList,
     onStage: input.onStage,
     prebuiltLedger: input.reuseLedger,
     ...knownNames,
@@ -492,7 +504,7 @@ export async function persistWholeMeetingAccounting(
     await sql`
       insert into meeting_ledger_items
         (newsroom_id,draft_id,lead_id,item_no,kind,text,start_seconds,end_seconds,packet_page,
-         status,reason,source_excerpt,vote_result,vote_tally,evidence)
+         status,reason,source_excerpt,vote_result,vote_tally,motions,evidence)
       values (
         ${input.newsroomId},${input.draftId},${input.leadId},${item.itemNo},
         ${storableText(item.kind).slice(0, 60)},${storableText(item.text)},
@@ -500,6 +512,12 @@ export async function persistWholeMeetingAccounting(
         ${item.status},${storableText(item.reason)},
         ${storableText(item.sourceExcerpt)},
         ${storableText(item.voteResult ?? "")},${storableText(item.voteTally ?? "")},
+        ${JSON.stringify((item.motions ?? []).map((motion) => ({
+          result: storableText(motion.result),
+          tally: storableText(motion.tally),
+          unanimous: storableText(motion.unanimous),
+          seconds: motion.seconds,
+        })))}::jsonb,
         ${JSON.stringify((item.evidence ?? []).map((entry) => ({
           kind: entry.kind,
           text: storableText(entry.text),
@@ -508,6 +526,7 @@ export async function persistWholeMeetingAccounting(
           packetPage: entry.packetPage,
           numbers: storableText(entry.numbers),
           sourceExcerpt: storableText(entry.sourceExcerpt),
+          agenda: storableText(entry.agenda ?? ""),
         })))}::jsonb
       )`;
   }

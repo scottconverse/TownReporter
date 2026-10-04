@@ -262,11 +262,12 @@ function LedgerRow({
         </label>
         <label className="ledger-field ledger-field-reason">
           <span className="ledger-field-label">Reason</span>
-          <input
+          <textarea
             value={reason}
             disabled={locked}
-            aria-label={`Reason for excluding item ${item.itemNo}`}
-            placeholder="Why it is left out"
+            rows={2}
+            aria-label={`Reason for the status of item ${item.itemNo}`}
+            placeholder="Why it is left out, or kept"
             onChange={(e) => setReason(e.target.value)}
           />
         </label>
@@ -281,7 +282,20 @@ function LedgerRow({
           {problem}
         </p>
       ) : null}
-      {item.voteResult || item.voteTally ? (
+      {(item.motions?.length ?? 0) > 0 ? (
+        <ul className="ledger-vote">
+          {item.motions.map((motion, index) => (
+            <li key={index}>
+              Recorded vote:{" "}
+              {[motion.result, motion.tally || motion.unanimous].filter(Boolean).join(", ") ||
+                "result not stated"}
+              {motion.seconds !== null ? (
+                <span className="ledger-stamp"> {clockFromSeconds(motion.seconds)}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : item.voteResult || item.voteTally ? (
         <p className="ledger-vote">
           Recorded vote:{" "}
           {[item.voteResult, item.voteTally].filter(Boolean).join(", ")}
