@@ -1,3 +1,6 @@
+import { editorTitle } from "./desk-copy.ts";
+import { parseNotes } from "./notes.ts";
+
 /**
  * What a bulk press on the Queue says when it is finished.
  *
@@ -119,4 +122,28 @@ export function bulkStatusSummary(report: Pick<BulkStatusReport, "status" | "don
   const failed = `${report.failures.length} failed`;
   const first = report.failures[0];
   return first ? `${head} ${failed}: ${first}` : `${head} ${failed}.`;
+}
+
+/** Each selected lead keeps its own recorded reason in the delete confirmation. */
+export function bulkDeleteReasonLines(
+  leads: readonly {
+    id: number;
+    headline: string;
+    status: string;
+    why: string;
+    notes_json?: string | null;
+    kill_reason?: string | null;
+  }[],
+) {
+  return leads.map((lead) => {
+    const held = parseNotes(lead.notes_json).hold;
+    const reason =
+      lead.status === "killed"
+        ? lead.kill_reason?.trim() || "No kill reason recorded."
+        : lead.status === "held"
+          ? [held?.reason, held?.note].filter((part) => part?.trim()).join(" — ") ||
+            "No hold reason recorded."
+          : lead.why.trim() || "No filing reason recorded.";
+    return { id: lead.id, title: editorTitle(lead.headline), reason };
+  });
 }

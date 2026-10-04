@@ -1225,7 +1225,7 @@
 .desk-ltr .lead-list {margin-top:4px}
 .desk-ltr .lead-row {display:grid;grid-template-columns:auto 1fr auto;gap:16px;padding:18px 0;border-bottom:1px solid var(--line);align-items:start}
 .desk-ltr .lead-flags {display:flex;flex-direction:column;align-items:end;gap:4px;min-width:0;max-width:11rem}
-.desk-ltr .lead-row.dead {opacity:.5}
+.desk-ltr .lead-row.dead {color:var(--fg2)}
 .desk-ltr .lead-main {min-width:0}
 /*
   Unit UI1b-3: every link that goes somewhere is underlined.

@@ -648,7 +648,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
       story_headline: string | null;
     }
   >`
-    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
            l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
            -- "import" = read out of a report the editor pasted; null = not
            -- recorded. The Queue shows the Imported badge off this.
