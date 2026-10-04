@@ -1102,6 +1102,23 @@ export const leadStatusInput = z.object({
   killReasonUrl: z.string().trim().max(2000).optional(),
 });
 
+/**
+ * `desk.ts` restoreKilledLead -- the way back from a kill, and the ONE path
+ * that may write `drafted`.
+ *
+ * `leadStatusInput` above has no `drafted` in it on purpose: a lead becomes
+ * drafted through the desk's own drafting pass, and no screen picks that status
+ * by hand. A kill's Undo is the exception, and only because it is putting a lead
+ * back where it already was -- so it gets its own input rather than widening the
+ * one every Hold and Kill goes through. The two conditions a schema cannot state
+ * (the lead must be killed right now, and a lead going back to `drafted` must
+ * still have its draft) are held by `restoreKilledLead` in `desk.ts`.
+ */
+export const leadStatusRestoreInput = z.object({
+  id: rowId,
+  status: z.enum(["new", "held", "drafted"]),
+});
+
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */
 export const leadDuplicateResolutionInput = z.object({
   id: rowId,
