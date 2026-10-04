@@ -1023,7 +1023,6 @@ export const listInvestigations = createServerFn({ method: "GET" })
       from investigations i
       where i.newsroom_id = ${owned(context)}
       order by i.updated_at desc
-      limit 40
     `;
     return rows.map((r) => ({
       ...r,
@@ -1159,7 +1158,9 @@ export const getInvestigation = createServerFn({ method: "GET" })
       extraction_method: string | null;
     }>`
       select id, url, title, classification, fetch_status, fetch_outcome, version_id,
-        created_at, left(full_text, 2500) as excerpt, extraction_method
+        created_at,
+        case when url like 'editor://%' then full_text else left(full_text, 2500) end as excerpt,
+        extraction_method
       from artifacts
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60

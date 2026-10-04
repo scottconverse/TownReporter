@@ -56,6 +56,7 @@ import {
   providerAvailability,
   refreshLocalModelCatalog,
 } from "@/lib/news/provider-availability";
+import { modelReadiness, modelReadinessOption, type ReadinessFacts } from "@/lib/news/model-readiness";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import {
   deleteCustomAiConnectionFn,
@@ -73,7 +74,6 @@ import {
   jobEffortOptionTitle,
   jobEffortOptions,
   jobModelOptions,
-  jobOptionLabel,
   jobOptionTitle,
   jobSlotEmptyLabel,
   jobStatusHelp,
@@ -640,24 +640,16 @@ function JobRow({
     enabled: !disabled,
     staleTime: 60_000,
   });
-  const assignedConnection = connections.find((row) => `custom:${row.id}` === resolvedSaved.providerId);
-  const providerKind = providersFor(surface).find((row) => row.id === resolvedSaved.providerId)?.kind;
-  const statusProvider = providerKind === "claude-code" ? "claude" : providerKind === "codex" ? "codex" : null;
-  const status = statuses.data?.find((row) => row.provider === statusProvider);
-  const readinessLabel = (() => {
-    if (status) {
-      if (status.disabledByOperator) return "Turned off";
-      if (!status.installed) return "Not installed";
-      if (!status.signedIn) return "Sign in needed";
-      if (status.lastTest?.ok === false) return "Last test failed";
-      return "Ready";
-    }
-    if (assignedConnection) {
-      if (!assignedConnection.enabled) return "Turned off";
-      return assignedConnection.hasApiKey && assignedConnection.modelId ? "Ready" : null;
-    }
-    return resolvedSaved.providerId && availability.data?.[resolvedSaved.providerId] === true ? "Ready" : null;
-  })();
+  function readinessFor(providerId: string): ReadinessFacts {
+    const kind = providersFor(surface).find((entry) => entry.id === providerId)?.kind;
+    const signin = kind === "claude-code" ? "claude" : kind === "codex" ? "codex" : null;
+    return {
+      status: statuses.data?.find((row) => row.provider === signin),
+      connection: connections.find((row) => `custom:${row.id}` === providerId),
+      available: availability.data?.[providerId],
+    };
+  }
+  const readinessLabel = modelReadiness(readinessFor(resolvedSaved.providerId));
 
   const facts = {
     built: job?.built ?? true,
@@ -727,6 +719,7 @@ function JobRow({
               label={`First choice for ${job?.label ?? jobKey}`}
               value={draft.first.providerId}
               options={menu}
+              readinessFor={readinessFor}
               emptyLabel={defaultFirstLabel}
               disabled={disabled}
               onChange={(next) =>
@@ -789,6 +782,7 @@ function JobRow({
             label={`Fallback 1 for ${job?.label ?? jobKey}`}
             value={draft.fallback1.providerId}
             options={menu}
+              readinessFor={readinessFor}
             emptyLabel={jobSlotEmptyLabel("fallback1")}
             disabled={disabled}
             onChange={(next) => onPatch(jobKey, "fallback1", { providerId: next })}
@@ -804,6 +798,7 @@ function JobRow({
             label={`Fallback 2 for ${job?.label ?? jobKey}`}
             value={draft.fallback2.providerId}
             options={menu}
+              readinessFor={readinessFor}
             emptyLabel={jobSlotEmptyLabel("fallback2")}
             disabled={disabled}
             onChange={(next) => onPatch(jobKey, "fallback2", { providerId: next })}
@@ -974,10 +969,12 @@ function ModelSelect({
   emptyLabel,
   disabled,
   onChange,
+  readinessFor,
 }: {
   label: string;
   value: string;
   options: readonly ModelChoiceOption[];
+  readinessFor: (providerId: string) => ReadinessFacts;
   emptyLabel: string;
   disabled: boolean;
   onChange: (next: string) => void;
@@ -996,7 +993,7 @@ function ModelSelect({
       <option value="">{emptyLabel}</option>
       {options.map((option) => (
         <option key={option.value} value={option.value} title={jobOptionTitle(option)}>
-          {jobOptionLabel(option)}
+          {modelReadinessOption(option.label, readinessFor(option.value))}
         </option>
       ))}
     </select>

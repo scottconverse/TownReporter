@@ -717,28 +717,6 @@ const currentUserStub = inlineModule(`
 const claimStub = inlineModule(`
   export async function leaveEditor() { return { ok: true }; }
 `);
-const deskCopyStub = inlineModule(`
-  export function createEditorCopy() { return {}; }
-  /*
-    Redesign phase 2a: the shell counts Queue from the same openLeads() the
-    Queue screen uses. The render test does not care about the arithmetic, only
-    that the import resolves.
-  */
-  export function openLeads(leads) { return leads ?? []; }
-  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
-  export function pileForStatus() { return "desk"; }
-  /*
-    UI1b-6: desk-chrome.tsx now draws its status chips through desk-copy's
-    chipLabel -- the capital the old ".chip { text-transform: uppercase }"
-    rule used to supply. The REAL functions are inlined here rather than
-    stubbed to a constant: the Chip stub below draws through them, so a
-    stand-in that returned anything else would make this file describe itself
-    instead of the desk.
-  */
-  export function sentenceCase(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
-  const CHIP_LABELS = { aside: "set aside", closed: "closed", exhausted: "exhausted" };
-  export function chipLabel(status) { return sentenceCase(CHIP_LABELS[status] ?? status); }
-`);
 // Chip() does not touch the appearance context, but desk-chrome.tsx imports it
 // (Light/Dark and Normal/Large moved there -- src/lib/appearance-context.ts),
 // so the module cannot load without it resolving.
@@ -767,7 +745,15 @@ const { Chip } = await import(
       "@/lib/auth/client": authClientStub,
       "@/lib/auth/use-current-user": currentUserStub,
       "@/lib/news/claim": claimStub,
-      "@/lib/news/desk-copy": deskCopyStub,
+      /*
+        The REAL desk-copy.ts (loaded above), not a stub. desk-chrome.tsx
+        imports chipLabel, createEditorCopy, editorTitle, openLeads,
+        pileForStatus and sentenceCase from it; a hand-written stub silently
+        went stale the moment the shell gained `editorTitle`, and the whole
+        point of these tests is that they describe the desk rather than
+        themselves.
+      */
+      "@/lib/news/desk-copy": deskCopy,
       "@/lib/desk-nav": deskNavUrl,
       "@/components/desk-chrome-utils": deskChromeUtils,
 
@@ -807,7 +793,7 @@ const { Chip } = await import(
       ),
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; }",
+        "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; } export async function countDraftsDesk() { return 0; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       /*
@@ -1230,7 +1216,10 @@ test("a ticked Queue row carries the picked class and an unticked row does not",
     "the unticked row should still render as the Queue row it was",
   );
   // The killed row's own state is a different axis and must survive the tint:
-  // `.lead-row.dead` is `opacity:.5` (styles.css) and the row can carry both.
+  // `.lead-row.dead` (styles.css) is a colour on the row's own text, so it
+  // composes with the picked row's background tint rather than multiplying it.
+  // (It used to be `opacity:.5`, which dimmed the tint underneath it too --
+  // 25ad13d4, "Fix Release 2 Queue and Dark Desk audit defects".)
   const killed = renderToStaticMarkup(
     createElement(LeadRowView, {
       lead: baseLead({ status: "killed" }),
@@ -1243,8 +1232,8 @@ test("a ticked Queue row carries the picked class and an unticked row does not",
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(
     styles,
-    /\.desk-ltr \.lead-row\.dead \{opacity:\.5\}/,
-    "the killed row's own rule is opacity, which multiplies whatever fill is under it",
+    /\.desk-ltr \.lead-row\.dead \{color:var\(--fg2\)\}/,
+    "the killed row dims its own text and leaves the picked row's fill alone",
   );
 });
 

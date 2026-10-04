@@ -21,6 +21,7 @@ import { readerSearch, readMinutes } from "@/lib/reader";
 import { usePublicSections } from "@/lib/use-sections";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { topicReportingSentence } from "@/lib/paper-phrases";
+import { editionRiverQuery } from "@/lib/news/edition-river";
 
 /**
  * How many stories "Latest stories" prints.
@@ -167,18 +168,17 @@ export const Route = createFileRoute("/")({
     const also = alsoUnderLead(page.stories, week, opinion.stories[0]?.slug).map((s) => s.id);
     const region = await readRegion();
     const river = await readerArticles({
-      data: {
-        limit: RIVER_BATCH,
+      data: editionRiverQuery(area!, RIVER_BATCH,
         // Everything the top of the page prints -- the lead, the six cells,
         // the band's piece, the lead column's own rows -- each story once.
-        exclude: [
+        [
           ...above,
           ...opinion.stories.map((s) => s.id),
           ...also,
           // The region band prints only with two or more stories; when it does, the river skips them.
           ...(region.length >= 2 ? region.map(({ story }) => story.id) : []),
         ],
-      },
+      ),
     });
     return { listing: page, river, opinion, week, region };
   },

@@ -14,7 +14,7 @@ import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
-import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
@@ -98,6 +98,7 @@ import {
   jobIdInput,
   leadIdInput,
   leadStatusInput,
+  leadStatusRestoreInput,
   leadDuplicateResolutionInput,
   editLeadInput,
   meetingArticleReviewInput,
@@ -304,7 +305,7 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
 async function querySourceRows(context: { userId: string; newsroomId: number }) {
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
-  return sql<SourceRow>`
+  const rows = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
              -- the row can say "Keeps failing" rather than repeating the last
@@ -353,6 +354,7 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
         case when status = 'proposed' then id end desc,
         id asc
     `;
+  return rows.map((row) => ({ ...row, title: sourceName(row.title) }));
 }
 
 /**
@@ -648,7 +650,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
       story_headline: string | null;
     }
   >`
-    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
            l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
            -- "import" = read out of a report the editor pasted; null = not
            -- recorded. The Queue shows the Imported badge off this.
@@ -3898,40 +3900,18 @@ export const draftLead = createServerFn({ method: "POST" })
   newest row is the same "the draft on this desk" rule `listLeads` already uses
   for `story_headline`. A lead with two draft rows is one story, not two.
 */
-async function queryDraftRows(context: { newsroomId: number }) {
-  const { ensureJobsSchema } = await import("./jobs.ts");
-  await ensureJobsSchema();
-  const sql = await getSql();
-  return sql<{
-    id: number;
-    lead_id: number;
-    headline: string;
-    dek: string | null;
-    topic: string | null;
-    form: string | null;
-    updated_at: string;
-    /** Has any prose been written into this draft row yet? See the CTE note. */
-    has_body: boolean;
-    lead_status: string;
-    origin: string | null;
-    newsworthiness: number | null;
-    why: string | null;
-    model_headline: string | null;
-    headline_source: string | null;
-    job_status: string | null;
-    job_stage: string | null;
-    job_started_at: string | null;
-    job_updated_at: string | null;
-    job_model_choice: string | null;
-    job_error: string | null;
-    evidence_required: boolean;
-    evidence_decision: string | null;
-    evidence_checked_at: string | null;
-    imported_text: boolean;
-    name_check_complete: boolean;
-    names_checked_at: string | null;
-    names_unresolved: number;
-  }>`
+/*
+  The row SQL lives here so more than one reader can share it. `queryDraftRows`
+  runs it for the list, and `countDraftsDesk` runs it as a subquery to count
+  exactly the rows the Drafts screen lists -- one source of truth for what a
+  draft row is, rather than a second WHERE clause to keep in step.
+
+  It is a plain string with `$1` for the newsroom id, not a tagged template:
+  both callers hand it to `sql.query(text, params)`, and a nested tag fragment
+  does not work -- `toSql` turns an interpolated value into a parameter, not
+  into SQL text.
+*/
+const DESK_DRAFT_ROWS_SQL = `
     with latest_draft as (
       select distinct on (d.lead_id)
              d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
@@ -3964,7 +3944,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
              coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
       from drafts d
       join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
-      where d.newsroom_id = ${owned(context)}
+      where d.newsroom_id = $1
         -- "Everything not yet printed": a killed lead, or one already
         -- published, is not a draft on the desk.
         and l.status in ('new','drafted','held')
@@ -4002,7 +3982,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
     left join lateral (
       select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
       from desk_jobs j
-      where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
+      where j.newsroom_id = $1 and j.kind = 'draft' and j.subject_id = v.lead_id
       order by j.id desc limit 1
     ) jb on true
     -- Newest work first: the draft an editor just touched is the one they
@@ -4011,6 +3991,41 @@ async function queryDraftRows(context: { newsroomId: number }) {
     -- being written.
     order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
   `;
+
+async function queryDraftRows(context: { newsroomId: number }) {
+  const { ensureJobsSchema } = await import("./jobs.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  return sql.query<{
+    id: number;
+    lead_id: number;
+    headline: string;
+    dek: string | null;
+    topic: string | null;
+    form: string | null;
+    updated_at: string;
+    /** Has any prose been written into this draft row yet? See the CTE note. */
+    has_body: boolean;
+    lead_status: string;
+    origin: string | null;
+    newsworthiness: number | null;
+    why: string | null;
+    model_headline: string | null;
+    headline_source: string | null;
+    job_status: string | null;
+    job_stage: string | null;
+    job_started_at: string | null;
+    job_updated_at: string | null;
+    job_model_choice: string | null;
+    job_error: string | null;
+    evidence_required: boolean;
+    evidence_decision: string | null;
+    evidence_checked_at: string | null;
+    imported_text: boolean;
+    name_check_complete: boolean;
+    names_checked_at: string | null;
+    names_unresolved: number;
+  }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
 }
 
 /*
@@ -4029,6 +4044,31 @@ async function queryDraftRows(context: { newsroomId: number }) {
 export const listDraftsDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(({ context }) => queryDraftRows(context));
+
+/*
+  A count-only read of the same rows (review D2).
+
+  The shell draws the Drafts nav count on every desk screen, and it used to
+  call `listDraftsDesk()` for it -- every draft row with every projection, then
+  read `.length`. This runs the very same row query (`DESK_DRAFT_ROWS_SQL`, the
+  one `listDraftsDesk` and `listDraftsDeskPage` share) inside `count(*)`, so the
+  number is taken over exactly the rows the Drafts screen lists, from one source
+  of truth for what a draft row is, and only the integer crosses the wire. The
+  Drafts screen's "All" pill counts those same rows; the nav count is that
+  number, not a second one invented here.
+*/
+export const countDraftsDesk = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const [row] = await sql.query<{ count: number }>(
+      `select count(*)::int as count from (${DESK_DRAFT_ROWS_SQL}) as desk_drafts`,
+      [owned(context)],
+    );
+    return row?.count ?? 0;
+  });
 
 /**
  * The Drafts screen's window (Unit CZ-long-lists).
@@ -4412,6 +4452,58 @@ export const setLeadStatus = createServerFn({ method: "POST" })
       update leads set status = ${data.status}
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
+    return { ok: true as const };
+  });
+
+/**
+ * The way back from a kill: put the lead where it was, not where kills usually go.
+ *
+ * Owner, 2026-10-03. The Undo on a kill put every lead back to `new`
+ * (`killUndoPress`), so a `drafted` lead an editor killed and took back came back
+ * as a fresh lead with its draft orphaned behind it -- the status an Undo must
+ * restore is the one the row held when the Kill was pressed, and for a lead that
+ * had been drafted that is `drafted`.
+ *
+ * WHY THIS IS NOT `setLeadStatus`. That input has no `drafted` in it, and should
+ * not: `drafted` is written by the desk's own drafting pass and never picked by
+ * a screen. The Undo may write it only because it is UN-writing, so the
+ * permission lives here, behind two checks the schema cannot make:
+ *
+ *   - the lead must be KILLED right now. An Undo is the way back from a kill and
+ *     nothing else; without this the call would be a general "set any status"
+ *     door with a friendly name.
+ *   - a lead going back to `drafted` must still have its draft (`drafts.lead_id`).
+ *     A lead whose draft was thrown away has nothing to go back to, and calling
+ *     it drafted would promise a story that no longer exists.
+ *
+ * Both refusals are the desk's ordinary `{ok:false, error}`, so the row rolls
+ * back through `leadStatusOptimistic` and the toast carries the reason.
+ */
+export const restoreKilledLead = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => leadStatusRestoreInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const room = owned(context);
+    if (data.status === "drafted") {
+      const rows = await sql<{ id: number }>`
+        update leads set status = 'drafted'
+        where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+          and exists (
+            select 1 from drafts
+            where drafts.lead_id = leads.id and drafts.newsroom_id = ${room}
+          )
+        returning id
+      `;
+      if (!rows.length) return { ok: false as const, error: "That lead has no draft to go back to." };
+      return { ok: true as const };
+    }
+    const rows = await sql<{ id: number }>`
+      update leads set status = ${data.status}
+      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+      returning id
+    `;
+    if (!rows.length) return { ok: false as const, error: "That lead is not killed." };
     return { ok: true as const };
   });
 
