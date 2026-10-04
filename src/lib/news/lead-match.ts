@@ -46,6 +46,15 @@ const HEADLINE_CONTAINMENT_THRESHOLD = 0.7;
  * calling it the same story -- this is the sole signal at that point. */
 const HEADLINE_ONLY_THRESHOLD = 0.85;
 
+/** Unit AN (2026-10-03): how many non-furniture proper nouns two headlines
+ * must share before a names-only pair counts as sharing distinguishing
+ * evidence -- see sharesDistinguishingEvidence. Two, for the same reason
+ * ANCHOR_MATCH_MIN_SHARED is two: one shared name is usually a PLACE
+ * ("Bohn Farm", "Twin Peaks") and is not evidence of a shared subject, while
+ * two independent names that survive properNounStoplist (a venue AND an
+ * event, an organisation AND a person) are. */
+const NAME_ONLY_MIN_SHARED = 2;
+
 /**
  * Real miss (2026-09-02): "Council books two executive sessions in eight
  * days -- Sept. 22 and Sept. 29 -- with packets already posted" filed as a
@@ -656,24 +665,28 @@ export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
  * every surviving word -- see contentTokens and CONTENT_STOPLIST's doc
  * comment for why scoring civic-agenda furniture ("council approves ...
  * contract at ... meeting") let two different agenda items look like a
- * paraphrase of each other. sharesDistinguishingWord is also required explicitly:
+ * paraphrase of each other. sharesDistinguishingEvidence is also required explicitly:
  * given the thresholds below are all > 0, a nonzero Jaccard/containment
  * score already implies at least one shared content token, but the explicit
  * check keeps that invariant true even if a threshold is ever loosened.
+ *
+ * Unit AN (2026-10-03): the tokens scored are distinguishingTokens, not raw
+ * contentTokens -- see that function for the names-only headline that made
+ * every path here score 0.0.
  */
 function headlinesOverlapEnough(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const ta = contentTokens(a, place);
-  const tb = contentTokens(b, place);
+  const ta = distinguishingTokens(a, b, place);
+  const tb = distinguishingTokens(b, a, place);
   return (
     (jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD) &&
-    sharesDistinguishingWord(a, b, place)
+    sharesDistinguishingEvidence(a, b, place)
   );
 }
 
 function headlinesAloneMatch(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const ta = contentTokens(a, place);
-  const tb = contentTokens(b, place);
-  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingWord(a, b, place);
+  const ta = distinguishingTokens(a, b, place);
+  const tb = distinguishingTokens(b, a, place);
+  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingEvidence(a, b, place);
 }
 
 /** Words at least 4 letters long, present in the headline, and NOT on
@@ -684,7 +697,7 @@ function headlinesAloneMatch(a: string, b: string, place?: NewsroomPlace | null)
  * is already scored as an anchor (noun:twin, noun:peaks), so reusing it here
  * would let two different agenda items about the same place ("Twin Peaks
  * rezoning application" vs "Twin Peaks parking variance") satisfy
- * sharesDistinguishingWord on the location alone -- the anchor path needs a
+ * sharesDistinguishingEvidence on the location alone -- the anchor path needs a
  * *different* piece of evidence that the SUBJECT, not just the place, is the
  * same. Plural/singular variants are folded together (stem) after the
  * stoplist checks, which all key on the raw word. */
@@ -705,6 +718,57 @@ function contentTokens(headline: string, place?: NewsroomPlace | null): Set<stri
     )
     .map(stem);
   return new Set(words);
+}
+
+/**
+ * Unit AN (2026-10-03): the words a headline is SCORED on -- contentTokens,
+ * unless there are none, in which case its own proper nouns.
+ *
+ * The live bug this closes. Every headline-overlap path below scores content
+ * tokens, and contentTokens deliberately drops every proper noun (see its own
+ * doc comment). A headline whose every word of four letters or more is a
+ * capitalised name therefore has NO content tokens at all: the sets are empty,
+ * jaccard/containment return 0 by definition, sharesDistinguishingEvidence can
+ * never fire, and all three of findMatchingLead's paths fail however identical
+ * the two headlines are. Scan run 66 (2026-10-03, Longmont) filed 20 leads of
+ * which at least 16 repeated earlier leads, and not one of them was even
+ * flagged, because of this. Measured on the real matcher, before this change:
+ *
+ *   lead 418 "Callahan House Video Release Party Set for Oct. 8 at Tend Studio"
+ *     vs lead 349 -- byte-identical headline, byte-identical EVENT page URL,
+ *     both sightings of one event -- scored null.
+ *   lead 430 vs lead 412 -- byte-identical headline (both "North Pace Street
+ *     Entrance at Fox Creek Village and King Soopers Reopens"), one with only
+ *     the /news/ index between them -- scored null.
+ *   leads 416, 422 (same scan, same city news story, one article page) -- no
+ *     same-run merge, so two rows for one story.
+ *
+ * The fallback is the headline's proper nouns, and it is switched on by BOTH
+ * sides having no content tokens, never by either side. As long as one
+ * headline carries subject vocabulary the existing subject-word rule decides,
+ * which is what keeps every QA-1/U26 negative where it is today ("library roof
+ * repair" vs "park irrigation", "Twin Peaks rezoning" vs "Twin Peaks parking
+ * variance", "commissioners ... jail expansion" vs "... staff pay raises"): in
+ * each of those, at least one side has content tokens, so nothing here fires.
+ *
+ * Names are weaker evidence than subjects (see distinguishingOverlap), which
+ * is why they are only ever reached for a headline that has nothing else, and
+ * why the pair still has to clear the same Jaccard/containment bars and a
+ * shared URL or >= ANCHOR_MATCH_MIN_SHARED anchors. Two DIFFERENT stories that
+ * both happen to be all-names still do not merge: their name sets are mostly
+ * disjoint ("Longmont Library to Close All Day Oct. 6 for Staff Training" vs
+ * "Longmont Seeks Residents for New Technology Policy Advisory Board" share
+ * only the newsroom's own furniture, which is stripped, so 0.0).
+ */
+function distinguishingTokens(
+  headline: string,
+  otherHeadline: string,
+  place?: NewsroomPlace | null,
+): Set<string> {
+  const own = contentTokens(headline, place);
+  if (own.size > 0) return own;
+  if (contentTokens(otherHeadline, place).size > 0) return own;
+  return nonStoplistedProperNouns(headline, place);
 }
 
 /**
@@ -755,9 +819,36 @@ function sharedWordCount(a: Set<string>, b: Set<string>): number {
  * is the evidence that they are about the same THING -- "climate",
  * "Heritage", "ExxonMobil" -- and it is what the owner's 2026-09-30 false
  * positive ("...Boulder County Climate Suit Oct. 5" against "Boulder County
- * Proclaims Hispanic and Latinx Heritage Month...") never had. */
-function sharesDistinguishingWord(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  return sharedWordCount(contentTokens(a, place), contentTokens(b, place)) >= 1;
+ * Proclaims Hispanic and Latinx Heritage Month...") never had.
+ *
+ * Unit AN (2026-10-03): the one exception, and it is the whole point of the
+ * unit -- when NEITHER headline has a word that survives contentTokens, there
+ * is no subject-word overlap available to require, and requiring it anyway is
+ * what let every repeat in scan 66 through (see distinguishingTokens). The
+ * fallback bar is NAME_ONLY_MIN_SHARED non-furniture names, which is a
+ * strictly stronger piece of evidence than the >= 1 content word it replaces
+ * (a content word can be shared by two headlines about nothing in common --
+ * see CONTENT_STOPLIST's own history; two shared names that survive
+ * properNounStoplist are what the anchor path already demands). */
+function sharesDistinguishingEvidence(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+): boolean {
+  const ca = contentTokens(a, place);
+  const cb = contentTokens(b, place);
+  if (sharedWordCount(ca, cb) >= 1) return true;
+  // Unit AN (2026-10-03): neither headline has subject vocabulary at all, so
+  // the words that survive contentTokens are not the only distinguishing
+  // evidence there is -- the names are the rest of it. Without this, a
+  // names-only pair could never satisfy any path no matter how identical the
+  // headlines were (see distinguishingTokens). The bar is >= 2 names and not
+  // >= 1 for the same reason as the anchor path: one shared name is a place.
+  if (ca.size > 0 || cb.size > 0) return false;
+  return (
+    sharedWordCount(nonStoplistedProperNouns(a, place), nonStoplistedProperNouns(b, place)) >=
+    NAME_ONLY_MIN_SHARED
+  );
 }
 
 export type MatchCandidateLead = {
@@ -790,12 +881,13 @@ export type MatchCandidateLead = {
  * story as. Returns the matching lead's id, or null when nothing matches.
  *
  * Match rule (three independent paths, any one is sufficient; every path
- * also requires sharesDistinguishingWord -- QA-1 round 2, see CONTENT_STOPLIST's
+ * also requires sharesDistinguishingEvidence -- QA-1 round 2, see CONTENT_STOPLIST's
  * doc comment):
- *   1. Shares at least one normalised source URL AND CONTENT-token overlap
- *      (contentTokens -- furniture words and shared proper nouns stripped,
- *      >= 4 letters, plurals folded) is >= 0.6 Jaccard OR >= 0.7 containment
- *      of the shorter headline.
+ *   1. Shares at least one normalised source URL AND distinguishing-token
+ *      overlap (distinguishingTokens -- contentTokens: furniture words and
+ *      shared proper nouns stripped, >= 4 letters, plurals folded; and, for a
+ *      headline with NO content tokens at all, its own proper nouns instead)
+ *      is >= 0.6 Jaccard OR >= 0.7 containment of the shorter headline.
  *   2. Shares at least one normalised source URL AND the two headlines
  *      share >= ANCHOR_MATCH_MIN_SHARED anchors (concrete dates, dollar
  *      amounts, multi-digit numbers, or non-generic proper nouns) AND share
@@ -803,8 +895,8 @@ export type MatchCandidateLead = {
  *      ANCHOR_MATCH_MIN_SHARED for why this catches a same-source rewrite
  *      that shares almost no words, and CONTENT_STOPLIST for why anchors
  *      alone are not enough to tell two different agenda items apart (QA-1).
- *   3. No shared URL, but CONTENT-token overlap is >= 0.85 Jaccard alone
- *      (a portal notice re-posted under a different deep link).
+ *   3. No shared URL, but distinguishing-token overlap is >= 0.85 Jaccard
+ *      alone (a portal notice re-posted under a different deep link).
  *
  * Scoring every path over content tokens (not every surviving word) is what
  * keeps two different agenda items on one templated portal page ("Council
@@ -813,6 +905,13 @@ export type MatchCandidateLead = {
  * alone -- round 1 fixed this for path 2 only; round 2 (2026-09-02) closed
  * the same hole in paths 1 and 3, which QA-1's adversarial set caught
  * merging 7 of 13 pairs it should not have.
+ *
+ * Unit AN (2026-10-03): scoring content tokens only is also what made all
+ * three paths unreachable for a headline whose every word of four letters or
+ * more is a capitalised name -- the live scan-66 repeats. Those headlines now
+ * score their own proper nouns; see distinguishingTokens for why the fallback
+ * is on both sides being nameless and not either, and why no QA-1/U26 negative
+ * moves.
  *
  * Only considers leads whose status is in MATCHABLE_STATUSES (never
  * 'published' -- a fresh development on a published story should file as
@@ -851,7 +950,7 @@ function pairMatches(
       extractAnchors(candidateHeadline, place),
       extractAnchors(leadHeadline, place),
     ) >= ANCHOR_MATCH_MIN_SHARED &&
-    sharesDistinguishingWord(candidateHeadline, leadHeadline, place)
+    sharesDistinguishingEvidence(candidateHeadline, leadHeadline, place)
   ) {
     return true;
   }
@@ -1081,8 +1180,8 @@ export function matchStrength(
     return null;
   }
 
-  const ca = contentTokens(candidateHeadline, place);
-  const cb = contentTokens(existingHeadline, place);
+  const ca = distinguishingTokens(candidateHeadline, existingHeadline, place);
+  const cb = distinguishingTokens(existingHeadline, candidateHeadline, place);
   const score = jaccard(ca, cb);
   const symmetricOk = symmetricDiffAllVariants(ca, cb);
 
