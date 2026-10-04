@@ -19,7 +19,7 @@ If initialization fails, open `app\Install TownReporter.cmd` in the chosen folde
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\app\installer\FirstRun.ps1 -Port 4390 -PgPort 15434
 ```
 
-Setup.exe refuses an already configured application folder instead of overwriting its newsroom. Automatic upgrades and PostgreSQL major-version upgrades are outside this path. Uninstall stops the owned processes and retains the private data folder. Keep at least 8 GB free for the app, browser and database; keep the computer awake while the paper runs.
+TownReporter installs once per Windows user. Setup.exe reads the folder recorded in that user's uninstall entry, so running it again defaults to the same folder and upgrades the app in place without touching the private data folder; choosing a different folder stops Setup with a plain message instead of creating a second, orphaned copy. PostgreSQL major-version upgrades are outside this path. Uninstall stops the owned processes and retains the private data folder. Keep at least 8 GB free for the app, browser and database; keep the computer awake while the paper runs.
 
 ## Older source-ZIP path (online)
 

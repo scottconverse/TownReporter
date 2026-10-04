@@ -177,7 +177,9 @@ jobs:
     needs: [changes, package, setup]
     if: ${{ always() && needs.changes.outputs.docs_only != 'true' && (needs.setup.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
     runs-on: windows-latest
-    timeout-minutes: 55
+    # 55 minutes covered the offline install and acceptance walk; the
+    # one-installation proof adds a refused Setup run and an in-place upgrade.
+    timeout-minutes: 75
     env:
       INSTALL_SOURCE_COMMIT: ${{ needs.setup.outputs.source-sha }}
       INSTALL_SOURCE_SHA256: ${{ needs.setup.outputs.setup-sha256 }}
@@ -347,6 +349,89 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Owned installation cleanup failed.' }
           }
           if ($elapsed -ge 3600) { throw 'Installation acceptance exceeded one hour.' }
+      # One TownReporter per Windows user. The install above registered itself in
+      # the uninstall key Inno writes for this AppId, so a second Setup.exe run
+      # must refuse a different folder, and a re-run into the recorded folder must
+      # upgrade in place and leave the private newsroom data alone. The app is
+      # stopped by the step above. This runs after the measured acceptance window.
+      - name: Prove one installation only, so a second folder is refused and the recorded folder upgrades
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = $env:INSTALL_SOURCE_ARCHIVE
+          $dataRoot = $env:INSTALL_DATA_ROOT
+          $appRoot = $env:INSTALL_APP_ROOT
+          $evidence = $env:INSTALL_EVIDENCE_DIR
+          $config = Get-Content -LiteralPath "$dataRoot\config.json" -Raw | ConvertFrom-Json
+
+          function Invoke-InstallerScript([string]$Name, [switch]$NoBrowser) {
+            $arguments = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"$appRoot\installer\$Name.ps1",'-DataRoot',$dataRoot)
+            if ($NoBrowser) { $arguments += '-NoBrowser' }
+            & powershell.exe @arguments
+            if ($LASTEXITCODE -ne 0) { throw "$Name.ps1 failed while proving the one-installation rule." }
+          }
+          function Get-ArticleCount {
+            $env:PGPASSWORD = $config.DatabasePassword
+            try { $raw = & "$($config.PgBin)\psql.exe" -h 127.0.0.1 -p $config.PgPort -U townreporter -d townreporter -At -c 'select count(*) from articles;' }
+            finally { $env:PGPASSWORD = $null }
+            if ($LASTEXITCODE -ne 0) { throw 'psql could not read the articles table.' }
+            $text = ($raw | Out-String).Trim()
+            if ($text -notmatch '^\d+$') { throw "Unexpected article-count output: $text" }
+            return [int]$text
+          }
+          function Wait-Paper([string]$Path) {
+            $url = "http://127.0.0.1:$($config.Port)$Path"
+            for ($attempt = 1; $attempt -le 60; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri $url -TimeoutSec 5).StatusCode -eq 200) { return } } catch { Start-Sleep -Seconds 2 }
+            }
+            throw "The paper did not answer at $url."
+          }
+          function Invoke-Setup([string]$Directory, [string]$LogName) {
+            $startInfo = [Diagnostics.ProcessStartInfo]::new($setup)
+            $startInfo.UseShellExecute = $true
+            $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+            $startInfo.Arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $Directory + '" /DATAROOT="' + $dataRoot + '" /LOG="' + (Join-Path $evidence $LogName) + '"'
+            $process = [Diagnostics.Process]::Start($startInfo)
+            try {
+              $null = $process.Handle
+              if (!$process.WaitForExit(1500000)) { throw 'Setup.exe exceeded its 25-minute deadline.' }
+              $process.Refresh()
+              if ($null -eq $process.ExitCode) { throw 'Setup.exe reported no exit code.' }
+              return $process.ExitCode
+            } finally { $process.Dispose() }
+          }
+
+          $configSha = (Get-FileHash -LiteralPath "$dataRoot\config.json" -Algorithm SHA256).Hash
+          $instanceId = $config.InstanceId
+          try {
+            # Baseline: the pre-upgrade build still serves the article the
+            # acceptance run published into the private database.
+            Invoke-InstallerScript 'Start' -NoBrowser
+            $before = Get-ArticleCount
+            if ($before -lt 1) { throw 'The acceptance installation has no article to preserve.' }
+            Wait-Paper '/'
+            Invoke-InstallerScript 'Stop'
+
+            # A second Setup.exe into a different folder is refused by the
+            # one-installation check and writes nothing.
+            $other = Join-Path $env:RUNNER_TEMP 'second newsroom'
+            $refused = Invoke-Setup $other 'refused-second-install.log'
+            if ($refused -eq 0) { throw 'Setup.exe accepted a second installation into a different folder.' }
+            $refusalLog = Get-Content -LiteralPath (Join-Path $evidence 'refused-second-install.log') -Raw
+            if ($refusalLog -notmatch 'PrepareToInstall failed') { throw 'The second installation did not stop at the one-installation check.' }
+            if (Test-Path -LiteralPath (Join-Path $other 'app')) { throw 'The refused Setup.exe still wrote its payload into the second folder.' }
+
+            # Re-running into the recorded folder upgrades in place and keeps the data.
+            if ((Invoke-Setup $env:INSTALL_ROOT 'upgrade-in-place.log') -ne 0) { throw 'Setup.exe could not upgrade the existing folder in place.' }
+            $after = Get-ArticleCount
+            if ($after -ne $before) { throw "The upgrade changed the article count from $before to $after." }
+            if ((Get-Content -LiteralPath "$dataRoot\config.json" -Raw | ConvertFrom-Json).InstanceId -cne $instanceId) { throw 'The upgrade replaced the installation identity.' }
+            if ((Get-FileHash -LiteralPath "$dataRoot\config.json" -Algorithm SHA256).Hash -cne $configSha) { throw 'The upgrade rewrote the existing configuration.' }
+            Wait-Paper '/'
+            @{ refusedExitCode=$refused; articlesBefore=$before; articlesAfter=$after; instanceId=$instanceId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'one-installation.json')
+          } finally {
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$appRoot\installer\Stop.ps1" -DataRoot $dataRoot *> (Join-Path $evidence 'one-installation-stop.log')
+          }
       - name: Restore outbound networking after acceptance
         if: always()
         shell: pwsh

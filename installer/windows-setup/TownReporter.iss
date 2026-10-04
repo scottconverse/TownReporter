@@ -7,7 +7,9 @@ AppName=TownReporter
 AppVersion={#AppVersion}
 DefaultDirName={localappdata}\Programs\TownReporter
 DisableDirPage=no
-UsePreviousAppDir=no
+; One TownReporter per Windows user: an existing installation is upgraded in
+; place, so the chosen folder defaults to the recorded one.
+UsePreviousAppDir=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
@@ -36,16 +38,46 @@ Name: "{userprograms}\TownReporter\Configure AI"; Filename: "{app}\app\Configure
 Filename: "http://127.0.0.1:4388/desk"; Flags: shellexec postinstall skipifsilent; Description: "Open TownReporter"
 
 [Code]
+const
+  { The uninstall key Inno writes for AppId=TownReporter. Inno appends _is1 to an
+    AppId that is not a GUID, and PrivilegesRequired=lowest puts the key in the
+    installing user's hive. Its "Inno Setup: App Path" value records the folder
+    of the one installation this user already has. }
+  UninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\TownReporter_is1';
+
 var
   OwnerSetupMessage: String;
+
+function InstalledAppPath(): String;
+begin
+  Result := '';
+  RegQueryStringValue(HKCU, UninstallKey, 'Inno Setup: App Path', Result);
+end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Entry: TFindRec;
+  InstalledDir: String;
 begin
   Result := '';
+  InstalledDir := InstalledAppPath();
+  if InstalledDir <> '' then begin
+    { One TownReporter per Windows user. An existing installation is only ever
+      upgraded in place: a second folder would replace its Add/Remove Programs
+      entry and Start menu shortcuts while leaving the first copy orphaned. The
+      private newsroom data lives outside the installation folder and is not
+      touched by an upgrade. }
+    if CompareText(RemoveBackslashUnlessRoot(ExpandConstant('{app}')), RemoveBackslashUnlessRoot(InstalledDir)) <> 0 then begin
+      Result := 'TownReporter is already installed in:' + #13#10 +
+        InstalledDir + #13#10 + #13#10 +
+        'Only one copy can be installed, so Setup will not install a second one into a different folder.' + #13#10 +
+        'Run Setup again and keep that folder to upgrade your newsroom, or uninstall TownReporter first.';
+      Exit;
+    end;
+    Exit;
+  end;
   if FileExists(ExpandConstant('{app}\app\.townreporter-install.json')) then
-    Result := 'This folder already contains a configured newsroom. Stop it and preserve its data. Choose a separate empty folder; this installer does not upgrade an existing newsroom.'
+    Result := 'This folder already contains a TownReporter newsroom that Windows does not list as installed. This installer will not overwrite an unregistered copy. Uninstall the existing copy, then run Setup again. Nothing was changed.'
   else if FindFirst(ExpandConstant('{app}\*'), Entry) then begin
     try
       repeat
