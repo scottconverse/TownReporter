@@ -131,29 +131,34 @@ const newStoryStub = inlineModule(`
   }
 `);
 
-const deskCopyStub = inlineModule(`
-  /*
-    openLeads is what the shell counts Queue from. The render test does not care
-    about the arithmetic, only that the import resolves.
-  */
-  export function openLeads(leads) {
-    return (leads ?? []).filter((l) => l.status !== "killed" && l.status !== "published");
-  }
-  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
-  export function pileForStatus() {
-    return "desk";
-  }
-  export function createEditorCopy() {
-    return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
-  }
-  /* UI1b-6: the desk's chip component draws its word through chipLabel() (sentence case). */
-  export function sentenceCase(text) {
-    return text.charAt(0).toUpperCase() + text.slice(1);
-  }
-  export function chipLabel(status) {
-    return sentenceCase(status);
-  }
+/*
+  The REAL desk-copy.ts, not a stand-in.
+
+  The shell imports chipLabel, createEditorCopy, editorTitle, openLeads,
+  pileForStatus and sentenceCase from it. A hand-written stub went stale the
+  moment the shell gained `editorTitle` -- that missing export is what broke
+  this file -- so the real module is loaded and its three own imports are
+  stubbed, the same way scripts/lead-badge-render.test.mjs stubs them.
+*/
+const preflightStub = inlineModule(`
+  export function looksLikeProviderAuthFailure() { return false; }
+  export function providerAuthTarget() { return ""; }
 `);
+const leadMatchStubForCopy = inlineModule(`
+  export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
+`);
+const paperModuleStub = inlineModule(`
+  export const TOPICS = [];
+`);
+const deskCopyUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
+  "desk-copy.ts",
+  {
+    "./preflight.ts": preflightStub,
+    "./lead-match.ts": leadMatchStubForCopy,
+    "../paper.ts": paperModuleStub,
+  },
+);
 
 /*
   DeskShell now reads Light/Dark and Normal/Large from AppearanceProvider
@@ -236,10 +241,10 @@ const { DeskShell } = await import(
       "@/lib/auth/client": authClientStub,
       "@/lib/auth/use-current-user": useCurrentUserStub,
       "@/lib/news/claim": claimStub,
-      "@/lib/news/desk-copy": deskCopyStub,
+      "@/lib/news/desk-copy": deskCopyUrl,
       "lucide-react": import.meta.resolve("lucide-react"),
       "@/lib/news/desk": inlineModule(
-        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; } export async function listFollowUps() { return []; }",
+        "export async function listLeads() { return []; } export async function listRecentStoryWork() { return []; } export async function listFollowUps() { return []; } export async function countDraftsDesk() { return 0; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
       /*

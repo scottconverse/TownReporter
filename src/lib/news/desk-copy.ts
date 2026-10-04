@@ -2556,14 +2556,16 @@ export function sentenceCase(text: string): string {
 /** Machine provenance belongs in the record, not in an editor's title. */
 export function editorTitle(text: string): string {
   const title = text
-    .replace(/\s*\(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\)\s*/g, " ")
+    .replace(/\s*\(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?\)\s*/g, " ")
     .trim()
     .replace(/^\[discovery\]\s*/i, "");
   return title === title.toUpperCase() ? agendaTitle(title) : title;
 }
 
 export function agendaTitle(text: string): string {
-  return sentenceCase(text === text.toUpperCase() ? text.toLowerCase() : text);
+  if (text !== text.toUpperCase()) return sentenceCase(text);
+  // Agenda identifiers are names, even in an otherwise all-caps heading.
+  return sentenceCase(text.toLowerCase().replace(/\b\d+[a-z]+\b/g, (id) => id.toUpperCase()));
 }
 
 /**

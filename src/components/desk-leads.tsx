@@ -63,6 +63,8 @@ export function LeadRowView({
   onDarkDesk,
   followUp,
   onKillWithReason,
+  onKillNow,
+  killPending = false,
 }: {
   lead: LeadRow;
   /** The newsroom's configured display name for the stored section key. */
@@ -175,6 +177,20 @@ export function LeadRowView({
   followUp?: ReactNode;
   /** "Kill with a reason" -- the last of the drawn six. */
   onKillWithReason?: () => void;
+  /**
+   * The fast kill -- the row's own inline Kill, one press.
+   *
+   * Owner, 2026-10-03: killing a lead must be fast, and the drawn dialog is not
+   * (More ▾ → a menu row → a dialog → a reason → a second press). This is the
+   * same kill with the reason moved to AFTER the press, offered as the chips in
+   * the toast that reports it (`fast-kill.ts`). A separate prop rather than
+   * reusing `onKillWithReason`, deliberately: the menu keeps its dialog, and a
+   * screen that has not been converted (Today's rows) draws no inline Kill and
+   * is otherwise unchanged.
+   */
+  onKillNow?: () => void;
+  /** This row's fast kill is in flight. */
+  killPending?: boolean;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [confirming, setConfirming] = useState(false);
@@ -310,7 +326,7 @@ export function LeadRowView({
                 () => setDupKill("failed"),
               );
             }}
-            ariaLabel={`Kill ${lead.headline} as a duplicate of ${editorTitle(dup.headline)}`}
+            ariaLabel={`Kill ${editorTitle(lead.headline)} as a duplicate of ${editorTitle(dup.headline)}`}
           >
             {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
           </InkButton>
@@ -358,7 +374,7 @@ export function LeadRowView({
             small
             disabled={drafting}
             onClick={() => onDraft(modelChoice, modelEffort)}
-            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${editorTitle(lead.headline)} with ${modelChoiceLabel(modelChoice)}`}
           >
             {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
           </InkButton>
@@ -510,7 +526,7 @@ export function LeadRowView({
             type="checkbox"
             className="queue-pick"
             checked={deleteSelected}
-            aria-label={`Select ${lead.headline} for deletion`}
+            aria-label={`Select ${editorTitle(lead.headline)} for deletion`}
             onChange={(event) => onDeleteSelect(event.target.checked)}
           />
           <span className="queue-box" aria-hidden="true">
@@ -539,7 +555,7 @@ export function LeadRowView({
             link on Today. */}
         <h3 className="hl-head">
           <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
-            {lead.headline}
+            {editorTitle(lead.headline)}
           </Link>
         </h3>
         {/*
@@ -559,7 +575,7 @@ export function LeadRowView({
               type="checkbox"
               checked={batchSelected}
               disabled={batchDisabled}
-              aria-label={`Include ${lead.headline} in the batch draft`}
+              aria-label={`Include ${editorTitle(lead.headline)} in the batch draft`}
               onChange={(event) => onBatchSelect(event.target.checked)}
             />{" "}
             Include in batch draft
@@ -604,7 +620,7 @@ export function LeadRowView({
           <p className="meta dup-match">
             matches:{" "}
             <Link to="/articles/$slug" params={{ slug: dup.slug }} className="inline-link">
-              {dup.headline}
+              {editorTitle(dup.headline)}
             </Link>{" "}
             · published {formatShortDate(dup.publishedAt)}
           </p>
@@ -647,15 +663,47 @@ export function LeadRowView({
             </InkButton>
           ) : null
         ) : closed ? null : (
-          <Link
-            to="/desk/story/$leadId"
-            params={{ leadId: String(lead.id) }}
-            className="btn solid small"
-          >
-            Start story
-          </Link>
+          <>
+            <Link
+              to="/desk/story/$leadId"
+              params={{ leadId: String(lead.id) }}
+              className="btn solid small"
+            >
+              Start story
+            </Link>
+            {/*
+              The fast kill, on the row itself.
+
+              Owner, 2026-10-03: "killing a lead takes about half a dozen clicks
+              … after twenty leads I often skipped the reason." It is here, at the
+              same level as Start story, rather than behind "More ▾" -- the
+              drawing's own LeadRow prints Start story / Hold / Kill in this cell
+              (docs/design/design-system-2026-10-02, LeadRow.jsx), so the drawn
+              answer to "make it fast" is already the inline control, and the
+              reason the dialog demanded before it would kill is asked AFTER, as
+              the chips on the toast this press raises.
+
+              `quiet-danger` is the desk's Kill tone (the same one the menu's
+              "Kill" uses), so the third button in the cell reads as the
+              destructive one without a filled red block in every row. It is only
+              drawn when the screen hands over `onKillNow`, so a screen still
+              using the dialog (Today) shows exactly what it showed before.
+            */}
+            {onKillNow ? (
+              <InkButton
+                tone="quiet-danger"
+                small
+                pending={killPending}
+                pendingLabel="Killing…"
+                onClick={onKillNow}
+                ariaLabel={`Kill the lead: ${lead.headline}`}
+              >
+                Kill
+              </InkButton>
+            ) : null}
+          </>
         )}
-        <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={items} />
+        <DeskMoreMenu ariaLabel={`More actions for ${editorTitle(lead.headline)}`} items={items} />
         {bulkDeleteReason ? <p className="action-reason" role="alert">{bulkDeleteReason}</p> : null}
       </div>
     </div>

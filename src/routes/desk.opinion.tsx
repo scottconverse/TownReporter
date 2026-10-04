@@ -834,8 +834,8 @@ function OpinionPage() {
                     </div>
                   ) : null}
                   {r.error ? (
-                    <div className="astra-span text-rust">
-                      {editorDraftError(r.error) ?? r.error}
+                    <div className="astra-span text-rust flex flex-col items-start gap-[14px]">
+                      <p>{editorDraftError(r.error) ?? r.error}</p>
                       {looksLikeProviderAuthFailure(r.error) ? (
                         <ProviderSignInButton detail={r.error} />
                       ) : null}
