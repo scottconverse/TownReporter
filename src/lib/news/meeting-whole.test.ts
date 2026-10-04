@@ -13,6 +13,7 @@ import {
   usesWholeMeetingWriter,
   type MeetingSegment,
   type PacketPage,
+  type LedgerItem,
   type WholeMeetingChat,
 } from "./meeting-whole.ts";
 
@@ -250,6 +251,83 @@ describe("whole-meeting writer", () => {
     assert.ok(headingAt > leadAt, "the heading follows the lead story");
     assert.ok(firstItemAt > headingAt, "the roundup items follow the heading");
     assert.match(body, /ALSO AT THE MEETING\n\nAirport fund budget: /, "the heading leads the list");
+  });
+
+  it("rewrites from the stored ledger without reading the tape again", async () => {
+    /*
+      Rewrite from ledger: the editor read the ledger a first run built and set
+      the statuses, and the rewrite reuses those rows. No window is inventoried
+      again, and no status pass runs -- the editor's decisions are the input. An
+      item moved to `excluded` is absent from the new body; the lead item is in
+      it. The chat counts every call by the system prompt it was handed, so a
+      single inventory call fails this test.
+    */
+    const handled = fakeChat({
+      inventory: () => INVENTORY_OK,
+      status: () => STATUS_OK,
+      lead: () =>
+        JSON.stringify({
+          headline: "Airport noise policy set",
+          dek: "One line.",
+          lead: "The council set a noise policy.",
+        }),
+      roundup: () => JSON.stringify({ paragraph: "The airport fund budget was discussed." }),
+      cold: () => COLD_OK,
+    });
+    const calls: string[] = [];
+    const counting: WholeMeetingChat = async (system, user, maxTokens) => {
+      calls.push(system.includes(INVENTORY_SYSTEM) ? "inventory" : "write");
+      return handled(system, user, maxTokens);
+    };
+    const stored: LedgerItem[] = [
+      {
+        itemNo: 1,
+        kind: "vote",
+        text: "Airport noise policy carries unanimously",
+        startSeconds: 0,
+        packetPage: 57,
+        status: "lead",
+        reason: "the meeting's main decision",
+        sourceExcerpt: "And that carries unanimously.",
+      },
+      {
+        itemNo: 2,
+        kind: "staff-report",
+        text: "Proposed 2027 airport fund budget totals $733,170",
+        startSeconds: 10,
+        packetPage: 57,
+        status: "excluded",
+        reason: "covered in a separate story",
+        sourceExcerpt: "The 2027 proposed Airport Fund budget totals $733,170.",
+      },
+    ];
+
+    const result = await runWholeMeetingWriter({
+      meeting: { title: "City Council Study Session", date: "2026-09-29", videoUrl: "https://youtu.be/example" },
+      segments: SEGMENTS,
+      packetPages: PACKET,
+      votes: [],
+      chat: counting,
+      prebuiltLedger: stored,
+    });
+
+    assert.equal(
+      calls.filter((kind) => kind === "inventory").length,
+      0,
+      "a rewrite makes no inventory call",
+    );
+    // The lead write and the cold check are the only calls left: no inventory
+    // pass, no status pass. Before the prebuilt ledger this was four calls.
+    assert.equal(calls.length, 2, "only the lead write and the cold check spend a call");
+    assert.deepEqual(
+      result.ledger.map((item) => item.status),
+      ["lead", "excluded"],
+      "the editor's statuses are used as-is",
+    );
+    assert.equal(result.ledger[1]!.reason, "covered in a separate story", "with the editor's reason");
+    assert.match(result.body, /The council set a noise policy\./, "the lead item is in the new body");
+    assert.doesNotMatch(result.body, /airport fund budget was discussed/i, "an excluded item is not written");
+    assert.doesNotMatch(result.body, new RegExp(ROUNDUP_HEADING), "no roundup items means no roundup heading");
   });
 
   it("sends a lead that names one agenda item to the old one-item path", async () => {

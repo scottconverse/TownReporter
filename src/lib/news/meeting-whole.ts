@@ -638,6 +638,16 @@ export async function runWholeMeetingWriter(input: {
   packetRead?: boolean;
   maxWindowChars?: number;
   onStage?: (stage: string) => void | Promise<void>;
+  /**
+   * The ledger an earlier whole-meeting run already built and an editor already
+   * statused. When present the writer SKIPS the inventory windows and the status
+   * pass -- no reading, no re-deciding -- and writes the lead, roundups,
+   * assembly, checks and cold check straight from these items, honoring the
+   * editor's `status` and `reason` exactly as stored. This is the "rewrite from
+   * ledger" path: the tape and the packet are not re-read, so an item the editor
+   * moved to `excluded` stays out of the new body.
+   */
+  prebuiltLedger?: LedgerItem[];
 }): Promise<WholeMeetingResult> {
   const startedAt = Date.now();
   const stats: RunStats = { wallMs: 0, modelCalls: 0, inputTokens: 0, outputTokens: 0 };
@@ -659,7 +669,10 @@ export async function runWholeMeetingWriter(input: {
   const meetings = `MEETING: ${input.meeting.title}${input.meeting.date ? ` (${input.meeting.date})` : ""}`;
   const inventories: WindowInventory[] = [];
   const unread: UnreadWindow[] = [];
-  for (let i = 0; i < windows.length; i += 1) {
+  // Rewrite from ledger: the editor already read the tape and set the statuses,
+  // so the loop below does not run -- no inventory call is made and no window is
+  // re-read. The status pass further down is skipped for the same reason.
+  for (let i = 0; i < windows.length && !input.prebuiltLedger; i += 1) {
     const segments = windows[i]!;
     await stage(`Reading the meeting: window ${i + 1} of ${windows.length}`);
     const packet = packetPagesForWindow(input.packetPages, segments);
@@ -686,8 +699,10 @@ export async function runWholeMeetingWriter(input: {
     else unread.push({ windowIndex: i, segments });
   }
 
-  let ledger = buildLedger(inventories, unread);
-  if (ledger.length) {
+  // The stored ledger carries the editor's statuses; without one, build it from
+  // what the windows produced and let the status pass propose statuses.
+  let ledger = input.prebuiltLedger ?? buildLedger(inventories, unread);
+  if (!input.prebuiltLedger && ledger.length) {
     await stage("Assigning the ledger");
     const statusReply = await chat(
       `${meetings}\n${LEDGER_STATUS_SYSTEM}`,
@@ -822,6 +837,10 @@ export async function runWholeMeetingWriter(input: {
       : "COLD CHECK: no mismatches reported.",
   ].join("\n\n");
 
+  const unreadWindows = input.prebuiltLedger
+    ? input.prebuiltLedger.filter((item) => item.status === "unread").length
+    : unread.length;
+
   stats.wallMs = Date.now() - startedAt;
   return {
     headline,
@@ -833,7 +852,7 @@ export async function runWholeMeetingWriter(input: {
     nameCheck,
     meetingNotes,
     runStats: stats,
-    unreadWindows: unread.length,
+    unreadWindows,
     packetRead,
   };
 }

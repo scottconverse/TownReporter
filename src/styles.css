@@ -1582,6 +1582,69 @@
 .desk-ltr .notes-disc summary {font-family:var(--fd);font-weight:700;font-size:calc(0.875rem * var(--ts));padding:10px 14px;cursor:pointer;list-style-position:inside}
 .desk-ltr .notes-disc .notes {margin:0;border:none;border-top:1px solid var(--line)}
 /*
+  WR1 phase 2: the Meeting ledger panel in the story rail. It sits beside the
+  transcript block and reads like every other section here -- the same `--fd`
+  headings, the same `--line` rules -- with two things added for the ledger's
+  own rules: an unread row carries a `--warn` edge (the part of the tape nobody
+  read), and the two controls on a row are a real select and a text box at
+  >=44px, because those are the presses an editor makes again and again.
+  Every size here is at or above the desk's 14px floor: `calc(0.9375rem *
+  var(--ts))` for the reading text, `calc(0.875rem * var(--ts))` for the meta,
+  and `--ts` is never below 1.
+*/
+.desk-ltr .meeting-ledger-panel {margin-top:16px}
+.desk-ltr .meeting-ledger-rewrite {margin-bottom:12px}
+.desk-ltr .meeting-ledger {border:1px solid var(--line);background:var(--bg2)}
+.desk-ltr .meeting-ledger > summary {
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  min-height:44px;padding:12px 14px;cursor:pointer;list-style-position:inside;
+  font-family:var(--fd);font-weight:700;font-size:calc(0.9375rem * var(--ts));color:var(--fg);
+}
+.desk-ltr .meeting-ledger-count {font-family:inherit;font-weight:400;color:var(--fg2);font-size:calc(0.875rem * var(--ts))}
+.desk-ltr .meeting-ledger-stats {margin:0;padding:0 14px 8px;color:var(--fg2);font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums}
+.desk-ltr .meeting-ledger .note-sec {margin-top:0;padding:0 14px 14px}
+.desk-ltr .ledger-item {border-top:1px solid var(--line);padding:10px 0 2px}
+.desk-ltr .ledger-item-head {display:flex;gap:8px;align-items:baseline}
+.desk-ltr .ledger-no {flex:none;min-width:2ch;text-align:right;color:var(--mut);font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums}
+.desk-ltr .ledger-kind {flex:none;color:var(--adeep);font-size:calc(0.875rem * var(--ts));font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.desk-ltr .ledger-text {min-width:0;color:var(--fg);font-size:calc(0.9375rem * var(--ts));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The item the run could not read: a `--warn` edge plus the sentence under it. */
+.desk-ltr .ledger-unread {border-left:3px solid var(--warn);padding-left:11px}
+.desk-ltr .ledger-item-meta {display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin-top:8px}
+.desk-ltr .ledger-stamp {color:var(--fg);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:calc(0.875rem * var(--ts));font-variant-numeric:tabular-nums;white-space:nowrap}
+.desk-ltr .ledger-stamp-none {color:var(--mut)}
+.desk-ltr .ledger-page {color:var(--fg2);font-size:calc(0.875rem * var(--ts))}
+.desk-ltr .ledger-field {display:flex;align-items:center;gap:6px}
+.desk-ltr .ledger-field-label {color:var(--mut);font-size:calc(0.875rem * var(--ts));letter-spacing:.1em;text-transform:uppercase}
+.desk-ltr .ledger-field select,
+.desk-ltr .ledger-field input {
+  min-height:44px;padding:6px 9px;border:1px solid var(--line);border-radius:0;
+  background:var(--bg);color:var(--fg);font:inherit;font-size:calc(0.9375rem * var(--ts));
+}
+.desk-ltr .ledger-field select:focus,
+.desk-ltr .ledger-field input:focus {border-color:var(--fg);outline:2px solid var(--fg);outline-offset:2px}
+.desk-ltr .ledger-field-reason input {min-width:170px}
+.desk-ltr .ledger-field select:disabled,
+.desk-ltr .ledger-field input:disabled {opacity:.6}
+.desk-ltr .ledger-saved {color:var(--ok);font-size:calc(0.875rem * var(--ts));font-weight:700}
+.desk-ltr .ledger-problem {margin:6px 0 0;color:var(--danger);font-size:calc(0.875rem * var(--ts))}
+/* The checked-claim rows: flagged first, and the mark is a real checkbox. */
+.desk-ltr .claim-item {border-top:1px solid var(--line);padding:10px 0 2px}
+.desk-ltr .claim-check {display:flex;align-items:center;gap:8px;min-height:44px;font-size:calc(0.9375rem * var(--ts));color:var(--fg);cursor:pointer}
+.desk-ltr .claim-check input {width:20px;height:20px;flex:none;accent-color:var(--a)}
+.desk-ltr .claim-flag {color:var(--fg2);font-size:calc(0.875rem * var(--ts));font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.desk-ltr .claim-flag-on {color:var(--warn)}
+.desk-ltr .claim-item-text {margin:4px 0 0;color:var(--fg);font-size:calc(0.9375rem * var(--ts))}
+.desk-ltr .claim-item-source {margin:2px 0 0;color:var(--fg2);font-size:calc(0.875rem * var(--ts));overflow-wrap:anywhere}
+.desk-ltr .claim-item-note {margin:2px 0 0;color:var(--mut);font-size:calc(0.875rem * var(--ts))}
+/* The run's own record, in full and with its line breaks kept. */
+.desk-ltr .meeting-notes-full {
+  margin:8px 0 0;padding:10px 12px;max-height:520px;overflow:auto;
+  border:1px solid var(--line);background:var(--bg);color:var(--fg);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:calc(0.875rem * var(--ts));line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;
+}
+/*
   Below 1024px: single column, aside first then the work area (source
   order already puts <aside class="story-side"> before <section
   class="story-work">, so the grid collapse is the only rule needed --

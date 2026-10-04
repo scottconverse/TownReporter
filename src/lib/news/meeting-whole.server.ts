@@ -177,6 +177,13 @@ export async function loadOrFetchMeetingPacket(
     title: string;
     modelChoice: EffectiveProviderChoice;
     onStage?: (stage: string) => void | Promise<void>;
+    /**
+     * Rewrite-from-ledger: read the packet already retained for this lead and
+     * nothing else. The portal is not consulted and no document is fetched --
+     * the editor asked for the stored ledger's draft, not a fresh round of the
+     * source hunt the first run already did.
+     */
+    retainedOnly?: boolean;
   },
   deps: WholeMeetingDraftDeps = {},
 ): Promise<{ pages: PacketPage[]; documentId: string | null; note: string }> {
@@ -191,6 +198,9 @@ export async function loadOrFetchMeetingPacket(
   if (existing) {
     const pages = parsePages(existing.extraction_pages);
     if (pages.length) return { pages, documentId: existing.id, note: "The packet was already retained for this lead." };
+  }
+  if (input.retainedOnly) {
+    return { pages: [], documentId: null, note: "The packet was not re-fetched; this rewrite reads the stored ledger." };
   }
 
   try {
@@ -307,6 +317,11 @@ function parsePages(raw: string | null | undefined): PacketPage[] {
  * `meetingEvidenceWide` is set so the desk's citation derivation runs over
  * every transcript candidate rather than a single focus: this writer read the
  * whole meeting on purpose.
+ *
+ * `reuseLedger` is the rewrite-from-ledger path: the editor statused the ledger
+ * a first run built, and this run reuses it -- skipping the packet fetch and the
+ * inventory pass -- so the new draft reflects the editor's decisions rather than
+ * a fresh reading of the tape.
  */
 export async function runWholeMeetingDraft(
   input: {
@@ -323,6 +338,8 @@ export async function runWholeMeetingDraft(
     onStage?: (stage: string) => void | Promise<void>;
     /** The desk's own per-call budget; 0 lets the chat wrapper size the call. */
     callTimeoutMs?: number;
+    /** The stored ledger to rewrite from, with the editor's statuses already on it. */
+    reuseLedger?: LedgerItem[];
   },
   deps: WholeMeetingDraftDeps = {},
 ): Promise<WholeMeetingDraftResult> {
@@ -336,6 +353,8 @@ export async function runWholeMeetingDraft(
       title: material.meeting.title,
       modelChoice: input.modelChoice,
       onStage: input.onStage,
+      // A rewrite does not hunt the source again; it reads the retained packet.
+      retainedOnly: Boolean(input.reuseLedger),
     },
     deps,
   );
@@ -351,6 +370,7 @@ export async function runWholeMeetingDraft(
     chat,
     packetRead: packet.pages.length > 0,
     onStage: input.onStage,
+    prebuiltLedger: input.reuseLedger,
   });
 
   const notes = [packet.note, result.integrityNotes].filter(Boolean).join("\n");

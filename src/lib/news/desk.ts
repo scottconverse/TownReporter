@@ -123,6 +123,9 @@ import {
   suggestHeadlinesInput,
   updateArticleHeadlineInput,
   correctionWordingInput,
+  ledgerItemStatusInput,
+  claimReviewedInput,
+  rewriteFromLedgerInput,
 } from "./request-input.ts";
 import {
   evidenceNeedsReview,
@@ -1017,6 +1020,19 @@ export const getLead = createServerFn({ method: "GET" })
     const draftMeetingEvidence = drafts[0]
       ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
       : null;
+    /*
+      WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
+      panel shows -- the ledger (unread rows first), the checked claims (flagged
+      first, each with its reviewed mark), the full meeting notes, and the run
+      stats line. Null when this lead's draft predates the whole-meeting writer,
+      and the panel hides itself rather than opening empty.
+    */
+    const meetingAccounting = drafts[0]
+      ? await (await import("./meeting-ledger.server.ts")).loadMeetingAccounting(sql, {
+          newsroomId: owned(context),
+          leadId: id,
+        })
+      : null;
     if (draft?.body) draft.body = stripReporterNotebook(draft.body);
     let notes = parseNotes(lead.notes_json);
     if (!notes.todo.length && draft?.unanswered) {
@@ -1107,6 +1123,7 @@ export const getLead = createServerFn({ method: "GET" })
       lead,
       draft,
       draftMeetingEvidence,
+      meetingAccounting,
       evidenceToken,
       topicConfirmed,
       unreviewedClaimsAcceptedCount,
@@ -3502,6 +3519,21 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     hasMeetingMaterial: Boolean(meetingMaterial),
     editorialAssignment: prevNotes.editorialAssignment?.text ?? null,
   });
+  /*
+    Rewrite from ledger (WR1 phase 2): "Rewrite from ledger" queues an ordinary
+    draft job that carries `reuseLedger` in its receipt, the only free-form
+    column `desk_jobs` has. The worker reads that flag here -- before the run,
+    because a fail-over switch rewrites `result_json` to a receipt of its own
+    partway through -- and, when set, hands the writer the ledger already stored
+    for this lead instead of reading the tape again.
+  */
+  const reuseLedger = (() => {
+    try {
+      return Boolean((JSON.parse(job.result_json || "{}") as { reuseLedger?: unknown }).reuseLedger);
+    } catch {
+      return false;
+    }
+  })();
   // The writer runs inside `waitForModel` so the stall ticker keeps working; the
   // ledger, claims, notes and run stats it produces are carried out through this
   // closure and persisted against the draft row below, after the INSERT gives
@@ -3524,6 +3556,16 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           ...draftInput,
           modelChoice: effectiveStoryModelChoice(job.model_choice),
         });
+      // A rewrite reuses the stored ledger -- the editor's statuses and all --
+      // and skips the fetch and inventory passes. The length guard means an
+      // empty read falls back to the normal full run rather than writing a draft
+      // off a ledger that is not there.
+      const storedLedger = reuseLedger
+        ? await (await import("./meeting-ledger.server.ts")).loadStoredLedgerForRewrite(sql, {
+            newsroomId: owned(context),
+            leadId,
+          })
+        : undefined;
       const whole = await (await import("./meeting-whole.server.ts")).runWholeMeetingDraft({
         sql,
         newsroomId: owned(context),
@@ -3538,6 +3580,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           reportDeps.chat ??
           (async () => ({ ok: false as const, error: "The writing provider is not available." })),
         onStage: (stage) => setStage(job.id, stage),
+        reuseLedger: storedLedger?.length ? storedLedger : undefined,
       });
       wholeAccounting = whole;
       return whole.draft;
@@ -3966,6 +4009,63 @@ export const draftLead = createServerFn({ method: "POST" })
       modelChoice,
       modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
+    });
+  });
+
+/*
+  WR1 phase 2: the story page's Meeting ledger panel, and the two writes and one
+  queue it makes.
+
+  `deskMiddleware` has already established the caller is an owner or editor and
+  told us the newsroom. Both writes are scoped by `newsroom_id` in the saver
+  itself, so a draft id or claim id belonging to another newsroom matches no row
+  and is refused -- a screen that names someone else's ledger cannot change it.
+*/
+export const saveLedgerItemStatus = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => ledgerItemStatusInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const { saveLedgerItemStatus: save } = await import("./meeting-ledger.server.ts");
+    return save(sql, {
+      newsroomId: owned(context),
+      draftId: data.draftId,
+      itemNo: data.itemNo,
+      status: data.status,
+      reason: data.reason ?? "",
+    });
+  });
+
+/** WR1 phase 2: set or clear the "Checked" mark on one checked claim. */
+export const markClaimReviewed = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => claimReviewedInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const { markClaimReviewed: mark } = await import("./meeting-ledger.server.ts");
+    return mark(sql, { newsroomId: owned(context), claimId: data.claimId, reviewed: data.reviewed });
+  });
+
+/**
+ * WR1 phase 2: "Rewrite from ledger". Queues an ordinary draft job through the
+ * same commit boundary the Draft button uses -- the only difference is the
+ * `reuseLedger` flag the worker reads, which makes the run reuse the ledger
+ * already stored for this lead instead of reading the tape again.
+ */
+export const rewriteFromLedger = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => rewriteFromLedgerInput.parse(input))
+  .handler(async ({ context, data }) => {
+    await requirePaperSetUp(owned(context), "rewrite this story");
+    const modelChoice = storyModelChoice(data.modelChoice);
+    const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
+    return commitStoryDraftForAuthenticatedEditor({
+      context: { userId: context.userId, newsroomId: owned(context) },
+      leadId: data.leadId,
+      modelChoice,
+      modelEffort: modelEffort(modelChoice, data.modelEffort),
+      researchScope: data.researchScope,
+      reuseLedger: true,
     });
   });
 

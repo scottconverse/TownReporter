@@ -13,6 +13,16 @@ import {
 
 export const Route = createFileRoute("/desk/transcript/$artifactId")({
   head: () => ({ meta: [{ title: "Transcript — TownReporter" }] }),
+  /*
+    WR1 phase 2: the ledger panel's timestamps link here with `?at=<seconds>`,
+    so the line the editor was reading is the line the transcript opens on. The
+    parameter is a plain second count; anything else reads as "no position" and
+    the page opens at the top, as it always did.
+  */
+  validateSearch: (search: Record<string, unknown>): { at: number | null } => {
+    const at = Number(search.at);
+    return { at: Number.isFinite(at) && at >= 0 ? Math.floor(at) : null };
+  },
   component: TranscriptPage,
 });
 
@@ -44,6 +54,7 @@ export const Route = createFileRoute("/desk/transcript/$artifactId")({
  */
 function TranscriptPage() {
   const { artifactId } = Route.useParams();
+  const { at } = Route.useSearch();
   const id = Number(artifactId);
   const q = useQuery({
     queryKey: ["transcript-view", id],
@@ -56,6 +67,28 @@ function TranscriptPage() {
   const fallbackRef = useRef<HTMLTextAreaElement>(null);
   const view = q.data?.ok ? q.data.view : null;
   const plainText = useMemo(() => (view ? transcriptPlainText(view) : ""), [view]);
+
+  /*
+    The line `?at` points at: the last line that started at or before that
+    second, which is the line a speaker was in the middle of. A position before
+    the first line lands on the first; nothing to match leaves the page alone.
+  */
+  const activeIndex = useMemo(() => {
+    if (at === null || !view) return null;
+    let best: number | null = null;
+    for (const line of view.lines) {
+      if (line.startSeconds <= at) best = line.segmentIndex;
+      else break;
+    }
+    return best ?? view.lines[0]?.segmentIndex ?? null;
+  }, [at, view]);
+
+  // Bring that line into view once it is rendered. `scrollIntoView` is absent
+  // in a bare DOM; the guard keeps this a convenience, never a crash.
+  useEffect(() => {
+    if (activeIndex === null) return;
+    document.getElementById(`transcript-line-${activeIndex}`)?.scrollIntoView?.({ block: "center" });
+  }, [activeIndex]);
 
   /*
     Copy all, with a fallback that is part of the design rather than a
@@ -218,7 +251,13 @@ function TranscriptPage() {
       ) : (
         <ol className="transcript-lines">
           {view.lines.map((line) => (
-            <li key={line.segmentIndex} className="transcript-line">
+            <li
+              key={line.segmentIndex}
+              id={`transcript-line-${line.segmentIndex}`}
+              className={
+                activeIndex === line.segmentIndex ? "transcript-line transcript-line-at" : "transcript-line"
+              }
+            >
               <a
                 className="transcript-stamp inline-link"
                 href={transcriptSegmentUrl(view.videoId, line.startSeconds)}

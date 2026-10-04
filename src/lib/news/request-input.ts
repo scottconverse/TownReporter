@@ -1087,6 +1087,45 @@ export const pullTodoInput = z.object({
 /** `desk.ts:2065` listPullJobs. */
 export const leadIdInput = z.object({ leadId: rowId });
 
+/*
+  WR1 phase 2 (the screens): the ledger panel's two writes and the rewrite.
+
+  `ledgerItemStatusInput` is scoped by draft id, not lead id: the panel edits the
+  ledger of the draft it is showing, and `saveLedgerItemStatus` matches that
+  `(newsroom_id, draft_id, item_no)` exactly -- a draft from another newsroom
+  updates no row and is refused. The enum is the three decisions an editor makes;
+  `unread` is not one of them, because an editor does not decide that a window
+  was never read. `reason` is optional here and required for `excluded` by the
+  writer itself, so "excluded without a reason" is refused at the boundary that
+  can say why.
+
+  `claimReviewedInput` carries the whole mark: `reviewed: false` clears it.
+*/
+export const ledgerItemStatusInput = z.object({
+  draftId: rowId,
+  itemNo: z.number().int().min(0).max(1_000_000),
+  status: z.enum(["lead", "roundup", "excluded"]),
+  reason: z.string().trim().max(2_000).optional(),
+});
+
+/** `desk.ts` markClaimReviewed (WR1 phase 2). */
+export const claimReviewedInput = z.object({
+  claimId: rowId,
+  reviewed: z.boolean(),
+});
+
+/**
+ * `desk.ts` rewriteFromLedger (WR1 phase 2): the same form the Draft button
+ * posts, because it queues the same kind of draft job -- the difference
+ * (`reuseLedger`) is a server-side decision, not something the screen picks.
+ */
+export const rewriteFromLedgerInput = z.object({
+  leadId: rowId,
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  researchScope: researchScopeValue.optional(),
+});
+
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
 export const jobIdInput = z.object({ jobId: rowId });
 /** `desk.ts:2208` setLeadStatus. */
