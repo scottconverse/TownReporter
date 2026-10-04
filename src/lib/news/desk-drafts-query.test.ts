@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
+import { deskDraftFilterCounts, deskDraftState, type DeskDraftFacts } from "./desk-drafts.ts";
 
 /*
   The Drafts screen's query, run against a real database.
@@ -28,23 +29,24 @@ const desk = await readFile(new URL("./desk.ts", import.meta.url), "utf8");
 
 function draftsQuery(): string {
   /*
-    ANCHORED ON THE ROW QUERY, NOT ON THE EXPORTED FUNCTION.
+    ANCHORED ON THE SHARED SQL CONSTANT, NOT ON A FUNCTION.
 
     Unit CZ-long-lists windowed this list, so the SQL moved out of the
-    `listDraftsDesk` chain into `queryDraftRows`, which both `listDraftsDesk`
-    (every draft, for Today's counts) and `listDraftsDeskPage` (one window,
-    for the screen) now call. Searching from the export found nothing and the
-    guard below fired. The guard itself is kept and the search now starts at
-    the function the query lives in; every assertion about the rows is
+    `listDraftsDesk` chain into `queryDraftRows`. Review D2 then moved the SQL
+    itself into `DESK_DRAFT_ROWS_SQL`, which `queryDraftRows` (the list, for
+    Today's counts and the screen) and `countDraftsDesk` (the nav count, run as
+    a subquery) now share. Searching from the const is the honest anchor: it is
+    the one place the row query lives, so this test runs the same text both
+    readers do. The $1 newsroom placeholder is inlined to a literal, exactly as
+    the old `${owned(context)}` was; every assertion about the rows is
     unchanged.
   */
-  const start = desk.indexOf("async function queryDraftRows");
-  assert.ok(start >= 0, "desk.ts no longer defines queryDraftRows");
-  const queryStart = desk.indexOf("with latest_draft as (", start);
-  assert.ok(queryStart > start, "could not isolate the drafts query");
+  const start = desk.indexOf("const DESK_DRAFT_ROWS_SQL = `");
+  assert.ok(start >= 0, "desk.ts no longer defines DESK_DRAFT_ROWS_SQL");
+  const queryStart = desk.indexOf("`", start) + 1;
   const queryEnd = desk.indexOf("`;", queryStart);
   assert.ok(queryEnd > queryStart, "could not find the end of the drafts query");
-  const query = desk.slice(queryStart, queryEnd).replaceAll("${owned(context)}", "1");
+  const query = desk.slice(queryStart, queryEnd).replaceAll("$1", "1");
   assert.ok(!query.includes("${"), "the isolated query still holds a template slot");
   return query;
 }
@@ -148,6 +150,70 @@ test("the drafts list reads the desk's real state out of a text column", async (
     assert.equal(bare.job_error, "Codex quota reached", "the failed row's reason rides with the row");
     assert.equal(imported.job_status, null, "a lead with no job at all reads null, not undefined");
     assert.equal(imported.job_error, null);
+  } finally {
+    await pg.close();
+  }
+});
+
+/*
+  Review D2: the shell now asks the server to COUNT the draft rows
+  (`countDraftsDesk`) rather than send them, because the nav only draws the
+  number. The property the nav depends on has to survive that change: the number
+  on the Drafts item is the number of rows /desk/drafts lists under "All".
+
+  This runs the shared row SQL, computes the screen's "All" count from those
+  rows through the real state machine (`deskDraftState` -> `deskDraftFilterCounts`,
+  the same pair `listDraftsDeskPage` uses), and runs the count-only shape --
+  `count(*)` over the very same SQL -- and insists all three agree.
+*/
+test("the nav's count-only read equals the Drafts screen's All count", async () => {
+  const pg = new PGlite();
+  await pg.waitReady;
+  await pg.exec(`
+    create table leads (
+      id integer primary key, newsroom_id integer not null, headline text, status text,
+      origin text, newsworthiness integer, why text
+    );
+    create table drafts (
+      id integer primary key, lead_id integer, newsroom_id integer, headline text, dek text,
+      body text not null, topic text, form text, model_headline text, headline_source text,
+      updated_at timestamptz, research_json text not null default '{}'
+    );
+    create table desk_jobs (
+      id integer primary key, newsroom_id integer, kind text, subject_id integer, status text,
+      stage text, started_at timestamptz, updated_at timestamptz, model_choice text, error text
+    );
+  `);
+  await pg.exec(`
+    insert into leads(id,newsroom_id,headline,status,origin,newsworthiness,why)
+      values(1,1,'A filed lead','drafted',null,5,'x'),
+            (2,1,'A hand-filed lead','new',null,5,'x'),
+            (3,1,'Already printed','published',null,5,'x');
+    insert into drafts(id,lead_id,newsroom_id,headline,dek,body,topic,form,model_headline,headline_source,updated_at,research_json)
+      values(1,1,1,'A filed lead','d','The council voted.','council','news','A filed lead','model','2026-09-26T08:00:00.000Z','{}'),
+            (2,2,1,'A hand-filed lead','d','','council','news','A hand-filed lead','model','2026-09-26T09:00:00.000Z','{}'),
+            -- A published lead keeps its draft row: it is not on "everything not
+            -- yet printed", so it must not be in the count either.
+            (3,3,1,'Already printed','d','Printed.','council','news','Already printed','model','2026-09-26T09:30:00.000Z','{}');
+  `);
+  try {
+    const listed = await pg.query<Record<string, unknown>>(draftsQuery());
+    const states = listed.rows.map((row) => deskDraftState(row as unknown as DeskDraftFacts));
+    const pageCounts = deskDraftFilterCounts(states);
+    const counted = await pg.query<{ count: number }>(
+      `select count(*)::int as count from (${draftsQuery()}) as desk_drafts`,
+    );
+    assert.equal(
+      counted.rows[0]?.count,
+      listed.rows.length,
+      "the count-only read counts exactly the rows the list returns",
+    );
+    assert.equal(
+      pageCounts.all,
+      listed.rows.length,
+      "the Drafts screen's All pill counts those same rows",
+    );
+    assert.equal(counted.rows[0]?.count, pageCounts.all, "nav count == Drafts page All count");
   } finally {
     await pg.close();
   }

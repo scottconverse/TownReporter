@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { editorTitle } from "./desk-copy.ts";
-import { newestOpenFile, fullFileQuestion, signalCounts } from "./dark-rail.ts";
+import {
+  INVESTIGATION_TITLE_LIMIT,
+  newestOpenFile,
+  fullFileQuestion,
+  signalCounts,
+} from "./dark-rail.ts";
 import { bulkDeleteReasonLines } from "./queue-bulk.ts";
 import { deskDraftState, tonightDrafts, type DeskDraftFacts } from "./desk-drafts.ts";
 
@@ -32,17 +37,42 @@ test("auto-open picks the newest Open file and never a newer Set aside or Waitin
   );
 });
 
-test("question recovers the full pasted first line only when it extends the stored title", () => {
+test("question recovers the full pasted first line only from a title that was cut", () => {
+  /*
+    Review D1. A short question that only happens to be the prefix of some other
+    artifact's first line is a whole question of its own. "City budget" beside a
+    tip that opens "City budget documents are available..." is two different
+    things; swapping the tip in rewrites what the editor asked.
+  */
   assert.equal(
-    fullFileQuestion(
-      "Check filing dates, end",
-      "Check filing dates, endorsements and campaign reports.\nRecords below",
-    ),
-    "Check filing dates, endorsements and campaign reports.",
+    fullFileQuestion("City budget", "City budget documents are available at city hall.\nRecords below"),
+    "City budget",
+    "an editor's short question keeps its own words",
   );
   assert.equal(
     fullFileQuestion("Editor's renamed question", "An unrelated pasted record"),
     "Editor's renamed question",
+  );
+  /*
+    A title that WAS cut: `openInvestigationForEditor` stores the paste's first
+    line only up to the title limit, so a stored title that sits exactly on that
+    limit is a truncated one, and the artifact holds the rest.
+  */
+  const longFirstLine = `${"Check filing dates, endorsements and campaign reports. ".repeat(5)}And the rest.`;
+  const cut = longFirstLine.slice(0, INVESTIGATION_TITLE_LIMIT);
+  assert.equal(cut.length, INVESTIGATION_TITLE_LIMIT, "the fixture must sit on the real limit");
+  assert.equal(
+    fullFileQuestion(cut, `${longFirstLine}\nRecords below`),
+    longFirstLine,
+    "a title cut at the limit recovers the artifact's full first line",
+  );
+  /* A title cut with a visible ellipsis recovers the same way. */
+  assert.equal(
+    fullFileQuestion(
+      "Check filing dates, end…",
+      "Check filing dates, endorsements and campaign reports.\nRecords below",
+    ),
+    "Check filing dates, endorsements and campaign reports.",
   );
 });
 

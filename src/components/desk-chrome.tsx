@@ -24,7 +24,7 @@ import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { jobHeadline } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
-import { listFollowUps, listLeads, listDraftsDesk } from "@/lib/news/desk";
+import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
 
@@ -192,7 +192,18 @@ export function DeskShell({
   */
   const jobs = useDeskJobs();
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
-  const drafts = useQuery({ queryKey: ["drafts-desk"], queryFn: () => listDraftsDesk() });
+  /*
+    The Drafts nav count asks the server to count the draft rows, not to send
+    them (review D2): the shell only needs the number, and the count is taken
+    over the same rows /desk/drafts lists.
+
+    The key is `["drafts-desk", "count"]`, not the bare `["drafts-desk"]` Today
+    reads the whole list under (desk.index.tsx): one cache entry cannot hold a
+    number on one screen and an array of rows on another, and the nav would
+    render that array. The shared `["drafts-desk"]` PREFIX keeps every
+    invalidation reaching this read.
+  */
+  const drafts = useQuery({ queryKey: ["drafts-desk", "count"], queryFn: () => countDraftsDesk() });
   const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
   const followUps = useQuery({
     queryKey: ["follow-ups", "all"],
@@ -211,7 +222,8 @@ export function DeskShell({
 
       Queue      `openLeads`, the same filter Today's and the Queue's own
                  headings count with (desk-copy.ts:437).
-      Drafts     the same latest-draft rows that /desk/drafts lists.
+      Drafts     the count of the same latest-draft rows /desk/drafts lists
+                 -- `countDraftsDesk`, the row query run inside `count(*)`.
       Opinion    every row /desk/opinion's "Requests & editorials" heading
                  counts (desk.opinion.tsx:474-482, `rows.length`).
       Follow-ups the Follow-ups screen's default tab: its agent rows that pass
@@ -227,7 +239,7 @@ export function DeskShell({
   */
   const counts: Record<string, number | undefined> = {
     Queue: allLeads.length ? openLeads(allLeads).length : undefined,
-    Drafts: drafts.data?.length,
+    Drafts: drafts.data,
     Opinion: editorials.data ? editorials.data.length : undefined,
     "Follow-ups": followUps.data
       ? followUps.data.filter(

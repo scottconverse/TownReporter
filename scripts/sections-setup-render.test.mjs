@@ -107,30 +107,37 @@ const useCurrentUserStub = inlineModule(
   `export function useCurrentUserState() { return { user: null, isPending: false }; }`,
 );
 const claimStub = inlineModule(`export async function leaveEditor() { return { ok: true }; }`);
-const deskCopyStub = inlineModule(`
-  export function createEditorCopy() {
-    return { leave: "Give up the desk", confirm: "", confirmYes: "", confirmNo: "", mismatch: "" };
-  }
-  export function kindFromSourceUrl() { return "official"; }
-  /* UI1b-6: the desk's chip component draws its word through chipLabel() (sentence case). */
-  export function sentenceCase(text) { return text.charAt(0).toUpperCase() + text.slice(1); }
-  export function chipLabel(status) { return sentenceCase(status); }
-  /* Redesign phase 2a: the shell counts Queue from openLeads(). */
-  export function openLeads(leads) { return leads ?? []; }
-  /* CY item 6: the shell's Dark Desk count is pileForStatus(x) === "desk". */
-  export function pileForStatus() { return "desk"; }
-  export function tierFromKind() { return "A"; }
-  /*
-    The add box's catch runs this on a failure (0.6.67). No click can happen in
-    a static render, so the real formatter's dump branch -- which needs the
-    schemas in request-input.ts -- is not what this file is about; the
-    pass-through is its other, contract-visible half.
-  */
-  export function editorActionError(raw, what) {
-    if (!raw || !String(raw).trim()) return null;
-    return String(raw).trim();
-  }
+/*
+  The REAL desk-copy.ts, not a hand-written stand-in.
+
+  desk-chrome.tsx (the shell this page draws inside) imports chipLabel,
+  createEditorCopy, editorTitle, openLeads, pileForStatus and sentenceCase from
+  it, and sections-setup.tsx imports editorActionError, kindFromSourceUrl and
+  tierFromKind. A stub silently went stale the moment the shell gained
+  `editorTitle`, which is exactly the failure this file hit. desk-copy.ts's own
+  three imports are stubbed the way scripts/lead-badge-render.test.mjs stubs
+  them -- it reaches preflight.ts, lead-match.ts and paper.ts for functions
+  this page never calls.
+*/
+const preflightStub = inlineModule(`
+  export function looksLikeProviderAuthFailure() { return false; }
+  export function providerAuthTarget() { return ""; }
 `);
+const leadMatchStubForCopy = inlineModule(`
+  export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
+`);
+const paperModuleStub = inlineModule(`
+  export const TOPICS = [];
+`);
+const deskCopyUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
+  "desk-copy.ts",
+  {
+    "./preflight.ts": preflightStub,
+    "./lead-match.ts": leadMatchStubForCopy,
+    "../paper.ts": paperModuleStub,
+  },
+);
 // The same server function the Sources page calls. In this static render it is
 // never invoked -- no click can happen -- so it only has to exist and be shaped
 // like the real one.
@@ -147,6 +154,12 @@ const deskServerStub = inlineModule(`
     the three reads answer empty and the nav prints nothing.
   */
   export async function listFollowUps() { return []; }
+  /*
+    Review D2: the shell's Drafts nav count is now a count-only server read
+    (countDraftsDesk) instead of the whole list. This static render never
+    invokes it -- there is no click and no live query -- it only has to exist.
+  */
+  export async function countDraftsDesk() { return 0; }
   export async function addSource() {
     return { ok: false, error: "not called in a static render" };
   }
@@ -228,7 +241,7 @@ const DESK_CHROME_IMPORTS = {
   "@/lib/auth/client": authClientStub,
   "@/lib/auth/use-current-user": useCurrentUserStub,
   "@/lib/news/claim": claimStub,
-  "@/lib/news/desk-copy": deskCopyStub,
+  "@/lib/news/desk-copy": deskCopyUrl,
   "@/lib/news/desk": deskServerStub,
   "@/lib/news/opinion": opinionStub,
   /*
@@ -324,7 +337,7 @@ const { SectionsSetup } = await import(
       // The add box calls the Sources page's own server function, so this
       // panel needs the same two modules desk.sources.tsx imports.
       "@/lib/news/desk": deskServerStub,
-      "@/lib/news/desk-copy": deskCopyStub,
+      "@/lib/news/desk-copy": deskCopyUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

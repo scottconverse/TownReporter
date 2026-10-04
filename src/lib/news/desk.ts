@@ -3891,40 +3891,18 @@ export const draftLead = createServerFn({ method: "POST" })
   newest row is the same "the draft on this desk" rule `listLeads` already uses
   for `story_headline`. A lead with two draft rows is one story, not two.
 */
-async function queryDraftRows(context: { newsroomId: number }) {
-  const { ensureJobsSchema } = await import("./jobs.ts");
-  await ensureJobsSchema();
-  const sql = await getSql();
-  return sql<{
-    id: number;
-    lead_id: number;
-    headline: string;
-    dek: string | null;
-    topic: string | null;
-    form: string | null;
-    updated_at: string;
-    /** Has any prose been written into this draft row yet? See the CTE note. */
-    has_body: boolean;
-    lead_status: string;
-    origin: string | null;
-    newsworthiness: number | null;
-    why: string | null;
-    model_headline: string | null;
-    headline_source: string | null;
-    job_status: string | null;
-    job_stage: string | null;
-    job_started_at: string | null;
-    job_updated_at: string | null;
-    job_model_choice: string | null;
-    job_error: string | null;
-    evidence_required: boolean;
-    evidence_decision: string | null;
-    evidence_checked_at: string | null;
-    imported_text: boolean;
-    name_check_complete: boolean;
-    names_checked_at: string | null;
-    names_unresolved: number;
-  }>`
+/*
+  The row SQL lives here so more than one reader can share it. `queryDraftRows`
+  runs it for the list, and `countDraftsDesk` runs it as a subquery to count
+  exactly the rows the Drafts screen lists -- one source of truth for what a
+  draft row is, rather than a second WHERE clause to keep in step.
+
+  It is a plain string with `$1` for the newsroom id, not a tagged template:
+  both callers hand it to `sql.query(text, params)`, and a nested tag fragment
+  does not work -- `toSql` turns an interpolated value into a parameter, not
+  into SQL text.
+*/
+const DESK_DRAFT_ROWS_SQL = `
     with latest_draft as (
       select distinct on (d.lead_id)
              d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
@@ -3957,7 +3935,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
              coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
       from drafts d
       join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
-      where d.newsroom_id = ${owned(context)}
+      where d.newsroom_id = $1
         -- "Everything not yet printed": a killed lead, or one already
         -- published, is not a draft on the desk.
         and l.status in ('new','drafted','held')
@@ -3995,7 +3973,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
     left join lateral (
       select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
       from desk_jobs j
-      where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
+      where j.newsroom_id = $1 and j.kind = 'draft' and j.subject_id = v.lead_id
       order by j.id desc limit 1
     ) jb on true
     -- Newest work first: the draft an editor just touched is the one they
@@ -4004,6 +3982,41 @@ async function queryDraftRows(context: { newsroomId: number }) {
     -- being written.
     order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
   `;
+
+async function queryDraftRows(context: { newsroomId: number }) {
+  const { ensureJobsSchema } = await import("./jobs.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  return sql.query<{
+    id: number;
+    lead_id: number;
+    headline: string;
+    dek: string | null;
+    topic: string | null;
+    form: string | null;
+    updated_at: string;
+    /** Has any prose been written into this draft row yet? See the CTE note. */
+    has_body: boolean;
+    lead_status: string;
+    origin: string | null;
+    newsworthiness: number | null;
+    why: string | null;
+    model_headline: string | null;
+    headline_source: string | null;
+    job_status: string | null;
+    job_stage: string | null;
+    job_started_at: string | null;
+    job_updated_at: string | null;
+    job_model_choice: string | null;
+    job_error: string | null;
+    evidence_required: boolean;
+    evidence_decision: string | null;
+    evidence_checked_at: string | null;
+    imported_text: boolean;
+    name_check_complete: boolean;
+    names_checked_at: string | null;
+    names_unresolved: number;
+  }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
 }
 
 /*
@@ -4022,6 +4035,31 @@ async function queryDraftRows(context: { newsroomId: number }) {
 export const listDraftsDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(({ context }) => queryDraftRows(context));
+
+/*
+  A count-only read of the same rows (review D2).
+
+  The shell draws the Drafts nav count on every desk screen, and it used to
+  call `listDraftsDesk()` for it -- every draft row with every projection, then
+  read `.length`. This runs the very same row query (`DESK_DRAFT_ROWS_SQL`, the
+  one `listDraftsDesk` and `listDraftsDeskPage` share) inside `count(*)`, so the
+  number is taken over exactly the rows the Drafts screen lists, from one source
+  of truth for what a draft row is, and only the integer crosses the wire. The
+  Drafts screen's "All" pill counts those same rows; the nav count is that
+  number, not a second one invented here.
+*/
+export const countDraftsDesk = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const [row] = await sql.query<{ count: number }>(
+      `select count(*)::int as count from (${DESK_DRAFT_ROWS_SQL}) as desk_drafts`,
+      [owned(context)],
+    );
+    return row?.count ?? 0;
+  });
 
 /**
  * The Drafts screen's window (Unit CZ-long-lists).

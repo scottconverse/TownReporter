@@ -13,7 +13,7 @@ import {
 } from "@/lib/news/check-gates";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
-import { SaveShortcut } from "@/components/desk-save-shortcut";
+import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
 import { StoryBody } from "@/components/story-body";
@@ -411,9 +411,15 @@ function EditorialPage() {
               onClick={() => save.mutate()}
             >
               Save edits
-              <span className="astra-wb-kbd" aria-hidden="true">
-                ⌘S
-              </span>
+              {/*
+                The drawn chip, aria-hidden so the press's accessible name stays
+                exactly "Save edits" -- the walks ask for it by that name
+                (`getByRole("button", { name: "Save edits" })`) and a name of
+                "Save edits ⌘S" would stop matching. Drawn through
+                `SaveShortcutHint`, not as a literal, so the label follows the
+                platform (Ctrl+S off a Mac) exactly as the story page's does.
+              */}
+              <SaveShortcutHint />
             </InkButton>
             {/*
               Unit UI1a2. Same control as the story page's (`desk.story.$leadId`),
