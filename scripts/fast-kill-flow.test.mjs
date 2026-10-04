@@ -190,7 +190,7 @@ const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
   ),
   "@/components/dialog": stub(`export function Dialog() { return null; } export function ChoiceCard() { return null; }`),
   "@/components/dialogs": stub(`export function NewStoryDialog() { return null; }`),
-  "@/lib/news/desk": stub(`export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; }`),
+  "@/lib/news/desk": stub(`export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; } export async function countDraftsDesk() { return 0; }`),
   "@/lib/news/opinion": stub(`export async function listEditorials() { return []; }`),
   "@/lib/news/dark": stub(`export async function listInvestigations() { return []; }`),
   "@/lib/news/follow-up-copy": stub(`export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }`),
