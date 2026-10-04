@@ -41,8 +41,18 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 
-/** The three statuses a row's own press can move a lead between. */
-export type LeadStatusMove = "held" | "killed" | "new";
+/**
+ * The statuses a row's own press can move a lead between.
+ *
+ * `drafted` is the fourth, and it arrives by exactly one route: the Undo of a
+ * kill putting a drafted lead back where it was (owner, 2026-10-03 -- before
+ * this, that Undo restored `new` and orphaned the lead's draft). No other press
+ * moves a lead INTO `drafted`; the desk's own drafting pass writes it, and the
+ * row's press sites never name it. Widening this union is safe for the patch
+ * below: `drafted` falls through `tabFor` and `matchesTab` exactly as `new`
+ * does, because a lead with a draft is still an open lead.
+ */
+export type LeadStatusMove = "held" | "killed" | "new" | "drafted";
 
 /**
  * The three Queue tabs a lead's own status decides.

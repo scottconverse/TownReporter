@@ -36,7 +36,7 @@
  * the host is inside `.desk-ltr.astra` and has to follow the desk's night
  * palette and its Text: Large scale (`--ts`) like every other desk surface.
  */
-import { createElement, type MouseEvent } from "react";
+import { createElement, type MouseEvent, type ReactNode } from "react";
 import { toast } from "sonner";
 import { editorActionError, looksLikeValidationDump } from "../lib/news/desk-copy.ts";
 
@@ -67,6 +67,24 @@ export type DeskToastOptions = {
    * A caller reporting a *new* action leaves this out and stacks as before.
    */
   id?: string | number;
+  /**
+   * One-tap follow-ups drawn INSIDE the toast, under its sentence.
+   *
+   * Owner, 2026-10-03: the fast kill is one press, so the reason it used to
+   * demand before killing is offered after the fact, as chips
+   * (`fast-kill.ts`, `KillReasonChips`). They belong to the sentence that
+   * reports the press — a press on a chip is a press on that kill — so they are
+   * drawn as part of the toast's body rather than as a second toast the editor
+   * has to connect to the first.
+   *
+   * Sonner has a `description` slot for exactly this shape, and it is not used
+   * here: with `unstyled` (this host, `desk-toaster.tsx`) the desk styles every
+   * part of the card itself, and a description slot the desk has never styled
+   * is a second element to keep in step with `.desk-toast-card` for no gain.
+   * The body is the element the desk already paints, so the chips go in it and
+   * the card grows one line.
+   */
+  chips?: ReactNode | null;
 };
 
 /*
@@ -256,6 +274,7 @@ export function deskErrorReason(error: unknown, what = "do that"): string {
 export function deskToast(text: string, options: DeskToastOptions = {}): void {
   const tone = options.tone ?? "ok";
   const undo = options.undo ?? null;
+  const chips = tone === "err" ? null : (options.chips ?? null);
   const body =
     tone === "err"
       ? createElement(
@@ -265,9 +284,23 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
           text,
         )
       : text;
+  /*
+    A failure never carries chips: the press did not take, so there is nothing
+    to say why about. The chip row is drawn under the sentence in the same
+    element, so the toast's own gap between the two lines is a real layout
+    decision and not sonner's default spacing between two siblings.
+  */
+  const message = chips
+    ? createElement(
+        "span",
+        { className: "desk-toast-body" },
+        createElement("span", { className: "desk-toast-line" }, body),
+        chips,
+      )
+    : body;
 
   const data: Parameters<typeof toast.success>[1] = {
-    className: "desk-toast desk-toast-" + tone,
+    className: "desk-toast desk-toast-" + tone + (chips ? " desk-toast-chips-card" : ""),
     duration: options.duration ?? (tone === "err" ? DESK_TOAST_ERR_MS : DESK_TOAST_OK_MS),
     // Undefined is sonner's own "a fresh toast"; an id replaces the one on
     // screen. See `DeskToastOptions.id`.
@@ -300,5 +333,5 @@ export function deskToast(text: string, options: DeskToastOptions = {}): void {
   }
 
   const sink = tone === "err" ? toast.error : tone === "warn" ? toast.warning : toast.success;
-  id = sink(body, data);
+  id = sink(message, data);
 }
