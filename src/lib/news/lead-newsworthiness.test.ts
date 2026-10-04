@@ -14,7 +14,7 @@ import { noEventVerdict, standingPageStamp } from "./lead-newsworthiness.ts";
  *     titles read like listings ("... Lists Regular Hours"), because a bare
  *     "Lists" or "Hours" token is not proof of a page.
  *
- * Each assertion names the rule it is pinning (R1-R4). Deleting that rule from
+ * Each assertion names the rule it is pinning (R1-R5). Deleting that rule from
  * lead-newsworthiness.ts fails its test: the stamp comes back null (or from a
  * different rule), so the `rule` check fails.
  */
@@ -142,6 +142,53 @@ test("a bare 'Lists' or 'Hours' token is not enough: published listing-style lea
     }),
     null,
   );
+});
+
+test("R5: a bare meeting record is dropped (dev scan, leads 415 and 416)", () => {
+  // The two routine meeting records the real scan filed as leads: a commission
+  // agenda title and a commission minutes title. Nothing is decided, proposed
+  // or disputed in either -- they are records that the meetings were held.
+  const pz = standingPageStamp({
+    headline: "Planning and Zoning Commission 9/16/26",
+    source_urls: ["https://www.youtube.com/watch?v=skwd58zm6jk"],
+  });
+  assert.equal(pz?.rule, "R5");
+  assert.match(pz!.reason, /meeting/i);
+
+  const hpc = standingPageStamp({
+    headline: "Historic Preservation Commission - October 1, 2026",
+    source_urls: ["https://www.youtube.com/watch?v=nbHxli1govY"],
+  });
+  assert.equal(hpc?.rule, "R5");
+
+  // Qualifier words before the body are fine: still only a name and a date.
+  assert.equal(
+    standingPageStamp({ headline: "Longmont Urban Renewal Authority (LURA) Meeting, August 18, 2026" })?.rule,
+    "R5",
+  );
+});
+
+test("R5: a meeting record that says something is news and survives", () => {
+  for (const headline of [
+    "Board of Adjustment denies the variance for 350 Kimbark Street",
+    "City Council Approves 2027 Budget",
+    "Boulder County Commissioners Confirm $13.2M in 2027 Reductions and Oct. 22 Public Hearing",
+    "Historic Preservation Commission meets Oct. 1, 2026; first item is approval of Sept. 3 minutes",
+  ]) {
+    assert.equal(standingPageStamp({ headline, source_urls: [] }), null, `news was stamped: ${headline}`);
+  }
+});
+
+test("R5: the meeting-capture transcript-story form is left to the model", () => {
+  // Published leads 297 and 298 carry the parenthesized capture stamp written
+  // by meeting-lead.ts `meetingLeadCopy`. That form means the desk holds an
+  // aligned transcript, so the lead is a transcript-story, not a bare record.
+  for (const headline of [
+    "City Council Regular Session - September 22, 2026 (2026-09-23)",
+    "Arts in Public Places Commission - September 17, 2026 (2026-09-18)",
+  ]) {
+    assert.equal(standingPageStamp({ headline, source_urls: [] }), null, `transcript-story stamped: ${headline}`);
+  }
 });
 
 test("real published news is never stamped (spot check across the published set)", () => {

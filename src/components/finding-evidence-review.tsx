@@ -1023,6 +1023,7 @@ export function FindingEvidenceReviewPanel({
     openClaims: list.openClaims,
     nameCheck: list.nameCheck,
     styleFindings: list.styleFindings,
+    groundingRows: review?.groundingRows ?? [],
   });
 
   /*

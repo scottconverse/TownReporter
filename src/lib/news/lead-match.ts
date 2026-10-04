@@ -63,6 +63,17 @@ const NAME_ONLY_MIN_SHARED = 2;
  * is the same argument measured on a finer instrument. */
 const HEADLINE_RATIO_CANDIDATE = 0.7;
 
+/** Unit R2, item 1 (2026-10-03): the ratio floor for the NAME-ONLY route to the
+ * candidate tier -- the case where the shorter headline's every name appears in
+ * the longer and there are at least four of them, but the wording overlaps less
+ * than HEADLINE_RATIO_CANDIDATE. 433 "Wild Plum Center Plans 'Sweet 60'
+ * Anniversary Gala for Six Decades of Head Start" against 277 "Wild Plum Center
+ * marks 60 years with 'Sweet 60' anniversary gala" is 0.64 with all four names,
+ * and is the same story. Lower than the general bar because the name agreement
+ * is doing the work: four independent shared names at 60% of the characters is
+ * not two headlines about different things. */
+const NEAR_DUPLICATE_NAME_RATIO = 0.6;
+
 /** Unit AO: a shared date:/amount: anchor, or a shared number that is not a
  * bare year -- see specificAnchors. One is enough at the classifying tier
  * where two are needed to pass the URL-sharing gate (ANCHOR_MATCH_MIN_SHARED),
@@ -1116,6 +1127,8 @@ function factsConflict(a: Iterable<string>, b: Iterable<string>): boolean {
  */
 type NearDuplicateSignals = {
   sharedNames: number;
+  /** Every name one side has, the other has too (and it has at least one). */
+  namesOneSided: boolean;
   oneSided: boolean;
   factsAgree: boolean;
   sharedSpecificAnchors: number;
@@ -1135,10 +1148,9 @@ function nearDuplicateSignals(
   const db = distinguishingTokens(b, a, place);
   const anchorsA = extractAnchors(a, place);
   const anchorsB = extractAnchors(b, place);
-  const sharedNames = sharedWordCount(
-    nonStoplistedProperNouns(a, place),
-    nonStoplistedProperNouns(b, place),
-  );
+  const namesA = nonStoplistedProperNouns(a, place);
+  const namesB = nonStoplistedProperNouns(b, place);
+  const sharedNames = sharedWordCount(namesA, namesB);
   const sharedAnchors = specificAnchors(
     [...anchorsA].filter((anchor) => anchorsB.has(anchor)),
   );
@@ -1146,6 +1158,21 @@ function nearDuplicateSignals(
 
   return {
     sharedNames,
+    /*
+      The name half of the same idea as `oneSided` below, and its own signal
+      because the two fail apart on the headline shape this desk keeps hitting:
+      an AI-written candidate is Title Case throughout, so contentTokens (which
+      drops capitalised words) is EMPTY on that side while the sentence-case
+      sibling it repeats is not. "Wild Plum Center Plans 'Sweet 60' Anniversary
+      Gala for Six Decades of Head Start" and "Wild Plum Center marks 60 years
+      with 'Sweet 60' anniversary gala" share every name the second one has
+      (Wild, Plum, Center, Sweet) and no content token at all on the candidate
+      side, so the token-based `oneSided` cannot see them; every name in the
+      shorter list being present in the longer one can. See nearDuplicateCandidate.
+    */
+    namesOneSided:
+      (namesA.size > 0 && [...namesA].every((name) => namesB.has(name))) ||
+      (namesB.size > 0 && [...namesB].every((name) => namesA.has(name))),
     // Scored on the distinguishing sets, and only when both sides have one: for
     // two all-names headlines contentTokens is empty on BOTH sides, and reading
     // oneSided off it made the test vacuously true for every such pair -- the
@@ -1168,10 +1195,22 @@ function nearDuplicateSignals(
     // subject -- see subjectTokens), and the test is containment in one
     // direction or the other, not a shared word: see the signal's doc comment
     // for why a shared name is not enough.
+    //
+    // An EMPTY side agrees. This is the same fix the both-empty clause always
+    // made for two all-names headlines, extended to the one-empty case that the
+    // Title-Case candidate produces: subjectTokens drops capitalised words, so
+    // an AI candidate ("Longmont Museum Sets Oct. 17 Reopening After Expansion")
+    // has no subject on its side while the sentence-case row it byte-for-byte
+    // repeats ("Longmont Museum sets Oct. 17 reopening after expansion") has
+    // several. Reading that as disagreement blocked the pair at charRatio 1.0;
+    // a side with no subject cannot disagree with a side that has one, so it
+    // must not. The gate that stays honest is the SHARED side: when both sides
+    // carry subject vocabulary, one must be contained in the other.
     subjectsAgree:
-      (sa.size === 0 && sb.size === 0) ||
-      (sa.size > 0 && [...sa].every((token) => sb.has(token))) ||
-      (sb.size > 0 && [...sb].every((token) => sa.has(token))),
+      sa.size === 0 ||
+      sb.size === 0 ||
+      [...sa].every((token) => sb.has(token)) ||
+      [...sb].every((token) => sa.has(token)),
     charRatio: () => (ratio ??= headlineCharRatio(a, b)),
   };
 }
@@ -1230,6 +1269,39 @@ function nearDuplicateCandidate(a: string, b: string, place?: NewsroomPlace | nu
     }
   }
   if (signals.charRatio() >= HEADLINE_ONLY_THRESHOLD) return true;
+  // A headline told again in the same NAMES, in two strengths. The routes above
+  // all miss a repeat with no shared anchor and no shared URL, and the token
+  // routes miss the AI's Title-Case candidate whose content tokens are empty
+  // (see namesOneSided); a headline that names the same things at most of its
+  // characters is worth the desk's duplicate check even so. Both routes here are
+  // still only CANDIDATES -- this tier links and files; it never stamps.
+  //
+  //   - the narrow one: at least two shared names, most of the characters in
+  //     common (>= 0.70), and one headline's names contained in the other's.
+  //     This is what links 67 "Development Services counter now closed to the
+  //     public every Wednesday morning" to 389 "Development Services Center
+  //     Counter Closed Wednesday Mornings" and 207/212 "Longmont Senior Center
+  //     ... free evening meal(s)" to 323 "… Lists Free Evening Meals".
+  //   - the wider one: at least FOUR shared names at >= 60% of the characters,
+  //     WITHOUT requiring containment. This is the route 417 "North Pace Street
+  //     Entrance to Fox Creek Village Reopens; South Entrance Remains Closed"
+  //     against the killed 412 "North Pace Street Entrance at Fox Creek Village
+  //     and King Soopers Reopens" takes -- seven names in common at 0.74 of the
+  //     characters -- and it is not one-sided either way: each side adds a name
+  //     the other lacks (417's "South", 412's "King"/"Soopers"), which is why
+  //     the narrow route above cannot see a pair that is plainly one story. The
+  //     same route links the Title-Case repeat of 433 against 277, four shared
+  //     names (Wild, Plum, Center, Sweet) at 0.64 of the characters.
+  if (
+    signals.namesOneSided &&
+    signals.sharedNames >= NAME_ONLY_MIN_SHARED &&
+    signals.charRatio() >= HEADLINE_RATIO_CANDIDATE
+  ) {
+    return true;
+  }
+  if (signals.sharedNames >= 4 && signals.charRatio() >= NEAR_DUPLICATE_NAME_RATIO) {
+    return true;
+  }
   return signals.oneSided && signals.charRatio() >= HEADLINE_RATIO_CANDIDATE;
 }
 
@@ -1499,10 +1571,25 @@ export function sameStoryForMerge(
  * and a killed lead plus a new fact is the case where dropping it loses one.
  *
  * What counts as a fact: a concrete ANCHOR -- a date, a dollar amount, or a
- * number -- in the two leads' own words (`why` and `evidence`; deliberately
- * NOT the headline, which the caller has already established is the same story
- * at >= 0.85 Jaccard, so letting headline wording count would make every
- * paraphrase look like a new fact). See NEW_FACT_ANCHOR_KINDS.
+ * number -- in the two leads' own words. See NEW_FACT_ANCHOR_KINDS.
+ *
+ * R2, item 1 (2026-10-03): the HEADLINE is counted too, on both sides. It used
+ * to be excluded, on the reasoning that the caller had already established the
+ * two are the same story, so letting headline wording count would make every
+ * paraphrase look like a new fact. That was wrong about the instrument: a
+ * paraphrase re-words a fact, it does not produce a NEW anchor, and the anchors
+ * are dates/amounts/counts, which are the same token however they are spelled
+ * (`Oct. 6`, `October 6th`, `2026-10-06` all fold to `date:20261006`). What the
+ * exclusion DID do was let a repeat through whenever the OLD row's `why` and
+ * `evidence` were thin or empty -- which is the rule the live run tripped: 429
+ * "Longmont Library Closed Oct. 6 for All-Staff Training Day" carries "Oct. 6",
+ * and the killed 367 it repeats "Longmont Library Closed All Day Oct. 6 for
+ * Staff Training" carries the same "Oct. 6" in its own HEADLINE, but with a
+ * blank `why` the old side saw no anchor at all and the repeat was filed as a
+ * development. Counting the headline closes the case the exclusion was there
+ * for: a date the old lead already states is not a new fact. A genuinely
+ * changed fact still is -- 435 against the budget row 149 adds a date/amount
+ * 149 never states anywhere, and still files as developing.
  *
  * The bar was once "one new anchor OR two new content tokens" (0.6.69 unit AK
  * as first written). The token half was wrong, and the Postgres end-to-end
@@ -1526,13 +1613,15 @@ export function sameStoryForMerge(
  * of concrete new fact this bar is for). */
 const NEW_FACT_ANCHOR_KINDS = ["date:", "amount:", "num:"] as const;
 
-/** The concrete anchors in a lead's own words, and nothing else. */
+/** The concrete anchors in a lead's own words (its headline included), and
+ * nothing else. */
 function factAnchors(
+  headline?: string | null,
   why?: string | null,
   evidence?: string | null,
   place?: NewsroomPlace | null,
 ): Set<string> {
-  const text = `${why ?? ""} ${evidence ?? ""}`;
+  const text = `${headline ?? ""} ${why ?? ""} ${evidence ?? ""}`;
   const anchors = new Set<string>();
   for (const anchor of extractAnchors(text, place)) {
     if (NEW_FACT_ANCHOR_KINDS.some((kind) => anchor.startsWith(kind))) anchors.add(anchor);
@@ -1541,12 +1630,12 @@ function factAnchors(
 }
 
 export function newFactsIn(
-  candidate: { why?: string | null; evidence?: string | null },
-  existing: { why?: string | null; evidence?: string | null },
+  candidate: { headline?: string | null; why?: string | null; evidence?: string | null },
+  existing: { headline?: string | null; why?: string | null; evidence?: string | null },
   place?: NewsroomPlace | null,
 ): boolean {
-  const old = factAnchors(existing.why, existing.evidence, place);
-  for (const anchor of factAnchors(candidate.why, candidate.evidence, place)) {
+  const old = factAnchors(existing.headline, existing.why, existing.evidence, place);
+  for (const anchor of factAnchors(candidate.headline, candidate.why, candidate.evidence, place)) {
     if (!old.has(anchor)) return true;
   }
   return false;

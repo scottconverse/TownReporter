@@ -171,11 +171,12 @@ import {
 } from "./outlet-credit";
 import {
   buildScanUserMessage,
+  composeScanRunSummary,
   composeZeroLeadSummary,
-  droppedCandidatesSentence,
   editorFetchError,
   kindFromSourceUrl,
   resurfacedSummarySentence,
+  scanDecisionsSentence,
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
@@ -236,6 +237,7 @@ import {
   failoverNoteSentence,
   failoverReasonPhrase,
 } from "./automatic-failover.ts";
+import type { DraftGroundingRow } from "./draft-specifics.ts";
 import type { DraftRow, LeadRow, MemoryRow, ScanRow, SourceRow } from "./types";
 
 function owned(context: { newsroomId?: number }) {
@@ -2761,15 +2763,34 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       model-written field the original fix noticed; the lead fields beside it,
       which fail the same transaction, did not get one until SCAN-001.
     */
-    let summary = String(data.editor_summary ?? "").slice(0, 1200);
-    if (leadsCreated === 0 && !summary)
-      summary = composeZeroLeadSummary({
-        fetched: fetchedCount,
-        changed: pendingHashes.filter((p) => p.changed).length,
-      });
+    /*
+      Scan quality round 2 (2026-10-04): the model's paragraph and the desk's
+      own sentences share one 1200-character column, and the paragraph -- not
+      the counts -- is what gives way when they do not fit. Before this, each
+      sentence was stitched on and the whole thing re-sliced to 1200, so a model
+      paragraph that ran to the budget erased every count behind it: the
+      2026-10-03 dev scan's summary ended mid-word at the limit and reported no
+      dropped or stamped counts at all.
+
+      So the counts go down FIRST, in one short plain sentence
+      (`scanDecisionsSentence`), and the model's paragraph is trimmed to the
+      room that is left. The counts are the receipt for a decision; the
+      paragraph is the colour.
+    */
+    const SUMMARY_LIMIT = 1200;
+    const decisionsSentence = scanDecisionsSentence({
+      standingPageDropped,
+      noEventDropped,
+      repeatsStamped: resurfacedKilled + resurfacedOpen,
+      firstDroppedReason,
+    });
     const resurfacedSentence = resurfacedSummarySentence({
-      resurfacedKilled,
-      resurfacedOpen,
+      // The stamped repeats (killed/open) are carried by `scanDecisionsSentence`
+      // above, in the one short plain sentence the editor reads; this sentence
+      // keeps the other decisions -- a maybe-same filing, a same-scan merge, a
+      // killed story that came back with new facts -- and the example headline.
+      resurfacedKilled: 0,
+      resurfacedOpen: 0,
       possibleMatched,
       // Unit AK item 2: a developing finding is filed too, but it is not a
       // brand-new story for the desk -- it is an old one that came back -- so
@@ -2779,25 +2800,22 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
     });
-    if (resurfacedSentence)
-      summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
-    /*
-      Scan quality (2026-10-03): a drop is a decision the editor must be able to
-      read. The candidates this pass left out for having no news event -- the
-      cheap standing-page rules plus the model's `is_event: false` verdict --
-      are named here with the first example and the reason, so a shorter Queue
-      is explained rather than mysterious.
-    */
-    const droppedSentence = droppedCandidatesSentence({
-      standingPageDropped,
-      noEventDropped,
-      firstDroppedReason,
+    let editorSummary = String(data.editor_summary ?? "").trim();
+    if (leadsCreated === 0 && !editorSummary)
+      editorSummary = composeZeroLeadSummary({
+        fetched: fetchedCount,
+        changed: pendingHashes.filter((p) => p.changed).length,
+      });
+    // The assembly -- counts and the coverage line first, the model's
+    // paragraph trimmed to the room left -- lives in desk-copy.ts so the
+    // folding is testable without a database (see composeScanRunSummary).
+    let summary = composeScanRunSummary({
+      editorSummary,
+      decisionsSentence,
+      resurfacedSentence,
+      meetingCoverageLine: meetingAwareness?.coverageLine ?? "",
+      summaryLimit: SUMMARY_LIMIT,
     });
-    if (droppedSentence)
-      summary = summary ? `${summary} ${droppedSentence}`.slice(0, 1200) : droppedSentence;
-    const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
-    if (meetingCoverageLine)
-      summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
     // Sanitize the ASSEMBLED sentence rather than only the model's clause at
     // the top: every part of it -- the coverage line, the resurfaced sentence
     // naming a discarded headline, the meeting clause -- is stitched onto the
@@ -4834,6 +4852,7 @@ export type UnreviewedClaimDeps = {
     rows: readonly FindingEvidenceRow[];
     claimRows: readonly ClaimEvidenceRow[];
     manualClaimRows: readonly ManualClaimEvidenceRow[];
+    groundingRows?: readonly DraftGroundingRow[];
     evidenceToken: string;
   }>;
 };
@@ -4888,7 +4907,12 @@ export async function unreviewedClaimsGate(
     throw error;
   }
   return {
-    outstanding: claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows),
+    outstanding: claimsNeedingReview(
+      review.rows,
+      review.claimRows,
+      review.manualClaimRows,
+      review.groundingRows ?? [],
+    ),
     evidenceToken: review.evidenceToken,
   };
 }

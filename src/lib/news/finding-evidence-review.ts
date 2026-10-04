@@ -2,6 +2,7 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
+import type { DraftGroundingRow } from "./draft-specifics.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import { sha256 } from "./url-guard.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
@@ -99,6 +100,14 @@ export type FindingEvidenceReview = {
   rows: FindingEvidenceRow[];
   claimRows: ClaimEvidenceRow[];
   manualClaimRows: ManualClaimEvidenceRow[];
+  /**
+   * Round 2, item 5: the specifics the body states that no source the check
+   * could read carries. Not a row stack with judgments -- there is nothing to
+   * judge and no record to open -- but plain text the pane lists as needing a
+   * person. Read from the draft's stored `draftGrounding` (see `storedGrounding`)
+   * and empty when the draft predates the measurement or its body has moved.
+   */
+  groundingRows: DraftGroundingRow[];
   manualClaimCaptureOptions: ManualClaimCaptureOption[];
 };
 
@@ -355,6 +364,37 @@ function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
 
 function manualClaimKey(claim: StoredManualClaim) {
   return `manual-claim:${claim.id}`;
+}
+
+/**
+ * Round 2, item 5: the ungrounded specifics stored with this draft, or none.
+ *
+ * Tolerant on purpose, unlike `storedClaims`/`storedManualClaims`. Those two
+ * throw `invalid-input` on a shape they cannot read -- which the publish gate
+ * treats as "there is nothing to count" (`isUnreadableFindingsError`) -- and a
+ * grounding block the writer never produced (an older draft) or wrote badly
+ * must not open or close a gate it has nothing to say about. A missing block
+ * means "not measured"; a present block whose `checkedText` no longer matches
+ * the body is STALE -- an editor edited the text after the measurement -- and is
+ * dropped rather than listed, because its rows would name text nobody can see.
+ */
+export function storedGrounding(draft: Partial<DraftRow>): DraftGroundingRow[] {
+  const stored = objectMemo(draft.research_json).draftGrounding;
+  if (!stored || typeof stored !== "object" || Array.isArray(stored)) return [];
+  const value = stored as Record<string, unknown>;
+  if (value.version !== 1 || typeof value.checkedText !== "string" || !Array.isArray(value.rows)) return [];
+  if (normalizedText(value.checkedText) !== normalizedText(draft.body ?? "")) return [];
+  const kinds = new Set<DraftGroundingRow["kind"]>(["address", "amount", "date", "identifier", "name", "vote"]);
+  const rows: DraftGroundingRow[] = [];
+  for (const raw of value.rows) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const row = raw as Record<string, unknown>;
+    if (typeof row.kind !== "string" || !kinds.has(row.kind as DraftGroundingRow["kind"])) continue;
+    if (typeof row.text !== "string" || !row.text.trim()) continue;
+    rows.push({ kind: row.kind as DraftGroundingRow["kind"], text: row.text });
+    if (rows.length >= 24) break;
+  }
+  return rows;
 }
 
 function referenceForManualClaim(claim: StoredManualClaim): StoryFinding {
@@ -848,6 +888,7 @@ export async function loadFindingEvidenceReview(
     manualClaimRows: await Promise.all(
       manualClaims.map((claim) => resolveManualClaim(sql, newsroomId, draft, claim)),
     ),
+    groundingRows: storedGrounding(draft),
     manualClaimCaptureOptions: await manualClaimCaptureOptions(sql, newsroomId, draft),
   };
 }

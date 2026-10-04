@@ -17,7 +17,7 @@
  *      happened, will happen on a date, was decided, changed, announced or
  *      disputed, or a number moved. A directory, a list of funds, opening
  *      hours, a "lists" page, an obituary index or an about page describes
- *      what exists and has no event. -- R1-R4 below name the page shapes.
+ *      what exists and has no event. -- R1-R5 below name the page shapes.
  *
  *   2. Page-change monitoring. The Marshall Project's Klaxon (and every page
  *      watcher since) treats a standing page as a WATCH TARGET: the news is the
@@ -35,6 +35,12 @@
  *   4. Evergreen / boilerplate detection: URL and title patterns for standing
  *      pages (/directory, /about, /hours, obituaries index, /projects, /funds,
  *      "Lists", "Index", "Page", "Directory", "Hours"). -- R1-R3.
+ *
+ *   5. Meeting records. "A meeting is news when something is decided, proposed
+ *      or disputed, not when a record is posted" (this desk's rule, after two
+ *      routine commission records -- an agenda and a set of minutes -- were
+ *      filed as leads). A headline that is nothing but a public body's name and
+ *      a date is a record that the meeting was held, not news from it. -- R5.
  *
  * A rule only fires when the candidate shows a page ARTIFACT and no event: a
  * title that carries a dated event ("...Fundraiser Set for Oct. 10") is left
@@ -62,7 +68,7 @@ export type LeadEventFields = {
 };
 
 export type StandingPageStamp = {
-  /** Short rule id (R1-R4), for tests and logs. */
+  /** Short rule id (R1-R5), for tests and logs. */
   rule: string;
   /** One line the editor can read: why this candidate is a page, not news. */
   reason: string;
@@ -182,7 +188,86 @@ function eventsListingStamp(lead: LeadLike): StandingPageStamp | null {
   return null;
 }
 
-const STANDING_PAGE_RULES = [obituaryIndexStamp, directoryIndexStamp, projectsIndexStamp, eventsListingStamp];
+/*
+  R5 -- a bare meeting record (news values: a meeting is news when something is
+  decided, proposed or disputed, not when a record is posted).
+
+  "Planning and Zoning Commission 9/16/26" and "Historic Preservation
+  Commission - October 1, 2026" are the video/agenda titles of two routine
+  meetings -- the agenda posted, the minutes posted, nothing decided -- and the
+  scan filed both as leads. A headline whose only content is the body's name
+  and a date says only that the meeting happened; the news, if any, is what was
+  decided in it, and that belongs to the meeting-capture transcript path.
+
+  Three conditions, all cheap:
+    - the title carries a date (no date, no record);
+    - the title names a public body (council, commission, board, committee,
+      authority, trustees, panel -- with any qualifier words: "Historic
+      Preservation Commission", "Board of Adjustment");
+    - nothing in the title is news: at most a few words are left once the body,
+      the date and the meeting vocabulary (session, meeting, agenda, minutes,
+      hearing, packet, consent, item, remarks ...) are removed, and none of them
+      is a decision/action word (approve, vote, reject, propose, postpone,
+      confirm, cut, hire ...). "Board of Adjustment meets Oct. 3" is a record;
+      "Board of Adjustment denies the variance" is news and is left alone.
+
+  Guard: a headline ending in a parenthesized machine timestamp -- "City Council
+  Regular Session - September 22, 2026 (2026-09-23)" -- is written only by the
+  meeting-capture path (./meeting-lead.ts `meetingLeadCopy`), which files a lead
+  only for an ALIGNED transcript. Those leads are transcript-stories the desk
+  has the recording for, not bare records, so this rule leaves them to the
+  model. That is the whole difference between the published council-session
+  leads and the two records this rule drops.
+*/
+const MEETING_BODY_NOUN =
+  /^(council|councils|commission|commissions|commissioners|board|boards|committee|committees|authority|authorities|trustees|panel|panels)$/;
+
+/** Words that name a meeting or its paperwork rather than an event in it. */
+const MEETING_RECORD_WORDS = new Set(
+  (
+    "meeting meetings session sessions regular special study worksession work " +
+    "agenda agendas minutes packet packets hearing hearings presession pre call " +
+    "order roll pledge allegiance remarks comments report reports presentation " +
+    "presentations consent business item items reading readings ordinance " +
+    "ordinances resolution resolutions new old first second third public invited " +
+    "be heard member members from to of and the a an at on in for with"
+  ).split(/\s+/),
+);
+
+/** A decision, proposal or dispute: the presence of one means this is news. */
+const MEETING_ACTION_WORD =
+  /\b(approv\w*|reject\w*|den(?:y|ies|ied)|vote[sd]?|voting|pass(?:ed|es)?|adopt\w*|decid\w*|decision|postpon\w*|delay\w*|propos\w*|disput\w*|debat\w*|confirm\w*|flag\w*|back(?:ed|s)?|block\w*|halt\w*|sign(?:ed|s)?|veto\w*|ok(?:s|'d)?|kill\w*|settl\w*|award\w*|hir(?:e|ed|es|ing)|fir(?:e|ed|es|ing)|appoint\w*|elect\w*|su(?:ed|es)|fin(?:ed|es)|rais(?:e|ed|es)|cuts?|sets?|axe[sd]?|greenlight\w*|agree\w*|table[sd]?|unanimous|announc\w*|reopen\w*|launch\w*|fund\w*|budget\w*|contract\w*|pay(?:s|ment|ments)?|paid|spend\w*|purchas\w*|sell\w*|sold|build\w*|expands?|expand(?:ed|s|ing)?|reduc\w*|increas\w*|tax(?:es)?|fees?|rates?|deadline\w*|applicat\w*|cancel\w*)\b/i;
+
+/** A parenthesized machine timestamp: the meeting-capture transcript-lead form. */
+const CAPTURE_STAMP = /\(\s*\d{4}-\d{2}-\d{2}/;
+
+const MONTH_WORD = /^(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/;
+
+function meetingRecordStamp(lead: LeadLike): StandingPageStamp | null {
+  const title = lead.headline ?? "";
+  if (CAPTURE_STAMP.test(title)) return null; // transcript-story, not a bare record
+  const cleaned = title.replace(/\([^)]*\)/g, " ").replace(/&amp;/g, "&");
+  if (!titleCarriesEventDate(cleaned) && !/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(cleaned)) return null;
+  const words = cleaned.toLowerCase().match(/[a-z]+|\d+(?:\/\d+)*/g) ?? [];
+  const bodyAt = words.findIndex((w) => MEETING_BODY_NOUN.test(w));
+  if (bodyAt < 0) return null;
+  if (MEETING_ACTION_WORD.test(cleaned)) return null;
+  const isDateWord = (w: string) =>
+    MONTH_WORD.test(w) || /^\d+(?:\/\d+)+$/.test(w) || /^\d{4}-\d{2}-\d{2}$/.test(w) || /^\d{1,4}$/.test(w);
+  let extra = 0;
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (i === bodyAt || isDateWord(w) || MEETING_RECORD_WORDS.has(w)) continue;
+    extra++;
+  }
+  if (extra > 3) return null; // real content beside the body: leave it to the model
+  return {
+    rule: "R5",
+    reason: "headline is only a meeting body and a date — a record that the meeting was held, not news from it",
+  };
+}
+
+const STANDING_PAGE_RULES = [obituaryIndexStamp, directoryIndexStamp, projectsIndexStamp, eventsListingStamp, meetingRecordStamp];
 
 /**
  * Stamp a candidate that is a standing page rather than a news event, or null
