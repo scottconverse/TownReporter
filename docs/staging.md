@@ -27,7 +27,7 @@ That:
 3. Terminates connections to `townreporter_dev`, drops and recreates it, and
    restores the dump into it with `psql`. Prints the story count so you can see
    real data landed.
-4. Upserts a staging sign-in into `townreporter_dev` via
+4. Upserts a staging owner sign-in into `townreporter_dev` via
    `scripts\stage-editor.mjs` (skip with `-StageEditor:$false`). See
    "Signing in on staging" below.
 5. Runs `npm run build` (skip with `-NoBuild` to reuse the existing `.output`).
@@ -58,41 +58,62 @@ else can open the staged desk at all.
 `ops\stage.ps1` fixes that automatically (unless run with
 `-StageEditor:$false`): right after the restore, it runs
 `node scripts\stage-editor.mjs` against `townreporter_dev`, which upserts a
-second, disposable editor account:
+second, disposable owner account:
 
 ```
 email:    staging@townreporter.test
 password: staging-walk-2026
 ```
 
-That account is a newsroom `editor`, not `owner` -- `newsroom_members` only
-ever allows one `owner` row (a unique partial index enforces it, and the
-restored backup's real owner already holds it), so a second owner is not
-possible here even if it were desirable. An `editor` can open every desk
-page, including `/desk/ops` (the Server page): a handful of owner-only
-panels there (Writing models sign-in, Paper setup, Invite an editor) simply
-do not render for a non-owner, but the page itself, and everything else
-under `/desk`, is fully visible.
+By default, that account becomes newsroom 1's `owner`, giving access to
+owner-only screens and controls, including Writing models sign-in, Paper
+setup, and Invite an editor. In **one transaction**, the restored owner row
+becomes `editor` before staging becomes `owner`, respecting the unique
+partial index that permits only one owner per newsroom. A failure rolls
+back both the role transfer and the account changes. Other newsrooms are
+untouched.
+
+Pass `-StageOwner:$false` to `ops\stage.ps1` to keep the previous behavior:
+staging is an `editor`, and other membership roles are left alone. After a
+fresh restore, this keeps the real owner as owner. It does not transfer
+ownership back if staging already took it on a previous run. Pass
+`-StageEditor:$false` to skip the staging account step entirely.
 
 **These credentials exist ONLY inside `townreporter_dev`.** They are written
 directly into that database's own `user` / `account` / `newsroom_members`
 tables -- there is no copy anywhere else, not in this repo, not in
 production. The next time `ops\stage.ps1` restores a fresh backup, the whole
 database (including this account) is dropped and recreated from that backup,
-so the staging sign-in is gone until the script's staging-editor step runs
+so the staging sign-in is gone until the script's staging-account step runs
 again, which it does by default on every restore.
 
-You can also (re-)run it by hand against a running staging copy:
+You can also (re-)run only the account step against the existing staging copy,
+without restoring data or rebuilding/restarting the server:
 
 ```
 $env:DATABASE_URL = "postgres://postgres@127.0.0.1:5433/townreporter_dev"
 node scripts\stage-editor.mjs
 ```
 
+Append `--editor` to the Node command to assign staging the editor role instead.
+
 It refuses to run against any database whose name is not exactly
-`townreporter_dev` -- including `townreporter`, the live paper's database --
-and it is idempotent: running it again just updates the password in place,
-never creates a duplicate account.
+`townreporter_dev`, including `townreporter`, the live paper's database.
+The CLI rejects URL query overrides, and the writing function independently
+checks the connected database's actual name before any writes. It is
+idempotent: running it again updates the password in place, never creates a
+duplicate account, and leaves exactly one owner in newsroom 1 (staging).
+
+The focused behavior tests use a fresh UTF8 Postgres cluster under `%TEMP%`,
+Scoop's `postgresql\current\bin` binaries, and only port 5550. They check
+the live-database refusal using a fake config, ownership on two successive
+runs, the editor opt-out, and transaction rollback. Run them from this checkout:
+
+```powershell
+$env:TOWNREPORTER_STAGE_OWNER_POSTGRES_TEST = '1'
+try { node --test scripts\stage-editor.test.mjs }
+finally { Remove-Item Env:TOWNREPORTER_STAGE_OWNER_POSTGRES_TEST }
+```
 
 ## Walk the changed screens
 
