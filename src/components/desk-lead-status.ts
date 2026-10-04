@@ -41,8 +41,18 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 
-/** The three statuses a row's own press can move a lead between. */
-export type LeadStatusMove = "held" | "killed" | "new";
+/**
+ * The statuses a row's own press can move a lead between.
+ *
+ * `drafted` is the fourth, and it arrives by exactly one route: the Undo of a
+ * kill putting a drafted lead back where it was (owner, 2026-10-03 -- before
+ * this, that Undo restored `new` and orphaned the lead's draft). No other press
+ * moves a lead INTO `drafted`; the desk's own drafting pass writes it, and the
+ * row's press sites never name it. Widening this union is safe for the patch
+ * below: `drafted` falls through `tabFor` and `matchesTab` exactly as `new`
+ * does, because a lead with a draft is still an open lead.
+ */
+export type LeadStatusMove = "held" | "killed" | "new" | "drafted";
 
 /**
  * The three Queue tabs a lead's own status decides.
@@ -56,7 +66,7 @@ export type StatusTab = "open" | "held" | "killed";
 /** The Queue page's tab numbers, in the shape the page holds them. */
 type Counts = { open?: number; held?: number; killed?: number; all?: number };
 
-type Leadish = { id?: number; status?: string; headline?: string };
+type Leadish = { id?: number; status?: string; headline?: string; why?: string | null; topic?: string | null };
 
 /**
  * What the cached list being patched is SHOWING, read off its own query key.
@@ -74,6 +84,8 @@ export type LeadsPatch = {
   filter?: StatusTab;
   /** The sort it is in, kept so a rollback can put an arriving row back. */
   sort?: string;
+  section?: string;
+  search?: string;
   /**
    * The row itself, which only a move INTO a cached tab needs: a list that
    * never held the lead cannot invent it, so the caller hands over the copy it
@@ -165,7 +177,7 @@ export function patchLeadsData(
   // it is arriving in -- the copy handed over by the caller.
   const source = held ?? patch.incoming;
   const moved = source ? { ...source, status } : undefined;
-  const stays = moved ? matchesTab(moved, patch.filter) : false;
+  const stays = moved ? matchesTab(moved, patch.filter) && matchesView(moved, patch) : false;
 
   let nextRows = rows;
   let delta = 0;
@@ -215,6 +227,12 @@ function matchesTab(row: Leadish, filter: StatusTab | undefined): boolean {
   return true;
 }
 
+function matchesView(row: Leadish, view: LeadsPatch): boolean {
+  if (view.section && view.section !== "all" && row.topic !== view.section) return false;
+  const needle = view.search?.trim().toLowerCase();
+  return !needle || `${row.headline ?? ""} ${row.why ?? ""} ${row.topic ?? ""}`.toLowerCase().includes(needle);
+}
+
 /**
  * The tab and sort a cached list under `["leads"]` is showing, read off the
  * key the Queue builds (`["leads", filter, section, sort, search, shown]`).
@@ -226,8 +244,11 @@ function matchesTab(row: Leadish, filter: StatusTab | undefined): boolean {
  */
 export function leadsViewFor(key: readonly unknown[]): LeadsPatch {
   const filter = key.length > 1 ? key[1] : undefined;
+  if (!isStatusTab(filter) && filter !== "all" && filter !== "printed") return {};
   const sort = typeof key[3] === "string" ? key[3] : undefined;
-  return { filter: isStatusTab(filter) ? filter : undefined, sort };
+  const section = typeof key[2] === "string" ? key[2] : undefined;
+  const search = typeof key[4] === "string" ? key[4] : undefined;
+  return { filter: isStatusTab(filter) ? filter : undefined, sort, section, search };
 }
 
 function isStatusTab(value: unknown): value is StatusTab {

@@ -24,7 +24,7 @@
  * module that can replace the reason with a generic apology, because a generic
  * apology is the silent failure with extra steps.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
 import { deskErrorReason, deskToast, type DeskUndo } from "@/components/desk-toast";
@@ -60,6 +60,28 @@ export type DeskActionCopy<Result, Variables = void> = {
    * Returning null means this particular outcome is not reversible.
    */
   undo?: (result: Result, variables: Variables) => DeskUndo | null;
+  /**
+   * One-tap follow-ups drawn on the done toast, under its sentence.
+   *
+   * Owner, 2026-10-03: the fast kill is one press, so the reason it used to ask
+   * for before killing is offered after it, as chips (`fast-kill.ts`). A press
+   * whose outcome raises a question gets to draw the answer; a press that does
+   * not returns null and the toast is exactly the toast it was.
+   *
+   * It is on the copy and not on the press site because it is decided by the
+   * OUTCOME, not by the screen: the same `setStatus` mutation carries the fast
+   * kill, the Hold, and the Undo, and only the kill has something to ask.
+   */
+  chips?: (result: Result, variables: Variables) => ReactNode | null;
+  /**
+   * How long the done toast lives, when this outcome needs longer than
+   * `DESK_TOAST_OK_MS`. `undefined` keeps the tone's own life.
+   *
+   * Read for the same reason `chips` is: the kill toast asks a question and has
+   * to stay long enough to be answered, while every other outcome of the same
+   * mutation is a sentence to read once.
+   */
+  duration?: (result: Result, variables: Variables) => number | undefined;
 };
 
 /**
@@ -69,11 +91,13 @@ export type DeskActionCopy<Result, Variables = void> = {
 export function deskActionDone<Result, Variables>(
   result: Result,
   variables: Variables,
-  copy: Pick<DeskActionCopy<Result, Variables>, "done" | "undo">,
-): { message: string; undo: DeskUndo | null } {
+  copy: Pick<DeskActionCopy<Result, Variables>, "done" | "undo" | "chips" | "duration">,
+): { message: string; undo: DeskUndo | null; chips: ReactNode | null; duration: number | undefined } {
   return {
     message: copy.done(result, variables),
     undo: copy.undo?.(result, variables) ?? null,
+    chips: copy.chips?.(result, variables) ?? null,
+    duration: copy.duration?.(result, variables),
   };
 }
 
@@ -155,8 +179,8 @@ export function useDeskAction<Result>(copy: DeskActionCopy<Result>): DeskAction<
         setPhase("failed");
         return;
       }
-      const { message, undo } = deskActionDone(result, undefined, copyRef.current);
-      if (message) deskToast(message, { tone: "ok", undo });
+      const { message, undo, chips, duration } = deskActionDone(result, undefined, copyRef.current);
+      if (message) deskToast(message, { tone: "ok", undo, chips, duration });
       setPhase("done");
     } catch (err) {
       const sentence = deskActionFailure(err, copyRef.current);
@@ -396,8 +420,8 @@ export function useDeskMutation<Data, Variables = void>(
         throw new DeskFollowUpError(sentence, error);
       }
       if (!optionsRef.current.muted?.()) {
-        const { message, undo } = deskActionDone(data, variables, optionsRef.current);
-        if (message) deskToast(message, { tone: "ok", undo });
+        const { message, undo, chips, duration } = deskActionDone(data, variables, optionsRef.current);
+        if (message) deskToast(message, { tone: "ok", undo, chips, duration });
       }
     },
     onError: (error: Error, variables: Variables, mutationContext: unknown) => {

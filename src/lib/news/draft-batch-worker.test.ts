@@ -166,12 +166,16 @@ it("actual draft worker uses only the persisted forced transport", async () => {
     else process.env.ANTHROPIC_API_KEY = previousKey;
   }
   assert.deepEqual(calls, ["claude-ocr", "claude:selected-claude"]);
-  const [persisted] = await sql.query<{ status: string; drafts: number; result_json: string; draft_id: number }>(
-    "select j.status,j.result_json,(select count(*)::int from drafts d where d.lead_id=j.subject_id) drafts,(select id from drafts d where d.lead_id=j.subject_id order by id desc limit 1) draft_id from desk_jobs j where j.id=$1",
+  const [persisted] = await sql.query<{ status: string; drafts: number; result_json: string; draft_id: number; model_body: string | null }>(
+    "select j.status,j.result_json,(select count(*)::int from drafts d where d.lead_id=j.subject_id) drafts,(select id from drafts d where d.lead_id=j.subject_id order by id desc limit 1) draft_id,(select model_body from drafts d where d.lead_id=j.subject_id order by id desc limit 1) model_body from desk_jobs j where j.id=$1",
     [job.id],
   );
   assert.equal(persisted.status, "completed");
   assert.equal(persisted.drafts, 1);
+  // 0119: the writer's final row keeps its own body in `model_body` (the repair
+  // pass above changes no words on this run), which is what the editor's save
+  // then leaves alone.
+  assert.equal(persisted.model_body, "The council met Tuesday.");
   const completion = JSON.parse(persisted.result_json);
   assert.equal(completion.requestId, "retained");
   assert.equal(completion.version, 2);

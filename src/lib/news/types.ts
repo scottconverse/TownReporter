@@ -171,6 +171,11 @@ export type DraftRow = {
   /** Migration 0093. Who last decided this row's headline: `model` or
    * `editor`. A redraft keeps the editor's headline when this reads editor. */
   headline_source?: string | null;
+  /** Migration 0119. The body the model wrote, kept even when `body` holds
+   * the editor's -- the editor's save overwrites `body` in place, so without
+   * this the model's original is gone the moment the editor touches it.
+   * Null/absent = written before 0119, or a draft no model wrote. */
+  model_body?: string | null;
 };
 
 export type ArticleRow = {

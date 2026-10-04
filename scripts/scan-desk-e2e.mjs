@@ -146,7 +146,7 @@ async function ownTheDesk() {
  */
 async function theScreenRenders() {
   await page.goto(`${base}/desk/scan`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 1, name: "Scan", exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByRole("heading", { level: 1, name: "Scan history", exact: true }).waitFor({ timeout: 30_000 });
   step("the Scan page renders its own heading");
 
   const runButton = page.getByRole("button", { name: "Run scan" });
@@ -173,7 +173,7 @@ async function theScreenRenders() {
   // A fresh desk has run zero scans: the zero-state copy, not a skeleton or
   // an error, and the section's own count reads 0.
   await page
-    .getByText("No scans yet. Click Run scan when you want a new pass — not on a loop.")
+    .getByText("No scans yet. Run a scan when you want a new pass.")
     .waitFor({ timeout: 30_000 });
   step("a fresh desk shows the previous-scans zero state, not a skeleton or an error");
 
@@ -286,7 +286,7 @@ async function dailySettingsJourney(context, observePage) {
     // where it used to read "The queue"; the assertion is the same one -- the
     // link opens the real desk route and that route's own heading is there.
     await linked
-      .getByRole("heading", { level: 1, name: name === "history" ? "Scan" : "Queue", exact: true })
+      .getByRole("heading", { level: 1, name: name === "history" ? "Scan history" : "Queue", exact: true })
       .waitFor();
     page = originalPage;
     await linked.close();

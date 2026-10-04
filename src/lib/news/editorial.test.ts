@@ -1070,7 +1070,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.equal(calls.length, 2, "the Claude writer is a gathering pass and a writing call");
     const [research, writing] = calls as [ClaudeCallOptions, ClaudeCallOptions];
 
-    assert.deepEqual(research.allowedTools, ["WebSearch", "WebFetch"]);
+    assert.deepEqual(research.allowedTools, ["WebSearch"]);
     assert.equal(
       research.systemPromptFile,
       undefined,
@@ -1081,7 +1081,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.equal(writing.system, "", "the voice never travels as prompt text");
     assert.deepEqual(
       writing.allowedTools,
-      ["WebSearch", "WebFetch"],
+      ["WebSearch"],
       "the writer holds the voice AND the tools: the voice carries the research protocol",
     );
     assert.equal(
@@ -1092,7 +1092,7 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.match(writing.user, /gathered findings, each with its URL/);
     assert.match(
       writing.user,
-      /Open and verify the sources yourself using the available web tools/,
+      /The sources are provided in this pack/,
       "and the pack asks it to do what it now can",
     );
   });

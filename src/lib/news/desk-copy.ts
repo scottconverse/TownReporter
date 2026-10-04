@@ -1539,6 +1539,46 @@ export function resurfacedSummarySentence(input: {
   return `${bits.join("; ")}.`;
 }
 
+/**
+ * What the pass deliberately left out, in the editor's words.
+ *
+ * Scan quality (2026-10-03): the scan now drops candidates that are standing
+ * pages rather than news events -- obituaries indexes, directory pages,
+ * projects indexes, hours pages -- by the cheap rules in
+ * ./lead-newsworthiness.ts and the model's own `is_event` verdict (see
+ * `fileScanLeads`). A drop is a decision, and a decision the editor cannot see
+ * is indistinguishable from a miss, so the run names the count, the first
+ * example, and the reason the desk would read. This is Reuters Tracer's rule
+ * that an event-scoring decision stays explainable, and it is the same shape as
+ * `resurfacedSummarySentence` next door.
+ *
+ * Silent at zero: a run that dropped nothing says nothing, the way an ordinary
+ * scan with nothing to flag does today.
+ */
+export function droppedCandidatesSentence(input: {
+  standingPageDropped: number;
+  noEventDropped: number;
+  firstDroppedReason?: { headline: string; reason: string };
+}): string {
+  const total = input.standingPageDropped + input.noEventDropped;
+  if (total <= 0) return "";
+  const bits: string[] = [];
+  if (input.standingPageDropped > 0) {
+    bits.push(
+      `${input.standingPageDropped} standing page${input.standingPageDropped === 1 ? "" : "s"} (not a news event)`,
+    );
+  }
+  if (input.noEventDropped > 0) {
+    bits.push(
+      `${input.noEventDropped} candidate${input.noEventDropped === 1 ? "" : "s"} the scan read as no event`,
+    );
+  }
+  const first = input.firstDroppedReason;
+  const example = first?.headline?.trim() ? ` — e.g. '${first.headline.slice(0, 120)}'` : "";
+  const why = first?.reason?.trim() ? `: ${first.reason}` : "";
+  return `Left out ${bits.join(" and ")}${example}${why}.`;
+}
+
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {
   if (input.fetched <= 0) return "No sources were fetched.";
   const same = Math.max(0, input.fetched - input.changed);
@@ -2386,11 +2426,14 @@ Return JSON:
   "leads": [
     {
       "headline": "",
-      "why": "why this is news now",
+      "why": "one sentence: the EVENT -- what happened, will happen, was decided, changed, was announced or was disputed",
       "topic": "council",
       "source_urls": ["https://..."],
       "evidence": "short quotes or facts from the text",
-      "newsworthiness": 12
+      "newsworthiness": 12,
+      "is_event": true,
+      "event": "one sentence: what happened or will happen",
+      "event_date": "the event's date if the text states one, else \\"\\""
     }
   ],
   "proposed_sources": [
@@ -2403,7 +2446,8 @@ Return JSON:
   ]
 }
 ${scanTopicBlock(opts.topics ?? DEFAULT_TOPIC_OPTIONS)}
-${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler or manufacture a lead to earn a score. proposed_sources may be any public http(s) page URL cited in the text above -- a document, agenda, roster, feed or site the text actually points at. Give each one a "why": ONE sentence, in plain words, saying what that page offers this paper and why it is worth putting on the watch list. Set "section" to the exact key of the section it would be filed under, from the section list above. Never return a search-results page, a redirector, or a URL you did not see in the text. Max 12 leads, max 12 proposed_sources.`;
+A lead must be a news EVENT, not a page that exists. Every lead needs something that happened, will happen on a date, was decided, changed, was announced or was disputed, or a number that moved. News values require an event (Galtung & Ruge 1965; Harcup & O'Neill 2017); a directory, a list of funds, a set of opening hours, a "lists" page, an obituaries index or an about page describes what exists and has NO event -- do not file it. Set "is_event" to true or false for each lead, "event" to one sentence naming the event, and "event_date" to its date when the text gives one (else ""). If you cannot write a one-sentence event, set "is_event" to false; the desk drops those. If the candidate comes from an index, listing, feed or category page, the lead must be the SPECIFIC NEW item on it -- a new obituary name, a new grant, a new meeting, a new closed road -- never the page itself; if the text does not say what is new on that page, do not file a lead from it (a page watcher's news is the change to a page, not the page).
+${opts.section?"File useful, evidence-backed resident developments relevant to the selected section and its reporting brief, including community life beyond government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler.":"File useful, evidence-backed resident developments across schools, libraries, community life and arts, transportation, housing, local business, health, recreation, and government. Use source-quoted facts, local impact, and dates when present. Do not refile facts in Already covered, invent new sections, or file filler."} Return 0 leads only if none of the sources contain such a fact. If you file 0 leads, editor_summary MUST be one sentence saying why (what matched last capture, what was boilerplate). Never leave editor_summary empty on a zero-lead pass. newsworthiness is an integer from 0 to 20: 0 means valid but lowest priority, 10 means a useful dated local development, and 20 means an urgent major decision or immediate resident impact. Do not file filler, a standing page, or manufacture a lead to earn a score. proposed_sources may be any public http(s) page URL cited in the text above -- a document, agenda, roster, feed or site the text actually points at. Give each one a "why": ONE sentence, in plain words, saying what that page offers this paper and why it is worth putting on the watch list. Set "section" to the exact key of the section it would be filed under, from the section list above. Never return a search-results page, a redirector, or a URL you did not see in the text. Max 12 leads, max 12 proposed_sources.`;
 }
 
 /**
@@ -2507,6 +2551,21 @@ export function redditPostStateLabel(state: "filed" | "already-known" | "below-l
 */
 export function sentenceCase(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Machine provenance belongs in the record, not in an editor's title. */
+export function editorTitle(text: string): string {
+  const title = text
+    .replace(/\s*\(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)?\)\s*/g, " ")
+    .trim()
+    .replace(/^\[discovery\]\s*/i, "");
+  return title === title.toUpperCase() ? agendaTitle(title) : title;
+}
+
+export function agendaTitle(text: string): string {
+  if (text !== text.toUpperCase()) return sentenceCase(text);
+  // Agenda identifiers are names, even in an otherwise all-caps heading.
+  return sentenceCase(text.toLowerCase().replace(/\b\d+[a-z]+\b/g, (id) => id.toUpperCase()));
 }
 
 /**

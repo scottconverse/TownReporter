@@ -36,6 +36,7 @@ import {
   listPublishedDesk,
   listQueuePage,
   listScans,
+  restoreKilledLead,
   runScan,
   setLeadStatus,
 } from "@/lib/news/desk";
@@ -54,6 +55,7 @@ import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
+  bulkDeleteReasonLines,
   bulkStatusSummary,
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
@@ -64,6 +66,16 @@ import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { deskErrorReason, deskToast } from "@/components/desk-toast";
+import {
+  KILL_TOAST_MS,
+  KillReasonChips,
+  killPress,
+  killUndoPress,
+  restoreStatus,
+  type KillReasonRequest,
+  type KillUndoPress,
+  type RestoreStatus,
+} from "@/components/fast-kill";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
@@ -178,12 +190,79 @@ function QueuePage() {
       (row) => row.kind === "scan" && (row.status === "queued" || row.status === "running"),
     ) ?? null;
   /*
+    The chips' own write: the fast kill's reason, one tap later.
+
+    Owner, 2026-10-03. It is a second write on purpose -- the kill is already
+    done when these chips are drawn, and the editor's whole complaint was that
+    the reason stood between them and the kill. Same server function and same
+    `after` as the kill itself, so a reason lands on the lead the kill just
+    moved and the Killed tab shows both.
+
+    `done` returns "" so this press raises NO toast of its own. The chip's
+    answer is the "Reason kept: …" line drawn in place of the chips inside the
+    kill's toast, and a second toast would both cover the row the editor is
+    moving to and take the kill's Undo off the screen. A FAILURE still speaks
+    (the shared family reports a refusal whatever `done` says), because a reason
+    that did not save must never look like one that did.
+  */
+  const saveKillReason = useDeskMutation({
+    mutationFn: (request: KillReasonRequest) => setLeadStatus({ data: request.data }),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Keeping the reason…",
+    done: () => "",
+    failedLead: "Could not keep that reason. ",
+    what: "keep that reason",
+  });
+  /*
+    What the screen remembers about a kill it just made, per lead: the status the
+    lead held before the press.
+
+    Owner, 2026-10-03. Every kill the rows and the keyboard make carries that
+    status on the press itself (`killPress(id, restoreStatus(l.status))`), which
+    is what the toast's own Undo reads. The U key is the one way back that holds
+    no press to read it from -- it acts on the row the cursor is on, and by then
+    that row is already killed -- so this is the memory it looks in. It is this
+    session's memory only: after a reload a killed lead's U key falls back to
+    `new`, which is where it put every lead before this fix.
+  */
+  const killedFrom = useRef(new Map<number, RestoreStatus>());
+  const killLead = (lead: { id: number; status: string }) => {
+    const restore = restoreStatus(lead.status);
+    killedFrom.current.set(lead.id, restore);
+    return killPress(lead.id, restore);
+  };
+  /*
+    The way back from a kill, putting the lead where it was (owner, 2026-10-03).
+    A `drafted` lead an editor killed came back as `new` with its draft orphaned,
+    because the way back was `setLeadStatus` -- whose input has no `drafted` in it,
+    and should not: `drafted` is written by the desk's drafting pass, never picked
+    by a screen. This is the one write that may put a lead back into `drafted`,
+    and the server holds it to the two conditions the screen cannot: the lead must
+    be killed right now, and a lead going back to `drafted` must still have its
+    draft (`restoreKilledLead`, desk.ts).
+
+    It carries the same optimistic rule as `setStatus`, so the row returns to the
+    Open tab in the same paint as the Undo press and moves back if the server
+    refuses -- leaving the lead killed and the toast saying why.
+  */
+  const undoKill = useDeskMutation({
+    mutationFn: (press: KillUndoPress) =>
+      restoreKilledLead({ data: { id: press.id, status: press.status } }),
+    ...leadStatusOptimistic(qc),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Undoing…",
+    done: () => "Undone: the lead is back on the Queue.",
+    failedLead: "Could not put that lead back. ",
+    what: "put that lead back",
+  });
+  /*
     FB5: the Queue reaches this mutation from its rows, its bulk Hold and its
     bulk Kill, and every one of those paths reported nothing at all when the
     write failed (FB0-REPORT.md Table B, "bulk Hold": "partial failure leaves
     rows held silently"). The shared action family reports the refusal with the
     server's own reason, so a partial failure is at least said out loud.
   */
+  const [releasedId, setReleasedId] = useState<number | null>(null);
   const setStatus = useDeskMutation({
     mutationFn: (input: {
       id: number;
@@ -191,6 +270,14 @@ function QueuePage() {
       killReason?: string;
       killReasonUrl?: string;
       release?: boolean;
+      /*
+        Carried by a kill press only, and never sent from here: it is the status
+        the kill's own Undo will restore (`killPress`), read by the `undo` copy
+        below and handed to `undoKill`, which is the write allowed to restore
+        `drafted`. `leadStatusInput` has no `drafted` in it, so forwarding this
+        to `setLeadStatus` would be a refusal waiting to happen.
+      */
+      restore?: RestoreStatus;
     }) => setLeadStatus({ data: {
       id: input.id,
       status: input.status,
@@ -206,7 +293,10 @@ function QueuePage() {
       cache, so one failure cannot put back eleven successes.
     */
     ...leadStatusOptimistic(qc),
-    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: async (_result, input) => {
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      if (input.release) setReleasedId(input.id);
+    },
     /*
       M7: while a bulk press is fanning out over the selection, each lead's own
       toast is suppressed -- the bulk path owns the outcome and says it once.
@@ -216,12 +306,18 @@ function QueuePage() {
     pending: "Saving…",
     done: (_result, input) =>
       input.release
-        ? "Released."
+        ? ""
         : input.status === "new"
           ? "Undone: the lead is back on the Queue."
           : input.status === "held"
             ? "The lead is on hold, off the Queue until you release it."
-            : "The lead moved to Killed, and its row keeps an Undo.",
+            : /*
+                Owner, 2026-10-03, the fast kill: the kill left the Open tab in
+                the same paint, so the sentence names the two things that are on
+                the toast in front of the editor rather than a row that is gone
+                -- the Undo, and the chips that put a reason on the record.
+              */
+              "The lead moved to Killed. Undo is here, and you can say why in one tap.",
     /*
       L4 of the batch-6 pre-merge audit: the Kill sentence names an Undo, and
       this toast now carries it. A killed lead leaves the "Open" tab on the
@@ -229,14 +325,41 @@ function QueuePage() {
       go and find; the way back belongs on the sentence that says so.
     */
     undo: (_result, input) =>
-      input.status === "new" && !input.release
+      input.status === "new"
         ? null
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new" });
+              /*
+                A released lead goes back to `held`, the same write this Undo
+                always made. A kill's way back is `killUndoPress` carrying the
+                status the row held when the Kill was pressed -- read from the
+                press, not guessed -- and it goes through `undoKill`, the one
+                write that may restore `drafted`; `setStatus` would refuse it.
+              */
+              if (input.release) {
+                await setStatus.mutateAsync({ id: input.id, status: "held" as const });
+                return;
+              }
+              await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
             },
           },
+    /*
+      Owner, 2026-10-03, the fast kill: the reason is offered AFTER the kill,
+      as chips in the toast that reports it. Only a kill gets them -- a hold or
+      an undo has no "why" to ask -- and only for a press that actually took,
+      because `deskToast` drops the chips on a failure.
+    */
+    chips: (_result, input) =>
+      input.status === "killed" ? (
+        <KillReasonChips leadId={input.id} save={(request) => saveKillReason.mutate(request)} />
+      ) : null,
+    /*
+      And that toast lives longer than an ordinary one, because it is the only
+      one that asks a question the editor has to read and answer. Undo stays on
+      it for the whole life.
+    */
+    duration: (_result, input) => (input.status === "killed" ? KILL_TOAST_MS : undefined),
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -702,11 +825,33 @@ function QueuePage() {
         if (lead && !closedOrHeld(lead)) setHoldFor(lead);
         break;
       case "kill":
-        if (lead && !closedOrHeld(lead)) setKillFor(lead);
+        /*
+          Owner, 2026-10-03, the fast kill: X is the ROW's kill now, not the
+          dialog. The legend has always promised "X kill" (`TRIAGE_LEGEND`,
+          desk-triage.ts) and the drawn LeadRow prints the same key hint on its
+          inline Kill, so the key does what the button beside it does: kills at
+          once, with the Undo and the reason chips on the toast. The dialog is
+          still there for a written reason, in the row's More ▾ menu.
+        */
+        if (lead && !closedOrHeld(lead)) setStatus.mutate(killLead(lead));
         break;
       case "undo":
-        if (lead && (lead.status === "held" || lead.status === "killed")) {
-          setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
+        if (lead && lead.status === "held") {
+          /*
+            `release` is what makes a held lead's Undo say "Released." and put it
+            back on hold. A held lead was open before the Hold, and where a
+            released lead goes back to is unchanged here: `held` is the target
+            this Undo has always had.
+          */
+          setStatus.mutate({ id: lead.id, status: "new", release: true });
+        } else if (lead && lead.status === "killed") {
+          /*
+            A kill's way back, through the same write the row's own Undo uses --
+            and the one entry point with no press to read the pre-kill status
+            from, so it reads this session's memory (`killedFrom`) and falls back
+            to `new` for a lead killed before the screen knew.
+          */
+          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id) ?? "new"));
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
@@ -1290,6 +1435,13 @@ function QueuePage() {
                       {selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published
                       articles stay on the paper.
                     </span>
+                    <ul className="queue-delete-reasons">
+                      {bulkDeleteReasonLines(selectedLeads).map((lead) => (
+                        <li key={lead.id}>
+                          <strong>{lead.title}</strong> — {lead.reason}
+                        </li>
+                      ))}
+                    </ul>
                     {/*
                       Unit UI1a2: the confirm press carries the states. Its DONE
                       is the rows leaving the Queue, which the list and the
@@ -1361,6 +1513,30 @@ function QueuePage() {
       ) : null}
 
       {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
+      {releasedId !== null ? (
+        <div className="queue-release-message" role="status">
+          <span>Released.</span>
+          <InkButton
+            tone="quiet"
+            pending={setStatus.isPending}
+            onClick={() => {
+              setStatus.mutate(
+                { id: releasedId, status: "held" },
+                {
+                  onSuccess: (result) => {
+                    if (result?.ok) setReleasedId(null);
+                  },
+                },
+              );
+            }}
+          >
+            Undo
+          </InkButton>
+          <InkButton tone="quiet" onClick={() => setReleasedId(null)}>
+            Dismiss
+          </InkButton>
+        </div>
+      ) : null}
       {bulkDeleteNotice ? <Notice kind="ok">{bulkDeleteNotice}</Notice> : null}
       {undo != null ? (
         <Notice kind="ok">
@@ -1531,6 +1707,23 @@ function QueuePage() {
                     `["leads"]` because the write lands inside the dialog.
                   */
                   onKillWithReason={() => setKillFor(l)}
+                  /*
+                    Owner, 2026-10-03, the fast kill: the row's own inline Kill.
+                    One press, no dialog, with the Undo and the optional reason
+                    chips on the toast it raises (`fast-kill.ts`). The menu's
+                    "Kill with a reason" above stays for the editor who wants to
+                    write the sentence before killing.
+                  */
+                  onKillNow={() => setStatus.mutate(killLead(l))}
+                  /*
+                    Only THIS row's kill is pending. A hold on the same lead (or a
+                    kill on another) must not put "Killing…" on this button.
+                  */
+                  killPending={
+                    setStatus.isPending &&
+                    setStatus.variables?.id === l.id &&
+                    setStatus.variables?.status === "killed"
+                  }
                   onKillAsDuplicate={
                     /* Unit AK item 4: the reason names the piece the desk matched,
                    so the kill record on the story page means something to

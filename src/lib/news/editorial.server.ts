@@ -38,6 +38,7 @@ import {
 import {
   EDITORIAL_TOOLS,
   RESEARCH_INSTRUCTIONS,
+  buildEditorialPack,
   buildWritingPack,
   opinionHeadline,
   editorialSourcesError,
@@ -45,7 +46,7 @@ import {
   type Editorial,
   type EditorialPointer,
 } from "./editorial.ts";
-import { suppliedMaterialCutRecord } from "./supplied-material-cap.ts";
+import { suppliedMaterialCapFor, suppliedMaterialCutRecord } from "./supplied-material-cap.ts";
 import { modelEffort, plannerModelFor, providerEntry, providerModel } from "./provider-registry.ts";
 import { failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { nameCheckText, type NameCheck } from "./name-check.ts";
@@ -229,6 +230,7 @@ export async function writeEditorial(
     for the same searches and page opens a second time.
   */
   let completedDeskResearch: DeskResearchOutcome | null = null;
+  const materialCaps = new Map<string, number>();
   /*
     The city's own site, read once for the desk pass's planner and its relevance
     ranking -- the same read the dig makes for its `site:` strategies (see
@@ -484,6 +486,15 @@ export async function writeEditorial(
       // is validated against: the resolved local pick, or the rung's own
       // registry model (DeepSeek v4.1 Flash declares off/low/high/max).
       const exactModel = isLocalPick ? localModel?.id : providerModel(entry);
+      // Reuse the existing cached catalog; picks intentionally carry only endpoint/id.
+      const catalog = localModel
+        ? await import("./local-models.ts").then((m) => m.discoverLocalModels()).catch(() => null)
+        : null;
+      const contextLength = catalog?.servers.find((s) => s.baseUrl === localModel?.baseUrl)
+        ?.models.find((m) => m.id === localModel?.id)?.contextLength;
+      const suppliedMaterialCap = suppliedMaterialCapFor(contextLength);
+      materialCaps.set(choice, suppliedMaterialCap);
+      researchPack = buildEditorialPack({ ...editorialInput, suppliedMaterialCap });
       const { grokChat } = await import("./ai.ts");
       const chat = deps.grokChat ?? grokChat;
       /*
@@ -523,6 +534,7 @@ export async function writeEditorial(
           askedFor: editorialInput.askedFor,
           research: desk.findings,
           suppliedMaterial: editorialInput.sourceText,
+          suppliedMaterialCap,
           deskResearch: {
             searches: desk.searches,
             pages: desk.pages,
@@ -587,7 +599,8 @@ export async function writeEditorial(
         },
       );
     },
-    fileEditorial,
+    fileEditorial: (workInput, editorial, choice) =>
+      fileEditorial({ ...workInput, suppliedMaterialCap: materialCaps.get(choice) }, editorial, choice),
     timeoutMs: editorialTimeoutMs,
     onTechnicalFallback: async ({ previous, next, reason }) => {
       if (!input.completion) return;
@@ -759,6 +772,7 @@ export async function fileEditorial(
   const suppliedMaterial = suppliedMaterialForPrompt({
     subject: input.subject,
     sourceText: input.sourceText,
+    cap: input.suppliedMaterialCap,
   });
   const lengthCut = suppliedMaterial ? suppliedMaterialCutRecord(suppliedMaterial) : null;
 
@@ -828,18 +842,25 @@ export async function fileEditorial(
       `editorial_extras` beside it holds the two other things the model wrote:
       the fact sheet and the image prompt. Same guard, same reason.
     */
+    /*
+      `model_body` (0119) is the model's own body, hoisted so `body` and
+      `model_body` are the same bytes here. The editor's later save on this row
+      (`saveOpinionDraft`) rewrites `body` and leaves this column alone.
+    */
+    const editorialBody = storableText(body);
     const rows = await sql<{ id: number }>`
-      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json)
+      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json, model_body)
       values (
         ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
-        ${storableText(headline)}, ${""}, ${storableText(body)}, ${"opinion"}, ${"[]"}, ${"editorial"},
+        ${storableText(headline)}, ${""}, ${editorialBody}, ${"opinion"}, ${"[]"}, ${"editorial"},
         ${storableText(integrityNotes)},
         ${JSON.stringify(
           sanitizeJsonLeaves({
             ...(nameCheck ? { nameCheck } : {}),
             ...(lengthCut ? { lengthCut } : {}),
           }),
-        )}
+        )},
+        ${editorialBody}
       )
       returning id
     `;

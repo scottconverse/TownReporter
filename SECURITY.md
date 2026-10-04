@@ -147,6 +147,9 @@ in application code before sending the prompt.
   hide the tool surface entirely. OCR is the narrow exception: it exposes only
   `Read` for the single temporary page image TownReporter created for that
   OCR call.
+  Opinion calls expose only `WebSearch`; `WebFetch` is absent from their tool
+  definitions as well as their permission list, so it cannot transmit pasted
+  source material through a fetch URL or prompt.
 - OpenAI-compatible and Anthropic API calls, including local-model calls,
   receive text prompts without tool or function definitions. TownReporter
   performs source search and fetching itself through its guarded application

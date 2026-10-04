@@ -92,27 +92,31 @@ function resolveLocalImport(root, fromFile, specifier) {
   return candidates.find(existsSync) ?? null;
 }
 
-export function moduleCanConnectToPostgres(file, root = process.cwd(), seen = new Set()) {
+export function moduleCanConnectToPostgres(file, root = process.cwd(), seen = new Set(), modules = new Map()) {
   const absolute = normalize(file);
   if (seen.has(absolute) || !existsSync(absolute)) return false;
   seen.add(absolute);
-  const source = readFileSync(absolute, "utf8");
-  const testFile = /\.test\.[cm]?[jt]sx?$/i.test(absolute);
-  const { canConnectDirectly, readsAdminUrl, staticSpecifiers } = sourceModuleSpecifiers(absolute, source, {
-    inspectDynamicPg: testFile,
-  });
+  // Cache parsing within one discovery pass, not reachability: each test still
+  // needs its own visited set so cycles cannot hide a connection in another path.
+  if (!modules.has(absolute)) {
+    modules.set(absolute, sourceModuleSpecifiers(absolute, readFileSync(absolute, "utf8"), {
+      inspectDynamicPg: /\.test\.[cm]?[jt]sx?$/i.test(absolute),
+    }));
+  }
+  const { canConnectDirectly, readsAdminUrl, staticSpecifiers } = modules.get(absolute);
   if (canConnectDirectly || readsAdminUrl) return true;
   return staticSpecifiers.some((specifier) => {
     const dependency = resolveLocalImport(root, absolute, specifier);
-    return dependency ? moduleCanConnectToPostgres(dependency, root, seen) : false;
+    return dependency ? moduleCanConnectToPostgres(dependency, root, seen, modules) : false;
   });
 }
 
 /** Return the repo-relative database-dependent test files in deterministic order. */
 export function postgresTestFiles(root) {
   const files = new Set(globSync("src/**/*.test.*", { cwd: root }));
+  const modules = new Map();
   return [...files]
-    .filter((file) => moduleCanConnectToPostgres(join(root, file), root))
+    .filter((file) => moduleCanConnectToPostgres(join(root, file), root, new Set(), modules))
     .map((file) => relative(root, join(root, file)).split("\\").join("/"))
     .sort();
 }

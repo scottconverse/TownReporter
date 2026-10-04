@@ -1,4 +1,5 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
+import { editorTitle } from "@/lib/news/desk-copy";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
@@ -94,6 +95,7 @@ import {
   deskDraftAction,
   deskDraftElapsed,
   deskDraftState,
+  tonightDrafts,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
 import { keepsFailing } from "@/lib/news/source-rows";
@@ -762,8 +764,8 @@ function DeskHome() {
     deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
   );
   const writingNow = draftStates.filter((s) => s.running).length;
-  const readyToCheck = draftStates.filter((s) => s.needsYou).length;
-  const readyToPrint = draftStates.filter((s) => s.key === "ready").length;
+  const edition = tonightDrafts(draftRows, draftStates);
+  const { readyToCheck, readyToPrint } = edition;
   /*
     Running now: open jobs, every kind, newest first. Open jobs only -- a job
     that has stopped is not running, and the drafts grid below is where a
@@ -884,11 +886,7 @@ function DeskHome() {
 
   /** The stories tonight actually turns on: through their checks, or waiting
    *  on the editor. Newest work first within each group. */
-  const tonightRows = draftRows
-    .map((row, index) => ({ row, state: draftStates[index]! }))
-    .filter(({ state }) => state.key === "ready" || state.needsYou)
-    .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"))
-    .slice(0, 3);
+  const tonightRows = edition.rows;
 
   /*
     FB6, item 1: `Start story` and `S` were DEAD and a SILENT FAIL (FB0-Report
@@ -1299,7 +1297,7 @@ function DeskHome() {
         <div className="today-edition-head">
           <div className="today-edition-headline">
             <h2 className="today-edition-title">Tonight’s edition</h2>
-            <span className="sec-count">{readyToPrint + readyToCheck}</span>
+            <span className="sec-count">{tonightRows.length}</span>
           </div>
           {/*
             Unit U9: this line used to read "Each story needs every check before
@@ -1345,7 +1343,7 @@ function DeskHome() {
                         params={{ leadId: String(row.lead_id) }}
                         className="today-edition-hl hl-link"
                       >
-                        {row.headline}
+                        {editorTitle(row.headline)}
                       </Link>
                     </h3>
                   </div>
@@ -2336,7 +2334,7 @@ function DeskHome() {
                 {inbox.slice(0, 3).map((item) => (
                   <div key={item.id} className="np-item">
                     <p className="np-kind">{editorKindLabel(item.kind)}</p>
-                    <p className="np-title">{item.title}</p>
+                    <p className="np-title">{editorTitle(item.title)}</p>
                     {item.source_line ? <p className="np-meta">{item.source_line}</p> : null}
                     <div className="np-acts">
                       <InkButton

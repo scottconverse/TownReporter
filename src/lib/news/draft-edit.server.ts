@@ -4,6 +4,7 @@ import { evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } fr
 import { headlineSourceAfterEdit } from "./headline-control.ts";
 import { researchJsonWithStyleAudit, styleRecordForSavedText, type DraftStyleRecord } from "./draft-audit-record.ts";
 import type { DraftRow } from "./types.ts";
+import { sanitizeJsonLeaves } from "./storable-text.ts";
 export type DraftEditInput = { leadId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string };
 /**
  * Save the editor's draft.
@@ -15,6 +16,9 @@ export type DraftEditInput = { leadId: number; headline: string; dek: string; bo
  * that record describes the body being saved here.
  */
 export async function saveDraftForEditor(context: { userId: string; newsroomId: number }, data: DraftEditInput, style?: DraftStyleRecord | null) {
+  // Style repair and editor-dialog rewrites share this persistence boundary.
+  data = sanitizeJsonLeaves(data);
+  style = sanitizeJsonLeaves(style);
   return withLeadDraftLock(context, data.leadId, async (sql) => {
     const existing = await sql<DraftRow>`
       select * from drafts where lead_id = ${data.leadId} and newsroom_id = ${context.newsroomId}

@@ -160,14 +160,14 @@ async function main() {
       .getByRole("button", { name: "Post correction", exact: true })
       .click({ force: true });
     const open = await page
-      .getByPlaceholder("What was wrong")
+      .getByLabel("What was wrong")
       .waitFor({ timeout: 5_000 })
       .then(() => true)
       .catch(() => false);
     if (open) break;
     if (i === 5) throw new Error("the correction form never opened after six clicks");
   }
-  await page.getByPlaceholder("What was wrong").fill(correction);
+  await page.getByLabel("What was wrong").fill(correction);
   const correctionRequest = page.waitForRequest(
     (request) => request.method() === "POST" && request.url().includes("/_serverFn/"),
   );

@@ -229,9 +229,13 @@ describe("research scope", () => {
       "ci.longmont.co.us",
       "the older .us city address is still the city's own",
     );
-    // A three-letter town name cannot identify a host (ada.gov is not a town),
-    // and a site that abbreviates its city's name is not recognised from it.
+    // A three-letter town name cannot identify a host (ada.gov is not a town).
     assert.equal(officialSiteHost("Ada", [{ url: "https://ada.gov/", kind: "official" }]), null);
+    // A site the editor configured as the city's official one (even on .com/.org, even
+    // abbreviated like fcgov.com) is that city's own site: 21c, so other cities get site: scoping.
+    assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official", title: "City of Fort Collins" }]), "fcgov.com");
+    // Initials alone never pick a host: another "FC" city must not inherit fcgov.com.
+    assert.equal(officialSiteHost("Foster City", [{ url: "https://www.fcgov.com/", kind: "official", title: "City of Fort Collins" }]), null);
     assert.equal(officialSiteHost("Fort Collins", [{ url: "https://www.fcgov.com/", kind: "official" }]), null);
   });
 

@@ -363,6 +363,8 @@ async function openTheStory(leadId) {
 /** 1. The press is on the workbench, and it opens the drawn dialog. */
 async function addToStoryIsOnTheWorkbench() {
   const row = page.locator(".astra-story-actions");
+  // Group 3 moved "+ Add to story" under More (N5: one row of four presses).
+  await row.locator("details.story-more > summary").click();
   const press = row.getByRole("button", { name: "+ Add to story", exact: true });
   await press.waitFor({ timeout: 30_000 });
   assert.equal(await press.isEnabled(), true, "the press is live on a drafted lead");
@@ -582,6 +584,9 @@ async function theDarkPassShowsBothDialogs() {
   const row = page.locator(".astra-story-actions");
   shots.push(await shot(row, "cp-action-row-dark.png"));
 
+  if (!(await row.getByRole("button", { name: "+ Add to story", exact: true }).isVisible())) {
+    await row.locator("details.story-more > summary").click();
+  }
   await row.getByRole("button", { name: "+ Add to story", exact: true }).click();
   await dialog().waitFor({ timeout: 20_000 });
   await page.getByRole("radio", { name: /Add as an update at the top/ }).click();

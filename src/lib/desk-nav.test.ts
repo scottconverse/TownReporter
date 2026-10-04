@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { DESK_MORE, DESK_NAV, DESK_PATHS, SEARCH_PAGES, navItemIsActive } from "./desk-nav.ts";
 
 /**
- * Unit U24: the Scan screen is reachable from the nav.
+ * R2: Scan history is reached from Sources & scan and the palette.
  *
  * THE FINDING. `/desk/scan` is the screen with the scope and the effort dials
  * -- General Scan over every accepted source, one section, or a picked set, on
@@ -13,32 +13,24 @@ import { DESK_MORE, DESK_NAV, DESK_PATHS, SEARCH_PAGES, navItemIsActive } from "
  * controls. So the only way to the full Scan screen was Ctrl K, and the
  * stand-in editorial day found it that way and said so.
  *
- * What these tests hold: the route is drawn, it is drawn UNDER the item an
- * editor would look under rather than as a twelfth destination, it is not
- * offered twice by the palette, and it is the current item on its own URL.
+ * The Sources header owns the visible route; it is not a side-menu item.
  */
 
 const scanRouteSource = readFileSync(new URL("../routes/desk.scan.tsx", import.meta.url), "utf8");
 const chromeSource = readFileSync(new URL("../components/desk-chrome.tsx", import.meta.url), "utf8");
+const sourcesRouteSource = readFileSync(new URL("../routes/desk.sources.tsx", import.meta.url), "utf8");
 
 describe("U24: the desk nav offers the Scan screen", () => {
-  it("draws /desk/scan, immediately under 'Sources & scan'", () => {
+  it("offers Scan history from the Sources header instead of the side menu", () => {
     const paths = DESK_NAV.map((item) => item.to);
-    assert.ok(paths.includes("/desk/scan"), "the Scan screen must be a drawn nav item");
-
-    const sources = paths.indexOf("/desk/sources");
-    const scan = paths.indexOf("/desk/scan");
-    assert.equal(
-      scan,
-      sources + 1,
-      "it is a sub-item, so it follows the screen an editor would look under",
-    );
-    assert.equal(DESK_NAV[scan]?.sub, true, "and it is drawn as a sub-item");
+    assert.ok(!paths.includes("/desk/scan"));
+    assert.match(sourcesRouteSource, /className="btn quiet"[^>]*to="\/desk\/scan"/);
+    assert.match(sourcesRouteSource, /Scan history/);
   });
 
-  it("keeps the sub-item a sub-item: one parent, and the parent is still drawn", () => {
+  it("keeps Sources & scan in the side menu without a scan sub-item", () => {
     const subs = DESK_NAV.filter((item) => item.sub);
-    assert.equal(subs.length, 1);
+    assert.equal(subs.length, 0);
     const label = DESK_NAV.find((item) => item.to === "/desk/sources")?.label;
     assert.equal(label, "Sources & scan");
   });
@@ -51,25 +43,25 @@ describe("U24: the desk nav offers the Scan screen", () => {
       "DESK_NAV and DESK_MORE together build the palette; a page in both is offered twice",
     );
     assert.ok(
-      !DESK_MORE.some((item) => item.to === "/desk/scan"),
-      "it graduated from the palette-only list to a drawn item",
+      DESK_MORE.some((item) => item.to === "/desk/scan"),
+      "the palette still offers Scan history",
     );
     assert.equal(new Set(DESK_PATHS).size, DESK_PATHS.length, "no route is offered twice");
   });
 
   it("is the current item on /desk/scan, and not on /desk/sources", () => {
-    const item = (to: string) => DESK_NAV.find((candidate) => candidate.to === to)!;
+    const item = (to: string) => [...DESK_NAV, ...DESK_MORE].find((candidate) => candidate.to === to)!;
     assert.equal(navItemIsActive(item("/desk/scan"), "/desk/scan", ""), true);
     assert.equal(navItemIsActive(item("/desk/sources"), "/desk/scan", ""), false);
     assert.equal(navItemIsActive(item("/desk/scan"), "/desk/sources", ""), false);
     assert.equal(navItemIsActive(item("/desk/sources"), "/desk/sources", ""), true);
   });
 
-  it("still tells Models from Server on the route they share", () => {
+  it("tells Models from Server on their own pages", () => {
     const models = DESK_NAV.find((item) => item.label === "Models")!;
     const server = DESK_NAV.find((item) => item.label === "Server")!;
-    assert.equal(navItemIsActive(models, "/desk/ops", "#writing-models"), true);
-    assert.equal(navItemIsActive(server, "/desk/ops", "#writing-models"), false);
+    assert.equal(navItemIsActive(models, "/desk/models", ""), true);
+    assert.equal(navItemIsActive(server, "/desk/ops", "#writing-models"), true);
     assert.equal(navItemIsActive(server, "/desk/ops", ""), true);
     assert.equal(navItemIsActive(models, "/desk/ops", ""), false);
   });

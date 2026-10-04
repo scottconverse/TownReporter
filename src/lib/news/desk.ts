@@ -14,7 +14,7 @@ import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
-import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
@@ -98,6 +98,7 @@ import {
   jobIdInput,
   leadIdInput,
   leadStatusInput,
+  leadStatusRestoreInput,
   leadDuplicateResolutionInput,
   editLeadInput,
   meetingArticleReviewInput,
@@ -171,6 +172,7 @@ import {
 import {
   buildScanUserMessage,
   composeZeroLeadSummary,
+  droppedCandidatesSentence,
   editorFetchError,
   kindFromSourceUrl,
   resurfacedSummarySentence,
@@ -203,6 +205,7 @@ import {
   setJobModelRuntime,
   setJobStage,
   throwIfJobCancelled,
+  JobCancelledError,
   waitForModel,
   type DeskJob,
 } from "./jobs";
@@ -303,7 +306,7 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
 async function querySourceRows(context: { userId: string; newsroomId: number }) {
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
-  return sql<SourceRow>`
+  const rows = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
              -- the row can say "Keeps failing" rather than repeating the last
@@ -352,6 +355,7 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
         case when status = 'proposed' then id end desc,
         id asc
     `;
+  return rows.map((row) => ({ ...row, title: sourceName(row.title) }));
 }
 
 /**
@@ -647,7 +651,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
       story_headline: string | null;
     }
   >`
-    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
            l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
            -- "import" = read out of a report the editor pasted; null = not
            -- recorded. The Queue shows the Imported badge off this.
@@ -1560,6 +1564,7 @@ export type PerformScanWorkDeps = {
   };
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
+  scheduledFailure?: (msg: string, write: (sql: Sql) => Promise<void>) => Promise<void>;
 };
 
 /**
@@ -1646,6 +1651,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   deps: PerformScanWorkDeps = {},
 ) {
   let failureRunId = job.subject_id;
+  let writeQueuedSourceWrites = async (_sql: Sql): Promise<void> => {};
   const failureReceipt = {
     sourcesSelected: 0,
     sourcesAttempted: 0,
@@ -1871,7 +1877,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `writeSourceTouch` and nothing else: a source row must not depend on which
     path touched it (HIGH-1, A-B8). One rule, three write sites.
   */
-  const writeQueuedSourceWrites = async (writeSql: Sql) => {
+  writeQueuedSourceWrites = async (writeSql: Sql) => {
     for (const queued of pendingSourceTouches) {
       await writeSourceTouch(writeSql, {
         id: queued.id,
@@ -2005,7 +2011,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // 14" is a different sentence from "0 fetched" with no denominator.
   await writeLiveRunRow(true);
   await reportStage("Reading the sources");
+  let fetchLoopError: unknown;
   await mapLimit(watchSlice, 6, async (src) => {
+    if (fetchLoopError) return;
+    try {
     await deps.scheduledGuard?.();
     /*
       SH-B items 2 and 3, the half that makes them real: a row the site asked
@@ -2165,7 +2174,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       // right up to the failure.
       await noteSourceProgress();
     }
+    } catch (error) {
+      // Drain in-flight fetches before settling their queued observations.
+      fetchLoopError ??= error;
+    }
   });
+  if (fetchLoopError) throw fetchLoopError;
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
     `sources_selected` still counts it -- it was in scope -- so the receipt
@@ -2489,63 +2503,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   }
 
   if (!batchResults.length) {
-    /*
-      A run with ZERO batches never reached a model at all: `buildScanBatches`
-      returns nothing when no source yielded text (scan-batches.ts), so the only
-      thing that failed is the fetch. Reporting the model-shaped fallback for
-      that case sent its reader to the provider when the source had simply not
-      resolved -- measured in Unit AA2, where a scheduled run recorded
-      `sources_fetched 0`, `model_batches_used 0` and zero chat calls at the
-      stubbed rung, yet failed as "Writing pass returned no usable JSON." The
-      first failed source's own message is the truth when there is one; the
-      model-shaped fallback stays for the batches-ran-and-were-unreadable case.
-    */
-    const error =
-      lastBatchError ??
-      (batches.length === 0
-        ? `Scan fetched no source text, so no writing pass ran.${
-            failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""
-          }`
-        : "Writing pass returned no usable JSON.");
-    /*
-      Record the failed run on BOTH commit paths.
-
-      This wrote the scan_runs row only when there was no scheduledCommit, so a
-      SCHEDULED scan in which every model batch failed threw before anything was
-      persisted: no counts, no coverage line, no error row. The desk then showed
-      nothing at all, and "the scan ran and everything failed" was
-      indistinguishable from "the scan never ran" -- the exact silent-failure
-      class the coverage accounting exists to eliminate.
-
-      The scheduled path commits through the caller-supplied transaction so the
-      write lands in the same unit of work as the rest of a scheduled run.
-
-      B8F2: the QUEUED SOURCE WRITES go in that same transaction, beside the
-      failed run. This ending never reaches `commitResults` -- it writes the run
-      row and throws -- so without this the whole unattended pass left every
-      source row untouched: a newsroom whose sources ALL failed during an
-      outage got no failure streak, no stored `retry_after`, no `blocked_*`,
-      and the desk kept knocking at full speed on the one lane no editor is
-      watching. The inline lane was never affected; it writes during the loop.
-
-      One transaction and not a second one, deliberately: the run row and the
-      rows it is a receipt FOR must not be able to disagree about whether the
-      pass settled. If the touch write fails, the whole unit rolls back and the
-      caller's own `finalizeDailyScanFailure` records the failed run -- which is
-      the way round that loses nothing an editor can see, and never the other
-      way (a source row written for a run that was never settled).
-
-      The fence is the one this lane already has: `deps.scheduledCommit` is the
-      scheduler's own transaction, which refuses a job whose claim token is no
-      longer the running one -- so a worker that lost this run to a newer one
-      writes neither the run row nor the sources.
-    */
-    if (deps.scheduledCommit) {
-      await deps.scheduledCommit(async (writeSql) => {
-        await recordFailedRun(writeSql, error);
-        await writeQueuedSourceWrites(writeSql);
-      });
-    } else {
+    const error = lastBatchError ?? (batches.length === 0
+      ? `Scan fetched no source text, so no writing pass ran.${failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""}`
+      : "Writing pass returned no usable JSON.");
+    // The outer failure settlement saves both the run and queued touches.
+    // It must not complete a daily reservation before quota handling runs.
+    if (!deps.scheduledCommit) {
       await recordManualFailure(error);
     }
     throw new Error(error);
@@ -2679,6 +2642,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       });
     }
   } catch (error) {
+    if (error instanceof JobCancelledError) throw error;
     // A check that could not run must not be able to change an answer: the
     // word rule stands, exactly as it did before this unit (see dup-check.ts).
     console.error("[scan] duplicate check could not run", error);
@@ -2742,6 +2706,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -2814,6 +2781,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    /*
+      Scan quality (2026-10-03): a drop is a decision the editor must be able to
+      read. The candidates this pass left out for having no news event -- the
+      cheap standing-page rules plus the model's `is_event: false` verdict --
+      are named here with the first example and the reason, so a shorter Queue
+      is explained rather than mysterious.
+    */
+    const droppedSentence = droppedCandidatesSentence({
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
+    });
+    if (droppedSentence)
+      summary = summary ? `${summary} ${droppedSentence}`.slice(0, 1200) : droppedSentence;
     const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
     if (meetingCoverageLine)
       summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
@@ -2897,11 +2878,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       owned(context),
     );
   } catch (error) {
-    if (!deps.scheduledCommit) {
-      const failure = postgresText(error instanceof Error ? error.message : String(error));
+    const failure = postgresText(error instanceof Error ? error.message : String(error));
+    {
       try {
-        await withTransaction(async (receiptSql) => {
-          if (!(await lockManualScanClaim(receiptSql, job))) return;
+        const settle = async (receiptSql: Sql) => {
+          if (!deps.scheduledCommit && !(await lockManualScanClaim(receiptSql, job))) return;
           await receiptSql`
             update scan_runs
             set finished_at = now(),
@@ -2921,8 +2902,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
                 error = coalesce(error, ${failure.slice(0, 800)})
             where id = ${failureRunId} and newsroom_id = ${job.newsroom_id} and finished_at is null
           `;
-          await refreshManualScanClaim(receiptSql, job);
-        });
+          await writeQueuedSourceWrites(receiptSql);
+          if (!deps.scheduledCommit) await refreshManualScanClaim(receiptSql, job);
+        };
+        if (deps.scheduledFailure) await deps.scheduledFailure(failure, settle);
+        else if (deps.scheduledCommit) await deps.scheduledCommit(settle);
+        else await withTransaction(settle);
       } catch (settleError) {
         const settleMessage = postgresText(
           settleError instanceof Error ? settleError.message : String(settleError),
@@ -3234,9 +3219,17 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           writerCheckpoint: { version: 1, jobId: job.id, evidenceCheckIncomplete: true },
         }),
       );
+      /*
+        The model's own body, kept beside the editor's (0119). Written here and
+        at the final write below -- the two inserts the writer model's words
+        create -- and by no editor save. Hoisted so the same bytes go into both
+        columns: the editor's save overwrites `body` in place, and this is what
+        survives it.
+      */
+      const checkpointBody = storableText(checkpoint.body);
       const [saved] = await transactionSql<DraftRow>`
-        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source)
-        values(${context.userId},${owned(context)},${leadId},${storableText(checkpointHeadline.headline)},${storableText(checkpoint.dek)},${storableText(checkpoint.body)},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${storableText(integrityNotes)},${JSON.stringify(provenance)},${storableText(String(checkpoint.form ?? ""))},${JSON.stringify(sanitizeJsonLeaves(checkpoint.found ?? null))},${JSON.stringify(sanitizeJsonLeaves(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : []))},${checkpointResearchJson},${storableText(checkpointHeadline.modelHeadline)},${checkpointHeadline.source})
+        insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_headline,headline_source,model_body)
+        values(${context.userId},${owned(context)},${leadId},${storableText(checkpointHeadline.headline)},${storableText(checkpoint.dek)},${checkpointBody},${lead.topic},${JSON.stringify(checkpoint.source_urls)},${storableText(integrityNotes)},${JSON.stringify(provenance)},${storableText(String(checkpoint.form ?? ""))},${JSON.stringify(sanitizeJsonLeaves(checkpoint.found ?? null))},${JSON.stringify(sanitizeJsonLeaves(Array.isArray(checkpoint.unanswered) ? checkpoint.unanswered : []))},${checkpointResearchJson},${storableText(checkpointHeadline.modelHeadline)},${checkpointHeadline.source},${checkpointBody})
         returning *
       `;
       /*
@@ -3697,7 +3690,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     insert into drafts (
       user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, integrity_notes,
       provenance_json, form, found_note, unanswered, research_json,
-      model_headline, model_topic, headline_source
+      model_headline, model_topic, headline_source, model_body
     )
     values (
       ${context.userId}, ${owned(context)}, ${leadId}, ${storableText(headline.headline)},
@@ -3706,7 +3699,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       ${provenanceJson}, ${storableText(reported.form)}, ${storableText(reported.found_note)},
       ${unansweredJson},
       ${researchJson},
-      ${storableText(headline.modelHeadline)}, ${storableText(reported.topic)}, ${headline.source}
+      ${storableText(headline.modelHeadline)}, ${storableText(reported.topic)}, ${headline.source}, ${draftBody}
     )
     returning id
   `;
@@ -3925,40 +3918,18 @@ export const draftLead = createServerFn({ method: "POST" })
   newest row is the same "the draft on this desk" rule `listLeads` already uses
   for `story_headline`. A lead with two draft rows is one story, not two.
 */
-async function queryDraftRows(context: { newsroomId: number }) {
-  const { ensureJobsSchema } = await import("./jobs.ts");
-  await ensureJobsSchema();
-  const sql = await getSql();
-  return sql<{
-    id: number;
-    lead_id: number;
-    headline: string;
-    dek: string | null;
-    topic: string | null;
-    form: string | null;
-    updated_at: string;
-    /** Has any prose been written into this draft row yet? See the CTE note. */
-    has_body: boolean;
-    lead_status: string;
-    origin: string | null;
-    newsworthiness: number | null;
-    why: string | null;
-    model_headline: string | null;
-    headline_source: string | null;
-    job_status: string | null;
-    job_stage: string | null;
-    job_started_at: string | null;
-    job_updated_at: string | null;
-    job_model_choice: string | null;
-    job_error: string | null;
-    evidence_required: boolean;
-    evidence_decision: string | null;
-    evidence_checked_at: string | null;
-    imported_text: boolean;
-    name_check_complete: boolean;
-    names_checked_at: string | null;
-    names_unresolved: number;
-  }>`
+/*
+  The row SQL lives here so more than one reader can share it. `queryDraftRows`
+  runs it for the list, and `countDraftsDesk` runs it as a subquery to count
+  exactly the rows the Drafts screen lists -- one source of truth for what a
+  draft row is, rather than a second WHERE clause to keep in step.
+
+  It is a plain string with `$1` for the newsroom id, not a tagged template:
+  both callers hand it to `sql.query(text, params)`, and a nested tag fragment
+  does not work -- `toSql` turns an interpolated value into a parameter, not
+  into SQL text.
+*/
+const DESK_DRAFT_ROWS_SQL = `
     with latest_draft as (
       select distinct on (d.lead_id)
              d.id, d.lead_id, d.headline, d.dek, d.topic, d.form,
@@ -3991,7 +3962,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
              coalesce(nullif(btrim(d.research_json), ''), '{}')::jsonb as research
       from drafts d
       join leads l on l.id = d.lead_id and l.newsroom_id = d.newsroom_id
-      where d.newsroom_id = ${owned(context)}
+      where d.newsroom_id = $1
         -- "Everything not yet printed": a killed lead, or one already
         -- published, is not a draft on the desk.
         and l.status in ('new','drafted','held')
@@ -4029,7 +4000,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
     left join lateral (
       select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
       from desk_jobs j
-      where j.newsroom_id = ${owned(context)} and j.kind = 'draft' and j.subject_id = v.lead_id
+      where j.newsroom_id = $1 and j.kind = 'draft' and j.subject_id = v.lead_id
       order by j.id desc limit 1
     ) jb on true
     -- Newest work first: the draft an editor just touched is the one they
@@ -4038,6 +4009,41 @@ async function queryDraftRows(context: { newsroomId: number }) {
     -- being written.
     order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
   `;
+
+async function queryDraftRows(context: { newsroomId: number }) {
+  const { ensureJobsSchema } = await import("./jobs.ts");
+  await ensureJobsSchema();
+  const sql = await getSql();
+  return sql.query<{
+    id: number;
+    lead_id: number;
+    headline: string;
+    dek: string | null;
+    topic: string | null;
+    form: string | null;
+    updated_at: string;
+    /** Has any prose been written into this draft row yet? See the CTE note. */
+    has_body: boolean;
+    lead_status: string;
+    origin: string | null;
+    newsworthiness: number | null;
+    why: string | null;
+    model_headline: string | null;
+    headline_source: string | null;
+    job_status: string | null;
+    job_stage: string | null;
+    job_started_at: string | null;
+    job_updated_at: string | null;
+    job_model_choice: string | null;
+    job_error: string | null;
+    evidence_required: boolean;
+    evidence_decision: string | null;
+    evidence_checked_at: string | null;
+    imported_text: boolean;
+    name_check_complete: boolean;
+    names_checked_at: string | null;
+    names_unresolved: number;
+  }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
 }
 
 /*
@@ -4056,6 +4062,31 @@ async function queryDraftRows(context: { newsroomId: number }) {
 export const listDraftsDesk = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(({ context }) => queryDraftRows(context));
+
+/*
+  A count-only read of the same rows (review D2).
+
+  The shell draws the Drafts nav count on every desk screen, and it used to
+  call `listDraftsDesk()` for it -- every draft row with every projection, then
+  read `.length`. This runs the very same row query (`DESK_DRAFT_ROWS_SQL`, the
+  one `listDraftsDesk` and `listDraftsDeskPage` share) inside `count(*)`, so the
+  number is taken over exactly the rows the Drafts screen lists, from one source
+  of truth for what a draft row is, and only the integer crosses the wire. The
+  Drafts screen's "All" pill counts those same rows; the nav count is that
+  number, not a second one invented here.
+*/
+export const countDraftsDesk = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema();
+    const sql = await getSql();
+    const [row] = await sql.query<{ count: number }>(
+      `select count(*)::int as count from (${DESK_DRAFT_ROWS_SQL}) as desk_drafts`,
+      [owned(context)],
+    );
+    return row?.count ?? 0;
+  });
 
 /**
  * The Drafts screen's window (Unit CZ-long-lists).
@@ -4439,6 +4470,58 @@ export const setLeadStatus = createServerFn({ method: "POST" })
       update leads set status = ${data.status}
       where id = ${data.id} and newsroom_id = ${owned(context)}
     `;
+    return { ok: true as const };
+  });
+
+/**
+ * The way back from a kill: put the lead where it was, not where kills usually go.
+ *
+ * Owner, 2026-10-03. The Undo on a kill put every lead back to `new`
+ * (`killUndoPress`), so a `drafted` lead an editor killed and took back came back
+ * as a fresh lead with its draft orphaned behind it -- the status an Undo must
+ * restore is the one the row held when the Kill was pressed, and for a lead that
+ * had been drafted that is `drafted`.
+ *
+ * WHY THIS IS NOT `setLeadStatus`. That input has no `drafted` in it, and should
+ * not: `drafted` is written by the desk's own drafting pass and never picked by
+ * a screen. The Undo may write it only because it is UN-writing, so the
+ * permission lives here, behind two checks the schema cannot make:
+ *
+ *   - the lead must be KILLED right now. An Undo is the way back from a kill and
+ *     nothing else; without this the call would be a general "set any status"
+ *     door with a friendly name.
+ *   - a lead going back to `drafted` must still have its draft (`drafts.lead_id`).
+ *     A lead whose draft was thrown away has nothing to go back to, and calling
+ *     it drafted would promise a story that no longer exists.
+ *
+ * Both refusals are the desk's ordinary `{ok:false, error}`, so the row rolls
+ * back through `leadStatusOptimistic` and the toast carries the reason.
+ */
+export const restoreKilledLead = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => leadStatusRestoreInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const sql = await getSql();
+    const room = owned(context);
+    if (data.status === "drafted") {
+      const rows = await sql<{ id: number }>`
+        update leads set status = 'drafted'
+        where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+          and exists (
+            select 1 from drafts
+            where drafts.lead_id = leads.id and drafts.newsroom_id = ${room}
+          )
+        returning id
+      `;
+      if (!rows.length) return { ok: false as const, error: "That lead has no draft to go back to." };
+      return { ok: true as const };
+    }
+    const rows = await sql<{ id: number }>`
+      update leads set status = ${data.status}
+      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+      returning id
+    `;
+    if (!rows.length) return { ok: false as const, error: "That lead is not killed." };
     return { ok: true as const };
   });
 

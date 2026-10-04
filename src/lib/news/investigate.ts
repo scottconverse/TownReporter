@@ -838,12 +838,8 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     database this ensure path already built. Same guarded shape as
     migrations/0051_draft_batches.sql and draft-batch.server.ts use for theirs.
 
-    If existing rows would violate the constraint, it is added NOT VALID
-    rather than failing the statement: ensureSchemaOnce swallows a throw and
-    still records the fingerprint, so a hard failure here would silently leave
-    the database without the constraint forever. A fresh database has no rows
-    to violate it and ends up with the validated constraint, exactly like the
-    migration.
+    Existing orphan rows get NOT VALID constraints, enforcing new writes.
+    ensureInvestigateSchema retries validation after those rows are repaired.
   */
   `do $$
   begin
@@ -882,6 +878,20 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
 export async function ensureInvestigateSchema() {
   const sql = await getSql();
   await ensureSchemaOnce(sql, "investigate", INVESTIGATE_SCHEMA_STATEMENTS);
+  // Validation is outside the fingerprint guard so repaired data can be retried.
+  for (const table of ["frontier_items", "artifacts"] as const) {
+    const name = `${table}_investigation_id_fkey`;
+    const [pending] = await sql.query(
+      "select 1 from pg_constraint where conrelid=$1::regclass and conname=$2 and not convalidated",
+      [table, name],
+    );
+    if (!pending) continue;
+    try {
+      await sql.query(`alter table ${table} validate constraint ${name}`);
+    } catch (error) {
+      console.error(`[schema-ensure] ${name} could not be validated; will retry`, error);
+    }
+  }
 }
 
 /** Investigation IDs come from authorized callers; model hints never select a newsroom. */

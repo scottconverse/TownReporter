@@ -1,0 +1,38 @@
+-- The AI's original body, kept (0.6.83).
+--
+-- WHY THIS EXISTS. The drafting prompt writes a body, the editor rewrites it in
+-- the story workbench, and that save overwrites the draft row in place:
+-- `draft-edit.server.ts` runs `update drafts set ... body = ...`. Publish then
+-- copies that same row into `articles`. So a draft row only ever holds the
+-- LATEST body -- the editor's -- and what the model handed over is gone the
+-- moment the editor touches it. `article-body-history` was meant to keep the
+-- versions; it holds nothing.
+--
+-- The 30-day export that prompted this work (305 drafts, 115 published) is the
+-- proof that the loss is total: for all 102 pairs matched on
+-- `articles.origin_draft_id`, the article body was the draft body character for
+-- character. That measured what printed and said nothing at all about what the
+-- model wrote -- the exact question the export was pulled to answer. Whether
+-- drafts are sub-par could only be inferred from the drafts that survived, and
+-- not one editor body edit could be seen. `model_headline` (0093) already solves
+-- this for the headline; this is the same move for the body, which is where the
+-- editing work actually is.
+--
+-- SET ONCE, BY THE MODEL'S OWN WRITE. The column is written at the insert that
+-- the model's words created -- the story drafter's checkpoint and its final
+-- write, the reconcile pass's rewritten row, the opinion writer's row -- and by
+-- no editor save. The editor's save, and the opinion save, update `body` and
+-- leave this column exactly as they leave `model_headline`, so a row keeps the
+-- edited text and the original side by side and the desk can finally measure
+-- the difference. Nothing prints from this column; it is the paper's own
+-- record.
+--
+-- Nullable, no defaults, additive: a draft written before this migration has no
+-- recorded model body, and NULL is the honest answer ("not recorded"), not an
+-- empty string that would read as "the model wrote nothing". A draft that no
+-- model wrote is NULL for the same reason -- there is no model body to keep. That
+-- covers the pasted report an import files (its body is another outlet's words,
+-- marked `importedText`) and the empty shell row a hand-filed lead gets.
+alter table drafts add column if not exists model_body text;
+comment on column drafts.model_body is
+  'The body the model wrote, kept even when body holds the editor''s. Null = written before this migration, or a draft no model wrote.';

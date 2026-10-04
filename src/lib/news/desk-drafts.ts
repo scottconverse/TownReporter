@@ -238,3 +238,16 @@ export function deskDraftAction(state: DeskDraftState): string {
       return "Review";
   }
 }
+
+/** The edition and its step counts are derived before any display window. */
+export function tonightDrafts<T>(rows: readonly T[], states: readonly DeskDraftState[]) {
+  const edition = rows
+    .map((row, index) => ({ row, state: states[index]! }))
+    .filter(({ state }) => state.key === "ready" || state.needsYou)
+    .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"));
+  return {
+    rows: edition,
+    readyToPrint: edition.filter(({ state }) => state.key === "ready").length,
+    readyToCheck: edition.filter(({ state }) => state.needsYou).length,
+  };
+}

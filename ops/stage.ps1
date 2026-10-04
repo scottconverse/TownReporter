@@ -18,7 +18,9 @@
   nobody but the operator knows -- so by default this also upserts a second,
   disposable sign-in (staging@townreporter.test) into townreporter_dev right
   after the restore, via scripts\stage-editor.mjs, so the coordinator can open
-  the staged desk too. Pass -StageEditor:$false to skip that. Those
+  the staged desk as owner too. In one transaction, staging becomes owner and
+  the restored owner becomes editor. Pass -StageOwner:$false to keep staging
+  as editor, or -StageEditor:$false to skip the account entirely. Those
   credentials live ONLY in townreporter_dev and vanish the next time this
   script restores a fresh backup over it -- see docs\staging.md.
 
@@ -27,6 +29,7 @@
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Backup <path>
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Port 3100 -NoBuild
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -StageEditor:$false
+    powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -StageOwner:$false
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Status
     powershell -ExecutionPolicy Bypass -File ops\stage.ps1 -Stop
 #>
@@ -38,7 +41,8 @@ param(
   [switch]$AllowDirty,
   [switch]$Stop,
   [switch]$Status,
-  [bool]$StageEditor = $true
+  [bool]$StageEditor = $true,
+  [bool]$StageOwner = $true
 )
 
 $ErrorActionPreference = "Stop"
@@ -257,16 +261,18 @@ Say "stories with a publish date in $dbName : $storyCount"
 # --- 3b. stage a sign-in nobody has to guess ---------------------------------
 $stagingCredentialsPrinted = $false
 if ($StageEditor) {
-  Say "upserting the staging editor account (scripts\stage-editor.mjs)"
+  Say "upserting the staging account (owner=$StageOwner, scripts\stage-editor.mjs)"
   $prevDbUrl = $env:DATABASE_URL
   $env:DATABASE_URL = "postgres://postgres@127.0.0.1:$pgPort/$dbName"
-  $r = Invoke-External { node scripts/stage-editor.mjs }
+  $stageAccountArgs = @("scripts/stage-editor.mjs")
+  if (-not $StageOwner) { $stageAccountArgs += "--editor" }
+  $r = Invoke-External { node @stageAccountArgs }
   $env:DATABASE_URL = $prevDbUrl
   Write-Host $r.Output
   if ($r.ExitCode -ne 0) { Die "scripts\stage-editor.mjs failed (exit $($r.ExitCode)). $dbName now holds the restored backup with no staging sign-in." }
   $stagingCredentialsPrinted = $true
 } else {
-  Say "skipping the staging editor account (-StageEditor:`$false)"
+  Say "skipping the staging account (-StageEditor:`$false)"
 }
 
 # --- 4. build, unless -NoBuild -----------------------------------------------

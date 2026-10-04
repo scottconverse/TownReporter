@@ -7,6 +7,7 @@ import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
   COMPARE_NO_ANSWER,
+  editorTitle,
   COMPARE_PRIOR_LABEL,
   comparePressNote,
   KILLED_LEAD_HEADING,
@@ -167,7 +168,7 @@ function CompareSideView({
       <p className="kick">{label}</p>
       <h3 className="lead-compare-headline">
         <Link to="/desk/story/$leadId" params={{ leadId: String(side.id) }} className="hl-link">
-          {side.headline}
+          {editorTitle(side.headline)}
         </Link>
       </h3>
       <p className="meta">

@@ -242,8 +242,15 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       reportedClaims:{version:1,rows:claims},
       evidenceReconciledAt:new Date().toISOString(),
     }));
-    const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json)
-      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${storableText(edited.headline)},${storableText(edited.dek)},${storableText(edited.body)},${draft.topic},${sourceUrls},${storableText(integrityNotes)},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(sanitizeJsonLeaves(unanswered))},${reconcileResearchJson}) returning id`;
+    /*
+      The reconcile pass rewrites the body and files a new row; `model_body`
+      (0119) records the model's own rewrite, so a later editor save on THIS row
+      cannot erase it. Hoisted once: the same bytes go into `body` and
+      `model_body`, and they must not drift.
+    */
+    const editedBody = storableText(edited.body);
+    const [saved] = await tx<{id:number}>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_body)
+      values(${job.user_id},${job.newsroom_id},${draft.lead_id},${storableText(edited.headline)},${storableText(edited.dek)},${editedBody},${draft.topic},${sourceUrls},${storableText(integrityNotes)},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(sanitizeJsonLeaves(unanswered))},${reconcileResearchJson},${editedBody}) returning id`;
     // The Done card's Open button, written in the same statement as the receipt
     // (0099) so a completed reconcile row is never briefly linkless. It points
     // at the draft this run SAVED, not the one it read.

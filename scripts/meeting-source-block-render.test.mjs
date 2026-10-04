@@ -70,6 +70,13 @@ test("shows the agenda item, the timestamp and the verbatim words", () => {
   assert.match(html, /the motion carries six to one/, "the editor must see the words from the tape");
 });
 
+test("shows an agenda identifier exactly as the agenda prints it (9C stays 9C)", () => {
+  const notes = { ...full, transcriptCitations: [{ ...full.transcriptCitations[0], item: "9C" }] };
+  const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes, usedEvidence }));
+  assert.match(html, /Item 9C/);
+  assert.doesNotMatch(html, /Item 9c/);
+});
+
 test("puts the recording one click away at the cited moment", () => {
   const html = renderToStaticMarkup(createElement(MeetingSourceBlock, { notes: full, usedEvidence }));
   assert.match(html, /youtube\.com\/watch\?v=L1AnMLsLwtk&amp;t=18450s/, "the tape must be one click away at the cited moment");

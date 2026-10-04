@@ -41,6 +41,36 @@ before(async () => {
 )`);
 });
 
+// Bug 19c: document interpretation stored raw model notes containing NUL.
+it("document interpretation strips NUL before checkpointing evidence", async () => {
+  const { storeStoryDocument, readStoryDocuments } = await import("./story-documents.server.ts");
+  const sql = await getSql();
+  const [lead] = await sql`insert into leads(user_id,newsroom_id,headline,why,topic) values('nul-doc',1,'Document','Fixture','council') returning id`;
+  const doc = await storeStoryDocument(1, "nul-doc", "fixture.txt", "text/plain", Buffer.from("Evidence from the council."));
+  await sql`update story_documents set lead_id=${lead.id} where id=${doc.id}`;
+  await readStoryDocuments(1, Number(lead.id), "codex-balanced", "Read", async () => {}, [], "nul-doc", true, undefined, {
+    probe: async () => ({ ok: true, choice: "codex-balanced" }) as never,
+    chat: async () => ({ ok: true, text: "Before\u0000after" }),
+  });
+  assert.match(String((await sql`select evidence from story_documents where id=${doc.id}`)[0].evidence), /Beforeafter/);
+});
+
+// Bug 19c: OCR model output carried NUL into stored document text.
+it("OCR strips NUL before storing document text", async () => {
+  const { createCanvas } = await import("@napi-rs/canvas");
+  const { storeStoryDocument, readStoryDocuments } = await import("./story-documents.server.ts");
+  const sql = await getSql();
+  const [lead] = await sql`insert into leads(user_id,newsroom_id,headline,why,topic) values('nul-ocr',1,'Scan','Fixture','council') returning id`;
+  const doc = await storeStoryDocument(1, "nul-ocr", "fixture.png", "image/png", createCanvas(1, 1).toBuffer("image/png"));
+  await sql`update story_documents set lead_id=${lead.id} where id=${doc.id}`;
+  await readStoryDocuments(1, Number(lead.id), "codex-balanced", "Read", async () => {}, [], "nul-ocr", true, undefined, {
+    probe: async () => ({ ok: true, choice: "codex-balanced" }) as never,
+    chat: async () => ({ ok: true, text: "Interpreted" }),
+    ocrAdapters: { codex: async () => "Before\u0000after" },
+  });
+  assert.match(String((await sql`select full_text from story_documents where id=${doc.id}`)[0].full_text), /Beforeafter/);
+});
+
 it("reads a 15-page PDF through its final page, beyond the old 12-page OCR limit", async () => {
   const bytes = readFileSync(
     new URL("./fixtures/story-documents/packet.pdf", import.meta.url),

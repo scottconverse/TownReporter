@@ -541,7 +541,7 @@ const DESK_ROUTES = [
   { label: "Queue", path: "/desk/queue", link: "Queue" },
   { label: "Published", path: "/desk/published", link: "Published" },
   { label: "Server", path: "/desk/ops", link: "Server" },
-  { label: "Scan", path: "/desk/scan", palette: "Scan the wire" },
+  { label: "Scan", path: "/desk/scan", palette: "Scan history" },
 ];
 
 /** One full pass, dark or light. Returns when every frame has been checked. */
@@ -683,7 +683,7 @@ async function deskLink(name) {
  * Reach a screen the nav does not carry, the way the design says to: the
  * shell's Ctrl K palette ("Find a story or screen"), whose result link is a
  * real client-side navigation to that route. /desk/scan moved out of the nav
- * in the redesign -- it is "Scan the wire" in the palette now.
+ * in the redesign -- it is "Scan history" in the palette now.
  */
 async function paletteTo(label) {
   await page.keyboard.press("Control+k");

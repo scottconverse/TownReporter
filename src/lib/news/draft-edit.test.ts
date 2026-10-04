@@ -4,6 +4,19 @@ import { getSql } from "../db.ts";
 import { saveDraftForEditor } from "./draft-edit.server.ts";
 import { evidenceNeedsReview, evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { parseStyleRecord } from "./draft-audit-record.ts";
+
+// Bug 19c: style-repair output reached the editor-save writer with NULs intact.
+it("draft saves strip NUL from model repair text", async () => {
+  const sql = await getSql(), context = { newsroomId: 1, userId: "nul-repair" };
+  const [lead] = await sql`insert into leads(user_id,newsroom_id,headline,why,topic) values('nul-repair',1,'Repair','Fixture','council') returning id`;
+  const edit = { leadId: Number(lead.id), headline: "Before\u0000after", dek: "Before\u0000after", body: "Before\u0000after", topic: "council" };
+  await saveDraftForEditor(context, edit);
+  await saveDraftForEditor(context, edit);
+  const [saved] = await sql`select headline,dek,body from drafts where lead_id=${lead.id}`;
+  assert.deepEqual(saved, { headline: "Beforeafter", dek: "Beforeafter", body: "Beforeafter" });
+  await sql`delete from drafts where lead_id=${lead.id}`;
+  await sql`delete from leads where id=${lead.id}`;
+});
 import type { DraftRow } from "./types.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 
@@ -105,4 +118,43 @@ it("measures the saved draft into research_json beside the desk's other keys, an
   const [fixed] = await sql<DraftRow>`select * from drafts where lead_id = 7002`;
   assert.equal(parseStyleRecord(JSON.parse(fixed.research_json ?? "{}").styleAudit)?.fixCount, 0);
   assert.deepEqual(JSON.parse(fixed.research_json ?? "{}").manualClaims, [{ fact: "the fee" }]);
+});
+
+/*
+  The editor's save overwrites the body in place, so before `model_body` (0119)
+  the model's own words were gone the moment the editor touched them and no
+  export could measure an editor body edit. The writer sets `model_body` from
+  the body it writes; the editor's save must leave it exactly where the writer
+  put it. This is the reader-facing half of that contract: the row prints the
+  editor's text and still knows what the model handed over.
+*/
+it("an editor save changes the body and leaves the model's own body in model_body", async () => {
+  const sql = await getSql();
+  await sql.query(`insert into section_config(newsroom_id) values (91) on conflict do nothing`);
+  await sql.query(
+    `insert into newsroom_sections(newsroom_id,key,name,position,visible) values (91,'community','Community',100,true) on conflict do nothing`,
+  );
+  await sql.query(
+    `insert into leads (id,newsroom_id,user_id,headline,why,topic) values (7003,91,'editor','Water fee','Fixture','community') on conflict (id) do nothing`,
+  );
+  // The row as the writer files it: `body` and `model_body` are the same bytes
+  // the moment the model's words land.
+  const modelBody = "The council voted 5-2 on Tuesday. The new rate starts in January.";
+  await sql.query(
+    `insert into drafts (newsroom_id,user_id,lead_id,headline,dek,body,topic,source_urls,model_headline,headline_source,model_body)
+      values (91,'editor',7003,'Water fee rises','',$1,'community','[]','Water fee rises','model',$1)`,
+    [modelBody],
+  );
+  const ctx = { userId: "editor", newsroomId: 91 };
+  const editorBody = "The council voted 5-2. The new rate takes effect in January, the city said.";
+  await saveDraftForEditor(ctx, {
+    leadId: 7003,
+    headline: "Water fee rises",
+    dek: "The council voted 5-2.",
+    body: editorBody,
+    topic: "community",
+  });
+  const [saved] = await sql<DraftRow>`select * from drafts where lead_id = 7003`;
+  assert.equal(saved.body, editorBody, "the row prints the editor's text");
+  assert.equal(saved.model_body, modelBody, "and the model's own body survives the edit, or the edit can never be measured");
 });

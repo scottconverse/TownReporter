@@ -1,4 +1,5 @@
 import { getSql } from "../db.ts";
+import { INVESTIGATION_TITLE_LIMIT } from "./dark-rail.ts";
 import { headlineFromUrl, looksLikeUrl } from "./desk-copy.ts";
 import { ensureInvestigateSchema, seedInvestigation } from "./investigate.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -28,11 +29,16 @@ export async function openInvestigationForEditor(
   const budget = Math.min(20, Math.max(1, Math.round(Number(opts.budget ?? 5)) || 5));
   const firstLine = paste.split("\n")[0]?.replace(/\s+/g, " ").trim() ?? "";
   const candidate = (opts.title || firstLine).trim();
+  /*
+    The cut length lives in `dark-rail.ts` beside the code that reads it back:
+    the rail can tell a title cut HERE from an editor's own short question only
+    by knowing exactly how long a cut one is.
+  */
   const title = (
     looksLikeUrl(candidate)
       ? headlineFromUrl(candidate)
       : candidate || `Investigation ${new Date().toISOString().slice(0, 10)}`
-  ).slice(0, 200);
+  ).slice(0, INVESTIGATION_TITLE_LIMIT);
   const created = await sql<{ id: number }>`
     insert into investigations (user_id, newsroom_id, title, status, budget, summary)
     values (${userId}, ${newsroomId}, ${title}, ${"open"}, ${budget}, ${"Opened from Dark Desk."})

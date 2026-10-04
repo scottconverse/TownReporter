@@ -15,6 +15,15 @@
  * running evidence check change while the button stays on screen.
  */
 import { useSaveShortcut } from "@/components/desk-action";
+import { useSyncExternalStore } from "react";
+import { saveShortcutLabel } from "@/lib/save-shortcut-label";
+
+const subscribe = () => () => {};
+
+export function SaveShortcutHint() {
+  const platform = useSyncExternalStore(subscribe, () => navigator.platform, () => "");
+  return <span className="astra-wb-kbd" aria-hidden="true">{saveShortcutLabel(platform)}</span>;
+}
 
 export function SaveShortcut({
   save,

@@ -42,20 +42,7 @@ export const DESK_NAV: readonly DeskNavItem[] = [
   { to: "/desk/follow-ups", label: "Follow-ups" },
   { to: "/desk/dark", label: "Dark Desk" },
   { to: "/desk/sources", label: "Sources & scan" },
-  /*
-    UNIT U24 -- THE SCAN SCREEN IS IN THE NAV.
-
-    `/desk/scan` is where the scope and the effort dials live: General Scan
-    over every accepted source, one section, or a picked set, on an Automatic
-    or a named writer. The nav item above it is "Sources & scan", and that goes
-    to `/desk/sources`, which carries a "Run scan now" button but none of those
-    controls. So an editor looking for "a General Scan" had the Ctrl K palette
-    and nothing else -- the stand-in editorial day found it only that way. It
-    is a sub-item of the screen an editor would look under, not a twelfth
-    top-level destination.
-  */
-  { to: "/desk/scan", label: "Scan the wire", sub: true },
-  { to: "/desk/ops", label: "Models", hash: "writing-models" },
+  { to: "/desk/models", label: "Models" },
   { to: "/desk/ops", label: "Server" },
   { to: "/desk/stats", label: "Stats" },
 ] as const;
@@ -67,12 +54,10 @@ export const DESK_NAV: readonly DeskNavItem[] = [
  * navigate to, which is the design's own "find anything" mechanism. Not drawn
  * in the footer -- BF3 removed those links, and the capture has none.
  *
- * `/desk/scan` used to live here and in the palette only (unit U24). It is a
- * drawn sub-item now, so it is in `DESK_NAV` and NOT repeated below -- the
- * palette builds itself from both lists, and a page in both is a page the
- * palette offers twice.
+ * Scan history is reached from the Sources header and remains in the palette.
  */
 export const DESK_MORE: readonly { to: string; label: string }[] = [
+  { to: "/desk/scan", label: "Scan history" },
   { to: "/desk/import", label: "Import" },
   { to: "/desk/memory", label: "Beat memory" },
   { to: "/desk/legal-removals", label: "Legal removals" },
@@ -93,9 +78,8 @@ export const SEARCH_PAGES = [...DESK_NAV, ...DESK_MORE].map((l) => ({
 export const DESK_PATHS: readonly string[] = [...new Set(SEARCH_PAGES.map((p) => p.to))];
 
 /**
- * Which nav item is current. `pathname` alone cannot answer it, because Models
- * and Server are the same route; the hash decides between them when there is
- * one, and Server — the page — wins when there is not.
+ * Which nav item is current. Models and Server have separate destinations;
+ * a section hash does not change the active page.
  */
 export function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
   const path = item.to;
@@ -103,7 +87,5 @@ export function navItemIsActive(item: DeskNavItem, pathname: string, hash: strin
     ? pathname === path
     : pathname === path || pathname.startsWith(`${path}/`);
   if (!onPath) return false;
-  if (path !== "/desk/ops") return true;
-  const wantHash = `#${item.hash ?? ""}`;
-  return item.hash ? hash === wantHash : hash !== "#writing-models";
+  return !item.hash || hash === `#${item.hash}`;
 }

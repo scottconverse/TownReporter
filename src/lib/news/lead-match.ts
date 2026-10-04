@@ -46,6 +46,31 @@ const HEADLINE_CONTAINMENT_THRESHOLD = 0.7;
  * calling it the same story -- this is the sole signal at that point. */
 const HEADLINE_ONLY_THRESHOLD = 0.85;
 
+/** Unit AN (2026-10-03): how many non-furniture proper nouns two headlines
+ * must share before a names-only pair counts as sharing distinguishing
+ * evidence -- see sharesDistinguishingEvidence. Two, for the same reason
+ * ANCHOR_MATCH_MIN_SHARED is two: one shared name is usually a PLACE
+ * ("Bohn Farm", "Twin Peaks") and is not evidence of a shared subject, while
+ * two independent names that survive properNounStoplist (a venue AND an
+ * event, an organisation AND a person) are. */
+const NAME_ONLY_MIN_SHARED = 2;
+
+/** Unit AO (2026-10-03): the cheapest half of the candidate filter -- how
+ * character-similar two normalized headlines must be before the pair is worth
+ * classifying at all. See nearDuplicateSignals for the whole design; the
+ * strong bar for the same signal is HEADLINE_ONLY_THRESHOLD (0.85), the same
+ * number as the token-level "nothing but the wording differs" bar, because it
+ * is the same argument measured on a finer instrument. */
+const HEADLINE_RATIO_CANDIDATE = 0.7;
+
+/** Unit AO: a shared date:/amount: anchor, or a shared number that is not a
+ * bare year -- see specificAnchors. One is enough at the classifying tier
+ * where two are needed to pass the URL-sharing gate (ANCHOR_MATCH_MIN_SHARED),
+ * and the difference is the name agreement both new routes require: this
+ * tier's evidence is "the same specific fact AND the same subject", never a
+ * fact on its own. */
+const NEAR_DUPLICATE_ANCHOR_MIN_SHARED = 1;
+
 /**
  * Real miss (2026-09-02): "Council books two executive sessions in eight
  * days -- Sept. 22 and Sept. 29 -- with packets already posted" filed as a
@@ -191,6 +216,33 @@ const MONTH_NUMBER: Record<string, string> = {
  * blanked out of the working copy as they're consumed so a date's day number
  * isn't also counted as a bare `num:` anchor and a date's month name isn't
  * also counted as a `noun:` anchor. */
+/**
+ * Unit AO (2026-10-03): one dollar figure, one anchor. `$547.5M` and `$547.5
+ * million` are the same amount written two ways, and the scan model writes it
+ * both ways -- live, "Longmont begins review of proposed $547.5 million 2027
+ * operating budget" (lead 149, killed) against "Longmont's Proposed 2027
+ * Budget: $547.5M Operating Plan..." (lead 435, scan 66). Until this, the two
+ * stored `amount:$547.5` and `amount:$547.5million` -- the short form kept its
+ * suffix in full and the long form kept only the digits -- so a pair whose
+ * whole point is that they quote the SAME figure had no shared amount anchor at
+ * all and could only be matched on the bare year in both headlines: the one
+ * signal that must never decide a match (see distinguishingTokens).
+ *
+ * The suffix is ALWAYS folded to its long form (`k`/`m`/`b` -> thousand/
+ * million/billion) after whitespace and commas are dropped, and the long form
+ * is left as it stands, so every spelling of one magnitude lands on one string
+ * (`$547.5M` -> `$547.5million` <- `$547.5 million`). Nothing else about the
+ * amount is normalized: `$547.5M` and `$548M` stay different anchors, which is
+ * the point of an anchor.
+ */
+function normalizeAmount(full: string): string {
+  const compact = full.toLowerCase().replace(/[\s,]/g, "");
+  return compact.replace(
+    /[kmb]$/,
+    (suffix) => ({ k: "thousand", m: "million", b: "billion" })[suffix] ?? suffix,
+  );
+}
+
 export function extractAnchors(headline: string, place?: NewsroomPlace | null): Set<string> {
   const anchors = new Set<string>();
   let working = headline;
@@ -213,7 +265,7 @@ export function extractAnchors(headline: string, place?: NewsroomPlace | null): 
   working = working.replace(
     /\$\s?\d[\d,]*(?:\.\d+)?\s?(?:[kmb]\b|million|billion|thousand)?/gi,
     (full) => {
-      anchors.add(`amount:${full.toLowerCase().replace(/[\s,]/g, "")}`);
+      anchors.add(`amount:${normalizeAmount(full)}`);
       return " ".repeat(full.length);
     },
   );
@@ -656,24 +708,28 @@ export function sharesStoryPageUrl(a: string[], b: string[]): boolean {
  * every surviving word -- see contentTokens and CONTENT_STOPLIST's doc
  * comment for why scoring civic-agenda furniture ("council approves ...
  * contract at ... meeting") let two different agenda items look like a
- * paraphrase of each other. sharesDistinguishingWord is also required explicitly:
+ * paraphrase of each other. sharesDistinguishingEvidence is also required explicitly:
  * given the thresholds below are all > 0, a nonzero Jaccard/containment
  * score already implies at least one shared content token, but the explicit
  * check keeps that invariant true even if a threshold is ever loosened.
+ *
+ * Unit AN (2026-10-03): the tokens scored are distinguishingTokens, not raw
+ * contentTokens -- see that function for the names-only headline that made
+ * every path here score 0.0.
  */
 function headlinesOverlapEnough(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const ta = contentTokens(a, place);
-  const tb = contentTokens(b, place);
+  const ta = distinguishingTokens(a, b, place);
+  const tb = distinguishingTokens(b, a, place);
   return (
     (jaccard(ta, tb) >= HEADLINE_JACCARD_THRESHOLD || containment(ta, tb) >= HEADLINE_CONTAINMENT_THRESHOLD) &&
-    sharesDistinguishingWord(a, b, place)
+    sharesDistinguishingEvidence(a, b, place)
   );
 }
 
 function headlinesAloneMatch(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const ta = contentTokens(a, place);
-  const tb = contentTokens(b, place);
-  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingWord(a, b, place);
+  const ta = distinguishingTokens(a, b, place);
+  const tb = distinguishingTokens(b, a, place);
+  return jaccard(ta, tb) >= HEADLINE_ONLY_THRESHOLD && sharesDistinguishingEvidence(a, b, place);
 }
 
 /** Words at least 4 letters long, present in the headline, and NOT on
@@ -684,7 +740,7 @@ function headlinesAloneMatch(a: string, b: string, place?: NewsroomPlace | null)
  * is already scored as an anchor (noun:twin, noun:peaks), so reusing it here
  * would let two different agenda items about the same place ("Twin Peaks
  * rezoning application" vs "Twin Peaks parking variance") satisfy
- * sharesDistinguishingWord on the location alone -- the anchor path needs a
+ * sharesDistinguishingEvidence on the location alone -- the anchor path needs a
  * *different* piece of evidence that the SUBJECT, not just the place, is the
  * same. Plural/singular variants are folded together (stem) after the
  * stoplist checks, which all key on the raw word. */
@@ -705,6 +761,99 @@ function contentTokens(headline: string, place?: NewsroomPlace | null): Set<stri
     )
     .map(stem);
   return new Set(words);
+}
+
+/**
+ * Unit AO (2026-10-03): contentTokens minus the numbers, which is what the
+ * headline-overlap paths now score -- a bare year (or any 4+ digit number) is
+ * never distinguishing evidence that two headlines are the same story.
+ *
+ * The live bug. Measured on the real matcher before this: a headline whose
+ * only surviving content word is a year scored a Jaccard of 1.0 against every
+ * other headline containing that year, and `matchStrength` returned "strong"
+ * on the year alone -- the tier that DISCARDS the finding (lead-filing.ts:111,
+ * only `resurfaced_count` moves). Two shapes from scan 66 and its 30-day
+ * neighbours:
+ *
+ *   - "St. Vrain Valley Schools Opens 2027-28 School Choice Window Dec. 1-15"
+ *     (killed, 332) against "Longmont's Proposed 2027 Budget: $547.5M
+ *     Operating Plan, With Modifications Hinged to Nov. 3 Tax Votes" (435) --
+ *     two different stories that share nothing but 2027, linked as
+ *     `dup_kind='developing'` on the live queue.
+ *   - "Longmont Public Media posts Museum and Library advisory board meetings
+ *     for September 2026" (223) against every calendar listing that month
+ *     ("City Council Regular Session - September 22, 2026"), linked as
+ *     possible duplicates of each other.
+ *
+ * A number is still an ANCHOR -- see extractAnchors and
+ * sharedAnchorCount, which is where a shared date or a shared street number
+ * (the real "8979 Nelson Road" repeat, leads 66 and 147) is supposed to be
+ * scored, with the >= ANCHOR_MATCH_MIN_SHARED bar and a shared source URL
+ * behind it. What it must not do is satisfy the token-overlap score.
+ */
+function subjectTokens(headline: string, place?: NewsroomPlace | null): Set<string> {
+  const out = new Set<string>();
+  for (const word of contentTokens(headline, place)) {
+    if (!/^\d+$/.test(word)) out.add(word);
+  }
+  return out;
+}
+/**
+ * Unit AN (2026-10-03): the words a headline is SCORED on -- contentTokens,
+ * unless there are none, in which case its own proper nouns.
+ *
+ * The live bug this closes. Every headline-overlap path below scores content
+ * tokens, and contentTokens deliberately drops every proper noun (see its own
+ * doc comment). A headline whose every word of four letters or more is a
+ * capitalised name therefore has NO content tokens at all: the sets are empty,
+ * jaccard/containment return 0 by definition, sharesDistinguishingEvidence can
+ * never fire, and all three of findMatchingLead's paths fail however identical
+ * the two headlines are. Scan run 66 (2026-10-03, Longmont) filed 20 leads of
+ * which at least 16 repeated earlier leads, and not one of them was even
+ * flagged, because of this. Measured on the real matcher, before this change:
+ *
+ *   lead 418 "Callahan House Video Release Party Set for Oct. 8 at Tend Studio"
+ *     vs lead 349 -- byte-identical headline, byte-identical EVENT page URL,
+ *     both sightings of one event -- scored null.
+ *   lead 430 vs lead 412 -- byte-identical headline (both "North Pace Street
+ *     Entrance at Fox Creek Village and King Soopers Reopens"), one with only
+ *     the /news/ index between them -- scored null.
+ *   leads 416, 422 (same scan, same city news story, one article page) -- no
+ *     same-run merge, so two rows for one story.
+ *
+ * The fallback is the headline's proper nouns, and it is switched on by BOTH
+ * sides having no content tokens, never by either side. As long as one
+ * headline carries subject vocabulary the existing subject-word rule decides,
+ * which is what keeps every QA-1/U26 negative where it is today ("library roof
+ * repair" vs "park irrigation", "Twin Peaks rezoning" vs "Twin Peaks parking
+ * variance", "commissioners ... jail expansion" vs "... staff pay raises"): in
+ * each of those, at least one side has content tokens, so nothing here fires.
+ *
+ * Names are weaker evidence than subjects (see distinguishingOverlap), which
+ * is why they are only ever reached for a headline that has nothing else, and
+ * why the pair still has to clear the same Jaccard/containment bars and a
+ * shared URL or >= ANCHOR_MATCH_MIN_SHARED anchors. Two DIFFERENT stories that
+ * both happen to be all-names still do not merge: their name sets are mostly
+ * disjoint ("Longmont Library to Close All Day Oct. 6 for Staff Training" vs
+ * "Longmont Seeks Residents for New Technology Policy Advisory Board" share
+ * only the newsroom's own furniture, which is stripped, so 0.0).
+ *
+ * Unit AO (2026-10-03): the subject half is subjectTokens, not raw
+ * contentTokens -- a number is an anchor, never a subject word. A headline
+ * whose only content word is a year is therefore in exactly the same position
+ * as the all-names headline above and falls back to its own proper nouns; see
+ * subjectTokens for the two live pairs that made that the difference between
+ * "strong" (discarded) and no match at all.
+ */
+function distinguishingTokens(
+  headline: string,
+  otherHeadline: string,
+  place?: NewsroomPlace | null,
+): Set<string> {
+  const own = subjectTokens(headline, place);
+  if (own.size > 0) return own;
+  if (subjectTokens(otherHeadline, place).size > 0) return own;
+  return nonStoplistedProperNouns(headline, place);
 }
 
 /**
@@ -755,9 +904,384 @@ function sharedWordCount(a: Set<string>, b: Set<string>): number {
  * is the evidence that they are about the same THING -- "climate",
  * "Heritage", "ExxonMobil" -- and it is what the owner's 2026-09-30 false
  * positive ("...Boulder County Climate Suit Oct. 5" against "Boulder County
- * Proclaims Hispanic and Latinx Heritage Month...") never had. */
-function sharesDistinguishingWord(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  return sharedWordCount(contentTokens(a, place), contentTokens(b, place)) >= 1;
+ * Proclaims Hispanic and Latinx Heritage Month...") never had.
+ *
+ * Unit AN (2026-10-03): the one exception, and it is the whole point of the
+ * unit -- when NEITHER headline has a word that survives contentTokens, there
+ * is no subject-word overlap available to require, and requiring it anyway is
+ * what let every repeat in scan 66 through (see distinguishingTokens). The
+ * fallback bar is NAME_ONLY_MIN_SHARED non-furniture names, which is a
+ * strictly stronger piece of evidence than the >= 1 content word it replaces
+ * (a content word can be shared by two headlines about nothing in common --
+ * see CONTENT_STOPLIST's own history; two shared names that survive
+ * properNounStoplist are what the anchor path already demands). */
+function sharesDistinguishingEvidence(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+): boolean {
+  const ca = contentTokens(a, place);
+  const cb = contentTokens(b, place);
+  if (sharedWordCount(ca, cb) >= 1) return true;
+  // Unit AN (2026-10-03): neither headline has subject vocabulary at all, so
+  // the words that survive contentTokens are not the only distinguishing
+  // evidence there is -- the names are the rest of it. Without this, a
+  // names-only pair could never satisfy any path no matter how identical the
+  // headlines were (see distinguishingTokens). The bar is >= 2 names and not
+  // >= 1 for the same reason as the anchor path: one shared name is a place.
+  if (ca.size > 0 || cb.size > 0) return false;
+  return (
+    sharedWordCount(nonStoplistedProperNouns(a, place), nonStoplistedProperNouns(b, place)) >=
+    NAME_ONLY_MIN_SHARED
+  );
+}
+
+/** The normalized form two headlines are compared at character level:
+ * lowercased, punctuation dropped, whitespace collapsed. */
+function normalizedHeadline(headline: string): string {
+  return headline.toLowerCase().replace(/[^a-z0-9\s]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** Length of the longest common subsequence of two strings -- the M of
+ * difflib.SequenceMatcher.ratio()'s 2M/T. Two rows of the DP table, which is
+ * everything a headline-length comparison needs. */
+function lcsLength(a: string, b: string): number {
+  const width = b.length + 1;
+  let prev = new Array<number>(width).fill(0);
+  let cur = new Array<number>(width).fill(0);
+  for (let i = 0; i < a.length; i++) {
+    cur[0] = 0;
+    for (let j = 0; j < b.length; j++) {
+      cur[j + 1] = a[i] === b[j] ? prev[j] + 1 : Math.max(cur[j], prev[j + 1]);
+    }
+    const swap = prev;
+    prev = cur;
+    cur = swap;
+  }
+  return prev[b.length];
+}
+
+/** Character-level similarity of two headlines: 2 * LCS / (len(a) + len(b))
+ * over the normalized forms, Python's difflib ratio. The wide, cheap half of
+ * the candidate filter -- see nearDuplicateSignals. */
+function headlineCharRatio(a: string, b: string): number {
+  const x = normalizedHeadline(a);
+  const y = normalizedHeadline(b);
+  if (!x.length && !y.length) return 1;
+  if (!x.length || !y.length) return 0;
+  return (2 * lcsLength(x, y)) / (x.length + y.length);
+}
+
+/** The specific facts a headline pins down: a date, a dollar amount, or a
+ * number that is not a bare year. `num:2027` is one headline's calendar, not
+ * a fact two stories share -- requirement: a bare year is never enough. */
+function specificAnchors(anchors: Iterable<string>): string[] {
+  return [...anchors].filter(
+    (anchor) =>
+      /^(date:|amount:)/.test(anchor) || (/^num:/.test(anchor) && !/^num:\d{4}$/.test(anchor)),
+  );
+}
+
+/** The facts a headline pins down: anything from extractAnchors that says when,
+ * how much, or how many. `noun:` is a name, and names are the subject half of
+ * the signal, not the fact half. */
+function factAnchorsOf(anchors: Iterable<string>): string[] {
+  return [...anchors].filter((anchor) => /^(date:|amount:|month:|num:)/.test(anchor));
+}
+
+/** Unit AO (2026-10-03): do two headlines NAME A DIFFERENT VALUE for the same
+ * role -- a contradiction, and therefore two different stories? The roles are
+ * the kinds extractAnchors knows: when (`date:`, `month:`), how much
+ * (`amount:`), how many (`num:`).
+ *
+ * The distinction this exists to draw is between detail and contradiction:
+ *
+ *   - a role ONE side fills is detail the second telling added, not a
+ *     disagreement. 429 carries no deadline; 354 carries `date:10-16`. Same
+ *     story, one more fact -- the tier that files it HELD and links it, exactly
+ *     as a repeat that brings a new fact should be handled.
+ *   - a role BOTH sides fill with nothing in common is a contradiction. 297
+ *     "City Council Regular Session - September 22, 2026 (2026-09-23)" and 302
+ *     "City Council Regular Session - September 8, 2026 (2026-09-09)" are the
+ *     same template for two different meetings: `date:09-22` against
+ *     `date:09-08`, nothing shared, and no amount of character overlap (0.88)
+ *     makes them one story.
+ *
+ * Why not simply require that neither side adds any fact (the old `sameFacts`)?
+ * Because that reads detail as disagreement, and it is the reason 429 was still
+ * filed as a fresh lead against the killed 354 after every other signal agreed.
+ *
+ * A shared value anywhere in the role clears it: 434 names `num:542` and
+ * `num:550` where 359 names `num:542`, `num:550` and `num:2026` -- the extra
+ * year is detail, the shared goals are the same goals, so no conflict.
+ */
+function factsConflict(a: Iterable<string>, b: Iterable<string>): boolean {
+  const fa = factAnchorsOf(a);
+  const fb = factAnchorsOf(b);
+  for (const kind of ["date:", "amount:", "month:", "num:"]) {
+    const va = fa.filter((anchor) => anchor.startsWith(kind));
+    const vb = fb.filter((anchor) => anchor.startsWith(kind));
+    if (va.length > 0 && vb.length > 0 && !va.some((anchor) => vb.includes(anchor))) return true;
+  }
+  return false;
+}
+
+/**
+ * Unit AO (2026-10-03): the two-stage near-duplicate signals. Stage 1 is a
+ * wide, cheap candidate filter (this: any strong signal makes a pair worth
+ * classifying); Stage 2 is the classifier that decides whether the pair is
+ * the SAME story (nearDuplicateStrong) or only worth LINKING
+ * (nearDuplicateCandidate and no more). Both stages are built from this one
+ * struct so the filter and the classifier cannot drift apart -- every signal
+ * the classifier uses is one the filter already looked at.
+ *
+ * Why a second mechanism at all, when pairMatches already has three paths. The
+ * three paths score PROSE (token overlap, anchors) and are the right tool when
+ * two headlines are rewrites of each other. They are blind to the shape scan
+ * 66 was full of -- a repeat whose headline is the SAME sentence with the
+ * subject's name spelled out differently, or the same sentence plus the
+ * number the earlier one left implicit:
+ *
+ *   - 418 "Callahan House Video Release Party Set for Oct. 8 at Tend Studio"
+ *     against 349 -- byte-identical headline, byte-identical event URL, and
+ *     still null before unit AN because every word over three letters is a
+ *     name (see distinguishingTokens).
+ *   - 435 "Longmont's Proposed 2027 Budget: $547.5M Operating Plan, With
+ *     Modifications Hinged to Nov. 3 Tax Votes" against the killed 149
+ *     "Longmont begins review of proposed $547.5 million 2027 operating
+ *     budget": the same budget, the same figure (once normalizeAmount folds
+ *     $547.5M and $547.5 million together), and a new date.
+ *   - 424 "Harvest of Hope Pantry Reports 31,260 Shopping Visits and 1,016,373
+ *     Items of Food Distributed in 2025" against the killed 233, whose only
+ *     shared specifics are those two numbers.
+ *
+ * The signals, and why each one is a guard rather than a nicety:
+ *
+ *   - `sharedNames` >= 1: at least one non-furniture proper noun in common.
+ *     Every route requires it, and it is what keeps two template-driven agenda
+ *     items apart when their number happens to match (QA-1's NEG set: "library
+ *     roof repair" vs "park irrigation", "police overtime" vs "fire truck" --
+ *     same date, same amount, different subjects, no shared name).
+ *   - `oneSided`: one headline's distinguishing vocabulary is contained in the
+ *     other's (see distinguishingTokens -- the same sets the headline-overlap
+ *     paths score). A pair that each brings words the other lacks is two
+ *     different stories being compared, not one story said twice. It is the one
+ *     signal only the FILTER uses, and only to decide the moderate band: a pair
+ *     at 0.70-0.85 of shared characters has to be one-sided to be worth
+ *     classifying, while a pair at 0.85 or over needs no such corroboration.
+ *     Scored on the distinguishing sets and not on raw contentTokens because
+ *     for two all-names headlines contentTokens is EMPTY on both sides and the
+ *     test goes vacuously true -- 416/412, seven shared names, 0.74 of shared
+ *     characters, and two different retellings of the Fox Creek reopening.
+ *   - `factsAgree`: the two headlines do not name a different value for the
+ *     same role. A role only one side fills is detail added by a second
+ *     telling (429 "Boulder County Opens Applications for Behavioral Health
+ *     Funding Oversight Roles" and 354, the same headline plus "; Deadline
+ *     Oct. 16") and is exactly what requirement "a repeat carrying a new fact
+ *     is HELD and linked" describes. A role BOTH sides fill with nothing in
+ *     common is a contradiction: the same council-session template for Sept. 22
+ *     and for Sept. 8 (297 against 302), or the WOW! Children's Museum's two
+ *     birthday bashes, must never be one story however few characters differ.
+ *     See factsConflict.
+ *   - `sharedSpecificAnchors`: see specificAnchors -- a shared date or amount,
+ *     never a bare year.
+ *   - `subjectsAgree`: the two headlines do not each bring their own subject
+ *     vocabulary. Either neither has any (two all-names headlines -- the shared
+ *     names ARE the subject, and a pair that shares most of them is the same
+ *     subject said twice), or one headline's subject words are contained in the
+ *     other's (the second telling refines the same subject). What it excludes
+ *     is the pair where both sides name a subject the other lacks, which is the
+ *     shape of every different-story pair in the QA-1 set: NEG-11 "Twin Peaks
+ *     rezoning APPLICATION" against "Twin Peaks parking VARIANCE" (both share
+ *     the place name and the date, and are two different agenda items), NEG-7
+ *     EAST county against WEST county. A shared name cannot stand in for this:
+ *     "Twin Peaks" is a place, and the anchor path already refuses to read a
+ *     shared place as a shared subject (sharesDistinguishingEvidence). This is
+ *     the signal that keeps the high-ratio route honest -- 429 and 354 are 0.87
+ *     of shared characters and have no subject vocabulary at all, so the six
+ *     names they share are the whole subject; NEG-11 is 0.86 and has one on
+ *     each side, so it is not.
+ *   - `charRatio`: the character-level similarity, computed lazily because it
+ *     is the one signal with real cost (an LCS) and the cheap signals decide
+ *     most pairs.
+ *
+ * What this deliberately does NOT do: relax anything for a pair whose only
+ * shared evidence is a year. `num:2027` is not in sharedSpecificAnchors and not
+ * a subject word (see subjectTokens), so a pair sharing nothing but the year
+ * still has no name and no subject in common and no route reaches it: the two
+ * most expensive failures of the live queue -- 435 linked to the school-choice
+ * story 332 as "developing", and 223 "posts Museum and Library advisory board
+ * meetings for September 2026" linked to every council session that month --
+ * stop happening.
+ */
+type NearDuplicateSignals = {
+  sharedNames: number;
+  oneSided: boolean;
+  factsAgree: boolean;
+  sharedSpecificAnchors: number;
+  sharedAnchorsAreDates: boolean;
+  subjectsAgree: boolean;
+  charRatio: () => number;
+};
+
+function nearDuplicateSignals(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+): NearDuplicateSignals {
+  const sa = subjectTokens(a, place);
+  const sb = subjectTokens(b, place);
+  const da = distinguishingTokens(a, b, place);
+  const db = distinguishingTokens(b, a, place);
+  const anchorsA = extractAnchors(a, place);
+  const anchorsB = extractAnchors(b, place);
+  const sharedNames = sharedWordCount(
+    nonStoplistedProperNouns(a, place),
+    nonStoplistedProperNouns(b, place),
+  );
+  const sharedAnchors = specificAnchors(
+    [...anchorsA].filter((anchor) => anchorsB.has(anchor)),
+  );
+  let ratio: number | null = null;
+
+  return {
+    sharedNames,
+    // Scored on the distinguishing sets, and only when both sides have one: for
+    // two all-names headlines contentTokens is empty on BOTH sides, and reading
+    // oneSided off it made the test vacuously true for every such pair -- the
+    // reason 416 "…to Fox Creek Village Reopens; South Entrance Remains Closed"
+    // was linked as a possible duplicate of 412 "…at Fox Creek Village and King
+    // Soopers Reopens" on 0.74 of shared characters and then filed HELD instead
+    // of NEW. See distinguishingTokens' doc for the same fallback.
+    oneSided:
+      (da.size > 0 && [...da].every((token) => db.has(token))) ||
+      (db.size > 0 && [...db].every((token) => da.has(token))),
+    factsAgree: !factsConflict(anchorsA, anchorsB),
+    sharedSpecificAnchors: sharedAnchors.length,
+    // A date is the one specific anchor a pair can share by coincidence: two
+    // unrelated meetings fall on the same day. Both this and the amount/count
+    // anchors are specific, but only the date needs to be told apart from "no
+    // anchor at all" by the caller; see nearDuplicateCandidate.
+    sharedAnchorsAreDates:
+      sharedAnchors.length > 0 && sharedAnchors.every((anchor) => anchor.startsWith("date:")),
+    // The subject vocabulary is subjectTokens (a number is an anchor, never a
+    // subject -- see subjectTokens), and the test is containment in one
+    // direction or the other, not a shared word: see the signal's doc comment
+    // for why a shared name is not enough.
+    subjectsAgree:
+      (sa.size === 0 && sb.size === 0) ||
+      (sa.size > 0 && [...sa].every((token) => sb.has(token))) ||
+      (sb.size > 0 && [...sb].every((token) => sa.has(token))),
+    charRatio: () => (ratio ??= headlineCharRatio(a, b)),
+  };
+}
+
+/**
+ * Unit AO, stage 1: is this pair worth a second look? The filter is deliberately
+ * wider than the classifier below -- every pair the classifier calls the same
+ * story is a pair this accepts -- and it is the cheap signals that decide it,
+ * with the expensive character-level signal asked last and only when it has to
+ * be. No pair whose two headlines contradict each other on a date, an amount, a
+ * month or a count ever gets this far; see factsConflict.
+ *
+ * Three ways in, in increasing cost:
+ *
+ *   - a shared specific fact (see specificAnchors -- a date or an amount, never
+ *     a bare year) that is corroborated when the fact is only a date: a date is
+ *     the one anchor two unrelated stories share by accident, so a shared date
+ *     counts when the two also share a second name token (NAME_ONLY_MIN_SHARED,
+ *     the bar path 2 already uses below) or when their wording is already close
+ *     to the 0.70 one-sided bar. Without that, "Housing and Human Services
+ *     Advisory Board Cancels Oct. 8 Meeting" and "Planning Division Sets Oct. 8
+ *     Neighborhood Meeting" -- one day, one word ("meeting"), 0.43 of shared
+ *     characters -- would be handed to the desk's AI check as a possible pair,
+ *     and so would every other pair of meetings filed on the same October day.
+ *     An amount or a count needs no such corroboration: 435's budget headline
+ *     and 149 share $547.5 million and "2027" and nothing else at 0.49, and that
+ *     is the same story told twice.
+ *   - a headline that is the same characters in the same order (>= 0.85), which
+ *     needs no corroboration beyond a shared name: two reporters cannot put
+ *     that many characters of one sentence in one order by accident,
+ *   - failing both, a moderately similar headline (>= 0.70) that is one-sided:
+ *     one headline's vocabulary contained in the other's. This is the narrow,
+ *     high-precision half of the ratio band, and it exists so the filter does
+ *     not have to open the 0.70-0.85 band to every pair that shares a name --
+ *     416 "North Pace Street Entrance to Fox Creek Village Reopens; South
+ *     Entrance Remains Closed" and 412 "North Pace Street Entrance at Fox Creek
+ *     Village and King Soopers Reopens" sit at 0.74 with seven names in common
+ *     and are two different retellings, not one story said twice.
+ *
+ * Every way in also requires that the two do not each bring a subject the other
+ * lacks (see subjectsAgree). The filter is wide, but not so wide that two
+ * agenda items on one board's meeting page are worth the desk's AI check every
+ * time they share a date -- NEG-11 "Twin Peaks rezoning application" against
+ * "Twin Peaks parking variance" is null before this and stays null.
+ */
+function nearDuplicateCandidate(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  const signals = nearDuplicateSignals(a, b, place);
+  if (signals.sharedNames < 1 || !signals.factsAgree || !signals.subjectsAgree) return false;
+  if (signals.sharedSpecificAnchors >= NEAR_DUPLICATE_ANCHOR_MIN_SHARED) {
+    if (
+      !signals.sharedAnchorsAreDates ||
+      signals.sharedNames >= NAME_ONLY_MIN_SHARED ||
+      signals.charRatio() >= HEADLINE_RATIO_CANDIDATE
+    ) {
+      return true;
+    }
+  }
+  if (signals.charRatio() >= HEADLINE_ONLY_THRESHOLD) return true;
+  return signals.oneSided && signals.charRatio() >= HEADLINE_RATIO_CANDIDATE;
+}
+
+/**
+ * Unit AO, stage 2: is this pair the SAME story -- the tier that stamps or
+ * discards (lead-filing.ts:111), so the tier held to the higher bar.
+ *
+ * Two ways to earn it, both requiring a shared name, agreement on the subject
+ * and no contradiction between the two headlines' facts (see subjectsAgree and
+ * factsConflict):
+ *
+ *   - a shared specific fact AND the two headlines substantially the same
+ *     sentence (>= HEADLINE_RATIO_CANDIDATE), which is the 433/374 pair: the
+ *     same Oct. 10 Purrs & Paws fundraiser at the Longmont Museum, one of them
+ *     run by the Friends of Feral & Abandoned Cats and the other by the Longmont
+ *     Cat Rescue, at 0.81 of shared characters. The ratio floor is what a shared
+ *     fact is worth on its own: a fact alone says two headlines are about the
+ *     same THING, not that they are the same STORY, and 282 "Budget presentation
+ *     flags Public Safety Sales and Use Tax and Property Tax on Nov. 3 ballot"
+ *     shares Nov. 3 with 435's budget headline at 0.41 -- related, and not the
+ *     same event.
+ *   - a headline that is the same characters in the same order: byte-identical
+ *     for 418/349, and 0.87 for 429 against the killed 354 -- the same Boulder
+ *     County funding-oversight story, 429 naming the roles and 354 the
+ *     volunteers, 354 carrying a deadline 429 does not. That last pair is why
+ *     this route reads agreement-on-facts and not identical-facts: a second
+ *     telling that ADDS a date is the same story, and requirement 3 files it
+ *     HELD and linked. A second telling that CONTRADICTS one -- a different
+ *     session date on the same template -- is not, which is what stops 297
+ *     (Sept. 22) matching 302 (Sept. 8) at 0.88 characters.
+ *
+ * subjectsAgree is what keeps the 0.85 route from reading a shared date, a
+ * shared amount and a shared place name as a shared story: NEG-11 shares
+ * "Twin Peaks", Sept. 18, and 0.86 of its characters with the parking-variance
+ * item and is a different agenda item; NEG-7 shares SVVSD, $850,000 and 0.99 of
+ * its characters with the west-county item and is the other side of the county.
+ * Both name a subject the other does not, and neither can be "strong".
+ *
+ * The grey zone between this and nearDuplicateCandidate is the file-and-link
+ * tier, which is where a repeat that does not clear these bars goes: still
+ * filed, still linked, never silently folded into the old row -- and handed to
+ * the desk's own duplicate check (dup-check.ts) when a scan has one, which is
+ * the model the grey zone was always for.
+ */
+function nearDuplicateStrong(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  const signals = nearDuplicateSignals(a, b, place);
+  if (signals.sharedNames < 1 || !signals.factsAgree || !signals.subjectsAgree) return false;
+  if (signals.charRatio() >= HEADLINE_ONLY_THRESHOLD) return true;
+  return (
+    signals.sharedSpecificAnchors >= NEAR_DUPLICATE_ANCHOR_MIN_SHARED &&
+    signals.charRatio() >= HEADLINE_RATIO_CANDIDATE
+  );
 }
 
 export type MatchCandidateLead = {
@@ -790,12 +1314,13 @@ export type MatchCandidateLead = {
  * story as. Returns the matching lead's id, or null when nothing matches.
  *
  * Match rule (three independent paths, any one is sufficient; every path
- * also requires sharesDistinguishingWord -- QA-1 round 2, see CONTENT_STOPLIST's
+ * also requires sharesDistinguishingEvidence -- QA-1 round 2, see CONTENT_STOPLIST's
  * doc comment):
- *   1. Shares at least one normalised source URL AND CONTENT-token overlap
- *      (contentTokens -- furniture words and shared proper nouns stripped,
- *      >= 4 letters, plurals folded) is >= 0.6 Jaccard OR >= 0.7 containment
- *      of the shorter headline.
+ *   1. Shares at least one normalised source URL AND distinguishing-token
+ *      overlap (distinguishingTokens -- contentTokens: furniture words and
+ *      shared proper nouns stripped, >= 4 letters, plurals folded; and, for a
+ *      headline with NO content tokens at all, its own proper nouns instead)
+ *      is >= 0.6 Jaccard OR >= 0.7 containment of the shorter headline.
  *   2. Shares at least one normalised source URL AND the two headlines
  *      share >= ANCHOR_MATCH_MIN_SHARED anchors (concrete dates, dollar
  *      amounts, multi-digit numbers, or non-generic proper nouns) AND share
@@ -803,8 +1328,12 @@ export type MatchCandidateLead = {
  *      ANCHOR_MATCH_MIN_SHARED for why this catches a same-source rewrite
  *      that shares almost no words, and CONTENT_STOPLIST for why anchors
  *      alone are not enough to tell two different agenda items apart (QA-1).
- *   3. No shared URL, but CONTENT-token overlap is >= 0.85 Jaccard alone
- *      (a portal notice re-posted under a different deep link).
+ *   3. No shared URL, but distinguishing-token overlap is >= 0.85 Jaccard
+ *      alone (a portal notice re-posted under a different deep link).
+ *   4. Unit AO (2026-10-03): the near-duplicate candidate filter
+ *      (nearDuplicateCandidate) -- a shared subject plus a shared specific
+ *      anchor or a very high headline character ratio, with no shared URL
+ *      required. See pairMatches, which is the one gate both callers use.
  *
  * Scoring every path over content tokens (not every surviving word) is what
  * keeps two different agenda items on one templated portal page ("Council
@@ -813,6 +1342,13 @@ export type MatchCandidateLead = {
  * alone -- round 1 fixed this for path 2 only; round 2 (2026-09-02) closed
  * the same hole in paths 1 and 3, which QA-1's adversarial set caught
  * merging 7 of 13 pairs it should not have.
+ *
+ * Unit AN (2026-10-03): scoring content tokens only is also what made all
+ * three paths unreachable for a headline whose every word of four letters or
+ * more is a capitalised name -- the live scan-66 repeats. Those headlines now
+ * score their own proper nouns; see distinguishingTokens for why the fallback
+ * is on both sides being nameless and not either, and why no QA-1/U26 negative
+ * moves.
  *
  * Only considers leads whose status is in MATCHABLE_STATUSES (never
  * 'published' -- a fresh development on a published story should file as
@@ -833,6 +1369,12 @@ export type MatchCandidateLead = {
  * described in findMatchingLead's doc comment) without duplicating it.
  * Matching uses these same three paths. Selection prefers a strong match
  * over an earlier possible match so row order cannot hide an exact repeat.
+ *
+ * Unit AO (2026-10-03) added a fourth: the near-duplicate candidate filter
+ * (nearDuplicateCandidate), which the three prose paths above cannot express.
+ * It is still one gate for both callers -- findMatchingLead and matchStrength
+ * call this function and nothing else -- so a pair can never be "strong" for
+ * the tiering without having passed the same gate the selection used.
  */
 function pairMatches(
   candidateHeadline: string,
@@ -851,11 +1393,19 @@ function pairMatches(
       extractAnchors(candidateHeadline, place),
       extractAnchors(leadHeadline, place),
     ) >= ANCHOR_MATCH_MIN_SHARED &&
-    sharesDistinguishingWord(candidateHeadline, leadHeadline, place)
+    sharesDistinguishingEvidence(candidateHeadline, leadHeadline, place)
   ) {
     return true;
   }
   if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline, place)) {
+    return true;
+  }
+  // Unit AO (2026-10-03): the near-duplicate candidate filter -- see
+  // nearDuplicateSignals. It is deliberately independent of `shareUrl`: 429
+  // "Boulder County Opens Applications for Behavioral Health Funding Oversight
+  // Roles" and the killed 354 cite no URL in common at all, and a headline that
+  // is the same sentence twice needs no URL to be worth classifying.
+  if (nearDuplicateCandidate(candidateHeadline, leadHeadline, place)) {
     return true;
   }
   return false;
@@ -1040,11 +1590,15 @@ export function findMatchingLead(
  * pairMatches() already considers "the same story" at all:
  *
  *   - "strong": stamp the existing lead (findMatchingLead/fileScanLeads's
- *     old behaviour) -- only when ALL of:
- *       1. contentTokens() Jaccard similarity is >= 0.85, AND
- *       2. every token in the symmetric difference of the two content-token
- *          sets has a variant partner on the other side (plural/possessive/
- *          hyphen forms -- see tokenVariant; contentTokens' own stem() call
+ *     old behaviour) -- when the near-duplicate classifier says so (see
+ *     nearDuplicateStrong: a shared specific fact plus subject agreement, or
+ *     the same headline character-for-character with no one-sided fact), or
+ *     when ALL of:
+ *       1. distinguishingTokens() Jaccard similarity is >= 0.85, AND
+ *       2. every token in the symmetric difference of the two
+ *          distinguishing-token sets has a variant partner on the other side
+ *          (plural/possessive/hyphen forms -- see tokenVariant; the stem()
+ *          call inside contentTokens, which distinguishingTokens builds on,
  *          already folds most of these before matchStrength ever sees them,
  *          so this is almost always trivially satisfied by an empty
  *          symmetric difference, but a real variant that stem() does not
@@ -1056,7 +1610,7 @@ export function findMatchingLead(
  *     one (possible_duplicate_of) instead of silently discarding it. This
  *     is what the 6 round-3 false merges become, and it is also what the
  *     live 0.6.2 rewrite pair (POS-2) becomes: it is a genuine rewrite of
- *     the same story, but its content-token Jaccard is far below 0.85 (the
+ *     the same story, but its token Jaccard is far below 0.85 (the
  *     two headlines share almost no words beyond "executive session"), so
  *     it is filed and linked rather than silently folded into the old row --
  *     intentional, not a regression.
@@ -1081,8 +1635,15 @@ export function matchStrength(
     return null;
   }
 
-  const ca = contentTokens(candidateHeadline, place);
-  const cb = contentTokens(existingHeadline, place);
+  // Unit AO (2026-10-03): the near-duplicate classifier's strong tier, before
+  // the prose score below, which is blind to a pair of headlines that say the
+  // same thing in different names -- see nearDuplicateStrong. Both tiers of
+  // this pair's decision come from the one signal struct (nearDuplicateSignals)
+  // so the gate above and this cannot disagree about what they are looking at.
+  if (nearDuplicateStrong(candidateHeadline, existingHeadline, place)) return "strong";
+
+  const ca = distinguishingTokens(candidateHeadline, existingHeadline, place);
+  const cb = distinguishingTokens(existingHeadline, candidateHeadline, place);
   const score = jaccard(ca, cb);
   const symmetricOk = symmetricDiffAllVariants(ca, cb);
 
@@ -1101,14 +1662,15 @@ export function matchStrength(
   return "possible";
 }
 
-/** Two content tokens count as the same subject word for matchStrength's
- * symmetric-difference check when they are plural/possessive/-es variants
- * of each other. contentTokens() already runs stem() (trailing "s" fold,
- * words > 4 letters) before matchStrength ever sees a token, and already
- * turns hyphens and apostrophes into spaces before tokenizing, so most
- * variant pairs never even reach here as a symmetric-difference entry --
- * this is the belt-and-suspenders case stem() alone does not fold (e.g. a
- * short word, or an "-ies" plural). */
+/** Two distinguishing tokens count as the same subject word for
+ * matchStrength's symmetric-difference check when they are plural/possessive/
+ * -es variants of each other. contentTokens() -- what distinguishingTokens
+ * falls back through -- already runs stem() (trailing "s" fold, words > 4
+ * letters) before matchStrength ever sees a token, and already turns hyphens
+ * and apostrophes into spaces before tokenizing, so most variant pairs never
+ * even reach here as a symmetric-difference entry -- this is the
+ * belt-and-suspenders case stem() alone does not fold (e.g. a short word, or
+ * an "-ies" plural). */
 function tokenVariant(a: string, b: string): boolean {
   if (a === b) return true;
   const norm = (w: string) => w.replace(/ies$/, "y").replace(/(es|s)$/, "");

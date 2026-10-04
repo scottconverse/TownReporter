@@ -491,6 +491,7 @@ function SourcesPage() {
           <h1 className="h1">Sources &amp; scan</h1>
         </div>
         <div className="astra-head-acts">
+          <Link className="btn quiet" to="/desk/scan">Scan history →</Link>
           <button type="button" className="btn solid" onClick={() => setAddOpen(true)}>
             + Add a source
           </button>
