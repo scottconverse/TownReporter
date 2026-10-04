@@ -8,10 +8,9 @@ import { createServer, type ViteDevServer } from "vite";
   removal.
 
   The claims-of-absence gate (`desk.ts`, "FAIL CLOSED ON A CLAIM OF ABSENCE")
-  was covered only by `scripts/claims-of-absence-gate.test.mjs`, which greps
-  the source text of desk.ts for the branch -- a regex over the file still
-  matches when the condition is short-circuited to `false`, so the branch could
-  be deleted and every test stayed green. The section-mismatch refusal
+  was covered only by a grep over the source text of desk.ts for the branch --
+  a regex over the file still matches when the condition is short-circuited to
+  `false`, so the branch could be deleted and every test stayed green. The section-mismatch refusal
   (`sectionFromEditor` naming a section the draft does not file under) had no
   test at all.
 

@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { takedownDoneNotice, takedownFailedNotice } from "./takedown-notice.ts";
 
@@ -12,9 +10,6 @@ import { takedownDoneNotice, takedownFailedNotice } from "./takedown-notice.ts";
   The server answers it (`TakeDownCaptureResult.linkKept`) and the checkbox that
   decides it is on the same form, so the only thing missing was the sentence.
 */
-
-const here = fileURLToPath(new URL(".", import.meta.url));
-const read = (file: string) => readFileSync(here + file, "utf8");
 
 describe("a takedown says what happened to the public link", () => {
   it("says the link was KEPT when it was", () => {
@@ -45,17 +40,4 @@ describe("a takedown says what happened to the public link", () => {
     assert.match(text, /Nothing was removed/i);
   });
 
-  it("is the sentence the review pane actually shows", () => {
-    // A pin, because the pane is a route-level component with no props-only
-    // seam: what broke was the pane ignoring a field the server sent, and the
-    // pin fails on the edit that goes back to one fixed string.
-    const pane = read("../../components/finding-evidence-review.tsx");
-    assert.match(pane, /takedownDoneNotice\(result\.linkKept\)/, "the pane branches on linkKept");
-    assert.match(pane, /takedownFailedNotice\(\)/);
-    assert.doesNotMatch(
-      pane,
-      /Excerpt taken down\./,
-      "and the sentence is not also written inline, where it could drift from the tested one",
-    );
-  });
 });

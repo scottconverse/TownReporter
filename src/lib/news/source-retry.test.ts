@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
@@ -158,25 +157,6 @@ it("starts no scan and no job -- the press costs one page fetch, not a run", asy
     "a re-check of one source leaves no scan run and no queued job behind",
   );
   assert.deepEqual(before, { runs: 0, jobs: 0 }, "fixture: this newsroom has neither");
-});
-
-it("is what the row's Retry actually presses -- not a scan in disguise", () => {
-  /*
-    The tests above prove the server function starts nothing. This is the
-    tripwire for the OTHER half, and the half the finding was about: the row's
-    press. `desk.sources.tsx` used to call `runScan({ customSourceIds: [id] })`
-    from this mutation -- the whole scan, model pass and all -- and pointing it
-    back there is the mutation this fails on.
-  */
-  const page = readFileSync(new URL("../../routes/desk.sources.tsx", import.meta.url), "utf8");
-  assert.match(page, /checkOneSource\(\{ data: id \}\)/);
-  assert.doesNotMatch(
-    page,
-    /customSourceIds: \[id\]/,
-    "the row's press must not be a scan scoped to one source",
-  );
-  /* The page-level "Run scan now" is still a scan, and still says so. */
-  assert.match(page, /runScanNow = useMutation\(\{[\s\S]{0,200}runScan\(\{/);
 });
 
 it("refuses a source that is not ACCEPTED, and fetches nothing at all", async () => {

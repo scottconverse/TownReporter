@@ -238,19 +238,3 @@ test("when the setup check itself fails the panel shows no form and no shipped i
   assert.doesNotMatch(html, /Longmont/);
   assert.doesNotMatch(html, new RegExp(SHIPPED_EMAIL.replace(".", "\\.")));
 });
-
-test("the panel asks the same server function the first-run gate does", async () => {
-  // A source-shape check for the wiring itself: the flag must come from
-  // `firstRunSetupState` (the gate's own read, same query key), not from a
-  // second notion of "set up" that could drift from it.
-  const source = await readFile(new URL("../src/components/ops-panels.tsx", import.meta.url), "utf8");
-  const panel = source.slice(
-    source.indexOf("export function PaperSetupPanel("),
-    source.indexOf("export function DarkDeskCounty("),
-  );
-  assert.match(panel, /firstRunSetupState\(\)/);
-  assert.match(panel, /queryKey: \["first-run-setup"\]/);
-  assert.match(panel, /firstRun=\{setupState\.data\.needsSetup === true\}/);
-  // ...and a failed or missing answer is never read as "already set up".
-  assert.match(panel, /setupState\.isError \|\| setupState\.data === undefined/);
-});

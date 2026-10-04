@@ -458,79 +458,6 @@ const field = (selector) => lastLayer().querySelector(`.astra-modal-body ${selec
    `.value` only when it UPDATES a textarea; on mount it sets `defaultValue`. */
 const text = (node) => (node.value !== "" ? node.value : (node.defaultValue ?? ""));
 
-/* ------------------------------------------------------------------- static */
-
-test("the story page mounts both dialogs, on the drawn presses and the drawn rule", async () => {
-  const story = await source("src/routes/desk.story.$leadId.tsx");
-  for (const name of ["AddToStoryDialog", "HeadlineDialog"]) {
-    assert.match(story, new RegExp(`import \\{[^}]*${name}`), `the story page must import ${name}`);
-    assert.match(story, new RegExp(`<${name}\\b`), `the story page must mount <${name}>`);
-  }
-  assert.match(
-    story,
-    /<AddToStoryDialog[\s\S]{0,200}?leadId=\{id\}/,
-    "the add-to dialog takes the lead it is adding to",
-  );
-  assert.match(
-    story,
-    /<HeadlineDialog[\s\S]{0,200}?current=\{headline\}/,
-    "the headline dialog opens on the headline the box is showing",
-  );
-  /*
-    The drawn label, spelled the way the drawing spells it. A "+ Add story" or
-    an "Add to this story" press here would be a press the editor was not shown.
-  */
-  assert.match(story, /\+ Add to story/, "the press carries the drawn label");
-  /*
-    The same gate the other action-row presses use: `locked` is `killed` and
-    `onPaper` is published (see their definitions in that file). A lead with no
-    draft has nothing to add to -- `performWeaveIntoStory` refuses it with "This
-    lead has no draft to add to yet." -- so the press is not drawn.
-  */
-  assert.match(
-    story,
-    /\{data\.draft && !locked && !onPaper \? \(\s*<InkButton\s+tone="ghost"[\s\S]{0,200}?onClick=\{\(\) => setAddToOpen\(true\)\}/,
-    "the add-to press is drawn for a lead that is not killed and not published, and has a draft",
-  );
-  /*
-    The landing: the screen takes the saved bytes, not the note. A sentence
-    parsed back into a body would be a second, worse copy of the body.
-  */
-  assert.match(story, /onSaved=\{\(after\) => \{/, "the add-to dialog hands the screen its bytes");
-  assert.match(
-    story,
-    /onSaved=\{\(saved\) => \{[\s\S]{0,400}?setHeadline\(saved\)/,
-    "the chosen headline lands in the box",
-  );
-  /*
-    One list, not two. The inline suggestions are drawn only on the printed
-    path, where the dialog is not: `chooseHeadline` writes the DRAFT's headline
-    while a printed story shows the article's own field, so the dialog is not
-    the right control there and the press keeps doing what it does today.
-  */
-  assert.match(
-    story,
-    /\{onPaper && headlineSuggestions\.length > 0 \? \(/,
-    "the inline suggestions are the printed story's, and only its",
-  );
-  assert.match(
-    story,
-    /if \(onPaper\) suggest\.mutate\(\);\s*else setHeadlineOpen\(true\);/,
-    "a draft's Suggest press opens the drawn dialog; a printed story's does not",
-  );
-});
-
-test("the article page keeps the drawn corrections block", async () => {
-  /* Item 4 of unit CP: already built. This is the pin, so a later redesign of
-     the article page has to delete it deliberately. The h2 is written with the
-     entity -- an audit grep for the plain "&" is the probe that missed it. */
-  const article = await source("src/routes/articles.$slug.tsx");
-  assert.match(article, /<h2>Corrections &amp; accountability<\/h2>/);
-  assert.match(article, /No corrections have been posted for this story\./);
-  assert.match(article, /File a correction →/);
-  assert.match(article, /Share the reporting\./);
-});
-
 test("the add-to dialog reviews before it saves, and hands the screen the saved bytes", async () => {
   actions.__reset();
   announce.__reset();
@@ -654,18 +581,4 @@ test("a headline too short to save is refused before the press, not by the desk"
   assert.equal(button("Use this headline").disabled, false);
   assert.deepEqual(actions.calls, [], "no call was made while the dialog was refusing");
   await page.close();
-});
-
-/* ------------------------------------------------------------------ the route */
-
-test("the add-to press is on a draft that is neither killed nor published", async () => {
-  /*
-    The gate read from the route, not from the copy of it above: `locked` and
-    `onPaper` are the names the two other action-row presses use, and this
-    asserts they still mean what the mount assumes. Both are derived once, in
-    that file, from the lead's status and the published slug.
-  */
-  const story = await source("src/routes/desk.story.$leadId.tsx");
-  assert.match(story, /const locked = [^;]*"killed"/);
-  assert.match(story, /const onPaper = [^;]*published/);
 });

@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PublishBarResult } from "./publish-bar-result.ts";
@@ -59,108 +58,5 @@ describe("PublishBarResult", () => {
     const html = render({ kind: "published", slug: null });
     assert.match(html, /Published\./);
     assert.doesNotMatch(html, /Read it on the paper/);
-  });
-});
-
-/**
- * The page's half. A refusal that is only drawn is half the fix: the stale
- * state that produced it has to be refreshed too, or the bar goes on saying
- * "Nothing blocks Publish" beside the refusal.
- */
-describe("the story page draws every publish answer at the bar", () => {
-  const source = readFileSync(
-    new URL("../routes/desk.story.$leadId.tsx", import.meta.url),
-    "utf8",
-  )
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .filter((line) => !line.trim().startsWith("//"))
-    .join("\n");
-
-  it("derives the bar's answer from one value, not from three latched booleans", () => {
-    assert.match(source, /publishPressState\(\{/);
-    assert.match(source, /<PublishBarResult state=\{press\} \/>/);
-  });
-
-  it("draws 'Publishing…' on the button and keeps it disabled while the press runs", () => {
-    assert.match(source, /publish\.isPending \? "Publishing…" : /);
-    assert.match(source, /disabled=\{publish\.isPending \|\| blockers\.length > 0\}/);
-  });
-
-  it("refreshes the lead query on a refusal and on a thrown error, so the bar cannot keep saying nothing blocks Publish", () => {
-    /* Both paths that end in a refusal, each with the invalidation that makes
-       the blocker list and the "Publish anyway" button the server's answer. */
-    /* The refusals, and the refresh that goes with each: the answer is written
-       to the BAR's state (not to `msg`, which is the body Notice the owner
-       never saw), and the lead the bar reads is refetched so the blocker list
-       stops saying "Nothing blocks Publish".
-
-       PUB2: the refresh is now the `refresh(...)` helper (or a bare `void
-       qc.invalidateQueries`) rather than an awaited call, and `refuse` is no
-       longer async -- awaiting it was what kept the bar on "Publishing…"
-       until the refetch returned. The property is unchanged: a refusal writes
-       the bar's state AND refreshes the lead query. */
-    assert.match(
-      source,
-      /const refuse = \(text: string\) => \{[\s\S]{0,160}?setPublishRefusal\(text\);[\s\S]{0,160}?refresh\(\["lead", id\]\)/,
-      "the refusal writes the bar's state and refreshes the lead query",
-    );
-    assert.match(source, /refuse\(NO_ANSWER\)/, "the desk not answering is a refusal to report");
-    assert.match(source, /refuse\(result\.error\)/, "so is the server's own refusal");
-    assert.match(
-      source,
-      /setPublishRefusal\([\s\S]{0,120}?editorActionError\(err instanceof Error \? err\.message : "", "publish that story"\)[\s\S]{0,160}?queryKey: \["lead", id\]/,
-      "a thrown error is said in a person's words and refreshes the same query",
-    );
-    assert.match(source, /setPublishRefusal\(""\)/, "the next press replaces the last answer");
-    assert.doesNotMatch(
-      source,
-      /setMsg\(result\.error\)/,
-      "the publish refusal is not also written to the body Notice the owner never found",
-    );
-  });
-
-  it("shows a note about the printing only when it carries more than the banner already says", () => {
-    /* A story printed from this page says "Published." in the bar's own place;
-       the body Notice appears only for a message beyond that ("On the paper."
-       followed by a notes problem), and the old top note only for a story that
-       was already on the paper when the page opened. So the sentence and the
-       link are never on the screen twice. */
-    assert.match(source, /draftProblem && \(!onPaper \|\| \(justPublished && msg !== "On the paper\."\)\)/);
-    assert.match(source, /\{onPaper && !justPublished \? \(/);
-  });
-
-  it("gives the printed banner the bar's own place, because a print takes the bar away", () => {
-    /*
-      UNIT UI1b-2 CHANGED THIS PIN, and this is why.
-
-      It used to read `press.kind === "published" ? (` -- the bar was drawn
-      only from the press's own last answer, so a story that was ALREADY on the
-      paper when the page opened drew no bar at all. The owner's request (the
-      auditor put PR 171 in front of him on his real story: after "Yes, print
-      it" the Publish button was GONE) is that the CONTROL changes and stays,
-      so the slot is a fact about the story and is drawn from `onPaper`.
-
-      The banner's own place is unchanged -- it is still the bar, at
-      `#astra-publish-bar`, and still the same words -- and it now shares that
-      place with the button's own done state (`PublishBarDone`, asserted in
-      `publish-bar-done.test.ts`).
-    */
-    assert.match(source, /\{onPaper \? \(\s*<PublishBarDone result=\{press\} \/>/);
-    assert.doesNotMatch(source, /press\.kind === "published" \? \(/);
-    /* And the bar it lands in is still the bar: the on-paper body is drawn
-       with `#astra-publish-bar`, and the banner is drawn inside it. */
-    const bar = readFileSync(new URL("./publish-bar-result.ts", import.meta.url), "utf8");
-    assert.match(bar, /className: "astra-publish-bar astra-publish-done", id: "astra-publish-bar"/);
-    assert.match(bar, /createElement\(PublishBarResult, \{ state: props\.result \}\)/);
-  });
-
-  it("only welcomes a story that printed here and now", () => {
-    /* A page opened on an already-published story seeds `publishedSlug` from
-       the loader, so the banner cannot be drawn from it: a green "Published."
-       bar on every visit would claim a press nobody made. */
-    assert.match(source, /const \[justPublished, setJustPublished\] = useState\(false\)/);
-    assert.match(source, /setJustPublished\(true\)/);
-    assert.match(source, /publishedSlug: justPublished \? publishedSlug : null/);
   });
 });

@@ -437,8 +437,7 @@ describe("the read-only 'Models on this computer' list", () => {
   row it listed, cloud rows included -- and the server refuses a cloud pick on
   purpose (test "refuses a cloud model as the default", below, is that door).
   A control whose only possible outcome is the refusal sentence is worse than
-  no control, so a cloud row is a LINE. These two cases are the rule itself;
-  `src/components/first-run-model-card.test.ts` pins the card's call site.
+  no control, so a cloud row is a LINE. These two cases are the rule itself.
 */
 describe("the card's rows: which is a pick, and which is only a line", () => {
   it("a cloud model is a line, never a pick", () => {

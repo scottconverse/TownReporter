@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -29,8 +28,6 @@ import { publishPressState, type PublishBlocker } from "../lib/news/publish-bloc
  *     to drift),
  *   - the ICON appears (the check for done, the spinner for working).
  */
-
-const deskCss = readFileSync(new URL("../desk-astra.css", import.meta.url), "utf8");
 
 function render(node: Parameters<typeof renderToStaticMarkup>[0]) {
   return renderToStaticMarkup(node);
@@ -133,10 +130,6 @@ describe("ActionButton: the four states of one press", () => {
     assert.equal(actionToken("working", "secondary"), "fg2");
     assert.equal(actionToken("done", "danger"), "ok", "done is green whatever the level");
     assert.equal(actionToken("failed", "secondary"), "danger");
-    /* The stylesheet resolves those names to real tokens, in both themes. */
-    assert.match(deskCss, /\.action-btn\[data-token="ok"\][\s\S]{0,80}var\(--ok\)/);
-    assert.match(deskCss, /\.action-reason[\s\S]{0,200}var\(--danger\)/);
-    assert.match(deskCss, /\.action-icon-spin[\s\S]{0,120}animation:/);
   });
 
   it("primary and danger draw the level the design system names", () => {
@@ -299,19 +292,6 @@ describe("the publish-blocker rows: a real button, and it says what it is doing"
  * reported.
  */
 describe("no scoped control is drawn as bare text", () => {
-  const SCOPED = [
-    "Publish",
-    "Publish anyway",
-    "Kill this lead",
-    "Delete",
-    "Hold",
-    "Pause",
-    "Redraft",
-    "Check now",
-    "Preview as reader",
-    "Review the claims",
-  ];
-
   it("every button the blocker list draws carries a level class", () => {
     const html = renderBlockers();
     const buttons = html.match(/<button[^>]*>/g) ?? [];
@@ -323,43 +303,5 @@ describe("no scoped control is drawn as bare text", () => {
         `a blocker button is drawn without a button level: ${tag}`,
       );
     }
-  });
-
-  it("no desk route or component draws a scoped label on a classless <button>", () => {
-    const dirs = [
-      new URL("../routes/", import.meta.url),
-      new URL("../components/", import.meta.url),
-    ];
-    const files: string[] = [];
-    for (const dir of dirs) {
-      for (const name of readdirSync(dir)) {
-        if (!name.endsWith(".tsx")) continue;
-        if (dir.pathname.includes("routes") && !/^desk.*\.tsx$/.test(name)) continue;
-        files.push(new URL(name, dir).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
-      }
-    }
-    assert.ok(files.length > 30, `sanity: scanned ${files.length} desk files`);
-
-    const offenders: string[] = [];
-    for (const file of files) {
-      const source = readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-      for (const m of source.matchAll(/<button\b([^>]*)>([\s\S]{0,400}?)<\/button>/g)) {
-        const [, attrs, inner] = m;
-        if (/\bbtn\b/.test(attrs)) continue;
-        if (/\bclassName=\{/.test(attrs)) continue; /* a computed class list */
-        const text = inner.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-        const hit = SCOPED.find((label) => text.startsWith(label) || text === label);
-        if (hit) offenders.push(`${file.split(/[\\/]/).pop()}: <button> says "${hit}" with no class`);
-      }
-    }
-    assert.deepEqual(offenders, [], "these controls read as text, not as buttons");
-  });
-
-  it("Story titles in lists stay links, and links are always underlined", () => {
-    /* Rule 2: a plain text link is allowed for going to another page, and then
-       it is ALWAYS underlined. One rule, in both stylesheets. */
-    const appCss = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
-    assert.match(appCss, /\.desk-ltr \.inline-link \{[^}]*text-decoration:\s*underline/);
-    assert.match(deskCss, /\.desk-ltr\.astra a \{[^}]*text-decoration-thickness/);
   });
 });

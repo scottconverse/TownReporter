@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, it } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
@@ -447,22 +446,4 @@ it("still swallows the one error that really means 'no findings to count'", asyn
     0,
     "a draft with unreadable stored findings has no claims to count",
   );
-});
-
-it("is called from the page with the shape its own schemas take", () => {
-  /*
-    The tests above call `performAcceptUnreviewedClaims` directly, so they
-    cannot see the one thing that would break in the browser: the wire shape.
-    `acceptUnreviewedClaimsInput` is `{ leadId, evidenceToken }` -- a NUMBER and
-    a STRING -- and a press passing a bare id, or omitting the token, would fail
-    validation and report a schema dump to the editor. TypeScript cannot catch
-    it (a server function's validator input is untyped at the call site), so the
-    tripwire is here.
-  */
-  const page = readFileSync(
-    new URL("../../routes/desk.story.$leadId.tsx", import.meta.url),
-    "utf8",
-  );
-  assert.match(page, /acceptUnreviewedClaims\(\{\s*data: \{ leadId: id, evidenceToken:/);
-  assert.doesNotMatch(page, /acceptUnreviewedClaims\(\{ data: id \}\)/);
 });

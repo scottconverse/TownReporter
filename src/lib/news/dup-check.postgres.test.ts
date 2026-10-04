@@ -265,8 +265,8 @@ describe("U28: the duplicate check's verdict persists and reaches the Queue read
       await fileScanLeads(sql, { userId: USER_ID }, NEWSROOM_ID, runId, [BOHN_CANDIDATE], [], PLACE, yes);
 
       /* The exact columns the Queue's own reader projects (desk.ts's
-         `queryLeadRows`, pinned there by lead-possible-duplicate-projection's
-         test), read back from a real database rather than off an object. */
+         `queryLeadRows`), read back from a real database rather than off an
+         object. */
       const readBack = await sql<{ headline: string; topic: string | null } & FiledRow>`
         select id, headline, topic, possible_duplicate_of, dup_kind,
                dup_ai_same, dup_ai_why, dup_ai_target,

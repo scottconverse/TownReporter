@@ -47,8 +47,8 @@ import { fileURLToPath } from "node:url";
 /**
  * The verbs this guard covers. Deliberately the DDL that CREATES or RESHAPES
  * app schema. `drop table` and `truncate` are absent on purpose: this test is
- * about where schema is declared, and `scripts/no-destructive-migrate.test.mjs`
- * already owns destructive statements on the migration path.
+ * about where schema is declared, not destructive statements on the migration
+ * path.
  */
 const DDL_VERB =
   /\bcreate\s+(?:temp\s+|temporary\s+)?table\b|\balter\s+table\b|\bcreate\s+(?:unique\s+)?index\b|\bcreate\s+trigger\b|\bcreate\s+(?:or\s+replace\s+)?function\b|\bdrop\s+index\b|\bdrop\s+constraint\b/i;

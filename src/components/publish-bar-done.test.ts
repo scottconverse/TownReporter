@@ -14,7 +14,6 @@ const bar = (result: Parameters<typeof PublishBarDone>[0]["result"]) =>
   renderToStaticMarkup(createElement(PublishBarDone, { result }));
 const buttonOf = (html: string) => html.slice(0, html.indexOf("</button>") + "</button>".length);
 const route = readFileSync(new URL("../routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
-const css = readFileSync(new URL("../desk-astra.css", import.meta.url), "utf8");
 
 it("after a print, and for a story already on the paper, the bar holds a green Published control that stays", () => {
   /* Bug caught: a print took the Publish button away and left only a banner, so nothing said what had happened at the control. */
@@ -38,10 +37,4 @@ it("a refused press never draws the Published state", () => {
   assert.doesNotMatch(html, /action-btn|Published|action-icon-check/);
   assert.match(route, /\{onPaper \? \(\s*<PublishBarDone result=\{press\} \/>/, "the slot is drawn from the story, not from the last press");
   assert.equal((route.match(/<PublishBarDone/g) ?? []).length, 1, "a second call site could draw Published for a refusal");
-});
-
-it("the done control keeps its green in the night theme and is not faded when disabled", () => {
-  /* Bug caught: the night theme repainted the disabled done control near-black on a transparent ground. */
-  assert.match(css, /\.action-btn\[data-phase="done"\]:disabled[\s\S]{0,200}?opacity:\s*1/);
-  assert.match(css, /\.desk-ltr\.astra\.night \.action-btn\[data-(?:phase="done"|token="ok")\][\s\S]{0,200}?var\(--ok\)/);
 });

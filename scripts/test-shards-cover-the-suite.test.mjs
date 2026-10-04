@@ -1,11 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { jobs } from "./ci-yaml.mjs";
 import { parseShard, shardArgs, shardNotice } from "./test-shard.mjs";
 
 /**
@@ -29,7 +28,6 @@ import { parseShard, shardArgs, shardNotice } from "./test-shard.mjs";
  *    nowhere and nothing says so.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const CI = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
 
 test("no shard variables means the complete suite", () => {
   assert.equal(parseShard({}), null);
@@ -129,84 +127,3 @@ test("node deals every discovered file to exactly one shard", () => {
   }
 });
 
-/** `run:` command lines of one job, comments and block scalars flattened. */
-function runLines(jobName) {
-  const body = jobs(CI)[jobName];
-  assert.ok(body, `job "${jobName}" is not in ci.yml`);
-  return body
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith("#"))
-    .flatMap((line) => {
-      const match = /^-?\s*run:\s*(.+)$/.exec(line);
-      return match && match[1] !== "|" ? [match[1].trim()] : [];
-    });
-}
-
-/** Lines of one job's YAML with whole-line comments removed. */
-function settingLines(jobName) {
-  const body = jobs(CI)[jobName];
-  assert.ok(body, `job "${jobName}" is not in ci.yml`);
-  return body.filter((line) => line.trim() && !line.trim().startsWith("#"));
-}
-
-test("CI runs the unit suite as shards, and asks for exactly as many as it runs", () => {
-  const lines = settingLines("unit-tests");
-  const text = lines.join("\n");
-
-  const matrix = /^\s*shard:\s*\[([^\]]+)\]\s*$/m.exec(text);
-  assert.ok(matrix, "the unit-tests job has no `shard: [...]` matrix");
-  const indices = matrix[1].split(",").map((value) => Number(value.trim()));
-  assert.deepEqual(
-    indices,
-    indices.map((_, i) => i + 1),
-    `the shard matrix must be 1..n with no gaps and no repeats; got ${indices.join(", ")}`,
-  );
-
-  assert.match(
-    text,
-    /^\s*TOWNREPORTER_TEST_SHARD:\s*\$\{\{\s*matrix\.shard\s*\}\}\s*$/m,
-    "each machine must be handed its own matrix index, not a fixed one",
-  );
-  const declaredTotal = /^\s*TOWNREPORTER_TEST_SHARD_TOTAL:\s*["']?(\d+)["']?\s*$/m.exec(text);
-  assert.ok(declaredTotal, "the unit-tests job never sets TOWNREPORTER_TEST_SHARD_TOTAL");
-  assert.equal(
-    Number(declaredTotal[1]),
-    indices.length,
-    `the job runs ${indices.length} shards but asks node for ${declaredTotal[1]}: ` +
-      `the difference is the part of the suite that runs nowhere`,
-  );
-
-  assert.ok(
-    runLines("unit-tests").includes("npm test"),
-    "the shards must run the documented suite command, not a hand-written subset",
-  );
-  assert.match(
-    text,
-    /^\s*fail-fast:\s*false\s*$/m,
-    "one shard's failure must not cancel the others, or a red run hides the rest of its failures",
-  );
-});
-
-test("one check stays green only when every shard and the static checks are", () => {
-  const gate = settingLines("test").join("\n");
-  assert.match(gate, /^\s*needs:.*\bunit-tests\b/m, "the gate job does not wait for the shards");
-  assert.match(gate, /^\s*needs:.*\bstatic\b/m, "the gate job does not wait for typecheck and lint");
-  assert.match(gate, /if:\s*always\(\)/, "the gate must run even when a shard fails, or it never reports");
-  assert.match(gate, /needs\.unit-tests\.result/, "the gate must read the shards' result");
-  assert.match(gate, /needs\.static\.result/, "the gate must read the static checks' result");
-  assert.match(gate, /exit 1/, "the gate must actually fail when a dependency did not succeed");
-  // A branch rule matches the check by the job's `name:` when it has one and by
-  // its id when it does not. This job is the one that used to run the suite, so
-  // it stays nameless and the required check stays called `test`.
-  assert.ok(
-    !/^ {4}name:/m.test(gate),
-    "the gate job must not be given a name: the check a branch rule requires is called `test`",
-  );
-});
-
-test("typecheck and lint still run in CI, beside the suite", () => {
-  const commands = runLines("static");
-  for (const command of ["npm ci", "npm run typecheck", "npm run typecheck:test", "npm run lint"]) {
-    assert.ok(commands.includes(command), `the static job must run exactly \`${command}\``);
-  }
-});

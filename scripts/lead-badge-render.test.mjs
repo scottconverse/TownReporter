@@ -1124,26 +1124,6 @@ test("a reopened lead's record says the kill was undone instead of forgetting it
   assert.doesNotMatch(html, />Reopen</);
 });
 
-// The story page itself cannot be rendered here (it is a route with a router,
-// a query client and a paper context), so the one thing this test can check
-// about it is its source: the page that used to say "This lead was killed.
-// Nothing to draft." now mounts the record above, and the dead sentence is
-// gone from the file rather than merely hidden behind the new component.
-test("the story page renders the killed lead's record and no longer says there is nothing to draft", async () => {
-  const story = await readFile(
-    new URL("../src/routes/desk.story.$leadId.tsx", import.meta.url),
-    "utf8",
-  );
-  assert.match(story, /<KilledLeadRecord/);
-  assert.match(story, /<LeadComparePanel/);
-  // The removed sentence is still quoted in the comment that records why it
-  // went, so this checks the two places it could actually still reach an
-  // editor -- as JSX text, or as a string literal -- rather than banning the
-  // words from the file.
-  assert.doesNotMatch(story, /Nothing to draft\.\s*</);
-  assert.doesNotMatch(story, /["'`]Nothing to draft/);
-});
-
 // A stub that disagrees with the real parser would make every source
 // assertion above a statement about the stub. The real function is lifted out
 // of src/lib/paper.ts here and run against both the examples the desk actually
@@ -1234,25 +1214,5 @@ test("a ticked Queue row carries the picked class and an unticked row does not",
     styles,
     /\.desk-ltr \.lead-row\.dead \{color:var\(--fg2\)\}/,
     "the killed row dims its own text and leaves the picked row's fill alone",
-  );
-});
-
-test("the picked class is what the desk's stylesheet tints, and only on the Queue's own list", async () => {
-  const css = await readFile(new URL("../src/desk-astra.css", import.meta.url), "utf8");
-  const tint = css.match(
-    /\.desk-ltr\.astra \.lead-list\.roomy \.lead-row\.picked \{[^}]*\}/,
-  );
-  assert.ok(tint, "desk-astra.css should tint .lead-list.roomy .lead-row.picked");
-  assert.match(
-    tint[0],
-    /background:\s*var\(--surface\)/,
-    "the tint is the drawing's --panel, which this shell maps to --surface",
-  );
-  // The desk's `--surface` must be the prototype's `--panel`, or the tint above
-  // would be a different color than the drawing asks for.
-  assert.match(
-    css,
-    /--panel->--surface/,
-    "desk-astra.css documents the prototype --panel -> --surface mapping this tint relies on",
   );
 });

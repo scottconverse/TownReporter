@@ -1,11 +1,10 @@
 /**
  * "Come back later", through the real scan (unit SH-B items 2 and 3).
  *
- * WHY THIS RUNS THE REAL `performScanWork`. The rules are pinned in
- * `fetch-politeness.test.ts` and the wiring in `source-politeness-wiring.test.ts`,
- * and neither of those can prove the thing the owner actually asked for: that a
- * site which said "come back at 3:40" is *left alone until then and read
- * after*. That is a claim about a row, two scans and a clock, so it is asserted
+ * WHY THIS RUNS THE REAL `performScanWork`. The rules are covered in
+ * `fetch-politeness.test.ts`, which cannot prove the thing the owner actually
+ * asked for: that a site which said "come back at 3:40" is *left alone until
+ * then and read after*. That is a claim about a row, two scans and a clock, so it is asserted
  * here against the real scan loop and the real schema -- the harness
  * `scan-section-cache.test.ts` established, with one newsroom per test so the
  * fixtures cannot collide.

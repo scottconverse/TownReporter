@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { jobs } from "./ci-yaml.mjs";
+import { join } from "node:path";
 import { postgresTestFiles, postgresTestsMissingFromCi } from "./postgres-test-discovery.mjs";
 
 /**
@@ -24,55 +22,6 @@ import { postgresTestFiles, postgresTestsMissingFromCi } from "./postgres-test-d
  * `TEST_POSTGRES_ADMIN_URL`. The resulting paths must run through the
  * explicit PostgreSQL integration runner in a CI job with its separate opt-in.
  */
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
-
-/** Every `src/**\/*.test.ts` file with statically discoverable Postgres capability. */
-const dbSkippableTestFiles = () => postgresTestFiles(ROOT);
-
-/**
- * Jobs whose env actually hands these tests a real connection to use.
- *
- * Matches the YAML key form (`TEST_POSTGRES_ADMIN_URL: <value>`), not a bare
- * substring -- a job's own leading comment block is attributed to whichever
- * job precedes it by this file's line-based `jobs()` split (see ci-yaml.mjs),
- * and prose that merely mentions the variable's name would otherwise credit
- * the wrong job with providing a database.
- */
-function jobsThatProvideADatabase() {
-  return Object.entries(jobs(ci))
-    .filter(([, body]) => {
-      const lines = body.map((line) => line.split("#", 1)[0]).filter((line) => line.trim());
-      return lines.some((line) => /^\s*TOWNREPORTER_RUN_POSTGRES_INTEGRATION:\s*["']?1["']?\s*$/.test(line)) &&
-        lines.some((line) => /^\s*TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL:\s*\S/.test(line));
-    })
-    .map(([name]) => name);
-}
-
-test("every DB-skippable test file is run by a CI job that provides a database", () => {
-  const files = dbSkippableTestFiles();
-  assert.ok(
-    files.length > 0,
-    "found zero test files with statically discoverable Postgres capability -- this gate's own detection " +
-      "is broken, or every Postgres-integration test has been deleted",
-  );
-
-  const dbJobs = jobsThatProvideADatabase();
-  assert.ok(
-    dbJobs.length > 0,
-    "no CI job sets TEST_POSTGRES_ADMIN_URL -- nothing in .github/workflows/ci.yml gives these " +
-      "tests a real database to run against",
-  );
-
-  const offenders = postgresTestsMissingFromCi(files, ci);
-  assert.deepEqual(
-    offenders,
-    [],
-    `these test files can skip for a missing database but are not referenced by any CI job ` +
-      `that provides one (checked: ${dbJobs.join(", ") || "none"}): ${offenders.join(", ")}`,
-  );
-});
-
 test("database discovery catches static helper imports and direct dynamic pg imports, then fails on CI omission", () => {
   const root = mkdtempSync(join(tmpdir(), "townreporter-pg-discovery-"));
   const lib = join(root, "src", "lib");

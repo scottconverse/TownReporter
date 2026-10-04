@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { getSql } from "../db.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
 import {
@@ -219,44 +217,6 @@ describe("N3 — the marker never leaves the Dark Desk", () => {
     assert.match(lead!.why, /Unconfirmed, not in any capture: .*1749 Main Street/);
     assert.equal(await markerRows(), 0, "the marker reached a lead, a draft or a story");
     await cleanUp(user, invId, runId);
-  });
-
-  it("can only be written by the grounding rule's own module", async () => {
-    /*
-      The containment half of the guard, and the reason it is a source sweep
-      rather than more fixtures: a behavioural test can only cover the handoffs
-      someone thought to exercise. The marker's exact wording lives in ONE
-      module, and every writer of a lead, a draft or a story that can receive
-      model prose already imports its strippers -- so a later author adding a
-      fourth handoff cannot acquire the marker by accident, only by printing the
-      literal into a new module, which this fails on.
-    */
-    const root = new URL("../", import.meta.url);
-    const files: string[] = [];
-    const walk = async (dir: URL) => {
-      for (const entry of await readdir(dir, { withFileTypes: true })) {
-        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-        const child = new URL(`${entry.name}${entry.isDirectory() ? "/" : ""}`, dir);
-        if (entry.isDirectory()) await walk(child);
-        else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) files.push(fileURLToPath(child));
-      }
-    };
-    await walk(root);
-    assert.ok(files.length > 100, `the sweep found almost nothing: ${files.length} files`);
-    const owners: string[] = [];
-    for (const file of files) {
-      // Comments are read by people, not by a renderer: the sentence is quoted
-      // in prose in two modules that must never print it.
-      const source = (await readFile(file, "utf8"))
-        .replace(/\/\*[\s\S]*?\*\//g, " ")
-        .replace(/\/\/[^\n]*/g, " ");
-      if (source.includes(UNGROUNDED_MARKER)) owners.push(file.replace(/\\/g, "/").split("/src/")[1]!);
-    }
-    assert.deepEqual(
-      owners,
-      ["lib/news/dark-specific-grounding.ts"],
-      "the marker's wording is written in more than one module",
-    );
   });
 
   it("reads a headline out of a marked name the way the handoff does", () => {

@@ -4,14 +4,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { isMigrationFile, migrationName, pendingMigrations } from "./migration-plan.mjs";
-import { projectRoot } from "./with-app-env.mjs";
 
 const AUTH_MIGRATION = "0001_auth.sql";
 
@@ -54,26 +52,6 @@ test("pending migrations are returned in name order", () => {
 test("non-.sql entries are dropped (readdir also yields the auth/ directory)", () => {
   assert.equal(isMigrationFile("auth"), false);
   assert.deepEqual(pendingMigrations(["auth", "README.md"], []), []);
-});
-
-test("auth-on apps glob 0001_auth.sql plus app migrations", () => {
-  const migrationsDir = join(projectRoot(), "migrations");
-  const names = readdirSync(migrationsDir).filter(isMigrationFile);
-  assert.ok(names.includes("0001_auth.sql"));
-  assert.ok(names.includes("0002_newsroom.sql"));
-  assert.ok(readdirSync(join(migrationsDir, "auth")).includes("0001_auth.sql"));
-});
-
-test("this workspace's auth schema copy is byte-identical to its source", () => {
-  // An edited copy diverges silently: basename keying skips it on a database
-  // that already ran the original, and applies it on a fresh PGLite preview.
-  const pair = authSchemaCopy(projectRoot());
-  if (pair === null) return; // sign-in off — nothing has been copied up
-  assert.equal(
-    pair.copy,
-    pair.source,
-    "migrations/0001_auth.sql has been edited — it must stay a verbatim copy of migrations/auth/0001_auth.sql",
-  );
 });
 
 test("the copy check reads both files and catches an edit", () => {

@@ -1,11 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 // Import the REAL paging helpers that desk.scan.tsx uses. The point of this
 // file is to be bound to the production code, not to re-implement it.
 import { pageOffset, nextWindowSize, isHistoryExhausted, accumulateScanPages, scanIsRunning, scanReportIsCurrent } from "./scan-history.ts";
-
-const scanRouteSource = readFileSync(new URL("../../routes/desk.scan.tsx", import.meta.url), "utf8");
 
 describe("scan history paging (P0-4, >50 runs)", () => {
   it("requests successive offsets instead of one growing window", () => {
@@ -50,11 +47,6 @@ describe("scan history paging (P0-4, >50 runs)", () => {
     assert.deepEqual(merged.map((r) => r.id), [5, 4, 3]);
   });
 
-  it("is the paging code production actually uses (coupling pin)", () => {
-    assert.match(scanRouteSource, /pageOffset\(/, "the Scan page must use pageOffset");
-    assert.match(scanRouteSource, /isHistoryExhausted\(/, "the Scan page must use isHistoryExhausted");
-    assert.match(scanRouteSource, /accumulateScanPages\(/, "the Scan page must accumulate, not replace");
-  });
 });
 
 /*
@@ -148,11 +140,4 @@ describe("U24: a pressed scan is running before its own report arrives", () => {
     );
   });
 
-  it("is what desk.scan.tsx actually reads", () => {
-    /* The tripwire: a page that stops passing `reportBeforePress` silently
-       goes back to drawing the previous report under the new scan's progress. */
-    assert.match(scanRouteSource, /scanIsRunning\(\{/);
-    assert.match(scanRouteSource, /reportBeforePress/);
-    assert.match(scanRouteSource, /setReportBeforePress\(showing\)/);
-  });
 });

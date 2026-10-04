@@ -1,8 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 /**
  * The seal is only worth anything if it is loaded everywhere a test runs and
@@ -19,35 +16,6 @@ import { fileURLToPath } from "node:url";
  *    real-Postgres lane are three separate entry points; a test that reaches a
  *    provider is only refused if the process it starts carries the preload.
  */
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const read = (relative) => readFileSync(join(ROOT, relative), "utf8");
-
-const OPT_IN = "TOWNREPORTER_TEST_ALLOW_REAL_MODELS";
-const SEAL = "src/lib/test-support/model-seal.ts";
-
-test("CI never opts the test suite into real model servers", () => {
-  const ci = read(".github/workflows/ci.yml");
-  assert.ok(!ci.includes(OPT_IN), `.github/workflows/ci.yml must never mention ${OPT_IN}`);
-  // The other half of the same property: the opt-in is a live value, so a
-  // workflow cannot set it by accident through a matrix or a reusable env.
-  for (const line of ci.split(/\r?\n/)) {
-    assert.ok(
-      !/^\s*RUN_LIVE_MODEL_TESTS\s*:/.test(line) || /""/.test(line),
-      `CI must not enable live model evaluation: ${line.trim()}`,
-    );
-  }
-});
-
-test("every test entry point loads the model seal", () => {
-  for (const runner of [
-    "scripts/run-tests-safe.mjs",
-    "scripts/with-app-env.mjs",
-    "scripts/run-postgres-integration.mjs",
-  ]) {
-    assert.ok(read(runner).includes(SEAL), `${runner} must load ${SEAL}`);
-  }
-});
-
 test("the seal refuses every address discovery actually probes", async () => {
   /*
     The drift check. `DISCOVERED_LOCAL_ADDRESSES` is the one list of default

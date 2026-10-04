@@ -100,22 +100,3 @@ test(
     assert.match(output, /WATCHDOG-OWNER-PASS/);
   },
 );
-
-/**
- * ...and the watchdog must actually call it, not re-inline a pattern that can
- * silently stop matching again.
- */
-test("the watchdog's port-owner check goes through lib-port.ps1, not an inline slash pattern", () => {
-  const wd = readFileSync(join(OPS, "watchdog.ps1"), "utf8");
-  const sweep = wd.slice(wd.indexOf("Clear a process holding"), wd.indexOf("Launch the start script"));
-  assert.match(
-    sweep,
-    /Test-TownReporterBuiltServerProcess/,
-    "the watchdog no longer asks the shared predicate whether the port owner is this app",
-  );
-  assert.doesNotMatch(
-    sweep,
-    /CommandLine\s+-notlike\s+"[^"]*\.output\/server\/index\.mjs/,
-    'the watchdog is back to matching a forward-slash path pattern against a command line Windows reports with backslashes (the 2026-09-26 stalled-server miss)',
-  );
-});

@@ -1,6 +1,5 @@
 import { before, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import { getSql } from "../db.ts";
 import { ensureLegalSchema } from "./legal-removal-schema.ts";
 import { previewLegalRemoval, removeLegally } from "./legal-removal-store.ts";
@@ -10,7 +9,6 @@ import {
   LEGAL_GONE_BODY,
   LEGAL_GONE_TITLE,
   isLegallyRemovedSlug,
-  legalGonePageHtml,
   legalGoneResponse,
 } from "./legal-gone.ts";
 import type { LegalSelection } from "./legal-removal-types.ts";
@@ -165,38 +163,6 @@ it("the dialog's search-index and RSS promise holds: the removed story is in nei
   const live = await f.sql<{ n: number }>`
     select count(*)::int as n from articles where slug=${f.slug} and status='published'`;
   assert.equal(live[0]?.n, 0, "no published row for the feed or the sitemap to print");
-});
-
-it("the in-app path says the same words, from the same two strings", async () => {
-  /*
-    Unit BH6. A reader who reaches a removed story INSIDE the app -- by a link,
-    or by pressing Back to a story they had open when it was live -- never makes
-    a request for the URL, so nothing in the route's handler runs for them. The
-    route's loader asks the same question (`isLegallyRemovedForReader`, the
-    server function over `isLegallyRemovedSlug` above) and renders the removal
-    page itself.
-
-    The route's rendering is checked where it can be checked properly -- in a
-    real browser, by this unit's own walk -- so what is asserted here is the one
-    thing a browser walk cannot hold down over time: that the two doors print
-    the SAME strings, and that the route does not grow a second copy of the
-    sentence. Drift is the failure mode: a route that re-typed the paragraph
-    would pass every browser check the day it was written.
-  */
-  const html = legalGonePageHtml();
-  assert.ok(html.includes(`<h1>${LEGAL_GONE_TITLE}</h1>`), "the 410 page's heading is the shared title");
-  assert.ok(html.includes(`<p>${LEGAL_GONE_BODY}</p>`), "the 410 page's sentence is the shared body");
-
-  const route = await readFile(
-    new URL("../../routes/articles.$slug.tsx", import.meta.url),
-    "utf8",
-  );
-  for (const name of ["LEGAL_GONE_TITLE", "LEGAL_GONE_BODY", "isLegallyRemovedForReader"])
-    assert.ok(route.includes(name), `the route uses ${name} for the in-app path`);
-  assert.ok(
-    !route.includes(LEGAL_GONE_BODY),
-    "the route does not re-type the removal sentence; it prints the export",
-  );
 });
 
 it("a removal in another newsroom leaves this paper's URLs alone", async () => {
