@@ -289,6 +289,42 @@ async function retainAndExtractPacket(
   return pages;
 }
 
+/**
+ * The two name sources the writer corrects garbled caption surnames against:
+ * the newsroom's own "Elected officials and staff" list (paper_settings,
+ * owner-edited on the setup screen) and the desk's entities for this newsroom.
+ *
+ * Both are best-effort. A paper that has written no roster and a database with
+ * no entities table both mean the same thing to the writer: fewer names to
+ * match against, and any caption name it cannot place is flagged rather than
+ * guessed. Neither failure may stop a draft -- a meeting story written from the
+ * tape alone is still a draft.
+ */
+async function loadKnownNameSources(
+  sql: Sql,
+  newsroomId: number,
+  userId: string,
+): Promise<{ roster: string; entityNames: string[] }> {
+  let roster = "";
+  try {
+    const { getPaperConfig } = await import("./paper-settings.ts");
+    roster = (await getPaperConfig(newsroomId)).electedOfficials ?? "";
+  } catch {
+    roster = "";
+  }
+  let entityNames: string[] = [];
+  try {
+    const rows = await sql.query<{ name: string | null }>(
+      `select name from entities where user_id=$1 order by id`,
+      [userId],
+    );
+    entityNames = rows.map((row) => row.name ?? "").filter(Boolean);
+  } catch {
+    entityNames = [];
+  }
+  return { roster, entityNames };
+}
+
 function parsePages(raw: string | null | undefined): PacketPage[] {
   if (!raw) return [];
   try {
@@ -332,6 +368,13 @@ export async function runWholeMeetingDraft(
     artifactId: number;
     videoId: string;
     fallbackTitle: string;
+    /**
+     * The lead's own section key. A whole-meeting draft belongs to the section
+     * the lead was filed under -- not to the meeting's title, which no newsroom
+     * has a section for. Omitted (a rewrite from a bare ledger) falls back to
+     * the meeting title for legacy rows.
+     */
+    topic?: string;
     videoUrl?: string;
     modelChoice: EffectiveProviderChoice;
     chat: ReportChat;
@@ -362,6 +405,8 @@ export async function runWholeMeetingDraft(
   const chat: WholeMeetingChat = (system, user, maxTokens) =>
     input.chat(system, user, maxTokens, input.modelChoice, { timeoutMs: input.callTimeoutMs ?? 0 });
 
+  const knownNames = await loadKnownNameSources(input.sql, input.newsroomId, input.userId);
+
   const result = await runWholeMeetingWriter({
     meeting: { title: material.meeting.title, date: material.meeting.date, videoUrl: material.meeting.videoUrl },
     segments: material.segments,
@@ -371,6 +416,7 @@ export async function runWholeMeetingDraft(
     packetRead: packet.pages.length > 0,
     onStage: input.onStage,
     prebuiltLedger: input.reuseLedger,
+    ...knownNames,
   });
 
   const notes = [packet.note, result.integrityNotes].filter(Boolean).join("\n");
@@ -379,7 +425,10 @@ export async function runWholeMeetingDraft(
     headline: result.headline,
     dek: result.dek,
     body: result.body,
-    topic: material.meeting.title.slice(0, 200),
+    // The lead's section key, not the meeting title: the sections trigger
+    // resolves a story's section from this value, and no newsroom has a
+    // section named after the meeting.
+    topic: (input.topic?.trim() || material.meeting.title).slice(0, 200),
     source_urls: [material.meeting.videoUrl],
     citation_status: "not-applicable",
     integrity_notes: notes,
@@ -442,12 +491,24 @@ export async function persistWholeMeetingAccounting(
   for (const item of input.ledger) {
     await sql`
       insert into meeting_ledger_items
-        (newsroom_id,draft_id,lead_id,item_no,kind,text,start_seconds,packet_page,status,reason,source_excerpt)
+        (newsroom_id,draft_id,lead_id,item_no,kind,text,start_seconds,end_seconds,packet_page,
+         status,reason,source_excerpt,vote_result,vote_tally,evidence)
       values (
         ${input.newsroomId},${input.draftId},${input.leadId},${item.itemNo},
         ${storableText(item.kind).slice(0, 60)},${storableText(item.text)},
-        ${item.startSeconds},${item.packetPage},${item.status},${storableText(item.reason)},
-        ${storableText(item.sourceExcerpt)}
+        ${item.startSeconds},${item.endSeconds ?? null},${item.packetPage},
+        ${item.status},${storableText(item.reason)},
+        ${storableText(item.sourceExcerpt)},
+        ${storableText(item.voteResult ?? "")},${storableText(item.voteTally ?? "")},
+        ${JSON.stringify((item.evidence ?? []).map((entry) => ({
+          kind: entry.kind,
+          text: storableText(entry.text),
+          who: storableText(entry.who),
+          startSeconds: entry.startSeconds,
+          packetPage: entry.packetPage,
+          numbers: storableText(entry.numbers),
+          sourceExcerpt: storableText(entry.sourceExcerpt),
+        })))}::jsonb
       )`;
   }
   for (const claim of input.claims) {

@@ -7,8 +7,14 @@ import {
   LEDGER_STATUS_SYSTEM,
   ROUNDUP_HEADING,
   ROUNDUP_WRITE_SYSTEM,
+  RULE_ASSIGNED_REASON,
   assembleStory,
+  buildKnownNames,
+  buildLedger,
+  checkDraftNames,
   editorNamesOneAgendaItem,
+  mapCaptionNames,
+  parseInventoryReply,
   runWholeMeetingWriter,
   usesWholeMeetingWriter,
   type MeetingSegment,
@@ -109,7 +115,100 @@ const STATUS_OK = JSON.stringify({
   ],
 });
 
+// The two-item grouping run's statuses: the airport group leads, NextLight
+// roundups. Numbering follows the order the groups were built from the tape.
+const TWO_ITEM_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", reason: "the noise policy vote" },
+    { item_no: 2, status: "roundup", reason: "a budget presentation" },
+  ],
+});
+
 const COLD_OK = JSON.stringify({ mismatches: [] });
+
+/*
+  The newsroom's own officials-and-staff list for Sept. 29, 2026, exactly as the
+  editor keeps it on the setup screen: the people the captions garble -- "Christ"
+  for Crist, "Koffer" for Kalkhofer, "Marcin" for Marsing, "Prito" for Prieto.
+*/
+const REAL_ROSTER = [
+  "Susie Hidalgo-Fahring, Mayor",
+  "Diane Crist, Council member",
+  "Alex Kalkhofer, Council member",
+  "Jake Marsing, Council member",
+  "Matthew Popkin, Council member",
+  "Crystal Prieto, Council member",
+  "Harold Dominguez, City Manager",
+  "Jenn Ooton, Assistant City Manager",
+].join("\n");
+
+/*
+  A two-item meeting from the same Sept. 29 tape: the airport noise item runs
+  first (0:00-10:00) and the NextLight budget item second (11:40-21:40), far
+  enough apart that the coarse alignment can hold them as two agenda items.
+  This is the shape the grouping has to survive -- the real run read 308 raw
+  lines off one tape, and those lines must reach the editor as a handful of
+  agenda items, not as the inventory they were read from.
+*/
+const TWO_ITEM_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "The council turned to the airport noise policy.", item: "1", itemTitle: "Airport noise policy" },
+  { index: 1, seconds: 600, text: "Public comment followed on the noise policy.", item: "1", itemTitle: "Airport noise policy" },
+  { index: 2, seconds: 700, text: "Next, the NextLight budget.", item: "2", itemTitle: "NextLight budget" },
+  { index: 3, seconds: 1300, text: "The budget discussion continued.", item: "2", itemTitle: "NextLight budget" },
+];
+
+// Five raw lines, two agenda items: three under the airport item (a motion, its
+// vote, a budget figure) and two under NextLight. Every line has to survive.
+const TWO_ITEM_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport noise policy", who: "Council Member Prieto", timestamp: "0:03:00", packet_page: 57, numbers: "", source_words: "I move to approve the airport noise policy." },
+    { kind: "vote", text: "The airport noise policy carries unanimously", who: "", timestamp: "0:08:00", packet_page: 57, numbers: "", source_words: "And that carries unanimously." },
+    { kind: "staff-report", text: "Airport fund budget totals $733,170", who: "staff", timestamp: "0:09:00", packet_page: 57, numbers: "$733,170", source_words: "The 2027 proposed Airport Fund budget totals $733,170." },
+    { kind: "presentation", text: "NextLight budget reflects $24,907,816 in expenses", who: "staff", timestamp: "0:12:00", packet_page: 57, numbers: "$24,907,816", source_words: "The NextLight 2027 budget reflects $24,907,816 in expenses." },
+    { kind: "staff-report", text: "NextLight shows a negative balance of ($710,104)", who: "staff", timestamp: "0:16:00", packet_page: 57, numbers: "($710,104)", source_words: "a negative balance of ($710,104)." },
+  ],
+});
+
+// The voted group is SECOND here: this is the meeting where the model, left to
+// itself, leads with the budget because it is a big number.
+const OVERRULE_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Next, the NextLight budget.", item: "1", itemTitle: "NextLight budget" },
+  { index: 1, seconds: 600, text: "The budget discussion continued.", item: "1", itemTitle: "NextLight budget" },
+  { index: 2, seconds: 700, text: "The council turned to the airport noise policy.", item: "2", itemTitle: "Airport noise policy" },
+  { index: 3, seconds: 1300, text: "Public comment followed.", item: "2", itemTitle: "Airport noise policy" },
+];
+
+// Item 1 (the unvoted NextLight group) two lines; item 2 (the airport group)
+// a motion and its vote. Item 1 comes first, so it is the group numbered 1.
+const OVERRULE_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "presentation", text: "NextLight budget reflects $24,907,816 in expenses", who: "staff", timestamp: "0:05:00", packet_page: 57, numbers: "$24,907,816", source_words: "The NextLight 2027 budget reflects $24,907,816 in expenses." },
+    { kind: "staff-report", text: "NextLight shows a negative balance of ($710,104)", who: "staff", timestamp: "0:08:00", packet_page: 57, numbers: "($710,104)", source_words: "a negative balance of ($710,104)." },
+    { kind: "motion", text: "Move to approve the airport noise policy", who: "Council Member Prieto", timestamp: "0:12:00", packet_page: 57, numbers: "", source_words: "I move to approve the airport noise policy." },
+    { kind: "vote", text: "The airport noise policy carries unanimously", who: "", timestamp: "0:15:00", packet_page: 57, numbers: "", source_words: "And that carries unanimously." },
+  ],
+});
+
+// The model leads with item 1 (the unvoted budget) and roundups item 2 (the
+// vote). The code must overrule it.
+const OVERRULE_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", reason: "the biggest number on the tape" },
+    { item_no: 2, status: "roundup", reason: "a noise-policy vote" },
+  ],
+});
+
+// The real tape line the run-2 report missed: "carries 5 to two" (line ~750).
+const TALLY_TAPE = `Council Member Prieto: I move to approve the airport noise policy.
+Mayor: All in favor? The motion carries 5 to two.`;
+const TALLY_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 300, text: TALLY_TAPE, item: "1", itemTitle: "Airport noise policy" },
+];
+const TALLY_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport noise policy", who: "Council Member Prieto", timestamp: "0:05:00", packet_page: 57, numbers: "", source_words: "I move to approve the airport noise policy." },
+  ],
+});
 
 function run(
   handlers: Parameters<typeof fakeChat>[0],
@@ -125,31 +224,256 @@ function run(
 }
 
 describe("whole-meeting writer", () => {
-  it("keeps every inventory item and gives each one a status", async () => {
+  it("groups hundreds of raw inventory lines into one item per agenda item", async () => {
     /*
-      The ledger is the whole point of WR1: every item the meeting covered is a
-      row, and every row has an editorial status. An item the status pass never
-      names is still in the ledger -- defaulted to excluded with a reason -- so
-      an omission is a decision the editor can read, not a silent loss.
+      The inventory pass reads every line it finds -- a four-hour meeting gives
+      it hundreds, the real Sept. 29 run read 308 -- and that is an inventory,
+      not a ledger an editor can read. The ledger groups those lines by the
+      agenda item they belong to and keeps every raw line as evidence under its
+      group. Five raw lines across two agenda items become two rows, and nothing
+      the run read is lost doing it.
     */
-    const result = await run({
-      inventory: () => INVENTORY_OK,
-      status: () => STATUS_OK,
-      lead: () => JSON.stringify({ headline: "Airport noise policy set", dek: "One line.", lead: "The council set a noise policy." }),
-      roundup: () => JSON.stringify({ paragraph: "The airport fund budget was discussed." }),
-      cold: () => COLD_OK,
-    });
-    assert.equal(result.ledger.length, 2, "both inventory items must be in the ledger");
-    assert.deepEqual(result.ledger.map((item) => item.itemNo), [1, 2], "items must be numbered in order");
+    const result = await run(
+      {
+        inventory: () => TWO_ITEM_INVENTORY,
+        status: () => TWO_ITEM_STATUS,
+        lead: () => JSON.stringify({ headline: "Airport noise policy set", dek: "One line.", lead: "The council set a noise policy." }),
+        roundup: () => JSON.stringify({ paragraph: "The NextLight budget was presented." }),
+        cold: () => COLD_OK,
+      },
+      { segments: TWO_ITEM_SEGMENTS },
+    );
+    assert.equal(result.ledger.length, 2, "five raw lines group into the meeting's two agenda items");
+    assert.deepEqual(result.ledger.map((item) => item.kind), ["agenda-item", "agenda-item"]);
+    assert.deepEqual(result.ledger.map((item) => item.itemNo), [1, 2], "groups are numbered in the order the meeting ran");
+    assert.match(result.ledger[0]!.text, /Airport noise policy/, "a group is named by the agenda item's own title");
+    assert.match(result.ledger[1]!.text, /NextLight budget/);
+    assert.deepEqual(
+      result.ledger.map((item) => item.evidence!.length),
+      [3, 2],
+      "each raw line is evidence under the item it belongs to",
+    );
+    const raw = result.ledger.flatMap((item) => item.evidence!.map((entry) => entry.text));
+    assert.equal(raw.length, 5, "every raw inventory line survives as evidence");
+    assert.ok(
+      raw.some((text) => /Move to approve the airport noise policy/.test(text)),
+      "the motion is kept under the item it belongs to",
+    );
+  });
+
+  it("keeps the public comment in one item whatever the model calls the kind", () => {
+    /*
+      The real run-2 inventory returned the kind "public comment", with a space.
+      The grouping matches the key "public-comment", so the public-comment period
+      -- the one stretch of the tape that is the public's own words -- never
+      formed as an item: its speakers were scattered into the discussion blocks
+      and the roundup had no item to name. The kind is a key, so both spellings
+      have to be one key, and the same goes for "withdrawn motion".
+    */
+    const parsed = parseInventoryReply(
+      JSON.stringify({
+        items: [
+          { kind: "Public Comment", text: "Speaker one asks about the noise program", timestamp: "0:21:09", source_words: "Speaker one asks about the noise program." },
+          { kind: "public comment", text: "Speaker two asks about the flight school", timestamp: "0:22:10", source_words: "Speaker two asks about the flight school." },
+          { kind: "withdrawn motion", text: "Council member Marcy withdraws the motion", timestamp: "0:33:30", source_words: "Council member Marcy withdraws the motion." },
+        ],
+      }),
+    );
+    assert.deepEqual(
+      parsed.items.map((item) => item.kind),
+      ["public-comment", "public-comment", "withdrawn-motion"],
+      "the kind is a key: a space and a hyphen are the same kind",
+    );
+    const ledger = buildLedger([{ windowIndex: 0, segments: [], items: parsed.items }], [], []);
+    assert.deepEqual(
+      ledger.map((item) => item.kind),
+      ["public-comment", "withdrawn-motion"],
+      "the meeting's public comment is one item, not one item per speaker",
+    );
+    assert.equal(ledger[0]!.evidence!.length, 2, "and both speakers stay under it");
+  });
+
+  it("assigns a status by rule when the status pass cannot be read, never excluded", async () => {
+    /*
+      A batch of the status pass that fails twice must not strand its items. The
+      run-2 failure was the opposite: every one of 308 items was "excluded" with
+      the reason "The ledger pass proposed no status for this item", so the paper
+      dropped an hour of the meeting on an unreadable model reply. Here the
+      status call returns prose twice, and both items are still assigned -- the
+      one that carries a vote leads, the other roundups -- with a reason that
+      says the assignment was by rule.
+    */
+    const result = await run(
+      {
+        inventory: () => TWO_ITEM_INVENTORY,
+        status: () => "Sorry, I cannot produce that as JSON right now.",
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council set a noise policy." }),
+        roundup: () => JSON.stringify({ paragraph: "The NextLight budget was presented." }),
+        cold: () => COLD_OK,
+      },
+      { segments: TWO_ITEM_SEGMENTS },
+    );
     for (const item of result.ledger) {
-      assert.ok(
-        ["lead", "roundup", "excluded", "unread"].includes(item.status),
-        `every ledger item needs a status, got ${item.status}`,
-      );
-      assert.ok(item.reason.length > 0, "every status carries a reason");
+      assert.notEqual(item.status, "excluded", "no item is dropped because a model reply could not be read");
+      assert.ok(["lead", "roundup"].includes(item.status), `assigned by rule, got ${item.status}`);
+      assert.equal(item.reason, RULE_ASSIGNED_REASON);
     }
-    assert.equal(result.ledger[0]!.status, "lead");
+    assert.equal(result.ledger[0]!.status, "lead", "the group with a vote and a motion leads under the rule");
     assert.equal(result.ledger[1]!.status, "roundup");
+    assert.match(
+      result.meetingNotes,
+      /RULE ASSIGNMENT: 2 item\(s\) had no readable status from the model/,
+      "the notes count how many items were assigned by rule",
+    );
+  });
+
+  it("leads with a voted group over a model pick that had no vote", async () => {
+    /*
+      A meeting that voted on something cannot lead its story on something it
+      did not vote on. The model here picks the budget (item 1); the code sees
+      that item 2 carries the motion and the vote and overrules it, and the run
+      says so in its notes. This is the Sept. 29 airport case in miniature.
+    */
+    let leadPrompt = "";
+    const result = await run(
+      {
+        inventory: () => OVERRULE_INVENTORY,
+        status: () => OVERRULE_STATUS,
+        lead: (user) => {
+          leadPrompt = user;
+          return JSON.stringify({ headline: "H", dek: "", lead: "The council acted." });
+        },
+        roundup: () => JSON.stringify({ paragraph: "The budget was presented." }),
+        cold: () => COLD_OK,
+      },
+      { segments: OVERRULE_SEGMENTS },
+    );
+    const leadSource = leadPrompt.slice(
+      leadPrompt.indexOf("LEAD ITEM SOURCE"),
+      leadPrompt.indexOf("TRANSCRIPT EXCERPTS"),
+    );
+    assert.match(leadSource, /Airport noise policy/, "the voted group is the one the writer leads on");
+    assert.doesNotMatch(leadSource, /NextLight budget/, "the model's unvoted pick is not the lead source");
+    assert.match(
+      result.meetingNotes,
+      /LEAD: the model's pick had no vote or motion under it/,
+      "the run records that it overruled the model",
+    );
+  });
+
+  it("reads 'carries 5 to two' as a 5-2 tally on the motion before it", async () => {
+    /*
+      The run-2 story said "no vote tally was recorded" while the tape said
+      "carries 5 to two". The result is found in code, attached to the motion
+      that precedes it, and handed to the writer as a fact -- the words "two"
+      and "2" are the same number. The draft's own "5 to 2" is then found, not
+      flagged, because the record holds it.
+    */
+    let leadPrompt = "";
+    const result = await run(
+      {
+        inventory: () => TALLY_INVENTORY,
+        status: () => JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the vote" }] }),
+        lead: (user) => {
+          leadPrompt = user;
+          return JSON.stringify({ headline: "H", dek: "", lead: "The airport noise policy carries 5 to 2." });
+        },
+        cold: () => COLD_OK,
+      },
+      { segments: TALLY_SEGMENTS },
+    );
+    const motion = result.ledger[0]!;
+    assert.equal(motion.voteResult, "carries", "the result phrase is read off the tape");
+    assert.equal(motion.voteTally, "5-2", "the word 'two' is read as the number 2");
+    assert.match(leadPrompt, /recorded vote: carries, 5-2/, "the writer is handed the tally as a fact");
+    const tallyClaim = result.claims.find((claim) => /5\s*to\s*2/i.test(claim.claim));
+    assert.ok(tallyClaim, "the tally in the draft is checked");
+    assert.equal(tallyClaim!.checkStatus, "found", "the tally the tape states is not flagged");
+  });
+
+  it("corrects a garbled caption name against the newsroom's own list", async () => {
+    /*
+      Captions spell the council by ear: the real tape calls Council Member
+      Marsing "Marcin". With the newsroom's officials-and-staff list, the
+      surname is matched by sound and the tape the writer reads carries the
+      known spelling -- not the caption's.
+
+      The roster here is the real one, all eight names. A one-name roster would
+      pass even if the match were arbitrary: with the real list, "Marcin"'s
+      consonant skeleton sits one edit from Crist's and one from Marsing's, and
+      the first letter is what decides between them.
+    */
+    const roster = REAL_ROSTER;
+    const known = buildKnownNames({ roster });
+    const tape = "Council Member Marcin: I support the NextLight budget.";
+    const mapped = mapCaptionNames(tape, known, "");
+    assert.ok(
+      mapped.mappings.some((row) => row.captioned === "Marcin" && row.known === "Jake Marsing"),
+      "the caption's spelling maps to the known name",
+    );
+    assert.match(mapped.text, /Marsing/, "the corrected tape carries the newsroom's spelling");
+    assert.doesNotMatch(mapped.text, /Marcin/, "the garbled spelling is gone");
+    assert.deepEqual(mapped.unverified, [], "a name the roster holds is not reported unverified");
+
+    let leadPrompt = "";
+    await runWholeMeetingWriter({
+      meeting: { title: "City Council Study Session", date: "2026-09-29", videoUrl: "https://youtu.be/example" },
+      segments: [{ index: 0, seconds: 0, text: tape, item: "1", itemTitle: "Airport noise policy" }],
+      packetPages: [],
+      votes: [],
+      roster,
+      maxWindowChars: 12_000,
+      chat: fakeChat({
+        inventory: () =>
+          JSON.stringify({
+            items: [
+              { kind: "council-comment", text: "Council Member Marcin supported the budget", who: "Marcin", timestamp: "0:00:00", packet_page: null, numbers: "", source_words: "I support the NextLight budget." },
+            ],
+          }),
+        status: () => JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the comment" }] }),
+        lead: (user) => {
+          leadPrompt = user;
+          return JSON.stringify({ headline: "H", dek: "", lead: "A member spoke." });
+        },
+        cold: () => COLD_OK,
+      }),
+    });
+    assert.match(leadPrompt, /Marsing/, "the writer's tape carries the corrected name");
+    // The mapping line names the garbled spelling on purpose ("Marcin ->
+    // Jake Marsing"), so the check is the tape itself, not the whole prompt.
+    const tapeForWriter = leadPrompt.slice(
+      leadPrompt.indexOf("TRANSCRIPT EXCERPTS"),
+      leadPrompt.indexOf("PACKET EXCERPTS"),
+    );
+    assert.doesNotMatch(tapeForWriter, /Marcin\b/, "the tape the writer reads never carries the garbled name");
+  });
+
+  it("flags a name the record and the newsroom's list do not hold, and leaves it as captioned", async () => {
+    /*
+      Name correction never invents. A caption name that matches nothing the
+      newsroom knows stays exactly as captioned and is reported unverified; a
+      name in the draft that is in neither the record nor the list is flagged
+      for review, never silently corrected.
+    */
+    const known = buildKnownNames({ roster: "Jake Marsing, Council member" });
+    const tape = "Mayor Hidalgo-Fahring called the meeting to order.\nAnna Blomqvist: I have a question about the budget.";
+    const mapped = mapCaptionNames(tape, known, "");
+    assert.ok(
+      mapped.unverified.includes("Anna Blomqvist"),
+      "a caption name the newsroom does not know is reported unverified",
+    );
+    assert.match(mapped.text, /Anna Blomqvist/, "an unmatched name is left exactly as captioned");
+
+    const claims = checkDraftNames({
+      body: "Officials said Rachel Thornquist would review it.",
+      transcriptText: tape,
+      packetText: "",
+      knownNames: known,
+    });
+    const flagged = claims.find((claim) => claim.claim === "Rachel Thornquist");
+    assert.ok(flagged, "a name written into the draft is checked");
+    assert.equal(flagged!.checkStatus, "flagged", "a name the record does not hold is flagged, not dropped");
+    assert.match(flagged!.note, /verify the spelling/i);
   });
 
   it("accounts for a window it could not parse as unread rather than losing it", async () => {

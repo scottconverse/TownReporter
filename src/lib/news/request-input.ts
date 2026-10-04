@@ -81,6 +81,13 @@ export const LIMITS = {
   meetingKeywordEntries: 100,
   listItem: 200,
   meetingKeyword: 120,
+  /**
+   * WR1 fixes round 1: the newsroom's own list of elected officials and staff,
+   * one name and title per line. A plain text block, not a list of entries --
+   * a town's council, staff and board members run to a few dozen lines, and
+   * 4,000 chars is generous room for them.
+   */
+  electedOfficials: 4_000,
 
   /*
     0.6.63, the full sweep. The first group was written against the column

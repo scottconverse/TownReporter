@@ -77,6 +77,7 @@ describe("paper settings refuse a setup form larger than a paper", () => {
         city: huge,
         state: huge,
         timezone: huge,
+        electedOfficials: huge,
       },
     });
     assert.ok(cleaned.name.length <= LIMITS.paperName, `name kept ${cleaned.name.length} characters`);
@@ -88,6 +89,12 @@ describe("paper settings refuse a setup form larger than a paper", () => {
     // none, so these two go blank rather than being cut to a broken value.
     assert.equal(cleaned.councilVotesUrl, "", `councilVotesUrl kept ${cleaned.councilVotesUrl.length} characters`);
     assert.equal(cleaned.editorEmail, "", `editorEmail kept ${cleaned.editorEmail.length} characters`);
+    // The officials roster is display-ish text like the tagline, not a URL:
+    // it is cut to the bound rather than blanked.
+    assert.ok(
+      cleaned.electedOfficials.length <= LIMITS.electedOfficials,
+      `electedOfficials kept ${cleaned.electedOfficials.length} characters`,
+    );
   });
 
   it("bounds the three lists as well as their members", () => {
@@ -119,6 +126,7 @@ describe("paper settings refuse a setup form larger than a paper", () => {
       watchlist: [],
       youtubeChannels: [],
       meetingKeywords: [],
+      electedOfficials: "",
     });
   });
 });

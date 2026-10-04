@@ -3574,6 +3574,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         artifactId: Number(lead.meeting_artifact_id),
         videoId: lead.meeting_video_id ?? "",
         fallbackTitle: lead.headline,
+        // The draft files under the lead's own section, so the sections trigger
+        // resolves to a section this newsroom actually has.
+        topic: lead.topic ?? "",
         videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
         modelChoice: effectiveStoryModelChoice(job.model_choice),
         chat:

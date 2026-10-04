@@ -1,6 +1,35 @@
 import type { Sql } from "../db.ts";
 import { storableText } from "./storable-text.ts";
-import type { LedgerItem, LedgerStatus, RunStats } from "./meeting-whole.ts";
+import type { LedgerEvidence, LedgerItem, LedgerStatus, RunStats } from "./meeting-whole.ts";
+
+/** jsonb arrives parsed on Neon and as a JSON string under PGLite; accept both. */
+function parseEvidence(raw: unknown): LedgerEvidence[] {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      kind: String(entry.kind ?? ""),
+      text: String(entry.text ?? ""),
+      who: String(entry.who ?? ""),
+      startSeconds: entry.startSeconds === null || entry.startSeconds === undefined
+        ? null
+        : Number(entry.startSeconds),
+      packetPage: entry.packetPage === null || entry.packetPage === undefined
+        ? null
+        : Number(entry.packetPage),
+      numbers: String(entry.numbers ?? ""),
+      sourceExcerpt: String(entry.sourceExcerpt ?? ""),
+    }));
+}
+
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The reading half of WR1's screens: the accounting a whole-meeting run left on
@@ -28,9 +57,16 @@ export type LedgerItemRow = {
   kind: string;
   text: string;
   startSeconds: number | null;
+  endSeconds: number | null;
   packetPage: number | null;
   status: LedgerStatus;
   reason: string;
+  /** The result phrase the tape recorded for this item, or "". */
+  voteResult: string;
+  /** The tally the tape recorded, normalized "N-N", or "". */
+  voteTally: string;
+  /** Every raw inventory entry this item grouped, so the panel can show them. */
+  evidence: LedgerEvidence[];
 };
 
 export type ClaimRow = {
@@ -83,13 +119,18 @@ export async function loadMeetingAccounting(
     kind: string;
     text: string;
     start_seconds: number | string | null;
+    end_seconds: number | string | null;
     packet_page: number | null;
     status: string;
     reason: string | null;
+    vote_result: string | null;
+    vote_tally: string | null;
+    evidence: unknown;
   }>(
     // Unread first: the part of the tape nobody read is the part the editor most
     // needs to see, so it sorts above the decisions that are already made.
-    `select id,draft_id,item_no,kind,text,start_seconds,packet_page,status,reason
+    `select id,draft_id,item_no,kind,text,start_seconds,end_seconds,packet_page,status,reason,
+            vote_result,vote_tally,evidence
        from meeting_ledger_items where newsroom_id=$1 and draft_id=$2
       order by (status='unread') desc, item_no, id`,
     [input.newsroomId, draftId],
@@ -124,9 +165,13 @@ export async function loadMeetingAccounting(
       kind: row.kind,
       text: row.text,
       startSeconds: row.start_seconds === null ? null : Number(row.start_seconds),
+      endSeconds: row.end_seconds === null ? null : Number(row.end_seconds),
       packetPage: row.packet_page === null ? null : Number(row.packet_page),
       status: row.status as LedgerStatus,
       reason: row.reason ?? "",
+      voteResult: row.vote_result ?? "",
+      voteTally: row.vote_tally ?? "",
+      evidence: parseEvidence(row.evidence),
     })),
     claims: claimRows.map((row) => ({
       id: Number(row.id),
@@ -163,12 +208,17 @@ export async function loadStoredLedgerForRewrite(
     kind: string;
     text: string;
     start_seconds: number | string | null;
+    end_seconds: number | string | null;
     packet_page: number | null;
     status: string;
     reason: string | null;
     source_excerpt: string | null;
+    vote_result: string | null;
+    vote_tally: string | null;
+    evidence: unknown;
   }>(
-    `select item_no,kind,text,start_seconds,packet_page,status,reason,source_excerpt
+    `select item_no,kind,text,start_seconds,end_seconds,packet_page,status,reason,source_excerpt,
+            vote_result,vote_tally,evidence
        from meeting_ledger_items where newsroom_id=$1 and draft_id=$2 order by item_no, id`,
     [input.newsroomId, Number(latest[0].draft_id)],
   );
@@ -177,10 +227,14 @@ export async function loadStoredLedgerForRewrite(
     kind: row.kind,
     text: row.text,
     startSeconds: row.start_seconds === null ? null : Number(row.start_seconds),
+    endSeconds: row.end_seconds === null ? null : Number(row.end_seconds),
     packetPage: row.packet_page === null ? null : Number(row.packet_page),
     status: row.status as LedgerStatus,
     reason: row.reason ?? "",
     sourceExcerpt: row.source_excerpt ?? "",
+    voteResult: row.vote_result ?? "",
+    voteTally: row.vote_tally ?? "",
+    evidence: parseEvidence(row.evidence),
   }));
 }
 

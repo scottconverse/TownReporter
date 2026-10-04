@@ -7,8 +7,16 @@ import {
   loadWholeMeetingInput,
   packetDocumentForMeeting,
   persistWholeMeetingAccounting,
+  runWholeMeetingDraft,
 } from "./meeting-whole.server.ts";
+import {
+  COLD_CHECK_SYSTEM,
+  INVENTORY_SYSTEM,
+  LEAD_WRITE_SYSTEM,
+  LEDGER_STATUS_SYSTEM,
+} from "./meeting-whole.ts";
 import type { IngestDocument } from "./ingest.ts";
+import type { ReportChat } from "./report.ts";
 import type { ClaimCheck, LedgerItem, RunStats } from "./meeting-whole.ts";
 
 /*
@@ -276,6 +284,84 @@ describe("whole-meeting writer, against the migrated schema", () => {
     assert.match(stored[0]!.meeting_notes ?? "", /1 lead, 1 roundup/, "the check results land on the draft row");
     assert.equal(stored[0]!.run_stats?.modelCalls, 44, "the run's model-call count is recorded");
     assert.equal(stored[0]!.run_stats?.wallMs, 1234);
+  });
+
+  it("files a whole-meeting draft under the lead's section, not the meeting's title", async () => {
+    /*
+      The run-1 failure: the writer filed the draft under the meeting's title
+      ("City Council Study Session"), which no newsroom has a section for, so the
+      sections trigger refused the save. A whole-meeting draft belongs to the
+      section its lead was filed under. This drives the real pipeline against the
+      migrated schema, then proves both halves: the title is rejected by the
+      trigger, and the section key the run returns saves.
+    */
+    const sql = await getSql();
+    const chat: ReportChat = async (system) => {
+      if (system.includes(INVENTORY_SYSTEM)) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            items: [
+              {
+                kind: "vote",
+                text: "Airport noise policy carries unanimously",
+                who: "",
+                timestamp: "0:00:00",
+                packet_page: 57,
+                numbers: "",
+                source_words: "And that carries unanimously.",
+              },
+            ],
+          }),
+        };
+      }
+      if (system.includes(LEDGER_STATUS_SYSTEM)) {
+        return { ok: true, text: JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the vote" }] }) };
+      }
+      if (system.includes(LEAD_WRITE_SYSTEM)) {
+        return {
+          ok: true,
+          text: JSON.stringify({ headline: "Council takes up airport noise policy", dek: "One line.", lead: "The council voted on the noise policy." }),
+        };
+      }
+      if (system.includes(COLD_CHECK_SYSTEM)) return { ok: true, text: JSON.stringify({ mismatches: [] }) };
+      return { ok: false, error: "unexpected stage" };
+    };
+    const result = await runWholeMeetingDraft(
+      {
+        sql,
+        newsroomId: NEWSROOM,
+        userId: USER,
+        leadId,
+        artifactId,
+        videoId: VIDEO,
+        fallbackTitle: "fallback",
+        topic: "council",
+        modelChoice: "auto",
+        chat,
+      },
+      { primeGovOrigin: async () => null },
+    );
+    assert.equal(result.draft.topic, "council", "the draft carries the lead's own section key");
+    assert.notEqual(result.draft.topic, "City Council Study Session", "and not the meeting's title");
+
+    // The run-1 save failure, in one line: the title a newsroom has no section
+    // for is refused by the sections trigger.
+    await assert.rejects(
+      sql.query(
+        `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic)
+         values($1,$2,$3,$4,$5,$6,$7)`,
+        [USER, NEWSROOM, leadId, "T", "", "b", "City Council Study Session"],
+      ),
+      /Section not found in this newsroom/,
+    );
+
+    const saved = await sql.query<{ id: number }>(
+      `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic)
+       values($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [USER, NEWSROOM, leadId, result.draft.headline, result.draft.dek, result.draft.body, result.draft.topic],
+    );
+    assert.ok(saved[0]!.id, "the draft the run returns saves under that section");
   });
 
   it("picks the portal's packet over its agenda", () => {

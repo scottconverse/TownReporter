@@ -57,15 +57,43 @@ export type StructuredVoteRow = {
 
 export type LedgerStatus = "lead" | "roundup" | "excluded" | "unread";
 
+/**
+ * One raw line the inventory pass read out of a window. Every inventory entry
+ * survives as evidence under its ledger item: the ledger groups the meeting
+ * into agenda items and events for the reader, but nothing the run read is
+ * thrown away doing so -- the panel can open a group and show every line it was
+ * built from, and the writer is handed the same lines as its source.
+ */
+export type LedgerEvidence = {
+  kind: string;
+  text: string;
+  who: string;
+  startSeconds: number | null;
+  packetPage: number | null;
+  numbers: string;
+  sourceExcerpt: string;
+};
+
 export type LedgerItem = {
   itemNo: number;
   kind: string;
   text: string;
   startSeconds: number | null;
+  /** The end of the item's span on the tape, when the item covers a range. */
+  endSeconds?: number | null;
   packetPage: number | null;
   status: LedgerStatus;
   reason: string;
   sourceExcerpt: string;
+  /** Every raw inventory entry this ledger item groups. */
+  evidence?: LedgerEvidence[];
+  /**
+   * The result phrase found in the tape for this item's motion ("carries",
+   * "unanimous", "failed"), and the tally normalized to "N-N". Both empty when
+   * the tape recorded no result -- which is a fact to state, not a gap to fill.
+   */
+  voteResult?: string;
+  voteTally?: string;
 };
 
 export type ClaimCheck = {
@@ -107,6 +135,26 @@ export const WINDOW_PACKET_CHARS = 12_000;
 export const INVENTORY_REPLY_TOKENS = 3_000;
 export const LEAD_REPLY_TOKENS = 4_000;
 export const ROUNDUP_REPLY_TOKENS = 400;
+export const STATUS_REPLY_TOKENS = 2_000;
+
+/**
+ * The paragraph a roundup item carries when its own write could not be read.
+ * The item stays in the list -- the run read it, so the editor sees it -- and
+ * the sentence says plainly that the prose is the editor's to write.
+ */
+export const ROUNDUP_STUB = "This item's paragraph could not be written; the ledger keeps it for the editor.";
+/**
+ * How far outside an agenda item's own span a raw item may sit and still belong
+ * to it. The capture's alignment is coarse, and an item's first words often
+ * precede the chunk's recorded start.
+ */
+export const AGENDA_SNAP_SECONDS = 900;
+/** Two otherwise-ungrouped items more than this apart start a new block. */
+export const LEDGER_BLOCK_GAP_SECONDS = 600;
+/** The most ledger items one status call may carry. */
+export const LEDGER_STATUS_BATCH_SIZE = 30;
+/** The reason recorded for a status the code assigned because a model reply failed. */
+export const RULE_ASSIGNED_REASON = "Assigned by rule: the model reply could not be read.";
 
 /** Seconds from `h:mm:ss`, `hh:mm:ss` or `mm:ss`. Null when the text is not a clock. */
 export function parseClock(text: string | null | undefined): number | null {
@@ -181,6 +229,65 @@ export function packetPagesForWindow(
   return matched;
 }
 
+/** The span of tape a single agenda item covers, from the capture's alignment. */
+export type AgendaRange = {
+  item: string;
+  title: string;
+  startSeconds: number;
+  endSeconds: number;
+};
+
+/**
+ * The agenda items this tape was aligned to, and the span each one covers. One
+ * range per distinct item id, widened to hold every segment carrying it. A tape
+ * with no alignment (every segment's `item` empty) yields an empty list, and
+ * the ledger then groups by event and time alone.
+ */
+export function agendaRanges(segments: MeetingSegment[]): AgendaRange[] {
+  const byItem = new Map<string, AgendaRange>();
+  for (const segment of segments) {
+    const item = segment.item.trim();
+    if (!item) continue;
+    const title = segment.itemTitle.trim();
+    const existing = byItem.get(item);
+    if (!existing) {
+      byItem.set(item, { item, title, startSeconds: segment.seconds, endSeconds: segment.seconds });
+      continue;
+    }
+    existing.startSeconds = Math.min(existing.startSeconds, segment.seconds);
+    existing.endSeconds = Math.max(existing.endSeconds, segment.seconds);
+    if (!existing.title && title) existing.title = title;
+  }
+  return [...byItem.values()].sort((a, b) => a.startSeconds - b.startSeconds);
+}
+
+/**
+ * The agenda item a moment on the tape belongs to: the range that contains it,
+ * or the nearest range within `AGENDA_SNAP_SECONDS`. Overlapping ranges resolve
+ * to the earliest-starting one, so a coarse alignment that repeats an item does
+ * not scatter its items across two groups.
+ */
+export function agendaItemAt(ranges: AgendaRange[], seconds: number | null): AgendaRange | null {
+  if (seconds === null || !ranges.length) return null;
+  let containing: AgendaRange | null = null;
+  for (const range of ranges) {
+    if (seconds >= range.startSeconds && seconds <= range.endSeconds) {
+      if (!containing || range.startSeconds < containing.startSeconds) containing = range;
+    }
+  }
+  if (containing) return containing;
+  let nearest: AgendaRange | null = null;
+  let distance = Number.POSITIVE_INFINITY;
+  for (const range of ranges) {
+    const gap = seconds < range.startSeconds ? range.startSeconds - seconds : seconds - range.endSeconds;
+    if (gap < distance) {
+      distance = gap;
+      nearest = range;
+    }
+  }
+  return nearest && distance <= AGENDA_SNAP_SECONDS ? nearest : null;
+}
+
 export type InventoryItem = {
   kind: string;
   text: string;
@@ -209,7 +316,15 @@ export function parseInventoryReply(text: string): { valid: boolean; items: Inve
     .map((row) => {
       if (!row || typeof row !== "object") return null;
       const record = row as Record<string, unknown>;
-      const kind = String(record.kind ?? "").trim().toLowerCase();
+      /*
+        The kind is a key, not prose: the grouping rules match on it, so "public
+        comment" and "public-comment" -- and "withdrawn motion" and
+        "withdrawn-motion" -- must be one key, whichever spelling the model
+        returns. A real run returned the spaced forms, and the public-comment
+        block then never formed: its speakers were scattered into the discussion
+        blocks instead of one item under the meeting's one public-comment period.
+      */
+      const kind = String(record.kind ?? "").trim().toLowerCase().replace(/\s+/g, "-");
       const text = String(record.text ?? record.summary ?? "").trim();
       if (!kind || !text) return null;
       const page = Number(record.packet_page ?? record.packetPage);
@@ -232,7 +347,7 @@ export type WindowInventory = { windowIndex: number; segments: MeetingSegment[];
 export type UnreadWindow = { windowIndex: number; segments: MeetingSegment[] };
 
 /** A key that collapses the same item reported twice from overlapping windows. */
-function dedupeKey(item: InventoryItem): string {
+function dedupeKey(item: { kind: string; text: string }): string {
   const words = item.text
     .toLowerCase()
     .replace(/[^a-z0-9 ]+/g, " ")
@@ -244,56 +359,305 @@ function dedupeKey(item: InventoryItem): string {
 }
 
 /**
- * Merge the per-window inventories into one numbered ledger.
- *
- * Every inventory item becomes a row -- nothing is dropped for being a
- * duplicate of another window's row, only merged. An unread window becomes one
- * `unread` row naming the window, so a window whose reply could not be parsed
- * is accounted for rather than silently missing.
+ * Raw kinds that stand alone as their own ledger item when the tape did not
+ * align them to an agenda item: a decision or a set piece the meeting should
+ * account for one by one, not fold into a discussion block.
  */
-export function buildLedger(windows: WindowInventory[], unread: UnreadWindow[]): LedgerItem[] {
-  const byWindow = new Map<number, LedgerItem[]>();
-  const seen = new Set<string>();
+const STANDALONE_EVENT_KINDS = new Set([
+  "vote",
+  "motion",
+  "amendment",
+  "withdrawn-motion",
+  "withdrawn motion",
+  "proclamation",
+  "tribute",
+  "announcement",
+]);
+
+/**
+ * Of those, the ones that carry a DECISION: a vote, a motion, an amendment, a
+ * motion withdrawn. These are what a meeting story leads on, and they are what
+ * the rule assignment and the lead ranking weigh -- a proclamation or a tribute
+ * is a set piece, not a decision.
+ */
+const DECISION_EVENT_KINDS = new Set(["vote", "motion", "amendment", "withdrawn-motion", "withdrawn motion"]);
+
+/** Every motion-like moment recorded under this item, the item itself included. */
+function decisionMoments(item: LedgerItem): number {
+  const own = DECISION_EVENT_KINDS.has(item.kind) ? 1 : 0;
+  const under = (item.evidence ?? []).filter((entry) => DECISION_EVENT_KINDS.has(entry.kind)).length;
+  const recorded = item.voteResult || item.voteTally ? 1 : 0;
+  return own + under + recorded;
+}
+
+function evidenceOf(item: InventoryItem): LedgerEvidence {
+  return {
+    kind: item.kind,
+    text: item.text,
+    who: item.who,
+    startSeconds: parseClock(item.timestamp),
+    packetPage: item.packetPage,
+    numbers: item.numbers,
+    sourceExcerpt: item.sourceWords || item.text,
+  };
+}
+
+/**
+ * Merge the per-window inventories into one numbered ledger of AGENDA ITEMS and
+ * EVENTS, not raw lines.
+ *
+ * The inventory pass reads the tape in windows and returns every line it finds;
+ * a four-hour meeting produces hundreds of them, which is an inventory, not a
+ * ledger an editor can read. This groups those lines the way the meeting was
+ * run:
+ *
+ *   - one item per agenda item, from the capture's own alignment -- everything
+ *     read inside that item's span (and within `AGENDA_SNAP_SECONDS` of it)
+ *     becomes evidence under it;
+ *   - one item per standalone event outside any agenda item -- each vote,
+ *     motion, amendment, proclamation, tribute and announcement;
+ *   - one block for the public comment, however many speakers it holds;
+ *   - and, for lines the tape did not align, blocks of discussion that break
+ *     whenever the tape goes quiet for `LEDGER_BLOCK_GAP_SECONDS`.
+ *
+ * Every raw line survives as `evidence` on its group (a line reported twice
+ * from overlapping windows is kept once), and the group's excerpt, page and
+ * span are read from that evidence -- so nothing the run read is lost, and the
+ * writer and the panel both see all of it. An unread window is still one
+ * `unread` row, accounted for rather than silently missing.
+ */
+export function buildLedger(
+  windows: WindowInventory[],
+  unread: UnreadWindow[],
+  agenda: AgendaRange[] = [],
+): LedgerItem[] {
+  const groups: LedgerItem[] = [];
+  const byKey = new Map<string, LedgerItem>();
+  const seenEvidence = new Set<string>();
+  let block: LedgerItem | null = null;
+  let blockLast = Number.NEGATIVE_INFINITY;
+
+  const newGroup = (key: string, seed: Partial<LedgerItem>): LedgerItem => {
+    const group: LedgerItem = {
+      itemNo: 0,
+      kind: seed.kind ?? "item",
+      text: seed.text ?? "",
+      startSeconds: seed.startSeconds ?? null,
+      endSeconds: seed.endSeconds ?? null,
+      packetPage: seed.packetPage ?? null,
+      status: "excluded",
+      reason: "",
+      sourceExcerpt: "",
+      evidence: [],
+      voteResult: "",
+      voteTally: "",
+    };
+    groups.push(group);
+    byKey.set(key, group);
+    return group;
+  };
+
+  const addEvidence = (key: string, group: LedgerItem, evidence: LedgerEvidence) => {
+    const dedupe = `${key}|${dedupeKey({ kind: evidence.kind, text: evidence.text })}`;
+    if (seenEvidence.has(dedupe)) return;
+    seenEvidence.add(dedupe);
+    group.evidence!.push(evidence);
+    const seconds = evidence.startSeconds;
+    if (seconds !== null) {
+      if (group.startSeconds === null || seconds < group.startSeconds) group.startSeconds = seconds;
+      if ((group.endSeconds ?? null) === null || seconds > (group.endSeconds ?? 0)) group.endSeconds = seconds;
+    }
+    if (group.packetPage === null && evidence.packetPage !== null) group.packetPage = evidence.packetPage;
+    if (!group.sourceExcerpt) group.sourceExcerpt = (evidence.sourceExcerpt || evidence.text).slice(0, 600);
+  };
+
   for (const window of windows) {
-    const rows: LedgerItem[] = [];
     for (const item of window.items) {
-      const key = dedupeKey(item);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      rows.push({
-        itemNo: 0,
-        kind: item.kind,
-        text: item.text,
-        startSeconds: parseClock(item.timestamp),
-        packetPage: item.packetPage,
-        status: "excluded",
-        reason: "",
-        sourceExcerpt: item.sourceWords || item.text,
-      });
+      const evidence = evidenceOf(item);
+      const range = agendaItemAt(agenda, evidence.startSeconds);
+      if (range) {
+        const key = `agenda:${range.item}`;
+        const group =
+          byKey.get(key) ??
+          newGroup(key, {
+            kind: "agenda-item",
+            text: range.title ? `${range.item}. ${range.title}` : `Agenda item ${range.item}`,
+          });
+        addEvidence(key, group, evidence);
+        continue;
+      }
+      if (item.kind === "public-comment") {
+        const key = "public-comment";
+        const group = byKey.get(key) ?? newGroup(key, { kind: "public-comment", text: "Public comment" });
+        addEvidence(key, group, evidence);
+        continue;
+      }
+      if (STANDALONE_EVENT_KINDS.has(item.kind)) {
+        const key = `solo:${item.kind}:${normalizeForMatch(item.text).slice(0, 80)}`;
+        const group =
+          byKey.get(key) ??
+          newGroup(key, { kind: item.kind, text: item.text, startSeconds: evidence.startSeconds });
+        addEvidence(key, group, evidence);
+        continue;
+      }
+      // Ungrouped discussion: continue the current block when the tape has not
+      // gone quiet, otherwise open a new one.
+      const seconds = evidence.startSeconds;
+      const gap = seconds === null ? 0 : seconds - blockLast;
+      if (!block || (seconds !== null && blockLast !== Number.NEGATIVE_INFINITY && gap > LEDGER_BLOCK_GAP_SECONDS)) {
+        block = newGroup(`block:${groups.length}`, { kind: "block" });
+        blockLast = Number.NEGATIVE_INFINITY;
+      }
+      addEvidence(`block:${groups.indexOf(block)}`, block, evidence);
+      if (seconds !== null && seconds > blockLast) blockLast = seconds;
     }
-    byWindow.set(window.windowIndex, rows);
   }
-  const unreadByWindow = new Map(unread.map((window) => [window.windowIndex, window]));
-  const order = [...new Set([...byWindow.keys(), ...unreadByWindow.keys()])].sort((a, b) => a - b);
-  const ledger: LedgerItem[] = [];
-  for (const windowIndex of order) {
-    ledger.push(...(byWindow.get(windowIndex) ?? []));
-    const missed = unreadByWindow.get(windowIndex);
-    if (missed) {
-      const first = missed.segments[0];
-      ledger.push({
-        itemNo: 0,
-        kind: "unread-window",
-        text: `Window ${windowIndex + 1} could not be inventoried (${missed.segments.length} transcript segments).`,
-        startSeconds: first ? first.seconds : null,
-        packetPage: null,
-        status: "unread",
-        reason: "The inventory reply for this window was not valid JSON after a retry.",
-        sourceExcerpt: first ? `[${clockFromSeconds(first.seconds)}; segment ${first.index}] ${first.text}`.slice(0, 600) : "",
-      });
-    }
+
+  // A discussion block is labeled by the span of tape it covers: a block of
+  // twelve lines has no one clause that names it, and its first line would
+  // mislead. Its evidence carries what was said.
+  for (const group of groups) {
+    if (group.kind !== "block") continue;
+    const from = group.startSeconds !== null ? clockFromSeconds(group.startSeconds) : "no timestamp";
+    const end = group.endSeconds ?? null;
+    const to = end !== null && end !== group.startSeconds ? `–${clockFromSeconds(end)}` : "";
+    group.text = `Discussion from ${from}${to}`;
+  }
+
+  const ledger: LedgerItem[] = [...groups];
+  for (const window of [...unread].sort((a, b) => a.windowIndex - b.windowIndex)) {
+    const first = window.segments[0];
+    ledger.push({
+      itemNo: 0,
+      kind: "unread-window",
+      text: `Window ${window.windowIndex + 1} could not be inventoried (${window.segments.length} transcript segments).`,
+      startSeconds: first ? first.seconds : null,
+      endSeconds: null,
+      packetPage: null,
+      status: "unread",
+      reason: "The inventory reply for this window was not valid JSON after a retry.",
+      sourceExcerpt: first ? `[${clockFromSeconds(first.seconds)}; segment ${first.index}] ${first.text}`.slice(0, 600) : "",
+      evidence: [],
+      voteResult: "",
+      voteTally: "",
+    });
   }
   return ledger.map((item, index) => ({ ...item, itemNo: index + 1 }));
+}
+
+/** A result phrase the tape states, with the moment it was spoken. */
+export type VoteFinding = {
+  seconds: number;
+  /** The result verb the tape used: "carries", "fails", "is approved". */
+  result: string;
+  /** The tally normalized to "N-N", or "" when the result was not a count. */
+  tally: string;
+  /** "unanimous" when the tape said so, else "". */
+  unanimous: string;
+  words: string;
+};
+
+const NUMBER_WORDS: Record<string, number> = {
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
+  seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+};
+
+function tallyNumber(token: string): number | null {
+  const digits = Number(token);
+  if (Number.isInteger(digits)) return digits;
+  return NUMBER_WORDS[token.toLowerCase()] ?? null;
+}
+
+const VOTE_RESULT_PHRASE =
+  /\b(carries|passed|passes|fails|failed|is approved|approved|motion passes|motion fails)\b/i;
+const VOTE_UNANIMOUS = /\bunanimous(?:ly)?\b/i;
+const VOTE_TALLY = /\b(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*(?:to|-|–|—)\s*(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/i;
+
+/**
+ * Find every vote result the tape states, in code.
+ *
+ * The captions carry the outcome of a vote as a result phrase -- "carries",
+ * "passes", "fails", "is approved" -- next to either the word "unanimous" or a
+ * tally, and both numbers may be words ("carries 5 to two"). This reads those
+ * moments off the tape so the ledger can carry the real tally instead of
+ * leaving the writer to infer one, and so the check can flag a vote word the
+ * tape never said. A motion with no result phrase near it simply has no
+ * finding: "no vote was recorded in the captions" is then the honest sentence.
+ */
+export function scanVoteResults(segments: MeetingSegment[]): VoteFinding[] {
+  const findings: VoteFinding[] = [];
+  for (const segment of segments) {
+    const text = segment.text;
+    if (!VOTE_RESULT_PHRASE.test(text)) continue;
+    const unanimous = VOTE_UNANIMOUS.test(text) ? "unanimous" : "";
+    const tallyMatch = text.match(VOTE_TALLY);
+    let tally = "";
+    if (tallyMatch) {
+      const a = tallyNumber(tallyMatch[1]!);
+      const b = tallyNumber(tallyMatch[2]!);
+      if (a !== null && b !== null) tally = `${a}-${b}`;
+    }
+    if (!unanimous && !tally) continue;
+    const result = (text.match(VOTE_RESULT_PHRASE)?.[1] ?? "").toLowerCase();
+    findings.push({
+      seconds: segment.seconds,
+      result,
+      tally,
+      unanimous,
+      words: (tallyMatch?.[0] ?? unanimous).trim(),
+    });
+  }
+  return findings.sort((a, b) => a.seconds - b.seconds);
+}
+
+/**
+ * Attach each found result to the latest ledger item whose evidence holds a
+ * motion at or before it -- the motion the tape is reporting the outcome of --
+ * preferring an item whose span contains the finding. A finding with no motion
+ * before it is dropped: an outcome with nothing to decide is not a vote this
+ * ledger can name.
+ */
+export function attachVoteResults(ledger: LedgerItem[], findings: VoteFinding[]): LedgerItem[] {
+  if (!findings.length) return ledger;
+  const motionSeconds = (item: LedgerItem): number[] =>
+    (item.evidence ?? [])
+      .filter((entry) => STANDALONE_EVENT_KINDS.has(entry.kind))
+      .map((entry) => entry.startSeconds)
+      .filter((seconds): seconds is number => seconds !== null);
+  const hasMotion = (item: LedgerItem): boolean =>
+    STANDALONE_EVENT_KINDS.has(item.kind) || motionSeconds(item).length > 0;
+
+  const out = ledger.map((item) => ({ ...item }));
+  for (const finding of findings) {
+    const containing = out.find(
+      (item) =>
+        item.status !== "unread" &&
+        hasMotion(item) &&
+        item.startSeconds !== null &&
+        (item.endSeconds ?? null) !== null &&
+        finding.seconds >= item.startSeconds &&
+        finding.seconds <= (item.endSeconds ?? 0),
+    );
+    const latest = ():
+      | { item: LedgerItem; at: number }
+      | null => {
+      let best: { item: LedgerItem; at: number } | null = null;
+      for (const item of out) {
+        if (item.status === "unread" || !hasMotion(item)) continue;
+        for (const at of motionSeconds(item).concat(item.kind !== "block" ? [item.startSeconds ?? -1] : [])) {
+          if (at < 0 || at > finding.seconds) continue;
+          if (!best || at > best.at) best = { item, at };
+        }
+      }
+      return best;
+    };
+    const target = containing ?? latest()?.item;
+    if (!target) continue;
+    if (finding.tally && !target.voteTally) target.voteTally = finding.tally;
+    if (finding.unanimous && !target.voteTally) target.voteTally = finding.unanimous;
+    if (finding.result && !target.voteResult) target.voteResult = finding.result;
+  }
+  return out;
 }
 
 export const LEDGER_STATUS_SYSTEM = `You are the editor of a local paper assigning a whole-meeting story.
@@ -339,9 +703,27 @@ export function parseStatusReply(
 }
 
 /**
+ * The status an item gets when no model status reached it -- because the batch
+ * that held it could not be read, or because the pass named other items but not
+ * this one. It is assigned by rule, not by guess: an item that carries a
+ * decision (a vote, a motion, an amendment) is a lead candidate, and everything
+ * else the run read belongs in the roundup.
+ *
+ * "excluded" is never assigned here. Dropping an item from the story is a
+ * judgement only the model or the editor may make, and a model reply that could
+ * not be read is not a judgement.
+ */
+export function ruleStatus(item: LedgerItem): LedgerStatus {
+  return decisionMoments(item) > 0 ? "lead" : "roundup";
+}
+
+/**
  * Apply the status proposal to the ledger. An item the pass did not name keeps
- * the honest default: excluded, with a reason saying no status was proposed,
- * rather than being silently promoted into the story.
+ * a status assigned by rule rather than being silently dropped: the run read it,
+ * so the editor should see it, and the note counts how many got that treatment.
+ *
+ * A proposal of "excluded" with no reason of its own is not a judgement either
+ * -- dropping an item requires saying why -- so it is treated as unnamed.
  */
 export function applyStatuses(
   ledger: LedgerItem[],
@@ -351,11 +733,62 @@ export function applyStatuses(
   return ledger.map((item) => {
     if (item.status === "unread") return item;
     const proposal = byNo.get(item.itemNo);
-    return proposal
-      ? { ...item, status: proposal.status, reason: proposal.reason || item.reason }
-      : { ...item, status: "excluded", reason: "The ledger pass proposed no status for this item." };
+    if (proposal && !(proposal.status === "excluded" && !proposal.reason)) {
+      return { ...item, status: proposal.status, reason: proposal.reason || item.reason };
+    }
+    return { ...item, status: ruleStatus(item), reason: RULE_ASSIGNED_REASON };
   });
 }
+
+/**
+ * Rank a ledger item as a lead candidate: decisions first (votes and motions),
+ * then the money it moves, then the minutes of tape it took. A meeting's news is
+ * what it decided; a long discussion with no decision is second.
+ */
+export function leadRank(item: LedgerItem): [number, number, number] {
+  const evidence = item.evidence ?? [];
+  const dollars = [item.sourceExcerpt, ...evidence.map((entry) => entry.text)]
+    .map((text) => (text.match(/\$\s?\d[\d,]*(?:\.\d+)?/g) ?? []).length)
+    .reduce((sum, count) => sum + count, 0);
+  const end = item.endSeconds ?? null;
+  const seconds = item.startSeconds !== null && end !== null ? end - item.startSeconds : 0;
+  return [decisionMoments(item), dollars, Math.round(seconds / 60)];
+}
+
+/** Every item the story might lead on, best first; the lead is the first. */
+export function rankLeadItems(ledger: LedgerItem[]): LedgerItem[] {
+  return ledger
+    .map((item, index) => ({ item, index }))
+    .filter((row) => row.item.status !== "unread" && row.item.status !== "excluded")
+    .sort((left, right) => {
+      const a = leadRank(left.item);
+      const b = leadRank(right.item);
+      return b[0] - a[0] || b[1] - a[1] || b[2] - a[2] || left.index - right.index;
+    })
+    .map((row) => row.item);
+}
+
+/**
+ * Choose the lead item. The model's pick stands -- unless it has no vote or
+ * motion under it while another item does, in which case the meeting's decision
+ * leads and the run says so in its notes. A meeting that voted on something
+ * cannot lead its story on something it did not vote on.
+ */
+export function chooseLead(
+  ledger: LedgerItem[],
+  modelLeads: LedgerItem[],
+): { items: LedgerItem[]; overruled: boolean; chosen: LedgerItem | null } {
+  const ranked = rankLeadItems(ledger);
+  const first = ranked[0] ?? null;
+  const model = modelLeads[0] ?? null;
+  const modelHasDecision = model ? decisionMoments(model) > 0 : false;
+  if (model && (modelHasDecision || !first || decisionMoments(first) === 0)) {
+    return { items: modelLeads, overruled: false, chosen: model };
+  }
+  if (!first) return { items: [], overruled: false, chosen: null };
+  return { items: [first], overruled: Boolean(model), chosen: first };
+}
+
 
 export const LEAD_WRITE_SYSTEM = `You are the writer of the lead story for a local paper, from one meeting's transcript and packet.
 Write the story that LEADS with the meeting's main decision, using ONLY the source text given.
@@ -430,10 +863,13 @@ const QUOTED = /"([^"]{3,})"/g;
  * Check the assembled body against the meeting record, in code, with no model.
  *
  * Every dollar figure, percent and date the body states must appear in the
- * transcript or the packet text. Every vote word must appear in the source or
- * in the structured votes. Every quotation must appear in the packet (a quote
- * matched only against the auto-captioned tape is flagged "unverified against
- * tape"). What cannot be found is flagged, never dropped.
+ * transcript or the packet text. Every vote word -- "unanimously", a tally --
+ * must match a vote the run FOUND in the record (a structured vote row, or a
+ * result phrase read off the tape by `scanVoteResults`); the bare transcript is
+ * not enough, because a caption can say "20 to 60" about anything at all.
+ * Every quotation must appear in the packet (a quote matched only against the
+ * auto-captioned tape is flagged "unverified against tape"). What cannot be
+ * found is flagged, never dropped.
  */
 export function checkDraftClaims(input: {
   body: string;
@@ -443,7 +879,7 @@ export function checkDraftClaims(input: {
 }): ClaimCheck[] {
   const source = normalizeForMatch(`${input.transcriptText} ${input.packetText}`);
   const packet = normalizeForMatch(input.packetText);
-  const voteSource = normalizeForMatch([...(input.voteWords ?? []), input.transcriptText, input.packetText].join(" "));
+  const voteSource = normalizeForMatch((input.voteWords ?? []).join(" "));
   const checks: ClaimCheck[] = [];
   const push = (
     claim: string,
@@ -472,7 +908,7 @@ export function checkDraftClaims(input: {
   }
   for (const match of input.body.match(VOTE_WORD) ?? []) {
     const found = voteSource.includes(normalizeForMatch(match));
-    push(match, "primary", "structured votes or source text", found, found ? "Vote word matched the record." : "Vote word not found in the record; do not infer a vote or outcome.");
+    push(match, "primary", "a recorded vote", found, found ? "Vote word matched the record." : "Vote word not found in the record; do not infer a vote or outcome.");
   }
   for (const match of input.body.matchAll(QUOTED)) {
     const quote = match[1] ?? "";
@@ -538,9 +974,271 @@ const NON_PERSON_HEADS = new Set([
 ]);
 
 /**
+ * Words that turn up capitalized next to a name in this register without being
+ * one: the civic words above, plus the caption's own filler.
+ */
+const NAME_STOPWORDS = new Set([
+  ...NON_PERSON_HEADS,
+  "item",
+  "motion",
+  "vote",
+  "public",
+  "comment",
+  "staff",
+  "member",
+  "members",
+  "present",
+  "absent",
+  "minutes",
+  "agenda",
+  "ordinance",
+  "resolution",
+  "second",
+  "seconded",
+  "yes",
+  "no",
+  "abstain",
+  "thank",
+  "thanks",
+  "okay",
+  "yeah",
+  "hello",
+  "good",
+  "evening",
+  "morning",
+  "afternoon",
+  "right",
+  "well",
+  "just",
+]);
+
+/** The office words a roster line may lead with ("Mayor Susie Hidalgo-Fahring"). */
+const ROSTER_TITLE_WORDS =
+  /^(mayor|council|councilmember|councilman|councilwoman|councilor|councillor|city|assistant|manager|clerk|director|attorney|chief|superintendent|sheriff|ms|mr|mrs|dr)$/i;
+
+/** Someone the newsroom knows by name: an official, a staffer, a person of record. */
+export type KnownName = {
+  name: string;
+  title: string;
+  /** Where the name came from: the newsroom's own list, the packet, or the desk's entities. */
+  from: "roster" | "packet" | "entities";
+};
+
+/** The surname -- the last word -- of a name, lowercased and stripped of punctuation. */
+export function surnameOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (words[words.length - 1] ?? "").toLowerCase().replace(/[^a-z]/g, "");
+}
+
+/**
+ * A rough phonetic key for a surname: its consonant skeleton, with the
+ * equivalences captioning tends to make folded together (ph/f, c/k or s, z/s,
+ * x/ks, q/k) and doubled letters collapsed. It is a heuristic, not a
+ * pronunciation engine. It exists to catch the caption's spelling of a name the
+ * newsroom already knows; where it is unsure it does not correct, it flags.
+ */
+export function soundKey(word: string): string {
+  let text = word.toLowerCase().replace(/[^a-z]/g, "");
+  if (!text) return "";
+  text = text
+    .replace(/ph/g, "f")
+    .replace(/ck/g, "k")
+    .replace(/c(?=[eiy])/g, "s")
+    .replace(/c/g, "k")
+    .replace(/z/g, "s")
+    .replace(/x/g, "ks")
+    .replace(/q/g, "k")
+    .replace(/^h/, "");
+  const first = text[0] ?? "";
+  const rest = text.slice(1).replace(/[aeiouy]/g, "").replace(/(.)\1+/g, "$1");
+  return `${first}${rest}`;
+}
+
+/** Levenshtein distance, capped: the caller only ever compares short surnames. */
+function editDistance(left: string, right: string): number {
+  const a = left;
+  const b = right;
+  const rows = a.length + 1;
+  const cols = b.length + 1;
+  let previous = Array.from({ length: cols }, (_, index) => index);
+  for (let i = 1; i < rows; i += 1) {
+    const current = [i];
+    for (let j = 1; j < cols; j += 1) {
+      current[j] = Math.min(
+        previous[j]! + 1,
+        current[j - 1]! + 1,
+        previous[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[cols - 1]!;
+}
+
+/** Is the shorter key's consonant sequence in the longer one, in order? */
+function isSubsequence(shorter: string, longer: string): boolean {
+  let cursor = 0;
+  for (const character of longer) {
+    if (character === shorter[cursor]) cursor += 1;
+  }
+  return cursor === shorter.length;
+}
+
+/**
+ * How well a captioned spelling matches a known surname: 0 exact, 1 close
+ * spelling, 2 same consonants in order (a caption that swallowed a syllable --
+ * "Koffer" for Kalkhofer), null for no match. Shorter/longer must stay within
+ * half each other's length so a short skeleton cannot swallow an unrelated long
+ * one, and the shorter skeleton needs at least three consonants to be worth
+ * trusting at all.
+ *
+ * The rank is doubled and an odd point added when the two keys start with
+ * different letters, so a first-letter match always beats a first-letter
+ * mismatch of the same rank. Without that, the real roster sent "Marcin" to
+ * council member Crist: the key of "Marcin" (mrsn) sits one edit from Crist's
+ * (krst) and one from Marsing's (mrsng), and the tie went to whichever came
+ * first in the list. A caption that keeps the person's own first letter is the
+ * better guess, and the first letter is the one letters captions garble least.
+ */
+export function nameMatchScore(captioned: string, knownSurname: string): number | null {
+  const a = soundKey(captioned);
+  const b = soundKey(knownSurname);
+  if (!a || !b) return null;
+  if (a === b) return 0;
+  const weight = a[0] === b[0] ? 0 : 1;
+  if (editDistance(a, b) <= 2) return 2 + weight;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter.length >= 3 && shorter.length * 2 >= longer.length && isSubsequence(shorter, longer)) {
+    return 4 + weight;
+  }
+  return null;
+}
+
+/**
+ * The names this newsroom knows: the plain list of elected officials and staff
+ * the editor keeps on the setup screen, the people named in the packet, and the
+ * desk's own entities. Everything here is a spelling the writer may trust; a
+ * caption spelling that is not here is the caption's, not the city's.
+ */
+export function buildKnownNames(input: {
+  roster?: string;
+  packetText?: string;
+  entityNames?: string[];
+}): KnownName[] {
+  const known: KnownName[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, title: string, from: KnownName["from"]) => {
+    const clean = name.replace(/\s+/g, " ").trim();
+    const key = normalizeForMatch(clean);
+    if (!key || key.split(" ").length < 2 || seen.has(key)) return;
+    seen.add(key);
+    known.push({ name: clean, title: title.trim(), from });
+  };
+
+  // The roster: one person per line, "Name, Title" (the documented form) or
+  // "Title Name", or a bare name. The name is what precedes the first comma,
+  // pipe or dash-run; a leading title word is dropped so the surname matching
+  // sees the person, not the office.
+  for (const line of (input.roster ?? "").split(/\r?\n/)) {
+    const text = line.trim().replace(/^[-*]\s*/, "");
+    if (!text) continue;
+    const separator = text.match(/\s*[,—–|]\s*|\s{2,}/);
+    let name = (separator ? text.slice(0, separator.index) : text).trim();
+    const title = separator ? text.slice(separator.index! + separator[0].length).trim() : "";
+    const words = name.split(/\s+/).filter(Boolean);
+    if (words.length > 1 && ROSTER_TITLE_WORDS.test(words[0]!)) name = words.slice(1).join(" ");
+    add(name, title, "roster");
+  }
+  // The packet names people in full: "Mayor Susie Hidalgo-Fahring", "Diane Crist".
+  for (const match of (input.packetText ?? "").matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z'-]+){1,2})\b/g)) {
+    const name = match[1]!;
+    if (NAME_STOPWORDS.has(name.split(/\s+/)[0]!.toLowerCase())) continue;
+    add(name, "", "packet");
+  }
+  for (const name of input.entityNames ?? []) add(name, "", "entities");
+  return known;
+}
+
+/** Where a speaker's name shows up in a transcript: after a title, or as a label. */
+const TITLE_FOR_NAME =
+  /\b(?:Mayor(?:\s+Pro\s+Tem)?|Council\s+Member|Councilmember|Councilman|Councilwoman|Council\s+President|City\s+Manager|Assistant\s+City\s+Manager|City\s+Attorney|City\s+Clerk|Chief|Director|Manager|Superintendent|Sheriff|Clerk|Ms\.|Mr\.|Mrs\.)\s+([A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+)?)/g;
+const SPEAKER_LABEL = /(?:^|\n)\s*([A-Z][A-Za-z'’-]+(?:\s+[A-Z][A-Za-z'’-]+)?)\s*:/g;
+
+/** The person-like spellings a transcript uses, longest first. */
+export function captionNameCandidates(text: string): string[] {
+  const found = new Set<string>();
+  for (const source of [TITLE_FOR_NAME, SPEAKER_LABEL]) {
+    const pattern = new RegExp(source.source, "g");
+    for (const match of text.matchAll(pattern)) {
+      const candidate = (match[1] ?? "").replace(/\s+/g, " ").trim();
+      if (candidate.length >= 4) found.add(candidate);
+    }
+  }
+  return [...found].sort((left, right) => right.length - left.length);
+}
+
+export type NameMapping = { captioned: string; known: string; title: string; how: string };
+
+/**
+ * Correct the caption's spellings of names against the names the newsroom knows,
+ * before the writer sees them.
+ *
+ * Speakers and staff are spelled by an automatic captioner, so the tape calls
+ * Council Member Crist "Christ" and Mayor Kalkhofer "Koffer". This maps each
+ * person-like spelling in the tape to the closest known surname by sound
+ * (`nameMatchScore`), rewrites the transcript the writer reads, and hands the
+ * writer the mapping as a list. A spelling that matches nothing known is left
+ * exactly as captioned and reported as unverified -- the run never invents a
+ * name, and never silently swaps one.
+ */
+export function mapCaptionNames(
+  text: string,
+  known: KnownName[],
+  packetText = "",
+): { text: string; mappings: NameMapping[]; unverified: string[] } {
+  const packet = normalizeForMatch(packetText);
+  const mappings: NameMapping[] = [];
+  const unverified: string[] = [];
+  let corrected = text;
+  for (const candidate of captionNameCandidates(text)) {
+    const words = candidate.split(/\s+/);
+    const head = words[0]!.toLowerCase();
+    if (NAME_STOPWORDS.has(head)) continue;
+    if (packet.includes(normalizeForMatch(candidate))) continue;
+    const surname = surnameOf(candidate);
+    if (surname.length < 4) continue;
+    let best: { known: KnownName; score: number } | null = null;
+    for (const person of known) {
+      const score = nameMatchScore(surname, surnameOf(person.name));
+      if (score === null) continue;
+      if (!best || score < best.score) best = { known: person, score };
+    }
+    if (!best) {
+      if (!unverified.includes(candidate)) unverified.push(candidate);
+      continue;
+    }
+    const how = best.score === 0 ? "exact" : best.score === 1 ? "spelling" : "sound-alike";
+    // The caption shows a surname (after a title) or a full speaker label. Swap
+    // the surname in place, and the whole label when the caption gave a pair.
+    // The replacement keeps the known name's own spelling: `surnameOf` lowercases
+    // for matching, and a tape rewritten to "council member marsing" would hand
+    // the writer a name the newsroom never uses.
+    const knownWords = best.known.name.split(/\s+/).filter(Boolean);
+    const replacement = words.length > 1 ? best.known.name : (knownWords[knownWords.length - 1] ?? best.known.name);
+    const pattern = new RegExp(`\\b${candidate.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+    corrected = corrected.replace(pattern, replacement);
+    if (!mappings.some((row) => row.captioned === candidate)) {
+      mappings.push({ captioned: candidate, known: best.known.name, title: best.known.title, how });
+    }
+  }
+  return { text: corrected, mappings, unverified };
+}
+
+/**
  * The code-only name check for a whole-meeting draft: every capitalized pair or
- * triple in the body that reads like a person's name and does not appear in the
- * meeting record is flagged for review, never dropped.
+ * triple in the body that reads like a person's name, and that appears neither
+ * in the meeting record nor among the names the newsroom knows, is flagged for
+ * review, never dropped.
  *
  * This is the half of the desk's name check that needs no model. The model-led
  * spelling reconciliation (`checkStoryNames`) reads the open web and is not run
@@ -551,8 +1249,11 @@ export function checkDraftNames(input: {
   body: string;
   transcriptText: string;
   packetText: string;
+  knownNames?: KnownName[];
 }): ClaimCheck[] {
   const source = normalizeForMatch(`${input.transcriptText} ${input.packetText}`);
+  const known = input.knownNames ?? [];
+  const knownNorm = new Set(known.map((person) => normalizeForMatch(person.name)));
   const seen = new Set<string>();
   const checks: ClaimCheck[] = [];
   for (const match of input.body.matchAll(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/g)) {
@@ -560,14 +1261,20 @@ export function checkDraftNames(input: {
     const head = name.split(/\s+/)[0]!.toLowerCase();
     if (NON_PERSON_HEADS.has(head) || seen.has(name)) continue;
     seen.add(name);
-    const found = source.includes(normalizeForMatch(name));
+    const inRecord = source.includes(normalizeForMatch(name));
+    const rosterKnown =
+      knownNorm.has(normalizeForMatch(name)) ||
+      known.some((person) => nameMatchScore(surnameOf(name), surnameOf(person.name)) !== null);
+    const found = inRecord || rosterKnown;
     checks.push({
       claim: name,
       sourceKind: "primary",
-      sourceRef: found ? "transcript or packet text" : "unverified",
+      sourceRef: found ? (inRecord ? "transcript or packet text" : "the newsroom's name list") : "unverified",
       checkStatus: found ? "found" : "flagged",
       note: found
-        ? "Name matched the meeting record."
+        ? inRecord
+          ? "Name matched the meeting record."
+          : "Name matched the newsroom's list of officials and staff."
         : "Name not found in the meeting record; verify the spelling before publication.",
     });
   }
@@ -637,6 +1344,15 @@ export async function runWholeMeetingWriter(input: {
   chat: WholeMeetingChat;
   packetRead?: boolean;
   maxWindowChars?: number;
+  /**
+   * The newsroom's own list of elected officials and staff -- one person per
+   * line, "Name, Title" or just a name. Caption spellings are matched against
+   * it before the writer sees the tape. Empty is allowed: nothing is corrected
+   * and the notes say so.
+   */
+  roster?: string;
+  /** The desk's entities for this newsroom: people already recorded by name. */
+  entityNames?: string[];
   onStage?: (stage: string) => void | Promise<void>;
   /**
    * The ledger an earlier whole-meeting run already built and an editor already
@@ -700,37 +1416,86 @@ export async function runWholeMeetingWriter(input: {
   }
 
   // The stored ledger carries the editor's statuses; without one, build it from
-  // what the windows produced and let the status pass propose statuses.
-  let ledger = input.prebuiltLedger ?? buildLedger(inventories, unread);
+  // what the windows produced, attach the vote results the tape states, and let
+  // the status pass propose statuses.
+  const voteFindings = scanVoteResults(input.segments);
+  let ledger =
+    input.prebuiltLedger ??
+    attachVoteResults(buildLedger(inventories, unread, agendaRanges(input.segments)), voteFindings);
   if (!input.prebuiltLedger && ledger.length) {
-    await stage("Assigning the ledger");
-    const statusReply = await chat(
-      `${meetings}\n${LEDGER_STATUS_SYSTEM}`,
-      `LEDGER:\n${ledgerDigest(ledger)}`,
-      2_000,
-    );
-    const proposals = statusReply.ok ? parseStatusReply(statusReply.text) : { valid: false, proposals: [] };
-    ledger = applyStatuses(ledger, proposals.proposals);
+    // Batches of at most `LEDGER_STATUS_BATCH_SIZE`, each retried once. A batch
+    // that still cannot be read does not strand its items: `applyStatuses`
+    // assigns them by rule, and the notes count how many that was.
+    const system = `${meetings}\n${LEDGER_STATUS_SYSTEM}`;
+    const proposals: { itemNo: number; status: LedgerStatus; reason: string }[] = [];
+    for (let start = 0; start < ledger.length; start += LEDGER_STATUS_BATCH_SIZE) {
+      const batch = ledger.slice(start, start + LEDGER_STATUS_BATCH_SIZE);
+      const allowed = new Set(batch.map((item) => item.itemNo));
+      const user = `LEDGER:\n${ledgerDigest(batch)}`;
+      await stage(
+        `Assigning the ledger: items ${start + 1}-${Math.min(start + LEDGER_STATUS_BATCH_SIZE, ledger.length)} of ${ledger.length}`,
+      );
+      let reply = await chat(system, user, STATUS_REPLY_TOKENS);
+      let parsed = reply.ok ? parseStatusReply(reply.text) : { valid: false, proposals: [] };
+      if (!parsed.valid) {
+        reply = await chat(
+          `${system}\nSTRICT RETRY: return valid JSON only, one row per item number listed, each reason at most six words.`,
+          user,
+          STATUS_REPLY_TOKENS,
+        );
+        parsed = reply.ok ? parseStatusReply(reply.text) : { valid: false, proposals: [] };
+      }
+      if (parsed.valid) proposals.push(...parsed.proposals.filter((row) => allowed.has(row.itemNo)));
+    }
+    ledger = applyStatuses(ledger, proposals);
   }
 
-  const leadCandidates = ledger.filter((item) => item.status === "lead");
-  const roundupCandidates = ledger.filter((item) => item.status === "roundup");
-  const leadItems = leadCandidates.length
-    ? leadCandidates
-    : [roundupCandidates[0] ?? ledger.find((item) => item.status !== "unread")].filter(
-        (item): item is LedgerItem => Boolean(item),
-      );
+  // The code chooses the lead: a meeting that voted on something leads its story
+  // on that vote, whatever the model picked.
+  const leadChoice = chooseLead(
+    ledger,
+    ledger.filter((item) => item.status === "lead"),
+  );
+  const leadItems = leadChoice.items.length
+    ? leadChoice.items
+    : ledger.filter((item) => item.status !== "unread").slice(0, 1);
+  const roundupCandidates = ledger.filter(
+    (item) => item.status !== "unread" && item.status !== "excluded" && !leadItems.includes(item),
+  );
 
+  // A recorded vote is a fact of the record: state it under the item, and say so
+  // plainly when a motion has none, so the writer is never left to infer one.
+  const voteFactFor = (item: LedgerItem): string => {
+    const parts = [item.voteResult, item.voteTally].filter(Boolean);
+    if (parts.length) return `\n  recorded vote: ${parts.join(", ")}`;
+    if (decisionMoments(item) > 0) return "\n  recorded vote: none in the captions";
+    return "";
+  };
   const sourceFor = (items: LedgerItem[]) =>
     items
       .map((item) => {
         const where = item.startSeconds !== null ? clock(item.startSeconds) : "no timestamp";
         const page = item.packetPage !== null ? `, packet p${item.packetPage}` : "";
-        return `- [${item.kind}] ${item.text} (${where}${page})\n  source: ${item.sourceExcerpt}`;
+        return `- [${item.kind}] ${item.text} (${where}${page})${voteFactFor(item)}\n  source: ${item.sourceExcerpt}`;
       })
       .join("\n");
   const transcriptText = input.segments.map((s) => s.text).join("\n");
   const packetText = input.packetPages.map((p) => p.text).join("\n");
+
+  // Names before prose: the caption's spelling of the people this newsroom
+  // already knows is corrected in the tape the writer reads, and the mapping is
+  // handed to the writer with it.
+  const knownNames = buildKnownNames({
+    roster: input.roster,
+    entityNames: input.entityNames,
+    packetText,
+  });
+  const nameMap = mapCaptionNames(transcriptText, knownNames, packetText);
+  const nameMapBlock = nameMap.mappings.length
+    ? `NAMES AS THE RECORD SPELLS THEM (use these spellings):\n${nameMap.mappings
+        .map((row) => `- ${row.captioned} -> ${row.known}${row.title ? ` (${row.title})` : ""}`)
+        .join("\n")}`
+    : "";
   const packetExcerptFor = (items: LedgerItem[]) => {
     const pages = new Set(items.map((item) => item.packetPage).filter((page): page is number => page !== null));
     const text = input.packetPages.filter((page) => pages.has(page.page)).map((page) => page.text).join("\n");
@@ -753,10 +1518,13 @@ export async function runWholeMeetingWriter(input: {
     `${meetings}\n${LEAD_WRITE_SYSTEM}`,
     [
       `LEAD ITEM SOURCE (this is the record; write only from it):\n${sourceFor(leadItems)}`,
-      `TRANSCRIPT EXCERPTS:\n${transcriptText.slice(0, 24_000)}`,
+      nameMapBlock,
+      `TRANSCRIPT EXCERPTS:\n${nameMap.text.slice(0, 24_000)}`,
       `PACKET EXCERPTS:\n${packetExcerptFor(leadItems)}`,
       voteLines.length ? `VOTES FROM THE STRUCTURED RECORD:\n${voteLines.join("\n")}` : "VOTES: no vote was established from the structured record. Do not infer a vote or outcome.",
-    ].join("\n\n"),
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     LEAD_REPLY_TOKENS,
   );
   const lead = leadReply.ok
@@ -765,26 +1533,50 @@ export async function runWholeMeetingWriter(input: {
   const headline = lead.headline || input.meeting.title;
   const dek = lead.dek;
 
+  // Every roundup item keeps its own paragraph. An item whose own write could
+  // not be read is not dropped from the list: it carries a plain sentence
+  // saying so, and the notes count them, so the editor sees the gap.
   const roundups: { name: string; text: string }[] = [];
+  let roundupStubs = 0;
   for (const item of roundupCandidates) {
     await stage(`Writing roundup item: ${item.text.slice(0, 60)}`);
     const reply = await chat(
       `${meetings}\n${ROUNDUP_WRITE_SYSTEM}`,
-      `ITEM SOURCE (this is the record):\n${sourceFor([item])}`,
+      [
+        `ITEM SOURCE (this is the record):\n${sourceFor([item])}`,
+        nameMapBlock,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
       ROUNDUP_REPLY_TOKENS,
     );
     const parsed = reply.ok ? parseRoundupReply(reply.text) : { valid: false, paragraph: "" };
     if (parsed.valid) roundups.push({ name: item.text.slice(0, 80), text: parsed.paragraph });
+    else {
+      roundupStubs += 1;
+      roundups.push({ name: item.text.slice(0, 80), text: ROUNDUP_STUB });
+    }
   }
 
   const body = assembleStory({ lead: lead.lead, roundups });
-  const figureClaims = checkDraftClaims({
-    body,
-    transcriptText,
-    packetText,
-    voteWords: input.votes.flatMap((vote) => [vote.tally ?? "", vote.result ?? ""]).filter(Boolean),
-  });
-  const nameClaims = checkDraftNames({ body, transcriptText, packetText });
+  // A vote word in the draft must match a vote the run FOUND -- a structured vote
+  // row, or a result phrase read off the tape -- and both forms are offered: a
+  // draft may write "5 to 2" where the tape said "5 to two", and "unanimously"
+  // where the tape said "unanimous", and both are the same recorded vote. The
+  // source is the found votes alone, never the whole tape, so a tally the record
+  // does not hold is still flagged.
+  const voteWords = [
+    ...input.votes.flatMap((vote) => [vote.tally ?? "", vote.result ?? ""]),
+    ...voteFindings.flatMap((finding) => [
+      finding.tally,
+      finding.tally.replace("-", " to "),
+      finding.unanimous,
+      finding.unanimous ? `${finding.unanimous}ly` : "",
+      finding.result,
+    ]),
+  ].filter(Boolean);
+  const figureClaims = checkDraftClaims({ body, transcriptText, packetText, voteWords });
+  const nameClaims = checkDraftNames({ body, transcriptText, packetText, knownNames });
   const claims = [...figureClaims, ...nameClaims];
   const nameCheck: NameCheck = {
     version: 1,
@@ -818,16 +1610,41 @@ export async function runWholeMeetingWriter(input: {
   }
 
   const flagged = claims.filter((claim) => claim.checkStatus === "flagged");
+  const ruleAssigned = ledger.filter((item) => item.reason === RULE_ASSIGNED_REASON).length;
   const integrityNotes = [
     input.meeting.title ? `Written from the captured meeting transcript: ${input.meeting.videoUrl}` : "",
     packetRead ? "" : "The meeting packet was not found; this story was written from the transcript alone.",
     lead.valid ? "" : "The lead-story reply was not readable; the draft may be incomplete.",
+    roundupStubs ? `${roundupStubs} roundup item(s) got no paragraph from the model and need one.` : "",
     flagged.length ? `${flagged.length} claim(s) flagged for review (see meeting notes).` : "",
   ]
     .filter(Boolean)
     .join("\n");
+  const leadNote = leadChoice.overruled && leadChoice.chosen
+    ? `LEAD: the model's pick had no vote or motion under it while the record did, so the story leads with "${leadChoice.chosen.text.slice(0, 120)}".`
+    : leadChoice.chosen
+      ? `LEAD: "${leadChoice.chosen.text.slice(0, 120)}".`
+      : "LEAD: the ledger had no item to lead on.";
+  const nameNote = nameMap.mappings.length || nameMap.unverified.length
+    ? [
+        nameMap.mappings.length
+          ? `Names corrected from the newsroom's list: ${nameMap.mappings
+              .map((row) => `${row.captioned} -> ${row.known} (${row.how})`)
+              .join("; ")}.`
+          : "Names corrected from the newsroom's list: none.",
+        nameMap.unverified.length
+          ? `Names not verified: ${nameMap.unverified.join(", ")}.`
+          : "Names not verified: none.",
+      ].join(" ")
+    : "NAMES: the tape needed no name correction; the newsroom's officials-and-staff list is empty or nothing matched. Names not verified: none.";
   const meetingNotes = [
     `LEDGER: ${ledger.length} item(s); ${ledger.filter((item) => item.status === "lead").length} lead, ${ledger.filter((item) => item.status === "roundup").length} roundup, ${ledger.filter((item) => item.status === "excluded").length} excluded, ${ledger.filter((item) => item.status === "unread").length} unread.`,
+    ruleAssigned
+      ? `RULE ASSIGNMENT: ${ruleAssigned} item(s) had no readable status from the model and were assigned by rule (a vote or motion leads; everything else roundups).`
+      : "RULE ASSIGNMENT: none; every item got a status from the model or the editor.",
+    leadNote,
+    nameNote,
+    roundupStubs ? `ROUNDUP: ${roundupStubs} item(s) got no paragraph from the model and carry a placeholder.` : "",
     packetRead ? "PACKET: read." : "PACKET: not found; transcript only.",
     flagged.length
       ? `FLAGGED CLAIMS:\n${flagged.map((claim) => `- ${claim.claim} — ${claim.note}`).join("\n")}`
@@ -835,7 +1652,9 @@ export async function runWholeMeetingWriter(input: {
     mismatches.length
       ? `COLD CHECK:\n${mismatches.map((line) => `- ${line}`).join("\n")}`
       : "COLD CHECK: no mismatches reported.",
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 
   const unreadWindows = input.prebuiltLedger
     ? input.prebuiltLedger.filter((item) => item.status === "unread").length

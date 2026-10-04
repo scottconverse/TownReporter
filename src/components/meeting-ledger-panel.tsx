@@ -281,6 +281,32 @@ function LedgerRow({
           {problem}
         </p>
       ) : null}
+      {item.voteResult || item.voteTally ? (
+        <p className="ledger-vote">
+          Recorded vote:{" "}
+          {[item.voteResult, item.voteTally].filter(Boolean).join(", ")}
+        </p>
+      ) : null}
+      {item.evidence.length ? (
+        <details className="ledger-evidence">
+          <summary>
+            {item.evidence.length} item{item.evidence.length === 1 ? "" : "s"} read under this one
+          </summary>
+          <ul>
+            {item.evidence.map((entry, index) => (
+              <li key={index}>
+                <span className="ledger-kind">{entry.kind}</span> {entry.text}
+                {entry.startSeconds !== null ? (
+                  <span className="ledger-stamp"> {clockFromSeconds(entry.startSeconds)}</span>
+                ) : null}
+                {entry.packetPage !== null ? (
+                  <span className="ledger-page"> · packet p{entry.packetPage}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </div>
   );
 }
