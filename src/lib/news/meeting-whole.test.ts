@@ -1,14 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  COLD_CHECK_MAX,
   COLD_CHECK_SYSTEM,
   EXCLUDED_OVERRULED_REASON,
   INVENTORY_SYSTEM,
   LEAD_WRITE_SYSTEM,
   LEDGER_STATUS_SYSTEM,
+  REPAIR_VOTE_SYSTEM,
   ROUNDUP_HEADING,
   ROUNDUP_WRITE_SYSTEM,
   RULE_ASSIGNED_REASON,
+  SECOND_LEAD_REASON,
   agendaRanges,
   applyStatuses,
   assembleStory,
@@ -17,14 +20,18 @@ import {
   buildLedger,
   checkDraftNames,
   editorNamesOneAgendaItem,
+  isProceduralItem,
   mapCaptionNames,
   mergeNearDuplicates,
+  mergeRelatedItems,
   parseInventoryReply,
+  plainLabel,
   rankLeadItems,
   runWholeMeetingWriter,
   scanVoteResults,
   usesWholeMeetingWriter,
   voteResultCount,
+  voteWordsIn,
   type AgendaListItem,
   type LedgerItem,
   type MeetingSegment,
@@ -78,10 +85,12 @@ function fakeChat(handlers: {
   status?: (user: string) => string;
   lead?: (user: string) => string;
   roundup?: (user: string) => string;
+  repair?: (user: string) => string;
   cold?: (user: string) => string;
 }): WholeMeetingChat {
   return async (system, user) => {
     const route: [boolean, (() => string) | undefined][] = [
+      [system.includes(REPAIR_VOTE_SYSTEM), handlers.repair ? () => handlers.repair!(user) : undefined],
       [system.includes(INVENTORY_SYSTEM), handlers.inventory ? () => handlers.inventory!(user) : undefined],
       [system.includes(LEDGER_STATUS_SYSTEM), handlers.status ? () => handlers.status!(user) : undefined],
       [system.includes(LEAD_WRITE_SYSTEM), handlers.lead ? () => handlers.lead!(user) : undefined],
@@ -220,18 +229,29 @@ const TALLY_INVENTORY = JSON.stringify({
   ],
 });
 
+// The same tape, but with the packet's agenda so the motion's group is named by
+// the agenda item ("Airport noise policy") rather than by the motion's own
+// clause -- the label the repair call and the story are written under.
+const TALLY_AGENDA: AgendaListItem[] = [{ id: "1", title: "Airport noise policy" }];
+const TALLY_AGENDA_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the airport noise policy", who: "Council Member Prieto", timestamp: "0:05:00", packet_page: 57, numbers: "", agenda: "1", source_words: "I move to approve the airport noise policy." },
+  ],
+});
+
 function run(
   handlers: Parameters<typeof fakeChat>[0],
   over: {
     segments?: MeetingSegment[];
     votes?: Parameters<typeof runWholeMeetingWriter>[0]["votes"];
     agendaList?: AgendaListItem[];
+    packetPages?: PacketPage[];
   } = {},
 ) {
   return runWholeMeetingWriter({
     meeting: { title: "City Council Study Session", date: "2026-09-29", videoUrl: "https://youtu.be/example" },
     segments: over.segments ?? SEGMENTS,
-    packetPages: PACKET,
+    packetPages: over.packetPages ?? PACKET,
     votes: over.votes ?? [],
     agendaList: over.agendaList,
     chat: fakeChat(handlers),
@@ -311,6 +331,133 @@ function row(over: Partial<LedgerItem> & { kind: string; text: string }): Ledger
     ...over,
   };
 }
+
+/*
+  Fix 1 -- one lead. Run 4's status pass called three items "lead": the library
+  motions (item 1), the airport presentation (6A) and the budget (6B). The code
+  must leave exactly one item leading -- the top-ranked one, 6A, which carries
+  three unanimous results -- and move the other two into the roundup with a
+  reason the editor can read, instead of writing the story about the library item
+  and dropping 6A entirely.
+*/
+const THREE_LEAD_AGENDA: AgendaListItem[] = [
+  { id: "3", title: "MOTIONS AND RESOLUTIONS Library Business Classes" },
+  {
+    id: "6A",
+    title:
+      "Presentation Of Options To Implement The Airport Monitoring Systems (AMS) Voluntary Noise Abatement Procedures (VNAP) Recommendations For Vance Brand Municipal Airport",
+  },
+  {
+    id: "6B",
+    title:
+      "2027 Proposed Budget Presentation And First Public Hearing On The 2027 Proposed Budget And The Proposed 2027-2031 Capital Improvement Program",
+  },
+];
+
+// Library (three motions) first so it is numbered 1; then the three-vote airport
+// item (6A) and the one-vote budget (6B). First-seen order is ledger order.
+const THREE_LEAD_INVENTORY = JSON.stringify({
+  items: [
+    { kind: "motion", text: "Move to approve the library business classes", who: "Council Member Crist", timestamp: "0:20:00", packet_page: 40, numbers: "", agenda: "3", source_words: "I move to approve the library business classes." },
+    { kind: "amendment", text: "Amendment to add a second session", who: "", timestamp: "0:21:00", packet_page: 40, numbers: "", agenda: "3", source_words: "I move to amend it to add a second session." },
+    { kind: "motion", text: "Move to approve the first AMS recommendation", who: "Council Member Prieto", timestamp: "0:00:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "I move to approve the first AMS recommendation." },
+    { kind: "vote", text: "The first AMS recommendation carries unanimously", who: "", timestamp: "0:00:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "That carries unanimously." },
+    { kind: "vote", text: "The second recommendation carries unanimously", who: "", timestamp: "0:01:00", packet_page: 12, numbers: "", agenda: "6A", source_words: "The second recommendation carries unanimously." },
+    { kind: "vote", text: "The third recommendation carries unanimously", who: "", timestamp: "0:01:30", packet_page: 12, numbers: "", agenda: "6A", source_words: "And the third carries unanimously." },
+    { kind: "motion", text: "Move to approve the 2027 budget presentation", who: "Council Member Crist", timestamp: "0:10:00", packet_page: 30, numbers: "$2,000,000", agenda: "6B", source_words: "I move to approve the $2,000,000 budget presentation." },
+    { kind: "vote", text: "The budget motion carries 5 to 2", who: "", timestamp: "0:10:30", packet_page: 30, numbers: "5-2", agenda: "6B", source_words: "The motion carries 5 to two." },
+  ],
+});
+
+const THREE_LEAD_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", label: "Library business classes", reason: "the library motions" },
+    { item_no: 2, status: "lead", label: "Airport noise rules", reason: "the airport votes" },
+    { item_no: 3, status: "lead", label: "2027 city budget", reason: "the budget hearing" },
+  ],
+});
+
+/*
+  Fix 3 -- procedural votes. The real tape's line ~5522, "carries six to one",
+  is a vote to EXTEND THE MEETING: the fee motion before it was withdrawn ("that
+  is withdrawn"), and the only motion alive in the 800 characters before the
+  result is the one to extend. A result like that is the meeting running itself,
+  not the item's vote -- it must never be written as 6B's vote, never counted for
+  rank, and must never trip the "an item with a vote is reported" rule.
+*/
+const PROCEDURAL_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 200, text: "Council Member Crist: I move to approve the fee schedule.", item: "6B", itemTitle: "2027 Proposed Budget" },
+  { index: 1, seconds: 260, text: "Council Member Kalkhofer: That is withdrawn. So um I will move to extend the meeting.", item: "6B", itemTitle: "2027 Proposed Budget" },
+  { index: 2, seconds: 300, text: "Mayor: And that carries six to one with council member Christ in opposition.", item: "6B", itemTitle: "2027 Proposed Budget" },
+];
+
+// The control: the same shape, but the motion before the result is the item's
+// own -- so the tally is a real decision and belongs to 6B.
+const SUBSTANTIVE_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 600, text: "Council Member Crist: I move to approve the budget presentation.", item: "6B", itemTitle: "2027 Proposed Budget" },
+  { index: 1, seconds: 630, text: "Mayor: The motion carries 5 to two.", item: "6B", itemTitle: "2027 Proposed Budget" },
+];
+
+/*
+  Fix 5 -- names. The dev roster now reads "Jake Marsing, Mayor Pro Tem"
+  (the tape's "Mayor Prom, are you comfortable with a withdrawal" is answered by
+  the member who made and withdrew the fee motion). The packet names people and
+  headings in the same capitalized shape, so a packet name is added only when it
+  sits where a person sits and appears at least twice.
+*/
+const MAYOR_PRO_TEM_ROSTER = REAL_ROSTER.replace("Jake Marsing, Council member", "Jake Marsing, Mayor Pro Tem");
+
+const MESSY_PACKET = [
+  "Proclamation Declaring October 2026 Electrify Longmont Day",
+  "Council member Jim Berthold.",
+  "Jim Berthold, Council member, was recognized.",
+  "The Fair Board met on Tuesday.",
+  "Home Comfort was discussed.",
+  "Proposed Budget Presentation",
+].join("\n");
+
+const NAME_TAPE = [
+  "Mayor doggoering: The meeting will come to order.",
+  "Council member Calcer: I move to approve the library item.",
+  "Council member Christ: Second.",
+  "Council member Koffer: Aye.",
+  "Council member Coloffer: Aye.",
+  "Council member Marcen: Aye.",
+  "Council member Marc: Aye.",
+  "Council member Marine: Aye.",
+  "Mayor Hadel Fairing: Thank you.",
+  "Mayor Prom, are you comfortable with a withdrawal?",
+  "Mayor promoy: All in favor?",
+  "Council member Zbyrowski: Aye.",
+].join("\n");
+
+/*
+  Fix 6 -- the cold check's excerpts. The check has to be handed the tape of the
+  written items' own time ranges, not a ledger digest: run 4 flagged SBDC, Data
+  Axle, "20 to 60 students" and a staff quote as "not in the excerpts" when every
+  one was in the tape it had never been shown.
+*/
+const COLD_PACKET: PacketPage[] = [
+  { page: 12, text: "AMS VOLUNTARY NOISE ABATEMENT\nThe airport monitoring recommendations were presented." },
+  { page: 30, text: "2027 PROPOSED BUDGET\nThe budget presentation and first public hearing." },
+];
+
+const COLD_SEGMENTS: MeetingSegment[] = [
+  { index: 0, seconds: 0, text: "Council Member Prieto: I move to approve the first AMS recommendation.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 1, seconds: 30, text: "Mayor: All in favor? That carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 2, seconds: 60, text: "Mayor: The second recommendation carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 3, seconds: 90, text: "Mayor: And the third carries unanimously.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 4, seconds: 600, text: "Council Member Crist: I move to approve the budget presentation.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 5, seconds: 620, text: "Council Member Crist: SBDC can help 20 to 60 students.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+  { index: 6, seconds: 630, text: "Mayor: The motion carries 5 to two.", item: "1", itemTitle: "MEETING CALLED TO ORDER" },
+];
+
+const COLD_STATUS = JSON.stringify({
+  items: [
+    { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the airport votes" },
+    { item_no: 2, status: "roundup", label: "2027 city budget", reason: "a budget hearing" },
+  ],
+});
 
 describe("whole-meeting writer", () => {
   it("groups hundreds of raw inventory lines into one item per agenda item", async () => {
@@ -474,7 +621,7 @@ describe("whole-meeting writer", () => {
     const motion = result.ledger[0]!;
     assert.equal(motion.voteResult, "carries", "the result phrase is read off the tape");
     assert.equal(motion.voteTally, "5-2", "the word 'two' is read as the number 2");
-    assert.match(leadPrompt, /recorded vote: carries, 5-2/, "the writer is handed the tally as a fact");
+    assert.match(leadPrompt, /RESULT: carries, 5-2/, "the writer is handed the tally as a fact");
     const tallyClaim = result.claims.find((claim) => /5\s*to\s*2/i.test(claim.claim));
     assert.ok(tallyClaim, "the tally in the draft is checked");
     assert.equal(tallyClaim!.checkStatus, "found", "the tally the tape states is not flagged");
@@ -497,7 +644,7 @@ describe("whole-meeting writer", () => {
     const tape = "Council Member Marcin: I support the NextLight budget.";
     const mapped = mapCaptionNames(tape, known, "");
     assert.ok(
-      mapped.mappings.some((row) => row.captioned === "Marcin" && row.known === "Jake Marsing"),
+      mapped.mappings.some((row) => row.captioned === "Council Member Marcin" && row.known === "Jake Marsing"),
       "the caption's spelling maps to the known name",
     );
     assert.match(mapped.text, /Marsing/, "the corrected tape carries the newsroom's spelling");
@@ -911,5 +1058,284 @@ describe("whole-meeting writer", () => {
     assert.equal(items[0]!.evidence!.length, 6, "and it keeps every one of the six readings");
     assert.deepEqual(items.map((item) => item.itemNo), [1, 2], "the kept items are renumbered in order");
     assert.match(items[1]!.text, /Airport fund budget/, "the different line stays its own item");
+  });
+
+  it("leaves exactly one lead and moves the status pass's other picks to the roundup", async () => {
+    /*
+      Run 4's status pass called three items "lead" -- the library motions (1),
+      the airport presentation (6A) and the budget (6B) -- and the story was
+      written about the library while 6A, three unanimous results and the top
+      item by rank, appeared nowhere. Exactly one item leads: the top-ranked one,
+      and the two the model also picked become roundup paragraphs whose reason
+      says they were moved.
+    */
+    let leadCalls = 0;
+    let leadPrompt = "";
+    const result = await run(
+      {
+        inventory: () => THREE_LEAD_INVENTORY,
+        status: () => THREE_LEAD_STATUS,
+        lead: (user) => {
+          leadCalls += 1;
+          leadPrompt = user;
+          return JSON.stringify({ headline: "Airport rules", dek: "", lead: "The council adopted the airport monitoring recommendations." });
+        },
+        roundup: () => JSON.stringify({ paragraph: "The item was discussed." }),
+        cold: () => COLD_OK,
+      },
+      { segments: AIRPORT_SEGMENTS, agendaList: THREE_LEAD_AGENDA },
+    );
+    assert.equal(leadCalls, 1, "the story is written from one item's evidence");
+    assert.match(leadPrompt, /6A\. Presentation Of Options/, "the lead source is the top-ranked item, not the model's first pick");
+    assert.ok(
+      result.body.startsWith("The council adopted the airport monitoring recommendations."),
+      "the body's first paragraph is about the top-ranked item",
+    );
+    assert.equal(result.ledger.filter((item) => item.status === "lead").length, 1, "exactly one item leads");
+    assert.equal(result.ledger[1]!.itemNo, 2);
+    assert.equal(result.ledger[1]!.status, "lead");
+    assert.equal(result.ledger[0]!.reason, SECOND_LEAD_REASON, "the library pick's reason says it was moved");
+    assert.equal(result.ledger[2]!.reason, SECOND_LEAD_REASON, "the budget pick's reason says it was moved");
+    assert.match(result.body, /\n\nLibrary business classes: /, "the library pick is written in the roundup");
+    assert.match(result.body, /\n\n2027 city budget: /, "the budget pick is written in the roundup");
+    assert.match(result.meetingNotes, /SECOND LEADS: 2 item\(s\)/, "the run records the two moved picks");
+  });
+
+  it("rewrites a paragraph that says no vote was recorded when the item holds a result", async () => {
+    /*
+      The run-4 story said "No vote was recorded in the source" for a motion the
+      ledger recorded as "carries, 5-2". The writer is handed each result as a
+      fact; when a paragraph still denies it, one repair call rewrites that
+      paragraph from the record, and what survives is flagged, not silently kept.
+    */
+    let repairCalls = 0;
+    let repairUser = "";
+    const result = await run(
+      {
+        inventory: () => TALLY_AGENDA_INVENTORY,
+        status: () => JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the vote" }] }),
+        lead: () =>
+          JSON.stringify({
+            headline: "H",
+            dek: "",
+            lead: "The council took up the airport noise policy. No vote was recorded in the source for the motion.",
+          }),
+        repair: (user) => {
+          repairCalls += 1;
+          repairUser = user;
+          return JSON.stringify({ paragraph: "The council took up the airport noise policy. The motion carries 5-2." });
+        },
+        cold: () => COLD_OK,
+      },
+      { segments: TALLY_SEGMENTS, agendaList: TALLY_AGENDA },
+    );
+    assert.equal(repairCalls, 1, "exactly one repair call is made for the flagged paragraph");
+    assert.match(repairUser, /ITEM: Airport noise policy/, "the repair call is scoped to the item");
+    assert.match(repairUser, /RECORD: carries, 5-2, at 00:05:00/, "the repair call hands over the record's result as a fact");
+    assert.doesNotMatch(result.body, /no vote was recorded/i, "the repaired body no longer denies the vote");
+    assert.match(result.body, /carries 5-2/, "the body carries the record's tally");
+    assert.match(result.meetingNotes, /VOTE REPAIRS: 1 paragraph/, "the run counts the repair");
+    assert.ok(
+      !result.claims.some((claim) => /Contradicts the record/.test(claim.note)),
+      "a paragraph the repair fixed is not left as a contradiction",
+    );
+  });
+
+  it("reads a vote to extend the meeting as procedural, not as the item's vote", async () => {
+    /*
+      The tape's "carries six to one" (line ~5522) is a vote to EXTEND THE
+      MEETING: the fee motion before it was withdrawn ("that is withdrawn"), and
+      the only motion alive in the 800 characters before the result is the one to
+      extend. The old code put 6-1 on the budget and wrote the budget's vote as
+      "carries, 6-1". A procedural result is never the item's vote, never counted
+      for rank, and never trips the rule that keeps a voted item off the drop
+      list.
+    */
+    const findings = scanVoteResults(PROCEDURAL_SEGMENTS);
+    assert.equal(findings.length, 1, "one result phrase is read off the tape");
+    assert.equal(findings[0]!.tally, "6-1", "the six-to-one tally is normalized");
+    assert.equal(findings[0]!.procedural, true, "the result is marked procedural from the tape before it");
+
+    const budget = row({
+      itemNo: 1,
+      kind: "agenda-item",
+      text: "6B. 2027 Proposed Budget",
+      startSeconds: 200,
+      endSeconds: 400,
+      packetPage: 30,
+      evidence: [
+        { kind: "motion", text: "Move to approve the fee schedule.", who: "Council Member Crist", startSeconds: 210, packetPage: 30, numbers: "", sourceExcerpt: "I move to approve the fee schedule." },
+        { kind: "withdrawn-motion", text: "The fee motion was withdrawn.", who: "", startSeconds: 260, packetPage: 30, numbers: "", sourceExcerpt: "That is withdrawn." },
+      ],
+    });
+    const withdrawnOnly = row({
+      kind: "agenda-item",
+      text: "6B. Fee schedule",
+      startSeconds: 200,
+      endSeconds: 400,
+      evidence: [
+        { kind: "withdrawn-motion", text: "The fee motion was withdrawn.", who: "", startSeconds: 260, packetPage: 30, numbers: "", sourceExcerpt: "That is withdrawn." },
+      ],
+    });
+    const attached = attachVoteResults([budget, withdrawnOnly], findings);
+    assert.equal(attached[0]!.motions!.length, 1, "the result attaches to the item that holds the motion");
+    assert.equal(attached[0]!.motions![0]!.kind, "procedural", "and it is marked procedural");
+    assert.equal(attached[0]!.motions![0]!.tally, "6-1");
+    assert.equal(attached[0]!.voteTally, "", "a procedural result never becomes the item's flat tally");
+    assert.equal(attached[0]!.voteResult, "", "nor its flat result");
+    assert.equal(voteResultCount(attached[0]!), 0, "a procedural result is never counted for rank");
+    assert.equal(isProceduralItem(attached[0]!), true);
+    assert.equal(attached[1]!.motions!.length, 0, "an item with only a withdrawn motion takes no result");
+
+    const kept = applyStatuses(
+      [attached[0]!],
+      [{ itemNo: 1, status: "excluded", label: "2027 city budget", reason: "the meeting's own procedure" }],
+    );
+    assert.equal(kept[0]!.status, "excluded", "an item whose only result is procedural stays off the drop list's override");
+
+    // The control: the same shape with the item's own motion before the result.
+    const substantive = scanVoteResults(SUBSTANTIVE_SEGMENTS);
+    assert.equal(substantive[0]!.procedural, false, "an item's own motion is not procedural");
+    const decided = attachVoteResults(
+      [row({ kind: "agenda-item", text: "6B. 2027 Proposed Budget", startSeconds: 600, endSeconds: 700, evidence: [{ kind: "motion", text: "Move to approve the budget presentation.", who: "Council Member Crist", startSeconds: 600, packetPage: 30, numbers: "", sourceExcerpt: "I move to approve the budget presentation." }] })],
+      substantive,
+    );
+    assert.equal(decided[0]!.motions![0]!.kind, "decision");
+    assert.equal(decided[0]!.voteTally, "5-2");
+    assert.equal(voteResultCount(decided[0]!), 1, "a real decision is still counted");
+  });
+
+  it("labels a roundup item in plain words and folds an item's own record into it", async () => {
+    /*
+      Run 4's roundup paragraphs opened with the raw agenda line cut mid-word
+      ("2. ROLL CALL AND PLEDGE OF ALLEGIANCE City Council Study Session,
+      September 29,:"). The status pass's own plain label is used when it gives
+      one; otherwise the agenda title is stripped of its number and footer and
+      cut at a word boundary. Before the write, an item's own record -- its
+      motion, amendment and discussion block -- and its own proclamation are
+      folded under it.
+    */
+    assert.equal(
+      plainLabel(row({ kind: "agenda-item", text: "2. ROLL CALL AND PLEDGE OF ALLEGIANCE City Council Study Session, September 29, 2026 Page 1 [Packet Page 1]" })),
+      "ROLL CALL AND PLEDGE OF ALLEGIANCE",
+      "the agenda number and the session footer are stripped",
+    );
+    const longTitle = plainLabel(
+      row({
+        kind: "agenda-item",
+        text: "6A. Presentation Of Options To Implement The Airport Monitoring Systems (AMS) Voluntary Noise Abatement Procedures (VNAP) Recommendations For Vance Brand Municipal Airport",
+      }),
+    );
+    assert.match(longTitle, /^Presentation Of Options/, "the label starts at the title, not the agenda number");
+    assert.ok(longTitle.length <= 60, "the label is cut short enough to open a paragraph");
+    assert.match(longTitle, /[A-Za-z]$/, "and it is cut at a word boundary, not mid-word");
+
+    const keptLabel = applyStatuses(
+      [row({ itemNo: 1, kind: "agenda-item", text: "3. MOTIONS AND RESOLUTIONS Library Business Classes" })],
+      [{ itemNo: 1, status: "roundup", label: "Library business classes", reason: "a library item" }],
+    );
+    assert.equal(keptLabel[0]!.label, "Library business classes", "the status pass's plain label wins");
+    const fallbackLabel = applyStatuses(
+      [row({ itemNo: 1, kind: "agenda-item", text: "2. ROLL CALL AND PLEDGE OF ALLEGIANCE City Council Study Session, September 29, 2026 Page 1" })],
+      [],
+    );
+    assert.equal(fallbackLabel[0]!.label, "ROLL CALL AND PLEDGE OF ALLEGIANCE", "with no model label, the agenda title is the label");
+
+    const merged = mergeRelatedItems([
+      row({ kind: "agenda-item", text: "3. MOTIONS AND RESOLUTIONS Library Business Classes", startSeconds: 10800, endSeconds: 12000, packetPage: 40 }),
+      row({ kind: "motion", text: "Move to approve the library business classes", startSeconds: 10860, packetPage: 40 }),
+      row({ kind: "amendment", text: "Amendment to add a second session", startSeconds: 10920, packetPage: 40 }),
+      row({ kind: "block", text: "Discussion from 03:00:00", startSeconds: 11000, endSeconds: 11500, packetPage: 40 }),
+      row({ kind: "agenda-item", text: "5A. Proclamation Declaring October 2026 Electrify Longmont Day", startSeconds: 12000, endSeconds: 12300, packetPage: 41 }),
+      row({ kind: "proclamation", text: "Proclamation Declaring October 2026 Electrify Longmont Day", startSeconds: 12030, packetPage: 41 }),
+      row({ kind: "tribute", text: "Tribute to Jim Berthold", startSeconds: 15000, packetPage: 42 }),
+    ]);
+    assert.equal(merged.merged, 4, "the motion, amendment, block and proclamation are folded into their items");
+    assert.equal(merged.items.length, 3);
+    assert.equal(merged.items[0]!.evidence!.length, 3, "the library item keeps its motion, amendment and block");
+    assert.equal(merged.items[1]!.evidence!.length, 1, "5A keeps its own proclamation");
+    assert.match(merged.items[2]!.text, /Tribute to Jim Berthold/, "a tribute with no matching item stays its own entry");
+  });
+
+  it("corrects the tape's garbled names, maps a title to its holder, and flags a name it cannot verify", async () => {
+    /*
+      Run 4's mapping printed junk: "Hadel Fairing -> The Fair", "Prom McCoy ->
+      Based Decision Making", "Koffer -> Home Comfort". The known-names list is
+      the newsroom's officials-and-staff list plus people of record the packet
+      names; a packet heading is not a person. The dev roster now reads "Jake
+      Marsing, Mayor Pro Tem" (the tape's "Mayor Prom" is answered by the member
+      who made and withdrew the fee motion), so a garbled title resolves to the
+      person the roster says holds it.
+    */
+    const known = buildKnownNames({ roster: MAYOR_PRO_TEM_ROSTER, packetText: MESSY_PACKET });
+    assert.deepEqual(
+      known.filter((entry) => entry.from === "packet").map((entry) => entry.name),
+      ["Jim Berthold"],
+      "only the packet's person, not its headings, joins the list",
+    );
+
+    const mapped = mapCaptionNames(NAME_TAPE, known, MESSY_PACKET);
+    const knownFor = new Map(mapped.mappings.map((entry) => [entry.captioned, entry.known]));
+    assert.equal(knownFor.get("Council member Koffer"), "Alex Kalkhofer");
+    assert.equal(knownFor.get("Council member Coloffer"), "Alex Kalkhofer");
+    assert.equal(knownFor.get("Council member Calcer"), "Alex Kalkhofer");
+    assert.equal(knownFor.get("Council member Christ"), "Diane Crist");
+    assert.equal(knownFor.get("Council member Marcen"), "Jake Marsing");
+    assert.equal(knownFor.get("Council member Marc"), "Jake Marsing");
+    assert.equal(knownFor.get("Council member Marine"), "Jake Marsing");
+    assert.equal(knownFor.get("Mayor doggoering"), "Susie Hidalgo-Fahring");
+    assert.equal(knownFor.get("Mayor Hadel Fairing"), "Susie Hidalgo-Fahring", "a garbled name is never mapped to a phrase");
+    assert.equal(knownFor.get("Mayor Prom"), "Mayor Pro Tem Jake Marsing", "the title resolves to the person who holds it");
+    assert.equal(knownFor.get("Mayor promoy"), "Mayor Pro Tem Jake Marsing");
+    assert.equal(knownFor.get("Council member Zbyrowski"), "a council member", "an unverifiable name is written as the title only");
+    assert.ok(mapped.unverified.includes("Council member Zbyrowski"), "and it is flagged, not invented");
+    assert.ok(!knownFor.has("Hadel Fairing"), "no mapping names the garbled phrase as the person");
+  });
+
+  it("hands the cold check the tape of the written items' own ranges and packet pages", async () => {
+    /*
+      Run 4's cold check reported SBDC, Data Axle, "20 to 60 students" and a
+      staff quote as "not in the excerpts" when every one was in the tape it had
+      never been shown: it was handed a ledger digest, not the tape. The reader
+      gets the lead item's span, each roundup item's span, and the packet pages
+      the written items came from -- so a fact at 10:20 under the budget is
+      visible to the check.
+    */
+    let coldUser = "";
+    await run(
+      {
+        inventory: () => AIRPORT_INVENTORY,
+        status: () => COLD_STATUS,
+        lead: () => JSON.stringify({ headline: "Airport rules", dek: "", lead: "The council acted." }),
+        roundup: () => JSON.stringify({ paragraph: "The budget was presented." }),
+        cold: (user) => {
+          coldUser = user;
+          return COLD_OK;
+        },
+      },
+      { segments: COLD_SEGMENTS, packetPages: COLD_PACKET, agendaList: SEPT29_AGENDA },
+    );
+    assert.equal(COLD_CHECK_MAX, 15, "the reader's list is capped at 15, most serious first");
+    assert.match(coldUser, /LEAD ITEM \(Airport noise rules\):/, "the lead item's tape is labelled with its plain name");
+    assert.match(coldUser, /ROUNDUP ITEM \(2027 city budget\):/, "the roundup item's tape is labelled too");
+    assert.match(coldUser, /PACKET PAGES:\nAMS VOLUNTARY NOISE ABATEMENT/, "the written items' packet pages are handed over");
+    assert.match(coldUser, /\[00:00:00\] Council Member Prieto: I move to approve the first AMS recommendation\./, "the lead's tape includes its earliest line");
+    assert.match(coldUser, /\[00:01:30\] Mayor: And the third carries unanimously\./, "and its latest line");
+    assert.match(coldUser, /\[00:10:20\] Council Member Crist: SBDC can help 20 to 60 students\./, "the roundup's tape includes the line run 4 called absent");
+  });
+
+  it("counts a tally as a vote word only near a vote verb, and never a year range", async () => {
+    /*
+      Run 4 flagged "20 to 60" (students), "10 to 2" (hours) and "2027-2031"
+      (years) as vote words. A tally is a vote word only within a few words of a
+      vote verb, and a year range is a year range.
+    */
+    assert.deepEqual(voteWordsIn("SBDC can help 20 to 60 students."), [], "a count of students is not a vote");
+    assert.deepEqual(voteWordsIn("The fair runs from 10 to 2 hours."), [], "hours are not a vote");
+    assert.deepEqual(voteWordsIn("The 2027-2031 capital improvement plan was presented."), [], "a year range is not a vote");
+    assert.deepEqual(voteWordsIn("The council voted, 5 to 2, but no vote was recorded in the source."), [], "a sentence that denies a vote is never read as one");
+    assert.deepEqual(voteWordsIn("The council voted on the 20 to 60 plan in 2027."), [], "a tally beside a year is not the item's vote");
+    assert.deepEqual(voteWordsIn("The council voted 5 to 2."), ["5 to 2"], "a tally next to a vote verb is a vote word");
+    assert.deepEqual(voteWordsIn("The council acted unanimously."), ["unanimously"], "a unanimous vote is found too");
   });
 });

@@ -315,8 +315,13 @@ async function loadKnownNameSources(
   }
   let entityNames: string[] = [];
   try {
+    // Only people are names the writer may correct a caption surname toward. A
+    // company, an address or a building in this list is how run 4 came to print
+    // "Hadel Fairing -> The Fair" and "Prom McCoy -> Based Decision Making":
+    // the writer reached for the nearest whole name in a list that was not a
+    // list of people.
     const rows = await sql.query<{ name: string | null }>(
-      `select name from entities where user_id=$1 order by id`,
+      `select name from entities where user_id=$1 and kind='person' order by id`,
       [userId],
     );
     entityNames = rows.map((row) => row.name ?? "").filter(Boolean);
