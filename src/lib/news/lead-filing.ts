@@ -1,5 +1,6 @@
 import { sanitizePublicUrls } from "./schema.ts";
 import { storableText } from "./storable-text.ts";
+import { noEventVerdict, standingPageStamp, type LeadEventFields } from "./lead-newsworthiness.ts";
 import type { DupCheckOutcome } from "./dup-check.ts";
 import {
   findMatchingLead,
@@ -63,7 +64,7 @@ export type ScanAiLead = {
    * section, which is what every caller written before this flag meant.
    */
   topicUnchosen?: boolean;
-};
+} & LeadEventFields;
 
 /**
  * The lead-filing half of `performScanWork` (src/lib/news/desk.ts), pulled
@@ -141,6 +142,16 @@ export type ScanAiLead = {
  * `dupCheck` is exactly the pre-U28 behaviour, which is what the check's own
  * failure path relies on: a call that failed, timed out or answered unusably
  * leaves this argument's decisions empty and files the scan by the word rule.
+ *
+ * Scan quality (2026-10-03): before any of the above, a candidate that is a
+ * standing PAGE rather than a news EVENT is dropped -- the cheap rules and the
+ * model's own `is_event` verdict, both in ./lead-newsworthiness.ts. The scan
+ * had been filing obituaries indexes, directory pages and hours pages as leads;
+ * an event is what makes a lead news (Galtung & Ruge 1965; Harcup & O'Neill
+ * 2017), and a page watcher's news is the CHANGE to a standing page, never the
+ * page (The Marshall Project's Klaxon). Dropped candidates are counted
+ * (`standingPageDropped`, `noEventDropped`) and the first is named in
+ * `firstDroppedReason` so the run can say what it left out and why.
  */
 export async function fileScanLeads(
   sql: SqlTag,
@@ -185,6 +196,17 @@ export async function fileScanLeads(
    * scan's own arithmetic still adds up: these file as plain new leads.
    * Always 0 when no check ran. */
   dupCheckCleared: number;
+  /** Candidates dropped as standing pages by the cheap rules in
+   * ./lead-newsworthiness.ts (an obituaries index, a directory/index, a
+   * projects index, an events listing) -- a page that exists, not an event.
+   * Not filed, not counted in `leadsCreated`. */
+  standingPageDropped: number;
+  /** Candidates the model itself said were not news events (`is_event: false`)
+   * and that no cheap rule caught. Not filed; not counted in `leadsCreated`. */
+  noEventDropped: number;
+  /** The first dropped candidate's headline and the one-line reason, so the
+   * scan summary can tell the editor what the pass deliberately left out. */
+  firstDroppedReason?: { headline: string; reason: string };
 }> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
@@ -193,7 +215,10 @@ export async function fileScanLeads(
   let developingFiled = 0;
   let mergedSameScan = 0;
   let dupCheckCleared = 0;
+  let standingPageDropped = 0;
+  let noEventDropped = 0;
   let firstDiscardedHeadline: string | undefined;
+  let firstDroppedReason: { headline: string; reason: string } | undefined;
   /* Leads THIS call inserted, newest last. A candidate is only ever merged
    * into one of these -- see sameStoryForMerge's doc comment for why a row an
    * editor has already seen is never touched. */
@@ -252,6 +277,34 @@ export async function fileScanLeads(
       stored.
     */
     if (!headline.trim()) continue;
+
+    /*
+      Is this a news EVENT, or a page that exists?
+
+      Two layers, cheapest first, both in ./lead-newsworthiness.ts:
+
+      1. The cheap deterministic rules (an obituaries index, a directory/index
+         page, a projects index, an events listing) run first, on the cleaned
+         headline and the sanitized URLs. A page that exists has no event, so
+         it is dropped here with no model tokens spent and no lead row.
+      2. The model's own verdict (`is_event: false`) drops the rest that the
+         patterns could not settle. Only an explicit false counts -- a reply
+         written before the field existed files exactly as it always did.
+
+      Both sit BEFORE the merge and match steps on purpose: a dropped page must
+      not resurface a killed lead, merge into a sibling, or draw a duplicate
+      chip. Dropping is counted, not silent: `firstDroppedReason` reaches the
+      scan summary so the editor can read what the pass left out and why
+      (Reuters Tracer's explainability rule, ./lead-newsworthiness.ts).
+    */
+    const pageStamp = standingPageStamp({ headline, source_urls: candidateUrls });
+    const verdict = pageStamp ? { reason: pageStamp.reason } : noEventVerdict(lead);
+    if (verdict) {
+      if (pageStamp) standingPageDropped += 1;
+      else noEventDropped += 1;
+      firstDroppedReason ??= { headline, reason: verdict.reason };
+      continue;
+    }
 
     const sibling = insertedThisRun.find((prior) =>
       sameStoryForMerge({ headline, source_urls: candidateUrls }, prior, place),
@@ -429,6 +482,9 @@ export async function fileScanLeads(
     mergedSameScan,
     dupCheckCleared,
     firstDiscardedHeadline,
+    standingPageDropped,
+    noEventDropped,
+    firstDroppedReason,
   };
 }
 

@@ -1577,7 +1577,7 @@ describe("buildScanUserMessage resident coverage contract", () => {
     assert.match(prompt, /Do not refile facts in Already covered, invent new sections, or file filler/i);
     assert.match(prompt, /newsworthiness is an integer from 0 to 20/i);
     assert.match(prompt, /0 means valid but lowest priority/i);
-    assert.match(prompt, /do not file filler or manufacture a lead to earn a score/i);
+    assert.match(prompt, /do not file filler, a standing page, or manufacture a lead to earn a score/i);
     assert.doesNotMatch(prompt, /"newsworthiness": 0/);
   });
 

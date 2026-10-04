@@ -171,6 +171,7 @@ import {
 import {
   buildScanUserMessage,
   composeZeroLeadSummary,
+  droppedCandidatesSentence,
   editorFetchError,
   kindFromSourceUrl,
   resurfacedSummarySentence,
@@ -2703,6 +2704,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
       dupCheckCleared,
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -2775,6 +2779,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     });
     if (resurfacedSentence)
       summary = summary ? `${summary} ${resurfacedSentence}`.slice(0, 1200) : resurfacedSentence;
+    /*
+      Scan quality (2026-10-03): a drop is a decision the editor must be able to
+      read. The candidates this pass left out for having no news event -- the
+      cheap standing-page rules plus the model's `is_event: false` verdict --
+      are named here with the first example and the reason, so a shorter Queue
+      is explained rather than mysterious.
+    */
+    const droppedSentence = droppedCandidatesSentence({
+      standingPageDropped,
+      noEventDropped,
+      firstDroppedReason,
+    });
+    if (droppedSentence)
+      summary = summary ? `${summary} ${droppedSentence}`.slice(0, 1200) : droppedSentence;
     const meetingCoverageLine = meetingAwareness?.coverageLine ?? "";
     if (meetingCoverageLine)
       summary = summary ? `${summary} ${meetingCoverageLine}`.slice(0, 1200) : meetingCoverageLine;
