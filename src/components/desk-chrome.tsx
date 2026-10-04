@@ -42,11 +42,8 @@ import type { JobProgressView } from "@/lib/news/job-progress";
   both draw the nav as a word with a count at the right, so the lucide glyphs
   the old nav carried are gone rather than kept as decoration.
 
-  Two items share one route: "Models" is the existing model-assignment panel
-  on the Server page (`#writing-models` in desk.ops.tsx), and "Server" is that
-  page itself. The phase-1 unit reports this honestly instead of inventing a
-  /desk/models screen the app does not have; the hash is what tells the two
-  apart for the active item, below.
+  Models opens the Who does what / Connections screen at /desk/models.
+  Server opens /desk/ops; its section hashes keep Server active.
 
   CY item 6: `count` is drawn on five of the items -- Queue, Drafts, Opinion,
   Follow-ups and Dark Desk (Desk Nav.dc.html:56) -- and every one of them is a
