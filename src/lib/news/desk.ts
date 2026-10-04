@@ -14,7 +14,7 @@ import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
-import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
@@ -304,7 +304,7 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
 async function querySourceRows(context: { userId: string; newsroomId: number }) {
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
-  return sql<SourceRow>`
+  const rows = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
              -- the row can say "Keeps failing" rather than repeating the last
@@ -353,6 +353,7 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
         case when status = 'proposed' then id end desc,
         id asc
     `;
+  return rows.map((row) => ({ ...row, title: sourceName(row.title) }));
 }
 
 /**
@@ -648,7 +649,7 @@ async function queryLeadRows(context: { newsroomId: number }) {
       story_headline: string | null;
     }
   >`
-    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence,
+    select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.notes_json,
            l.newsworthiness, l.created_at, l.investigation_id, a.slug as article_slug,
            -- "import" = read out of a report the editor pasted; null = not
            -- recorded. The Queue shows the Imported badge off this.

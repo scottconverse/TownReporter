@@ -467,14 +467,15 @@ function Login() {
         </form>
         )}
 
-        {mode === "signin" && !claim.isPending ? <RecoveryCodeSignIn /> : null}
-
-        <Link
-          to="/"
-          className="inline-flex min-h-11 items-center text-sm text-muted underline"
-        >
-          Back to the paper
-        </Link>
+        <div className="flex flex-col items-start gap-[14px]">
+          {mode === "signin" && !claim.isPending ? <RecoveryCodeSignIn /> : null}
+          <Link
+            to="/"
+            className="inline-flex min-h-11 items-center text-sm text-muted underline"
+          >
+            Back to the paper
+          </Link>
+        </div>
       </div>
     </main>
   );

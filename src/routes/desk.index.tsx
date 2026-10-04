@@ -95,6 +95,7 @@ import {
   deskDraftAction,
   deskDraftElapsed,
   deskDraftState,
+  tonightDrafts,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
 import { keepsFailing } from "@/lib/news/source-rows";
@@ -763,8 +764,8 @@ function DeskHome() {
     deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
   );
   const writingNow = draftStates.filter((s) => s.running).length;
-  const readyToCheck = draftStates.filter((s) => s.needsYou).length;
-  const readyToPrint = draftStates.filter((s) => s.key === "ready").length;
+  const edition = tonightDrafts(draftRows, draftStates);
+  const { readyToCheck, readyToPrint } = edition;
   /*
     Running now: open jobs, every kind, newest first. Open jobs only -- a job
     that has stopped is not running, and the drafts grid below is where a
@@ -885,11 +886,7 @@ function DeskHome() {
 
   /** The stories tonight actually turns on: through their checks, or waiting
    *  on the editor. Newest work first within each group. */
-  const tonightRows = draftRows
-    .map((row, index) => ({ row, state: draftStates[index]! }))
-    .filter(({ state }) => state.key === "ready" || state.needsYou)
-    .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"))
-    .slice(0, 3);
+  const tonightRows = edition.rows;
 
   /*
     FB6, item 1: `Start story` and `S` were DEAD and a SILENT FAIL (FB0-Report
@@ -1300,7 +1297,7 @@ function DeskHome() {
         <div className="today-edition-head">
           <div className="today-edition-headline">
             <h2 className="today-edition-title">Tonight’s edition</h2>
-            <span className="sec-count">{readyToPrint + readyToCheck}</span>
+            <span className="sec-count">{tonightRows.length}</span>
           </div>
           {/*
             Unit U9: this line used to read "Each story needs every check before

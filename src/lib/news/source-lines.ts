@@ -19,6 +19,11 @@ export type ParsedSourceLine = {
   kind: string;
 };
 
+/** A pasted URL separator is not part of the source's name. */
+export function sourceName(title: string): string {
+  return title.trim().replace(/\s+[—–-]\s*$/, "").trim();
+}
+
 export function parseHttpUrl(
   raw: string,
 ): { ok: true; url: string; host: string } | { ok: false; error: string } {
@@ -107,7 +112,7 @@ export function parseSourceLines(text: string): ParsedSourceLine[] {
           : "official";
 
     out.push({
-      title: title || parsed.host,
+      title: sourceName(title) || parsed.host,
       url: parsed.url,
       tier: currentTier,
       kind,

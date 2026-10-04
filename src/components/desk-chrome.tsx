@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { signOut } from "@/lib/auth/client";
 import { leaveEditor } from "@/lib/news/claim";
 import { listInvestigations } from "@/lib/news/dark";
-import { chipLabel, createEditorCopy, openLeads, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
+import { chipLabel, createEditorCopy, editorTitle, openLeads, pileForStatus, sentenceCase } from "@/lib/news/desk-copy";
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
@@ -24,7 +24,7 @@ import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { jobHeadline } from "@/components/desk-jobs";
 import { DeskJobCard } from "@/components/JobCard";
 import { useDeskJobs } from "@/components/job-card-state";
-import { listFollowUps, listLeads } from "@/lib/news/desk";
+import { listFollowUps, listLeads, listDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
 
@@ -42,11 +42,8 @@ import type { JobProgressView } from "@/lib/news/job-progress";
   both draw the nav as a word with a count at the right, so the lucide glyphs
   the old nav carried are gone rather than kept as decoration.
 
-  Two items share one route: "Models" is the existing model-assignment panel
-  on the Server page (`#writing-models` in desk.ops.tsx), and "Server" is that
-  page itself. The phase-1 unit reports this honestly instead of inventing a
-  /desk/models screen the app does not have; the hash is what tells the two
-  apart for the active item, below.
+  Models opens the Who does what / Connections screen at /desk/models.
+  Server opens /desk/ops; its section hashes keep Server active.
 
   CY item 6: `count` is drawn on five of the items -- Queue, Drafts, Opinion,
   Follow-ups and Dark Desk (Desk Nav.dc.html:56) -- and every one of them is a
@@ -195,6 +192,7 @@ export function DeskShell({
   */
   const jobs = useDeskJobs();
   const leads = useQuery({ queryKey: ["leads"], queryFn: () => listLeads() });
+  const drafts = useQuery({ queryKey: ["drafts-desk"], queryFn: () => listDraftsDesk() });
   const editorials = useQuery({ queryKey: ["editorials"], queryFn: () => listEditorials() });
   const followUps = useQuery({
     queryKey: ["follow-ups", "all"],
@@ -213,7 +211,7 @@ export function DeskShell({
 
       Queue      `openLeads`, the same filter Today's and the Queue's own
                  headings count with (desk-copy.ts:437).
-      Drafts     leads with status "drafted" -- what /desk/drafts lists.
+      Drafts     the same latest-draft rows that /desk/drafts lists.
       Opinion    every row /desk/opinion's "Requests & editorials" heading
                  counts (desk.opinion.tsx:474-482, `rows.length`).
       Follow-ups the Follow-ups screen's default tab: its agent rows that pass
@@ -229,7 +227,7 @@ export function DeskShell({
   */
   const counts: Record<string, number | undefined> = {
     Queue: allLeads.length ? openLeads(allLeads).length : undefined,
-    Drafts: allLeads.length ? allLeads.filter((l) => l.status === "drafted").length : undefined,
+    Drafts: drafts.data?.length,
     Opinion: editorials.data ? editorials.data.length : undefined,
     "Follow-ups": followUps.data
       ? followUps.data.filter(
@@ -742,7 +740,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
               onClick={onClose}
             >
               <span>
-                {l.story_headline || l.headline}
+                {editorTitle(l.story_headline || l.headline)}
                 <small>
                   {l.topic} · {l.status}
                 </small>

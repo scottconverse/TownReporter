@@ -42,7 +42,7 @@ export const DESK_NAV: readonly DeskNavItem[] = [
   { to: "/desk/follow-ups", label: "Follow-ups" },
   { to: "/desk/dark", label: "Dark Desk" },
   { to: "/desk/sources", label: "Sources & scan" },
-  { to: "/desk/ops", label: "Models", hash: "writing-models" },
+  { to: "/desk/models", label: "Models" },
   { to: "/desk/ops", label: "Server" },
   { to: "/desk/stats", label: "Stats" },
 ] as const;
@@ -78,9 +78,8 @@ export const SEARCH_PAGES = [...DESK_NAV, ...DESK_MORE].map((l) => ({
 export const DESK_PATHS: readonly string[] = [...new Set(SEARCH_PAGES.map((p) => p.to))];
 
 /**
- * Which nav item is current. `pathname` alone cannot answer it, because Models
- * and Server are the same route; the hash decides between them when there is
- * one, and Server — the page — wins when there is not.
+ * Which nav item is current. Models and Server have separate destinations;
+ * a section hash does not change the active page.
  */
 export function navItemIsActive(item: DeskNavItem, pathname: string, hash: string) {
   const path = item.to;
@@ -88,7 +87,5 @@ export function navItemIsActive(item: DeskNavItem, pathname: string, hash: strin
     ? pathname === path
     : pathname === path || pathname.startsWith(`${path}/`);
   if (!onPath) return false;
-  if (path !== "/desk/ops") return true;
-  const wantHash = `#${item.hash ?? ""}`;
-  return item.hash ? hash === wantHash : hash !== "#writing-models";
+  return !item.hash || hash === `#${item.hash}`;
 }
