@@ -35,6 +35,26 @@ export const ScanLeadSchema = z.object({
     if (!Number.isFinite(n)) return 0;
     return Math.max(0, Math.min(20, n));
   }, z.number().min(0).max(20)),
+  /*
+    The event fields the scan prompt now asks for (see ./desk-copy.ts).
+
+    `is_event` is the model's own yes/no to "is this a news event?", and the
+    desk reads it strictly in `fileScanLeads` (./lead-newsworthiness.ts's
+    `noEventVerdict`): only an explicit `false` drops a candidate. A reply
+    written before these fields existed, or one that omits them, parses to the
+    defaults below and files exactly as it did before -- "the desk did not ask"
+    must never be the same as "the model said no". `event` is the one-sentence
+    answer and `event_date` its date; both are optional for the same reason.
+  */
+  is_event: z.preprocess((v) => (typeof v === "boolean" ? v : undefined), z.boolean().optional()),
+  event: z.preprocess(
+    (v) => (typeof v === "string" ? v.slice(0, 400) : ""),
+    z.string().max(400).optional().default(""),
+  ),
+  event_date: z.preprocess(
+    (v) => (typeof v === "string" ? v.slice(0, 40) : ""),
+    z.string().max(40).optional().default(""),
+  ),
 });
 
 export const ScanResultSchema = z.object({
