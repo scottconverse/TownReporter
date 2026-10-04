@@ -326,7 +326,7 @@ export function LeadRowView({
                 () => setDupKill("failed"),
               );
             }}
-            ariaLabel={`Kill ${lead.headline} as a duplicate of ${editorTitle(dup.headline)}`}
+            ariaLabel={`Kill ${editorTitle(lead.headline)} as a duplicate of ${editorTitle(dup.headline)}`}
           >
             {dupKill === "saving" ? "Saving…" : "Kill as duplicate"}
           </InkButton>
@@ -374,7 +374,7 @@ export function LeadRowView({
             small
             disabled={drafting}
             onClick={() => onDraft(modelChoice, modelEffort)}
-            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${lead.headline} with ${modelChoiceLabel(modelChoice)}`}
+            ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${editorTitle(lead.headline)} with ${modelChoiceLabel(modelChoice)}`}
           >
             {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}
           </InkButton>
@@ -526,7 +526,7 @@ export function LeadRowView({
             type="checkbox"
             className="queue-pick"
             checked={deleteSelected}
-            aria-label={`Select ${lead.headline} for deletion`}
+            aria-label={`Select ${editorTitle(lead.headline)} for deletion`}
             onChange={(event) => onDeleteSelect(event.target.checked)}
           />
           <span className="queue-box" aria-hidden="true">
@@ -555,7 +555,7 @@ export function LeadRowView({
             link on Today. */}
         <h3 className="hl-head">
           <Link to="/desk/story/$leadId" params={{ leadId: String(lead.id) }} className="hl-link">
-            {lead.headline}
+            {editorTitle(lead.headline)}
           </Link>
         </h3>
         {/*
@@ -575,7 +575,7 @@ export function LeadRowView({
               type="checkbox"
               checked={batchSelected}
               disabled={batchDisabled}
-              aria-label={`Include ${lead.headline} in the batch draft`}
+              aria-label={`Include ${editorTitle(lead.headline)} in the batch draft`}
               onChange={(event) => onBatchSelect(event.target.checked)}
             />{" "}
             Include in batch draft
@@ -620,7 +620,7 @@ export function LeadRowView({
           <p className="meta dup-match">
             matches:{" "}
             <Link to="/articles/$slug" params={{ slug: dup.slug }} className="inline-link">
-              {dup.headline}
+              {editorTitle(dup.headline)}
             </Link>{" "}
             · published {formatShortDate(dup.publishedAt)}
           </p>
@@ -703,7 +703,7 @@ export function LeadRowView({
             ) : null}
           </>
         )}
-        <DeskMoreMenu ariaLabel={`More actions for ${lead.headline}`} items={items} />
+        <DeskMoreMenu ariaLabel={`More actions for ${editorTitle(lead.headline)}`} items={items} />
         {bulkDeleteReason ? <p className="action-reason" role="alert">{bulkDeleteReason}</p> : null}
       </div>
     </div>

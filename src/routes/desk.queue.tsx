@@ -55,6 +55,7 @@ import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
   bulkStatusReport,
+  bulkDeleteReasonLines,
   bulkStatusSummary,
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
@@ -261,6 +262,7 @@ function QueuePage() {
     rows held silently"). The shared action family reports the refusal with the
     server's own reason, so a partial failure is at least said out loud.
   */
+  const [releasedId, setReleasedId] = useState<number | null>(null);
   const setStatus = useDeskMutation({
     mutationFn: (input: {
       id: number;
@@ -291,7 +293,10 @@ function QueuePage() {
       cache, so one failure cannot put back eleven successes.
     */
     ...leadStatusOptimistic(qc),
-    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    after: async (_result, input) => {
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      if (input.release) setReleasedId(input.id);
+    },
     /*
       M7: while a bulk press is fanning out over the selection, each lead's own
       toast is suppressed -- the bulk path owns the outcome and says it once.
@@ -301,7 +306,7 @@ function QueuePage() {
     pending: "Saving…",
     done: (_result, input) =>
       input.release
-        ? "Released."
+        ? ""
         : input.status === "new"
           ? "Undone: the lead is back on the Queue."
           : input.status === "held"
@@ -320,7 +325,7 @@ function QueuePage() {
       go and find; the way back belongs on the sentence that says so.
     */
     undo: (_result, input) =>
-      input.status === "new" && !input.release
+      input.status === "new"
         ? null
         : {
             label: "Undo",
@@ -1430,6 +1435,13 @@ function QueuePage() {
                       {selectedDeleteLeads.length === 1 ? "" : "s"} and any drafts? Published
                       articles stay on the paper.
                     </span>
+                    <ul className="queue-delete-reasons">
+                      {bulkDeleteReasonLines(selectedLeads).map((lead) => (
+                        <li key={lead.id}>
+                          <strong>{lead.title}</strong> — {lead.reason}
+                        </li>
+                      ))}
+                    </ul>
                     {/*
                       Unit UI1a2: the confirm press carries the states. Its DONE
                       is the rows leaving the Queue, which the list and the
@@ -1501,6 +1513,30 @@ function QueuePage() {
       ) : null}
 
       {deleteError ? <Notice kind="err">{deleteError}</Notice> : null}
+      {releasedId !== null ? (
+        <div className="queue-release-message" role="status">
+          <span>Released.</span>
+          <InkButton
+            tone="quiet"
+            pending={setStatus.isPending}
+            onClick={() => {
+              setStatus.mutate(
+                { id: releasedId, status: "held" },
+                {
+                  onSuccess: (result) => {
+                    if (result?.ok) setReleasedId(null);
+                  },
+                },
+              );
+            }}
+          >
+            Undo
+          </InkButton>
+          <InkButton tone="quiet" onClick={() => setReleasedId(null)}>
+            Dismiss
+          </InkButton>
+        </div>
+      ) : null}
       {bulkDeleteNotice ? <Notice kind="ok">{bulkDeleteNotice}</Notice> : null}
       {undo != null ? (
         <Notice kind="ok">

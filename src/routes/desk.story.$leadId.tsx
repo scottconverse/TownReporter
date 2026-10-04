@@ -45,7 +45,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { editorTitle } from "@/lib/news/desk-copy";
 import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
-import { SaveShortcut } from "@/components/desk-save-shortcut";
+import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   draftLead,
@@ -3031,14 +3031,14 @@ function StoryPage() {
               name (`getByRole("button", { name: "Save edits", exact: true })`)
               and a name of "Save edits ⌘S" would stop matching.
             */}
-            <span className="astra-wb-kbd" aria-hidden="true">
-              ⌘S
-            </span>
+            <SaveShortcutHint />
             </InkButton>
           </>
         ) : null}
         {data.draft && !locked && !onPaper ? (
+          <div className="story-check-inline">
           <DraftReconcileControl {...reconcileControlProps} render="button" />
+          </div>
         ) : null}
         {/*
           Unit CP item 1: the drawn "+ Add to story", which had no press on
@@ -3059,6 +3059,7 @@ function StoryPage() {
         */}
         {!locked && !onPaper ? (
           <>
+            <div className={data.draft?.body ? "story-redraft-inline" : ""}>
             <ActionButton
               /*
                 The drawing's tone rule, applied to this press too: the three
@@ -3141,6 +3142,7 @@ function StoryPage() {
                 "Draft with AI"
               )}
             </ActionButton>
+            </div>
             <PaperSetupGateNote gate={paperGate} />
           </>
         ) : null}
@@ -3153,6 +3155,22 @@ function StoryPage() {
         <details className="row-more story-more">
           <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
           <div className="row-more-panel">
+        {data.draft && !locked && !onPaper ? (
+          <div className="story-check-overflow">
+            <DraftReconcileControl {...reconcileControlProps} render="button" />
+          </div>
+        ) : null}
+        {data.draft?.body && !locked && !onPaper ? (
+          <div className="story-redraft-overflow">
+          <InkButton
+            tone="quiet"
+            disabled={waiting || reconcileActive || paperGate.blocked}
+            onClick={() => setRedraftOpen(true)}
+          >
+            {waiting ? "Redrafting…" : "Redraft…"}
+          </InkButton>
+          </div>
+        ) : null}
         {data.draft && !locked && !onPaper ? (
           <InkButton
             tone="ghost"

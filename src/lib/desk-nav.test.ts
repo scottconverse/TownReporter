@@ -57,11 +57,11 @@ describe("U24: the desk nav offers the Scan screen", () => {
     assert.equal(navItemIsActive(item("/desk/sources"), "/desk/sources", ""), true);
   });
 
-  it("still tells Models from Server on the route they share", () => {
+  it("tells Models from Server on their own pages", () => {
     const models = DESK_NAV.find((item) => item.label === "Models")!;
     const server = DESK_NAV.find((item) => item.label === "Server")!;
-    assert.equal(navItemIsActive(models, "/desk/ops", "#writing-models"), true);
-    assert.equal(navItemIsActive(server, "/desk/ops", "#writing-models"), false);
+    assert.equal(navItemIsActive(models, "/desk/models", ""), true);
+    assert.equal(navItemIsActive(server, "/desk/ops", "#writing-models"), true);
     assert.equal(navItemIsActive(server, "/desk/ops", ""), true);
     assert.equal(navItemIsActive(models, "/desk/ops", ""), false);
   });

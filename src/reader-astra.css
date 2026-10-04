@@ -1121,17 +1121,21 @@
   display: block;
   margin-bottom: 12px;
 }
-.reader .segmented {
+.reader .reader-dialog .segmented {
   display: flex;
-  gap: 8px;
+  gap: 0;
+  border: 1px solid var(--muted);
 }
-.reader .segmented button {
+.reader .reader-dialog .segmented .btn {
   flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
 }
-.reader .segmented .selected {
-  background: var(--soft);
-  border-color: var(--sel);
-  color: var(--sel);
+.reader .reader-dialog .segmented .btn[aria-pressed="true"] {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--bg);
 }
 .reader .reading-sample {
   font-family: var(--serif);
