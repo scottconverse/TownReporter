@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as runner from "./run-postgres-integration.mjs";
 import { postgresTestFiles } from "./postgres-test-discovery.mjs";
@@ -66,13 +68,16 @@ test("neither lane guard will take an admin URL that dials the live paper", asyn
 
   // A URL the runner would otherwise accept -- loopback, the approved
   // database -- and only the port makes it wrong.
-  const runner = await readFile(new URL("./run-postgres-integration.mjs", import.meta.url), "utf8");
-  assert.match(runner, /targetsLivePostgres\(requestedAdminUrl\)/, "the runner's own guard no longer checks the port");
-  assert.match(runner, /Refusing a PostgreSQL integration admin URL on port \$\{LIVE_POSTGRES_PORT\}/);
+  for (const url of [live[0], "postgres://postgres@127.0.0.1:5432/postgres?port=5433"]) {
+    assert.throws(() => execFileSync(process.execPath, [fileURLToPath(new URL("./run-postgres-integration.mjs", import.meta.url))], {
+      env: { ...process.env, TOWNREPORTER_RUN_POSTGRES_INTEGRATION: "1", TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL: url },
+      encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    }), error => error.status === 1 && /Refusing a PostgreSQL integration admin URL on port 5433/.test(error.stderr),
+    "the runner must refuse the live target before spawning any test");
+  }
 
   // The preload, run for real in a child: it must refuse before it touches
   // anything, and it must still restore the URL for a legitimate target.
-  const { execFileSync } = await import("node:child_process");
   const preload = new URL("./postgres-integration-opt-in.mjs", import.meta.url).href;
   const probe = (url, extraEnv = {}) =>
     execFileSync(process.execPath, ["--import", preload, "-e", "console.log(process.env.TEST_POSTGRES_ADMIN_URL)"], {
@@ -107,15 +112,24 @@ test("neither lane guard will take an admin URL that dials the live paper", asyn
 });
 
 test("runner uses late isolation preload and executes the entire discovered set by default", async () => {
-  const source = await readFile(new URL("./run-postgres-integration.mjs", import.meta.url), "utf8");
-  assert.match(source, /postgresTestFiles\(root\)/);
-  assert.match(source, /--import.*test-environment-guard/);
-  assert.match(source, /--import.*postgres-integration-opt-in/);
-  assert.match(source, /selectPostgresTests\(discovered, weights, process\.argv\.slice\(2\)\)/);
   const files = ["src/a.test.ts", "src/b.test.ts"];
   assert.deepEqual(runner.selectPostgresTests(files, {}, [], {}), files);
   assert.deepEqual(runner.selectPostgresTests(files, {}, ["src\\b.test.ts"], {}), ["src/b.test.ts"]);
-  assert.match(source, /assertPassingIntegrationSummary/);
+  const fixture = new URL(`../src/pg-runner-preload-${randomUUID()}.test.ts`, import.meta.url);
+  const adminUrl = "postgres://postgres@127.0.0.1:5547/postgres";
+  try {
+    await writeFile(fixture, `import test from "node:test";\nimport assert from "node:assert/strict";\nimport pg from "pg";\ntest("preload restores only the disposable admin URL", () => {\nassert.ok(pg.Client);\nassert.equal(process.env.DATABASE_URL, "");\nassert.equal(process.env.TEST_POSTGRES_ADMIN_URL, ${JSON.stringify(adminUrl)});\nassert.equal(process.env.TOWNREPORTER_TEST_ENV_VERIFIED, "1");\nassert.ok(Object.keys(globalThis.__pgliteMigrationFiles__).length > 0);\n});\n`);
+    const output = execFileSync(process.execPath, [fileURLToPath(new URL("./run-postgres-integration.mjs", import.meta.url)), relative(resolve(dirname(fileURLToPath(import.meta.url)), ".."), fileURLToPath(fixture))], {
+      env: {
+        ...process.env, DATABASE_URL: "postgres://inherited-invalid.example/paper", TEST_POSTGRES_ADMIN_URL: "",
+        TOWNREPORTER_RUN_POSTGRES_INTEGRATION: "1", TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL: adminUrl,
+        TOWNREPORTER_POSTGRES_PART: "", TOWNREPORTER_POSTGRES_PARTS: "",
+      }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
+    assert.deepEqual(parseTapSummary(output), { tests: 1, pass: 1, fail: 0, skipped: 0, todo: 0 });
+  } finally {
+    await unlink(fixture);
+  }
 });
 
 test("three measured-time parts cover real discovery exactly once and stay within 15%", async () => {

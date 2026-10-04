@@ -202,6 +202,9 @@ async function main() {
   });
   env.TOWNREPORTER_RUN_POSTGRES_INTEGRATION = "1";
   env.TOWNREPORTER_POSTGRES_INTEGRATION_ADMIN_URL = requestedAdminUrl;
+  // This launcher starts a fresh node --test process per file. An inherited
+  // node:test context would make Node silently decline that fresh run as recursive.
+  delete env.NODE_TEST_CONTEXT;
   console.log(`[postgres-integration] discovered=${discovered.length}; selected=${files.length}; part=${part ? `${part.index}/${part.total}` : "all"}; target=${endpointLabel(requestedAdminUrl)}`);
   let testCount = 0;
   let passCount = 0;

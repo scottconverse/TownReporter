@@ -395,22 +395,25 @@ jobs:
   # desk refuses a mismatched confirmation -- are only ever asserted on a
   # developer's machine.
   #
-  # This gives them a real Postgres. `TEST_POSTGRES_ADMIN_URL` is how they find
+  # Three parallel parts give every discovered DB-capable file a real Postgres.
+  # Measured weights balance serial execution inside each part; unmeasured files
+  # are automatically assigned using the median weight, never filtered out.
+  # `TEST_POSTGRES_ADMIN_URL` is how tests find
   # it: the tests used to hardcode a developer's own `127.0.0.1:5433`, which is
   # exactly the port/user/password this service does NOT use, so they could
   # never have passed here. scripts/postgres-tests-are-covered.test.mjs fails
-  # the build if a file capable of this skip is ever removed from this list
-  # without a replacement.
+  # the build if a file capable of this skip loses its real-Postgres coverage.
   #
   # Also runs the real migrations against `townreporter_ci` and re-runs the
   # 20,000-story search benchmark from scratch in part 1, failing if the index does not
   # help -- a property no single test file above measures.
   postgres-integration:
-    name: Every discovered PostgreSQL-capable test, on a real Postgres, part ${{ matrix.part }} of 3
+    name: Real Postgres, part ${{ matrix.part }} of 3
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     strategy:
       fail-fast: false
+      max-parallel: 3
       matrix:
         part: [1, 2, 3]
     services:
@@ -448,7 +451,7 @@ jobs:
       - name: The index actually makes the search cheaper
         if: matrix.part == 1
         run: node scripts/search-index-proof.mjs
-      - name: Run every discovered database-capable test with per-file nonzero execution proof
+      - name: Run this part with per-file nonzero execution proof
         run: node scripts/run-postgres-integration.mjs
 
   # These two walks each need an UNCLAIMED desk: they create their own owner
