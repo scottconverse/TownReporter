@@ -234,6 +234,12 @@ function eventsListingStamp(lead: LeadLike): StandingPageStamp | null {
   has the recording for, not bare records, so this rule leaves them to the
   model. That is the whole difference between the published council-session
   leads and the records this rule drops.
+
+  The capture path titles its lead from the decision or the item the transcript
+  covered, and files nothing at all when the record names neither
+  (./meeting-lead.ts `meetingLeadSubject`), so this stamp now reaches the queue
+  only on a lead that already names an item. The exemption stands for the
+  transcript-stories already filed without one.
 */
 const MEETING_BODY_NOUN =
   /^(council|councils|commission|commissions|commissioners|board|boards|committee|committees|authority|authorities|trustees|panel|panels)$/;
