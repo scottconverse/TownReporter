@@ -11,7 +11,7 @@
  *   Remove-Item Env:TOWNREPORTER_RUN_POSTGRES_INTEGRATION,Env:TEST_POSTGRES_ADMIN_URL
  *
  * Optional positional args select a subset of discovered DB-capable tests.
- * Alternatively, TOWNREPORTER_POSTGRES_PART=2 and TOWNREPORTER_POSTGRES_PARTS=3
+ * Alternatively, TOWNREPORTER_POSTGRES_PART=2 and TOWNREPORTER_POSTGRES_PARTS=4
  * select one part, balanced by measured seconds in postgres-integration-weights.json.
  * With neither selector set, this runs the complete discovered set.
  * For an interrupted process's leftover scratch database, use the exact-name

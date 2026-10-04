@@ -132,7 +132,7 @@ test("runner uses late isolation preload and executes the entire discovered set 
   }
 });
 
-test("three measured-time parts cover real discovery exactly once and stay within 15%", async () => {
+test("four measured-time parts cover real discovery exactly once and stay within 15%", async () => {
   // Bug: a file silently dropped from CI by a split.
   assert.equal(typeof runner.selectPostgresTests, "function", "the runner needs a part selector");
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -140,9 +140,9 @@ test("three measured-time parts cover real discovery exactly once and stay withi
   const weights = JSON.parse(await readFile(new URL("./postgres-integration-weights.json", import.meta.url), "utf8"));
   const times = Object.values(weights).sort((a, b) => a - b);
   const median = (times[Math.floor((times.length - 1) / 2)] + times[Math.floor(times.length / 2)]) / 2;
-  const parts = Array.from({ length: 3 }, (_, index) => runner.selectPostgresTests(discovered, weights, [], {
+  const parts = Array.from({ length: 4 }, (_, index) => runner.selectPostgresTests(discovered, weights, [], {
     TOWNREPORTER_POSTGRES_PART: String(index + 1),
-    TOWNREPORTER_POSTGRES_PARTS: "3",
+    TOWNREPORTER_POSTGRES_PARTS: "4",
   }));
   for (const files of parts) assert.ok(files.length > 0, "a part must not pass without files");
   const assigned = parts.flat();
@@ -150,7 +150,7 @@ test("three measured-time parts cover real discovery exactly once and stay withi
   assert.deepEqual([...assigned].sort(), [...discovered].sort(), "no discovered file may disappear from CI");
   const totals = parts.map(files => files.reduce((sum, file) => sum + (weights[file] ?? median), 0));
   assert.ok(Math.max(...totals) <= Math.min(...totals) * 1.15, `unbalanced parts: ${totals.join(", ")}`);
-  assert.deepEqual(runner.partitionPostgresTests([...discovered].reverse(), weights, 3).map(part => part.files), parts,
+  assert.deepEqual(runner.partitionPostgresTests([...discovered].reverse(), weights, 4).map(part => part.files), parts,
     "discovery order must not change the partition");
 });
 

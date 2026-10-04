@@ -25,8 +25,8 @@ try {
   unlinkSync(baselineModule);
 }
 const weights = JSON.parse(readFileSync(join(root, "scripts/postgres-integration-weights.json"), "utf8"));
-const select = files => Array.from({ length: 3 }, (_, index) => selectPostgresTests(files, weights, [], {
-  TOWNREPORTER_POSTGRES_PART: String(index + 1), TOWNREPORTER_POSTGRES_PARTS: "3",
+const select = files => Array.from({ length: 4 }, (_, index) => selectPostgresTests(files, weights, [], {
+  TOWNREPORTER_POSTGRES_PART: String(index + 1), TOWNREPORTER_POSTGRES_PARTS: "4",
 }));
 const parts = select(postgresTestFiles(root));
 const union = parts.flat().sort();
@@ -56,7 +56,7 @@ assert.deepEqual(postgresTestFiles(root), oldFiles, "throwaway file was not remo
 probe.removed = true;
 mkdirSync(output, { recursive: true });
 writeFileSync(join(output, "old-lane.txt"), oldFiles.join("\n") + "\n");
-writeFileSync(join(output, "three-part-union.txt"), union.join("\n") + "\n");
+writeFileSync(join(output, "four-part-union.txt"), union.join("\n") + "\n");
 writeFileSync(join(output, "parts.json"), JSON.stringify({ baseCommit, files: oldFiles.length, parts, equal: true, duplicates: 0 }, null, 2) + "\n");
 writeFileSync(join(output, "new-file-probe.json"), JSON.stringify(probe, null, 2) + "\n");
 console.log(`Coverage PASS: old=${oldFiles.length}; union=${union.length}; duplicates=0; parts=${parts.map(files => files.length).join("/")}; base=${baseCommit}`);
