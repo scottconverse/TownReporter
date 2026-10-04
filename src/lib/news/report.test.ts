@@ -235,6 +235,50 @@ describe("stripReporterNotebook", () => {
     assert.doesNotMatch(out, /Next checks/);
     assert.doesNotMatch(out, /SEC\/SPAC/);
   });
+
+  it("drops a body sentence that names the paper's own backlog, keeping the reporting beside it", () => {
+    const out = stripReporterNotebook(
+      [
+        "Ursa Major said it will expand the Berthoud campus.",
+        "The Denver Gazette also carried the expansion under the headline “Ursa Major plans Berthoud growth.” TownReporter has not opened that story and is not reporting its contents here.",
+      ].join("\n\n"),
+    );
+    assert.match(out, /Berthoud campus/);
+    assert.match(out, /Denver Gazette also carried the expansion/);
+    assert.doesNotMatch(out, /has not opened that story/);
+  });
+
+  it("drops a whole paragraph that opens on the paper's to-do list", () => {
+    const out = stripReporterNotebook(
+      [
+        "Longmont will shut parts of Hover Street starting August 31.",
+        "TownReporter has not yet opened the Aug. 25 agenda item, meeting packet, minutes, video segment or hearing officer’s written report. Those records are needed to establish the vote.",
+      ].join("\n\n"),
+    );
+    assert.match(out, /Hover Street/);
+    assert.doesNotMatch(out, /Aug\. 25 agenda item/);
+    assert.doesNotMatch(out, /Those records are needed/);
+  });
+
+  it("cuts only the backlog clause when it trails a sentence of real reporting", () => {
+    const out = stripReporterNotebook(
+      "The hearing date is described only as “Wednesday” in the accounts reviewed. The Wednesday before that posting would be Sept. 9, but neither item states the date, and TownReporter has not yet opened the county hearing record to confirm it.",
+    );
+    assert.match(out, /would be Sept\. 9, but neither item states the date\./);
+    assert.doesNotMatch(out, /has not yet opened the county hearing record/);
+  });
+
+  it("leaves an unknown stated against the record, which the paper does print", () => {
+    const para =
+      "The size of the 2027 funding pool and the decision timeline are not stated in the pages reviewed.";
+    assert.equal(stripReporterNotebook(para), para);
+  });
+
+  it("leaves a paper mention woven through a clause of real reporting", () => {
+    const para =
+      "The AIA Colorado page does not list Johnson’s Station among the projects in the portion captured by TownReporter, and the full winners page has not been opened by TownReporter.";
+    assert.equal(stripReporterNotebook(para), para);
+  });
 });
 
 describe("looksLikeRewrite", () => {
