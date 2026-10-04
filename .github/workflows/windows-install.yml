@@ -21,10 +21,10 @@ permissions:
 
 jobs:
   # A docs-only pull request does not change what this workflow builds or
-  # installs, so the two heavy jobs below skip it. The skip has to happen INSIDE
+  # installs, so the heavy jobs below skip it. The skip has to happen INSIDE
   # the workflow: a `paths-ignore` filter on the trigger stops the workflow from
   # running at all, so its two required checks ("Package the exact source
-  # candidate" and "Fresh Windows ZIP install and persistent newsroom") never
+  # candidate" and "Fresh Windows Setup.exe install") never
   # report and a docs-only pull request can never reach a mergeable state. A job
   # skipped by `if:` reports as skipped, which satisfies a required check.
   # Failure is safe: if this job cannot classify the change, `docs_only` is not
@@ -95,18 +95,101 @@ jobs:
           path: ${{ runner.temp }}/windows-package/*
           if-no-files-found: error
 
-  install:
-    name: Fresh Windows ZIP install and persistent newsroom
-    needs: [changes, package]
-    if: ${{ always() && needs.changes.outputs.docs_only != 'true' && (needs.package.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
+  setup:
+    name: Build the self-contained Windows Setup.exe
+    needs: changes
+    if: ${{ !cancelled() && !inputs.release_tag && needs.changes.outputs.docs_only != 'true' }}
     runs-on: windows-latest
-    timeout-minutes: 55
+    timeout-minutes: 45
+    outputs:
+      source-sha: ${{ steps.identity.outputs.source-sha }}
+      setup-sha256: ${{ steps.identity.outputs.setup-sha256 }}
     env:
-      INSTALL_SOURCE_COMMIT: ${{ needs.package.outputs.source-sha }}
-      INSTALL_SOURCE_SHA256: ${{ needs.package.outputs.archive-sha256 }}
+      WINDOWS_SIGNING_PFX: ${{ secrets.WINDOWS_SIGNING_PFX }}
     steps:
-      # Deliberately no checkout/setup-node: installation and proof execute
-      # from the downloaded ZIP using its privately downloaded runtime.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      - name: Install checksum-verified pinned Inno Setup (CI only)
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.4.3.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_4_3/innosetup-6.4.3.exe' -OutFile $installer
+          ./scripts/verify-inno-setup.ps1 -InstallerPath $installer
+          $innoDirectory = Join-Path $env:RUNNER_TEMP 'Inno Setup 6.4.3'
+          $installLog = Join-Path $env:RUNNER_TEMP 'inno-install.log'
+          $install = Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /CURRENTUSER /PORTABLE=1 /DIR=`"$innoDirectory`" /LOG=`"$installLog`"" -WindowStyle Hidden -PassThru -Wait
+          Get-Content -LiteralPath $installLog
+          if ($install.ExitCode -ne 0) { throw "Pinned Inno Setup installation failed: $($install.ExitCode)." }
+          "INNO_ISCC_PATH=$(Join-Path $innoDirectory 'ISCC.exe')" >> $env:GITHUB_ENV
+      - name: Prove installer download and runtime gates reject broken payloads
+        shell: pwsh
+        run: ./scripts/windows-setup-checks.test.ps1 -IsccPath $env:INNO_ISCC_PATH
+      - name: Build the offline Windows installer and report part sizes
+        shell: pwsh
+        run: ./scripts/build-windows-setup.ps1 -OutputDirectory "$env:RUNNER_TEMP\windows-setup" -IsccPath $env:INNO_ISCC_PATH
+      # OPTIONAL SIGNING: unsigned by default. No certificate is supplied by this repo.
+      - name: Optional signtool signing with the owner's certificate
+        if: ${{ env.WINDOWS_SIGNING_PFX != '' }}
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_PASSWORD: ${{ secrets.WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'townreporter-signing.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGNING_PFX))
+            $tool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' | Sort-Object FullName -Descending | Select-Object -First 1
+            if (!$tool) { throw 'signtool is unavailable.' }
+            $exe = @(Get-ChildItem "$env:RUNNER_TEMP\windows-setup" -Filter '*-Setup.exe' -File)
+            if ($exe.Count -ne 1) { throw 'Expected one Setup.exe to sign.' }
+            $arguments = @('sign', '/f', $pfx, '/fd', 'SHA256', '/tr', 'http://timestamp.digicert.com', '/td', 'SHA256')
+            if ($env:WINDOWS_SIGNING_PASSWORD) { $arguments += @('/p', $env:WINDOWS_SIGNING_PASSWORD) }
+            & $tool.FullName @arguments $exe[0].FullName
+            if ($LASTEXITCODE -ne 0) { throw 'Optional signing failed.' }
+            & $tool.FullName verify /pa $exe[0].FullName
+            if ($LASTEXITCODE -ne 0) { throw 'Signature verification failed.' }
+          } finally { if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx } }
+      - name: Bind the final (possibly signed) installer to this checkout
+        id: identity
+        shell: pwsh
+        run: |
+          $exe = @(Get-ChildItem "$env:RUNNER_TEMP\windows-setup" -Filter '*-Setup.exe' -File)
+          if ($exe.Count -ne 1) { throw 'Expected one Setup.exe.' }
+          $hash = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $metadata = Get-Content -LiteralPath "$($exe[0].FullName).json" -Raw | ConvertFrom-Json
+          $commit = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $metadata.commit -cne $commit) { throw 'Setup source identity mismatch.' }
+          $metadata.sha256 = $hash
+          $metadata.bytes = $exe[0].Length
+          $metadata | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath "$($exe[0].FullName).json"
+          "$hash *$($exe[0].Name)" | Set-Content -LiteralPath "$($exe[0].FullName).sha256" -Encoding ASCII
+          "source-sha=$commit" >> $env:GITHUB_OUTPUT
+          "setup-sha256=$hash" >> $env:GITHUB_OUTPUT
+          Write-Host "Final Setup.exe: $($exe[0].Length) bytes; SHA256 $hash"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-setup
+          path: ${{ runner.temp }}/windows-setup/TownReporter-*-Setup.exe*
+          if-no-files-found: error
+
+  install:
+    name: Fresh Windows Setup.exe install
+    needs: [changes, package, setup]
+    if: ${{ always() && needs.changes.outputs.docs_only != 'true' && (needs.setup.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')) }}
+    runs-on: windows-latest
+    # 55 minutes covered the offline install and acceptance walk; the
+    # one-installation proof adds a refused Setup run and an in-place upgrade.
+    timeout-minutes: 75
+    env:
+      INSTALL_SOURCE_COMMIT: ${{ needs.setup.outputs.source-sha }}
+      INSTALL_SOURCE_SHA256: ${{ needs.setup.outputs.setup-sha256 }}
+    steps:
+      # Test drivers stay outside the installed payload. No setup-node or npm;
+      # every runtime check uses the bundled node.exe and Chromium.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.release_tag || (github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha) }}
+          path: ci-source
       - name: Start the measured installation clock
         shell: pwsh
         run: |
@@ -116,7 +199,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: ${{ !inputs.release_tag }}
         with:
-          name: windows-source-package
+          name: windows-setup
           path: ${{ runner.temp }}/downloaded-package
       - name: Download and verify the published release assets
         if: ${{ inputs.release_tag != '' }}
@@ -143,8 +226,8 @@ jobs:
             $target = $annotated.object
           }
           if ($target.type -ne 'commit' -or $target.sha -cnotmatch '^[a-f0-9]{40}$') { throw 'Release tag did not resolve to a commit.' }
-          $archives = @($release.assets | Where-Object { $_.name -cmatch '^TownReporter-[0-9][A-Za-z0-9.+-]*-windows-x64\.zip$' })
-          if ($archives.Count -ne 1) { throw 'Expected exactly one published Windows ZIP.' }
+          $archives = @($release.assets | Where-Object { $_.name -cmatch '^TownReporter-[0-9][A-Za-z0-9.+-]*-Setup\.exe$' })
+          if ($archives.Count -ne 1) { throw 'Expected exactly one published Windows Setup.exe.' }
           $name = $archives[0].name
           $destination = "$env:RUNNER_TEMP\downloaded-package"
           New-Item -ItemType Directory -Path $destination | Out-Null
@@ -156,149 +239,87 @@ jobs:
           $metadata = Get-Content -LiteralPath (Join-Path $destination "$name.json") -Raw | ConvertFrom-Json
           $hash = (Get-FileHash -LiteralPath (Join-Path $destination $name) -Algorithm SHA256).Hash.ToLowerInvariant()
           $checksum = (Get-Content -LiteralPath (Join-Path $destination "$name.sha256") -Raw).Trim()
-          if ($metadata.filename -cne $name -or $metadata.commit -cne $target.sha -or $metadata.sha256 -cne $hash) { throw 'Release ZIP metadata does not match the downloaded archive and tag commit.' }
-          if ($checksum -cnotmatch ('^' + $hash + '\s+\*?' + [regex]::Escape($name) + '$')) { throw 'Published checksum sidecar does not match the ZIP.' }
+          if ($metadata.filename -cne $name -or $metadata.commit -cne $target.sha -or $metadata.sha256 -cne $hash) { throw 'Release Setup.exe metadata does not match the downloaded artifact and tag commit.' }
+          if ($checksum -cnotmatch ('^' + $hash + '\s+\*?' + [regex]::Escape($name) + '$')) { throw 'Published checksum sidecar does not match Setup.exe.' }
           "INSTALL_SOURCE_COMMIT=$($target.sha)" >> $env:GITHUB_ENV
           "INSTALL_SOURCE_SHA256=$hash" >> $env:GITHUB_ENV
           @{ releaseTag=$release.tag_name; releaseUrl=$release.html_url; sourceCommit=$target.sha; archiveSha256=$hash; assetId=$archives[0].id; assetName=$name } | ConvertTo-Json | Set-Content -LiteralPath "$env:INSTALL_EVIDENCE_DIR\published-release.json"
-      - name: Verify and unpack the downloaded archive
+      - name: Verify the downloaded installer and prepare the long data path
         shell: pwsh
         run: |
-          $archives = @(Get-ChildItem "$env:RUNNER_TEMP\downloaded-package" -Filter '*.zip' -File)
-          if ($archives.Count -ne 1) { throw 'Expected exactly one packaged source archive.' }
-          $hash = (Get-FileHash -LiteralPath $archives[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($hash -ne $env:INSTALL_SOURCE_SHA256) { throw 'Downloaded source ZIP checksum mismatch.' }
-          Expand-Archive -LiteralPath $archives[0].FullName -DestinationPath "$env:RUNNER_TEMP\downloaded-source"
-          $entries = @(Get-ChildItem "$env:RUNNER_TEMP\downloaded-source" -Filter 'Install.ps1' -Recurse -File | Where-Object { $_.Directory.Name -eq 'installer' })
-          if ($entries.Count -ne 1) { throw 'Expected exactly one native installer in the ZIP.' }
-          $appRoot = $entries[0].Directory.Parent.FullName
-          "INSTALL_APP_ROOT=$appRoot" >> $env:GITHUB_ENV
-          "INSTALL_SOURCE_ARCHIVE=$($archives[0].FullName)" >> $env:GITHUB_ENV
-          $dataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+          $exes = @(Get-ChildItem "$env:RUNNER_TEMP\downloaded-package" -Filter '*-Setup.exe' -File)
+          if ($exes.Count -ne 1) { throw 'Expected exactly one Setup.exe.' }
+          $hash = (Get-FileHash -LiteralPath $exes[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $metadata = Get-Content -LiteralPath "$($exes[0].FullName).json" -Raw | ConvertFrom-Json
+          $checksum = (Get-Content -LiteralPath "$($exes[0].FullName).sha256" -Raw).Trim()
+          if ($hash -cne $env:INSTALL_SOURCE_SHA256 -or $metadata.sha256 -cne $hash -or $metadata.commit -cne $env:INSTALL_SOURCE_COMMIT -or $metadata.filename -cne $exes[0].Name) { throw 'Downloaded Setup.exe identity mismatch.' }
+          if ($checksum -cnotmatch ('^' + $hash + '\s+\*?' + [regex]::Escape($exes[0].Name) + '$')) { throw 'Setup checksum sidecar mismatch.' }
+          $installRoot = Join-Path $env:RUNNER_TEMP 'installed TownReporter'
+          "INSTALL_ROOT=$installRoot" >> $env:GITHUB_ENV
+          "INSTALL_APP_ROOT=$installRoot\app" >> $env:GITHUB_ENV
+          "INSTALL_SOURCE_ARCHIVE=$($exes[0].FullName)" >> $env:GITHUB_ENV
+          $dataRoot = Join-Path $env:LOCALAPPDATA ('TownReporter\ci-long-path-' + ('p' * 110) + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
+          if ($dataRoot.Length -lt 140) { throw 'Long-path fixture must be at least 140 characters.' }
           "INSTALL_DATA_ROOT=$dataRoot" >> $env:GITHUB_ENV
-          # A 140-character short staging prefix cannot fit Node's 130-character
-          # entry under MAX_PATH. Exercise its refusal separately using cached ZIPs.
-          $longRoot = Join-Path $env:LOCALAPPDATA 'TownReporter\ci-long-path-'
-          $padding = [Math]::Max(0, 140 - (Join-Path $longRoot 'tools\.x123456').Length)
-          $longRoot += 'p' * $padding
-          if ((Join-Path $longRoot 'tools\.x123456').Length -lt 140) { throw 'Long-path fixture is too short.' }
-          "INSTALL_LONG_DATA_ROOT=$longRoot" >> $env:GITHUB_ENV
           New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
           @{ TOWNREPORTER_CLAUDE_CODE='0'; TOWNREPORTER_CODEX='0'; TOWNREPORTER_LOCAL='0' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'providers.json')
-      - name: Run the default native installer with private downloads
+      - name: Install Setup.exe silently with outbound networking blocked
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $ruleName = 'TownReporter offline install ' + [guid]::NewGuid().ToString('N')
           $installer = $null
-          $failed = $true
           $started = [DateTime]::UtcNow
-          $env:INSTALL_HARNESS_DIR = Join-Path $env:RUNNER_TEMP 'private-installer-harness'
-          New-Item -ItemType Directory -Path $env:INSTALL_HARNESS_DIR | Out-Null
-          $account = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-          & icacls.exe $env:INSTALL_HARNESS_DIR /inheritance:r /grant:r "${account}:(OI)(CI)F" '*S-1-5-18:(OI)(CI)F' *> $null
-          if ($LASTEXITCODE -ne 0) { throw 'Could not protect private installer diagnostics.' }
+          $probeFailed = $false
+          $installed = $false
+          # Establish that the same request can reach the internet before blocking it.
+          Invoke-WebRequest -Uri 'https://example.com' -DisableKeepAlive -TimeoutSec 20 | Out-Null
           try {
-            # ShellExecute isolates runner pipe handles from long-lived app/DB descendants.
-            $wrapper = Join-Path $env:INSTALL_HARNESS_DIR 'ci-installer-wrapper.ps1'
-            @'
-          $ErrorActionPreference = 'Stop'
-          try {
-            $child = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',('"'+$env:INSTALL_APP_ROOT+'\installer\Install.ps1"'),'-DataRoot',('"'+$env:INSTALL_DATA_ROOT+'"'),'-NoBrowser') -WindowStyle Hidden -PassThru -RedirectStandardOutput "$env:INSTALL_HARNESS_DIR\installer.out.log" -RedirectStandardError "$env:INSTALL_HARNESS_DIR\installer.err.log"
-            $null = $child.Handle
-            if (!$child.WaitForExit(1490000)) { $child.Kill(); exit 124 }
-            $child.Refresh()
-            if ($null -eq $child.ExitCode) { exit 125 }
-            exit $child.ExitCode
-          } catch { $_ | Out-String | Add-Content -LiteralPath "$env:INSTALL_HARNESS_DIR\installer.err.log"; exit 1 }
-          '@ | Set-Content -LiteralPath $wrapper
-            $startInfo = [Diagnostics.ProcessStartInfo]::new('powershell.exe')
+            # Block Setup, every shipped executable, and both PowerShell hosts.
+            # Preserve loopback and GitHub runner heartbeats/artifact transport.
+            $metadata = Get-Content -LiteralPath "$env:INSTALL_SOURCE_ARCHIVE.json" -Raw | ConvertFrom-Json
+            if (!$metadata.executables -or $metadata.executables -notcontains 'node\node.exe' -or $metadata.executables -notcontains 'pgsql\bin\postgres.exe') { throw 'Setup executable inventory is incomplete.' }
+            $programs = @($env:INSTALL_SOURCE_ARCHIVE, (Get-Process -Id $PID).Path, "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe")
+            foreach ($relative in $metadata.executables) {
+              $program = [IO.Path]::GetFullPath((Join-Path $env:INSTALL_ROOT $relative))
+              if (!$program.StartsWith($env:INSTALL_ROOT.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Executable inventory escapes the installation folder.' }
+              $programs += $program
+            }
+            foreach ($program in @($programs | Sort-Object -Unique)) {
+              New-NetFirewallRule -DisplayName $ruleName -Direction Outbound -Action Block -Profile Any -Program $program -RemoteAddress @('0.0.0.0-126.255.255.255','128.0.0.0-255.255.255.255','::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff') | Out-Null
+            }
+            "INSTALL_FIREWALL_RULE=$ruleName" >> $env:GITHUB_ENV
+            try { Invoke-WebRequest -Uri 'https://example.com' -DisableKeepAlive -TimeoutSec 10 | Out-Null }
+            catch { $probeFailed = $true }
+            if (!$probeFailed) { throw 'Outbound request unexpectedly succeeded; offline proof is invalid.' }
+            $startInfo = [Diagnostics.ProcessStartInfo]::new($env:INSTALL_SOURCE_ARCHIVE)
             $startInfo.UseShellExecute = $true
             $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
-            $startInfo.Arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $wrapper + '"'
+            $startInfo.Arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $env:INSTALL_ROOT + '" /DATAROOT="' + $env:INSTALL_DATA_ROOT + '" /LOG="' + $env:INSTALL_EVIDENCE_DIR + '\setup.log"'
             $installer = [Diagnostics.Process]::Start($startInfo)
             $null = $installer.Handle
-            if (!$installer.WaitForExit(1500000)) { throw 'Native installer exceeded its 25-minute process deadline.' }
+            if (!$installer.WaitForExit(1500000)) { throw 'Setup.exe exceeded its 25-minute deadline.' }
             $installer.Refresh()
-            if ($null -eq $installer.ExitCode -or $installer.ExitCode -ne 0) { throw "Native installer exited unsuccessfully: $($installer.ExitCode)." }
-            $failed = $false
-          } finally {
+            if ($null -eq $installer.ExitCode -or $installer.ExitCode -ne 0) { throw "Setup.exe failed: $($installer.ExitCode)." }
+            # Resolve the shipped Chromium offline; no workstation browser cache.
+            $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $env:INSTALL_ROOT 'chromium'
+            Push-Location -LiteralPath $env:INSTALL_APP_ROOT
             try {
-            # Only allowlisted diagnostic tails: never upload config, providers or database files.
-            $secrets = @()
-            $safe = $true
-            $configPath = Join-Path $env:INSTALL_DATA_ROOT 'config.json'
-            if (Test-Path -LiteralPath $configPath) {
-              try {
-                $privateConfig = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-                $secrets = @($privateConfig.DatabasePassword, $privateConfig.AuthSecret) | Where-Object { $_ }
-              } catch { $safe = $false }
-            }
-            $logs = @('installer.out.log','installer.err.log')
-            if ($failed) { $logs += @('migrate.log','readiness.out.log','readiness.err.log','app.err.log','pg-control.out.log','pg-control.err.log','postgres.log','build.log') }
-            foreach ($name in $logs) {
-              $path = Join-Path $(if ($name.StartsWith('installer.')) { $env:INSTALL_HARNESS_DIR } else { $env:INSTALL_DATA_ROOT }) $name
-              if ($safe -and (Test-Path -LiteralPath $path)) {
-                $tail = (Get-Content -LiteralPath $path -Tail 160 -ErrorAction SilentlyContinue) -join "`n"
-                foreach ($secret in $secrets) { $tail = $tail.Replace([string]$secret,'[REDACTED]').Replace([Uri]::EscapeDataString([string]$secret),'[REDACTED]') }
-                $tail = $tail -replace '(?i)(postgres(?:ql)?://[^\s:/]+:)[^@\s]+@','$1[REDACTED]@'
-                if ($tail.Length -gt 65536) { $tail = $tail.Substring($tail.Length - 65536) }
-                $tail | Set-Content -LiteralPath (Join-Path $env:INSTALL_EVIDENCE_DIR "install-$name")
-              }
-            }
-            if ($failed) {
-              # Paths select this installation; evidence contains no command lines or environment.
-              $prefix = [IO.Path]::GetFullPath($env:INSTALL_DATA_ROOT).TrimEnd('\') + '\'
-              $ownedProcesses = @(Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -eq $installer.Id -or ($_.ExecutablePath -and $_.ExecutablePath.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase)) } | Select-Object ProcessId,ParentProcessId,Name,CreationDate)
-              ConvertTo-Json -InputObject $ownedProcesses | Set-Content -LiteralPath "$env:INSTALL_EVIDENCE_DIR\install-processes.json"
-            }
-            @{ failed=$failed; elapsedSeconds=([DateTime]::UtcNow-$started).TotalSeconds; maximumSeconds=1500; processId=$(if($installer){$installer.Id}else{$null}); exited=$(if($installer){$installer.HasExited}else{$null}); diagnosticLogsReadable=$safe } | ConvertTo-Json | Set-Content -LiteralPath "$env:INSTALL_EVIDENCE_DIR\installer-process.json"
-            } finally {
-            # Capture diagnostics before timeout cleanup. This is the process we spawned.
+              & "$env:INSTALL_ROOT\node\node.exe" --input-type=module -e 'import {chromium} from "playwright"; const browser=await chromium.launch(); const page=await browser.newPage(); await page.goto("http://127.0.0.1:4388/"); if(!(await page.title())) throw Error("Paper has no title"); await browser.close();'
+              if ($LASTEXITCODE -ne 0) { throw 'Bundled Chromium offline launch failed.' }
+            } finally { Pop-Location }
+            $installed = $true
+          } finally {
             if ($installer -and !$installer.HasExited) { $installer.Kill($true); [void]$installer.WaitForExit(10000) }
+            @{ outboundProbeFailed=$probeFailed; installed=$installed; elapsedSeconds=([DateTime]::UtcNow-$started).TotalSeconds; dataRootLength=$env:INSTALL_DATA_ROOT.Length; sourceCommit=$env:INSTALL_SOURCE_COMMIT; setupSha256=$env:INSTALL_SOURCE_SHA256 } | ConvertTo-Json | Set-Content -LiteralPath "$env:INSTALL_EVIDENCE_DIR\offline-install.json"
             if ($installer) { $installer.Dispose() }
-            }
+            if (!$installed) { Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
           }
-      - name: Refuse long ZIP paths before any extraction
-        shell: powershell
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $env:INSTALL_APP_ROOT 'installer\Install.ps1'), [ref]$null, [ref]$null)
-          foreach ($name in @('Get-ArchivePathInfo', 'Get-VerifiedDependency')) {
-            $fn = $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq $name}, $true)
-            if (!$fn) { throw "Missing installer function: $name" }
-            Invoke-Expression $fn.Extent.Text
-          }
-          # CI hosts may enable long paths. Model the Windows default without
-          # changing HKLM; the installer still generates its real short staging name.
-          function Get-ItemProperty { [pscustomobject]@{ LongPathsEnabled=0 } }
-          function Expand-Archive { throw 'Preflight allowed extraction of an overlong path.' }
-          $toolsRoot = Join-Path $env:INSTALL_LONG_DATA_ROOT 'tools'
-          New-Item -ItemType Directory -Path $toolsRoot -Force | Out-Null
-          $DownloadCache = Join-Path $env:INSTALL_DATA_ROOT 'tools'
-          $dependencies = Get-Content -LiteralPath (Join-Path $env:INSTALL_APP_ROOT 'installer\dependencies.json') -Raw | ConvertFrom-Json
-          foreach ($name in @('node', 'postgres')) {
-            $dependency = $dependencies.$name
-            $zipName = [IO.Path]::GetFileName(([uri]$dependency.url).AbsolutePath)
-            if (!(Test-Path -LiteralPath (Join-Path $DownloadCache $zipName))) { throw "Missing cached $name ZIP." }
-            $message = ''; $plan = $null
-            try { $plan = Get-VerifiedDependency $dependency $name } catch { $message = $_.Exception.Message }
-            if ($message -match 'path is too long:.*\\tools\\\.x[a-f0-9]{6}\\.*\([0-9]+ characters\).*Windows allows 259.*shorter -DataRoot.*C:\\TR') {
-              $message | Add-Content -LiteralPath (Join-Path $env:INSTALL_EVIDENCE_DIR 'long-path-preflight.log')
-            } elseif ($name -eq 'postgres' -and $plan -and $plan.Paths.ExtractionPath.Length -le 259 -and $plan.Paths.RuntimePath.Length -le 259) {
-              # PostgreSQL's entries can be shorter than Node's. Measure the
-              # actual ZIP rather than requiring a failure for a path that fits.
-              "PostgreSQL paths fit: extraction=$($plan.Paths.ExtractionPath.Length), runtime=$($plan.Paths.RuntimePath.Length)" | Add-Content -LiteralPath (Join-Path $env:INSTALL_EVIDENCE_DIR 'long-path-preflight.log')
-            } else {
-              throw "Expected actionable $name long-path refusal; got: $message"
-            }
-            if (Test-Path -LiteralPath (Join-Path $toolsRoot $dependency.directory)) { throw "$name was partially unpacked." }
-          }
-          if (@(Get-ChildItem -LiteralPath $toolsRoot -Directory -Force).Count) { throw 'Preflight created an extraction directory.' }
       - name: Verify browser workflow, stale-build refusal and restart persistence
         shell: pwsh
         run: |
           $config = Get-Content -LiteralPath "$env:INSTALL_DATA_ROOT\config.json" -Raw | ConvertFrom-Json
-          & $config.NodeExe "$env:INSTALL_APP_ROOT\scripts\windows-install-smoke.mjs" *> "$env:INSTALL_EVIDENCE_DIR\smoke.log"
+          & $config.NodeExe "$env:GITHUB_WORKSPACE\ci-source\scripts\windows-install-smoke.mjs" *> "$env:INSTALL_EVIDENCE_DIR\smoke.log"
           if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\smoke.log"; throw 'Packaged installation acceptance failed.' }
           Get-Content "$env:INSTALL_EVIDENCE_DIR\receipt.json"
       - name: Gate native ownership, credential ACL, lifecycle and Windows operations
@@ -306,7 +327,9 @@ jobs:
         run: |
           $config = Get-Content -LiteralPath "$env:INSTALL_DATA_ROOT\config.json" -Raw | ConvertFrom-Json
           $env:DATABASE_URL = ''
-          Push-Location -LiteralPath $env:INSTALL_APP_ROOT
+          # Source-only ESM test drivers resolve the shipped production packages.
+          New-Item -ItemType Junction -Path "$env:GITHUB_WORKSPACE\ci-source\node_modules" -Value "$env:INSTALL_APP_ROOT\node_modules" | Out-Null
+          Push-Location -LiteralPath "$env:GITHUB_WORKSPACE\ci-source"
           try {
             & $config.NodeExe --test scripts/windows-installer.test.mjs *> "$env:INSTALL_EVIDENCE_DIR\native-contracts.log"
             if ($LASTEXITCODE -ne 0) { Get-Content "$env:INSTALL_EVIDENCE_DIR\native-contracts.log"; throw 'Native installation contracts failed.' }
@@ -326,6 +349,94 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Owned installation cleanup failed.' }
           }
           if ($elapsed -ge 3600) { throw 'Installation acceptance exceeded one hour.' }
+      # One TownReporter per Windows user. The install above registered itself in
+      # the uninstall key Inno writes for this AppId, so a second Setup.exe run
+      # must refuse a different folder, and a re-run into the recorded folder must
+      # upgrade in place and leave the private newsroom data alone. The app is
+      # stopped by the step above. This runs after the measured acceptance window.
+      - name: Prove one installation only, so a second folder is refused and the recorded folder upgrades
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = $env:INSTALL_SOURCE_ARCHIVE
+          $dataRoot = $env:INSTALL_DATA_ROOT
+          $appRoot = $env:INSTALL_APP_ROOT
+          $evidence = $env:INSTALL_EVIDENCE_DIR
+          $config = Get-Content -LiteralPath "$dataRoot\config.json" -Raw | ConvertFrom-Json
+
+          function Invoke-InstallerScript([string]$Name, [switch]$NoBrowser) {
+            $arguments = @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',"$appRoot\installer\$Name.ps1",'-DataRoot',$dataRoot)
+            if ($NoBrowser) { $arguments += '-NoBrowser' }
+            & powershell.exe @arguments
+            if ($LASTEXITCODE -ne 0) { throw "$Name.ps1 failed while proving the one-installation rule." }
+          }
+          function Get-ArticleCount {
+            $env:PGPASSWORD = $config.DatabasePassword
+            try { $raw = & "$($config.PgBin)\psql.exe" -h 127.0.0.1 -p $config.PgPort -U townreporter -d townreporter -At -c 'select count(*) from articles;' }
+            finally { $env:PGPASSWORD = $null }
+            if ($LASTEXITCODE -ne 0) { throw 'psql could not read the articles table.' }
+            $text = ($raw | Out-String).Trim()
+            if ($text -notmatch '^\d+$') { throw "Unexpected article-count output: $text" }
+            return [int]$text
+          }
+          function Wait-Paper([string]$Path) {
+            $url = "http://127.0.0.1:$($config.Port)$Path"
+            for ($attempt = 1; $attempt -le 60; $attempt++) {
+              try { if ((Invoke-WebRequest -Uri $url -TimeoutSec 5).StatusCode -eq 200) { return } } catch { Start-Sleep -Seconds 2 }
+            }
+            throw "The paper did not answer at $url."
+          }
+          function Invoke-Setup([string]$Directory, [string]$LogName) {
+            $startInfo = [Diagnostics.ProcessStartInfo]::new($setup)
+            $startInfo.UseShellExecute = $true
+            $startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
+            $startInfo.Arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $Directory + '" /DATAROOT="' + $dataRoot + '" /LOG="' + (Join-Path $evidence $LogName) + '"'
+            $process = [Diagnostics.Process]::Start($startInfo)
+            try {
+              $null = $process.Handle
+              if (!$process.WaitForExit(1500000)) { throw 'Setup.exe exceeded its 25-minute deadline.' }
+              $process.Refresh()
+              if ($null -eq $process.ExitCode) { throw 'Setup.exe reported no exit code.' }
+              return $process.ExitCode
+            } finally { $process.Dispose() }
+          }
+
+          $configSha = (Get-FileHash -LiteralPath "$dataRoot\config.json" -Algorithm SHA256).Hash
+          $instanceId = $config.InstanceId
+          try {
+            # Baseline: the pre-upgrade build still serves the article the
+            # acceptance run published into the private database.
+            Invoke-InstallerScript 'Start' -NoBrowser
+            $before = Get-ArticleCount
+            if ($before -lt 1) { throw 'The acceptance installation has no article to preserve.' }
+            Wait-Paper '/'
+            Invoke-InstallerScript 'Stop'
+
+            # A second Setup.exe into a different folder is refused by the
+            # one-installation check and writes nothing.
+            $other = Join-Path $env:RUNNER_TEMP 'second newsroom'
+            $refused = Invoke-Setup $other 'refused-second-install.log'
+            if ($refused -eq 0) { throw 'Setup.exe accepted a second installation into a different folder.' }
+            $refusalLog = Get-Content -LiteralPath (Join-Path $evidence 'refused-second-install.log') -Raw
+            if ($refusalLog -notmatch 'PrepareToInstall failed') { throw 'The second installation did not stop at the one-installation check.' }
+            if (Test-Path -LiteralPath (Join-Path $other 'app')) { throw 'The refused Setup.exe still wrote its payload into the second folder.' }
+
+            # Re-running into the recorded folder upgrades in place and keeps the data.
+            if ((Invoke-Setup $env:INSTALL_ROOT 'upgrade-in-place.log') -ne 0) { throw 'Setup.exe could not upgrade the existing folder in place.' }
+            $after = Get-ArticleCount
+            if ($after -ne $before) { throw "The upgrade changed the article count from $before to $after." }
+            if ((Get-Content -LiteralPath "$dataRoot\config.json" -Raw | ConvertFrom-Json).InstanceId -cne $instanceId) { throw 'The upgrade replaced the installation identity.' }
+            if ((Get-FileHash -LiteralPath "$dataRoot\config.json" -Algorithm SHA256).Hash -cne $configSha) { throw 'The upgrade rewrote the existing configuration.' }
+            Wait-Paper '/'
+            @{ refusedExitCode=$refused; articlesBefore=$before; articlesAfter=$after; instanceId=$instanceId } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $evidence 'one-installation.json')
+          } finally {
+            & powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$appRoot\installer\Stop.ps1" -DataRoot $dataRoot *> (Join-Path $evidence 'one-installation-stop.log')
+          }
+      - name: Restore outbound networking after acceptance
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:INSTALL_FIREWALL_RULE) { Get-NetFirewallRule -DisplayName $env:INSTALL_FIREWALL_RULE -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

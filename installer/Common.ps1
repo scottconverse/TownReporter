@@ -279,7 +279,7 @@ function Set-AppEnvironment {
   $env:NODE_ENV = 'production'
   $env:TOWNREPORTER_TUNNEL = '0'; $env:TOWNREPORTER_LEGACY_OPS = '0'
   $env:TOWNREPORTER_DATA_ROOT = $DataRoot; $env:TOWNREPORTER_INSTANCE_ID = $config.InstanceId
-  $env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $DataRoot 'browsers'
+  $env:PLAYWRIGHT_BROWSERS_PATH = if ($config.BrowsersPath) { $config.BrowsersPath } else { Join-Path $DataRoot 'browsers' }
   $providerFile = Join-Path $DataRoot 'providers.json'
   if (Test-Path -LiteralPath $providerFile) {
     # TownReporter removed Grok (xAI) as a provider, so a providers.json that
