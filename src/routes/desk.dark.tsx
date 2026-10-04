@@ -1,3 +1,4 @@
+import { newestOpenFile, fullFileQuestion, signalCounts } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -222,7 +223,7 @@ function DarkPage() {
     if (autoOpened.current || !rows?.length) return;
     autoOpened.current = true;
     setOpenId((current) => current ??
-      [...rows].sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())[0].id);
+      newestOpenFile(rows)?.id ?? null);
   }, [investigations.data]);
 
   /*
@@ -798,6 +799,7 @@ function DarkPage() {
   }));
   const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
   const covered = worthRows.filter((row) => row.off);
+  const signalsCount = signalCounts(worthRows);
 
   return (
     /*
@@ -939,10 +941,10 @@ function DarkPage() {
 
           <div className="astra-pile">
             <div className="astra-pile-h">
-              <span>Signals to review</span>
-              <span>{inbox.length}</span>
+              <span>Signals</span>
+              <span>{signalsCount.total}</span>
             </div>
-            <p className="astra-note astra-pile-pad">New material. Nobody has opened it yet.</p>
+            <p className="astra-note astra-pile-pad">{signalsCount.toReview} to review · {signalsCount.covered} already accounted for.</p>
             {worth.isError && !worth.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
@@ -987,7 +989,7 @@ function DarkPage() {
             {covered.length ? (
               <details className="wire-more astra-pile-pad">
                 <summary>
-                  {covered.length} {covered.length === 1 ? "signal is" : "signals are"} not listed above
+                  {signalsCount.covered} {signalsCount.covered === 1 ? "signal is" : "signals are"} already accounted for
                 </summary>
                 {(expandedPiles.covered ? covered : covered.slice(0, 5)).map(({ item, off }) => (
                   <p key={item.id} className="wire-line">
@@ -1078,7 +1080,8 @@ function DarkPage() {
               <p className="meta astra-pile-pad">Nothing set aside yet.</p>
             ) : (
               (expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
-                <div key={row.id} className="astra-file dim astra-aside-file">
+                <div key={row.id} className={"astra-file dim astra-aside-file" + (row.id === openId ? " on" : "")}>
+                  {row.id === openId ? <span className="astra-file-m">Open now</span> : null}
                   <span className="astra-file-t" title={row.title}>{editorTitle(row.title) || `File ${row.id}`}</span>
                   <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>Read</InkButton>
                   <details className="row-more">
@@ -1316,7 +1319,7 @@ function DeskFileCard({
       >
         <span className="astra-file-t">{editorTitle(row.title) || `File ${row.id}`}</span>
         <span className="astra-file-m">
-          {editorStatus(row.status)} · {digRailCounterLine(records)}
+          {selected ? "Open now · " : ""}{editorStatus(row.status)} · {digRailCounterLine(records)}
           {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
           {formatListDateTime(row.updated_at)}
         </span>
@@ -1810,7 +1813,7 @@ function InvestigationWorkspace({
   const leftover = nextDeduped.length;
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
-  const parentTitle = inv?.title || `File ${openId}`;
+  const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
   const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
   const statusBit = !inv
     ? "Opening…"
@@ -1887,7 +1890,7 @@ function InvestigationWorkspace({
       */}
       <div>
         <p className="astra-label">The question</p>
-        <h2 className="astra-question">{parentTitle}</h2>
+        <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
         <p className="astra-note">{statusLine}</p>
       </div>
 

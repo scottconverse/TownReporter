@@ -153,7 +153,7 @@
 }
 .desk-ltr.astra button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 1;
 }
 .desk-ltr.astra :is(h2, h3) {
   font-family: var(--fd);
@@ -591,6 +591,12 @@
 .desk-ltr.astra .btn.gated {
   border: 2px dashed var(--fg2);
   color: var(--fg2);
+}
+.desk-ltr.astra :is(.btn, .document-add-button):disabled:not([data-phase="done"]) {
+  border: 2px dashed var(--fg2);
+  background: transparent;
+  color: var(--fg2);
+  opacity: 1;
 }
 .desk-ltr.astra .btn.solid.danger {
   background: var(--danger);
@@ -4403,10 +4409,18 @@
    existed: header lead track 346.188px against the rows' 212.438px. One
    number for both keeps the labels over their cells. Evidence and filed use
    their compact drawn widths so the lead keeps about 390px at desktop sizes;
-   below 1280px the supporting cells move under the lead. */
+   below 1280px the supporting cells move under the lead.
+
+   Owner, 2026-10-03: 202px was measured for two controls, Start story + More ▾.
+   The fast kill puts a THIRD press in this cell (the row's own inline Kill), so
+   the track is widened to hold it -- and to hold it while it is mid-press, when
+   it draws "Killing…" instead of "Kill". `.queue-acts > .btn` is `flex-shrink:
+   0` and the cell is `nowrap` at this width, so a track that only fitted the
+   resting labels would not squeeze the third button: it would print it over the
+   filed age beside it. */
 .desk-ltr.astra .lead-list.roomy,
 .desk-ltr.astra .queue-head {
-  --queue-acts-w: calc(202px * var(--ts));
+  --queue-acts-w: calc(300px * var(--ts));
 }
 .desk-ltr.astra .lead-list.roomy .lead-row {
   grid-template-columns: 44px 52px minmax(0, 1fr) 140px 90px var(--queue-acts-w);
@@ -4809,7 +4823,7 @@
 
 @media (max-width: 700px) {
   .desk-ltr.astra .lead-list.roomy .queue-acts {
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
     flex-wrap: wrap;
   }
 }
@@ -6239,6 +6253,7 @@
 .desk-ltr.astra .astra-plain > li.astra-row.opinion {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
   text-align: left;
 }
 /*
@@ -7580,7 +7595,57 @@
   padding: 10px 12px;
   font: inherit;
 }
-.desk-ltr .r2-correction-fields > .check-line { display: flex; align-items: center; gap: 10px; }
+.desk-ltr .r2-correction-fields > .check-line { display: flex; align-items: center; gap: 14px; }
+.desk-ltr .design-check {
+  min-height: 44px;
+  gap: 14px;
+  cursor: pointer;
+}
+.desk-ltr .design-check > input[type="checkbox"] {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  margin: 0;
+  border: 2px solid var(--fg);
+  background: var(--bg);
+  cursor: pointer;
+}
+.desk-ltr .design-check > input[type="checkbox"]:checked {
+  background: var(--fg);
+}
+.desk-ltr .design-check > input[type="checkbox"]:checked::after {
+  content: "✓";
+  display: block;
+  color: var(--bg);
+  text-align: center;
+  font-size: 18px;
+  line-height: 20px;
+}
+.desk-ltr .design-check > input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+}
+.desk-ltr.astra .r2-published-label { display: none; }
+.desk-ltr.astra :is(.story-redraft-overflow, .story-check-overflow) { display: none; }
+.desk-ltr.astra :is(.story-redraft-overflow, .story-check-overflow) > .btn { width: 100%; }
+@media (max-width: 699px) {
+  .desk-ltr.astra .r2-published-label { display: inline; font-size: 14px; font-weight: 700; }
+  .desk-ltr.astra .astra-row.pub > .astra-cell { gap: 14px; }
+}
+@media (max-width: 980px) {
+  .desk-ltr.astra :is(.story-redraft-inline, .story-check-inline) { display: none; }
+  .desk-ltr.astra :is(.story-redraft-overflow, .story-check-overflow) { display: flex; }
+  .desk-ltr.astra .work-bar.astra-story-actions:has(.story-redraft-inline) {
+    flex-wrap: nowrap;
+    gap: 14px;
+  }
+  .desk-ltr.astra .astra-story-actions:has(.story-redraft-inline) > .btn,
+  .desk-ltr.astra .astra-story-actions:has(.story-redraft-inline) > .story-more > summary {
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+}
 @media (max-width: 699px) {
   .desk-ltr.astra .r2-scan-head { display: none; }
   .desk-ltr.astra .r2-scan-row { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 18px 0; }
@@ -7707,6 +7772,83 @@
   font-weight: 600;
   color: inherit;
   overflow-wrap: anywhere;
+}
+
+/*
+   THE FAST KILL'S CHIPS (owner, 2026-10-03): the sentence on one line, the
+   reason chips under it, inside the same card.
+
+   `desk-toast.ts` builds this body itself rather than using sonner's
+   `description` slot, so `[data-title]` holds a column: the sentence, then the
+   row of chips. The gap between the two lines is the desk's own 14px-family
+   measure (10px, the same spacing the card uses between its title and its Undo)
+   and not sonner's default spacing between siblings, which the desk does not
+   control.
+
+   The chips WRAP rather than being pinned to one line. Six 44px chips with
+   their labels are about 470px of content and the stack is sonner's own 356px,
+   so they take two lines on the desktop and more on a phone; the card grows
+   downward, which is why the kill toast is allowed the longer life
+   (`KILL_TOAST_MS`, `fast-kill.ts`). A narrower chip -- a 2px border, less
+   padding -- is the one thing that must NOT be used to make them fit: the 44px
+   target is the design system's floor for every press on this desk
+   (design-system/README.md:120), and a chip an editor has to aim at is the
+   dialog's problem wearing a smaller hat.
+*/
+.desk-ltr .desk-toaster .desk-toast-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+.desk-ltr .desk-toaster .desk-toast-line {
+  overflow-wrap: anywhere;
+}
+.desk-ltr .desk-toaster .desk-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* 14px between chips on a line, 10px between the lines -- the desk's own
+     measures (design-system: 14px is the standard gap, 10px the tighter one it
+     already uses inside a control). */
+  column-gap: 14px;
+  row-gap: 10px;
+}
+.desk-ltr .desk-toaster .desk-chips-ask,
+.desk-ltr .desk-toaster .desk-chips-kept {
+  font-size: calc(14px * var(--ts));
+  font-weight: 600;
+  color: inherit;
+}
+/*
+   The chip itself: the desk's `.chip` shape (1px rule, 800 weight, 14px,
+   square) with the 44px target the row buttons have. `pointer-events` comes
+   back because the toast region is `none` -- only the pressable things take
+   presses, and a chip is one of them now, exactly like the Undo and the ✕.
+
+   `currentColor`, not `--fg2`, for both the rule and the word: this card is the
+   yellow accent, and the desk's first toast rule is that text on yellow is
+   `#111` in BOTH themes (design-system §3, and why the card above hardcodes
+   `#111` instead of reading `--fg`). `--fg2` is bone in night mode, which on
+   this card is a chip nobody can read -- so the chip takes the ink the card
+   already chose, the same thing the Undo button beside it does.
+*/
+.desk-ltr .desk-toaster .desk-chip {
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid currentColor;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font-family: var(--fd);
+  font-size: calc(14px * var(--ts));
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.desk-ltr .desk-toaster .desk-chip:hover {
+  background: rgba(17, 17, 17, 0.08);
 }
 
 /*
@@ -7946,3 +8088,34 @@
   outline: 2px solid var(--fg);
   outline-offset: 2px;
 }
+
+/* The Set aside rail keeps the title inside its own track at every width. */
+.desk-ltr.astra .astra-aside-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-aside-file .astra-file-t {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-aside-file > .astra-file-m { grid-column: 1 / -1; }
+.desk-ltr.astra .astra-question { overflow-wrap: anywhere; }
+.desk-ltr.astra .queue-delete-reasons { flex-basis: 100%; padding-left: 20px; overflow-wrap: anywhere; }
+
+.desk-ltr.astra .queue-release-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  margin-bottom: 14px;
+  background: var(--a);
+  color: #111;
+  border: 2px solid #111;
+}
+.desk-ltr.astra .queue-release-message .btn { color: #111; border-color: #111; }
