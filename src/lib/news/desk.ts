@@ -14,7 +14,7 @@ import { deskMiddleware } from "./desk-auth";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
-import { parseHttpUrl, parseSourceLines } from "./source-lines.ts";
+import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
@@ -304,7 +304,7 @@ export const bootstrapDesk = createServerFn({ method: "POST" })
 async function querySourceRows(context: { userId: string; newsroomId: number }) {
   await ensureSeeds(context.userId, owned(context));
   const sql = await getSql();
-  return sql<SourceRow>`
+  const rows = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
              -- the row can say "Keeps failing" rather than repeating the last
@@ -353,6 +353,7 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
         case when status = 'proposed' then id end desc,
         id asc
     `;
+  return rows.map((row) => ({ ...row, title: sourceName(row.title) }));
 }
 
 /**

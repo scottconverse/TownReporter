@@ -1077,7 +1077,7 @@
    so it never reads as a second kind of disabled button. */
 .desk-ltr .btn.gated {border:2px dashed var(--fg2);color:var(--fg2)}
 .desk-ltr .btn.danger.solid:hover:not(:disabled) {opacity:.85}
-.desk-ltr .btn:disabled {opacity:.45;cursor:not-allowed}
+.desk-ltr .btn:disabled {opacity:1;cursor:not-allowed;border:2px dashed var(--fg2);background:transparent;color:var(--fg2)}
 .desk-ltr .btn.queue-done {text-decoration:none;border-color:var(--fg);background:color-mix(in srgb,var(--fg) 10%,transparent)}
 .desk-ltr .btn.queue-done:hover {background:color-mix(in srgb,var(--fg) 18%,transparent)}
 .desk-ltr .inline-link {color:var(--adeep);text-decoration:underline;text-underline-offset:3px;font-size:inherit}

@@ -973,7 +973,7 @@ function PublishedPage() {
                       rather than retyping the story from memory. The two are
                       posted together, in one transaction.
                     */}
-                    <label className="check-line">
+                    <label className="check-line design-check">
                       <input
                         type="checkbox"
                         checked={corrFixBySlug[p.slug] === true}
@@ -1041,10 +1041,12 @@ function PublishedPage() {
               */}
               <div className="astra-cell">
                 <span className="astra-row-num">
+                  <span className="r2-published-label">Views: </span>
                   {viewStats.isError ? "—" : (viewsBySlug.get(p.slug) ?? 0).toLocaleString()}
                 </span>
               </div>
               <div className="astra-cell">
+                <span className="r2-published-label">Corrections:</span>
                 {p.corrections.length > 0 ? (
                   <span className="astra-row-meta">
                     {p.corrections.length} correction{p.corrections.length === 1 ? "" : "s"}
