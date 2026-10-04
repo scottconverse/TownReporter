@@ -1540,43 +1540,118 @@ export function resurfacedSummarySentence(input: {
 }
 
 /**
- * What the pass deliberately left out, in the editor's words.
+ * THE COUNTS OF WHAT THE PASS DECIDED, in one short plain sentence.
  *
- * Scan quality (2026-10-03): the scan now drops candidates that are standing
- * pages rather than news events -- obituaries indexes, directory pages,
- * projects indexes, hours pages -- by the cheap rules in
- * ./lead-newsworthiness.ts and the model's own `is_event` verdict (see
- * `fileScanLeads`). A drop is a decision, and a decision the editor cannot see
- * is indistinguishable from a miss, so the run names the count, the first
- * example, and the reason the desk would read. This is Reuters Tracer's rule
- * that an event-scoring decision stays explainable, and it is the same shape as
- * `resurfacedSummarySentence` next door.
+ * Scan quality round 2 (2026-10-04): a drop or a stamp is a decision, and a
+ * decision the editor cannot read is indistinguishable from a miss. This
+ * desk already writes a sentence for each kind of decision -- the drops
+ * (standing pages and candidates the scan read as no event; see
+ * ./lead-newsworthiness.ts and `fileScanLeads`) and the repeats stamped onto a
+ * row already in the paper -- but the run's editor summary is the model's own
+ * paragraph about the capture, and that paragraph routinely runs to the
+ * 1200-character budget the summary column allows. Anything the desk stitched
+ * on after it was silently cut off, and the counts went missing exactly that
+ * way: on the 2026-10-03 dev scan the paragraph ended mid-word at the limit
+ * and the run reported no dropped or stamped counts at all.
  *
- * Silent at zero: a run that dropped nothing says nothing, the way an ordinary
- * scan with nothing to flag does today.
+ * So this is deliberately ONE short plain sentence -- counts only, no desk
+ * jargon -- and it is laid down ahead of the model's paragraph whenever any
+ * count is above zero (see `scanRunSummary` in ./desk.ts, which reserves room
+ * for it). The paragraph is what gives way, never the counts. The first
+ * candidate left out rides along as an "e.g." so a shorter Queue is
+ * reviewable rather than mysterious -- Reuters Tracer's rule that a scoring
+ * decision stays explainable.
+ *
+ * Silent when all three counts are zero: a run that decided nothing says
+ * nothing.
  */
-export function droppedCandidatesSentence(input: {
+export function scanDecisionsSentence(input: {
   standingPageDropped: number;
   noEventDropped: number;
+  /** Repeats stamped onto a row already in the paper instead of refiled --
+   * `resurfacedKilled + resurfacedOpen` from `fileScanLeads`. */
+  repeatsStamped: number;
+  /** The first candidate left out, for the "e.g." clause. */
   firstDroppedReason?: { headline: string; reason: string };
 }): string {
-  const total = input.standingPageDropped + input.noEventDropped;
-  if (total <= 0) return "";
-  const bits: string[] = [];
+  const dropped: string[] = [];
   if (input.standingPageDropped > 0) {
-    bits.push(
-      `${input.standingPageDropped} standing page${input.standingPageDropped === 1 ? "" : "s"} (not a news event)`,
-    );
+    dropped.push(`${input.standingPageDropped} standing page${input.standingPageDropped === 1 ? "" : "s"}`);
   }
   if (input.noEventDropped > 0) {
-    bits.push(
-      `${input.noEventDropped} candidate${input.noEventDropped === 1 ? "" : "s"} the scan read as no event`,
+    dropped.push(`${input.noEventDropped} non-event${input.noEventDropped === 1 ? "" : "s"}`);
+  }
+  const clauses: string[] = [];
+  if (dropped.length) {
+    const first = input.firstDroppedReason;
+    const headline = first?.headline?.trim();
+    const reason = first?.reason?.trim();
+    const example = headline
+      ? ` — e.g. '${headline.slice(0, 120)}'${reason ? `: ${reason.slice(0, 140)}` : ""}`
+      : "";
+    clauses.push(`left out ${dropped.join(" and ")}${example}`);
+  }
+  if (input.repeatsStamped > 0) {
+    clauses.push(
+      `stamped ${input.repeatsStamped} repeat${input.repeatsStamped === 1 ? "" : "s"} onto stories already in the paper`,
     );
   }
-  const first = input.firstDroppedReason;
-  const example = first?.headline?.trim() ? ` — e.g. '${first.headline.slice(0, 120)}'` : "";
-  const why = first?.reason?.trim() ? `: ${first.reason}` : "";
-  return `Left out ${bits.join(" and ")}${example}${why}.`;
+  if (!clauses.length) return "";
+  return `This scan ${clauses.join("; ")}.`;
+}
+
+/**
+ * Assemble a scan run's persisted `scan_runs.summary` from the model's own
+ * paragraph and the desk's own sentences.
+ *
+ * Scan quality round 2 (2026-10-04). The model's paragraph and the desk's
+ * sentences share ONE 1200-character column (there is no second column for the
+ * counts), and the paragraph -- not the counts -- is what must give way when
+ * they do not fit. Before this, each sentence was stitched onto the paragraph
+ * and the whole thing re-sliced, so a paragraph that ran to the budget erased
+ * every count behind it: the 2026-10-03 dev scan's summary ended mid-word at
+ * the limit and reported no dropped or stamped counts at all (see
+ * `scanDecisionsSentence`).
+ *
+ * So the desk's sentences are laid down FIRST and the paragraph is trimmed to
+ * the room that is left, ending on a sentence boundary when one is reasonably
+ * close. The counts are the receipt for a decision; the paragraph is the
+ * colour.
+ *
+ * Pure, and extracted from `scanRunSummary` in ./desk.ts so the folding -- the
+ * coverage line and the counts both reaching the persisted value -- is a
+ * behavior this repo can test without a database.
+ */
+export function composeScanRunSummary(input: {
+  /** The model's paragraph, or "" -- the caller may have already substituted a
+   *  zero-lead fallback (`composeZeroLeadSummary`). */
+  editorSummary: string;
+  /** The decisions sentence (`scanDecisionsSentence`), or "". */
+  decisionsSentence?: string;
+  /** The other-decisions sentence (`resurfacedSummarySentence`), or "". */
+  resurfacedSentence?: string;
+  /** The meetings coverage line, or "". Must survive into the result. */
+  meetingCoverageLine?: string;
+  /** The column's own cap. Defaults to the 1200 the summary column has had. */
+  summaryLimit?: number;
+}): string {
+  const limit = input.summaryLimit ?? 1200;
+  const tail = [input.decisionsSentence ?? "", input.resurfacedSentence ?? "", input.meetingCoverageLine ?? ""]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ");
+  let summary = String(input.editorSummary ?? "").trim();
+  if (tail) {
+    const room = Math.max(0, limit - tail.length - 1);
+    if (summary.length > room) {
+      const cut = summary.slice(0, room);
+      // Prefer to end the paragraph on a full sentence rather than mid-word.
+      const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+      summary = (stop >= Math.floor(room / 2) ? cut.slice(0, stop + 1) : cut).trim();
+    }
+    summary = summary ? `${summary} ${tail}` : tail;
+  }
+  return summary.slice(0, limit);
 }
 
 export function composeZeroLeadSummary(input: { fetched: number; changed: number }): string {

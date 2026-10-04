@@ -29,6 +29,7 @@
  */
 
 import type { DraftAuditFinding } from "./draft-audit.ts";
+import type { DraftGroundingRow } from "./draft-specifics.ts";
 import type { EvidenceCheckState } from "./evidence-check-state.ts";
 import { PAPER, formatClockTime } from "../paper.ts";
 import type {
@@ -40,6 +41,16 @@ import type {
 } from "./finding-evidence-review.ts";
 import type { NameCheck } from "./name-check.ts";
 import type { NoteTodo } from "./notes.ts";
+
+/** What a grounding row's kind is called on the Checks pane. */
+const GROUNDING_KIND_LABEL: Record<DraftGroundingRow["kind"], string> = {
+  address: "address",
+  amount: "amount",
+  date: "date",
+  identifier: "identifier",
+  name: "name",
+  vote: "vote tally",
+};
 
 /**
  * The four chip shapes the drawing names. `ok` and `warn` are the two status
@@ -311,6 +322,15 @@ export function evidenceCheckRows(input: {
   nameCheck: NameCheck | null;
   /** Every finding this draft's audit raises, fixes and reviews together. */
   styleFindings: readonly DraftAuditFinding[];
+  /**
+   * Round 2, item 5: the specifics the finished draft states (a name, a number,
+   * a vote tally, a date, an address) that no text the check could read carries.
+   * Measured in code at draft time (`draftGrounding` in the research memo) and
+   * re-read here. Each is a thing the desk refuses to print unchecked, so it
+   * wears the review chip and carries no record to open -- like an absence
+   * claim, only a person can settle it.
+   */
+  groundingRows?: readonly DraftGroundingRow[];
 }): EvidenceListRow[] {
   const list: EvidenceListRow[] = [];
 
@@ -372,6 +392,26 @@ export function evidenceCheckRows(input: {
       tone: "warn",
       what: todo.t.trim(),
       note: todo.q?.trim() ? `The gate searched: ${todo.q.trim()}` : "Confirmation is still outstanding.",
+      action: null,
+      ref: null,
+    });
+  }
+
+  for (const row of input.groundingRows ?? []) {
+    /*
+      A specific the draft states that nothing the check could read carries --
+      not a claim that failed a check but one the desk refuses to print until a
+      person confirms it, the same shape as an absence claim above. It names the
+      kind so an editor can tell an invented date from an invented name, and it
+      opens to nothing: there is no record to open, only the source the writer
+      should have had.
+    */
+    list.push({
+      key: `grounding:${row.kind}:${row.text}`,
+      chip: "! Needs review",
+      tone: "warn",
+      what: row.text.trim(),
+      note: `Not in any source the check could read (${GROUNDING_KIND_LABEL[row.kind]}).`,
       action: null,
       ref: null,
     });

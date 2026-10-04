@@ -42,6 +42,7 @@
 
 import { judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
+import type { DraftGroundingRow } from "./draft-specifics.ts";
 import type {
   ClaimEvidenceRow,
   FindingCaptureEvidence,
@@ -131,8 +132,16 @@ export function claimsNeedingReview(
   rows: readonly FindingEvidenceRow[],
   claimRows: readonly ClaimEvidenceRow[],
   manualClaimRows: readonly ManualClaimEvidenceRow[],
+  /**
+   * Round 2, item 5: the draft's ungrounded specifics. They wear the same
+   * `! Needs review` chip as the row stacks (`evidenceCheckRows` hardcodes it),
+   * so they are counted here for the same reason every other such row is: the
+   * blocker's number and the pane's number of `! Needs review` rows must be the
+   * same number, and this is the one place that number is computed.
+   */
+  groundingRows: readonly DraftGroundingRow[] = [],
 ): number {
-  let count = 0;
+  let count = groundingRows.length;
   for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
     if (judgmentChip(row.judgment.value, row.captures).chip === NEEDS_REVIEW_CHIP) count += 1;
   }
@@ -191,8 +200,15 @@ export function evidenceCheckState(input: {
   toReview: number;
   /** How many of `toReview` the record contradicts. Defaults to none. */
   contradicted?: number;
+  /**
+   * Round 2, item 5: the draft's ungrounded specifics, already counted inside
+   * `toReview` (they are rows of the pane's list). Counted here too so a draft
+   * whose ONLY finding is an invented figure still reads as "a check ran" -- the
+   * measurement is the run's output, like the findings and the absence claims.
+   */
+  grounding?: number;
 }): EvidenceCheckState {
-  const fromTheRun = input.findings + input.claims + input.manualClaims;
+  const fromTheRun = input.findings + input.claims + input.manualClaims + (input.grounding ?? 0);
   return {
     ran: input.recorded || fromTheRun > 0 || input.openClaims > 0,
     toReview: input.toReview,
@@ -206,6 +222,8 @@ type ReviewLike = {
   rows: readonly FindingEvidenceRow[];
   claimRows: readonly ClaimEvidenceRow[];
   manualClaimRows: readonly ManualClaimEvidenceRow[];
+  /** Round 2, item 5: the draft's ungrounded specifics, when it carries any. */
+  groundingRows?: readonly DraftGroundingRow[];
 };
 
 /**
@@ -229,8 +247,9 @@ export function reviewEvidenceCheckState(input: {
     claims: review?.claimRows.length ?? 0,
     manualClaims: review?.manualClaimRows.length ?? 0,
     openClaims: input.openClaims,
+    grounding: review?.groundingRows?.length ?? 0,
     toReview: review
-      ? claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows)
+      ? claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows, review.groundingRows ?? [])
       : 0,
     contradicted: review
       ? contradictedClaims(review.rows, review.claimRows, review.manualClaimRows)

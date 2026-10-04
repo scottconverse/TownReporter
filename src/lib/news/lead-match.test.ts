@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   findMatchingLead,
   matchStrength,
+  newFactsIn,
   normalizeSourceUrl,
   extractAnchors,
   properNounStoplist,
@@ -754,5 +755,63 @@ describe("matchStrength", () => {
   it("returns null when either headline is empty", () => {
     assert.equal(matchStrength({ headline: "", source_urls: SAME_URL }, existingLead("Anything at all here")), null);
     assert.equal(matchStrength({ headline: "Anything at all here", source_urls: SAME_URL }, existingLead("")), null);
+  });
+});
+
+/**
+ * R2, item 1 (2026-10-04): what counts as a NEW FACT.
+ *
+ * `newFactsIn` answers the only question that separates a resurfacing from a
+ * development: does the finding state a concrete anchor -- a date, an amount, a
+ * number -- that the existing lead does not state anywhere? The dev scan's 429
+ * is why the HEADLINE is read on both sides. The killed 367 it repeats
+ * ("Longmont Library Closed All Day Oct. 6 for Staff Training") carries "Oct. 6"
+ * in its own headline and nothing in its `why`; the finding 429 carries the same
+ * "Oct. 6". While `why` + `evidence` only were read, the old side had no anchor
+ * at all, the shared "Oct. 6" looked new, and the repeat was filed as a
+ * development -- one story on the desk twice. A date the old lead already states
+ * is not a new fact, wherever the old lead states it.
+ */
+describe("newFactsIn: a date the old lead states only in its HEADLINE is not a new fact", () => {
+  it("stamps the dev-429 repeat whose only anchor the killed row already had (red without headline)", () => {
+    // red without the round-2 change: with the headline excluded from
+    // `factAnchors`, the killed row's blank why/evidence leaves the old side
+    // with NO anchor, so the shared Oct. 6 reads as new and this returns true.
+    assert.equal(
+      newFactsIn(
+        { headline: "Longmont Library Closed Oct. 6 for All-Staff Training Day", why: "The library closes Oct. 6 for staff training." },
+        { headline: "Longmont Library Closed All Day Oct. 6 for Staff Training", why: null, evidence: null },
+      ),
+      false,
+    );
+  });
+
+  it("still passes a genuinely changed fact, whether it sits in the headline or the why", () => {
+    // A new date the old lead never states anywhere -- the development the bar
+    // is FOR -- is not swallowed by the headline change.
+    assert.equal(
+      newFactsIn(
+        { headline: "Longmont Museum Reopens Oct. 17", why: "The reopening slipped to Oct. 24." },
+        { headline: "Longmont Museum Reopens Oct. 17", why: null, evidence: null },
+      ),
+      true,
+    );
+    assert.equal(
+      newFactsIn(
+        { headline: "Council sets the 2027 budget vote for Nov. 17" },
+        { headline: "Council to take up the 2027 budget" },
+      ),
+      true,
+    );
+  });
+
+  it("a reworded headline alone is never a new fact", () => {
+    assert.equal(
+      newFactsIn(
+        { headline: "Longmont Library Shut All Day Oct. 6 for Training" },
+        { headline: "Longmont Library Closed All Day Oct. 6 for Staff Training" },
+      ),
+      false,
+    );
   });
 });

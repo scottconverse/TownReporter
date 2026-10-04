@@ -157,11 +157,17 @@ describe("scan 66 repeats of an earlier lead (lead-match, real rows)", () => {
     assert.equal(grade(421, 330), "strong");
   });
 
-  it("424 repeats killed 233 (Harvest of Hope 31,260 visits / 1,016,373 items) as possible, and does not repeat the water report", () => {
-    // 424x233 is "possible" on main too: the grey zone, which is the AI
-    // duplicate check's job (dup_ai_*), so this assertion alone is green on
-    // both sides.
-    assert.equal(grade(424, 233), "possible");
+  it("424 repeats killed 233 (Harvest of Hope 31,260 visits / 1,016,373 items) as strong, and does not repeat the water report", () => {
+    // Round 2 (2026-10-04): this pair used to grade "possible" -- the grey zone
+    // left to the desk's AI check. It moved to "strong" with the same fix that
+    // makes the AI's Title-Case candidates match at all: subjectsAgree now reads
+    // an EMPTY subject side as agreement (see lead-match.ts). 424 is Title Case
+    // throughout, so contentTokens is empty on its side; the killed 233 spells
+    // the same annual report in sentence case. The two carry the SAME two
+    // figures (31,260 and 1,016,373), the same pantry and the same year at >=
+    // 0.85 of the characters, so it is one story and the repeat is stamped
+    // rather than filed -- exactly what item 1 of round 2 asked for.
+    assert.equal(grade(424, 233), "strong");
     // red on main: 424 vs 355 was "possible" -- two stories that share only the
     // pantry's homepage among their source URLs, merged by URL overlap alone.
     assert.equal(grade(424, 355), null);

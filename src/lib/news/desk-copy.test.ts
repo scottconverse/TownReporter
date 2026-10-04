@@ -73,6 +73,7 @@ import {
   createEditorCopy,
   inviteMessage,
   resurfacedSummarySentence,
+  scanDecisionsSentence,
   resolveDraftJobState,
   recoveringDraftCopy,
   DRAFT_JOB_STALE_AFTER_SECONDS,
@@ -214,6 +215,64 @@ describe("resurfacedSummarySentence (QA-1: a merge is never invisible)", () => {
         resurfacedSummarySentence({ resurfacedKilled: 2, resurfacedOpen: 1 }),
         "2 leads matched stories you already killed and were stamped, not refiled; 1 matched an open lead.",
       );
+    });
+  });
+
+  // Scan quality round 2, item 4: the run summary must always say what the pass
+  // dropped and stamped when above zero. The dev run of 2026-10-03 reported no
+  // counts at all because the model's paragraph filled the summary budget and
+  // the desk's sentence was cut off the end; this sentence is written first and
+  // the paragraph gives way (see `scanRunSummary` in ./desk.ts).
+  describe("scanDecisionsSentence (round-2 item 4: counts are never silent)", () => {
+    it("names the dropped and stamped counts in one short plain sentence", () => {
+      const sentence = scanDecisionsSentence({
+        standingPageDropped: 2,
+        noEventDropped: 1,
+        repeatsStamped: 3,
+        firstDroppedReason: {
+          headline: "Longmont Public Library Lists Regular Hours",
+          reason: "title names a directory/index page, not an event",
+        },
+      });
+      assert.match(sentence, /^This scan left out 2 standing pages and 1 non-event/);
+      assert.match(sentence, /— e\.g\. 'Longmont Public Library Lists Regular Hours': title names a directory\/index page, not an event/);
+      assert.match(sentence, /; stamped 3 repeats onto stories already in the paper\.$/);
+    });
+
+    it("speaks when only repeats were stamped -- the dev run's own case", () => {
+      // On the dev scan the only decisions above zero were the stamped repeats;
+      // the sentence has to carry them with no drops to lean on.
+      const sentence = scanDecisionsSentence({
+        standingPageDropped: 0,
+        noEventDropped: 0,
+        repeatsStamped: 8,
+      });
+      assert.equal(sentence, "This scan stamped 8 repeats onto stories already in the paper.");
+    });
+
+    it("says nothing when every count is zero", () => {
+      assert.equal(
+        scanDecisionsSentence({ standingPageDropped: 0, noEventDropped: 0, repeatsStamped: 0 }),
+        "",
+      );
+    });
+
+    it("uses the singular for a count of one", () => {
+      const sentence = scanDecisionsSentence({
+        standingPageDropped: 1,
+        noEventDropped: 0,
+        repeatsStamped: 1,
+      });
+      assert.equal(sentence, "This scan left out 1 standing page; stamped 1 repeat onto stories already in the paper.");
+    });
+
+    it("carries the count even when no example headline came through", () => {
+      const sentence = scanDecisionsSentence({
+        standingPageDropped: 2,
+        noEventDropped: 0,
+        repeatsStamped: 0,
+      });
+      assert.equal(sentence, "This scan left out 2 standing pages.");
     });
   });
 

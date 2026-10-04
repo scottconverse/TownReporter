@@ -99,11 +99,30 @@ const answering = (same: boolean, why: string): DupCheckChat =>
 
 const failing: DupCheckChat = async () => ({ ok: false, error: "timed out after 90000ms" });
 
+/*
+ * Round 2 item 1 (2026-10-04): the real dev-scan pair. The word rule rated the
+ * pair "possible"; the desk's check then READ BOTH and answered "same story",
+ * and the finding states no date, amount or number the killed row did not. The
+ * live run filed it anyway -- one story on the desk twice. Both rows below are
+ * copied from leads-30d.csv (336 and the dev run's 419).
+ */
+const HHSS_PAGE =
+  "https://longmont.primegov.com/Public/CompiledDocument?meetingTemplateId=17299&compileOutputType=1";
+const HHSS_KILLED_HEADLINE = "Housing and Human Services Advisory Board Cancels Oct. 8 Meeting";
+const HHSS_CANDIDATE = {
+  headline: "Longmont Housing and Human Services Board Schedules October Funding Hearings",
+  why: "October funding hearings are scheduled.",
+  topic: "council",
+  source_urls: [HHSS_PAGE],
+};
+
 type FiledRow = {
   id: number;
   status: string;
   possible_duplicate_of: number | null;
   dup_kind: string | null;
+  resurfaced_count: number;
+  last_resurfaced_scan_run_id: number | null;
   dup_ai_same: boolean | null;
   dup_ai_why: string | null;
   dup_ai_target: string | null;
@@ -116,6 +135,7 @@ type FiledRow = {
 
 async function filedRows(sql: SqlTag): Promise<FiledRow[]> {
   return sql<FiledRow>`select id, status, possible_duplicate_of, dup_kind,
+    resurfaced_count, last_resurfaced_scan_run_id,
     dup_ai_same, dup_ai_why, dup_ai_target,
     dup_ai_printed_same, dup_ai_printed_why, dup_ai_printed_slug,
     dup_ai_model, dup_ai_checked_at from leads order by id`;
@@ -264,6 +284,92 @@ describe("U28: the duplicate check settles the link the matcher only guessed at"
       assert.equal(filed!.dup_ai_same, true);
       assert.equal(filed!.dup_ai_why, "same two executive sessions, same Sept. 22 and Sept. 29 dates");
       assert.equal(filed!.dup_ai_target, EXISTING_HEADLINE);
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("a 'yes' with no new fact stamps the matched lead and files nothing (round 2 item 1)", async () => {
+    // red without the round-2 branch in fileScanLeads (lead-filing.ts): with it
+    // removed, this pair falls to the tier's default and a second HELD row is
+    // filed -- one story on the desk twice, which is the defect item 1 names.
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${HHSS_KILLED_HEADLINE}, ${"The board cancelled its Oct. 8 meeting."},
+                ${"council"}, ${"killed"},
+                ${JSON.stringify([HHSS_PAGE])}, 6)
+        returning id
+      `;
+      const existing = [
+        {
+          id: seeded[0]!.id,
+          status: "killed",
+          headline: HHSS_KILLED_HEADLINE,
+          source_urls: [HHSS_PAGE],
+        },
+      ];
+      const { pairs } = collectDupPairs({ candidates: [HHSS_CANDIDATE], existing, printed: [], place: PLACE });
+      assert.equal(pairs.length, 1, "the word rule rated the pair 'possible', so the desk asks about it");
+      const outcome = await runDupCheck({
+        pairs,
+        chat: answering(true, "the same funding-hearing notice for the same board"),
+      });
+
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 905, [HHSS_CANDIDATE], existing, PLACE, outcome);
+
+      assert.equal(result.leadsCreated, 0, "a resurfacing is a stamp, not a row");
+      assert.equal(result.resurfacedKilled, 1, "and the run's own record calls it a resurfacing");
+      assert.equal(result.possibleMatched, 0, "the link the word rule only guessed at is not made");
+      assert.equal(result.dupCheckCleared, 0, "this is not the 'not the same' path either");
+      const rows = await filedRows(sql);
+      assert.equal(rows.length, 1, "the only row on the desk is the one that was already there");
+      assert.equal(rows[0]!.id, seeded[0]!.id);
+      assert.equal(rows[0]!.resurfaced_count, 1);
+      assert.equal(rows[0]!.last_resurfaced_scan_run_id, 905, "and it records WHICH run saw it come back");
+      assert.equal(rows[0]!.possible_duplicate_of, null, "nothing links the candidate -- there is no candidate");
+    } finally {
+      await db.close();
+    }
+  });
+
+  it("a 'yes' WITH a new fact still files the developing lead (control for round 2 item 1)", async () => {
+    // The other half of the rule: the same 'yes' verdict, but the candidate
+    // states a date the killed row did not -- a genuinely changed fact -- so it
+    // is a development worth its own row, not a resurfacing to be stamped. This
+    // is the pair the first test in this file already uses (CANDIDATE carries
+    // Sept. 22 and Sept. 29; EXISTING_HEADLINE says only "late September").
+    const db = await scratch();
+    try {
+      const sql = makeSql(db);
+      const seeded = await sql<{ id: number }>`
+        insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, newsworthiness)
+        values (${"u"}, ${1}, ${EXISTING_HEADLINE}, ${"Two closed sessions are scheduled."},
+                ${"council"}, ${"killed"},
+                ${JSON.stringify(["https://longmontleader.com/agenda/sept-council"])}, 6)
+        returning id
+      `;
+      const existing = [
+        {
+          id: seeded[0]!.id,
+          status: "killed",
+          headline: EXISTING_HEADLINE,
+          source_urls: ["https://longmontleader.com/agenda/sept-council"],
+        },
+      ];
+      const { pairs } = collectDupPairs({ candidates: [CANDIDATE], existing, printed: [], place: PLACE });
+      const outcome = await runDupCheck({ pairs, chat: answering(true, "same sessions, but the dates are new") });
+
+      const result = await fileScanLeads(sql, { userId: "u" }, 1, 906, [CANDIDATE], existing, PLACE, outcome);
+
+      assert.equal(result.leadsCreated, 1, "a new fact earns a row");
+      assert.equal(result.resurfacedKilled, 0);
+      const [filed] = (await filedRows(sql)).filter((r) => r.id !== seeded[0]!.id);
+      assert.equal(filed!.status, "held", "and it is held, linked to the lead it develops");
+      assert.equal(filed!.possible_duplicate_of, seeded[0]!.id);
+      assert.equal(filed!.dup_kind, "possible");
     } finally {
       await db.close();
     }

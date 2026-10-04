@@ -44,6 +44,7 @@ import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
+import { ungroundedDraftSpecifics, type DraftGroundingRow } from "./draft-specifics.ts";
 import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
@@ -144,6 +145,16 @@ export type ResearchMemo = {
   pulls?: PullRecord[];
   /** What the claims-of-absence gate did to this draft. */
   gate?: GateEntry[];
+  /**
+   * Round 2, item 5: the specifics the finished body states (a name, a number,
+   * a vote tally, a date, an address) that no text the check could read
+   * carries. Measured here, in code, where the capture texts are in scope, and
+   * stored with the draft so the Checks pane can list them without re-reading
+   * the captures. `checkedText` is the exact body the measurement ran on: an
+   * editor's later edit moves the body, so the loader only trusts these rows
+   * while the two still match (see `storedGrounding`).
+   */
+  draftGrounding?: { version: 1; checkedText: string; rows: DraftGroundingRow[] };
 };
 
 export type FetchedDoc = {
@@ -341,6 +352,7 @@ Lede: the most important new fact immediately. A reader who stops after paragrap
 Nut graf: within the first few paragraphs, why someone in ${p.city} should care.
 Body: details, impact, money, people affected, history, disagreement or uncertainty, what happens next. Order of reader value, not the order of the press release.
 Each load-bearing number, name, date, and quote is attributed. Use the source URL in source_urls for public evidence. For an uploaded document, use its filename and page/character locator in prose and return an exact receipt in document_claims; never invent a URL. If neither kind of evidence supports the claim, put it in unanswered instead of the body.
+No specific the evidence does not carry. Every name, number, dollar figure, vote tally, date and address in the body — including every figure and date in the back half — must appear in EVIDENCE or in the lead and memo you were given. A reworded version of one is not the same specific, and neither a new source URL nor extra background makes an unsupported one supported. Do not supply a plausible figure, a name the source did not use, a reading date nobody announced, a condition nobody wrote, or a tally nobody reported. If the evidence does not state it, cut it; the reader must be able to check every specific against a source this story names.
 Do not write a "Next checks are…" closer. Do not write "What is solid / What is not solid yet". Those belong in reporting notes, never in the story.
 Each paragraph must add information. Never restate the same fact in consecutive paragraphs to create length.
 Ban filler: "This development marks…", "The announcement comes as…", "Residents are encouraged to…", "This initiative underscores…", "In a move that…", "It remains to be seen…" unless the sentence contains actual reporting.
@@ -2127,6 +2139,40 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     extraDocs: docs.filter((d) => d.text && !seedUrls.includes(d.url)).length,
   });
 
+  /*
+    ROUND 2, ITEM 5. Read the FINISHED body against every text the writer was
+    given, and keep the specifics nothing carries. A draft may state a name, a
+    number, a vote, a date or an address only when a source says it; anything
+    else is an invention the desk has to see before publishing. The pane lists
+    these as rows that need a person (`evidenceCheckRows`), and `checkedText`
+    records what was measured so an editor's later edit cannot leave the rows
+    describing a body nobody can see.
+  */
+  const groundingSources: string[] = [
+    ...docs.filter((d) => d.text).map((d) => `${d.title || d.url}\n${d.text}`),
+    ...(opts.documentNameEvidence ?? []).map((d) => `${d.filename}\n${d.text}`),
+    opts.documentEvidence ?? "",
+    promptExtraEvidence,
+    opts.lead.headline,
+    String(opts.lead.why ?? ""),
+    String(opts.lead.evidence ?? ""),
+    String(research?.news ?? ""),
+    String(research?.why_it_matters ?? ""),
+    String(research?.angle ?? ""),
+    String(research?.follow ?? ""),
+    ...stringsFrom(research?.questions),
+    ...stringsFrom(research?.unknowns),
+  ];
+  const draftGrounding = {
+    version: 1 as const,
+    checkedText: body,
+    rows: ungroundedDraftSpecifics({
+      body,
+      sources: groundingSources,
+      place: { city: paper.city, state: paper.state },
+    }),
+  };
+
   return {
     headline: coerced.headline,
     dek: coerced.dek,
@@ -2160,6 +2206,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
         .map((d) => ({ url: d.url, title: (d.title || d.url).slice(0, 160) })),
       pulls: pulls.slice(0, 12),
       gate: gateLog.slice(0, 12),
+      draftGrounding,
     },
   };
 }

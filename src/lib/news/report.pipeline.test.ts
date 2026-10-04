@@ -758,4 +758,86 @@ describe("reportAndDraft pipeline", { timeout: 30000 }, () => {
     );
     assert.ok(result.claims.some((c) => c.kind === "primary" && c.url === PR));
   });
+
+  /**
+   * R2, item 5 (2026-10-04): the draft's own invented specifics are measured
+   * against the writer's packet at write time and stored with the memo.
+   *
+   * The real case was the council recap (dev draft 430), whose back half stated
+   * two 2027 budget reading dates no readable source carried; the evidence check
+   * ran over the draft's recorded claims and saw none of them. This pins the
+   * wiring that closes that gap: the body is read against the sources the writer
+   * was given, the unsupported dates come back as rows, and a supported date is
+   * left alone. The rows are then read back by `storedGrounding` and drawn as
+   * "! Needs review" in the Checks pane (see draft-specifics.test.ts).
+   */
+  it("stores the specifics the writer invented, measured against its own packet", async () => {
+    const chat: ReportChat = async (system) => {
+      if (system === REPORT_RESEARCH_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            news: "Group 2 starts August 31.",
+            why_it_matters: "Hover Street closes.",
+            angle: "Group 2 start",
+            form: "reported",
+            questions: [],
+            fetch_urls: [],
+            unknowns: [],
+            follow: "",
+            lanes: { context: [], stakeholders: [], contradiction: [], gaps: [] },
+          }),
+        };
+      }
+      if (system === REPORT_WRITE_SYSTEM) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            headline: "Group 2 waterline work starts Aug. 31",
+            dek: "Hover Street crossings close.",
+            // The second sentence is the invention pattern: two reading dates
+            // the announcement never states.
+            body: "Longmont will shut parts of Hover Street starting August 31. The 2027 budget ordinances get first and second readings Nov. 17 and Dec. 1.",
+            topic: "utilities",
+            source_urls: [ANNOUNCE],
+            form: "reported",
+            found: null,
+            unanswered: [],
+            reporting_trail: [],
+          }),
+        };
+      }
+      return { ok: true, text: "{}" };
+    };
+
+    const result = await reportAndDraft(
+      { userId: "grounding-test", lead, urls: [ANNOUNCE], memory: [] },
+      {
+        ingest: async (url) => DOCS[url] ?? { url, title: url, text: "", extras: [] },
+        search: async () => [],
+        chat,
+        capture: async () => ({ version_id: 1, capture_event_id: 1 }),
+        hydrate: async () => [],
+      },
+    );
+    assert.ok(!("error" in result), "error" in result ? result.error : "");
+    if ("error" in result) return;
+
+    const grounding = result.research_memo.draftGrounding;
+    assert.ok(grounding, "the draft's grounding is measured and stored with the memo");
+    assert.equal(grounding!.version, 1);
+    assert.ok(grounding!.checkedText.includes("Nov. 17"), "the measured body is kept so a later edit can be detected");
+    const texts = grounding!.rows.map((row) => row.text);
+    assert.ok(texts.includes("Nov. 17"), `expected the invented Nov. 17 reading date, saw ${JSON.stringify(texts)}`);
+    assert.ok(texts.includes("Dec. 1"), `expected the invented Dec. 1 reading date, saw ${JSON.stringify(texts)}`);
+    assert.ok(
+      !texts.some((text) => /august 31/i.test(text)),
+      `a date the announcement states must not be flagged; saw ${JSON.stringify(texts)}`,
+    );
+    /*
+      And a supported fact is not on the list either: the "five weeks" style
+      number the packet gives, or the name Acme, is the desk's own material.
+    */
+    assert.ok(!texts.some((text) => /acme/i.test(text)), "a name the packet carries is not an invention");
+  });
 });

@@ -346,7 +346,7 @@ export async function fileScanLeads(
         // the killed row's "came back" count stays true).
         const killedWithNewFacts =
           matched.status === "killed" &&
-          newFactsIn({ why, evidence }, matched, place);
+          newFactsIn({ headline, why, evidence }, matched, place);
         await sql`
             update leads
             set resurfaced_count = resurfaced_count + 1,
@@ -370,6 +370,12 @@ export async function fileScanLeads(
           "possible" (or, defensively, a null that findMatchingLead's looser
           rule somehow disagreed with) -- file it, linked to the match, do NOT
           stamp the existing row.
+
+          R2 item 1: two verdicts carve out of that default. A "same" with no
+          new fact is a resurfacing and is stamped (below). A "not the same" is
+          cleared and files plain (U28, next paragraph). Only a "same" WITH a
+          new fact -- or no verdict at all -- files the linked row this tier
+          was written for.
 
           U28: unless the desk's duplicate check read both and said they are
           not the same story. Then the link is not made at all -- no
@@ -397,6 +403,44 @@ export async function fileScanLeads(
           leadAnswer && leadAnswer.headline === matched.headline ? leadAnswer.verdict : null;
         if (verdict && !verdict.same) {
           dupCheckCleared += 1;
+        } else if (verdict && verdict.same && !newFactsIn({ headline, why, evidence }, matched, place)) {
+          /*
+            R2 item 1 (2026-10-03): the word rule rates the pair "possible", and
+            the desk's duplicate check then READ BOTH and answered "same story"
+            -- and the finding carries no fact the existing row did not already
+            state. Filing it anyway puts one story on the desk twice: the live
+            run did that for 8 of 19 filed leads, each of them a repeat of a lead
+            already on the desk or in the paper.
+
+            So this is the case the "possible" tier was waiting for, spelled out:
+            a verdict of `same` with no genuinely new fact is a RESURFACING, and
+            a resurfacing is a stamp, not a row. The existing lead's
+            `resurfaced_count` goes up and its `last_resurfaced_at` moves, exactly
+            as the "strong" tier does above, and nothing is filed.
+
+            What still files: a verdict of `same` where `newFactsIn` finds an
+            anchor the existing row does not state -- a new date, a different
+            amount, a number that moved (`newFactsIn`, ./lead-match.ts). That is
+            a development of a story the desk already has, and a development is
+            worth a row (filed below, linked and held as before). A reworded
+            headline, a fresh source URL, or extra background is NOT a new fact:
+            the anchors are dates/amounts/counts, so a paraphrase folds to the
+            same tokens and lands here, in the stamp.
+
+            No verdict at all (`null`) is not this case: the desk did not ask,
+            and "did not ask" must never be read as "same" -- see dup-check.ts.
+          */
+          await sql`
+            update leads
+            set resurfaced_count = resurfaced_count + 1,
+                last_resurfaced_at = now(),
+                last_resurfaced_scan_run_id = ${runId}
+            where id = ${matchId} and newsroom_id = ${newsroomId}
+          `;
+          if (matched.status === "killed") resurfacedKilled += 1;
+          else resurfacedOpen += 1;
+          firstDiscardedHeadline ??= headline;
+          continue;
         } else {
           possibleDuplicateOf = matchId;
           if (matched.status === "killed") initialStatus = "held";

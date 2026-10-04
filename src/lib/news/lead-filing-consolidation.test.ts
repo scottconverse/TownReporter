@@ -438,13 +438,14 @@ test("a merged pair inside one run does not bump the resurfaced stamp of anythin
  * keeps today's behaviour exactly: stamp the killed row, file nothing.
  *
  * The fact bar is newFactsIn (./lead-match.ts): at least one new concrete
- * ANCHOR (a date, a dollar amount, or a number), compared over `why` +
- * `evidence` and never over the headline -- the headline is already the same
- * story at >= 0.85 Jaccard, so it cannot carry the new fact. It was briefly
- * "one new anchor or two new content tokens"; the token half refiled a plain
- * reword of a killed lead's own words (the scan model rewrites `why` every
- * time), which is what the end-to-end test in lead-resurface.e2e.test.ts and
- * the "reworded but fact-free" case below both pin.
+ * ANCHOR (a date, a dollar amount, or a number), compared over the headline
+ * plus `why` and `evidence` on both sides (round 2, item 1 -- the headline was
+ * excluded until a repeat of the killed 367, whose "Oct. 6" lived only in its
+ * headline, was filed as a development). It was briefly "one new anchor or two
+ * new content tokens"; the token half refiled a plain reword of a killed lead's
+ * own words (the scan model rewrites `why` every time), which is what the
+ * end-to-end test in lead-resurface.e2e.test.ts and the "reworded but
+ * fact-free" case below both pin.
  */
 
 test("killed lead + new facts: the finding is filed HELD, linked to the killed lead, which is still stamped", async () => {
@@ -834,7 +835,7 @@ const LPM_431 = "Longmont Public Media Raising $24,000 for New Community Podcast
 const CALLAHAN_349_WHY = "The Callahan House video release party was announced for Oct. 8.";
 const LPM_316_WHY = "Longmont Public Media is raising money for a podcast studio.";
 
-test("scan 66: the three Fox Creek sightings in one run are one new lead plus one resurface, never three rows", async () => {
+test("scan 66: the three Fox Creek sightings in one run are one marked repeat plus one resurface, never three rows", async () => {
   const db = new PGlite();
   try {
     await db.exec(CREATE_LEADS);
@@ -892,8 +893,15 @@ test("scan 66: the three Fox Creek sightings in one run are one new lead plus on
     assert.equal(rows.length, 2, "the killed row and the one new lead -- 422 and 430 add no rows");
     const filed = rows.find((r) => r.id !== 412)!;
     assert.equal(filed.headline, FOX_416, "the first sighting of the story is the one kept");
-    assert.equal(filed.status, "new");
-    assert.equal(filed.possible_duplicate_of, null, "a merged lead is not a duplicate of itself");
+    // Round 2 item 2 (2026-10-04): this is the real dev-scan 417 / scan-66 416
+    // case. The same-story-as-412 sighting must reach the desk CARRYING A
+    // MARKER -- before the fix it was filed as a bare open lead with
+    // possible_duplicate_of null, which is what let 417 sit in the queue
+    // looking new while 412 was the same story (REAL-SCAN-DEV.md section 3:
+    // "the desk's matcher caught 8 of the 9 repeats in this run; 417 is the
+    // miss"). Held + linked is the marker; it is still ONE row.
+    assert.equal(filed.status, "held", "a repeat of a killed lead is filed held for the desk to look at");
+    assert.equal(filed.possible_duplicate_of, 412, "and it says WHICH lead it repeats");
     assert.deepEqual(
       JSON.parse(filed.source_urls),
       [FOX_CREEK_STORY, CITY_FEED],
