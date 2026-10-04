@@ -8,8 +8,9 @@
 
     1. the row's own Kill kills in ONE press, is reachable without opening
        anything, and carries a name a screen reader can read;
-    2. the Undo raised with that press puts the lead back on the Queue -- it is
-       back in New, back in the Open tab's rows, back in the Open count;
+    2. the Undo raised with that press puts the lead back on the Queue in the
+       status it held before the kill -- New, Held or Drafted -- back in the Open
+       tab's rows and back in the Open count;
     3. one tap on a reason chip writes THAT chip's sentence to `kill_reason`,
        and the chips stop asking once one is taken.
 
@@ -214,10 +215,12 @@ const { LeadRowView } = await import(deskLeadsUrl);
 
 /*
   One Queue row, wired exactly as the Queue wires it: `useDeskMutation` for the
-  status write with the real optimistic rule spread in, the row's Kill handing
-  over `killPress(lead.id)`, the Undo handing over `killUndoPress(lead.id)`, the
-  chips drawing the REAL `KillReasonChips` with the screen's own save mutation,
-  and the kill's longer life.
+  status write with the real optimistic rule spread in, the row's Kill carrying
+  the status it will be undone to (`killPress(lead.id, restoreStatus(lead.status))`),
+  the Undo handing `killUndoPress` to the Queue's second write (`undoKill` --
+  the one that may restore `drafted`), the chips drawing the REAL
+  `KillReasonChips` with the screen's own save mutation, and the kill's longer
+  life.
 */
 const screenUrl = stub(`
 import { createElement as h } from ${JSON.stringify(import.meta.resolve("react"))};
@@ -230,6 +233,7 @@ import {
   KillReasonChips,
   killPress,
   killUndoPress,
+  restoreStatus,
 } from ${JSON.stringify(fastKillUrl)};
 
 export function Screen({ lead, answer }) {
@@ -240,6 +244,14 @@ export function Screen({ lead, answer }) {
     done: () => "",
     failedLead: "Could not keep that reason. ",
     what: "keep that reason",
+  });
+  const undoKill = useDeskMutation({
+    mutationFn: (press) => answer(press),
+    ...leadStatusOptimistic(qc),
+    pending: "Undoing…",
+    done: () => "Undone: the lead is back on the Queue.",
+    failedLead: "Could not put that lead back. ",
+    what: "put that lead back",
   });
   const setStatus = useDeskMutation({
     mutationFn: (input) => answer(input),
@@ -255,7 +267,7 @@ export function Screen({ lead, answer }) {
         : {
             label: "Undo",
             run: async () => {
-              await setStatus.mutateAsync(killUndoPress(input.id, "new"));
+              await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
             },
           },
     chips: (_result, input) =>
@@ -268,7 +280,7 @@ export function Screen({ lead, answer }) {
   return h(LeadRowView, {
     lead,
     roomy: true,
-    onKillNow: () => setStatus.mutate(killPress(lead.id)),
+    onKillNow: () => setStatus.mutate(killPress(lead.id, restoreStatus(lead.status))),
     killPending:
       setStatus.isPending && setStatus.variables?.id === lead.id && setStatus.variables?.status === "killed",
   });
@@ -400,8 +412,8 @@ test("the Open row's own Kill kills in one press, and the Undo puts the lead bac
     await page.click(kill);
     assert.deepEqual(
       page.calls,
-      [{ id: 7, status: "killed" }],
-      "ONE press sends ONE write, and the write is the kill",
+      [{ id: 7, status: "killed", restore: "new" }],
+      "ONE press sends ONE write, and the write is the kill -- carrying where it goes back to",
     );
     assert.equal(statusIn(qc, 7), "killed", "and the row moves at once");
     assert.deepEqual(openIds(qc), [], "leaving the Open tab's rows");
@@ -427,6 +439,56 @@ test("the Open row's own Kill kills in one press, and the Undo puts the lead bac
     );
     assert.equal(statusIn(qc, 7), "new", "the lead is New again");
     assert.deepEqual(openIds(qc), [7], "back in the Open tab's rows");
+    assert.equal(openCount(qc), 1, "back in the Open count");
+    assert.equal(killedCount(qc), 0, "and out of Killed's");
+  } finally {
+    await page.close();
+  }
+});
+
+/*
+  Owner, 2026-10-03, the follow-up: "Undo must restore the lead's exact previous
+  status. Today a 'drafted' lead that is killed and undone comes back as 'new'."
+
+  A lead the desk has drafted is still on the Queue's Open tab and carries the
+  same Kill as any other. Its Undo has to put it back where it was -- `drafted`,
+  with its draft still behind it -- and not into `new`, which orphans the story
+  already written for it. The write that may do that is the Queue's second
+  mutation (`undoKill` -> `restoreKilledLead`), because the ordinary status input
+  has no `drafted` in it; the press carries the status the row held, read at the
+  moment of the kill.
+*/
+test("the Undo of a drafted lead's kill puts the draft back, not a fresh New lead", async () => {
+  toast.toasts.length = 0;
+  const qc = freshClient();
+  const row = lead({ status: "drafted" });
+  seed(qc, row);
+  const page = await mountScreen(qc, row);
+  try {
+    const kill = page.container.querySelector(".queue-acts button[aria-label^='Kill the lead:']");
+    assert.ok(kill, "a drafted lead is on the Open tab and its row offers the same Kill");
+
+    await page.click(kill);
+    assert.deepEqual(
+      page.calls[0],
+      { id: 7, status: "killed", restore: "drafted" },
+      "the kill carries where the lead goes back to, read off the row it was pressed on",
+    );
+    assert.equal(statusIn(qc, 7), "killed");
+    assert.equal(openCount(qc), 0, "the drafted lead leaves the Open count with the kill");
+
+    const bar = toast.toasts[0];
+    assert.equal(bar?.undo?.label, "Undo", "the kill's Undo is on the sentence that reports it");
+    await React.act(async () => {
+      await bar.undo.run();
+    });
+    assert.deepEqual(
+      page.calls[1],
+      { id: 7, status: "drafted" },
+      "the Undo restores DRAFTED, not New -- the exact bug this unit fixes",
+    );
+    assert.equal(statusIn(qc, 7), "drafted", "the lead is drafted again, its draft intact");
+    assert.deepEqual(openIds(qc), [7], "back on the Open tab");
     assert.equal(openCount(qc), 1, "back in the Open count");
     assert.equal(killedCount(qc), 0, "and out of Killed's");
   } finally {
@@ -496,9 +558,17 @@ test("one tap on a reason chip writes that chip's sentence to kill_reason, and t
 });
 
 test("the presses are values with one meaning each, and an unknown chip writes nothing", () => {
-  assert.deepEqual(fastKill.killPress(7), { id: 7, status: "killed" });
+  assert.deepEqual(fastKill.killPress(7), { id: 7, status: "killed", restore: "new" });
+  assert.deepEqual(fastKill.killPress(7, "drafted"), { id: 7, status: "killed", restore: "drafted" });
   assert.deepEqual(fastKill.killUndoPress(7), { id: 7, status: "new" });
   assert.deepEqual(fastKill.killUndoPress(7, "held"), { id: 7, status: "held" });
+  assert.deepEqual(fastKill.killUndoPress(7, "drafted"), { id: 7, status: "drafted" });
+
+  /* Where a lead of each status goes when a kill of it is taken back. */
+  assert.equal(fastKill.restoreStatus("drafted"), "drafted");
+  assert.equal(fastKill.restoreStatus("held"), "held");
+  assert.equal(fastKill.restoreStatus("new"), "new");
+  assert.equal(fastKill.restoreStatus("published"), "new", "a status no kill can be pressed on goes to New");
 
   /* Every chip carries the sentence it writes; the write is the chip, not a copy. */
   for (const chip of KILL_REASON_CHIPS) {

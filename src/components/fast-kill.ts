@@ -35,32 +35,61 @@
 import { createElement, useState, type MouseEvent, type ReactNode } from "react";
 import { KILL_REASON_CHIPS, killReasonChip, type KillReasonChip } from "../lib/news/kill-reasons.ts";
 
+/**
+ * The statuses a kill's Undo may put a lead back to: everywhere a lead can be
+ * when an editor kills it.
+ *
+ * `drafted` is here and nowhere else in the kill path. A lead the desk drafted
+ * is still on the Queue's Open tab and can be killed from its own row; before
+ * this the Undo turned such a lead back into a fresh `new` one, orphaned from
+ * the draft already written for it. It is not a status any press SETS -- the
+ * desk's drafting pass writes it -- so it is reachable only as an Undo, and the
+ * server checks both that (`restoreKilledLead`, `desk.ts`).
+ */
+export type RestoreStatus = "new" | "held" | "drafted";
+
 /** The kill, as the write the screen's status mutation takes. */
-export type KillPress = { id: number; status: "killed" };
+export type KillPress = { id: number; status: "killed"; restore: RestoreStatus };
 
 /** The way back, as the same shape. */
-export type KillUndoPress = { id: number; status: "new" | "held" };
+export type KillUndoPress = { id: number; status: RestoreStatus };
 
 /**
- * The kill press: the lead's status and nothing else.
+ * Where a lead of this status goes when a kill of it is undone.
+ *
+ * The one rule, in one place: `drafted` is the lead's own answer, a held lead
+ * goes back on hold, and everything else -- a `new` lead, and a status no row
+ * press can produce -- goes back to `new`, which is where the Undo has always
+ * put a killed lead. Spelled as a function rather than read off the row at Undo
+ * time because the row is KILLED by then: the answer has to be taken when the
+ * Kill is pressed and carried on the press.
+ */
+export function restoreStatus(status: string | null | undefined): RestoreStatus {
+  return status === "drafted" ? "drafted" : status === "held" ? "held" : "new";
+}
+
+/**
+ * The kill press: the lead's status, where it goes back to, and nothing else.
  *
  * No reason, no dialog, no second press. The reason is a separate, optional
  * write (see `killReasonPress`) because the editor's complaint was that the
  * reason stood between them and a kill.
  */
-export function killPress(id: number): KillPress {
-  return { id, status: "killed" };
+export function killPress(id: number, restore: RestoreStatus = "new"): KillPress {
+  return { id, status: "killed", restore };
 }
 
 /**
  * The press that takes a kill back.
  *
- * `new` is where the desk's Undo already put a killed lead (`desk.queue.tsx`,
- * the `undo` on `setStatus`) and `held` is where it puts a held one, so the
- * restore target is the same value the Release + Undo pattern uses. Named here
- * rather than spelled inline so the round trip has one spelling and one test.
+ * `restore` is the status the lead held before the kill, read from the row at
+ * the moment of the press (`restoreStatus`). `new` is the default because that
+ * is where the desk's Undo has always put a killed lead, and the caller that
+ * does not know better than that should get the old behaviour rather than a
+ * guess. Named here rather than spelled inline so the round trip has one
+ * spelling and one test.
  */
-export function killUndoPress(id: number, restore: "new" | "held" = "new"): KillUndoPress {
+export function killUndoPress(id: number, restore: RestoreStatus = "new"): KillUndoPress {
   return { id, status: restore };
 }
 

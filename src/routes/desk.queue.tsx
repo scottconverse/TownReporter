@@ -36,6 +36,7 @@ import {
   listPublishedDesk,
   listQueuePage,
   listScans,
+  restoreKilledLead,
   runScan,
   setLeadStatus,
 } from "@/lib/news/desk";
@@ -69,7 +70,10 @@ import {
   KillReasonChips,
   killPress,
   killUndoPress,
+  restoreStatus,
   type KillReasonRequest,
+  type KillUndoPress,
+  type RestoreStatus,
 } from "@/components/fast-kill";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -209,6 +213,48 @@ function QueuePage() {
     what: "keep that reason",
   });
   /*
+    What the screen remembers about a kill it just made, per lead: the status the
+    lead held before the press.
+
+    Owner, 2026-10-03. Every kill the rows and the keyboard make carries that
+    status on the press itself (`killPress(id, restoreStatus(l.status))`), which
+    is what the toast's own Undo reads. The U key is the one way back that holds
+    no press to read it from -- it acts on the row the cursor is on, and by then
+    that row is already killed -- so this is the memory it looks in. It is this
+    session's memory only: after a reload a killed lead's U key falls back to
+    `new`, which is where it put every lead before this fix.
+  */
+  const killedFrom = useRef(new Map<number, RestoreStatus>());
+  const killLead = (lead: { id: number; status: string }) => {
+    const restore = restoreStatus(lead.status);
+    killedFrom.current.set(lead.id, restore);
+    return killPress(lead.id, restore);
+  };
+  /*
+    The way back from a kill, putting the lead where it was (owner, 2026-10-03).
+    A `drafted` lead an editor killed came back as `new` with its draft orphaned,
+    because the way back was `setLeadStatus` -- whose input has no `drafted` in it,
+    and should not: `drafted` is written by the desk's drafting pass, never picked
+    by a screen. This is the one write that may put a lead back into `drafted`,
+    and the server holds it to the two conditions the screen cannot: the lead must
+    be killed right now, and a lead going back to `drafted` must still have its
+    draft (`restoreKilledLead`, desk.ts).
+
+    It carries the same optimistic rule as `setStatus`, so the row returns to the
+    Open tab in the same paint as the Undo press and moves back if the server
+    refuses -- leaving the lead killed and the toast saying why.
+  */
+  const undoKill = useDeskMutation({
+    mutationFn: (press: KillUndoPress) =>
+      restoreKilledLead({ data: { id: press.id, status: press.status } }),
+    ...leadStatusOptimistic(qc),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Undoing…",
+    done: () => "Undone: the lead is back on the Queue.",
+    failedLead: "Could not put that lead back. ",
+    what: "put that lead back",
+  });
+  /*
     FB5: the Queue reaches this mutation from its rows, its bulk Hold and its
     bulk Kill, and every one of those paths reported nothing at all when the
     write failed (FB0-REPORT.md Table B, "bulk Hold": "partial failure leaves
@@ -222,6 +268,14 @@ function QueuePage() {
       killReason?: string;
       killReasonUrl?: string;
       release?: boolean;
+      /*
+        Carried by a kill press only, and never sent from here: it is the status
+        the kill's own Undo will restore (`killPress`), read by the `undo` copy
+        below and handed to `undoKill`, which is the write allowed to restore
+        `drafted`. `leadStatusInput` has no `drafted` in it, so forwarding this
+        to `setLeadStatus` would be a refusal waiting to happen.
+      */
+      restore?: RestoreStatus;
     }) => setLeadStatus({ data: {
       id: input.id,
       status: input.status,
@@ -272,16 +326,17 @@ function QueuePage() {
             label: "Undo",
             run: async (): Promise<void> => {
               /*
-                A kill's way back is `killUndoPress` -- the press the fast kill's
-                own round trip makes, read from the module that owns it so the
-                two cannot drift. A released lead goes back to `held` instead,
-                the same write this Undo always made.
+                A released lead goes back to `held`, the same write this Undo
+                always made. A kill's way back is `killUndoPress` carrying the
+                status the row held when the Kill was pressed -- read from the
+                press, not guessed -- and it goes through `undoKill`, the one
+                write that may restore `drafted`; `setStatus` would refuse it.
               */
-              await setStatus.mutateAsync(
-                input.release
-                  ? { id: input.id, status: "held" as const }
-                  : killUndoPress(input.id, "new"),
-              );
+              if (input.release) {
+                await setStatus.mutateAsync({ id: input.id, status: "held" as const });
+                return;
+              }
+              await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
             },
           },
     /*
@@ -773,17 +828,25 @@ function QueuePage() {
           once, with the Undo and the reason chips on the toast. The dialog is
           still there for a written reason, in the row's More ▾ menu.
         */
-        if (lead && !closedOrHeld(lead)) setStatus.mutate(killPress(lead.id));
+        if (lead && !closedOrHeld(lead)) setStatus.mutate(killLead(lead));
         break;
       case "undo":
-        if (lead && (lead.status === "held" || lead.status === "killed")) {
+        if (lead && lead.status === "held") {
           /*
-            `release` is what makes a held lead's Undo say "Released." and put
-            it back on hold rather than treating it as a kill's way back, so it
-            stays here exactly as it was -- `killUndoPress` is the two writes the
-            KILLED round trip makes, and a held lead's release is not one of them.
+            `release` is what makes a held lead's Undo say "Released." and put it
+            back on hold. A held lead was open before the Hold, and where a
+            released lead goes back to is unchanged here: `held` is the target
+            this Undo has always had.
           */
-          setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
+          setStatus.mutate({ id: lead.id, status: "new", release: true });
+        } else if (lead && lead.status === "killed") {
+          /*
+            A kill's way back, through the same write the row's own Undo uses --
+            and the one entry point with no press to read the pre-kill status
+            from, so it reads this session's memory (`killedFrom`) and falls back
+            to `new` for a lead killed before the screen knew.
+          */
+          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id) ?? "new"));
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
@@ -1615,7 +1678,7 @@ function QueuePage() {
                     "Kill with a reason" above stays for the editor who wants to
                     write the sentence before killing.
                   */
-                  onKillNow={() => setStatus.mutate(killPress(l.id))}
+                  onKillNow={() => setStatus.mutate(killLead(l))}
                   /*
                     Only THIS row's kill is pending. A hold on the same lead (or a
                     kill on another) must not put "Killing…" on this button.
