@@ -177,13 +177,15 @@ export type RetainedSource = FetchedDoc & {
 
 export type ReportSearchHit = { title: string; url: string; snippet?: string };
 
+import type { ChatResult } from "./ai-result-metadata.ts";
+
 export type ReportChat = (
   system: string,
   user: string,
   maxTokens?: number,
   modelChoice?: EffectiveProviderChoice,
   options?: { timeoutMs: number },
-) => Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+) => Promise<ChatResult>;
 
 export type WriterDraftCheckpoint = {
   headline: string;

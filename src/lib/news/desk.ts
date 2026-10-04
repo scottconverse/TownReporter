@@ -78,6 +78,7 @@ import {
 } from "./meeting-article-revision.ts";
 import { deriveFocusedUsedCitations, deriveUsedCitations } from "./meeting-draft-citations.ts";
 import { meetingDraftSourceUrls } from "./meeting-draft-input.ts";
+import { usesWholeMeetingWriter } from "./meeting-whole.ts";
 import { draftSourceInputs, suppliedUrlsFromText } from "./draft-input.ts";
 import {
   addSourceInput,
@@ -3484,6 +3485,28 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     work between them is a model call, and the answer is a sentence rather than
     a bill.
   */
+  /*
+    WR1: WHICH WRITER GETS THIS MEETING.
+
+    A transcript-story lead used to hand the meeting to `retrieveMeetingEvidence`,
+    which picks one subject and strips "unrelated votes" from the write prompt --
+    a four-hour council session became a one-motion brief and everything else it
+    did was read and dropped. The whole-meeting writer reads the whole tape on
+    purpose and accounts for every item against a ledger. It is the default for
+    a meeting draft now; the one-item path stays for the case it was designed
+    for, an editor's notes that NAME one item (an ordinance or resolution number,
+    or "item 9B2"). A note that only says how to write names nothing and still
+    gets the whole meeting -- see `usesWholeMeetingWriter`.
+  */
+  const wholeMeetingLead = usesWholeMeetingWriter({
+    hasMeetingMaterial: Boolean(meetingMaterial),
+    editorialAssignment: prevNotes.editorialAssignment?.text ?? null,
+  });
+  // The writer runs inside `waitForModel` so the stall ticker keeps working; the
+  // ledger, claims, notes and run stats it produces are carried out through this
+  // closure and persisted against the draft row below, after the INSERT gives
+  // them a draft id.
+  let wholeAccounting: import("./meeting-whole.server.ts").WholeMeetingDraftResult | null = null;
   await throwIfJobCancelled(job.id);
   /*
     The single longest await in the app: one call covering report.ts's plan,
@@ -3495,11 +3518,30 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const reported = await waitForModel({
     jobId: job.id,
     label: modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
-    run: () =>
-      runReportWithCheckpoint({
-        ...draftInput,
+    run: async () => {
+      if (!wholeMeetingLead)
+        return runReportWithCheckpoint({
+          ...draftInput,
+          modelChoice: effectiveStoryModelChoice(job.model_choice),
+        });
+      const whole = await (await import("./meeting-whole.server.ts")).runWholeMeetingDraft({
+        sql,
+        newsroomId: owned(context),
+        userId: context.userId,
+        leadId,
+        artifactId: Number(lead.meeting_artifact_id),
+        videoId: lead.meeting_video_id ?? "",
+        fallbackTitle: lead.headline,
+        videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
         modelChoice: effectiveStoryModelChoice(job.model_choice),
-      }),
+        chat:
+          reportDeps.chat ??
+          (async () => ({ ok: false as const, error: "The writing provider is not available." })),
+        onStage: (stage) => setStage(job.id, stage),
+      });
+      wholeAccounting = whole;
+      return whole.draft;
+    },
   });
   if ("error" in reported) throw new Error(reported.error);
   /*
@@ -3723,6 +3765,26 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
     if (savedDraft) {
       let transcriptLinkCreated = false;
+      /*
+        WR1'S ACCOUNTING, AGAINST THE ROW THAT NOW EXISTS.
+
+        The ledger rows, the claim checks, the (uncapped) meeting notes and the
+        run stats are written here rather than in the report pass because they
+        need a draft id and the id is the INSERT's `returning`. Same transaction
+        as the INSERT, so a ledger that cannot be written fails the draft rather
+        than leaving an unaccounted one on the desk.
+      */
+      if (wholeAccounting) {
+        await (await import("./meeting-whole.server.ts")).persistWholeMeetingAccounting(sql, {
+          newsroomId: owned(context),
+          draftId: Number(savedDraft.id),
+          leadId,
+          ledger: wholeAccounting.ledger,
+          claims: wholeAccounting.claims,
+          meetingNotes: wholeAccounting.meetingNotes,
+          runStats: wholeAccounting.runStats,
+        });
+      }
       /*
         Link a meeting draft to the transcript it drew from.
 
