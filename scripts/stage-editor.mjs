@@ -18,6 +18,9 @@
  * In ONE transaction, demote the restored owner of newsroom 1 to `editor`
  * before assigning staging as owner, respecting the unique partial index
  * in migrations/0012_newsroom_appliance.sql. Other newsrooms are untouched.
+ * The same transaction moves the demoted owner's unattended-automation
+ * authority (daily scan, routine notices) to staging — see
+ * OWNER_BOUND_AUTOMATION_COLUMNS — so the dev copy keeps scheduling.
  * Pass `--editor` (ops/stage.ps1: -StageOwner:$false) to leave other members
  * alone and assign staging the old `editor` role instead.
  *
@@ -106,12 +109,66 @@ async function ensureNewsroomSchema(client) {
 }
 
 /**
+ * Columns that record WHICH USER's owner authority an unattended automation
+ * runs under. The schedulers do not gate on "is there an owner"; they gate on
+ * "is the user recorded here still the owner":
+ *
+ *  - `daily_scan_policies.configured_by_user_id` — `tickDailyScans` pauses a
+ *    due daily scan whose configuring user is no longer the owner
+ *    (src/lib/news/daily-scan.server.ts:163-196).
+ *  - `routine_notice_automations.activated_by` — `tickRoutineNoticeEditions`
+ *    skips a due routine edition whose activating user is no longer the owner
+ *    (src/lib/news/routine-notice-worker.server.ts:68-81).
+ *
+ * Demoting the restored real owner therefore stops the dev copy from
+ * behaving like live — exactly the drift `ops\stage.ps1` exists to remove. So
+ * the swap that demotes them also hands these references to the staging user,
+ * inside the same transaction, keeping `enabled` (and every other column)
+ * untouched. A stale revision is NOT bumped: a queued run's revision fence
+ * must keep matching the policy it was reserved against.
+ *
+ * Deliberately not moved (audit/derived, not configured authority):
+ *  - `routine_notice_policies.updated_by` records who last touched the pause
+ *    switch; the worker checks only `paused`, never this user's role.
+ *  - `routine_notice_runs.actor` and the `desk_jobs.user_id` of a scheduled
+ *    scan/edition are copied from the two columns above at enqueue time, so a
+ *    later enqueue is already correct.
+ */
+const OWNER_BOUND_AUTOMATION_COLUMNS = [
+  { table: "daily_scan_policies", column: "configured_by_user_id" },
+  { table: "routine_notice_automations", column: "activated_by" },
+];
+
+/**
+ * Re-point owner-bound automation references at the staging user, in the same
+ * transaction as the role swap. Tables an older dev copy predates are simply
+ * skipped — a missing table holds no rows to move.
+ * @param {pg.PoolClient} client
+ * @param {{ newsroomId: number; fromUserIds: string[]; toUserId: string }} args
+ * @returns {Promise<{ table: string; column: string; moved: number }[]>}
+ */
+async function transferOwnerBoundAutomation(client, { newsroomId, fromUserIds, toUserId }) {
+  const moved = [];
+  for (const { table, column } of OWNER_BOUND_AUTOMATION_COLUMNS) {
+    const { rows } = await client.query(`select to_regclass('public."${table}"') as reg`);
+    if (!rows[0]?.reg) continue;
+    const result = await client.query(
+      `update "${table}" set "${column}" = $1
+       where newsroom_id = $2 and "${column}" = any($3::text[])`,
+      [toUserId, newsroomId, fromUserIds],
+    );
+    moved.push({ table, column, moved: result.rowCount ?? 0 });
+  }
+  return moved;
+}
+
+/**
  * Does the actual writing, against an already-connected client. Split out
  * from `main()` so tests (and the verification run) can call it directly.
  * Refuses non-dev connections before any writes and owns its transaction.
  * @param {pg.PoolClient} client
  * @param {{ stageOwner?: boolean }} [options]
- * @returns {Promise<{ userId: string; created: boolean; role: string }>}
+ * @returns {Promise<{ userId: string; created: boolean; role: string; automation: { table: string; column: string; moved: number }[] }>}
  */
 export async function upsertStagingEditor(client, { stageOwner = true } = {}) {
   const { rows } = await client.query("select current_database() as database");
@@ -197,7 +254,16 @@ async function upsertStagingAccount(client, stageOwner) {
   const role = stageOwner ? "owner" : "editor";
   // Free the unique owner slot before assigning it to staging. Both changes
   // commit together; a failure restores the old owner and account rows.
+  let demotedOwnerIds = [];
   if (stageOwner) {
+    // Capture WHO is being demoted first: the transfer below must touch only
+    // the authority the swap actually took away, never another editor's.
+    const previousOwners = await client.query(
+      `select user_id from newsroom_members
+       where newsroom_id = $1 and role = 'owner' and user_id <> $2 for update`,
+      [STAGING_NEWSROOM_ID, userId],
+    );
+    demotedOwnerIds = previousOwners.rows.map((row) => row.user_id);
     await client.query(
       `update newsroom_members set role = 'editor'
        where newsroom_id = $1 and role = 'owner' and user_id <> $2`,
@@ -213,7 +279,19 @@ async function upsertStagingAccount(client, stageOwner) {
     [userId, STAGING_NEWSROOM_ID, role],
   );
 
-  return { userId, created, role };
+  // With the editor opt-out the real owner keeps their role, so their
+  // automation authority stays with them too. Only a real demotion hands it
+  // over, and it does so in this same transaction.
+  const automation =
+    stageOwner && demotedOwnerIds.length
+      ? await transferOwnerBoundAutomation(client, {
+          newsroomId: STAGING_NEWSROOM_ID,
+          fromUserIds: demotedOwnerIds,
+          toUserId: userId,
+        })
+      : [];
+
+  return { userId, created, role, automation };
 }
 
 async function main() {
@@ -227,7 +305,7 @@ async function main() {
   const pool = new pg.Pool({ connectionString: databaseUrl, max: 1 });
   const client = await pool.connect();
   try {
-    const { userId, created, role } = await upsertStagingEditor(client, {
+    const { userId, created, role, automation } = await upsertStagingEditor(client, {
       stageOwner: !process.argv.includes("--editor"),
     });
     console.log(
@@ -237,6 +315,9 @@ async function main() {
     console.log(`[stage-editor] "user" row: id=${userId} email=${STAGING_EMAIL}`);
     console.log(`[stage-editor] "account" row: providerId=credential, userId=${userId}`);
     console.log(`[stage-editor] newsroom_members row: user_id=${userId} role=${role} newsroom_id=${STAGING_NEWSROOM_ID}`);
+    for (const { table, column, moved } of automation) {
+      console.log(`[stage-editor] ${table}.${column}: moved ${moved} row(s) from the demoted owner to ${userId}`);
+    }
     console.log("");
     console.log("[stage-editor] sign in at the staged server with:");
     console.log(`[stage-editor]   email:    ${STAGING_EMAIL}`);

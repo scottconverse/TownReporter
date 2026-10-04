@@ -85,13 +85,49 @@ test("staging account on throwaway UTF8 Postgres at port 5550", {
       create table newsroom_members (user_id text primary key, role text not null, newsroom_id integer not null default 1,
                                     created_at timestamptz not null default now());
       create unique index newsroom_members_one_owner on newsroom_members (newsroom_id) where role = 'owner';
+      -- Real column shapes from migrations/0050_daily_scan.sql and
+      -- migrations/0054_routine_notice_automation.sql for the columns the
+      -- swap moves; the schedulers gate on these user ids being the owner.
+      create table daily_scan_policies (
+        newsroom_id integer primary key references newsrooms(id),
+        enabled boolean not null default false,
+        paused boolean not null default false,
+        pause_reason text,
+        configured_by_user_id text not null
+      );
+      create table routine_notice_automations (
+        newsroom_id integer primary key references newsrooms(id) on delete cascade,
+        enabled boolean not null default false,
+        revision integer not null default 0,
+        activated_by text,
+        activated_at timestamptz
+      );
     `);
     async function reset() {
       await client.query(`
-        truncate "user", "account", "session", newsroom_members cascade;
+        truncate "user", "account", "session", newsroom_members, daily_scan_policies, routine_notice_automations cascade;
+        insert into newsrooms (id, name) values (1, 'TownReporter Longmont') on conflict (id) do nothing;
         insert into "user" (id, name, email, "emailVerified") values ('real-owner', 'Real Owner', 'owner@example.test', true);
         insert into newsroom_members (user_id, role) values ('real-owner', 'owner');
       `);
+    }
+    // An enabled daily scan and an enabled routine-notice automation, both
+    // configured by the restored real owner — the state a real backup carries.
+    async function seedOwnerBoundAutomation() {
+      await client.query(`
+        insert into daily_scan_policies (newsroom_id, enabled, paused, configured_by_user_id)
+          values (1, true, false, 'real-owner');
+        insert into routine_notice_automations (newsroom_id, enabled, revision, activated_by, activated_at)
+          values (1, true, 1, 'real-owner', now());
+      `);
+    }
+    async function automation() {
+      return (await client.query(`
+        select p.enabled as scan_enabled, p.configured_by_user_id as scan_owner,
+               a.enabled as notice_enabled, a.activated_by as notice_owner
+        from daily_scan_policies p, routine_notice_automations a
+        where p.newsroom_id = 1 and a.newsroom_id = 1
+      `)).rows[0];
     }
     async function roles() {
       return (await client.query("select user_id, role from newsroom_members where newsroom_id = 1 order by user_id")).rows;
@@ -117,6 +153,40 @@ test("staging account on throwaway UTF8 Postgres at port 5550", {
         { user_id: "real-owner", role: "owner" },
         { user_id: STAGING_USER_ID, role: "editor" },
       ]);
+    });
+    await t.test("default moves owner-bound automation authority to the staging user", async () => {
+      await reset();
+      await seedOwnerBoundAutomation();
+      const result = await upsertStagingEditor(client);
+      // The demoted owner configured an enabled daily scan and an enabled
+      // routine-notice automation. The unattended schedulers pause/skip both
+      // unless those ids are still the owner, so the swap has to re-point
+      // them — and leave them enabled — or the dev copy stops behaving live.
+      assert.deepEqual(await automation(), {
+        scan_enabled: true,
+        scan_owner: STAGING_USER_ID,
+        notice_enabled: true,
+        notice_owner: STAGING_USER_ID,
+      });
+      assert.deepEqual(
+        result.automation,
+        [
+          { table: "daily_scan_policies", column: "configured_by_user_id", moved: 1 },
+          { table: "routine_notice_automations", column: "activated_by", moved: 1 },
+        ],
+        "the swap should report moving one row of each authority column",
+      );
+    });
+    await t.test("editor opt-out leaves automation authority with the real owner", async () => {
+      await reset();
+      await seedOwnerBoundAutomation();
+      await upsertStagingEditor(client, { stageOwner: false });
+      assert.deepEqual(await automation(), {
+        scan_enabled: true,
+        scan_owner: "real-owner",
+        notice_enabled: true,
+        notice_owner: "real-owner",
+      });
     });
     await t.test("failed staging membership rolls back demotion and account creation", async () => {
       await reset();
