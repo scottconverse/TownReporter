@@ -35,21 +35,101 @@ function timestamp(seconds: number): string {
 }
 
 /**
+ * The desk's own headline cap: an edited headline is stored at `desk.ts` at 180,
+ * so a capture headline is bounded here rather than arriving longer than the
+ * field the editor is allowed to write.
+ */
+const HEADLINE_MAX = 180;
+
+/**
+ * What the lead is titled from: the decision the record established, or the
+ * agenda item the transcript covered.
+ *
+ * The capture path used to title a lead from the recording's own title, which
+ * for a routine meeting is the body's name and a date -- "City Council Regular
+ * Session - September 22, 2026". That is the shape a real dev scan filed five of
+ * as leads (REAL-SCAN-DEV-2 §3), and the desk has no way to tell a meeting record
+ * from news: an agenda posted, a session set, nothing decided. The lead is titled
+ * from what the meeting actually covered instead, the same "name the item"
+ * standard the scan prompt asks the model for. Both the model prompt
+ * (./desk-copy.ts) and this function now refuse a meeting that names nothing.
+ *
+ * `item` keeps the packet's own agenda id. "9C" stays "9C" -- the desk's reader
+ * looks that id up in the packet, and `9c` or `9` would not find it.
+ */
+export type MeetingLeadSubject = {
+  kind: "decision" | "item";
+  /** The agenda item id, exactly as the packet prints it. */
+  item: string;
+  /** One line naming the decision or the item, in the record's own words. */
+  text: string;
+};
+
+export function meetingLeadSubject(input: {
+  items: { item: string; title: string }[];
+  votes: { item: string; established: boolean; motion: string | null; tally: string | null; result: string | null }[];
+}): MeetingLeadSubject | null {
+  /*
+    A decision first. The news from a meeting is what it decided, and a vote the
+    structured record established is the only decision this pass can name without
+    inferring one from prose. The motion and the outcome are quoted as the record
+    states them: "Approve Ordinance O-2026-47" and a result of "Passed" is not
+    rewritten into "approves".
+  */
+  const decided = input.votes.find((vote) => vote.established && (vote.motion ?? "").trim());
+  if (decided) {
+    const outcome = [decided.result, decided.tally]
+      .map((part) => (part ?? "").trim())
+      .filter(Boolean)
+      .join(" ");
+    return {
+      kind: "decision",
+      item: decided.item,
+      text: `item ${decided.item} ${decided.motion!.trim()}${outcome ? ` — ${outcome}` : ""}`,
+    };
+  }
+  /*
+    No decision: fall back to the item the transcript covered. A packet item can
+    carry an empty title, and an item whose title is blank names nothing, so it
+    does not count.
+  */
+  const covered = input.items.find((item) => (item.title ?? "").trim());
+  if (covered) return { kind: "item", item: covered.item, text: `item ${covered.item} ${covered.title.trim()}` };
+  return null;
+}
+
+/**
  * The lead headline and why, derived only from what the transcript established.
  *
  * Deliberately plain: a meeting lead is an assignment to look at the meeting, not
  * a story. It names the items that were actually covered and how many votes the
  * structured record established, and it says so when that number is zero rather
  * than implying a vote the record does not support.
+ *
+ * Null when the record names no item and establishes no decision. A lead titled
+ * "Council meeting, date" is the record the desk keeps filing and cannot use, so
+ * this path files nothing rather than filing one. The caller records why.
  */
 export function meetingLeadCopy(input: {
   title: string;
   meetingDate: string | null;
   items: { item: string; title: string }[];
   establishedVotes: number;
-}): { headline: string; why: string } {
+  /** The structured record's votes. The first established decision titles the lead. */
+  votes: { item: string; established: boolean; motion: string | null; tally: string | null; result: string | null }[];
+}): { headline: string; why: string } | null {
+  const subject = meetingLeadSubject(input);
+  if (!subject) return null;
   const when = input.meetingDate ? ` (${input.meetingDate})` : "";
-  const headline = `${input.title}${when}`;
+  /*
+    The meeting itself stays in the headline in front of the item: the desk needs
+    to know which session this is before it needs to know which item. The
+    parenthesized capture stamp stays at the end, where the standing-page rule R5
+    reads it (./lead-newsworthiness.ts `CAPTURE_STAMP`).
+  */
+  const stem = `${input.title}: ${subject.text}`;
+  const room = HEADLINE_MAX - when.length;
+  const headline = (stem.length > room ? `${stem.slice(0, Math.max(0, room - 1)).trimEnd()}…` : stem) + when;
   const named = input.items
     .slice(0, 8)
     .map((i) => `item ${i.item}${i.title ? ` ${i.title}` : ""}`)
@@ -65,6 +145,19 @@ export function meetingLeadCopy(input: {
   ].filter(Boolean).join(" ");
   return { headline, why };
 }
+
+/**
+ * What filing did.
+ *
+ * "Filed nothing" is a real outcome, not a failure: a capture whose record names
+ * no item and establishes no decision has no lead to file, and inventing a
+ * headline for it is what put "Council meeting, date" in the queue. The caller
+ * reports the reason; nothing is written, and on a revision any lead already on
+ * the meeting is left alone rather than blanked.
+ */
+export type MeetingLeadFiling =
+  | { filed: true; leadId: number; headline: string }
+  | { filed: false; leadId: null; headline: null; reason: string };
 
 /**
  * Files the lead and returns its id. No draft is created here and no model is
@@ -99,8 +192,25 @@ export async function fileMeetingLead(
       source: string | null;
     }[];
   },
-): Promise<{ leadId: number; headline: string }> {
+): Promise<MeetingLeadFiling> {
   const copy = meetingLeadCopy(input);
+  /*
+    Nothing to name: file nothing.
+
+    This is the whole of the fix for the record-shaped leads. It comes before the
+    evidence block and the insert so a revision that suddenly names nothing does
+    not overwrite a lead that names something.
+  */
+  if (!copy) {
+    return {
+      filed: false,
+      leadId: null,
+      headline: null,
+      reason:
+        `no lead filed: the record for ${input.title} names no agenda item and establishes no vote, ` +
+        "so there is no item or decision to title a lead from",
+    };
+  }
   /*
     The evidence block, written into scratch.
 
@@ -182,6 +292,6 @@ export async function fileMeetingLead(
   );
   const leadId = rows[0]?.id;
   if (!leadId) throw new Error("Could not file the meeting lead.");
-  return { leadId, headline: copy.headline };
+  return { filed: true, leadId, headline: copy.headline };
 }
 
