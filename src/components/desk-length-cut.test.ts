@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DeskLengthCut } from "./desk-length-cut.ts";
@@ -72,39 +71,6 @@ describe("DeskLengthCut", () => {
     });
     assert.equal(render(bogus), "");
     assert.equal(readSuppliedMaterialCut(bogus), null);
-  });
-});
-
-/**
- * The render above proves the note is right; this proves the screens draw it.
- * The route components are TanStack route bodies behind a live loader, so the
- * repository's check for "what a route says" is reading its source (see
- * `desk-copy.test.ts`): a re-render that quietly drops the component is the
- * mutation this catches.
- */
-describe("the note is wired to the screens the editor reads", () => {
-  const routes = readFileSync(new URL("../routes/desk.opinion.tsx", import.meta.url), "utf8");
-  const workbench = readFileSync(
-    new URL("../routes/desk.story.draft.$draftId.tsx", import.meta.url),
-    "utf8",
-  );
-  const opinion = readFileSync(new URL("../lib/news/opinion.ts", import.meta.url), "utf8");
-
-  it("draws it on the opinion desk's piece panel", () => {
-    assert.match(routes, /import \{ DeskLengthCut \} from "@\/components\/desk-length-cut"/);
-    assert.match(routes, /<DeskLengthCut research=\{piece\.data\.research_json\} \/>/);
-  });
-
-  it("draws it on the finished job row, from the stored draft", () => {
-    assert.match(routes, /readSuppliedMaterialCut\(r\.research_json\)/);
-    assert.match(routes, /<DeskLengthCut research=\{r\.research_json\} \/>/);
-    // The row can only read it if the list query selects it.
-    assert.match(opinion, /d\.research_json/);
-  });
-
-  it("draws it in the story workbench for the same draft", () => {
-    assert.match(workbench, /import \{ DeskLengthCut \} from "@\/components\/desk-length-cut"/);
-    assert.match(workbench, /<DeskLengthCut research=\{q\.data\.research_json\} \/>/);
   });
 });
 

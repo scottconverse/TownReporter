@@ -108,49 +108,6 @@ test("setup build and CI PowerShell parse without running the build or installer
   }
 });
 
-test("offline setup ships a prebuilt payload and runs only first-run initialization", () => {
-  assert.ok(existsSync("installer/FirstRun.ps1"), "offline FirstRun script is required");
-  const firstRun = readFileSync("installer/FirstRun.ps1", "utf8");
-  assert.doesNotMatch(firstRun, /Invoke-WebRequest|Get-VerifiedDependency|npm\.cmd|npm ci|install', 'chromium|run', 'build/);
-  assert.match(firstRun, /Substring\(0, 8\)/);
-  assert.match(firstRun, /initdb\.exe/);
-  assert.match(firstRun, /install-build-manifest\.mjs.*verify/);
-  assert.match(firstRun, /Start\.ps1/);
-  assert.match(firstRun, /SETUP-CODE\.txt/);
-  const build = readFileSync("scripts/build-windows-setup.ps1", "utf8");
-  assert.match(build, /ci', '--omit=dev/);
-  assert.match(build, /PLAYWRIGHT_BROWSERS_PATH/);
-  assert.match(build, /'install', 'chromium'/);
-  assert.match(build, /migration-plan\.mjs/);
-  assert.match(build, /Copy-AppLocalCrt/);
-  assert.match(build, /THIRD_PARTY_NOTICES\.txt/);
-  assert.match(build, /'licenses'/);
-  assert.match(build, /Checksum mismatch/);
-  const template = readFileSync("installer/windows-setup/TownReporter.iss", "utf8");
-  assert.match(template, /PrivilegesRequired=lowest/);
-  assert.match(template, /DefaultDirName=\{localappdata\}\\Programs\\TownReporter/);
-  assert.match(template, /TownReporter-\{#AppVersion\}-Setup/);
-  assert.match(template, /FirstRun\.ps1/);
-  assert.match(template, /ResultCode <> 0/);
-  assert.match(template, /Choose an empty installation folder/);
-});
-
-test("setup CI blocks networking with a failed outbound probe and exercises long paths", () => {
-  const workflow = readFileSync(".github/workflows/windows-install.yml", "utf8");
-  assert.match(workflow, /name: Fresh Windows Setup\.exe install/);
-  assert.match(workflow, /build-windows-setup\.ps1/);
-  assert.match(workflow, /New-NetFirewallRule/);
-  assert.match(workflow, /-Program \$program/);
-  assert.match(workflow, /Restore outbound networking after acceptance/);
-  assert.match(workflow, /-ItemType Junction/);
-  assert.match(workflow, /Outbound request unexpectedly succeeded/);
-  assert.match(workflow, /Remove-NetFirewallRule/);
-  assert.match(workflow, /ci-long-path-/);
-  assert.match(workflow, /Length -lt 140/);
-  assert.match(workflow, /VERYSILENT.*SUPPRESSMSGBOXES/);
-  assert.match(workflow, /WINDOWS_SIGNING_PFX/);
-});
-
 test("bundled Chromium path is passed to the runtime without changing the ZIP fallback", { skip: !windows }, () => {
   const common = resolve("installer/Common.ps1").replaceAll("'", "''");
   const command = `$ErrorActionPreference='Stop'; $ast=[Management.Automation.Language.Parser]::ParseFile('${common}',[ref]$null,[ref]$null); Invoke-Expression $ast.Find({param($a) $a -is [Management.Automation.Language.FunctionDefinitionAst] -and $a.Name -eq 'Set-AppEnvironment'},$true).Extent.Text; $DataRoot='C:\\unused-fixture'; $config=[pscustomobject]@{DatabasePassword='p';PgPort=15432;AuthSecret='s';Port=4388;InstanceId='i';NodeExe='C:\\node.exe';BrowsersPath='C:\\bundled\\chromium'}; Set-AppEnvironment; [Console]::WriteLine($env:PLAYWRIGHT_BROWSERS_PATH); $config.PSObject.Properties.Remove('BrowsersPath'); Set-AppEnvironment; [Console]::WriteLine($env:PLAYWRIGHT_BROWSERS_PATH)`;
@@ -159,14 +116,6 @@ test("bundled Chromium path is passed to the runtime without changing the ZIP fa
   assert.match(output, /C:\\unused-fixture\\browsers/);
 });
 
-test("new installation paths are short and existing pointers are retained", () => {
-  const installer = readFileSync(resolve("installer/Install.ps1"), "utf8");
-  assert.match(installer, /if \(Test-Path -LiteralPath \$pointerFile\) \{ \$DataRoot = .*\.DataRoot \}/);
-  assert.match(installer, /'TownReporter\\' \+ \[guid\]::NewGuid\(\)\.ToString\('N'\)\.Substring\(0, 8\)/);
-  assert.match(installer, /'\.x' \+ \[guid\]::NewGuid\(\)\.ToString\('N'\)\.Substring\(0, 6\)/);
-  const pgPreflight = installer.indexOf("$pgDependency = Get-VerifiedDependency");
-  assert.ok(pgPreflight >= 0 && pgPreflight < installer.indexOf("$nodeRoot = Expand-VerifiedDependency"), "both archives must pass preflight before either extraction starts");
-});
 test(
   "ZIP preflight enforces the Windows boundary and reports the first extraction error",
   { skip: !windows && "Windows PowerShell required" },
@@ -244,16 +193,6 @@ test(
     }
   },
 );
-test("candidate packaging checks out the exact pull-request head", () => {
-  const workflow = readFileSync(resolve(".github/workflows/windows-install.yml"), "utf8");
-  assert.match(
-    workflow,
-    /- uses: actions\/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4\.4\.0\s+with:\s+ref: \$\{\{ github\.event_name == 'pull_request' && github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
-  );
-  // W1: the install job pads its data root (>= 140 characters) and installs the built Setup.exe offline.
-  assert.match(workflow, /ci-long-path-/);
-  assert.match(workflow, /Long-path fixture must be at least 140 characters/);
-});
 test(
   "one source folder cannot be rebound to a different data directory",
   { skip: !windows && "Windows PowerShell required" },

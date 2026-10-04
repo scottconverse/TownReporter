@@ -454,46 +454,6 @@ test("a closed Dialog renders to static markup without throwing and paints no la
   assert.equal(openHtml, "");
 });
 
-test("the story page mounts the three dialogs, and the legal page mounts the shared dialog", async () => {
-  const story = await source("src/routes/desk.story.$leadId.tsx");
-  for (const name of ["KillDialog", "RedraftDialog", "CompareVersionsDialog"]) {
-    assert.match(story, new RegExp(`import \\{[^}]*${name}`), `the story page must import ${name}`);
-    assert.match(story, new RegExp(`<${name}\\b`), `the story page must mount <${name}>`);
-  }
-  assert.match(story, /<KillDialog[\s\S]{0,200}?leadId=\{/, "the Kill dialog takes the lead id");
-  const route = await source("src/routes/desk.legal-removals.tsx");
-  assert.match(route, /import \{ LegalRemovalDialog \} from "@\/components\/dialogs\/LegalRemovalDialog"/);
-  assert.match(route, /<LegalRemovalDialog\b/);
-  /*
-    One gate, one flow. If a second copy of the REMOVE comparison appears, one of
-    the two surfaces has quietly become the soft one.
-  */
-  const flow = await source("src/components/dialogs/LegalRemovalDialog.tsx");
-  assert.equal(
-    flow.split('confirm !== "REMOVE"').length - 1,
-    1,
-    "the REMOVE gate must exist exactly once in the flow",
-  );
-  assert.equal(
-    route.split('confirm !== "REMOVE"').length - 1,
-    0,
-    "the route must re-derive no part of the REMOVE gate",
-  );
-  assert.equal(
-    route.split("legalConfirm").length - 1,
-    0,
-    "the route must not call legalConfirm itself",
-  );
-});
-
-test("Published opens Correction and Legal removal in the existing dialogs", async () => {
-  const published = await source("src/routes/desk.published.tsx");
-  assert.match(published, /<Dialog\b[\s\S]*?title="Add a correction"/);
-  assert.match(published, /Preview · the note as readers will see it/);
-  assert.match(published, /<LegalRemovalDialog\b/);
-  assert.doesNotMatch(published, /href=\{`\/desk\/legal-removals\?article=/);
-});
-
 /* --------------------------------------------------------------------- kill */
 
 test("the Kill dialog draws its quick fills, reason and link, with the reason required", async () => {

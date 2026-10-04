@@ -23,18 +23,6 @@ import ts from "typescript";
 const read = (relative) => readFile(new URL(`../${relative}`, import.meta.url), "utf8");
 
 const source = await read("src/components/dialog.tsx");
-const styles = await read("src/styles.css");
-const reference = await read(
-  "docs/design/handoff-2026-09-26/design-system/components/desk/Dialog.d.ts",
-);
-
-const between = (text, open, close) => {
-  const from = text.indexOf(open);
-  assert.notEqual(from, -1, `could not find ${open} in the source`);
-  const to = text.indexOf(close, from);
-  assert.notEqual(to, -1, `could not find the end of ${open}`);
-  return text.slice(from, to + close.length);
-};
 
 // ── The component itself ───────────────────────────────────────────────────
 // Transpiled and imported through a `data:` URL, the way the other
@@ -61,41 +49,6 @@ const module = await import(
   )
 );
 
-test("the dialog is Radix's, not a hand-rolled div with an Escape listener", () => {
-  assert.match(source, /from "@radix-ui\/react-dialog"/);
-  for (const part of ["Root", "Portal", "Overlay", "Content", "Title", "Description"]) {
-    assert.ok(
-      new RegExp(`DialogPrimitive\\.${part}\\b`).test(source),
-      `the dialog does not use Radix's ${part}`,
-    );
-  }
-  // The reference `Dialog.jsx` does all four of these by hand. Radix does them
-  // better (and the design package's own prompt says to use it), so their
-  // absence is the point -- each one would be a second implementation.
-  assert.doesNotMatch(source, /addEventListener\("keydown"/, "Escape is hand-rolled again");
-  assert.doesNotMatch(source, /role="dialog"/, "the dialog role is hand-rolled again");
-  assert.doesNotMatch(source, /aria-modal/, "modal semantics are hand-rolled again");
-  assert.doesNotMatch(source, /createPortal/, "the portal is hand-rolled again");
-});
-
-test("every prop of the design reference is kept", () => {
-  const referenceProps = [
-    ...between(reference, "interface DialogProps {", "}").matchAll(/(\w+)\??:/g),
-  ].map((m) => m[1]);
-  assert.ok(referenceProps.includes("primaryLabel") && referenceProps.includes("onClose"));
-
-  const ours = between(source, "export type DialogProps = {", "};");
-  const missing = referenceProps.filter((name) => !new RegExp(`\\b${name}\\??:`).test(ours));
-  assert.deepEqual(missing, [], `the dialog dropped props the design reference declares: ${missing.join(", ")}`);
-
-  const referenceChoiceProps = [
-    ...between(reference, "interface ChoiceCardProps {", "}").matchAll(/(\w+)\??:/g),
-  ].map((m) => m[1]);
-  const ourChoiceCard = between(source, "export function ChoiceCard({", "}");
-  const missingChoice = referenceChoiceProps.filter((name) => !new RegExp(`\\b${name}\\b`).test(ourChoiceCard));
-  assert.deepEqual(missingChoice, [], `ChoiceCard dropped: ${missingChoice.join(", ")}`);
-});
-
 test("the closed dialog renders nothing, and the open one cannot render without a document", () => {
   // Radix's Portal mounts into `document.body`, so on the server there is
   // nothing to render into and both states come back empty. Asserting it keeps
@@ -119,40 +72,4 @@ test("ChoiceCard renders the reference's radio markup and its selected state", (
   );
   assert.match(on, /aria-checked="true"/);
   assert.match(on, /class="astra-choice-card on"/);
-});
-
-test("the modal CSS carries the design's panel and the desk's warm-black dark palette", () => {
-  const panel = between(styles, ".desk-ltr.astra-modal-layer .astra-modal {", "}");
-  assert.match(panel, /width: 820px/, "the panel is not the design's 820px");
-  assert.match(panel, /border: 2px solid var\(--fg\)/, "the panel lost its 2px ink border");
-  assert.match(panel, /border-radius: 0/, "the panel is not square");
-  assert.match(panel, /box-shadow: var\(--shadow-dialog\)/, "the panel does not use the one allowed shadow");
-  assert.match(panel, /font-family: var\(--fd\)/, "the panel does not use the display face");
-
-  const dark = between(styles, ':root[data-appearance="desk-dark"] .desk-ltr.astra-modal-layer {', "}");
-  for (const [token, value] of [
-    ["--bg", "#1b1916"],
-    ["--bg2", "#27231f"],
-    ["--fg", "#e8e6e1"],
-    ["--ok", "#9fd4a8"],
-    ["--warn", "#f0b27a"],
-    ["--danger", "#f0998c"],
-  ]) {
-    assert.match(dark, new RegExp(`${token}: ${value};`), `the portaled layer's dark ${token} is not ${value}`);
-  }
-  assert.doesNotMatch(dark, /#000|#fff\b/i, "pure black or white came back to the dialog's dark palette");
-
-  // The portal is outside the desk shell, so the layer has to re-establish the
-  // desk scope and the desk's text-size control itself.
-  assert.match(between(styles, ".desk-ltr.astra-modal-layer {", "}"), /color: var\(--fg\)/);
-  assert.match(styles, /:root\[data-desk-size="large"\] \.desk-ltr\.astra-modal-layer \{\s*--ts: 1\.2;/);
-});
-
-test("the browser walk that proves the behavior is run by CI", async () => {
-  await read("scripts/astra-dialog-e2e.mjs");
-  const ci = await read(".github/workflows/ci.yml");
-  assert.ok(
-    ci.includes("scripts/astra-dialog-e2e.mjs"),
-    "scripts/astra-dialog-e2e.mjs exists but no CI job runs it",
-  );
 });

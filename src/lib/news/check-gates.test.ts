@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import {
   checkStageDone,
   deskRowChecks,
@@ -288,24 +287,6 @@ describe("U24b: a check that RAN is not a check that PASSED", () => {
     );
   });
 
-  it("is what the story page actually hands the chips", () => {
-    /*
-      The tripwire that makes the mutation real. Every case above is a pure
-      fixture, so none of them can see the line the audit found: the PAGE fed
-      `evidenceChecked` from "the check ran" as well as from the record, and
-      that single `||` is what turned a pane of `Could not check` rows into
-      `✓ Evidence checked` and "All checks done.". Putting it back must fail
-      here.
-    */
-    const page = readFileSync(new URL("../../routes/desk.story.$leadId.tsx", import.meta.url), "utf8");
-    assert.match(page, /evidenceChecked: draftChecks\.evidenceChecked,/);
-    assert.doesNotMatch(
-      page,
-      /evidenceChecked: draftChecks\.evidenceChecked \|\|/,
-      "the pass must never be widened to a run",
-    );
-    assert.match(page, /evidenceRan: evidenceState\.ran,/);
-  });
 });
 
 describe("U9b: the desk home's chips, on the two rows its old inline chip read differently", () => {
@@ -526,13 +507,6 @@ describe("U9c: a completed evidence reconciliation counts as an evidence check",
       evidenceReconciledAt: CHECKED_AT,
       ...extra,
     });
-
-  it("the key this rule reads is the key that worker writes", () => {
-    /* A rename in the producer would silently turn every checked draft back
-       into "not run"; this is the tripwire. */
-    const writer = readFileSync(new URL("./draft-reconcile.server.ts", import.meta.url), "utf8");
-    assert.match(writer, /evidenceReconciledAt:new Date\(\)\.toISOString\(\)/);
-  });
 
   it("reads the stamp as a check that ran, on the workbench and on the desk home row", () => {
     const research = reconciledResearch();

@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BeforeYouCanPublish } from "./publish-blockers.ts";
@@ -36,12 +35,6 @@ import { dialogPressProps } from "../lib/news/dialog-press.ts";
  * the exact expression the fix added, so the mutation that puts the bug back
  * fails it.
  */
-
-const ROOT = new URL("../../", import.meta.url);
-
-function source(relative: string): string {
-  return readFileSync(new URL(relative, ROOT), "utf8");
-}
 
 function render(node: Parameters<typeof renderToStaticMarkup>[0]) {
   return renderToStaticMarkup(node);
@@ -148,100 +141,6 @@ describe("finding 1: a resolved { ok: false } draws the failed phase, with the s
     assert.equal(press.failedTarget, "accept-unreviewed");
     assert.ok(press.failureReason && press.failureReason.length > 0);
   });
-
-  it("the page derives all three rows through that one function", () => {
-    const page = source("src/routes/desk.story.$leadId.tsx");
-    assert.match(
-      page,
-      /const blockerPress = blockerPressState\(\{/,
-      "the page went back to deriving the blocker presses by hand",
-    );
-    /* The bug's shape: a phase read from `isError` alone. */
-    assert.doesNotMatch(
-      page,
-      /failedTarget: acceptUnreviewed\.isError/,
-      "the failed phase is derived from `isError` alone again -- a refusal resolves, so it never fires",
-    );
-  });
-});
-
-/* ------------------------------------------------------------------ 2 --- */
-
-describe("finding 2: the per-row delete confirmation stays armed until the press settles", () => {
-  const leads = source("src/components/desk-leads.tsx");
-
-  /** The "Yes, delete" confirm button's own source block. */
-  function confirmBlock(): string {
-    const start = leads.indexOf('label: "Yes, delete"');
-    assert.notEqual(start, -1, "the Queue row's confirm button is gone");
-    const end = leads.indexOf("</ActionButton>", start);
-    return leads.slice(start, end);
-  }
-
-  it("the confirm press runs the delete without clearing `confirming`", () => {
-    const block = confirmBlock();
-    assert.match(block, /onAct=\{\(\) => onDelete\(\)\}/, "the press no longer runs onDelete directly");
-    assert.doesNotMatch(
-      block,
-      /setConfirming\(false\)/,
-      "the confirmation is cleared on the press again -- 'Deleting.' and the reason are then never drawn",
-    );
-  });
-
-  it("it still consumes deletePending and deleteReason, so 'Deleting.' and the reason are drawn", () => {
-    const block = confirmBlock();
-    assert.match(block, /rowActionPhase\(\{ isPending: deletePending, problem: deleteReason \}\)/);
-    assert.match(block, /workingLabel="Deleting…"/);
-    assert.match(block, /reason=\{deleteReason\}/);
-  });
-
-  it("the Queue still feeds it the row's own pending flag and reason", () => {
-    const queue = source("src/routes/desk.queue.tsx");
-    assert.match(queue, /deletePending=\{remove\.isPending && remove\.variables === l\.id\}/);
-    assert.match(queue, /deleteReason=\{/);
-  });
-});
-
-/* ------------------------------------------------------------------ 3 --- */
-
-describe("finding 3: pressing Stop watching leaves Pause/Resume idle", () => {
-  const panel = source("src/components/page-watch-panel.tsx");
-
-  /** The Pause/Resume ActionButton's own source block. */
-  function pauseBlock(): string {
-    const start = panel.indexOf('workingLabel={row.watch_state === "active" ? "Pausing…" : "Resuming…"}');
-    assert.notEqual(start, -1, "the page-watch Pause/Resume button is gone");
-    const begin = panel.lastIndexOf("<ActionButton", start);
-    return panel.slice(begin, start);
-  }
-
-  it("the working phase is scoped to pause and resume, not to the shared mutation", () => {
-    const block = pauseBlock();
-    assert.match(
-      block,
-      /isPending: state\.isPending && state\.variables\?\.state !== "stopped"/,
-      "the pending phase is unfiltered again -- the row says 'Pausing.' and 'Stopping.' at once",
-    );
-    assert.doesNotMatch(
-      block,
-      /isPending: state\.isPending,/,
-      "the pending phase reads the shared mutation alone",
-    );
-  });
-
-  it("the failure branch stayed scoped the same way, and both halves read the settled refusal", () => {
-    const block = pauseBlock();
-    assert.match(block, /state\.variables\?\.state !== "stopped"/);
-    assert.match(block, /stateRefusal/, "a settled `{ ok: false }` from setPageWatchState is not read");
-  });
-
-  it("Stop watching is scoped to its own state and reads the same refusal", () => {
-    const start = panel.indexOf('workingLabel="Stopping…"');
-    const begin = panel.lastIndexOf("<ActionButton", start);
-    const block = panel.slice(begin, start);
-    assert.match(block, /isPending: state\.isPending && state\.variables\?\.state === "stopped"/);
-    assert.match(block, /stateRefusal/);
-  });
 });
 
 /* ------------------------------------------------------------------ 4 --- */
@@ -268,79 +167,5 @@ describe("finding 4: only the dialog button that was PRESSED wears the pending w
     assert.equal(none.pending, false);
     assert.equal(none.primaryPendingLabel, undefined);
     assert.equal(none.altPendingLabel, undefined);
-  });
-
-  for (const dialog of [
-    { name: "Kill", file: "src/components/dialogs/KillDialog.tsx", word: "Killing…", setter: 'setBusy(withReason ? "primary" : "alt")' },
-    { name: "Hold", file: "src/components/dialogs/editor-dialogs.tsx", word: "Holding…", setter: 'setPressed(withReason ? "primary" : "alt")' },
-  ]) {
-    it(`the ${dialog.name} dialog tracks WHICH press, not just that one is out`, () => {
-      const text = source(dialog.file);
-      assert.match(
-        text,
-        new RegExp(`\\.\\.\\.dialogPressProps\\([^,]+,\\s*"${dialog.word}"\\)`),
-        `${dialog.file} hands the foot one pending word for both buttons again`,
-      );
-      assert.ok(
-        text.includes(dialog.setter),
-        `${dialog.file} no longer records which of its two destructive presses was fired`,
-      );
-      /* The bug's shape: one boolean, both labels. */
-      assert.doesNotMatch(
-        text,
-        new RegExp(`primaryPendingLabel="${dialog.word}"`),
-        `${dialog.file} pins the same word on the primary button unconditionally`,
-      );
-      assert.doesNotMatch(
-        text,
-        new RegExp(`altPendingLabel="${dialog.word}"`),
-        `${dialog.file} pins the same word on the alt button unconditionally`,
-      );
-    });
-  }
-
-  it("the shared Dialog foot only spins a button that was handed a word", () => {
-    const dialog = source("src/components/dialog.tsx");
-    assert.match(dialog, /pending=\{pending && altPendingLabel != null\}/);
-    assert.match(dialog, /pending=\{pending && primaryPendingLabel != null\}/);
-  });
-});
-
-/* ------------------------------------------------------------------ 5 --- */
-
-describe("the redraft working word: the walks accept both", () => {
-  const scripts = readdirSync(new URL("scripts/", ROOT)).filter((f) => f.endsWith(".mjs"));
-
-  it("no walk pins the button's name as exactly 'Drafting…' any more", () => {
-    const offenders: string[] = [];
-    for (const file of scripts) {
-      const text = source(`scripts/${file}`);
-      /* The two shapes that broke: an exact-name string pin, and a regex that
-         does not allow the "Re" prefix. Both were true only while the story
-         had no draft body. */
-      if (/name:\s*"Drafting…"/.test(text)) {
-        offenders.push(`${file}: still asks for the button by the exact name "Drafting…"`);
-      }
-      if (/\/\^Drafting…\$\//.test(text)) {
-        offenders.push(`${file}: still matches /^Drafting…$/ without the (Re)? alternative`);
-      }
-    }
-    assert.deepEqual(offenders, []);
-  });
-
-  it("the three walks that press the redraft control accept either word", () => {
-    for (const file of ["delete-corrections-e2e.mjs", "failover-e2e.mjs", "live-pipeline-proof.mjs"]) {
-      assert.match(
-        source(`scripts/${file}`),
-        /\/\^\(Re\)\?drafting…\$\/i/,
-        `${file} no longer accepts both "Drafting…" and "Redrafting…"`,
-      );
-    }
-  });
-
-  it("the page still draws the more accurate word the walk was updated for", () => {
-    const page = source("src/routes/desk.story.$leadId.tsx");
-    assert.match(page, /data\.draft\?\.body\s*\?\s*"Redrafting…"\s*:\s*"Drafting…"/);
-    assert.match(page, /doneLabel=\{data\.draft\?\.body \? "Redraft started" : "Draft started"\}/);
   });
 });

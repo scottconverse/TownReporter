@@ -2070,8 +2070,8 @@ function InvestigationWorkspace({
           />
           {/*
             FB7, item 2. The brief's card, directly under the brief it is
-            rewriting -- the same "the card is where the press was" rule
-            `scan-card-placement.test.ts` pins for the scan. A model call that
+            rewriting -- the same "the card is where the press was" rule the
+            scan follows. A model call that
             writes a whole brief with no stage, no clock and no Cancel was
             Table B's "LAZY BAR" on Write/Rewrite the brief.
           */}

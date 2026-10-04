@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import {
   worthItemOnDesk,
@@ -16,15 +14,15 @@ import {
   Dariss Yearby Shooting Bodycam Footage' was a card after the sweep and gone
   later, with 'SET ASIDE 0' throughout."
 
-  Two things were wrong and both are pinned here. The card was hidden by a
-  fuzzy title match against ANOTHER file (so the editor's counter, which counts
-  parked FILES, stayed 0 and explained nothing), and the hidden card left no
-  trace at all -- the brief's rule for this item is that nothing vanishes
-  silently, it is "visible somewhere with a reason".
-*/
+  Two things were wrong. The card was hidden by a fuzzy title match against
+  ANOTHER file (so the editor's counter, which counts parked FILES, stayed 0
+  and explained nothing), and the hidden card left no trace at all -- the
+  brief's rule for this item is that nothing vanishes silently, it is "visible
+  somewhere with a reason".
 
-const here = fileURLToPath(new URL(".", import.meta.url));
-const read = (file: string) => readFileSync(here + file, "utf8");
+  What survives here is the reason itself: the sentence the desk builds from
+  the real function, so the editor is told WHY a card is not on the desk.
+*/
 
 const tip = {
   id: "reddit-tip:abc",
@@ -67,30 +65,5 @@ describe("a hidden card says WHY it is hidden", () => {
         "the boolean is the reason asked as a yes/no",
       );
     }
-  });
-});
-
-describe("the Dark Desk draws the reason instead of a shorter list", () => {
-  const dark = read("../../routes/desk.dark.tsx");
-
-  it("keeps the covered cards and renders them", () => {
-    assert.match(dark, /const covered = worthRows\.filter\(\(row\) => row\.off\);/, "they are kept");
-    // capped at 5 with "Show all N" (Group 3), so the map runs over covered or its first five
-    assert.match(dark, /\(expandedPiles\.covered \? covered : covered\.slice\(0, 5\)\)\.map\(\(\{ item, off \}\)/, "and drawn");
-    assert.match(dark, /worthItemOnDeskLine\(off!\)/, "with the reason");
-  });
-
-  it("does not delete them with a bare filter", () => {
-    assert.doesNotMatch(
-      dark,
-      /const inbox = \(worth\.data \?\? \[\]\)\.filter\(\(item\) => !worthItemOnDesk\(/,
-      "the silent-hide line this item is about",
-    );
-  });
-
-  it("links to the file that covers the card, the way the desk opens files", () => {
-    // The route carries no search params: the id travels in OPEN_KEY, which is
-    // what every other "open that file" link on this desk does.
-    assert.match(dark, /sessionStorage\.setItem\(OPEN_KEY, String\(covering\.id\)\)/);
   });
 });

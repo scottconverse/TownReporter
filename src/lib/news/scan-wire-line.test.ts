@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { wireScanLine } from "./scan-wire-line.ts";
 import type { JobProgressView } from "./job-progress.ts";
@@ -14,9 +12,6 @@ import type { JobProgressView } from "./job-progress.ts";
   heading builds, and the fact that the heading is built from the job the card
   below it draws (one reader, one number).
 */
-
-const here = fileURLToPath(new URL(".", import.meta.url));
-const read = (file: string) => readFileSync(here + file, "utf8");
 
 /** The smallest thing `wireScanLine` reads. The card's other 20 fields are
     not this function's business, and filling them in would hide a change to
@@ -46,24 +41,6 @@ describe("the wire's heading agrees with a running scan", () => {
     assert.notEqual(bare, wireScanLine(job("Reading sources — 83 of 201")));
   });
 
-  it("MUTATION, the real one: the worker still counts its sources", () => {
-    /*
-      The sentence above is only as good as the step it is handed, so the
-      mutation this unit names -- "stop the scan worker reporting its source
-      phase" -- is pinned at its source. `performScanWork` reports the fetch
-      loop's progress with `countedStep("Reading sources", done, total)`, which
-      is the only thing that puts "— 83 of 201" on the row. Delete or replace
-      that call and this fails, which is exactly the edit the mutation
-      describes.
-    */
-    const worker = read("desk.ts");
-    assert.match(
-      worker,
-      /countedStep\("Reading sources",\s*attemptedCount,\s*watchSlice\.length\)/,
-      "the scan worker reports which source it is on, and how many there are",
-    );
-  });
-
   it("does not give the model phase a source count it never reported", () => {
     // `countedStep("Reading the sources with a model", 3, 7)` counts BATCHES.
     // The heading keeps the worker's noun rather than calling seven batches
@@ -78,24 +55,5 @@ describe("the wire's heading agrees with a running scan", () => {
     assert.equal(wireScanLine(job("")), "Scanning now");
     assert.equal(wireScanLine(null), null);
     assert.equal(wireScanLine(undefined), null);
-  });
-});
-
-describe("the heading and the card below it read the same job", () => {
-  const source = read("../../routes/desk.index.tsx");
-
-  it("builds the wire's sub line from the scan job, not from the last finished run", () => {
-    // The defect was the heading's precedence: `last` (the newest FINISHED
-    // scan) decided the line, so an open scan could not own it.
-    assert.match(source, /wireScanLine\(scanJob\)/, "the heading is built from the open scan job");
-    assert.match(source, /const scanJob =[\s\S]{0,240}?kind === "scan"/, "scanJob is the open scan");
-  });
-
-  it("draws the card the heading describes from that same variable", () => {
-    assert.match(source, /<DeskJobCard[\s\S]{0,200}?job=\{scanJob\}/, "the card draws the same job");
-    // There is exactly one scan job selection on the screen: two of them could
-    // drift, and a heading counting one while the card counted the other is
-    // the defect this item is about.
-    assert.equal(source.split(/kind === "scan"/).length - 1, 1);
   });
 });

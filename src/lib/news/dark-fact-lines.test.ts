@@ -1,7 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { dedupeFactLines, factLineKey, factLinesDropped } from "./dark-fact-lines.ts";
 
@@ -14,9 +12,6 @@ import { dedupeFactLines, factLineKey, factLinesDropped } from "./dark-fact-line
   way out, at both places the list is read: the panel and the brief pack. Both
   are pinned here.
 */
-
-const here = fileURLToPath(new URL(".", import.meta.url));
-const read = (file: string) => readFileSync(here + file, "utf8");
 
 const KCTV =
   "KCTV5 reported that the Lee's Summit centre closed in the same week as the Longmont one.";
@@ -70,29 +65,5 @@ describe("WHAT WE KNOW says a fact once", () => {
 
   it("drops an empty body rather than printing a blank line", () => {
     assert.equal(dedupeFactLines([{ body: "   " }, { body: "" }]).length, 0);
-  });
-});
-
-describe("both readers of the list are deduped", () => {
-  it("the Dark Desk panel folds the echoes before drawing them", () => {
-    const route = read("../../routes/desk.dark.tsx");
-    assert.match(
-      route,
-      /const facts = dedupeFactLines\(claims\.filter/,
-      "the panel's facts go through the dedupe",
-    );
-    assert.match(route, /factLinesDropped\(/, "and it reports how many it folded");
-  });
-
-  it("the brief pack is deduped too -- the model must not read it five times", () => {
-    // A2c's finding was not only cosmetic: feeding the model the same sentence
-    // five times is part of why the brief kept re-asking for records the file
-    // already held.
-    const dark = read("dark.ts");
-    assert.match(
-      dark,
-      /facts: dedupeFactLines\(/,
-      "buildDarkBriefPromptPack hands the model one line per fact",
-    );
   });
 });

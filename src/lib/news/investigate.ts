@@ -779,8 +779,8 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     than a functional index on lower(hypothesis) directly, so
     migrations/0039_dead_ends_confirmation.sql can de-collide a
     pre-existing duplicate WITHOUT deleting or rewriting its hypothesis
-    text (this repo's migration runner refuses any DELETE FROM -- see
-    scripts/no-destructive-migrate.test.mjs). Same best-effort convention
+    text (this repo's migration runner refuses any DELETE FROM). Same
+    best-effort convention
     as above.
   */
   `create unique index if not exists dead_ends_investigation_dedup_key on dead_ends (investigation_id, dedup_key)`,

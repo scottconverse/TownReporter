@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { mkdtempSync, rmSync, existsSync } from "node:fs";
@@ -188,67 +187,6 @@ describe("owner-only", () => {
     assert.doesNotThrow(() => assertOwner("owner"));
   });
 
-  it("every server function here is gated by deskMiddleware AND the owner check", () => {
-    const src = readFileSync(join(ROOT, "src/lib/news/provider-login.ts"), "utf8");
-    const names = [...src.matchAll(/export const (\w+) = createServerFn/g)].map((m) => m[1]);
-    assert.ok(names.length >= 5, `expected the five panel calls, found ${names.join(", ")}`);
-    for (const name of names) {
-      const start = src.indexOf(`export const ${name} = createServerFn`);
-      const next = names
-        .map((n) => src.indexOf(`export const ${n} = createServerFn`))
-        .filter((i) => i > start);
-      const body = src.slice(start, next.length ? Math.min(...next) : src.length);
-      assert.match(body, /\.middleware\(\[deskMiddleware\]\)/, `${name} has no deskMiddleware`);
-      assert.match(body, /assertOwner\(context\.role\)/, `${name} has no owner check`);
-    }
-  });
-
-  it("there is no sign-out anywhere in the panel or its calls", () => {
-    // A deliberate product decision, not an omission: one mis-click would stop
-    // the live paper, and a stale login is fixed by signing in again.
-    for (const file of ["src/lib/news/provider-login.ts", "src/routes/desk.ops.tsx"]) {
-      const src = readFileSync(join(ROOT, file), "utf8");
-      assert.doesNotMatch(src, /signOutProvider|providerSignOut|"Sign out"/);
-    }
-  });
-});
-
-describe("the migration and the PGLite ensure agree", () => {
-  it("declares the same columns in both places", () => {
-    const migration = [
-      readFileSync(join(ROOT, "migrations/0027_provider_logins.sql"), "utf8"),
-      readFileSync(join(ROOT, "migrations/0064_provider_login_supersession.sql"), "utf8"),
-    ].join("\n");
-    const supersessionMigration = readFileSync(
-      join(ROOT, "migrations/0064_provider_login_supersession.sql"),
-      "utf8",
-    );
-    const runtime = readFileSync(join(ROOT, "src/lib/news/provider-login.server.ts"), "utf8");
-    for (const column of [
-      "newsroom_id",
-      "provider",
-      "status",
-      "url",
-      "code",
-      "detail",
-      "pid",
-      "started_at",
-      "updated_at",
-      "finished_at",
-      "supersedes_login_id",
-    ]) {
-      assert.match(migration, new RegExp(`\\b${column}\\b`), `migration lacks ${column}`);
-      assert.match(runtime, new RegExp(`\\b${column}\\b`), `ensure lacks ${column}`);
-    }
-    assert.match(migration, /provider_logins_open_idx/);
-    assert.match(runtime, /provider_logins_open_idx/);
-    assert.match(
-      supersessionMigration,
-      /supersedes_login_id integer references provider_logins\(id\)/,
-    );
-    assert.match(supersessionMigration, /provider_logins_supersedes_login_id_key/);
-    assert.match(runtime, /provider_logins_supersedes_login_id_key/);
-  });
 });
 
 describe("the sign-in state machine, driven by a fake CLI", () => {

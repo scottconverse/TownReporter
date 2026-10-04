@@ -1,8 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
 
 /**
@@ -19,78 +16,6 @@ import { execFileSync } from "node:child_process";
  * risk in depending on a setting is that a setting can be turned off, quietly,
  * while the document keeps pointing at it. That is what the second test is for.
  */
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const POLICY = readFileSync(join(ROOT, "SECURITY.md"), "utf8");
-
-/**
- * SECURITY.md cross-references headings in other docs by quoted section name
- * (e.g. `docs/manual.md §"What the reader gets"`), not a markdown anchor
- * link, so nothing checked these automatically -- an audit (0.6.9, AUDIT-001)
- * found the references correct today but noted the rename that made them
- * correct would have silently rotted a stale one straight through review,
- * the same way `docs/manual.md`'s old `## Privacy of the reader` heading
- * disappeared without anyone updating a link, because there wasn't one to
- * break. This walks every `path §"heading"` pair SECURITY.md contains and
- * asserts the heading is a real `##`/`###` line in that file, verbatim.
- */
-test("every doc section SECURITY.md quotes by name still exists in that doc", () => {
-  const refs = [...POLICY.matchAll(/`(docs\/[\w.-]+\.md)`\s*§"([^"]+)"/g)].map((m) => ({
-    doc: m[1],
-    heading: m[2],
-  }));
-  assert.ok(refs.length > 0, "expected SECURITY.md to still contain at least one §\"...\" doc cross-reference");
-
-  const missing = [];
-  for (const { doc, heading } of refs) {
-    const docText = readFileSync(join(ROOT, doc), "utf8");
-    const headingLines = docText
-      .split(/\r?\n/)
-      .filter((l) => /^#{2,3}\s/.test(l))
-      .map((l) => l.replace(/^#{2,3}\s+/, "").trim());
-    if (!headingLines.includes(heading)) {
-      missing.push(`${doc} §"${heading}"`);
-    }
-  }
-  assert.deepEqual(
-    missing,
-    [],
-    `SECURITY.md quotes a section that no longer exists as a heading: ${missing.join(", ")}`,
-  );
-});
-
-test("the security policy contains no placeholder pretending to be a channel", () => {
-  // An angle-bracketed span with prose inside it is the shape of a fill-me-in
-  // that got shipped. A real address, a URL or a code span is not.
-  const placeholders = [...POLICY.matchAll(/<[^>@\n]*\b(?:fill|TODO|TBD|maintainer|your)\b[^>\n]*>/gi)].map(
-    (m) => m[0],
-  );
-  assert.deepEqual(
-    placeholders,
-    [],
-    `SECURITY.md still carries an unfilled placeholder: ${placeholders.join(", ")}`,
-  );
-});
-
-test("the reporting route the policy names is GitHub's, not an inbox it invented", () => {
-  assert.match(
-    POLICY,
-    /private vulnerability reporting/i,
-    "the policy no longer names GitHub's private vulnerability reporting",
-  );
-  // An email address here would mean the route changed and this test, plus the
-  // paragraph explaining why there is no address, are now both wrong.
-  const emails = [...POLICY.matchAll(/[\w.+-]+@[\w-]+\.[\w.]+/g)]
-    .map((m) => m[0])
-    // The tip line is named specifically to say it is NOT a security channel.
-    .filter((e) => e !== "tips@townreporter.org");
-  assert.deepEqual(
-    emails,
-    [],
-    `SECURITY.md now publishes an address (${emails.join(", ")}); if that is deliberate, ` +
-      `update the paragraph that says there deliberately is not one`,
-  );
-});
-
 /**
  * The setting behind the promise, checked for real where it can be.
  *

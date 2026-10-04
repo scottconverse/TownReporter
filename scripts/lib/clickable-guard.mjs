@@ -18,8 +18,8 @@
     1. a control that does something has a visible edge or fill -- the border
        of its strongest side, or its own background -- at 3:1 or better against
        the surface behind it, in BOTH themes. 3:1 is WCAG 2.1's floor for a
-       non-text indicator (1.4.11), the same number
-       scripts/desk-button-contrast.test.mjs asserts for the button levels.
+       non-text indicator (1.4.11), the same number the walk asserts for the
+       button levels.
     2. a target is at least 44px tall on the desk (README §2.9, §6).
     3. a plain text link is allowed ONLY for going to another page, inside a
        sentence or a list title, and then it is ALWAYS underlined.

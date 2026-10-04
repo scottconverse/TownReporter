@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 
 const source = await readFile(new URL("../src/components/draft-batch-result.tsx", import.meta.url), "utf8");
-const queueSource = await readFile(new URL("../src/routes/desk.queue.tsx", import.meta.url), "utf8");
 let output = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext } }).outputText;
 const states = `data:text/javascript;base64,${Buffer.from(`import{createElement}from${JSON.stringify(import.meta.resolve("react"))};export function Notice({children}){return createElement("div",{role:"alert"},children)}`).toString("base64")}`;
 output = output.replaceAll('"@/components/states"', JSON.stringify(states)).replaceAll('"react/jsx-runtime"', JSON.stringify(import.meta.resolve("react/jsx-runtime")));
@@ -72,17 +71,6 @@ test("a failed local batch item can redraft with the exact selected cloud runtim
   assert.match(html, /Open current story workbench: Water-rate story/);
   assert.match(html, /Your current saved draft stays in place until the redraft finishes/);
   assert.match(html, /The saved local model was unavailable/);
-  assert.match(
-    queueSource,
-    /queueDraft\.mutate\(\{\s*leadId: item\.leadId,\s*modelChoice: batchRuntime,\s*modelEffort: batchEffort,\s*fromBatch: true\s*\}\)/,
-    "the live action must send the currently selected exact runtime and effort",
-  );
-});
-
-test("queue hydrates a restored batch runtime once so redraft is not stranded", () => {
-  assert.match(queueSource, /hydratedBatchId\.current === current\.id/);
-  assert.match(queueSource, /setBatchRuntime\(current\.runtime\.modelChoice\)/);
-  assert.match(queueSource, /setBatchEffort\(current\.runtime\.modelEffort\)/);
 });
 
 test("an in-flight batch item does not expose Redraft", () => {

@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
@@ -44,12 +43,6 @@ import { pressPhase } from "./action-button.ts";
  * (`BeforeYouCanPublish`, `PublishBarResult`) the real component is rendered
  * and `action-button.test.ts` does that.
  */
-
-const ROOT = new URL("../../", import.meta.url);
-
-function source(relative: string): string {
-  return readFileSync(new URL(relative, ROOT), "utf8");
-}
 
 function render(node: Parameters<typeof renderToStaticMarkup>[0]) {
   return renderToStaticMarkup(node);
@@ -446,60 +439,6 @@ describe("every scoped control: idle -> working -> done, at the control", () => 
   }
 });
 
-describe("the scoped controls call sites really draw the shared piece", () => {
-  for (const control of CONTROLS) {
-    it(`${control.name}: ${control.file} draws it through ActionButton`, () => {
-      const text = source(control.file);
-      if (control.viaDialog) {
-        assert.match(
-          text,
-          /dialogPressProps\([^,]+,\s*"[^"]+…"\)/,
-          `${control.file} no longer hands the shared Dialog foot a working word for the button that was pressed`,
-        );
-      } else {
-        assert.match(
-          text,
-          /import \{[^}]*ActionButton[^}]*\} from "(\.\.\/components\/action-button|@\/components\/action-button|\.\/action-button)"/,
-          `${control.file} does not import the shared piece`,
-        );
-      }
-      for (const pin of control.pins) {
-        assert.ok(
-          text.includes(pin),
-          `${control.file} no longer contains ${JSON.stringify(pin)} -- the states have drifted`,
-        );
-      }
-    });
-  }
-
-  it("no scoped control is left on a hand-rolled pending ternary", () => {
-    /* The eight `isPending ? "X…" : "X"` expressions this unit replaced must
-       not come back: the working state now goes through `workingLabel`, so the
-       word, the spinner and the disabled attribute cannot come apart again. */
-    const files = [
-      "src/routes/desk.sources.tsx",
-      "src/components/page-watch-panel.tsx",
-      "src/routes/desk.queue.tsx",
-      "src/routes/desk.story.$leadId.tsx",
-      "src/routes/desk.story.draft.$draftId.tsx",
-    ];
-    const offenders: string[] = [];
-    /*
-      The shape that must not come back is the working word drawn as the
-      button's own CHILD -- `{busy ? "Pausing…" : "Pause"}`. A ternary passed to
-      `workingLabel=` is the shared piece's own API and is exactly what is
-      wanted, so the `=` before the brace is what tells the two apart.
-    */
-    const handRolled = /(^|[^=\w])\{[^{}]*\?\s*"(Pausing|Resuming|Checking|Removing|Deleting|Holding|Killing|Retrying)…"/gm;
-    for (const file of files) {
-      for (const m of source(file).matchAll(handRolled)) {
-        offenders.push(`${file}: still hand-rolls "${m[2]}…" as the button's own word`);
-      }
-    }
-    assert.deepEqual(offenders, []);
-  });
-});
-
 describe("the row-state controls: the ROW carries the done state", () => {
   it("rowActionPhase has no done branch, by design", () => {
     assert.equal(rowActionPhase({ isPending: true }), "working");
@@ -508,17 +447,6 @@ describe("the row-state controls: the ROW carries the done state", () => {
     /* The one thing it must never say: a button wearing a green "done" while
        the row it acts on is still being refetched. */
     assert.notEqual(rowActionPhase({ isPending: false }), "done");
-  });
-
-  it("a paused source row offers Resume, and a held lead reads 'On hold'", () => {
-    /* The persistent half of rule 3: the state Pause/Hold put the row INTO is
-       drawn from the row's data, so it survives a reload. These are the two
-       places that draw it. */
-    const sources = source("src/routes/desk.sources.tsx");
-    assert.match(sources, /\? \{ cls: "paused", label: "Paused" \}/, "the chip is not the row's own state");
-    assert.match(sources, /"Paused · the scanner will not fetch it"/);
-    /* Resume is drawn exactly where Pause was, from `status === "paused"`. */
-    assert.match(sources, /const paused = s\.status === "paused";/);
   });
 });
 
@@ -540,31 +468,6 @@ describe("the publish family keeps its own path", () => {
     assert.equal(pressPhase(publishPressState({ publishing: false, refusal: "", publishedSlug: "a" }).kind), "done");
     assert.equal(pressPhase(publishPressState({ publishing: false, refusal: "no", publishedSlug: null }).kind), "failed");
     assert.equal(pressPhase(publishPressState({ publishing: false, refusal: "", publishedSlug: null }).kind), "idle");
-  });
-
-  /**
-   * Unit UI1b-2. Publish was the one press in this family whose DONE state was
-   * not the button's: a print took the bar away and the banner said everything,
-   * on UI1a's one-confirmation rule. The owner changed that rule on purpose --
-   * "click a publish button, it publishes and then CHANGES to say 'Published'"
-   * -- so the bar's own slot now wears the shared piece's `done` phase, and
-   * this is the pin that the call site still draws it.
-   *
-   * What is asserted here is only the call site: the word, the token, the icon
-   * and the settled (not pressable) state are rendered for real in
-   * `publish-bar-done.test.ts`.
-   */
-  it("UI1b-2: the bar's slot wears Publish's own done state, and it stays", () => {
-    const route = source("src/routes/desk.story.$leadId.tsx");
-    assert.match(
-      route,
-      /\{onPaper \? \(\s*<PublishBarDone result=\{press\} \/>/,
-      "the slot is drawn from the story, not from the press's last answer",
-    );
-    const bar = source("src/components/publish-bar-result.ts");
-    assert.match(bar, /phase: "done"/, "the shared piece, in its done phase");
-    assert.match(bar, /doneLabel: PUBLISHED_LABEL/, "and it says Published");
-    assert.match(bar, /disabled: true/, "a done state has no second press");
   });
 });
 

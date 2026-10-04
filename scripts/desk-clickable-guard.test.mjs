@@ -13,10 +13,9 @@
       token: #d8d3c4 on the cream panel is 1.4:1, and it was the single biggest
       cause of the auditor's 463 hits on the desk. This is the case that makes
       the guard a guard rather than a rubber stamp.
-    - a quiet button with a `--fg2` edge PASSES -- the UI1a fix, and the same
-      number scripts/desk-button-contrast.test.mjs asserts (10.2:1 on the light
-      panel, 8.1:1 on the dark one). Both numbers are re-derived here against
-      the real token hexes, so the two guards cannot drift apart.
+    - a quiet button with a `--fg2` edge PASSES -- the UI1a fix, at 10.2:1 on
+      the light panel and 8.1:1 on the dark one. Both numbers are re-derived
+      here from the real token hexes.
     - a link with no underline FAILS as a link that does not read as one.
     - an underlined link in a list title PASSES: that is the one plain-text
       form the design system allows.
@@ -52,8 +51,8 @@ import {
   validateAllowlist,
 } from "./lib/clickable-guard.mjs";
 
-/* The desk's own tokens, copied from src/desk-astra.css -- the SAME hexes
-   scripts/desk-button-contrast.test.mjs resolves out of the stylesheets. */
+/* The desk's own tokens, copied from src/desk-astra.css -- the SAME hexes the
+   desk's stylesheets declare. */
 const LIGHT = { bg: "#fffdf7", surface: "#f6f2e7", line: "#d8d3c4", fg: "#111111", fg2: "#3a3a3a" };
 const NIGHT = { bg: "#1b1916", surface: "#27231f", line: "#3b3631", fg: "#e8e6e1", fg2: "#bdbab3" };
 
@@ -132,15 +131,14 @@ test("black on white is 21:1 and a colour against itself is 1:1", () => {
 });
 
 /*
-  THE TWO NUMBERS THE TWO GUARDS MUST AGREE ON.
+  THE NUMBERS THE QUIET EDGE TURNS ON.
 
-  scripts/desk-button-contrast.test.mjs resolves these out of the real
-  stylesheets and asserts the quiet edge clears 3:1 on both grounds in both
-  themes. This walk computes the same ratio from what the browser reports for
-  the drawn control. If they ever disagree, one of the two is measuring
-  something other than the button -- so the numbers are pinned here.
+  These are the ratios the desk's own token hexes yield for the quiet edge and
+  for `--fg2`. This walk computes the same ratio from what the browser reports
+  for the drawn control. If they ever disagree, the walk is measuring something
+  other than the button -- so the numbers are pinned here.
 */
-test("the quiet edge's ratios agree with scripts/desk-button-contrast.test.mjs", () => {
+test("the quiet edge's ratios agree with the desk's own token hexes", () => {
   const near = (measured, claimed) =>
     assert.ok(Math.abs(measured - claimed) < 0.15, `measured ${measured}, the desk's number is ~${claimed}`);
   near(ratio(LIGHT.fg2, LIGHT.surface), 10.2);

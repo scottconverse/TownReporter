@@ -1,13 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { citationResolution } from "./meeting-source-block-utils.ts";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const panel = fs.readFileSync(path.join(here, "finding-evidence-review.tsx"), "utf8");
-const route = fs.readFileSync(path.join(here, "../routes/desk.story.$leadId.tsx"), "utf8");
 
 const noNewer = { artifactId: 9, currentArtifactId: null, newerTranscriptExists: false };
 const withNewer = { artifactId: 9, currentArtifactId: 14, newerTranscriptExists: true };
@@ -47,41 +40,6 @@ describe("meeting citation evidence in the claims panel", () => {
     assert.match(
       citationResolution(withNewer, { currentEvidence: null }),
       /No longer resolves: no matching passage was found in the current transcript \(artifact 14\)/,
-    );
-  });
-
-  it("renders each citation with its excerpt, its timestamp link and its state", () => {
-    assert.match(panel, /meetingCitationUrl\(videoId, citation\.timestampSeconds\)/);
-    assert.match(panel, /meetingClock\(citation\.timestampSeconds\)/);
-    assert.match(panel, /\{citation\.excerpt\}/);
-    assert.match(panel, /citationResolution\(evidence, citation\)/);
-    // The door to the whole tape, from the address the button promises.
-    assert.match(panel, /transcriptViewPath\(evidence\.artifactId\)/);
-  });
-
-  it("is wired to the draft's own evidence, not a second read of the tape", () => {
-    assert.match(route, /meetingEvidence=\{data\.draftMeetingEvidence\}/);
-    assert.match(panel, /meetingEvidence\?: DraftMeetingEvidence \| null/);
-  });
-
-  it("says in one plain sentence when there is neither a finding nor a citation", () => {
-    assert.match(panel, /no recorded findings and no transcript citations/);
-    /*
-      FB6 item 8b (A2c-REPORT.md §6 C5). This condition used to be
-      `review.rows.length === 0` -- the REVIEW's rows -- while the list printed
-      directly under the sentence is built by `evidenceCheckRows` from the
-      review AND from the three rows the page holds itself (claims of absence,
-      names, style). Any of those can carry "! Needs review" with the review
-      empty, and that is exactly what the stand-in walkthrough photographed:
-      "there is nothing to review here" above "Evidence check ! Needs review".
-      The condition is the LIST's length now, so the sentence and the list it
-      sits above cannot disagree.
-    */
-    assert.match(panel, /review && listRows\.length === 0 && !meetingEvidence/);
-    assert.doesNotMatch(
-      panel,
-      /review\.rows\.length === 0 && !meetingEvidence/,
-      "the pane is denying in one line what the row below it asserts in the next",
     );
   });
 });

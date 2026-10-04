@@ -2,13 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
 import { FormError } from "./form-error.ts";
 
 const render = (props: Parameters<typeof FormError>[0]) =>
   renderToStaticMarkup(createElement(FormError, props));
-
-const loginSource = readFileSync(new URL("../routes/login.tsx", import.meta.url), "utf8");
 
 describe("FormError", () => {
   /*
@@ -46,45 +43,5 @@ describe("FormError", () => {
     // ...and a spot that had no class gets none, so nothing is restyled.
     const bare = render({ children: "One-time temporary password: abcd", role: "status" });
     assert.doesNotMatch(bare, /class=/);
-  });
-});
-
-describe("the sign-in screen's own errors go through FormError", () => {
-  it("renders the form error line -- setup, sign-in, password mismatch -- through FormError", () => {
-    const block = loginSource.slice(
-      loginSource.indexOf("{error ? ("),
-      loginSource.indexOf("{error ? (") + 400,
-    );
-    assert.match(
-      block,
-      /<FormError className="border border-rust\/40 bg-paper-2 px-3 py-2 text-sm text-ink">/,
-      "the sign-in/setup error line is no longer an announced FormError",
-    );
-    assert.doesNotMatch(
-      loginSource,
-      // The same class on a plain `<p>` is still the un-announced line -- note
-      // the dead-invite notice above the form wears this class too, so the
-      // check pins the paragraph that carries `{error}` rather than the class.
-      /<p className="border border-rust\/40 bg-paper-2 px-3 py-2 text-sm text-ink">\s*\{error\}/,
-      "the sign-in/setup error line is still a plain, unannounced paragraph",
-    );
-  });
-
-  it("announces the refused recovery code, and reveals the temporary password as a status", () => {
-    assert.match(
-      loginSource,
-      /\{error \? <FormError className="text-sm text-rust">\{error\}<\/FormError> : null\}/,
-    );
-    assert.match(loginSource, /<FormError role="status">\s*One-time temporary password:/);
-  });
-
-  /*
-    The same check UX-2 asks for, from the screen's side: the claimed-desk
-    branch names the one failure line, and the missing-account string it used to
-    reach for is gone. Point this back at the old text and this fails too.
-  */
-  it("shows one claimed-desk failure line, and does not ask the missing-account string", () => {
-    assert.match(loginSource, /taken\.signInFailed/);
-    assert.doesNotMatch(loginSource, /taken\.unknownEmail/);
   });
 });

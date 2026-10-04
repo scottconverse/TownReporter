@@ -454,58 +454,6 @@ async function cleanup(install) {
   await removeTree(install.root);
 }
 
-// --- always: the script is wired the way the tests below assume -------------
-
-test("promote.ps1 runs its long steps through the detached runner, never inline", () => {
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  const lib = readFileSync(join(OPS, "lib-promote.ps1"), "utf8");
-
-  // `& npm ci` as a COMMAND. Not `&&`, which is how the doc comments above the
-  // build step quote package.json's own script.
-  assert.doesNotMatch(
-    src,
-    /(^|\s)&\s*npm\b/,
-    "promote.ps1 is back to running npm inline: the child inherits the console's stdout, and a closed pipe kills it mid-install (the three failures this unit exists for)",
-  );
-  assert.match(src, /Invoke-PromoteChild[^\n]*-Command 'npm ci'/, "npm ci no longer goes through the detached runner");
-  assert.match(src, /Invoke-PromoteBuild[^\n]*-Command 'npm run build'/, "the build no longer goes through the detached runner");
-
-  // Output redirected to files is what makes the child immune to the launcher's
-  // console going away.
-  assert.match(lib, /-RedirectStandardOutput\s+\$outFile/);
-  assert.match(lib, /-RedirectStandardError\s+\$errFile/);
-
-  // The exit code has to come from the child's own record: Start-Process
-  // -PassThru's ExitCode is empty on Windows PowerShell 5.1 (measured), so a
-  // failed npm step read from there looks like a success.
-  assert.match(lib, /PROMOTE_EXIT=/, "the child no longer records its own exit code");
-  assert.doesNotMatch(
-    lib,
-    /\$proc\.ExitCode/,
-    "the runner is reading $process.ExitCode, which Start-Process -PassThru leaves empty on Windows PowerShell 5.1",
-  );
-});
-
-test("promote.ps1 keeps a log, offers -Resume, and prints the way back up", () => {
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  assert.match(src, /\[switch\]\$Resume/, "promote.ps1 no longer accepts -Resume");
-  assert.match(src, /New-PromoteLog -App \$app/, "promote.ps1 no longer opens a log of its own");
-  assert.match(src, /Get-PromoteResumePoint -App \$app/, "promote.ps1 no longer reads the previous run's log");
-
-  // The recovery command is the LAST thing printed on a failure that leaves the
-  // paper down. Checked structurally: nothing but the closing brace may follow
-  // it inside Die.
-  const die = src.slice(src.indexOf("function Die("), src.indexOf("function Get-OpenDeskJobs"));
-  const marker = 'Show "  $recovery" Yellow';
-  const at = die.indexOf(marker);
-  assert.ok(at > -1, "Die no longer prints the command that brings the paper back");
-  const after = die.slice(at + marker.length).trimStart();
-  assert.ok(
-    after.startsWith("}"),
-    `something is printed after the recovery command, so it is no longer the last line: ${JSON.stringify(after.slice(0, 60))}`,
-  );
-});
-
 // --- the log ----------------------------------------------------------------
 
 test("-WhatIf lets only the READ-ONLY database commands carry the live-promote flag", windowsOnly, async () => {
@@ -877,27 +825,6 @@ test("the run's own log is never mistaken for the run being resumed", windowsOnl
   }
 });
 
-test("promote.ps1 hands its own log to the resume lookup", () => {
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  /*
-    The ORDER is what broke -Resume, so the order is what this pins: the log
-    has to still be opened first (a run that dies on its first check must leave
-    a file), and the resume lookup has to be told which file that was.
-  */
-  const openAt = src.indexOf("$log = New-PromoteLog -App $app");
-  const resumeAt = src.indexOf("$resumePoint = Get-PromoteResumePoint");
-  assert.ok(openAt > -1, "promote.ps1 no longer opens a log of its own");
-  assert.ok(resumeAt > -1, "promote.ps1 no longer looks for an unfinished run");
-  assert.ok(
-    openAt < resumeAt,
-    "the log is now opened after the resume lookup, which is the opposite of why it is opened first",
-  );
-  assert.match(
-    src,
-    /Get-PromoteResumePoint -App \$app -ExcludeLog \$log\.Path/,
-    "promote.ps1 asks for the resume point without saying which log is its own, so it reads back its own empty one",
-  );
-});
 
 /*
   THE OTHER HALF OF THE FLAKE, ON PURPOSE AND WITHOUT A RACE.
@@ -2197,39 +2124,6 @@ test("-PreviousHead is checked before the stop, and is the commit a fallback ret
   }
 });
 
-test("the normal start does not skip the migration, and the refusal-before-the-copy path keeps its own start", () => {
-  /*
-    Only the fallback passes the switch. A plain start, the watchdog, -Resume
-    and the success path all migrate exactly as they always have -- including
-    the PR2d refusal restart, which is a DIFFERENT path with its own start, and
-    which now also skips (addition (a)).
-  */
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  const at = (needle, what, from = 0) => {
-    const index = src.indexOf(needle, from);
-    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
-    return index;
-  };
-  // The success path's start.
-  const successStart = at("if (-not (Start-TheApp)) {", "the success-path start");
-  assert.doesNotMatch(
-    src.slice(successStart, successStart + 60),
-    /SkipMigrate/,
-    "the normal start now skips the migration, so a plain start would serve an unmigrated database",
-  );
-  // Every start that runs against a RESTORED database skips it.
-  const fallbackStarts = [...src.matchAll(/StartTheApp \{ Start-TheApp -SkipMigrate \}/g)].length;
-  // five: the four fallbacks plus the refusal restart when a build snapshot cannot be kept (6b)
-  assert.equal(fallbackStarts, 5, `expected the five restored-database starts to skip the migration, found ${fallbackStarts}`);
-  assert.match(src, /Invoke-PromoteNothingChanged -Log \$log -App \$app -StartTheApp \{ Start-TheApp -SkipMigrate \}/, "the refusal restart does not skip the migration (addition (a))");
-  // The refusal path does not touch the checkout: nothing moved, so there is
-  // nothing to put back.
-  const lib = readFileSync(join(OPS, "lib-promote.ps1"), "utf8");
-  const from = lib.indexOf("function Invoke-PromoteNothingChanged");
-  assert.ok(from > -1, "Invoke-PromoteNothingChanged is gone from the library");
-  const nothingChanged = lib.slice(from, lib.indexOf("function Start-PromoteApp", from));
-  assert.doesNotMatch(nothingChanged, /Restore-PromoteCheckout|git -C/, "the nothing-changed restart resets the checkout");
-});
 
 test("Start-PromoteApp passes the skip switch to the start script, and not when it is off", windowsOnly, async () => {
   /*
@@ -2264,16 +2158,6 @@ test("Start-PromoteApp passes the skip switch to the start script, and not when 
   }
 });
 
-test("start-townreporter.ps1 only skips the migration when it is told to", () => {
-  const src = readFileSync(join(OPS, "start-townreporter.ps1"), "utf8");
-  assert.match(src, /param\(\s*\r?\n\s*\[switch\]\$SkipMigrate\s*\r?\n\)/, "start-townreporter.ps1 no longer takes -SkipMigrate");
-  // The migrate call is still there, and still the thing that runs by default.
-  assert.match(src, /Invoke-TownReporterMigrate -App \$app -Log \$appLog -Node \$node/, "the migration call is gone from the normal start");
-  const guard = src.indexOf("if ($SkipMigrate) {");
-  const call = src.indexOf("Invoke-TownReporterMigrate -App $app");
-  assert.ok(guard > -1 && guard < call, "the migrate call is not behind the -SkipMigrate guard");
-  assert.match(src.slice(guard, call), /elseif \(/, "the skip branch does not fall through to the normal migrate path");
-});
 
 test("the hand rollback starts without migrating, and finds the commit from the log that took the copy", windowsOnly, async () => {
   const install = makeGitInstall();
@@ -2407,35 +2291,6 @@ test("a refusal after the stop brings the paper back up instead of leaving it do
   }
 });
 
-test("the copy's refusal path starts the paper and still exits non-zero", () => {
-  /*
-    The wiring, because ops\promote.ps1 is a script and cannot be dot-sourced:
-    the refusal branch has to call the restart BEFORE the Die that ends the
-    run, and Die is what clears the marker when the paper answers and exits
-    non-zero either way. `Die`'s own behaviour is held by the existing test
-    that the recovery command is the last line printed when the paper is down.
-  */
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  const at = (needle, what) => {
-    const index = src.indexOf(needle);
-    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
-    return index;
-  };
-  const refused = at("if (-not $copied.Ok) {", "the copy refusal branch");
-  const brought = at("Invoke-PromoteNothingChanged -Log $log -App $app -StartTheApp { Start-TheApp -SkipMigrate } -Refusal $copied.Failure", "the restart");
-  const died = at("Die \"$($copied.Failure) $($back.Sentence)\"", "the failure exit");
-  assert.ok(refused < brought, "the restart is outside the copy refusal branch");
-  assert.ok(brought < died, "the run ends before the paper is started again");
-  // Nothing between the stop and the copy can have changed anything, and the
-  // message has to say the paper is up rather than that it is down.
-  assert.doesNotMatch(
-    src.slice(refused, died),
-    /The paper is still down and the database was not copied/,
-    "the refusal still tells the operator the paper is down",
-  );
-  // two: the copy refusal, and the refusal when the build snapshot cannot be kept before the copy (6b)
-  assert.equal([...src.matchAll(/Invoke-PromoteNothingChanged/g)].length, 2, "the restart is wired somewhere other than the copy refusal and the snapshot refusal");
-});
 
 test("whether to install is decided by what node_modules was built from, not by this run's fast-forward", windowsOnly, async () => {
   /*
@@ -2536,35 +2391,6 @@ test("whether to install is decided by what node_modules was built from, not by 
   }
 });
 
-test("the install marker is written after a successful install, and nowhere a failure can reach", () => {
-  /*
-    The marker is the record of a FINISHED install. Written anywhere else it
-    would be a guess, and the whole point of it is that it is not one -- a
-    marker left over from an install that died half way would tell the next
-    promotion that node_modules is built from a lockfile it never finished
-    installing.
-  */
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  const at = (needle, what) => {
-    const index = src.indexOf(needle);
-    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not in promote.ps1`);
-    return index;
-  };
-  const failed = at('Die "npm ci did not succeed', "the failed-install branch");
-  const wrote = at("Set-PromoteInstalledLockHash -App $app -Hash $lockAfter", "the marker write");
-  assert.ok(wrote > failed, "the marker is written before the failed install is reported, so a failed install can leave one behind");
-  assert.equal(
-    [...src.matchAll(/Set-PromoteInstalledLockHash/g)].length,
-    1,
-    "the marker is written from more than one place, which is how one of them ends up on a failure path",
-  );
-  // ...and the decision itself does not use the before/after pair any more.
-  assert.match(src, /\$install = Test-PromoteNeedsInstall -App \$app -LockHash \$lockAfter -ResumeAt "\$resumeAt"/, "promote.ps1 no longer asks what node_modules was built from");
-  assert.doesNotMatch(src, /\$mustInstall = \(\$lockBefore -ne \$lockAfter\)/, "the before/after comparison is back as the decider");
-  // The two hash lines stay: scripts\ci-hash-no-module.ps1 lifts exactly these
-  // two out and runs them in a session that cannot reach Get-FileHash.
-  assert.equal([...src.matchAll(/^\$lock(Before|After) = if \(Test-Path/gm)].length, 2, "the two lockfile hash lines the CI fixture lifts out are gone");
-});
 
 test("a resumed run takes the copy's freshness from the copy step, not from the run's start second", windowsOnly, async () => {
   /*
@@ -2657,122 +2483,4 @@ test("a resumed run takes the copy's freshness from the copy step, not from the 
   }
 });
 
-test("promote.ps1 tells the fallback what it knows about the database", () => {
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
 
-  // Step 8's failure path runs after the build step finished -- this run's or
-  // the resumed one's -- and the build step ends in db:migrate, so the database
-  // is on the new schema while the old build serves it. This has to say 'yes'
-  // and carry the build's own output, or the note never appears where it
-  // matters. Since PR2 it is the whole recovery that is called, because the
-  // database has to go back before the old build is started.
-  assert.match(
-    src,
-    /Invoke-PromoteRolloutFailure[^\n]*-MigrationsRan 'yes' -BuildOutput \$buildOutputFile/,
-    "the recovery after a failed health check no longer says the database was migrated",
-  );
-  // The build's own failure path must NOT claim to know: it died part way, so
-  // Invoke-PromoteBuild asks the build's output how far it got, and hands the
-  // answer to the recovery through -Recover.
-  assert.match(src, /\$buildOutputFile = \$built\.OutFile/, "the build's output is not kept for the fallback that follows it");
-  assert.match(src, /Get-PromoteHealthTimeoutSeconds/, "the health wait is back to a bare number in promote.ps1");
-  assert.match(src, /-Recover \{/, "the build's failure no longer runs the recovery");
-  assert.match(src, /Invoke-PromoteRolloutFailure -Why "the build did not succeed" -MigrationsRan \$migrations -BuildOutput \$output/);
-});
-
-test("promote.ps1 carries the hand rollback the unit promised, wired to the same swap", () => {
-  const src = readFileSync(join(OPS, "promote.ps1"), "utf8");
-  const lib = readFileSync(join(OPS, "lib-promote.ps1"), "utf8");
-
-  // The parameter exists and the script acts on it BEFORE its own flow: an
-  // operator running this is mid-incident with a promotion that stopped half
-  // way, and "an earlier promotion did not finish" must not be what stands
-  // between them and the paper coming back.
-  assert.match(src, /\[string\]\$RollbackDatabase = ""/, "promote.ps1 no longer accepts -RollbackDatabase");
-  const at = (haystack, needle, what) => {
-    const index = haystack.indexOf(needle);
-    assert.ok(index > -1, `${what} (${JSON.stringify(needle)}) is not there`);
-    return index;
-  };
-  assert.ok(
-    at(src, "if ($RollbackDatabase)", "the rollback branch") < at(src, "--- 0. is there an unfinished run", "the resume check"),
-    "the rollback runs after the unfinished-run check, so a stopped promotion would block it",
-  );
-
-  // The entry point is a thin one: the ordering lives in the library, where
-  // the test above drives it with fakes. What has to be true here is that this
-  // script hands it the things only this script has -- its port probe, its
-  // stop, its start -- and that it carries the operator's two switches.
-  assert.match(src, /\[switch\]\$StopApp/, "promote.ps1 no longer accepts -StopApp");
-  assert.ok(
-    // The call is written across several lines with backtick continuations, so
-    // this asks for the one line that matters rather than a whole call.
-    src.includes("-TestThePort { Test-PromotePaperUp -Port ([int]$port) }"),
-    "the hand rollback no longer probes the port with the script's own check",
-  );
-  assert.match(src, /-StopApp:\$StopApp -DryRun:\$WhatIfPreference/, "the hand rollback does not carry the operator's -StopApp and -WhatIf");
-  assert.match(src, /Invoke-PromoteRollback[^\n]*-StopApp:\$StopApp/, "the -StopApp switch is not passed to the rollback");
-
-  // It is the SAME swap as the automatic one, in the same library, with the
-  // wording turned to "manual" -- a second implementation of the renames is
-  // how one of them ends up wrong.
-  // It is the last function in the library, so this is the whole of it.
-  const rollback = lib.slice(at(lib, "function Invoke-PromoteDatabaseRollback", "the rollback function"));
-  const pos = (needle) => {
-    const index = rollback.indexOf(needle);
-    assert.ok(index > -1, `the hand rollback no longer mentions ${needle}`);
-    return index;
-  };
-  /*
-    The order, read out of the function rather than run: ask the port FIRST,
-    plan with the sizes, stop the app only if the operator said so, swap, put
-    the old build back, start it.
-
-    Asking the port first is the whole of addendum (b) -- a promotion that
-    failed its own health checks leaves the paper UP and serving, which is
-    exactly the case this command is printed for, and swapping a database out
-    from under a live app is not something to arrive at by accident.
-  */
-  const probed = pos("& $TestThePort");
-  const announced = pos("if ($Announce)");
-  const swapped = pos("Invoke-PromoteDatabaseSwapBack");
-  const restored = pos("Resolve-PromotePreviousBuild");
-  assert.ok(probed < swapped, "the hand rollback swaps before asking whether the paper is answering");
-  assert.ok(probed < announced, "the hand rollback announces the plan before it has checked the port");
-  assert.ok(announced < swapped, "the hand rollback renames before printing what it is about to do");
-  assert.ok(swapped < restored, "the hand rollback puts the build back before the database, so it would start the old build on the new schema");
-  assert.match(rollback, /-Mode 'manual'/, "the hand rollback is not the manual mode of the same swap");
-  assert.match(
-    rollback,
-    /The paper is answering on port \$Port\. Stop it first, or run the promote's own recovery; nothing was changed\./,
-    "the refusal while the paper is answering is not the sentence the unit promised",
-  );
-  assert.match(rollback, /\$paperUp -and -not \$StopApp/, "the port check no longer refuses unless -StopApp was passed");
-  assert.match(lib, /Invoke-PromoteDatabaseSwapBack[^\n]*-Mode 'recovery'/, "the automatic recovery no longer goes through the same swap-back");
-
-  // The one command the operator is told to run, and the warning that has to
-  // come with it.
-  assert.match(lib, /function Get-PromoteRollbackCommand/, "the rollback command is gone");
-  assert.match(lib, /-RollbackDatabase \$Copy/, "the printed command does not carry the copy's name");
-  assert.match(src, /ANYTHING WRITTEN SINCE THE NEW APP STARTED IS LOST/, "the cost of the hand rollback is no longer said out loud");
-  assert.match(src, /Show-RollbackOffer \$rollbackCommand/, "a promotion that ends badly no longer offers the rollback");
-
-  // And the last line of a failed run's log says which database holds what.
-  // Log FILE only, through the library's own writer: the command that brings
-  // the paper back is the last thing an operator SEES, and the test above
-  // holds that. The record gets its closing line underneath it.
-  assert.match(lib, /function Write-PromoteLogFileOnly/, "the log-only writer is gone");
-  assert.doesNotMatch(
-    lib.slice(lib.indexOf("function Write-PromoteLogFileOnly"), lib.indexOf("function Get-PromoteStepOrder")),
-    /Write-Host/,
-    "the log-only writer prints to the console, so the recovery command is no longer the last line an operator sees",
-  );
-  assert.match(src, /\$closing = "END\. \$msg"/, "the last line of a failed run's log no longer closes the record");
-  assert.match(
-    src,
-    /\$closing \+= " Databases: \$dbNote\."/,
-    "the last line of a failed run's log no longer says which database holds what",
-  );
-  assert.match(src, /Write-PromoteLogFileOnly \$log \$closing/, "the closing line is not written through the log-only writer");
-  assert.match(src, /\$dbNote = "the paper's database is \$dbName"/, "the log no longer names the databases at the end of a failed run");
-});

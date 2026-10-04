@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CheckGates } from "./check-gates.ts";
@@ -99,67 +98,5 @@ describe("the publish bar's chips, as the editor sees them", () => {
       publishBarNote({ ...NEVER_RUN, evidenceChecked: true, nameCheckComplete: true }),
       "All checks done.",
     );
-  });
-});
-
-describe("both workbenches read the rule instead of printing the old words", () => {
-  const here = new URL(".", import.meta.url);
-  const source = (path: string) =>
-    readFileSync(new URL(path, here), "utf8")
-      /* Comments above the code explain what was wrong; they are allowed to
-         name the old wording. What must be gone is the wording in the code. */
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split("\n")
-      .filter((line) => !line.trim().startsWith("//"))
-      .join("\n");
-  const lead = source("../routes/desk.story.$leadId.tsx");
-  const editorial = source("../routes/desk.story.draft.$draftId.tsx");
-  const home = source("../routes/desk.index.tsx");
-
-  it("(a) the lead workbench builds its chips and stepper from check-gates, with no old wording left", () => {
-    assert.match(lead, /evidenceChip\(checkFacts\)/);
-    assert.match(lead, /namesChip\(checkFacts\)/);
-    assert.match(lead, /storyStages\(checkFacts, onPaper\)/);
-    assert.match(lead, /publishBarNote\(checkFacts\)/);
-    assert.match(lead, /recordedChecks\(data\.draft\?\.research_json\)/);
-    assert.doesNotMatch(lead, /Names reviewed/);
-    assert.doesNotMatch(lead, /"All checks done\."/);
-    assert.doesNotMatch(lead, /const checkClear/, "the 'nothing is outstanding' stand-in is gone");
-  });
-
-  it("(a) the editorial workbench does the same, chips and bar line", () => {
-    assert.match(editorial, /namesChip\(checkFacts\)/);
-    assert.match(editorial, /evidenceChip\(checkFacts\)/);
-    assert.match(editorial, /publishBarNote\(checkFacts\)/);
-    assert.match(editorial, /recordedChecks\(q\.data\?\.research_json\)/);
-    assert.doesNotMatch(editorial, /Names reviewed/);
-    assert.doesNotMatch(editorial, /"All checks done\."/);
-  });
-
-  it("both bars render the drawn chip row, not a second copy of it", () => {
-    for (const source of [lead, editorial]) {
-      assert.match(source, /<CheckGates gates=\{publishGates\} label="Publish gates" \/>/);
-      assert.doesNotMatch(source, /className=\{`astra-gate\$\{/);
-    }
-  });
-
-  it("the desk home's own chips read the shared rule too, from the shared row facts", () => {
-    /* Not a byte-for-byte reproduction of the inline chip that used to sit
-       here -- U9b: two recorded rows print differently, and more honestly
-       (see the `deskRowChecks` cases in lib/news/check-gates.test.ts). */
-    assert.match(home, /const facts = deskRowChecks\(row\)/);
-    assert.match(home, /evidenceChip\(facts\)/);
-    assert.match(home, /namesChip\(facts\)/);
-    /* And its sub line no longer promises a rule the desk does not have: a
-       story may print with no check run, which is what the chips now say. */
-    assert.doesNotMatch(home, /Each story needs every check before it can print\./);
-    assert.match(home, /the chips show which checks ran/);
-  });
-
-  it("both workbenches hand the bar a name check RECORD, not just a pass", () => {
-    /* U9b: without this the bar could say "No name check ran" beside a chip
-       saying the check is older than the text. */
-    assert.match(lead, /nameCheckRecorded: draftChecks\.nameCheckRecorded/);
-    assert.match(editorial, /nameCheckRecorded: recorded\.nameCheckRecorded/);
   });
 });

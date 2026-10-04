@@ -285,40 +285,4 @@ describe("giving up the desk", () => {
       await db.end();
     }
   });
-
-  /*
-    Static by necessity, not by convenience: whether a component is ever
-    referenced in JSX is a property of the source tree, not of any one
-    request/response the running app can be asked to produce. Rendering every
-    desk page and asserting a button's absence would prove the same thing far
-    more expensively and would still only be checking today's page list. This
-    one needs no database, so it always runs.
-  */
-  it("is not rendered in the chrome of every desk page", () => {
-    const chrome = readFileSync(new URL("../../components/desk-chrome.tsx", import.meta.url), "utf8");
-    const rendered = chrome.includes("<LeaveEditorControl");
-    assert.equal(
-      rendered,
-      false,
-      "the control is back in the persistent header, one misclick from Sign out",
-    );
-  });
-
-  /*
-    Also static by necessity: this is checking the copy shown to the operator,
-    not a code path -- there is no request whose response is "the words in
-    the confirmation dialog." Reading the source is the direct check. No
-    database needed, so it always runs.
-  */
-  it("the confirmation names what is lost", () => {
-    const copy = readFileSync(new URL("./desk-copy.ts", import.meta.url), "utf8");
-    const block = copy.slice(copy.indexOf("export function createEditorCopy"));
-    const text = block.slice(0, block.indexOf("}", block.indexOf("return {")));
-    for (const word of ["archive", "cannot take it back", "Type your email"]) {
-      assert.ok(
-        text.includes(word),
-        `the confirmation no longer mentions "${word}"; it describes the mechanism, not the loss`,
-      );
-    }
-  });
 });

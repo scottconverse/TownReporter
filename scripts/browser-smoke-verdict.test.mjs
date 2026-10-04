@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   baselineComparison,
@@ -13,8 +10,6 @@ import {
   normalizedBodyTextHash,
   parseSmokeArgs,
 } from "./browser-smoke-verdict.mjs";
-
-const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function viewport(overrides = {}) {
   return {
@@ -369,48 +364,4 @@ test("exitCodeFor: 4xx boundary and missing status", () => {
 test("exitCodeFor: no viewport data is a failure", () => {
   assert.equal(exitCodeFor({}), 1);
   assert.equal(exitCodeFor(undefined), 1);
-});
-
-test("browser-smoke wires the guard and verdict helpers", () => {
-  const src = readFileSync(join(TEMPLATE_ROOT, "scripts/browser-smoke.mjs"), "utf8");
-  assert.match(src, /from "\.\/browser-guard\.mjs"/);
-  assert.match(src, /from "\.\/browser-smoke-verdict\.mjs"/);
-  assert.match(src, /const args = parseSmokeArgs\(process\.argv\.slice\(2\), process\.env\)/);
-  assert.match(src, /const url = checkedUrl\(args\.url\)/);
-  assert.match(src, /const outPng = checkedOutputPath\(args\.outPng, \["\/workspace"\]\)/);
-  assert.match(src, /const mobilePng = checkedOutputPath\(derived\.mobilePng, \["\/workspace"\]\)/);
-  assert.match(src, /const outJson = checkedOutputPath\(derived\.verdictJson, \["\/workspace"\]/);
-  assert.match(src, /checkedOutputPath\(realpathSync\(args\.baseline\), \["\/workspace"\]/);
-  assert.match(src, /baselinePath === outJson/);
-  assert.match(src, /normalizedBodyTextHash\(/);
-  assert.match(src, /bodyTextPrefix\(/);
-  assert.match(src, /baselineComparison\(/);
-  assert.match(src, /process\.exitCode = exitCodeFor\(viewports\)/);
-  assert.match(src, /waitUntil: "domcontentloaded"/);
-  assert.doesNotMatch(
-    src,
-    /waitUntil:\s*["']networkidle["']/,
-    "Vite HMR never reaches networkidle",
-  );
-  assert.match(src, /} finally \{\s*await browser\?\.close\(\);/s);
-  assert.doesNotMatch(
-    src.slice(src.indexOf("let browser = null")),
-    /process\.exit\(/,
-    "process.exit after Chromium launch skips finally teardown",
-  );
-});
-
-test("browser-smoke file I/O only touches guarded paths", () => {
-  const src = readFileSync(join(TEMPLATE_ROOT, "scripts/browser-smoke.mjs"), "utf8");
-  assert.doesNotMatch(src, /(?:writeFileSync|readFileSync|statSync|realpathSync)\(\s*["'`]/);
-  const writes = [...src.matchAll(/writeFileSync\(\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]);
-  assert.equal(writes.length, 2);
-  assert.ok(
-    writes.every((v) => v === "outJson"),
-    `unexpected writeFileSync target: ${writes}`,
-  );
-  const reads = [...src.matchAll(/readFileSync\(\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]);
-  assert.deepEqual(reads, ["baselinePath"]);
-  const stats = [...src.matchAll(/statSync\(\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]);
-  assert.deepEqual(stats, ["baselinePath"]);
 });

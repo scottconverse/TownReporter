@@ -13,7 +13,7 @@
   paint and no cascade, and sonner's own stylesheet is injected by script. The
   yellow fill, the `#111` text, the danger edge and the 14px floor are settled
   in `src/desk-astra.css` and are measured in a browser -- see the FB5 browser
-  walk and its screenshots, and `scripts/desk-min-font.test.mjs` for the floor.
+  walk and its screenshots.
 */
 import assert from "node:assert/strict";
 import { test } from "node:test";

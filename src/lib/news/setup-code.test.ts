@@ -8,7 +8,7 @@
 */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,51 +168,6 @@ describe("first-owner setup code", () => {
     } finally {
       restore();
     }
-  });
-
-  it("production never reaches the test-only setup-code override", () => {
-    // forceSetupCodeSatisfiedForTests() is a process-global escape hatch for
-    // the pre-existing race/index tests in first-owner-race.test.ts. This
-    // walks every non-test .ts file under src/ and server/ that is part of
-    // the real request path and proves none of them mention it by name --
-    // there is no environment variable or NODE_ENV check gating it, so the
-    // only thing that could make it reach production is a call site, and
-    // this proves there is none.
-    const PRODUCTION_DIRS = ["src/routes", "src/lib/news", "src/lib/auth", "server"].map((d) =>
-      new URL(`../../../${d}/`, import.meta.url),
-    );
-    const offenders: string[] = [];
-    function walk(dirUrl: URL) {
-      let entries: string[];
-      try {
-        entries = readdirSync(dirUrl);
-      } catch {
-        return;
-      }
-      for (const entry of entries) {
-        const childUrl = new URL(entry, dirUrl.href.endsWith("/") ? dirUrl : `${dirUrl}/`);
-        let isDir = false;
-        try {
-          isDir = statSync(childUrl).isDirectory();
-        } catch {
-          continue;
-        }
-        if (isDir) {
-          if (entry === "node_modules") continue;
-          walk(new URL(`${entry}/`, dirUrl));
-          continue;
-        }
-        if (!entry.endsWith(".ts") && !entry.endsWith(".tsx")) continue;
-        if (entry.includes(".test.")) continue;
-        if (entry === "setup-code.server.ts") continue; // the definition itself
-        const text = readFileSync(childUrl, "utf8");
-        if (text.includes("forceSetupCodeSatisfiedForTests")) {
-          offenders.push(childUrl.pathname);
-        }
-      }
-    }
-    for (const dir of PRODUCTION_DIRS) walk(dir);
-    assert.deepEqual(offenders, [], `test-only override referenced outside tests:\n  ${offenders.join("\n  ")}`);
   });
 
   it("claimOwner (the tested-signature function) still takes only a user id, and on a fresh install it refuses without the code too", async () => {

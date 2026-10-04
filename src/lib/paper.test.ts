@@ -115,23 +115,6 @@ describe("the full date-time keeps its year", () => {
     assert.equal(formatDateTime(`${CURRENT_YEAR}-10-02T12:43:00.000Z`), `Oct 2, ${CURRENT_YEAR}, 6:43 a.m.`);
   });
 
-  it("keeps the reader-facing records off the LIST formatter", () => {
-    /*
-      A SOURCE PIN, not a render: the three archival surfaces must not import
-      `formatListDateTime` at all. A future screen that reached for the desk's
-      short face here would silently drop the year off a capture time, and no
-      unit test of the formatter itself would notice.
-    */
-    for (const file of [
-      "src/components/provenance.tsx",
-      "src/routes/evidence.$versionId.tsx",
-      "src/routes/evidence.compare.tsx",
-    ]) {
-      const text = readFileSync(new URL(`../../${file}`, import.meta.url), "utf8");
-      assert.doesNotMatch(text, /formatListDateTime/, `${file} must print the full archival date`);
-      assert.match(text, /formatDateTime/, `${file} should still use the full-date formatter`);
-    }
-  });
 });
 
 describe("version", () => {

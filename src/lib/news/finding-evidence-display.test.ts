@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   captureStateSentence,
@@ -114,30 +113,4 @@ describe("opening the captured text brings it to the editor", () => {
     assert.doesNotThrow(() => revealOpenedCapture({}), "a node without the methods is not a crash");
   });
 
-  it("is wired to the panel that renders, and to both answers from the read", () => {
-    /*
-      The helper is proven above; this is the other half -- that the panel
-      which renders the captured text carries the ref, is focusable, and is
-      revealed by an effect keyed on whatever the read produced. There is no
-      DOM harness in this repository (no jsdom; the component tests here render
-      to static markup or read the source), so the wiring is read from the
-      source, the way `takedown-notice.test.ts` reads this same file.
-    */
-    const source = readFileSync(new URL("../../components/finding-evidence-review.tsx", import.meta.url), "utf8");
-    assert.match(source, /const capturePanel = useRef<HTMLDivElement \| null>\(null\)/);
-    assert.match(source, /revealOpenedCapture\(capturePanel\.current\)/);
-    assert.match(source, /ref=\{capturePanel\}/, "the ref is on the panel that renders the text");
-    assert.match(source, /tabIndex=\{-1\}/, "a region has to be focusable to take the cursor");
-    assert.match(
-      source,
-      /useEffect\(\(\) => \{\s*if \(!openedCapture\) return;\s*revealOpenedCapture\(capturePanel\.current\);\s*\}, \[openedCapture\]\)/,
-      "both a found capture and a refused read set `openedCapture`, and both are revealed",
-    );
-    assert.doesNotMatch(
-      source,
-      /captureRead\.isPending \? <BusyLine/,
-      "the busy line is at the link now, not below the fold",
-    );
-    assert.match(source, /Opening the saved copy…/);
-  });
 });

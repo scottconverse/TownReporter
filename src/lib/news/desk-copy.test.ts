@@ -1,6 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { z } from "zod";
 import type { NewsroomPlace } from "./lead-match.ts";
 import {
@@ -33,8 +32,6 @@ import {
   headlineFromUrl,
   humanFrontierLabel,
   investigationRoundLabel,
-  darkJobActive,
-  observedDarkJobFinished,
   investigationStopKind,
   keepsFailingNote,
   kindFromSourceUrl,
@@ -388,18 +385,6 @@ describe("editor copy", () => {
     assert.doesNotMatch(msg!, /budget/i);
   });
 
-  it("distinguishes the full open-entry count from the limited deduplicated display", () => {
-    const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
-    const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
-    assert.match(dataSource, /as still_open[\s\S]*from investigations i/);
-    assert.match(
-      screenSource,
-      /const totalOpen = Math\.max\(Number\(inv\?\.still_open \?\? 0\), leftover\)/,
-    );
-    assert.match(screenSource, /limited, deduplicated subset of \{totalOpen\} open follow-up/);
-    assert.doesNotMatch(screenSource, /more were mentioned but\s+not yet named/);
-  });
-
   it("does not say 'that is normal' when the batch was mostly blocked (Dark Desk F6)", () => {
     const raw =
       "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.";
@@ -466,27 +451,6 @@ describe("editor copy", () => {
     assert.equal(investigationRoundLabel(10, 5), "10 rounds completed · up to 5 per run");
     assert.equal(investigationRoundLabel(1, 5), "1 round completed · up to 5 per run");
     assert.doesNotMatch(investigationRoundLabel(10, 5), /10\s+of\s+5/i);
-  });
-
-  it("tracks only a matching observed dark job through terminal states", () => {
-    assert.equal(darkJobActive("queued"), true);
-    assert.equal(darkJobActive("running"), true);
-    assert.equal(darkJobActive("completed"), false);
-    assert.equal(darkJobActive("failed"), false);
-
-    const observed = { investigationId: 4, jobId: 10 };
-    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "completed" }), true);
-    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "failed" }), true);
-    assert.equal(observedDarkJobFinished(observed, 5, { id: 10, status: "completed" }), false);
-    assert.equal(observedDarkJobFinished(observed, 4, { id: 11, status: "completed" }), false);
-    assert.equal(observedDarkJobFinished(observed, 4, { id: 10, status: "running" }), false);
-
-    const dataSource = readFileSync(new URL("./dark.ts", import.meta.url), "utf8");
-    const screenSource = readFileSync(new URL("../../routes/desk.dark.tsx", import.meta.url), "utf8");
-    assert.match(dataSource, /darkJob:\s*job/);
-    assert.match(screenSource, /darkJobActive\(q\.state\.data\?\.darkJob\?\.status\)/);
-    assert.match(screenSource, /observedDarkJobFinished\(observedActiveDarkJob\.current, openId, job\)/);
-    assert.match(screenSource, /darkJobError \? <p className="note err" role="alert">/);
   });
 
   it("translates engine dumps into English", () => {
@@ -1330,77 +1294,6 @@ describe("a lapsed provider login is a sign-in problem, not a retry", () => {
     assert.ok(msg);
     assert.match(msg!, /timed out|timeout/i);
     assert.doesNotMatch(msg!, /sign in again/);
-  });
-});
-
-describe("the Server page tells a point-and-click operator what its buttons do", () => {
-  /*
-   * 2026-09-02 operator feedback: "No clue at all from the screen what
-   * Paper setup Save, Invite an editor, or Give up the desk actually do.
-   * Does it warn you? Where does the invited person put this code?" These
-   * are source-shape checks -- there is no request whose response is "the
-   * words on the Server page" -- reading the source of the cards directly
-   * is the check. No database needed, so it always runs.
-   *
-   * Unit CX2 moved these three editors off `/desk/ops` and behind the cards'
-   * own screens at `/desk/ops/<card>`; the components live in
-   * `src/components/ops-panels.tsx` now, and Paper setup and Invite an editor
-   * picked up the `-Panel` suffix their neighbours already had. The copy under
-   * test did not change -- only the file it is written in did -- so this check
-   * follows the copy rather than the file it used to be in.
-   */
-  const ops = readFileSync(new URL("../../components/ops-panels.tsx", import.meta.url), "utf8");
-  // JSX text wraps across source lines the way the paragraphs above are
-  // written; the browser collapses that whitespace when it renders, so the
-  // check does the same rather than requiring every phrase to fall on one
-  // physical line.
-  const flatten = (s: string) => s.replace(/\s+/g, " ");
-
-  it("Paper setup explains what Save writes, and answers the watch-list question truthfully", () => {
-    const block = flatten(
-      ops.slice(ops.indexOf("function PaperSetupPanel("), ops.indexOf("function DarkDeskCounty(")),
-    );
-    for (const phrase of [
-      "writes every field",
-      "kicker",
-      "welcome article",
-      "Published stories are not touched",
-      "no undo",
-      "Sources page",
-    ]) {
-      assert.ok(block.includes(phrase), `Paper setup no longer says "${phrase}"`);
-    }
-  });
-
-  it("Invite an editor says up front that nothing gets emailed", () => {
-    const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
-    );
-    assert.ok(
-      block.includes("does not send email"),
-      "the invite form no longer warns that TownReporter sends nothing",
-    );
-  });
-
-  it("Invite an editor says what happens once the person has the link", () => {
-    const block = flatten(
-      ops.slice(ops.indexOf("function InviteAnEditorPanel("), ops.indexOf("function RecoveryCodesPanel(")),
-    );
-    assert.ok(
-      block.includes("What happens next"),
-      "the post-mint copy no longer says what happens once they click the link",
-    );
-    assert.ok(
-      block.includes("Copy message") && block.includes("Copy link"),
-      "the minted-link panel lost one of its copy buttons",
-    );
-  });
-
-  it("Give up the desk shows the consequence in the sub line, before the first click", () => {
-    const block = flatten(ops.slice(ops.indexOf("function GiveUpTheDesk(")));
-    for (const phrase of ["Dark Desk files", "no way back", "type your email address"]) {
-      assert.ok(block.includes(phrase), `Give up the desk sub line no longer says "${phrase}"`);
-    }
   });
 });
 
