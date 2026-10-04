@@ -37,10 +37,12 @@
  *      "Lists", "Index", "Page", "Directory", "Hours"). -- R1-R3.
  *
  *   5. Meeting records. "A meeting is news when something is decided, proposed
- *      or disputed, not when a record is posted" (this desk's rule, after two
- *      routine commission records -- an agenda and a set of minutes -- were
- *      filed as leads). A headline that is nothing but a public body's name and
- *      a date is a record that the meeting was held, not news from it. -- R5.
+ *      or disputed, not when one is posted, set or scheduled" (this desk's
+ *      rule, after a real scan filed five routine meeting records -- two
+ *      commission agendas, a session and two meeting notices -- as leads). A
+ *      headline that is nothing but a public body's name, a date and the fact
+ *      that a meeting is set is a record that the meeting will happen, not news
+ *      from it. -- R5.
  *
  * A rule only fires when the candidate shows a page ARTIFACT and no event: a
  * title that carries a dated event ("...Fundraiser Set for Oct. 10") is left
@@ -190,26 +192,40 @@ function eventsListingStamp(lead: LeadLike): StandingPageStamp | null {
 
 /*
   R5 -- a bare meeting record (news values: a meeting is news when something is
-  decided, proposed or disputed, not when a record is posted).
+  decided, proposed or disputed, not when one is posted, set or scheduled).
 
   "Planning and Zoning Commission 9/16/26" and "Historic Preservation
   Commission - October 1, 2026" are the video/agenda titles of two routine
-  meetings -- the agenda posted, the minutes posted, nothing decided -- and the
-  scan filed both as leads. A headline whose only content is the body's name
-  and a date says only that the meeting happened; the news, if any, is what was
-  decided in it, and that belongs to the meeting-capture transcript path.
+  meetings -- the agenda posted, the minutes posted, nothing decided -- and a
+  real scan filed both as leads. Three more of the same shape came with them:
+  "Longmont Council Regular Session Set for Oct. 6", "Planning and Zoning
+  Commission Sets Oct. 21 Meeting" and "Longmont Housing Board Opens Human
+  Services Funding Hearings Oct. 15". A headline whose whole content is the
+  body's name, a date and the fact that a meeting is set says only that the
+  meeting will happen; the news, if any, is what is decided in it, and that
+  belongs to the meeting-capture transcript path.
 
-  Three conditions, all cheap:
-    - the title carries a date (no date, no record);
+  Five conditions, all cheap:
+    - the title carries a date or a clock time (no time, no record);
     - the title names a public body (council, commission, board, committee,
-      authority, trustees, panel -- with any qualifier words: "Historic
-      Preservation Commission", "Board of Adjustment");
-    - nothing in the title is news: at most a few words are left once the body,
-      the date and the meeting vocabulary (session, meeting, agenda, minutes,
-      hearing, packet, consent, item, remarks ...) are removed, and none of them
-      is a decision/action word (approve, vote, reject, propose, postpone,
-      confirm, cut, hire ...). "Board of Adjustment meets Oct. 3" is a record;
-      "Board of Adjustment denies the variance" is news and is left alone.
+      authority, trustees, panel). Qualifier words BEFORE the body noun are part
+      of the body's own name ("Historic Preservation Commission," "Longmont
+      Housing Board") and cost nothing -- every body's name is a few words long;
+    - the word right AFTER the body noun belongs to a meeting notice too: a date,
+      meeting vocabulary, or nothing. Otherwise the word is a venue or an event's
+      name, not a body ("Free Screening ... at Council Chambers Oct. 7"; "Jack's
+      Solar Garden Hosts 'Pumpkins & Panels' Halloween Event Oct. 24");
+    - nothing in the title is news: no decision, proposal or dispute word
+      (approve, vote, reject, propose, postpone, confirm, cut, hire ...).
+      Scheduling is not deciding: "Council sets a meeting" is a record, while
+      "Council sets the tax rate" is still caught by tax/rate, and "Council to
+      consider the X ordinance" by the proposal verb;
+    - at most three content words are left once the date, the body and the
+      meeting vocabulary (session, meeting, agenda, minutes, hearing, packet,
+      consent, item, remarks, scheduled, to meet, opens, convenes ...) are
+      removed. "Board of Adjustment meets Oct. 3" is a record; "Board of
+      Adjustment denies the variance for 350 Kimbark Street" is news and is
+      left alone.
 
   Guard: a headline ending in a parenthesized machine timestamp -- "City Council
   Regular Session - September 22, 2026 (2026-09-23)" -- is written only by the
@@ -217,12 +233,20 @@ function eventsListingStamp(lead: LeadLike): StandingPageStamp | null {
   only for an ALIGNED transcript. Those leads are transcript-stories the desk
   has the recording for, not bare records, so this rule leaves them to the
   model. That is the whole difference between the published council-session
-  leads and the two records this rule drops.
+  leads and the records this rule drops.
 */
 const MEETING_BODY_NOUN =
   /^(council|councils|commission|commissions|commissioners|board|boards|committee|committees|authority|authorities|trustees|panel|panels)$/;
 
-/** Words that name a meeting or its paperwork rather than an event in it. */
+/**
+ * Words that name a meeting or its paperwork rather than an event in it.
+ *
+ * "set/sets/scheduled/opens/meets/convenes" are here on purpose: a headline that
+ * only says WHEN a body meets has no event in it. They are deliberately NOT in
+ * the action list below, because scheduling is not a decision. The single
+ * letters are the tokenizer's leftovers from "7 p.m." (the clock-time half of a
+ * meeting notice).
+ */
 const MEETING_RECORD_WORDS = new Set(
   (
     "meeting meetings session sessions regular special study worksession work " +
@@ -230,13 +254,25 @@ const MEETING_RECORD_WORDS = new Set(
     "order roll pledge allegiance remarks comments report reports presentation " +
     "presentations consent business item items reading readings ordinance " +
     "ordinances resolution resolutions new old first second third public invited " +
-    "be heard member members from to of and the a an at on in for with"
+    "be heard member members from to of and the a an at on in for with " +
+    "set sets setting scheduled schedule schedules opens opened opening meets meet " +
+    "convenes reconvenes holds am pm m p"
   ).split(/\s+/),
 );
 
-/** A decision, proposal or dispute: the presence of one means this is news. */
+/**
+ * A decision, proposal or dispute: the presence of one means this is news.
+ *
+ * Scheduling words are absent by design ("sets" is not here -- see above), and
+ * so is "fund": "the board opens funding hearings" is a meeting being scheduled,
+ * not a decision, while the money it spends is still caught by budget, contract,
+ * pay, spend, purchase and tax.
+ */
 const MEETING_ACTION_WORD =
-  /\b(approv\w*|reject\w*|den(?:y|ies|ied)|vote[sd]?|voting|pass(?:ed|es)?|adopt\w*|decid\w*|decision|postpon\w*|delay\w*|propos\w*|disput\w*|debat\w*|confirm\w*|flag\w*|back(?:ed|s)?|block\w*|halt\w*|sign(?:ed|s)?|veto\w*|ok(?:s|'d)?|kill\w*|settl\w*|award\w*|hir(?:e|ed|es|ing)|fir(?:e|ed|es|ing)|appoint\w*|elect\w*|su(?:ed|es)|fin(?:ed|es)|rais(?:e|ed|es)|cuts?|sets?|axe[sd]?|greenlight\w*|agree\w*|table[sd]?|unanimous|announc\w*|reopen\w*|launch\w*|fund\w*|budget\w*|contract\w*|pay(?:s|ment|ments)?|paid|spend\w*|purchas\w*|sell\w*|sold|build\w*|expands?|expand(?:ed|s|ing)?|reduc\w*|increas\w*|tax(?:es)?|fees?|rates?|deadline\w*|applicat\w*|cancel\w*)\b/i;
+  /\b(approv\w*|reject\w*|den(?:y|ies|ied)|vote[sd]?|voting|pass(?:ed|es)?|adopt\w*|decid\w*|decision|postpon\w*|delay\w*|propos\w*|consider\w*|disput\w*|debat\w*|confirm\w*|flag\w*|back(?:ed|s)?|block\w*|halt\w*|sign(?:ed|s)?|veto\w*|ok(?:s|'d)?|kill\w*|settl\w*|award\w*|hir(?:e|ed|es|ing)|fir(?:e|ed|es|ing)|appoint\w*|elect\w*|su(?:ed|es)|fin(?:ed|es)|rais(?:e|ed|es)|cuts?|axe[sd]?|greenlight\w*|agree\w*|table[sd]?|unanimous|announc\w*|reopen\w*|launch\w*|budget\w*|contract\w*|pay(?:s|ment|ments)?|paid|spend\w*|purchas\w*|sell\w*|sold|build\w*|expands?|expand(?:ed|s|ing)?|reduc\w*|increas\w*|tax(?:es)?|fees?|rates?|deadline\w*|applicat\w*|cancel\w*)\b/i;
+
+/** A clock time in the title: the other way a meeting notice says when. */
+const TITLE_CLOCK_TIME = /\b\d{1,2}:\d{2}\b|\b\d{1,2}\s*(?:a\.?m\.?|p\.?m\.?)\b/i;
 
 /** A parenthesized machine timestamp: the meeting-capture transcript-lead form. */
 const CAPTURE_STAMP = /\(\s*\d{4}-\d{2}-\d{2}/;
@@ -247,23 +283,36 @@ function meetingRecordStamp(lead: LeadLike): StandingPageStamp | null {
   const title = lead.headline ?? "";
   if (CAPTURE_STAMP.test(title)) return null; // transcript-story, not a bare record
   const cleaned = title.replace(/\([^)]*\)/g, " ").replace(/&amp;/g, "&");
-  if (!titleCarriesEventDate(cleaned) && !/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(cleaned)) return null;
+  const dated =
+    titleCarriesEventDate(cleaned) ||
+    /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/.test(cleaned) ||
+    TITLE_CLOCK_TIME.test(cleaned);
+  if (!dated) return null;
   const words = cleaned.toLowerCase().match(/[a-z]+|\d+(?:\/\d+)*/g) ?? [];
   const bodyAt = words.findIndex((w) => MEETING_BODY_NOUN.test(w));
   if (bodyAt < 0) return null;
   if (MEETING_ACTION_WORD.test(cleaned)) return null;
   const isDateWord = (w: string) =>
     MONTH_WORD.test(w) || /^\d+(?:\/\d+)+$/.test(w) || /^\d{4}-\d{2}-\d{2}$/.test(w) || /^\d{1,4}$/.test(w);
+  // The word after the body's name must belong to a meeting notice: a date,
+  // meeting vocabulary, or the end of the title. Otherwise "council" is a venue
+  // in someone else's headline ("Free Screening ... at Council Chambers Oct. 7")
+  // or an event's name ("Pumpkins & Panels"), not the body holding a meeting.
+  const after = words[bodyAt + 1];
+  if (after !== undefined && !isDateWord(after) && !MEETING_RECORD_WORDS.has(after)) return null;
   let extra = 0;
   for (let i = 0; i < words.length; i++) {
     const w = words[i];
-    if (i === bodyAt || isDateWord(w) || MEETING_RECORD_WORDS.has(w)) continue;
+    // The body's own name: "Historic Preservation", "Longmont Housing",
+    // "Planning and Zoning" all describe the body, not the news.
+    if (i <= bodyAt) continue;
+    if (isDateWord(w) || MEETING_RECORD_WORDS.has(w)) continue;
     extra++;
   }
   if (extra > 3) return null; // real content beside the body: leave it to the model
   return {
     rule: "R5",
-    reason: "headline is only a meeting body and a date — a record that the meeting was held, not news from it",
+    reason: "headline is only a meeting body and a date — a record that the meeting was posted, set or held, not news from it",
   };
 }
 

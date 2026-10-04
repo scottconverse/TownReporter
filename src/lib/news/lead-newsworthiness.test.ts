@@ -144,28 +144,99 @@ test("a bare 'Lists' or 'Hours' token is not enough: published listing-style lea
   );
 });
 
-test("R5: a bare meeting record is dropped (dev scan, leads 415 and 416)", () => {
-  // The two routine meeting records the real scan filed as leads: a commission
-  // agenda title and a commission minutes title. Nothing is decided, proposed
-  // or disputed in either -- they are records that the meetings were held.
-  const pz = standingPageStamp({
-    headline: "Planning and Zoning Commission 9/16/26",
-    source_urls: ["https://www.youtube.com/watch?v=skwd58zm6jk"],
-  });
-  assert.equal(pz?.rule, "R5");
-  assert.match(pz!.reason, /meeting/i);
-
-  const hpc = standingPageStamp({
-    headline: "Historic Preservation Commission - October 1, 2026",
-    source_urls: ["https://www.youtube.com/watch?v=nbHxli1govY"],
-  });
-  assert.equal(hpc?.rule, "R5");
-
+test("R5: the five routine meeting records a real dev scan filed are all dropped", () => {
+  // Leads 437-439, 442 and 443 of the 2026-10-04 dev scan (REAL-SCAN-DEV-2.md §3,
+  // "routine meeting records 5"). Each headline is a public body, a date and the
+  // fact that a meeting is posted, set or scheduled -- an agenda, a session, a
+  // hearing notice, a meeting notice. None says what was decided in it.
+  const records = [
+    "Planning and Zoning Commission 9/16/26",
+    "Historic Preservation Commission - October 1, 2026",
+    "Longmont Housing Board Opens Human Services Funding Hearings Oct. 15",
+    "Longmont Council Regular Session Set for Oct. 6",
+    "Planning and Zoning Commission Sets Oct. 21 Meeting",
+  ];
+  for (const headline of records) {
+    const stamp = standingPageStamp({ headline, source_urls: [] });
+    assert.equal(stamp?.rule, "R5", `record not dropped: ${headline}`);
+    assert.match(stamp!.reason, /meeting/i);
+  }
   // Qualifier words before the body are fine: still only a name and a date.
   assert.equal(
     standingPageStamp({ headline: "Longmont Urban Renewal Authority (LURA) Meeting, August 18, 2026" })?.rule,
     "R5",
   );
+  // A clock time is the other way a notice says when: still only a record.
+  assert.equal(standingPageStamp({ headline: "City Council meeting Oct. 6 at 7 p.m." })?.rule, "R5");
+});
+
+test("R5: a published meeting story survives while the same meeting's bare record drops", () => {
+  // Published lead 221 says what happened -- the board cancelled a meeting --
+  // beside the record (dev lead 439) that only says hearings are on.
+  assert.equal(
+    standingPageStamp({
+      headline: "Human Services funding hearings set for Oct. 1 and Oct. 8; Oct. 8 regular board meeting cancelled",
+      source_urls: [],
+    }),
+    null,
+    "a cancelled meeting is news, not a record",
+  );
+  assert.equal(
+    standingPageStamp({ headline: "Longmont Housing Board Opens Human Services Funding Hearings Oct. 15" })?.rule,
+    "R5",
+  );
+});
+
+test("R5: a published board story survives while the set-a-session record drops", () => {
+  // Published lead 174: the board lists hearings "despite cancelling its regular
+  // Oct. 8 meeting" -- a change. Dev lead 442 is the same body announcing a
+  // session, which is not.
+  assert.equal(
+    standingPageStamp({
+      headline:
+        "Longmont’s housing and human-services board lists October funding hearings despite cancelling its regular Oct. 8 meeting",
+      source_urls: [],
+    }),
+    null,
+    "a change to a meeting is news, not a record",
+  );
+  assert.equal(
+    standingPageStamp({ headline: "Longmont Council Regular Session Set for Oct. 6" })?.rule,
+    "R5",
+  );
+});
+
+test("R5: 'Council Chambers' is a venue, not a body holding a meeting", () => {
+  // The dev scan filed this one as real news (lead 446, "real news (event)"),
+  // and it is right to: the event is the screening, and the council only owns
+  // the room. The same words with the record's shape (dev lead 443) are not.
+  assert.equal(
+    standingPageStamp({
+      headline: "Free Screening of 'Join or Die' at Council Chambers Oct. 7",
+      source_urls: [],
+    }),
+    null,
+    "a venue named after a council is not a council meeting",
+  );
+  assert.equal(
+    standingPageStamp({ headline: "Planning and Zoning Commission Sets Oct. 21 Meeting" })?.rule,
+    "R5",
+  );
+});
+
+test("R5: 'Pumpkins & Panels' is an event, not a board", () => {
+  // The dev scan filed this one as real news too (lead 457, held, "New facts").
+  // "Panels" here is hay-bale art, not a public body; the meeting notice beside
+  // it is what drops.
+  assert.equal(
+    standingPageStamp({
+      headline: "Jack’s Solar Garden Hosts 'Pumpkins & Panels' Halloween Event Oct. 24",
+      source_urls: [],
+    }),
+    null,
+    "an event's name is not a public body",
+  );
+  assert.equal(standingPageStamp({ headline: "Planning and Zoning Commission Sets Oct. 21 Meeting" })?.rule, "R5");
 });
 
 test("R5: a meeting record that says something is news and survives", () => {
@@ -174,6 +245,9 @@ test("R5: a meeting record that says something is news and survives", () => {
     "City Council Approves 2027 Budget",
     "Boulder County Commissioners Confirm $13.2M in 2027 Reductions and Oct. 22 Public Hearing",
     "Historic Preservation Commission meets Oct. 1, 2026; first item is approval of Sept. 3 minutes",
+    // Published lead 65: the council's session is in the minutes backlog -- a
+    // fact about the record, not the meeting.
+    "Sept. 1 council session joins the minutes backlog; portal now shows no approved minutes since July 22",
   ]) {
     assert.equal(standingPageStamp({ headline, source_urls: [] }), null, `news was stamped: ${headline}`);
   }
@@ -183,12 +257,18 @@ test("R5: the meeting-capture transcript-story form is left to the model", () =>
   // Published leads 297 and 298 carry the parenthesized capture stamp written
   // by meeting-lead.ts `meetingLeadCopy`. That form means the desk holds an
   // aligned transcript, so the lead is a transcript-story, not a bare record.
+  // Without the stamp, the same title is a bare record and must drop.
   for (const headline of [
     "City Council Regular Session - September 22, 2026 (2026-09-23)",
     "Arts in Public Places Commission - September 17, 2026 (2026-09-18)",
   ]) {
     assert.equal(standingPageStamp({ headline, source_urls: [] }), null, `transcript-story stamped: ${headline}`);
   }
+  assert.equal(
+    standingPageStamp({ headline: "City Council Regular Session - October 6, 2026" })?.rule,
+    "R5",
+    "the same title with no capture stamp is a bare record",
+  );
 });
 
 test("real published news is never stamped (spot check across the published set)", () => {
