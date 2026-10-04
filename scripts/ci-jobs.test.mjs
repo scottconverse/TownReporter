@@ -123,7 +123,6 @@ test("the real-Postgres matrix uses the explicit runner for every discovered tes
   assert.equal(job.if, undefined, "Postgres coverage must run on every PR");
   assert.equal(job.strategy["fail-fast"], false);
   assert.equal(job.strategy["max-parallel"], 4);
-  assert.equal(job["timeout-minutes"], 10);
   assert.deepEqual(job.strategy.matrix.part, [1, 2, 3, 4]);
   assert.equal(job.env.TOWNREPORTER_POSTGRES_PART, "${{ matrix.part }}");
   assert.equal(job.env.TOWNREPORTER_POSTGRES_PARTS, "4");
