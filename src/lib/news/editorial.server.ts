@@ -842,18 +842,25 @@ export async function fileEditorial(
       `editorial_extras` beside it holds the two other things the model wrote:
       the fact sheet and the image prompt. Same guard, same reason.
     */
+    /*
+      `model_body` (0119) is the model's own body, hoisted so `body` and
+      `model_body` are the same bytes here. The editor's later save on this row
+      (`saveOpinionDraft`) rewrites `body` and leaves this column alone.
+    */
+    const editorialBody = storableText(body);
     const rows = await sql<{ id: number }>`
-      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json)
+      insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json, model_body)
       values (
         ${input.userId}, ${input.newsroomId}, ${input.leadId ?? null},
-        ${storableText(headline)}, ${""}, ${storableText(body)}, ${"opinion"}, ${"[]"}, ${"editorial"},
+        ${storableText(headline)}, ${""}, ${editorialBody}, ${"opinion"}, ${"[]"}, ${"editorial"},
         ${storableText(integrityNotes)},
         ${JSON.stringify(
           sanitizeJsonLeaves({
             ...(nameCheck ? { nameCheck } : {}),
             ...(lengthCut ? { lengthCut } : {}),
           }),
-        )}
+        )},
+        ${editorialBody}
       )
       returning id
     `;
