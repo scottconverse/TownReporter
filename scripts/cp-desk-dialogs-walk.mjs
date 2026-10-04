@@ -186,12 +186,12 @@ function compareColumns() {
 /**
  * The 14px floor, measured LIVE inside an open dialog.
  *
- * A pass over the `.desk-ltr` rules in styles.css can hold the floor in the
- * source -- it bans the sub-14px Tailwind utilities in the desk's .tsx files --
- * but it cannot see what the browser resolved for a given element (a rule that
- * loses a cascade fight, an inherited size, a shorthand that never applied), so
- * this reads the computed size off every element the dialog actually draws and
- * names the ones under the floor.
+ * `scripts/desk-min-font.test.mjs` holds the floor statically -- it parses the
+ * `.desk-ltr` rules out of styles.css and bans the sub-14px Tailwind utilities
+ * in the desk's .tsx files. That pass cannot see what the browser resolved for
+ * a given element (a rule that loses a cascade fight, an inherited size, a
+ * shorthand that never applied), so this reads the computed size off every
+ * element the dialog actually draws and names the ones under the floor.
  *
  * Elements with no text of their own (the scrim, the rule under the title) are
  * skipped: a divider has no size to read.

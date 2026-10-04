@@ -86,8 +86,9 @@ async function main() {
       stories. The marker lived in the same database a backup would restore, so
       restoring a backup re-armed it.
 
-      It never fired on this machine and it is gone now. This path issues no
-      destructive statement; the runner refuses one outright.
+      It never fired on this machine and it is gone now. See
+      `scripts/no-destructive-migrate.test.mjs`, which fails the build if any
+      destructive statement returns to this path.
     */
   } finally {
     client.release();
