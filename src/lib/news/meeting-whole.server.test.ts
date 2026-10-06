@@ -15,6 +15,7 @@ import {
   LEAD_WRITE_SYSTEM,
   LEDGER_STATUS_SYSTEM,
 } from "./meeting-whole.ts";
+import { loadMeetingAccounting, loadStoredLedgerForRewrite } from "./meeting-ledger.server.ts";
 import type { IngestDocument } from "./ingest.ts";
 import type { ReportChat } from "./report.ts";
 import type { ClaimCheck, LedgerItem, RunStats } from "./meeting-whole.ts";
@@ -362,6 +363,175 @@ describe("whole-meeting writer, against the migrated schema", () => {
       [USER, NEWSROOM, leadId, result.draft.headline, result.draft.dek, result.draft.body, result.draft.topic],
     );
     assert.ok(saved[0]!.id, "the draft the run returns saves under that section");
+  });
+
+  it("keeps a procedural motion procedural through the real write, read and rewrite", async () => {
+    /*
+      The concrete round trip the write map used to break: the ledger is written
+      by persistWholeMeetingAccounting, read back by the accounting, and handed
+      to the rewrite. A motion the run classified procedural -- a vote to extend
+      the meeting, to recess, to adjourn -- must stay procedural at every step,
+      and its tally must not be borrowed into the item's own vote result.
+    */
+    const sql = await getSql();
+    const lead = await sql.query<{ id: number }>(
+      `insert into leads(user_id,newsroom_id,headline,why,topic,source_urls)
+       values ($1,$2,$3,$4,$5,$6) returning id`,
+      [USER, NEWSROOM, "Procedural round trip", "the tape covers it", "council", "[]"],
+    );
+    const roundTripLead = Number(lead[0]!.id);
+    const draft = await sql.query<{ id: number }>(
+      `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic)
+       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [USER, NEWSROOM, roundTripLead, "Procedural round trip", "", "body", "council"],
+    );
+    const roundTripDraft = Number(draft[0]!.id);
+    const ledger: LedgerItem[] = [
+      {
+        itemNo: 1,
+        kind: "motion",
+        text: "Motion to extend the meeting to 11:00 PM",
+        startSeconds: 3600,
+        packetPage: null,
+        status: "roundup",
+        reason: "the meeting running itself",
+        sourceExcerpt: "I move we extend to eleven.",
+        // A procedural motion: the meeting running itself, never the policy
+        // decision. Its tally is recorded, but it is not the item's vote.
+        motions: [{ result: "carried", tally: "6-1", unanimous: "", seconds: 3600, kind: "procedural" }],
+        voteResult: "",
+        voteTally: "",
+      },
+      {
+        itemNo: 2,
+        kind: "vote",
+        text: "Airport noise policy carries unanimously",
+        startSeconds: 0,
+        packetPage: 57,
+        status: "lead",
+        reason: "the meeting's main decision",
+        sourceExcerpt: "And that carries unanimously.",
+        voteResult: "carried 7-0",
+        voteTally: "7-0",
+      },
+    ];
+    await persistWholeMeetingAccounting(sql, {
+      newsroomId: NEWSROOM,
+      draftId: roundTripDraft,
+      leadId: roundTripLead,
+      ledger,
+      claims: [],
+      meetingNotes: "LEDGER: 2 item(s); 1 lead, 1 roundup, 0 excluded, 0 unread.",
+      runStats: { wallMs: 1, modelCalls: 1, inputTokens: 1, outputTokens: 1 },
+    });
+
+    const accounting = await loadMeetingAccounting(sql, { newsroomId: NEWSROOM, leadId: roundTripLead });
+    const procedural = accounting.ledger.find((item) => item.itemNo === 1)!;
+    assert.equal(procedural.motions[0]!.kind, "procedural", "the kind survives the insert and the read");
+    assert.equal(procedural.voteResult, "", "a procedural motion does not lend its tally to the item's vote result");
+    assert.equal(procedural.voteTally, "", "nor to the item's vote tally");
+
+    const rewrite = await loadStoredLedgerForRewrite(sql, { newsroomId: NEWSROOM, leadId: roundTripLead });
+    const rewrittenProcedural = rewrite.find((item) => item.itemNo === 1)!;
+    assert.equal(rewrittenProcedural.motions![0]!.kind, "procedural", "and it is still procedural in the rewrite's rows");
+    assert.equal(rewrittenProcedural.voteResult, "", "the rewrite's row does not gain a vote it never had");
+    const rewrittenVote = rewrite.find((item) => item.itemNo === 2)!;
+    assert.deepEqual(rewrittenVote.motions, [], "the policy vote carries no procedural motion of its own");
+    assert.equal(rewrittenVote.voteResult, "carried 7-0", "and keeps the decision it does hold");
+  });
+
+  it("saves and reads back the impact score through the real write and rewrite", async () => {
+    /*
+      The score the status pass produced has to reach the row and come back: the
+      editor's panel reads it from loadMeetingAccounting, and a rewrite hands it
+      back to the writer from loadStoredLedgerForRewrite. An item the pass never
+      scored stays NULL and reads back with no score -- unranked, not zero.
+    */
+    const sql = await getSql();
+    const lead = await sql.query<{ id: number }>(
+      `insert into leads(user_id,newsroom_id,headline,why,topic,source_urls)
+       values ($1,$2,$3,$4,$5,$6) returning id`,
+      [USER, NEWSROOM, "Impact round trip", "the tape covers it", "council", "[]"],
+    );
+    const impactLead = Number(lead[0]!.id);
+    const draft = await sql.query<{ id: number }>(
+      `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic)
+       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [USER, NEWSROOM, impactLead, "Impact round trip", "", "body", "council"],
+    );
+    const impactDraft = Number(draft[0]!.id);
+    const ledger: LedgerItem[] = [
+      {
+        itemNo: 1,
+        kind: "vote",
+        text: "Airport noise policy carries unanimously",
+        startSeconds: 0,
+        packetPage: 57,
+        status: "lead",
+        reason: "the meeting's main decision",
+        sourceExcerpt: "And that carries unanimously.",
+        voteResult: "carried 7-0",
+        voteTally: "7-0",
+        impact: {
+          immediacy: 5,
+          immediacyReason: "a nighttime flight-path change lands on residents this month",
+          impact: 4,
+          impactReason: "every household under the approach",
+          conflict: 3,
+          conflictReason: "the council split on the decibel target",
+          novelty: 4,
+          noveltyReason: "first time the council set a target",
+          total: 16,
+        },
+      },
+      {
+        itemNo: 2,
+        kind: "proclamation",
+        text: "Proclamation Declaring Electrify Longmont Day",
+        startSeconds: 120,
+        packetPage: null,
+        status: "roundup",
+        reason: "a proclamation",
+        sourceExcerpt: "Now therefore I proclaim",
+        // Never scored: stays NULL, and must read back unranked, not as a zero.
+      },
+    ];
+    await persistWholeMeetingAccounting(sql, {
+      newsroomId: NEWSROOM,
+      draftId: impactDraft,
+      leadId: impactLead,
+      ledger,
+      claims: [],
+      meetingNotes: "LEDGER: 2 item(s); 1 lead, 1 roundup, 0 excluded, 0 unread.",
+      runStats: { wallMs: 1, modelCalls: 1, inputTokens: 1, outputTokens: 1 },
+    });
+
+    const raw = await sql.query<{ item_no: number; impact: number | null }>(
+      `select item_no, impact from meeting_ledger_items where draft_id=$1 order by item_no`,
+      [impactDraft],
+    );
+    assert.ok(raw[0]!.impact, "the scored item stores a jsonb score");
+    assert.equal(raw[1]!.impact, null, "the unscored item stores NULL, not a zeroed score");
+
+    const accounting = await loadMeetingAccounting(sql, { newsroomId: NEWSROOM, leadId: impactLead });
+    const scored = accounting.ledger.find((item) => item.itemNo === 1)!;
+    assert.equal(scored.impact!.immediacy, 5, "the dimension arrives as a number");
+    assert.match(scored.impact!.immediacyReason, /flight-path/, "and its explanation is kept, not dropped");
+    assert.equal(
+      accounting.ledger.find((item) => item.itemNo === 2)!.impact,
+      null,
+      "the unscored item reads back unranked",
+    );
+
+    const rewrite = await loadStoredLedgerForRewrite(sql, { newsroomId: NEWSROOM, leadId: impactLead });
+    const rewritten = rewrite.find((item) => item.itemNo === 1)!;
+    assert.equal(rewritten.impact!.conflict, 3, "the rewrite carries the score back to the writer");
+    assert.match(rewritten.impact!.noveltyReason, /set a target/, "with its reason intact");
+    assert.equal(
+      rewrite.find((item) => item.itemNo === 2)!.impact ?? null,
+      null,
+      "and an unscored item stays unscored through the rewrite",
+    );
   });
 
   it("picks the portal's packet over its agenda", () => {

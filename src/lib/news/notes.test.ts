@@ -12,7 +12,91 @@ import {
   toggleTodo,
   packNotes,
   splitTodoLine,
+  mergeCompletedReportingNotes,
+  uncheckedGateTodos,
 } from "./notes.ts";
+
+describe("reporting package preservation", () => {
+  it("keeps the full imported claims ledger after changing the assignment", () => {
+    const ledger = "Claim, evidence URL, page and qualification.\n".repeat(150);
+    const notes = parseNotes(JSON.stringify({ editorialAssignment: { origin: "import", text: ledger } }));
+    assert.equal(notes.importedReport, ledger);
+    const edited = { ...notes, editorialAssignment: { origin: "story-workspace" as const, text: "Check the costs" } };
+    assert.equal(parseNotes(packNotes(edited)).importedReport, ledger);
+  });
+  it("keeps newer notes, removed errands and checked facts when reporting finishes", () => {
+    const before = parseNotes(JSON.stringify({ scratch: "old", todo: [{ t: "Remove me", src: "you" }, { t: "Check vote", src: "machine", done: false }] }));
+    const current = parseNotes(JSON.stringify({ scratch: "Editor's new evidence", editorialAssignment: { origin: "story-workspace", text: "Follow fee impact" }, todo: [{ t: "New errand", src: "you" }, { t: "Check vote", src: "machine", done: true }] }));
+    const generated = { ...before, news: "New development", todo: [...before.todo, { t: "Verify cost", src: "gate" as const, done: false }] };
+    const merged = mergeCompletedReportingNotes(before, current, generated);
+    assert.equal(merged.news, "New development");
+    assert.equal(merged.scratch, current.scratch);
+    assert.deepEqual(merged.editorialAssignment, current.editorialAssignment);
+    assert.deepEqual(merged.todo.map(({ t, done }) => ({ t, done })), [{ t: "New errand", done: false }, { t: "Check vote", done: true }, { t: "Verify cost", done: false }]);
+  });
+  it("keeps a revised memo and imported evidence alongside new findings", () => {
+    const before = parseNotes(JSON.stringify({ news: "Old angle" }));
+    const current = { ...before, news: "The editor's angle", importedReport: "Claim ledger" };
+    const merged = mergeCompletedReportingNotes(before, current, { ...before, news: "AI angle", verify: ["Cost unresolved"] });
+    assert.equal(merged.news, current.news);
+    assert.equal(merged.importedReport, current.importedReport);
+    assert.deepEqual(merged.verify, ["Cost unresolved"]);
+  });
+  it("keeps a newly generated publication gate through merge, pack and parse when the editor already holds 24 errands", () => {
+    const humans = Array.from({ length: 24 }, (_, i) => ({ t: `Editor errand ${i + 1}`, src: "you" as const, done: false }));
+    const current = parseNotes(JSON.stringify({ todo: humans }));
+    assert.equal(current.todo.length, 24);
+    const before = { ...current };
+    const gate = { t: "Claim of absence: the city published nothing", done: false, src: "gate" as const, q: "site:example.gov meeting" };
+    const generated = { ...before, todo: [...before.todo, gate] };
+    const merged = mergeCompletedReportingNotes(before, current, generated);
+    const reloaded = parseNotes(packNotes(merged));
+    const gates = uncheckedGateTodos(reloaded);
+    assert.equal(gates.length, 1, "the generated publication gate must survive the round trip");
+    assert.equal(gates[0].t, gate.t);
+    assert.equal(reloaded.todo.filter((row) => row.src === "you").length, 24);
+  });
+
+  it("keeps all 24 current human errands, their checked state and the gate when AI completion brings machine errands", () => {
+    // The coordinator's reproduction: 24 human rows with the FIRST one checked,
+    // plus a fresh gate and five AI errands arriving on the same completion. The
+    // old cap kept the last 24 non-gates, so five machine errands evicted five
+    // human tasks -- the first checked task vanished. Humans must outrank the
+    // memo's rebuildable errands, and the editor's checked state must survive.
+    const humans = Array.from({ length: 24 }, (_, i) => ({
+      t: `Editor errand ${i + 1}`,
+      src: "you" as const,
+      done: i === 0,
+    }));
+    const current = parseNotes(JSON.stringify({ scratch: "Editor's latest work", todo: humans }));
+    assert.equal(current.todo.length, 24);
+    assert.equal(current.todo[0].done, true, "precondition: the first human errand is the checked one");
+    const before = { ...current };
+    const gate = { t: "Claim of absence: the city published nothing", done: false, src: "gate" as const, q: "site:example.gov meeting" };
+    const machines = Array.from({ length: 5 }, (_, i) => ({ t: `AI follow-up ${i + 1}`, done: false, src: "machine" as const }));
+    const generated = { ...before, todo: [...before.todo, gate, ...machines] };
+
+    const merged = mergeCompletedReportingNotes(before, current, generated);
+    const reloaded = parseNotes(packNotes(merged));
+
+    const humanRows = reloaded.todo.filter((row) => row.src === "you");
+    assert.equal(humanRows.length, 24, "every current human errand must survive merge -> pack -> parse");
+    assert.deepEqual(
+      humanRows.map((row) => row.t),
+      humans.map((row) => row.t),
+      "human rows keep their original order",
+    );
+    assert.equal(
+      reloaded.todo.find((row) => row.t === "Editor errand 1")?.done,
+      true,
+      "the editor's checked state must survive the round trip",
+    );
+    const gates = uncheckedGateTodos(reloaded);
+    assert.equal(gates.length, 1, "the generated publication gate must survive the round trip");
+    assert.equal(gates[0].t, gate.t);
+    assert.ok(reloaded.scratch.includes("Editor's latest work"), "the editor's newest scratch is retained");
+  });
+});
 
 describe("reporting notes", () => {
   it("always includes the checked draft's verification findings when the reporting memo is already filled", () => {
@@ -152,6 +236,50 @@ describe("packNotes", () => {
     })) as unknown as typeof notes.todo;
     const packed = packNotes(notes, 600);
     assert.doesNotThrow(() => JSON.parse(packed));
+  });
+
+  /**
+   * The imported report is the claims ledger the story was built from, and the desk
+   * keeps it in one field beside the editable direction. When it is long it is the
+   * largest thing in the notes, so it is the thing a size fallback is most tempted to
+   * cut. It must survive as valid JSON together with the meeting, its transcript
+   * citations, the editor direction and any publication gate the absence check raised --
+   * a save that comes back without those is a save that silently lost the story's sources.
+   */
+  it("keeps the imported report, meeting and gate through a packed save", () => {
+    const report = "Claim | evidence URL | page | qualification.\n".repeat(200);
+    const notes = {
+      ...base(),
+      importedReport: report,
+      meeting: { videoId: "abc123", title: "City council, August 2026", date: "2026-08-12", artifactId: 42 },
+      transcriptCitations: [{
+        item: "August 2026 minutes",
+        segmentIndex: 12,
+        timestampSeconds: 3600,
+        excerpt: "the clerk confirmed the totals",
+        captionSha256: "abc123",
+      }],
+      editorialAssignment: { origin: "story-workspace" as const, text: "Follow the fee impact." },
+      todo: [
+        { t: "Call the clerk", done: true, src: "you" as const },
+        { t: "Claim of absence: nothing was published", done: false, src: "gate" as const, q: "site:example.gov" },
+      ],
+    };
+    const packed = packNotes(notes, 16000);
+    assert.doesNotThrow(() => JSON.parse(packed), "packed notes must always be valid JSON");
+    const reloaded = parseNotes(packed);
+    assert.equal(reloaded.importedReport, report, "the imported claims ledger survives the save");
+    assert.deepEqual(reloaded.meeting, notes.meeting);
+    assert.equal(reloaded.transcriptCitations?.length, 1);
+    assert.equal(reloaded.editorialAssignment?.text, "Follow the fee impact.");
+    assert.deepEqual(
+      reloaded.todo.map(({ t, done, src }) => ({ t, done, src })),
+      [
+        { t: "Call the clerk", done: true, src: "you" },
+        { t: "Claim of absence: nothing was published", done: false, src: "gate" },
+      ],
+    );
+    assert.equal(uncheckedGateTodos(reloaded).length, 1);
   });
 });
 

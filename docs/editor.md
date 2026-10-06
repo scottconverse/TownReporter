@@ -2,7 +2,7 @@
 
 Dark Desk uses the city and state saved in Paper setup, plus its configured county. It does not inherit Longmont jurisdictions for another town. The Reddit check requires one unambiguous subreddit among this newsroom's accepted Sources; otherwise it is unavailable and links to Sources. No subreddit is guessed from a town name. Reddit RSS finds candidates; when a local Redlib is running, the strongest candidates are read in full. The result panel says whether each card contains a full post or only an RSS excerpt. A Redlib failure never discards the RSS results.
 
-**Current software version: [0.6.82](releases/0.6.82.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
+**Current software version: [0.6.83](releases/0.6.83.md).** The release guide separates source, package metadata, GitHub publication, deployment, and provider-run evidence. Operators should start at [setup](setup.md). This guide covers a running newsroom with an editor account.
 
 **Screenshot scope:** Embedded screenshots were captured from the running v0.6.54 desk and public paper, so they show the current Astra navigation and document workflow. The [current desk guide](editor-desk.md) remains the written reference; if a label moves again, the text here takes precedence over the image.
 
@@ -61,6 +61,20 @@ remain unproven; compare every transcript with the original. See
 
 Configurable sections are available in Paper setup (see Newspaper sections below).
 Manual investigative page watching is available in Dark Desk; see the workflow below. The owner-only legal-removal workflow is documented below; ordinary Delete does not implement it. [The canonical queue](../TODO.md) records current work.
+
+## Reporting assignments and evidence
+
+From a lead, use **Report this meeting** or **Develop this lead** and write the assignment the run should answer. You can add public seed links and choose public research or supplied material. A direct town, beat, date or issue assignment starts from the desk. The assignment tells the run what to cover; it is not evidence and is not printed as story text.
+
+The **Reporting package** stays beside the editable story in the signed-in desk. It contains the run receipt, meeting coverage ledger, story claims and linked sources with locators, score, readiness and known gaps. It is private editorial material; it does not publish with the story. A package marked **PARTIAL** remains partial even if some claims have support. Review the underlying records and caption gaps, and complete ordinary editorial review before publishing.
+
+For each claim, **Recorded reporter status** is what that run filed. **Current saved-document check** is a separate recheck of the filed claim against documents retained by the newsroom. It does not silently rewrite the original status, your current story copy or your evidence judgment. Open the cited pages and decide what the copy can say. A combined or unclear locator, a compound claim, an unrelated page or a caption-only gap is not proof; keep unsupported parts held or split them into claims with their own sources.
+
+For meeting assignments, the ledger maps the meeting to agenda items and recorded actions. Review its evidence references and set each item's editorial treatment as **lead**, **roundup** or **excluded**. Action rows show their outcome, vote, policy stage, reporter disposition and evidence reference. An unread transcript segment or an item without a treatment stays visibly unresolved; the ledger is a coverage aid, not publication acceptance.
+
+Use **Record a correction or disposition** to save a dated note with its source or offline reference. Choose correction, disposition or source note. It is scoped to the current lead and assignment so a later relevant run can retrieve it; saving it does not edit the current story or make the note independent evidence. Check **Kept for the next assignment** to see the records available in this scope.
+
+**Ask for more reporting** starts a new, targeted run from this package. Add optional public seed links, then watch the new run under **Running**. Its result is filed as a new version; the existing draft, notes and checked states remain available while the follow-up runs and if it fails.
 
 ## Newspaper sections
 

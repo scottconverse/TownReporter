@@ -2,10 +2,10 @@
 
 > The public record is only the beginning.
 
-**Current software version: [0.6.82](docs/releases/0.6.82.md).** Fixes from the 0.6.81 live walk: Tonight's edition rows print the names chip once; the Queue's "Looks already printed" chip wraps instead of widening the desk; "This week" keeps "St." with its name and never ends a name on "beginning"; source cards print their role in words ("Announcing source").
+**Current software version: [0.6.83](docs/releases/0.6.83.md).** Adds assignment-scoped reporting packages, private evidence review, sourced corrections and targeted follow-ups, clearer document checks, source discovery, and meeting coverage informed by the six existing WR1 commits.
 
 See [the deployment boundary](SELF-HOSTING.md) before diagnosing the live paper.
-Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.82 release guide](docs/releases/0.6.82.md).
+Release source, package metadata, installation checks and deployment evidence are recorded separately in the [0.6.83 release guide](docs/releases/0.6.83.md).
 
 A civic newsroom you run yourself. A public paper on the front, a signed-in editor desk behind it. The working edition watches Longmont, Colorado — meetings, packets, minutes, money, contracts, and the YouTube tapes. Ordinary reporting is reviewed and published by a person; approved sources can produce automatic roundups of library, recreation, community-event, registration, waste-collection and public-meeting notices.
 
@@ -495,6 +495,6 @@ Twelve rendered diagrams, each with its Mermaid source beside it. The index is [
 
 ## Recent releases
 
-**0.6.82** is the current version; the summary at the top of this file and the [0.6.82 release guide](docs/releases/0.6.82.md) record what it claims and what it does not. Earlier versions are in the release history below.
+**0.6.83** is the current version; the summary at the top of this file and the [0.6.83 release guide](docs/releases/0.6.83.md) record what it claims and what it does not. Earlier versions are in the release history below.
 
 Release notes for every earlier version, moved verbatim out of this README, are in the [release history](docs/releases/README.md). Line-by-line detail is in [CHANGELOG.md](CHANGELOG.md).

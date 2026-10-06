@@ -30,6 +30,7 @@ export function EvidenceCheckList({
   compareLabel,
   onCompare,
   onStylePress,
+  onOpenRecord,
   detail,
   footer,
 }: {
@@ -40,6 +41,8 @@ export function EvidenceCheckList({
   compareLabel: string;
   onCompare: () => void;
   onStylePress: () => void;
+  /** The authenticated desk can open a private captured record in its pane. */
+  onOpenRecord?: (href: string) => void;
   /** The body of one row's shut disclosure, or null for a row that opens to nothing. */
   detail?: (row: EvidenceListRow) => ReactNode;
   /**
@@ -79,7 +82,10 @@ export function EvidenceCheckList({
                     claim was checked against something a reader can open.
                   */}
                   {row.action.kind === "open-record" ? (
-                    <a className="btn quiet astra-evidence-act" href={row.action.href}>
+                    onOpenRecord ? <button type="button" className="btn quiet astra-evidence-act"
+                      onClick={() => onOpenRecord(row.action!.kind === "open-record" ? row.action!.href : "")}>
+                      {row.action.label}
+                    </button> : <a className="btn quiet astra-evidence-act" href={row.action.href}>
                       {row.action.label}
                     </a>
                   ) : (

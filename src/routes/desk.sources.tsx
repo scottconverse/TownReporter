@@ -492,6 +492,16 @@ function SourcesPage() {
         </div>
         <div className="astra-head-acts">
           <Link className="btn quiet" to="/desk/scan">Scan history →</Link>
+          {/*
+            The inventory screen has existed since the brief's first outcome
+            ("inventory all accepted source records ... review status"), but it
+            had no link from anywhere an editor actually stands: a semantic pass
+            over the desk home, navigation and this screen found only /desk/sources
+            links. The full accepted-source inventory is reachable here, in the
+            header's own action cluster beside Scan history, rather than behind a
+            new nav framework or a redesign.
+          */}
+          <Link className="btn quiet" to="/desk/inventory">Source inventory →</Link>
           <button type="button" className="btn solid" onClick={() => setAddOpen(true)}>
             + Add a source
           </button>
@@ -1264,6 +1274,9 @@ function SuggestedSources({
                       cell would read as "the reason is nothing".
                     */}
                     {s.proposed_reason ?? "No reason was recorded when this was suggested."}
+                    {s.review_note?.trim() ? (
+                      <p className="astra-row-meta">Source review: {s.review_note}</p>
+                    ) : null}
                   </td>
                   <td className="td-meta" data-label="Suggested by">
                     {suggestedOriginLine(s)}
@@ -1538,6 +1551,9 @@ function WatchRows({
                   </a>
                   {s.kind ? ` · ${s.kind}` : ""}
                 </p>
+                {s.review_note?.trim() ? (
+                  <p className="astra-row-meta">Source review: {s.review_note}</p>
+                ) : null}
               </div>
               <div className="astra-cell src-state">
                 <span className={"astra-chip " + chip.cls}>{chip.label}</span>

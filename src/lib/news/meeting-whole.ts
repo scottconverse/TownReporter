@@ -1,6 +1,21 @@
 import { parseJsonBlock } from "./ai.ts";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
 import { nameCheckText, type NameCheck, type NameCheckRow } from "./name-check.ts";
+import {
+  IMPACT_ADVANCE_MIN,
+  IMPACT_HOLD_MIN,
+  IMPACT_SCORE_SYSTEM,
+  IMPACT_TOTAL_MAX,
+  IMPACT_TOTAL_MIN,
+  IMPACT_UNSCORED_REASON,
+  describeImpact,
+  impactDecision,
+  impactLine,
+  impactTotal,
+  isRanked,
+  parseImpactScore,
+  type ImpactScore,
+} from "./meeting-impact.ts";
 
 /**
  * WR1: the whole-meeting story writer, pure logic.
@@ -74,6 +89,8 @@ export type LedgerEvidence = {
   sourceExcerpt: string;
   /** The agenda id the inventory pass tagged this line with, when it gave one. */
   agenda?: string;
+  /** Immutable civic-reporting action, including unresolved locators and procedural disposition. */
+  reportingAction?: import("./civic-reporting.ts").CoverageAction;
 };
 
 /**
@@ -137,6 +154,16 @@ export type LedgerItem = {
    * roundup paragraph can open with.
    */
   label?: string;
+  /**
+   * The editor's own measure of this item's news value: civic-scanner's four
+   * dimensions (immediacy, local impact, conflict, novelty), each 1-5, 4-20
+   * total, with a reason beside each number. This is what ranks the lead -- the
+   * votes an item holds, the dollars it names and the minutes it ran do not.
+   * Absent (or unreadable) means the item is UNRANKED: it is still in the
+   * ledger and still reported, but it sorts after every scored item and is
+   * shown as "not scored" rather than as a low-scoring one.
+   */
+  impact?: ImpactScore;
 };
 
 export type ClaimCheck = {
@@ -1222,7 +1249,13 @@ export function ledgerDigest(ledger: LedgerItem[]): string {
       const end = item.endSeconds ?? null;
       const minutes =
         item.startSeconds !== null && end !== null ? Math.round((end - item.startSeconds) / 60) : 0;
+      // The evidence line names every kind of line the item grouped (motions,
+      // votes, amendments, discussion), so the model scores the item's actual
+      // record. The dollars and minutes are shown as evidence too, but the
+      // scoring prompt is told plainly they do not rank an item.
+      const prior = impactLine(item.impact);
       const facts = [
+        prior,
         `evidence: ${evidence.length}${kindText ? ` (${kindText})` : ""}`,
         motions ? `motions: ${(item.motions ?? []).length || 1}; results: ${motions}` : "",
         dollars.size ? `dollars: ${[...dollars].join(", ")}` : "",
@@ -1237,7 +1270,7 @@ export function parseStatusReply(
   text: string,
 ): {
   valid: boolean;
-  proposals: { itemNo: number; status: LedgerStatus; label: string; reason: string }[];
+  proposals: { itemNo: number; status: LedgerStatus; label: string; reason: string; impact: ImpactScore | null }[];
 } {
   const value = parseJsonBlock<unknown>(text);
   const rows = value && typeof value === "object" && !Array.isArray(value)
@@ -1257,10 +1290,14 @@ export function parseStatusReply(
         status,
         label: String(record.label ?? "").replace(/\s+/g, " ").trim().slice(0, 60),
         reason: String(record.reason ?? "").trim().slice(0, 300),
+        // The four resident-impact dimensions, read from the SAME reply: the
+        // model saw the item's actual evidence and scored it there. A reply that
+        // omitted a dimension yields null here and the item stays unranked.
+        impact: parseImpactScore(record),
       };
     })
     .filter(
-      (row): row is { itemNo: number; status: LedgerStatus; label: string; reason: string } =>
+      (row): row is { itemNo: number; status: LedgerStatus; label: string; reason: string; impact: ImpactScore | null } =>
         Boolean(row),
     );
   return { valid: true, proposals };
@@ -1327,12 +1364,21 @@ export function ruleStatus(item: LedgerItem): LedgerStatus {
 export function applyStatuses(
   ledger: LedgerItem[],
   proposals: { itemNo: number; status: LedgerStatus; label?: string; reason: string }[],
+  impacts: Map<number, ImpactScore> = new Map(),
 ): LedgerItem[] {
   const byNo = new Map(proposals.map((proposal) => [proposal.itemNo, proposal]));
+  // The resident-impact score is merged onto the item here, so every reader
+  // after this point -- the ranking, the writer, the panel and the stored row --
+  // sees the same score the status pass produced. An item the pass did not score
+  // keeps no score: it stays unranked, and its reason says why.
+  const scored = ledger.map((item) => {
+    const impact = impacts.get(item.itemNo);
+    return impact ? { ...item, impact } : item;
+  });
   // The best item by rank, ignoring status: every item still starts "excluded"
   // here, so rankLeadItems -- which filters excluded out -- would find nothing.
   const bestRanked =
-    ledger
+    scored
       .filter((item) => item.status !== "unread")
       .map((item, index) => ({ item, index }))
       .sort((left, right) => {
@@ -1341,14 +1387,22 @@ export function applyStatuses(
         return b[0] - a[0] || b[1] - a[1] || b[2] - a[2] || left.index - right.index;
       })[0]?.item ?? null;
 
-  return ledger.map((item) => {
+  return scored.map((item) => {
     if (item.status === "unread") return item;
     const proposal = byNo.get(item.itemNo);
     const named = proposal && !(proposal.status === "excluded" && !proposal.reason);
     const label = (named ? proposal!.label : "") || item.label || plainLabel(item);
+    // An item the pass did not name does not get re-decided here. A stored row
+    // that already carries a reason is the editor's own work -- what a rewrite
+    // hands back -- and it keeps its status and reason as they stand. Only a
+    // fresh row that no one has judged yet, recognisable by its empty reason,
+    // is filled in by rule. (An "unread" row was returned above, untouched.)
+    const editorDecided = item.reason.trim() !== "";
     const proposed = named
       ? { status: proposal!.status, reason: proposal!.reason || item.reason }
-      : { status: ruleStatus(item), reason: RULE_ASSIGNED_REASON };
+      : editorDecided
+        ? { status: item.status, reason: item.reason }
+        : { status: ruleStatus(item), reason: RULE_ASSIGNED_REASON };
     if (proposed.status === "excluded" && voteResultCount(item) > 0) {
       const status: LedgerStatus = item === bestRanked ? "lead" : "roundup";
       return { ...item, status, label, reason: EXCLUDED_OVERRULED_REASON };
@@ -1358,13 +1412,26 @@ export function applyStatuses(
 }
 
 /**
- * Rank a ledger item as a lead candidate: the votes it holds first, then the
- * money it moves, then the minutes of tape it took. A meeting's news is what it
- * decided, and how many times it decided; an item with three recorded votes
- * outranks one with a single vote, which outranks a long discussion with none.
+ * Rank a ledger item as a lead candidate. The measure is the editor's own: the
+ * item's resident-impact total (civic-scanner's four 1-5 dimensions, 4-20), and
+ * nothing else. Votes, dollar figures and minutes of tape are evidence the
+ * score was made FROM -- they are not the score, and an item does not outrank
+ * another by holding more of them.
+ *
+ * An item with no readable score is UNRANKED: it sorts after every scored item
+ * (a "not scored" item is not a "scored 0" one), and among unranked items the
+ * old order is kept only as a stable tiebreak so the ledger does not shuffle
+ * between runs. The tiebreak never lifts an unranked item above a ranked one.
  */
 export function leadRank(item: LedgerItem): [number, number, number] {
-  return [voteResultCount(item), dollarCountOf(item), Math.round(tapeSecondsOf(item) / 60)];
+  const ranked = isRanked(item.impact);
+  const total = ranked ? impactTotal(item.impact)! : 0;
+  // The model's own status pick is the second key: between two items the run
+  // scored the same, the one it called a lead is the better lead candidate.
+  const picked = item.status === "lead" ? 1 : 0;
+  // Ranked items first (1), then by total, then by the model's pick. An
+  // unranked item has total 0 and can never exceed a ranked item's total.
+  return [ranked ? 1 : 0, total, picked];
 }
 
 /** The dollar figures an item's own source and evidence state. */
@@ -1381,29 +1448,34 @@ export function tapeSecondsOf(item: LedgerItem): number {
 }
 
 /**
- * Whether an item earns a section of its own after the lead story. Two ways in:
- * the model picked it as a lead and the single-lead rule moved it (so the run's
- * own reader thought it mattered), or the item is simply big -- five or more
- * dollar figures in its own record, or twenty minutes of tape.
+ * Whether an item earns a section of its own after the lead story. Two ways in,
+ * both about the item's news value rather than its size: the editor's own score
+ * ADVANCES it (civic-scanner's 10-20 band -- a strong story that must not be
+ * squeezed into one roundup line), or the model picked it as a lead and the
+ * single-lead rule moved it here (so the run's own reader thought it mattered).
+ * A long budget presentation is not a section because it is long; it is a
+ * section when its score says it is a story.
  */
 export function deservesOwnSection(item: LedgerItem): boolean {
   if (item.status !== "roundup") return false;
   if (item.reason === SECOND_LEAD_REASON) return true;
-  return dollarCountOf(item) >= SECTION_DOLLAR_MIN || tapeSecondsOf(item) >= SECTION_SECONDS_MIN;
+  const total = impactTotal(item.impact);
+  return total !== null && impactDecision(total) === "ADVANCE";
 }
 
 /**
- * The items that get their own section, best first: money first, then minutes of
- * tape, capped at SECTION_MAX. Chosen from the roundup candidates, so the lead
- * is never re-written as a section and an excluded item is never resurrected.
+ * The items that get their own section, best first: the highest resident-impact
+ * total first, then a moved second lead, capped at SECTION_MAX. Chosen from the
+ * roundup candidates, so the lead is never re-written as a section and an
+ * excluded item is never resurrected.
  */
 export function chooseSectionItems(items: LedgerItem[]): LedgerItem[] {
   return items
     .filter((item) => deservesOwnSection(item))
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
-      const a = [dollarCountOf(left.item), Math.round(tapeSecondsOf(left.item) / 60)];
-      const b = [dollarCountOf(right.item), Math.round(tapeSecondsOf(right.item) / 60)];
+      const a = [impactTotal(left.item.impact) ?? -1, left.item.reason === SECOND_LEAD_REASON ? 1 : 0];
+      const b = [impactTotal(right.item.impact) ?? -1, right.item.reason === SECOND_LEAD_REASON ? 1 : 0];
       return b[0] - a[0] || b[1] - a[1] || left.index - right.index;
     })
     .slice(0, SECTION_MAX)
@@ -1494,11 +1566,17 @@ export function rankLeadItems(ledger: LedgerItem[]): LedgerItem[] {
 }
 
 /**
- * Choose the lead item. The model's pick stands -- unless another item holds
- * MORE recorded votes than it does, in which case the meeting's decisive item
- * leads and the run says so in its notes. A meeting that voted three times on
- * the airport cannot lead its story on an item with a single vote, still less
- * on one with none.
+ * Choose the lead item. The editor's score decides. The model's pick stands
+ * when it is at least as strong as the best other item (ties go to the pick,
+ * because the model read the tape too); when another item's resident-impact
+ * total is HIGHER than the pick's, that item leads and the run says so in its
+ * notes. A meaningful independent story -- a decision that changes what a
+ * resident can do -- is never forced into second place because another item
+ * held more votes or named more dollars.
+ *
+ * An UNRANKED model pick (no readable score) does not hold the lead against a
+ * scored item: an invented "0" would have let it, but silence is not a
+ * judgement, so the scored item leads and the run records the change.
  */
 export function chooseLead(
   ledger: LedgerItem[],
@@ -1507,7 +1585,7 @@ export function chooseLead(
   const ranked = rankLeadItems(ledger);
   const first = ranked[0] ?? null;
   const model = modelLeads[0] ?? null;
-  if (model && (!first || leadRank(model)[0] >= leadRank(first)[0])) {
+  if (model && (!first || leadRank(model)[1] >= leadRank(first)[1])) {
     return { items: modelLeads, overruled: false, chosen: model };
   }
   if (!first) return { items: [], overruled: false, chosen: null };
@@ -1517,13 +1595,11 @@ export function chooseLead(
 /**
  * Settle the lead to exactly one item before the writer is called.
  *
- * A story has one lead. The status pass may name three -- run 4 named item 1
- * (the library motions), item 14 (6A airport) and item 20 (6B budget) -- and
- * the writer, handed three, wrote the lead about item 1 while the top-ranked
- * item 14 appeared nowhere in the text at all. The one that leads is the
- * top-ranked of the model's own picks, ranked the way the rule safeguards
- * already rank; every other pick becomes roundup, with the reason saying so, so
- * it is written in the ALSO AT THE MEETING list instead of vanishing.
+ * A story has one lead. The status pass may name three; the highest-scoring of
+ * those picks keeps the lead and every other pick becomes roundup, with the
+ * reason saying so, so it is written in the ALSO AT THE MEETING list instead of
+ * vanishing. The score is the editor's resident-impact total, so the pick that
+ * is most consequential for residents leads -- not the one with the most votes.
  */
 export function enforceSingleLead(ledger: LedgerItem[]): { items: LedgerItem[]; moved: number } {
   const leads = ledger.filter((item) => item.status === "lead");
@@ -1732,6 +1808,21 @@ export function normalizeForMatch(text: string): string {
     .trim();
 }
 
+/** Currency formatting only, within an already bound documentary section.
+ * Budget table rows carry the first dollar sign through the numeric columns.
+ * Bare comma-grouped prose counts are deliberately left alone.
+ */
+export function documentMoneyText(text: string): string {
+  return text.split(/\r?\n/).map((line) => {
+    const tableRow = /^\s*\$?\s*\d/.test(line) && /(?:Revenues|Expenses|Use of Fund Balance)\s*$/i.test(line);
+    const marked = tableRow
+      ? line.replace(/(?<![\d,])(?:\$\s*)?\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?)(?![\d,])/g, "$$$1")
+      : line;
+    return marked.replace(/\$\s*(\d+(?:,\d{3})*(?:\.\d+)?)/g, (_whole, amount: string) =>
+      "$" + Number(amount.replaceAll(",", "")).toFixed(2));
+  }).join("\n");
+}
+
 const DOLLAR = /\$\s?\d[\d,]*(?:\.\d+)?/g;
 const PERCENT = /\d+(?:\.\d+)?\s?%/g;
 const DATE =
@@ -1782,18 +1873,6 @@ export function voteWordsIn(body: string): string[] {
 }
 
 /**
- * Check the assembled body against the meeting record, in code, with no model.
- *
- * Every dollar figure, percent and date the body states must appear in the
- * transcript or the packet text. Every vote word -- "unanimously", a tally --
- * must match a vote the run FOUND in the record (a structured vote row, or a
- * result phrase read off the tape by `scanVoteResults`); the bare transcript is
- * not enough, because a caption can say "20 to 60" about anything at all.
- * Every quotation must appear in the packet (a quote matched only against the
- * auto-captioned tape is flagged "unverified against tape"). What cannot be
- * found is flagged, never dropped.
- */
-/**
  * The sentence in a written section that says the meeting did not vote, or null
  * when it says no such thing. Used to catch the contradiction run 4 printed:
  * the lead said "no vote was recorded in the source" about the library motion
@@ -1818,53 +1897,203 @@ The paragraph says no vote was recorded. The record states the result below, and
 Rewrite the paragraph so the recorded result is stated, with its tally exactly as given. Keep every other fact in the paragraph as it is; change nothing else, add no new fact, and quote no words that are not in the paragraph already.
 Return compact valid JSON only: {"paragraph":"the corrected paragraph"}`;
 
+/**
+ * One written paragraph and the ledger item it was written from.
+ *
+ * The claim check is only as good as the binding it is given. A dollar figure,
+ * a tally or a date is a claim ABOUT the item the paragraph was written from;
+ * matching the same token somewhere else in the meeting is not evidence for it.
+ * The writer hands us one paragraph per item (the lead item's, each section's,
+ * each roundup item's), and the item is what the paragraph's facts must be
+ * found under.
+ */
+export type ClaimUnit = { text: string; label: string; item: LedgerItem | null };
+
+/** The item's own words: its tagged evidence, its excerpt, its clock and page. */
+function itemOwnRecord(item: LedgerItem): { text: string; locator: string } {
+  const evidence = item.evidence ?? [];
+  const text = [
+    item.text,
+    item.sourceExcerpt,
+    ...evidence.map((entry) => entry.text),
+    ...evidence.map((entry) => entry.numbers),
+    ...evidence.map((entry) => entry.sourceExcerpt),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const where = item.startSeconds !== null ? clockFromSeconds(item.startSeconds) : "no timestamp";
+  const page = item.packetPage !== null ? `, packet p${item.packetPage}` : "";
+  return { text, locator: `${where}${page}` };
+}
+
+/**
+ * Check each written paragraph's claims against the item it was written from.
+ *
+ * The old check merged the whole transcript and the whole packet into one
+ * string and looked for the token anywhere in it, so a dollar figure belonging
+ * to another action -- or a procedural tally spoken under a later item -- could
+ * "support" a claim about a different item. That is the defect this replaces: a
+ * claim is checked against ITS item's own record, and a token found elsewhere in
+ * the meeting is not a match, however identical.
+ *
+ * A figure or date is bound to the item's own evidence, its source excerpt and
+ * the item's own span of tape -- never the whole tape or the whole packet. A
+ * vote word is bound to the item's own motions and only the NON-procedural ones:
+ * a tally that decided the meeting's procedure ("extend the meeting") is not the
+ * item's vote, and a bare number in the text proves nothing. A quotation is bound
+ * to the item's own packet page; a quote matched only against the auto-captioned
+ * tape is flagged, because that caption is not a verified recording.
+ *
+ * "found" means the item's own record holds the text: a text match, not a
+ * substantive confirmation, and the note says so. When the binding is unresolved
+ * -- the paragraph has no item, or the claim is absent from that item's record --
+ * the claim is flagged, never certified from a match elsewhere.
+ */
 export function checkDraftClaims(input: {
-  body: string;
-  transcriptText: string;
-  packetText: string;
-  voteWords?: string[];
+  /** The written paragraphs, each with the item it was written from. */
+  units: ClaimUnit[];
+  /** The packet pages, for the item-bound packet lookup. */
+  packetPages?: PacketPage[];
+  /** The tape segments, for the item's own span. */
+  segments?: MeetingSegment[];
 }): ClaimCheck[] {
-  const source = normalizeForMatch(`${input.transcriptText} ${input.packetText}`);
-  const packet = normalizeForMatch(input.packetText);
-  const voteSource = normalizeForMatch((input.voteWords ?? []).join(" "));
+  const packetPages = input.packetPages ?? [];
+  const segments = input.segments ?? [];
   const checks: ClaimCheck[] = [];
-  const push = (
-    claim: string,
-    sourceKind: ClaimCheck["sourceKind"],
-    sourceRef: string,
-    found: boolean,
-    note: string,
-  ) => {
+  const push = (claim: string, sourceRef: string, found: boolean, note: string) => {
     if (!claim.trim()) return;
     checks.push({
       claim: claim.slice(0, 300),
-      sourceKind,
+      sourceKind: "primary",
       sourceRef,
       checkStatus: found ? "found" : "flagged",
       note,
     });
   };
-  for (const match of input.body.match(DOLLAR) ?? []) {
-    push(match, "primary", "transcript or packet text", source.includes(normalizeForMatch(match)), "Dollar figure stated in the body.");
-  }
-  for (const match of (input.body.match(PERCENT) ?? []).filter((value) => value.trim() !== "%")) {
-    push(match, "primary", "transcript or packet text", source.includes(normalizeForMatch(match)), "Percent stated in the body.");
-  }
-  for (const match of input.body.match(DATE) ?? []) {
-    push(match, "primary", "transcript or packet text", source.includes(normalizeForMatch(match)), "Date stated in the body.");
-  }
-  for (const match of voteWordsIn(input.body)) {
-    const found = voteSource.includes(normalizeForMatch(match));
-    push(match, "primary", "a recorded vote", found, found ? "Vote word matched the record." : "Vote word not found in the record; do not infer a vote or outcome.");
-  }
-  for (const match of input.body.matchAll(QUOTED)) {
-    const quote = match[1] ?? "";
-    const inPacket = packet.includes(normalizeForMatch(quote));
-    push(quote, "primary", inPacket ? "packet text" : "unverified", inPacket, inPacket ? "Quotation matched the packet." : "Quotation unverified against tape: not found in the packet text.");
+  for (const unit of input.units) {
+    const item = unit.item;
+    const label = unit.label || (item ? item.text : "an unbound paragraph");
+    if (!item) {
+      // No item to bind to: the paragraph's facts have no owner to check them
+      // against, and a token found elsewhere in the meeting would not prove
+      // them. Flag each for the editor rather than certifying it.
+      for (const match of unit.text.match(DOLLAR) ?? []) {
+        push(match, "unbound", false, "No item-bound source: the paragraph could not be tied to a ledger item.");
+      }
+      for (const match of (unit.text.match(PERCENT) ?? []).filter((value) => value.trim() !== "%")) {
+        push(match, "unbound", false, "No item-bound source: the paragraph could not be tied to a ledger item.");
+      }
+      for (const match of unit.text.match(DATE) ?? []) {
+        push(match, "unbound", false, "No item-bound source: the paragraph could not be tied to a ledger item.");
+      }
+      for (const match of voteWordsIn(unit.text)) {
+        push(match, "unbound", false, "No item-bound source: the paragraph could not be tied to a ledger item.");
+      }
+      for (const match of unit.text.matchAll(QUOTED)) {
+        push(match[1] ?? "", "unbound", false, "No item-bound source: the paragraph could not be tied to a ledger item.");
+      }
+      continue;
+    }
+    const own = itemOwnRecord(item);
+    // The item's own span of tape is part of its record -- but only ITS span.
+    // The whole tape is where the wrong-item match lived, so it is never used.
+    const ownTape = spanTape(item, segments, COLD_LEAD_CHARS);
+    const figureSource = normalizeForMatch(item.kind === "document-source"
+      ? documentMoneyText(`${own.text}\n${ownTape}`)
+      : `${own.text}\n${ownTape}`);
+    const locator = own.locator;
+    const page = item.packetPage;
+    const packetPageText = page === null
+      ? item.kind === "document-source" ? item.sourceExcerpt.split(/\r?\n/).filter((line) => !line.startsWith("Document title: ")).join("\n") : ""
+      : packetPages.filter((entry) => entry.page === page).map((entry) => entry.text).join("\n");
+    // Vote words: the item's own recorded motions, procedural ones excluded. A
+    // procedural tally is the meeting running itself, not the item's vote.
+    const motions = (item.motions ?? []).filter((motion) => motion.kind !== "procedural");
+    const motionWords = motions
+      .flatMap((motion) => [
+        motion.tally,
+        motion.tally ? motion.tally.replace("-", " to ") : "",
+        motion.unanimous,
+        motion.unanimous ? `${motion.unanimous}ly` : "",
+        motion.result,
+      ])
+      .filter(Boolean);
+    const voteSource = normalizeForMatch(motionWords.join(" "));
+    const proceduralWords = normalizeForMatch(
+      (item.motions ?? [])
+        .filter((motion) => motion.kind === "procedural")
+        .flatMap((motion) => [
+          motion.tally,
+          motion.tally ? motion.tally.replace("-", " to ") : "",
+          motion.unanimous,
+          motion.unanimous ? `${motion.unanimous}ly` : "",
+          motion.result,
+        ])
+        .filter(Boolean)
+        .join(" "),
+    );
+    for (const match of unit.text.match(DOLLAR) ?? []) {
+      const found = figureSource.includes(normalizeForMatch(item.kind === "document-source" ? documentMoneyText(match) : match));
+      push(
+        match,
+        `${label} (${locator})`,
+        found,
+        found
+          ? `Dollar figure appears in this item's own record (${locator}); this is a text match, not a substantive confirmation.`
+          : "Dollar figure is not in this item's own record; a figure stated for another action does not support it.",
+      );
+    }
+    for (const match of (unit.text.match(PERCENT) ?? []).filter((value) => value.trim() !== "%")) {
+      const found = figureSource.includes(normalizeForMatch(match));
+      push(
+        match,
+        `${label} (${locator})`,
+        found,
+        found
+          ? `Percent appears in this item's own record (${locator}); this is a text match, not a substantive confirmation.`
+          : "Percent is not in this item's own record; a figure stated for another action does not support it.",
+      );
+    }
+    for (const match of unit.text.match(DATE) ?? []) {
+      const found = figureSource.includes(normalizeForMatch(match));
+      push(
+        match,
+        `${label} (${locator})`,
+        found,
+        found ? `Date appears in this item's own record (${locator}).` : "Date is not in this item's own record.",
+      );
+    }
+    for (const match of voteWordsIn(unit.text)) {
+      const found = voteSource.includes(normalizeForMatch(match));
+      const onlyProcedural = !found && proceduralWords.includes(normalizeForMatch(match));
+      push(
+        match,
+        found ? `${label}, recorded result` : label,
+        found,
+        found
+          ? `Vote word matches this item's own recorded result (${label}); not inferred from a bare number.`
+          : onlyProcedural
+            ? "The only tally under this item is the meeting's own procedure; it does not verify this item's vote. Do not infer a vote or outcome."
+            : "Vote word not found in this item's record; do not infer a vote or outcome.",
+      );
+    }
+    for (const match of unit.text.matchAll(QUOTED)) {
+      const quote = match[1] ?? "";
+      const inPacketPage = packetPageText
+        ? normalizeForMatch(packetPageText).includes(normalizeForMatch(quote))
+        : false;
+      push(
+        quote,
+        inPacketPage ? page === null ? `${label} (cited document section)` : `${label} (packet p${page})` : `${label} (unverified)`,
+        inPacketPage,
+        inPacketPage
+          ? page === null ? "Quotation matched this claim's cited document section." : `Quotation matched this item's own packet page (p${page}).`
+          : "Quotation unverified: not in this item's packet page. A match against the auto-captioned tape alone is not a verified recording; check the recording, the approved minutes, or attribute the words to the packet.",
+      );
+    }
   }
   return checks;
 }
-
 /**
  * Words that begin a capitalized pair or triple in this register without naming
  * a person: a civic body, an office, a place or a month. "City Council" and
@@ -2945,8 +3174,15 @@ export async function runWholeMeetingWriter(input: {
     // Batches of at most `LEDGER_STATUS_BATCH_SIZE`, each retried once. A batch
     // that still cannot be read does not strand its items: `applyStatuses`
     // assigns them by rule, and the notes count how many that was.
-    const system = `${meetings}\n${LEDGER_STATUS_SYSTEM}`;
+    //
+    // The pass scores each item's resident impact in the SAME reply -- the four
+    // civic-scanner dimensions and their reasons -- so the model is judging the
+    // item's actual evidence (what was said, what was decided, who it lands on)
+    // rather than a count of votes or dollars. An item the reply did not score
+    // keeps no score and stays unranked.
+    const system = `${meetings}\n${LEDGER_STATUS_SYSTEM}\n\n${IMPACT_SCORE_SYSTEM}`;
     const proposals: { itemNo: number; status: LedgerStatus; reason: string }[] = [];
+    const impacts = new Map<number, ImpactScore>();
     for (let start = 0; start < ledger.length; start += LEDGER_STATUS_BATCH_SIZE) {
       const batch = ledger.slice(start, start + LEDGER_STATUS_BATCH_SIZE);
       const allowed = new Set(batch.map((item) => item.itemNo));
@@ -2958,26 +3194,32 @@ export async function runWholeMeetingWriter(input: {
       let parsed = reply.ok ? parseStatusReply(reply.text) : { valid: false, proposals: [] };
       if (!parsed.valid) {
         reply = await chat(
-          `${system}\nSTRICT RETRY: return valid JSON only, one row per item number listed, each reason at most six words.`,
+          `${system}\nSTRICT RETRY: return valid JSON only, one row per item number listed, each reason at most six words, each of the four dimensions an integer 1 to 5.`,
           user,
           STATUS_REPLY_TOKENS,
         );
         parsed = reply.ok ? parseStatusReply(reply.text) : { valid: false, proposals: [] };
       }
-      if (parsed.valid) proposals.push(...parsed.proposals.filter((row) => allowed.has(row.itemNo)));
+      if (parsed.valid) {
+        proposals.push(...parsed.proposals.filter((row) => allowed.has(row.itemNo)));
+        for (const row of parsed.proposals) {
+          if (allowed.has(row.itemNo) && row.impact) impacts.set(row.itemNo, row.impact);
+        }
+      }
     }
-    ledger = applyStatuses(ledger, proposals);
+    ledger = applyStatuses(ledger, proposals, impacts);
   }
 
-  // Exactly one item leads. The status pass may name three; the top-ranked of
-  // those picks keeps the lead and the rest go to the roundup, where they are
+  // Exactly one item leads. The status pass may name three; the highest-scoring
+  // of those picks keeps the lead and the rest go to the roundup, where they are
   // written instead of disappearing from the story.
   const single = enforceSingleLead(ledger);
   ledger = single.items;
   secondLeads = single.moved;
 
-  // The code chooses the lead: a meeting that voted on something leads its story
-  // on that vote, whatever the model picked.
+  // The code chooses the lead: the item with the highest resident-impact score
+  // leads, whatever the model picked. A meaningful independent story is not
+  // demoted to second because another item held more votes or bigger numbers.
   const leadChoice = chooseLead(
     ledger,
     ledger.filter((item) => item.status === "lead"),
@@ -3222,23 +3464,27 @@ export async function runWholeMeetingWriter(input: {
     packetText,
   );
   const body = spelled.text;
-  // A vote word in the draft must match a vote the run FOUND -- a structured vote
-  // row, or a result phrase read off the tape -- and both forms are offered: a
-  // draft may write "5 to 2" where the tape said "5 to two", and "unanimously"
-  // where the tape said "unanimous", and both are the same recorded vote. The
-  // source is the found votes alone, never the whole tape, so a tally the record
-  // does not hold is still flagged.
-  const voteWords = [
-    ...input.votes.flatMap((vote) => [vote.tally ?? "", vote.result ?? ""]),
-    ...voteFindings.flatMap((finding) => [
-      finding.tally,
-      finding.tally.replace("-", " to "),
-      finding.unanimous,
-      finding.unanimous ? `${finding.unanimous}ly` : "",
-      finding.result,
-    ]),
-  ].filter(Boolean);
-  const figureClaims = checkDraftClaims({ body, transcriptText, packetText, voteWords });
+  // Each written paragraph is checked against the item it was written from --
+  // the lead item's paragraph, each section's, each roundup item's -- so a
+  // figure or tally that belongs to another action, or a procedural tally, can
+  // no longer certify a claim about this item.
+  const claimUnits: ClaimUnit[] = [];
+  const pushClaimParagraphs = (text: string, label: string, item: LedgerItem | null): void => {
+    for (const paragraph of text.split(/\n{2,}/)) {
+      const clean = paragraph.trim();
+      if (clean && clean !== ROUNDUP_HEADING) claimUnits.push({ text: clean, label, item });
+    }
+  };
+  pushClaimParagraphs(repairedLead, leadItems[0] ? labelOf(leadItems[0]) : "the lead item", leadItems[0] ?? null);
+  for (const section of sections) pushClaimParagraphs(section.text, section.name, section.item);
+  for (let index = 0; index < roundups.length; index += 1) {
+    pushClaimParagraphs(roundups[index]!.text, roundups[index]!.name, roundupOnly[index] ?? null);
+  }
+  const figureClaims = checkDraftClaims({
+    units: claimUnits,
+    packetPages: input.packetPages,
+    segments: input.segments,
+  });
   const nameClaims = checkDraftNames({ body, transcriptText, packetText, knownNames });
   const claims: ClaimCheck[] = [...figureClaims, ...nameClaims];
   // A paragraph that still says there was no vote, after the repair call, is a
@@ -3277,19 +3523,10 @@ export async function runWholeMeetingWriter(input: {
     await stage("Cold-reading the draft");
     // The reader sees, for each paragraph, the tape windows whose words overlap
     // that paragraph most -- not the item's whole three-hour span, which made it
-    // call real tape facts "absent from the excerpts".
-    const units: { text: string; label: string; item: LedgerItem | null }[] = [];
-    const pushParagraphs = (text: string, label: string, item: LedgerItem | null): void => {
-      for (const paragraph of text.split(/\n{2,}/)) {
-        const clean = paragraph.trim();
-        if (clean && clean !== ROUNDUP_HEADING) units.push({ text: clean, label, item });
-      }
-    };
-    pushParagraphs(repairedLead, leadItems[0] ? labelOf(leadItems[0]) : "the lead item", leadItems[0] ?? null);
-    for (const section of sections) pushParagraphs(section.text, section.name, section.item);
-    for (let index = 0; index < roundups.length; index += 1) {
-      pushParagraphs(roundups[index]!.text, roundups[index]!.name, roundupOnly[index] ?? null);
-    }
+    // call real tape facts "absent from the excerpts". The same paragraph-to-item
+    // mapping the claim check used is reused here, so both checks bind a
+    // paragraph to the same item.
+    const units = claimUnits;
     let coldReadable = 0;
     for (const unit of units) {
       if (mismatches.length >= COLD_CHECK_MAX) break;
@@ -3320,6 +3557,17 @@ export async function runWholeMeetingWriter(input: {
   const flagged = claims.filter((claim) => claim.checkStatus === "flagged");
   const ruleAssigned = ledger.filter((item) => item.reason === RULE_ASSIGNED_REASON).length;
   const overruledExcluded = ledger.filter((item) => item.reason === EXCLUDED_OVERRULED_REASON).length;
+  // Every read item is accounted for, scored or not: the count of items the
+  // pass scored, the count it left unranked (no readable dimensions), and a
+  // line per scored item naming its total, its decision and each dimension with
+  // its reason -- so the editor can see the ranking's own reasoning and argue
+  // with it, rather than being handed a bare order.
+  const scoredItems = ledger.filter((item) => isRanked(item.impact));
+  const unscoredItems = ledger.filter((item) => item.status !== "unread" && !isRanked(item.impact));
+  const impactLines = scoredItems
+    .slice()
+    .sort((left, right) => (impactTotal(right.impact) ?? 0) - (impactTotal(left.impact) ?? 0))
+    .map((item) => describeImpact(item.label || plainLabel(item), item.impact));
   const bareMoney = bareMoneyNumbers(body);
   const integrityNotes = [
     input.meeting.title ? `Written from the captured meeting transcript: ${input.meeting.videoUrl}` : "",
@@ -3332,7 +3580,7 @@ export async function runWholeMeetingWriter(input: {
     .filter(Boolean)
     .join("\n");
   const leadNote = leadChoice.overruled && leadChoice.chosen
-    ? `LEAD: the model's pick had no vote or motion under it while the record did, so the story leads with "${labelOf(leadChoice.chosen)}".`
+    ? `LEAD: another item scored higher on resident impact than the model's pick, so the story leads with "${labelOf(leadChoice.chosen)}".`
     : leadChoice.chosen
       ? `LEAD: "${labelOf(leadChoice.chosen)}".`
       : "LEAD: the ledger had no item to lead on.";
@@ -3355,6 +3603,12 @@ export async function runWholeMeetingWriter(input: {
       : "RULE ASSIGNMENT: none; every item got a status from the model or the editor.",
     overruledExcluded
       ? `EXCLUDED OVERRULED: ${overruledExcluded} item(s) the model dropped held a recorded vote and were kept (the meeting's votes are reported).`
+      : "",
+    scoredItems.length
+      ? `IMPACT: ${scoredItems.length} item(s) scored on resident impact (immediacy, local impact, conflict, novelty; 4-20; ${IMPACT_ADVANCE_MIN}-${IMPACT_TOTAL_MAX} advances, ${IMPACT_HOLD_MIN}-${IMPACT_ADVANCE_MIN - 1} watches, ${IMPACT_TOTAL_MIN}-${IMPACT_HOLD_MIN - 1} demotes). The lead is the highest total, not the most votes.\n${impactLines.map((line) => `- ${line}`).join("\n")}`
+      : "IMPACT: no item got a readable score; the ledger keeps its order and the editor ranks by hand.",
+    unscoredItems.length
+      ? `UNSCORED: ${unscoredItems.length} item(s) had no readable newsworthiness score and are unranked, not scored zero. They are still reported.\n${unscoredItems.map((item) => `- ${item.label || plainLabel(item)}: ${IMPACT_UNSCORED_REASON}`).join("\n")}`
       : "",
     mergedCount
       ? `DUPLICATES MERGED: ${mergedCount} near-identical item(s) from overlapping windows were folded into their twins.`

@@ -460,9 +460,9 @@ export async function performImportFinishedStories(
     if (editorNotes) {
       await sql`
         update leads
-        set notes_json = ${JSON.stringify({ editorialAssignment: { origin: "import", text: editorNotes.slice(0, 4000) } })}
+        set notes_json = ${JSON.stringify({ importedReport: editorNotes, editorialAssignment: { origin: "import", text: editorNotes } })}
         where id = ${leadId} and newsroom_id = ${context.newsroomId}
-      `.catch(() => undefined);
+      `;
     }
     await audit(context.userId, "lead", `imported ${leadId}`, context.newsroomId);
     imported.push({ leadId, headline: story.headline, hold: story.hold, kind: story.kind });

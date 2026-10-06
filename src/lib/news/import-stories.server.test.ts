@@ -276,6 +276,19 @@ const IDEA_CARD: ImportSelection = {
 };
 
 describe("performImportFinishedStories: leads and drafts in the Queue", () => {
+  it("retains a complete long claim ledger in readable notes", async () => {
+    const sql = await ensureSchema();
+    const notes = "Claim with supporting page, locator and qualification.\n".repeat(200);
+    const result = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 995 },
+      { text: PASTE, tool: "Civic Scanner 2.6.0", stories: [{ ...IDEA_CARD, notes }] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    const [lead] = await sql.query<{ notes_json: string }>("select notes_json from leads where id=$1", [result.imported[0]!.leadId]);
+    const { parseNotes } = await import("./notes.ts");
+    assert.equal(parseNotes(lead!.notes_json).importedReport, `${notes.trim()}\n\nNext step: ${IDEA_CARD.reporterNextStep}`);
+  });
+
   it("files one lead and one saved draft per ticked card, and publishes nothing", async () => {
     const sql = await ensureSchema();
     const seen: { url: string; leadId: number }[] = [];

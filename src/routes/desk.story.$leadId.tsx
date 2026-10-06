@@ -144,6 +144,15 @@ import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialo
 import { AddToStoryDialog, HeadlineDialog } from "@/components/dialogs";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
 import { jobProgressView } from "@/lib/news/job-progress";
+/*
+  Civic reporting (editor UI). `ReportingPackagePanel` draws the structured
+  package the runner filed for this lead beside the editable copy, and
+  `ReportThisLeadControl` is the press that starts a run anchored on this
+  lead. Both are new, lead-scoped files; neither writes a package itself -- the
+  runner does. See reporting-package-panel.tsx.
+*/
+import { ReportingPackagePanel } from "@/components/reporting-package-panel";
+import { ReportThisLeadControl } from "@/components/report-this-lead";
 import {
   assessCheckedDraftResult,
   assessRefreshedCheckedDraft,
@@ -534,10 +543,29 @@ function StoryPage() {
         writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
     }),
   );
-  const lastDraft = lastDraftLine({
-    modelLabel: data?.job?.model_choice ? modelChoiceLabel(data.job.model_choice) : "",
-    when: lastDraftWhen(data?.job?.finished_at),
-  });
+  let civicReportingDraft = false;
+  try {
+    const research: unknown = JSON.parse(data?.draft?.research_json ?? "{}");
+    civicReportingDraft = Boolean(
+      research && typeof research === "object" && !Array.isArray(research) &&
+      (research as { civicReporting?: unknown }).civicReporting === true,
+    );
+  } catch {
+    // Malformed metadata cannot identify this as a civic-reporting draft.
+  }
+  /*
+    A civic-reporting run files a new draft without a standard `draft` job.
+    `data.job` is the latest standard writer job and can belong to an older
+    draft, so do not pair its model/time with this reporting-created draft.
+    The Reporting package shows its own run status; until the page has a
+    truthful reporting receipt line, suppress this stale attribution.
+  */
+  const lastDraft = civicReportingDraft
+    ? ""
+    : lastDraftLine({
+        modelLabel: data?.job?.model_choice ? modelChoiceLabel(data.job.model_choice) : "",
+        when: lastDraftWhen(data?.job?.finished_at),
+      });
 
   useEffect(() => {
     if (!modelResearchOpen) return;
@@ -2599,6 +2627,17 @@ function StoryPage() {
               }
               rewriteReason={pressWasRewrite.current ? draftProblem : null}
             />
+            {/*
+              The structured reporting package, drawn beside the editable copy
+              in the same tab the notes live in. It renders ONLY what the runner
+              filed (reporting-package-panel.tsx): a run that has not finished
+              shows the honest "no package yet" line, never a fake one. Its
+              "Open this story" links are the real filed leads the runner
+              recorded, and its follow-up/correction boxes start a NEW request
+              -- they never overwrite this draft, these notes or the checked
+              states.
+            */}
+            <ReportingPackagePanel leadId={data.lead.id} />
           </section>
         </aside>
 
@@ -3281,6 +3320,37 @@ function StoryPage() {
           >
             Compare
           </button>
+        ) : null}
+        {/*
+          CIVIC REPORTING (editor UI). The press that starts a civil-reports
+          run anchored on THIS lead: "Report this meeting" or "Develop this
+          lead". It shares the page's model/research state so the pin the
+          runner is handed is the same one the Writer row shows, and it is
+          gated exactly like the other presses that spend a model
+          (`!locked && !onPaper`, plus the paper-setup gate's own reason).
+
+          Which of the two words is drawn: a lead that already carries a draft
+          is one being developed, so it reads "Develop this lead"; a lead with
+          no draft yet is most often a meeting record the editor wants
+          accounted for, so it reads "Report this meeting". The control itself
+          owns the ask-and-model box it opens -- see report-this-lead.tsx.
+        */}
+        {!locked && !onPaper ? (
+          <span className="astra-story-report-this">
+            <ReportThisLeadControl
+              leadId={data.lead.id}
+              action={data.draft?.body ? "develop-lead" : "report-meeting"}
+              hasDraft={Boolean(data.draft?.body)}
+              modelChoice={modelChoice}
+              modelEffort={modelEffort}
+              onModelChoice={setModelChoice}
+              onModelEffort={setModelEffort}
+              researchScope={researchScope}
+              onResearchScope={setResearchScope}
+              disabled={paperGate.blocked}
+              disabledReason={paperGate.reason ?? null}
+            />
+          </span>
         ) : null}
           </div>
         </details>
@@ -4387,6 +4457,15 @@ function ReportingNotesPane({
         </div>
       ) : null}
       {meetingSourceBlock}
+      {notes.importedReport ? (
+        <section className="note-sec" aria-label="Imported reporting evidence">
+          <p className="side-label">Reporting package: claims, sources and gaps</p>
+          <p className="note-hint">These are the reporter's qualifications. Editing your assignment keeps this evidence attached.</p>
+          <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {notes.importedReport}
+          </div>
+        </section>
+      ) : null}
       {/*
         WR1 phase 2: the whole-meeting run's ledger, beside the transcript block
         and above the notes. It renders nothing at all for a lead whose draft

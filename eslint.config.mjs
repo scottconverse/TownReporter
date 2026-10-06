@@ -14,6 +14,8 @@ export default tseslint.config(
       ".vercel/**",
       ".nitro/**",
       "node_modules/**",
+      // Vendored Civic Scanner asset stays byte-for-byte intact.
+      "civic-scanner/**",
       "src/routeTree.gen.ts",
       // Audit evidence: capture scripts written by the auditors, kept out of
       // git and out of the lint budget. The reports beside them are the

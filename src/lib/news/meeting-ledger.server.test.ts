@@ -151,6 +151,16 @@ before(async () => {
 });
 
 describe("meeting ledger writes", () => {
+  it("keeps procedural motion classification through read and rewrite", async () => {
+    const sql = await getSql();
+    const motions = [{ result: "carries", tally: "6-1", unanimous: "", seconds: 500, kind: "procedural" }];
+    await sql.query("update meeting_ledger_items set motions=$1 where draft_id=$2 and item_no=2", [JSON.stringify(motions), ourDraftId]);
+    const accounting = await loadMeetingAccounting(sql, { newsroomId: NEWSROOM, leadId: ourLeadId });
+    assert.equal(accounting.ledger.find((item) => item.itemNo === 2)!.motions[0]!.kind, "procedural");
+    const rewrite = await loadStoredLedgerForRewrite(sql, { newsroomId: NEWSROOM, leadId: ourLeadId });
+    assert.equal(rewrite.find((item) => item.itemNo === 2)!.motions![0]!.kind, "procedural");
+  });
+
   it("saves a status for this newsroom's draft and refuses another newsroom's", async () => {
     /*
       The panel writes through the desk's server function, which passes the

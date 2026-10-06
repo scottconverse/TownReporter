@@ -29,6 +29,11 @@ import {
   type SourceTouch,
 } from "./fetch-politeness.ts";
 import { writeSourceTouch } from "./source-touch-write.ts";
+import {
+  observationForTouch,
+  recordObservation,
+  type ObservationKind,
+} from "./source-observations.server.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
 import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
@@ -126,6 +131,12 @@ import {
   ledgerItemStatusInput,
   claimReviewedInput,
   rewriteFromLedgerInput,
+  startReportingInput,
+  reportingFollowUpInput,
+  reportingObservationInput,
+  leadReportingPackageInput,
+  reportingRequestIdInput,
+  reportingObservationsScopeInput,
 } from "./request-input.ts";
 import {
   evidenceNeedsReview,
@@ -142,6 +153,7 @@ import {
   machineTodosFrom,
   packNotes,
   parseNotes,
+  mergeCompletedReportingNotes,
   topicConfirmationFingerprint,
   TODO_DETAIL_MAX,
   uncheckedGateTodos,
@@ -372,6 +384,27 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
 export const listSources = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => querySourceRows(context));
+
+/** The read-only inventory screen, using the same facts and judgement as its CSV. */
+export const getSourceInventory = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    const { buildInventory } = await import("./source-inventory.server.ts");
+    const { rows } = await buildInventory(context.newsroomId);
+    const unreadable = rows.filter(
+      (row) => row.observation === "retrieval-error" || row.observation === "extraction-failure",
+    ).length;
+    const replacementCandidates = rows.filter(
+      (row) => row.reviewStatus === "replacement-candidate",
+    ).length;
+    const duplicates = rows.filter((row) => row.duplicateOf).length;
+    const neverChecked = rows.filter((row) => row.observation === "never-checked").length;
+    return {
+      rows: rows.slice(0, 500),
+      total: rows.length,
+      counts: { unreadable, replacementCandidates, duplicates, neverChecked },
+    };
+  });
 
 /**
  * One page of the Sources screen (Unit CZ-long-lists).
@@ -1046,7 +1079,20 @@ export const getLead = createServerFn({ method: "GET" })
       const seeded = machineTodosFrom(lines);
       if (seeded.length) {
         notes = { ...notes, todo: seeded };
-        const json = JSON.stringify(notes).slice(0, 8000);
+        /*
+          Serialize with the notes module own writer, not a raw JSON slice.
+
+          JSON.stringify(notes).slice(0, 8000) cut the blob mid-structure:
+          it could drop a rich importedReport a pasted report had written
+          (the main import path deliberately keeps the WHOLE report, and the
+          note columns 8000-char cap is exactly the truncation the reporting
+          work exists to avoid -- report E02), and on the wrong boundary it
+          left invalid JSON that parseNotes read back as an empty memo,
+          silently losing the editor notes. packNotes is the one writer:
+          it keeps valid JSON, sheds the rebuildable lists first, and never
+          drops importedReport, the topic confirmation or the hold record.
+        */
+        const json = packNotes(notes);
         await sql`
           update leads set notes_json = ${json} where id = ${id} and newsroom_id = ${owned(context)}
         `;
@@ -1877,6 +1923,74 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
   const pendingDisappeared: { title: string; url: string; error: string }[] = [];
   /*
+    CIVIC REPORTING / SOURCE OBSERVATIONS (migration 0128).
+
+    Every real touch of a source in this pass leaves a dated, append-only
+    observation behind: the page changed, the page was quiet, the site asked us
+    to wait, the site blocked us, the read failed. The pure vocabulary and the
+    "which kind is this touch" decision live in source-observations.server.ts
+    (`observationForTouch`); this queue is only the transport so the scheduled
+    lane writes them in the same transaction as the touch it is already
+    queuing (a scheduled scan writes nothing to the row during the loop).
+
+    WHY THIS EXISTS AT ALL. "We read it and nothing changed" and "we never
+    knocked" are different facts and used to look identical on the screen --
+    both were just a `last_fetched_at` that did not move. A reporter asking
+    "has this source ever actually been checked?" could not tell them apart.
+    The observation records the fetch, the hash comparison and the refusal
+    separately, scoped to THIS newsroom and THIS source, keyed by the run so a
+    retried pass cannot double-record one attempt.
+
+    A failing observation write must never erase the touch that already
+    happened: the consumer below swallows its own errors (see
+    `recordScanObservation`).
+  */
+  const pendingObservations: {
+    sourceId: number;
+    input: { kind: ObservationKind; note: string | null };
+  }[] = [];
+  /*
+    Record one source observation for THIS pass. On the editor-started lane it
+    writes now; on the scheduled lane it queues for the run transaction (the
+    lane that writes nothing during the loop -- see `writeQueuedSourceWrites`).
+
+    BOTH PATHS SWALLOW THEIR OWN ERRORS. An observation is a record of a touch
+    that already happened; if the 0128 table is not there yet, or the insert
+    fails, the scan must still finish and the source row must still keep the
+    touch it earned. A failure here is not allowed to become a failed scan, so
+    the error is dropped on purpose rather than thrown -- the same rule the
+    `anomalies` insert on the editor lane already follows.
+
+    `scanRunId: runId` is what makes it idempotent: `recordObservation` refuses
+    a second row for the same source, kind and run, so a retried pass cannot
+    double-count one refusal.
+  */
+  const recordScanObservation = async (
+    sourceId: number,
+    kind: ObservationKind,
+    note: string | null,
+  ) => {
+    if (deps.scheduledCommit) {
+      pendingObservations.push({ sourceId, input: { kind, note } });
+      return;
+    }
+    try {
+      await recordObservation(
+        {
+          newsroomId: owned(context),
+          sourceId,
+          kind,
+          note,
+          scanRunId: runId,
+          observedBy: "scan",
+        },
+        sql,
+      );
+    } catch {
+      /* the touch stands whatever happens to the observation */
+    }
+  };
+  /*
     THE ONE CONSUMER OF THE QUEUED SOURCE WRITES (B8F2).
 
     On the scheduled lane the fetch loop writes nothing to a source row as it
@@ -1915,6 +2029,30 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         insert into anomalies (user_id, newsroom_id, kind, summary, url, details)
         values (${context.userId}, ${owned(context)}, 'disappeared', ${`Watched source failed after previously succeeding: ${gone.title}`}, ${gone.url}, ${gone.error})
       `;
+    }
+    /*
+      The dated observations this pass queued (see `recordScanObservation`):
+      written in the same transaction as the touches above, so an unattended
+      run cannot record a touch and lose the observation that explains it. One
+      failing observation is dropped, not thrown -- a bad 0128 row must not
+      fail the whole run's commit.
+    */
+    for (const obs of pendingObservations) {
+      try {
+        await recordObservation(
+          {
+            newsroomId: owned(context),
+            sourceId: obs.sourceId,
+            kind: obs.input.kind,
+            note: obs.input.note,
+            scanRunId: runId,
+            observedBy: "scan",
+          },
+          writeSql,
+        );
+      } catch {
+        /* the touch stands whatever happens to the observation */
+      }
     }
   };
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
@@ -2059,6 +2197,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         jumped at the end -- a count that stops short reads as a scan that is
         still going.
       */
+      /*
+        Observation: the desk is honouring a "come back later" this site asked
+        for earlier, so it did NOT knock this pass. "asked-to-wait" is the
+        honest record -- NOT "quiet" (no read happened) and NOT a failure
+        (nothing went wrong). The note carries the moment it was asked to
+        return, so a reporter reading the source later sees why it was still.
+      */
+      await recordScanObservation(
+        src.id,
+        "asked-to-wait",
+        "The desk is waiting out a request to come back later, made by this source.",
+      );
       skippedThisPass += 1;
       await noteSourceProgress();
       return;
@@ -2083,6 +2233,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
         else
           await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
+        /*
+          Observation: a HOST cap parked this source before the desk knocked --
+          the site never refused THIS page, the day's allowance for its host
+          ran out. "asked-to-wait" is the honest word for that; it is
+          deliberately not "retrieval-error" (nothing failed) and not "quiet"
+          (nothing was read). See source-observations.server.ts.
+        */
+        await recordScanObservation(src.id, "asked-to-wait", note);
         skippedThisPass += 1;
         await noteSourceProgress();
         return;
@@ -2125,6 +2283,22 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch: readTouch });
       else
         await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch: readTouch });
+      /*
+        Observation: the page was read cleanly. WHICH word -- "changed" or
+        "quiet" -- is decided by the hash comparison just above, never by the
+        touch alone: a clean read that found the same bytes is "quiet", not
+        "changed". This is the fact the editor could never see before -- "we
+        knocked and nothing moved" now reads differently from "we never
+        knocked". See `observationForTouch` for why the two words are pinned
+        apart there rather than here.
+      */
+      {
+        const verdict = observationForTouch({
+          outcome: "read",
+          changedByHash: changed,
+        });
+        await recordScanObservation(src.id, verdict.kind, verdict.note);
+      }
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
       failureReceipt.sourcesFetched = fetchedCount;
@@ -2167,6 +2341,23 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
       else await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
+      /*
+        Observation: the read did not return a page. WHICH kind is read off the
+        touch's own outcome, which the politeness layer already decided -- a
+        429/503 is "asked-to-wait", a 401/403 is "blocked", an ordinary failure
+        is split into "retrieval-error" and "extraction-failure" by the message
+        (a page that came back but had nothing to read is a different fact from
+        one that never came back). The sentence is the touch's own `last_error`,
+        passed through `observationForTouch` so the vocabulary stays in one
+        place. See source-observations.server.ts.
+      */
+      {
+        const verdict = observationForTouch({
+          outcome: touch.outcome,
+          last_error: touch.last_error ?? msg,
+        });
+        await recordScanObservation(src.id, verdict.kind, verdict.note);
+      }
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
       failureReceipt.sourcesFailed = failedSources.length;
       failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
@@ -3766,9 +3957,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     because `JSON.stringify` inside `packNotes` would keep a NUL as an escape
     for that cast to refuse later.
   */
-  const notesJson = packNotes(sanitizeJsonLeaves(nextNotes));
-
   await withClaimedLeadDraftLock(job, leadId, async (sql) => {
+    const [latestLead] = await sql<{ notes_json: string | null }>`
+      select notes_json from leads where id=${leadId} and newsroom_id=${owned(context)} for update
+    `;
+    if (!latestLead) throw new Error("Lead not found while saving reporting.");
+    const notesJson = packNotes(sanitizeJsonLeaves(mergeCompletedReportingNotes(
+      prevNotes, parseNotes(latestLead.notes_json), nextNotes,
+    )));
     const current =
       (
         await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1 for update`
@@ -4029,7 +4225,8 @@ export const saveLedgerItemStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) => ledgerItemStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const { saveLedgerItemStatus: save } = await import("./meeting-ledger.server.ts");
+    const { saveLedgerItemStatus: save, saveReportingLedgerItemStatus } = await import("./meeting-ledger.server.ts");
+    if (data.reporting) return withTransaction((tx) => saveReportingLedgerItemStatus(tx, { ...data, reporting: data.reporting!, newsroomId: owned(context), reason: data.reason ?? "" }));
     return save(sql, {
       newsroomId: owned(context),
       draftId: data.draftId,
@@ -4393,6 +4590,120 @@ export const saveReportingNotes = createServerFn({ method: "POST" })
       `;
       return { ok: true as const, notes };
     });
+  });
+
+/*
+  Editor-facing civic reporting (civic-reporting.ts / civic-reporting.server.ts).
+
+  One press opens ONE reporting run: a `reporting_requests` row (the durable
+  assignment/method/model record) and a `desk_jobs` row of kind `reporting`
+  whose subject is the REQUEST id. The runner does the actual method work;
+  these functions never run it, never write a package, and never fake one.
+
+  The four direct assignments (town/beat/date/issue) file their own lead, so
+  they carry no lead id; the two lead actions (this meeting / this lead)
+  require one. The distinction is enforced by the commit module, not here.
+*/
+export const startReporting = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => startReportingInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { startReportingForAuthenticatedEditor } = await import("./civic-reporting-commit.server.ts");
+    return startReportingForAuthenticatedEditor(
+      { userId: context.userId, newsroomId: owned(context) },
+      {
+        action: data.action,
+        leadId: data.leadId,
+        assignment: data.assignment,
+        seedUrls: data.seedUrls,
+        parentRequestId: data.parentRequestId,
+        modelChoice: data.modelChoice,
+        modelEffort: data.modelEffort ?? null,
+        researchScope: data.researchScope,
+      },
+    );
+  });
+
+/** A follow-up run: targeted work against a run the editor already has. */
+export const answerReportingFollowUp = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => reportingFollowUpInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { answerReportingFollowUp: run } = await import("./civic-reporting-commit.server.ts");
+    return run(
+      { userId: context.userId, newsroomId: owned(context) },
+      {
+        parentRequestId: data.parentRequestId,
+        assignment: data.assignment,
+        seedUrls: data.seedUrls,
+        modelChoice: data.modelChoice,
+        modelEffort: data.modelEffort ?? null,
+        researchScope: data.researchScope,
+      },
+    );
+  });
+
+/**
+  The editor's dated, sourced correction or disposition, saved for a later
+  relevant assignment. Scope and evidence are required at the boundary; this
+  records a decision and changes no model prompt.
+*/
+export const saveReportingCorrection = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => reportingObservationInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { saveReportingCorrection: save } = await import("./civic-reporting-commit.server.ts");
+    return save(
+      { userId: context.userId, newsroomId: owned(context) },
+      {
+        requestId: data.requestId,
+        leadId: data.leadId,
+        kind: data.kind,
+        text: data.text,
+        evidence: data.evidence,
+      },
+    );
+  });
+
+/** The structured reporting package for a lead, scoped to this newsroom. */
+export const loadLeadReportingPackage = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => leadReportingPackageInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { loadLeadReportingPackageForEditor } = await import("./civic-reporting-commit.server.ts");
+    return loadLeadReportingPackageForEditor(
+      { userId: context.userId, newsroomId: owned(context) },
+      data.leadId,
+    );
+  });
+
+/**
+  Observations relevant to ONE assignment, shown beside the package as
+  "records kept for the next assignment". The scope is REQUIRED: the screen
+  sends the lead, the run's parent request and the run's seed sources, and the
+  storage worker answers with only the observations that belong to them. This
+  replaces an unscoped newsroom-wide read that leaked every editor correction
+  onto every story.
+*/
+export const listReportingObservations = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => reportingObservationsScopeInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { listReportingObservations: list } = await import("./civic-reporting-commit.server.ts");
+    return list({ userId: context.userId, newsroomId: owned(context) }, {
+      leadId: data.leadId ?? null,
+      requestId: data.requestId ?? null,
+      seedUrls: data.seedUrls ?? [],
+    });
+  });
+
+/** Stop a reporting run the editor started (existing desk_jobs cancel path). */
+export const cancelReportingRequest = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => reportingRequestIdInput.parse(input))
+  .handler(async ({ context, data }) => {
+    const { cancelReportingRequest: cancel } = await import("./civic-reporting-commit.server.ts");
+    return cancel({ userId: context.userId, newsroomId: owned(context) }, data.requestId);
   });
 
 export const pullTodo = createServerFn({ method: "POST" })

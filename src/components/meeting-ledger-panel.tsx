@@ -4,6 +4,14 @@ import { useState } from "react";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { markClaimReviewed, saveLedgerItemStatus } from "@/lib/news/desk";
 import { clockFromSeconds } from "@/lib/news/meeting-whole";
+import {
+  IMPACT_DIMENSIONS,
+  IMPACT_UNSCORED_REASON,
+  impactDecision,
+  impactReasonKey,
+  impactTotal,
+  isRanked,
+} from "@/lib/news/meeting-impact";
 import { runStatsLine } from "@/components/meeting-ledger-stats";
 import type { ClaimRow, LedgerItemRow, MeetingAccounting } from "@/lib/news/meeting-ledger.server";
 
@@ -78,7 +86,8 @@ export function MeetingLedgerPanel({
         ? 1
         : a.itemNo - b.itemNo,
   );
-  const unreadCount = ledger.filter((item) => item.status === "unread").length;
+  const unreadCount = ledger.filter((item) => item.status === "unread" && !item.reporting).length;
+  const unsetTreatmentCount = ledger.filter((item) => item.status === "unread" && item.reporting).length;
   const stats = runStatsLine(accounting.runStats);
 
   return (
@@ -112,6 +121,7 @@ export function MeetingLedgerPanel({
           <span className="meeting-ledger-count">
             {ledger.length} item{ledger.length === 1 ? "" : "s"}
             {unreadCount ? ` · ${unreadCount} not read` : ""}
+            {unsetTreatmentCount ? ` · ${unsetTreatmentCount} treatments not set` : ""}
           </span>
         </summary>
 
@@ -168,6 +178,7 @@ function LedgerRow({
   onSaved: () => void;
 }) {
   const unread = item.status === "unread";
+  const action = item.evidence[0]?.reportingAction;
   const [status, setStatus] = useState<string>(unread ? "" : item.status);
   const [reason, setReason] = useState(item.reason);
   const [saved, setSaved] = useState(false);
@@ -177,6 +188,8 @@ function LedgerRow({
     mutationFn: (next: { status: string; reason: string }) =>
       saveLedgerItemStatus({
         data: {
+          rowId: item.id,
+          reporting: item.reporting,
           draftId: item.draftId,
           itemNo: item.itemNo,
           status: next.status as "lead" | "roundup" | "excluded",
@@ -219,8 +232,9 @@ function LedgerRow({
           {item.text}
         </span>
       </div>
+      {action ? <p className="note-one">Recorded action {action.actionId} · {action.agendaItem} · {action.timestamp}<br />Outcome: {action.outcome} · Vote: {action.vote}<br />Policy stage: {action.policyStage} · Reporter disposition: {action.disposition}<br />Evidence reference: {action.evidence}</p> : null}
       {unread ? (
-        <p className="warn-inline">This part of the tape was not read.</p>
+        <p className="warn-inline">{action ? "Editorial treatment has not been set." : "This part of the tape was not read."}</p>
       ) : null}
       <div className="ledger-item-meta">
         {item.startSeconds !== null ? (
@@ -252,7 +266,7 @@ function LedgerRow({
           >
             {unread ? (
               <option value="" disabled>
-                Not read
+                {action ? "Treatment not set" : "Not read"}
               </option>
             ) : null}
             <option value="lead">Lead</option>
@@ -282,11 +296,12 @@ function LedgerRow({
           {problem}
         </p>
       ) : null}
+      <ImpactScoreBlock impact={item.impact} />
       {(item.motions?.length ?? 0) > 0 ? (
         <ul className="ledger-vote">
           {item.motions.map((motion, index) => (
             <li key={index}>
-              Recorded vote:{" "}
+              {motion.kind === "procedural" ? "Procedural vote: " : "Recorded vote: "}
               {[motion.result, motion.tally || motion.unanimous].filter(Boolean).join(", ") ||
                 "result not stated"}
               {motion.seconds !== null ? (
@@ -321,6 +336,48 @@ function LedgerRow({
           </ul>
         </details>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Why this item is or is not worth leading on, in the model's own words.
+ *
+ * The ranking that picks the lead is driven by these four numbers, so the panel
+ * shows the working: the total out of twenty, the decision that total earns, and
+ * each dimension with its number and its reason. An item the run never scored --
+ * or scored in a reply that could not be read -- says "not scored" rather than
+ * showing a zero, because a zero would be a judgement nobody made.
+ */
+function ImpactScoreBlock({ impact }: { impact: LedgerItemRow["impact"] }) {
+  if (!isRanked(impact)) {
+    return (
+      <p className="ledger-impact ledger-impact-none" title={IMPACT_UNSCORED_REASON}>
+        Not scored — no resident-impact score was recorded, so this item is unranked.
+      </p>
+    );
+  }
+  const total = impactTotal(impact)!;
+  return (
+    <div className="ledger-impact">
+      <p className="ledger-impact-head">
+        <span className="ledger-impact-total">{total}/20</span>{" "}
+        <span className={`ledger-impact-decision ledger-impact-${impactDecision(total).toLowerCase()}`}>
+          {impactDecision(total)}
+        </span>{" "}
+        <span className="ledger-impact-caption">resident impact</span>
+      </p>
+      <ul className="ledger-impact-parts">
+        {IMPACT_DIMENSIONS.map((dimension) => (
+          <li key={dimension}>
+            <span className="ledger-impact-dim">{dimension}</span>{" "}
+            <span className="ledger-impact-value">{impact[dimension]}</span>
+            {String(impact[impactReasonKey(dimension)] ?? "").trim() ? (
+              <span className="ledger-impact-why"> — {String(impact[impactReasonKey(dimension)]).trim()}</span>
+            ) : null}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

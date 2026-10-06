@@ -1,6 +1,9 @@
+import { persistReportingActionLedger, reportingActionsToLedger } from "./reporting-ledger-adapter.ts";
+import type { CoverageAction } from "./civic-reporting.ts";
 import type { Sql } from "../db.ts";
 import { storableText } from "./storable-text.ts";
 import type { LedgerEvidence, LedgerItem, LedgerStatus, LedgerMotion, RunStats } from "./meeting-whole.ts";
+import { parseImpactScore, type ImpactScore } from "./meeting-impact.ts";
 
 /** jsonb arrives parsed on Neon and as a JSON string under PGLite; accept both. */
 function parseEvidence(raw: unknown): LedgerEvidence[] {
@@ -21,6 +24,7 @@ function parseEvidence(raw: unknown): LedgerEvidence[] {
       numbers: String(entry.numbers ?? ""),
       sourceExcerpt: String(entry.sourceExcerpt ?? ""),
       agenda: String(entry.agenda ?? ""),
+      ...(entry.reportingAction ? { reportingAction: entry.reportingAction as CoverageAction } : {}),
     }));
 }
 
@@ -35,7 +39,16 @@ function parseMotions(raw: unknown): LedgerMotion[] {
       tally: String(entry.tally ?? ""),
       unanimous: String(entry.unanimous ?? ""),
       seconds: entry.seconds === null || entry.seconds === undefined ? null : Number(entry.seconds),
+      ...(entry.kind === "procedural" || entry.kind === "decision" ? { kind: entry.kind } : {}),
     }));
+}
+
+/** The editor's impact score, read from the `impact` jsonb column. Returns null
+ * when the item was never scored or the stored score is missing/invalid, so an
+ * unscored item stays unranked -- never a fabricated zero. */
+function parseImpact(raw: unknown): ImpactScore | null {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  return parseImpactScore(value);
 }
 
 function safeParse(raw: string): unknown {
@@ -84,6 +97,10 @@ export type LedgerItemRow = {
   motions: LedgerMotionRow[];
   /** Every raw inventory entry this item grouped, so the panel can show them. */
   evidence: LedgerEvidence[];
+  /** The model's explained resident-impact score, or null when it was never
+   * scored (or the stored score was invalid). Null means unranked. */
+  impact: ImpactScore | null;
+  reporting?: ReportingLedgerPin;
 };
 
 /** One recorded vote under a ledger item: its result, tally and moment. */
@@ -92,6 +109,7 @@ export type LedgerMotionRow = {
   tally: string;
   unanimous: string;
   seconds: number | null;
+  kind?: "decision" | "procedural";
 };
 
 export type ClaimRow = {
@@ -127,12 +145,13 @@ export async function loadMeetingAccounting(
   sql: Sql,
   input: { newsroomId: number; leadId: number },
 ): Promise<MeetingAccounting> {
+  const reporting = await loadReportingLedgerBinding(sql, input);
   const latest = await sql.query<{ draft_id: number }>(
     `select draft_id from meeting_ledger_items
       where newsroom_id=$1 and lead_id=$2 order by draft_id desc limit 1`,
     [input.newsroomId, input.leadId],
   );
-  const draftId = latest[0] ? Number(latest[0].draft_id) : null;
+  const draftId = reporting?.draftId ?? (latest[0] ? Number(latest[0].draft_id) : null);
   if (draftId === null) {
     return { draftId: null, ledger: [], claims: [], meetingNotes: "", runStats: null };
   }
@@ -152,11 +171,12 @@ export async function loadMeetingAccounting(
     vote_tally: string | null;
     motions: unknown;
     evidence: unknown;
+    impact: unknown;
   }>(
     // Unread first: the part of the tape nobody read is the part the editor most
     // needs to see, so it sorts above the decisions that are already made.
     `select id,draft_id,item_no,kind,text,start_seconds,end_seconds,packet_page,status,reason,
-            vote_result,vote_tally,motions,evidence
+            vote_result,vote_tally,motions,evidence,impact
        from meeting_ledger_items where newsroom_id=$1 and draft_id=$2
       order by (status='unread') desc, item_no, id`,
     [input.newsroomId, draftId],
@@ -184,7 +204,7 @@ export async function loadMeetingAccounting(
 
   return {
     draftId,
-    ledger: ledgerRows.map((row) => ({
+    ledger: ledgerRows.length ? ledgerRows.map((row) => ({
       id: Number(row.id),
       draftId: Number(row.draft_id),
       itemNo: Number(row.item_no),
@@ -199,7 +219,13 @@ export async function loadMeetingAccounting(
       voteTally: row.vote_tally ?? "",
       motions: parseMotions(row.motions),
       evidence: parseEvidence(row.evidence),
-    })),
+      impact: parseImpact(row.impact),
+      ...(reporting ? { reporting: { ...reporting.pin, actionIndex: Number(row.item_no) - 1, actionId: reporting.actions[Number(row.item_no) - 1]?.actionId ?? "", actionSnapshot: JSON.stringify(reporting.actions[Number(row.item_no) - 1]) } } : {}),
+    })) : reporting ? reportingActionsToLedger(reporting.actions).map((item, actionIndex) => ({
+      ...item, id: -(actionIndex + 1), draftId, endSeconds: null, motions: [], impact: null,
+      evidence: item.evidence ?? [], voteResult: item.voteResult ?? "", voteTally: item.voteTally ?? "",
+      reporting: { ...reporting.pin, actionIndex, actionId: reporting.actions[actionIndex].actionId, actionSnapshot: JSON.stringify(reporting.actions[actionIndex]) },
+    })) : [],
     claims: claimRows.map((row) => ({
       id: Number(row.id),
       draftId: Number(row.draft_id),
@@ -244,9 +270,10 @@ export async function loadStoredLedgerForRewrite(
     vote_tally: string | null;
     motions: unknown;
     evidence: unknown;
+    impact: unknown;
   }>(
     `select item_no,kind,text,start_seconds,end_seconds,packet_page,status,reason,source_excerpt,
-            vote_result,vote_tally,motions,evidence
+            vote_result,vote_tally,motions,evidence,impact
        from meeting_ledger_items where newsroom_id=$1 and draft_id=$2 order by item_no, id`,
     [input.newsroomId, Number(latest[0].draft_id)],
   );
@@ -264,7 +291,80 @@ export async function loadStoredLedgerForRewrite(
     voteTally: row.vote_tally ?? "",
     motions: parseMotions(row.motions),
     evidence: parseEvidence(row.evidence),
+    ...(parseImpact(row.impact) ? { impact: parseImpact(row.impact)! } : {}),
   }));
+}
+
+export type ReportingLedgerPin = {
+  packageId: number; requestId: number; storyId: string; actionIndex: number; actionId: string; actionSnapshot: string;
+};
+
+function sameSnapshot(a: unknown, b: unknown): boolean {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).sort(([a],[b]) => a.localeCompare(b)).map(([key,entry]) => [key,canonical(entry)])) : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+function jsonRecord(raw: unknown): Record<string, unknown> | null {
+  const value = typeof raw === "string" ? safeParse(raw) : raw;
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+/** Exact saved draft/request/story binding. No newest-package fallback and no writes. */
+async function loadReportingLedgerBinding(sql: Sql, input: { newsroomId: number; leadId: number }, lock = false) {
+  const [draft] = await sql.query<{ id: number; research_json: unknown }>(
+    `select id,research_json from drafts where newsroom_id=$1 and lead_id=$2
+     order by updated_at desc,id desc limit 1${lock ? " for update" : ""}`, [input.newsroomId,input.leadId]);
+  if (!draft) return null;
+  const research = jsonRecord(draft.research_json);
+  if (research?.civicReporting !== true || !Number.isSafeInteger(Number(research.requestId)) || typeof research.storyId !== "string") return null;
+  const [row] = await sql.query<{ id: number; package: unknown }>(
+    `select p.id,p.package from reporting_packages p join reporting_requests r
+       on r.id=p.request_id and r.newsroom_id=p.newsroom_id
+     where p.newsroom_id=$1 and p.request_id=$2`, [input.newsroomId,Number(research.requestId)]);
+  const pkg = jsonRecord(row?.package);
+  if (!row || !pkg || !Array.isArray(pkg.stories) || !pkg.stories.some((story) => jsonRecord(story)?.id === research.storyId)
+      || !Array.isArray(pkg.actions)) return null;
+  const fields = ["actionId","timestamp","agendaItem","motionOrAction","outcome","vote","policyStage","evidence","disposition"];
+  if (!pkg.actions.every((action) => { const value = jsonRecord(action); return value && fields.every((key) => typeof value[key] === "string"); })) return null;
+  if (research.reportedActions !== undefined && !sameSnapshot(research.reportedActions, pkg.actions)) return null;
+  return { draftId: Number(draft.id), actions: pkg.actions as CoverageAction[],
+    pin: { packageId: Number(row.id),requestId: Number(research.requestId),storyId: research.storyId } };
+}
+
+/** Materialize historical actions only on an editor's explicit save, in the endpoint transaction. */
+export async function saveReportingLedgerItemStatus(sql: Sql, input: {
+  newsroomId: number; draftId: number; itemNo: number; rowId?: number; reporting: ReportingLedgerPin;
+  status: LedgerStatus; reason: string;
+}): Promise<LedgerStatusSaveResult> {
+  if (!EDITOR_LEDGER_STATUSES.includes(input.status)) return { ok: false, error: "That status is not one an editor can set." };
+  const reason = storableText(input.reason ?? "").trim();
+  if (input.status === "excluded" && !reason) return { ok: false, error: "A reason is required before an item can be excluded." };
+  const [draft] = await sql.query<{ lead_id: number }>(`select lead_id from drafts where id=$1 and newsroom_id=$2`,[input.draftId,input.newsroomId]);
+  if (!draft) return { ok: false, error: "That draft is not in this newsroom." };
+  // Serialize first-save materialization and guard against a replacement draft.
+  const [lead] = await sql.query<{ status: string }>(`select status from leads where id=$1 and newsroom_id=$2 for update`,[draft.lead_id,input.newsroomId]);
+  if (!lead || lead.status === "published") return { ok: false,error: "This story is published or unavailable, so its ledger is read-only." };
+  const binding = await loadReportingLedgerBinding(sql,{ newsroomId: input.newsroomId, leadId: Number(draft.lead_id) },true);
+  const pin = input.reporting;
+  if (!binding || binding.draftId !== input.draftId || binding.pin.packageId !== pin.packageId
+    || binding.pin.requestId !== pin.requestId || binding.pin.storyId !== pin.storyId
+    || !Number.isInteger(pin.actionIndex) || pin.actionIndex < 0 || input.itemNo !== pin.actionIndex + 1
+    || binding.actions[pin.actionIndex]?.actionId !== pin.actionId
+    || !sameSnapshot(safeParse(pin.actionSnapshot), binding.actions[pin.actionIndex]))
+    return { ok: false,error: "The reporting draft or package changed. Reload before saving." };
+  const existing = await sql.query<{ id: number; evidence: unknown }>(
+    `select id,evidence from meeting_ledger_items where newsroom_id=$1 and draft_id=$2 and item_no=$3`,
+    [input.newsroomId,input.draftId,input.itemNo]);
+  if (existing.length > 1) return { ok: false,error: "The saved action is ambiguous. Reload before saving." };
+  if (existing[0] && (input.rowId && input.rowId > 0 && Number(existing[0].id) !== input.rowId
+    || !sameSnapshot(parseEvidence(existing[0].evidence)[0]?.reportingAction, binding.actions[pin.actionIndex])))
+    return { ok: false,error: "The saved action changed. Reload before saving." };
+  if (!existing.length) await persistReportingActionLedger(sql,{ newsroomId: input.newsroomId,leadId: Number(draft.lead_id),draftId: input.draftId,actions: binding.actions });
+  const [item] = await sql.query<{ id: number }>(`select id from meeting_ledger_items where newsroom_id=$1 and draft_id=$2 and item_no=$3`,[input.newsroomId,input.draftId,input.itemNo]);
+  if (!item) return { ok: false,error: "The reporting action is unavailable." };
+  await sql.query(`update meeting_ledger_items set status=$1,reason=$2 where newsroom_id=$3 and draft_id=$4 and id=$5`,[input.status,reason,input.newsroomId,input.draftId,item.id]);
+  return { ok: true };
 }
 
 export type LedgerStatusSaveResult = { ok: true } | { ok: false; error: string };
@@ -285,6 +385,8 @@ export async function saveLedgerItemStatus(
   if (input.status === "excluded" && !reason) {
     return { ok: false, error: "A reason is required before an item can be excluded." };
   }
+  const [draft] = await sql.query<{ research_json: unknown }>(`select research_json from drafts where newsroom_id=$1 and id=$2`,[input.newsroomId,input.draftId]);
+  if (jsonRecord(draft?.research_json)?.civicReporting === true) return { ok: false,error: "Reload the reporting action before saving its editorial treatment." };
   const updated = await sql.query<{ id: number }>(
     `update meeting_ledger_items set status=$1, reason=$2
       where newsroom_id=$3 and draft_id=$4 and item_no=$5 returning id`,

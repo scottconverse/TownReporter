@@ -509,7 +509,7 @@ export async function persistWholeMeetingAccounting(
     await sql`
       insert into meeting_ledger_items
         (newsroom_id,draft_id,lead_id,item_no,kind,text,start_seconds,end_seconds,packet_page,
-         status,reason,source_excerpt,vote_result,vote_tally,motions,evidence)
+         status,reason,source_excerpt,vote_result,vote_tally,motions,evidence,impact)
       values (
         ${input.newsroomId},${input.draftId},${input.leadId},${item.itemNo},
         ${storableText(item.kind).slice(0, 60)},${storableText(item.text)},
@@ -522,6 +522,7 @@ export async function persistWholeMeetingAccounting(
           tally: storableText(motion.tally),
           unanimous: storableText(motion.unanimous),
           seconds: motion.seconds,
+          ...(motion.kind ? { kind: motion.kind } : {}),
         })))}::jsonb,
         ${JSON.stringify((item.evidence ?? []).map((entry) => ({
           kind: entry.kind,
@@ -532,7 +533,8 @@ export async function persistWholeMeetingAccounting(
           numbers: storableText(entry.numbers),
           sourceExcerpt: storableText(entry.sourceExcerpt),
           agenda: storableText(entry.agenda ?? ""),
-        })))}::jsonb
+        })))}::jsonb,
+        ${item.impact ? JSON.stringify(item.impact) : null}::jsonb
       )`;
   }
   for (const claim of input.claims) {

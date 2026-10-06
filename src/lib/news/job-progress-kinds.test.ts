@@ -17,7 +17,7 @@ import {
   type JobKind,
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
-import { readDeskJobs } from "./job-progress.ts";
+import { jobProgressView, readDeskJobs } from "./job-progress.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 
 /*
@@ -32,6 +32,17 @@ import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.t
   one -- the same call `dark-queue.test.ts` makes.
 */
 await applyMigrationsToTestPglite();
+
+describe("reporting result navigation", () => {
+  const requestJob = { id: 326, kind: "reporting", subject_id: 8, status: "running", model_choice: "local-model", result_href: null, started_at: null, finished_at: null, beat_at: null } as DeskJob;
+  it("never treats a reporting request ID as a lead ID", () => {
+    assert.equal(jobProgressView(requestJob, 0, null).resultHref, "/desk/queue");
+    assert.equal(jobProgressView(requestJob, 326, null).resultHref, "/desk/story/326");
+  });
+  it("keeps the worker's explicit result link", () => {
+    assert.equal(jobProgressView({ ...requestJob, result_href: "/desk/story/415" }, 326, null).resultHref, "/desk/story/415");
+  });
+});
 
 /*
   THE PROGRESS MODEL, FOR EVERY KIND (FB1, units 1-3).

@@ -128,6 +128,8 @@ export type PdfPage = {
   page: number | null;
   /** Extraction sequence, not PDF page order. Used for embedded-image OCR. */
   imageIndex?: number;
+  /** Original line/layout structure where available; `text` stays flattened for legacy readers. */
+  layoutText?: string;
   text: string;
   confidence?: number;
 };
@@ -262,12 +264,14 @@ export async function extractPdfBetter(
     // the original for regex/OCR fallback and the captured raw-byte receipt.
     const result = await extractText(Uint8Array.from(buf), { mergePages: false });
     const pagesRaw = Array.isArray(result.text) ? result.text : [String(result.text ?? "")];
-    const pages: PdfPage[] = pagesRaw.map((t, i) => ({
-      page: i + 1,
-      text: String(t ?? "")
-        .replace(/\s+/g, " ")
-        .trim(),
-    }));
+    const pages: PdfPage[] = pagesRaw.map((t, i) => {
+      const layoutText = String(t ?? "").trim();
+      return {
+        page: i + 1,
+        layoutText,
+        text: layoutText.replace(/\s+/g, " ").trim(),
+      };
+    });
     const text = pages
       .map((p) => p.text)
       .filter(Boolean)

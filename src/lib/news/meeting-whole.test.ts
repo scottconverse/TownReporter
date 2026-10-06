@@ -1,4 +1,5 @@
 import { describe, it } from "node:test";
+import { impactTotal, type ImpactScore } from "./meeting-impact.ts";
 import assert from "node:assert/strict";
 import {
   COLD_CHECK_MAX,
@@ -13,9 +14,7 @@ import {
   ROUNDUP_WRITE_SYSTEM,
   RULE_ASSIGNED_REASON,
   SECOND_LEAD_REASON,
-  SECTION_DOLLAR_MIN,
   SECTION_MAX,
-  SECTION_SECONDS_MIN,
   SECTION_WORD_CAP,
   agendaRanges,
   applyPacketSpellings,
@@ -222,12 +221,23 @@ const OVERRULE_INVENTORY = JSON.stringify({
   ],
 });
 
-// The model leads with item 1 (the unvoted budget) and roundups item 2 (the
-// vote). The code must overrule it.
+// The model leads with item 1 (the budget) and roundups item 2 (the vote).
+// It scores both -- and, reading the evidence rather than the tally, scores the
+// airport policy higher on resident impact, which is what the code ranks on. The
+// model's pick is NOT what decides the lead; the explained score is, so the code
+// still overrules it.
 const OVERRULE_STATUS = JSON.stringify({
   items: [
-    { item_no: 1, status: "lead", reason: "the biggest number on the tape" },
-    { item_no: 2, status: "roundup", reason: "a noise-policy vote" },
+    { item_no: 1, status: "lead", reason: "the biggest number on the tape",
+      immediacy: 3, immediacy_reason: "a budget hearing tonight",
+      impact: 3, impact_reason: "a money document, not a decision",
+      conflict: 2, conflict_reason: "no disagreement shown",
+      novelty: 2, novelty_reason: "a report already covered" },
+    { item_no: 2, status: "roundup", reason: "a noise-policy vote",
+      immediacy: 5, immediacy_reason: "voted tonight",
+      impact: 5, impact_reason: "quiets homes near the airport",
+      conflict: 4, conflict_reason: "residents organised for it",
+      novelty: 4, novelty_reason: "first rules of their kind" },
   ],
 });
 
@@ -330,6 +340,30 @@ const AIRPORT_WINDOWS: WindowInventory[] = [
   { windowIndex: 0, segments: [], items: parseInventoryReply(AIRPORT_INVENTORY).items },
 ];
 
+/**
+ * A complete resident-impact score with the four civic-scanner dimensions and
+ * the reason beside each, so tests can state a rank without a model. The total
+ * is computed, never passed -- the same rule the parser enforces.
+ */
+function impact(
+  immediacy: number,
+  impactValue: number,
+  conflict: number,
+  novelty: number,
+): ImpactScore {
+  return {
+    immediacy,
+    impact: impactValue,
+    conflict,
+    novelty,
+    immediacyReason: "why now",
+    impactReason: "why residents",
+    conflictReason: "what is contested",
+    noveltyReason: "what is new",
+    total: immediacy + impactValue + conflict + novelty,
+  };
+}
+
 /** A ledger row with the fields a merge or status test cares about. */
 function row(over: Partial<LedgerItem> & { kind: string; text: string }): LedgerItem {
   return {
@@ -385,11 +419,27 @@ const THREE_LEAD_INVENTORY = JSON.stringify({
   ],
 });
 
+// All three called "lead" by the model. Their scores are what decides which one
+// really leads: the airport presentation, which lands hardest on residents,
+// tops its two siblings -- not the library item, which merely came first, and
+// not the budget, whose hearing is a paper step.
 const THREE_LEAD_STATUS = JSON.stringify({
   items: [
-    { item_no: 1, status: "lead", label: "Library business classes", reason: "the library motions" },
-    { item_no: 2, status: "lead", label: "Airport noise rules", reason: "the airport votes" },
-    { item_no: 3, status: "lead", label: "2027 city budget", reason: "the budget hearing" },
+    { item_no: 1, status: "lead", label: "Library business classes", reason: "the library motions",
+      immediacy: 3, immediacy_reason: "motions decided tonight",
+      impact: 3, impact_reason: "a small programme",
+      conflict: 2, conflict_reason: "unanimous",
+      novelty: 3, novelty_reason: "a new session" },
+    { item_no: 2, status: "lead", label: "Airport noise rules", reason: "the airport votes",
+      immediacy: 5, immediacy_reason: "recommendations adopted tonight",
+      impact: 5, impact_reason: "quiets homes under the flight path",
+      conflict: 4, conflict_reason: "residents organised for it",
+      novelty: 4, novelty_reason: "the first rules of their kind" },
+    { item_no: 3, status: "lead", label: "2027 city budget", reason: "the budget hearing",
+      immediacy: 3, immediacy_reason: "a first hearing tonight",
+      impact: 3, impact_reason: "a money document",
+      conflict: 2, conflict_reason: "no disagreement shown",
+      novelty: 2, novelty_reason: "a report already covered" },
   ],
 });
 
@@ -515,12 +565,24 @@ const SECTIONS_INVENTORY = JSON.stringify({
   ],
 });
 
+// The lead item scores well; two roundup items score in the ADVANCE band (10+),
+// so their own value -- not five dollar figures or twenty minutes of tape -- is
+// what earns them a section. The proclamation scores low and stays a one-line
+// roundup. Every item is scored, so none is unranked.
 const SECTIONS_STATUS = JSON.stringify({
   items: [
-    { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the airport vote" },
-    { item_no: 2, status: "roundup", label: "2027 city budget", reason: "a budget hearing" },
-    { item_no: 3, status: "roundup", label: "Library business classes", reason: "library motions" },
-    { item_no: 4, status: "roundup", label: "Electrify Longmont Day", reason: "a proclamation" },
+    { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the airport vote",
+      immediacy: 5, immediacy_reason: "voted tonight", impact: 5, impact_reason: "quiets homes",
+      conflict: 4, conflict_reason: "residents organised", novelty: 4, novelty_reason: "first rules" },
+    { item_no: 2, status: "roundup", label: "2027 city budget", reason: "a budget hearing",
+      immediacy: 4, immediacy_reason: "a first hearing tonight", impact: 5, impact_reason: "sets the tax levy",
+      conflict: 3, conflict_reason: "a proposed cut", novelty: 2, novelty_reason: "an annual report" },
+    { item_no: 3, status: "roundup", label: "Library business classes", reason: "library motions",
+      immediacy: 4, immediacy_reason: "motions decided tonight", impact: 3, impact_reason: "a small programme",
+      conflict: 2, conflict_reason: "unanimous", novelty: 3, novelty_reason: "a new session" },
+    { item_no: 4, status: "roundup", label: "Electrify Longmont Day", reason: "a proclamation",
+      immediacy: 2, immediacy_reason: "an annual event", impact: 2, impact_reason: "a ceremony",
+      conflict: 1, conflict_reason: "none", novelty: 2, novelty_reason: "held every year" },
   ],
 });
 
@@ -771,12 +833,14 @@ describe("whole-meeting writer", () => {
     );
   });
 
-  it("leads with a voted group over a model pick that had no vote", async () => {
+  it("leads with the higher resident-impact item over a lower-scored model pick", async () => {
     /*
-      A meeting that voted on something cannot lead its story on something it
-      did not vote on. The model here picks the budget (item 1); the code sees
-      that item 2 carries the motion and the vote and overrules it, and the run
-      says so in its notes. This is the Sept. 29 airport case in miniature.
+      The lead is chosen by explained resident impact, not by the model's own
+      pick and not by how many votes an item holds. The model leads with the
+      budget (item 1) and roundups the airport vote (item 2), and both carry the
+      same number of votes as the model saw them -- but the score says the airport
+      policy lands on residents harder (18/20 to 10/20), so the code leads with it.
+      This is the Sept. 29 airport case in miniature.
     */
     let leadPrompt = "";
     const result = await run(
@@ -803,8 +867,8 @@ describe("whole-meeting writer", () => {
     assert.doesNotMatch(leadSource, /NextLight budget/, "the model's unvoted pick is not the lead source");
     assert.match(
       result.meetingNotes,
-      /LEAD: the model's pick had no vote or motion under it/,
-      "the run records that it overruled the model",
+      /another item scored higher on resident impact than the model's pick/,
+      "the run records that it overruled the model on resident impact",
     );
   });
 
@@ -1002,6 +1066,130 @@ describe("whole-meeting writer", () => {
     assert.match(inventedWord!.note, /do not infer a vote or outcome/i);
   });
 
+  it("rejects a figure that belongs to another item, and accepts the item's own with a locator", async () => {
+    /*
+      The zero-invented-figures rule binds a figure to the item the paragraph
+      was written from. In this two-item meeting the airport item holds
+      $733,170 and the NextLight item holds $24,907,816 -- and BOTH sit on packet
+      page 57, so the old whole-meeting merge ("is the number anywhere?") found
+      either one for either item. A lead written from the airport item that states
+      NextLight's $24,907,816 is a wrong-item figure and must be flagged, however
+      present it is elsewhere in the meeting; the airport item's own $733,170 is
+      found, and the check records the item and its clock/page as the locator.
+    */
+    const result = await run(
+      {
+        inventory: () => TWO_ITEM_INVENTORY,
+        status: () => TWO_ITEM_STATUS,
+        lead: () =>
+          JSON.stringify({
+            headline: "Airport budget",
+            dek: "",
+            lead: "The airport fund budget totals $733,170, while the utility budget shows $24,907,816 in expenses.",
+          }),
+        roundup: () => JSON.stringify({ paragraph: "The utility budget was presented." }),
+        cold: () => COLD_OK,
+      },
+      { segments: TWO_ITEM_SEGMENTS },
+    );
+    const own = result.claims.find((claim) => claim.claim.startsWith("$733,170"));
+    const other = result.claims.find((claim) => claim.claim.startsWith("$24,907,816"));
+    assert.ok(own, "the item's own figure must be checked");
+    assert.equal(own!.checkStatus, "found", "$733,170 is in the airport item's own record");
+    assert.match(own!.sourceRef, /\(.*packet p57\)/, "the found figure carries the item and its locator");
+    assert.ok(other, "the other item's figure must be checked");
+    assert.equal(
+      other!.checkStatus,
+      "flagged",
+      "$24,907,816 belongs to the NextLight item, so it is not evidence for a claim about the airport item",
+    );
+    assert.match(other!.note, /another action/i, "the note says a figure stated for another action does not support it");
+  });
+
+  it("does not let a procedural tally verify an item's vote", async () => {
+    /*
+      A tally that decided the meeting's procedure -- extending the meeting,
+      adjourning -- is not the item's vote. An item whose only recorded motion is
+      procedural (a 6-1 to extend the meeting) must not certify a paragraph that
+      states that tally as the item's own decision. The check flags it and says
+      what the tally actually was, rather than reading a bare number as a vote.
+    */
+    const result = await run(
+      {
+        inventory: () =>
+          JSON.stringify({
+            items: [
+              {
+                kind: "staff-report",
+                text: "The 2027 proposed Airport Fund budget totals $733,170",
+                who: "staff",
+                timestamp: "0:00:10",
+                packet_page: 57,
+                numbers: "$733,170",
+                source_words: "The 2027 proposed Airport Fund budget totals $733,170.",
+              },
+              {
+                kind: "vote",
+                text: "The council voted 6 to 1 to extend the meeting",
+                who: "",
+                timestamp: "0:20:00",
+                packet_page: 57,
+                numbers: "",
+                source_words: "All in favor of extending the meeting? The motion carries 6 to 1.",
+              },
+            ],
+          }),
+        status: () => TWO_ITEM_STATUS,
+        lead: () => JSON.stringify({ headline: "H", dek: "", lead: "The council set policy." }),
+        roundup: () =>
+          JSON.stringify({ paragraph: "The council voted 6 to 1 on the budget policy." }),
+        cold: () => COLD_OK,
+      },
+      {
+        segments: [
+          { index: 0, seconds: 0, text: "The council turned to the airport noise policy.", item: "1", itemTitle: "Airport noise policy" },
+          { index: 1, seconds: 600, text: "Next, the budget presentation.", item: "2", itemTitle: "2027 budget" },
+          { index: 2, seconds: 1200, text: "Council Member Prieto: I move to extend the meeting. Mayor: All in favor? The motion carries 6 to 1.", item: "2", itemTitle: "2027 budget" },
+        ],
+      },
+    );
+    const tally = result.claims.find((claim) => /6\s*to\s*1/i.test(claim.claim));
+    assert.ok(tally, "the tally written in the roundup must be checked");
+    assert.equal(tally!.checkStatus, "flagged", "a procedural 6-1 does not verify the item's vote");
+    assert.match(tally!.note, /procedure/i, "the note names the tally as the meeting's own procedure");
+    assert.match(tally!.note, /do not infer a vote or outcome/i);
+  });
+
+  it("attributes a quotation to the item's packet page, and flags one only the captions hold", async () => {
+    /*
+      A quotation is verified by the recording, the approved minutes or the
+      packet page it was written from -- not by a transcript that repeats the
+      same words, which is the caption, not a verified recording. A quotation the
+      item's own packet page holds is found and attributed to that page; one that
+      appears only on the auto-captioned tape is flagged, however familiar it is.
+    */
+    const result = await run({
+      inventory: () => INVENTORY_OK,
+      status: () => STATUS_OK,
+      lead: () =>
+        JSON.stringify({
+          headline: "Airport budget",
+          dek: "",
+          lead: `The fund pays for "maintaining and improving Vance Brand Municipal Airport". Staff asked "do we have a motion for directing giving direction".`,
+        }),
+      roundup: () => JSON.stringify({ paragraph: "More." }),
+      cold: () => COLD_OK,
+    });
+    const fromPacket = result.claims.find((claim) => /Vance Brand/.test(claim.claim));
+    const tapeOnly = result.claims.find((claim) => /do we have a motion/.test(claim.claim));
+    assert.ok(fromPacket, "the packet quotation must be checked");
+    assert.equal(fromPacket!.checkStatus, "found", "the words are on the item's own packet page");
+    assert.match(fromPacket!.sourceRef, /packet p57/, "the quotation is attributed to the packet page");
+    assert.ok(tapeOnly, "the tape-only quotation must be checked");
+    assert.equal(tapeOnly!.checkStatus, "flagged", "a caption match alone is not a verified quotation");
+    assert.match(tapeOnly!.note, /not a verified recording/i);
+  });
+
   it("puts the ALSO AT THE MEETING heading before the roundup paragraphs", async () => {
     /*
       The assembled body is the lead story, then the heading, then one paragraph
@@ -1174,12 +1362,15 @@ describe("whole-meeting writer", () => {
     }
   });
 
-  it("ranks an item holding three recorded votes above one holding a single vote", () => {
+  it("keeps every recorded vote as a fact but does not rank by the count", () => {
     /*
       The airport presentation carries three unanimous results; the budget item
-      one tally. How many times the meeting decided is what ranks the lead, so
-      the three-vote item outranks the one-vote item -- which is why 6A, not the
-      big-budget 6B, is the story's lead once the votes are counted.
+      one tally. The COUNT is real -- the writer is handed all three motions and
+      voteResultCount still reports 3 against 1 -- but it is not the rank. The
+      lead is the item with the higher explained resident impact, so this test
+      gives 6A the higher score and shows it leads on that, while the vote facts
+      are kept unchanged. A count alone, with no scores, would leave the order as
+      the ledger found it rather than lift the three-vote item.
     */
     const ledger = attachVoteResults(
       buildLedger(AIRPORT_WINDOWS, [], agendaRanges(AIRPORT_SEGMENTS), SEPT29_AGENDA),
@@ -1188,10 +1379,17 @@ describe("whole-meeting writer", () => {
     assert.equal(voteResultCount(ledger[0]!), 3, "6A holds all three unanimous results");
     assert.equal(voteResultCount(ledger[1]!), 1, "6B holds one tally");
     assert.equal(ledger[0]!.motions!.length, 3, "and the motions are kept in tape order");
-    // Statuses are assigned first, as the pipeline does before it ranks; every
-    // item still starts "excluded" straight out of `buildLedger`.
-    const statused = applyStatuses(ledger, []);
-    assert.match(rankLeadItems(statused)[0]!.text, /^6A\./, "the three-vote item ranks first");
+
+    // No scores: both items are unranked, and the order is the ledger's own --
+    // the three-vote item is NOT lifted above the one-vote item by its count.
+    const unscored = applyStatuses(ledger, []);
+    assert.match(rankLeadItems(unscored)[0]!.text, /^6A\./, "with no scores the ledger order stands");
+
+    // With the airport item scored higher on resident impact, it leads -- because
+    // of the score, and the vote count plays no part.
+    const scored = applyStatuses(ledger, [], new Map([[1, impact(5, 5, 4, 4)]]));
+    assert.match(rankLeadItems(scored)[0]!.text, /^6A\./, "the higher-impact item ranks first");
+    assert.equal(impactTotal(scored[0]!.impact), 18, "6A's impact total is what ranks it");
   });
 
   it("overrules a model that excludes an item holding a recorded vote", async () => {
@@ -1275,8 +1473,9 @@ describe("whole-meeting writer", () => {
     /*
       Run 4's status pass called three items "lead" -- the library motions (1),
       the airport presentation (6A) and the budget (6B) -- and the story was
-      written about the library while 6A, three unanimous results and the top
-      item by rank, appeared nowhere. Exactly one item leads: the top-ranked one.
+      written about the library while 6A, the item that lands hardest on
+      residents, appeared nowhere. Exactly one item leads: the best by resident
+      impact, not the one the model listed first.
       The two the model also picked were moved into the roundup by run 5 and got
       one short line each -- and 6B's budget facts were lost that way -- so each
       moved pick is written as a short section of its own under its plain name,
@@ -1596,18 +1795,18 @@ describe("whole-meeting writer", () => {
     assert.deepEqual(voteWordsIn("The council acted unanimously."), ["unanimously"], "a unanimous vote is found too");
   });
 
-  it("writes a big non-lead item as its own section after the lead, capped at two", async () => {
+  it("writes a high-impact non-lead item as its own section after the lead, capped at two", async () => {
     /*
       Fix 1. Run 5 led on 6A and moved its own second lead pick, 6B, to the
       roundup: a $511,000 shortfall, a $15,330 human services cut, a $495,670
-      savings and NextLight's budget became one short paragraph. An item the
-      status pass called a lead, or one with five dollar figures or twenty
-      minutes of tape, gets its own section -- a plain subhead and up to 450
-      words -- after the lead and before ALSO AT THE MEETING, at most two.
+      savings and NextLight's budget became one short paragraph. What earns a
+      section is the item's resident impact, not its size: an item the status
+      pass ADVANCES (10/20 or better) or one the single-lead rule moved here
+      gets a plain subhead and up to 450 words after the lead and before ALSO AT
+      THE MEETING, at most two. Five dollar figures or twenty minutes of tape, on
+      their own, do not.
     */
     assert.equal(SECTION_MAX, 2, "at most two items get their own section");
-    assert.equal(SECTION_DOLLAR_MIN, 5, "five dollar figures earn a section");
-    assert.equal(SECTION_SECONDS_MIN, 1200, "and twenty minutes of tape earns one");
 
     const small: LedgerItem = {
       itemNo: 9,
@@ -1622,24 +1821,34 @@ describe("whole-meeting writer", () => {
       evidence: [],
       motions: [],
     };
-    assert.equal(deservesOwnSection(small), false, "one figure and a minute of tape do not earn a section");
+    assert.equal(deservesOwnSection(small), false, "an unscored, small item earns no section");
     assert.equal(
       deservesOwnSection({ ...small, sourceExcerpt: "$1 $2 $3 $4 $5" }),
-      true,
-      "five dollar figures earn a section",
+      false,
+      "five dollar figures alone do not earn a section -- size is not news value",
     );
     assert.equal(
       deservesOwnSection({ ...small, sourceExcerpt: "", startSeconds: 0, endSeconds: 1300 }),
+      false,
+      "twenty minutes of tape alone do not earn a section",
+    );
+    assert.equal(
+      deservesOwnSection({ ...small, impact: impact(2, 2, 2, 2) }),
+      false,
+      "a low-scoring item is a roundup line, not a section",
+    );
+    assert.equal(
+      deservesOwnSection({ ...small, impact: impact(3, 3, 2, 2) }),
       true,
-      "twenty minutes of tape earn a section",
+      "an item the score ADVANCES (10/20) earns a section",
     );
     assert.equal(
       deservesOwnSection({ ...small, sourceExcerpt: "", reason: SECOND_LEAD_REASON }),
       true,
-      "an item the status pass called a lead earns a section even with no figures",
+      "an item the status pass called a lead earns a section even with no score",
     );
     assert.equal(
-      deservesOwnSection({ ...small, sourceExcerpt: "$1 $2 $3 $4 $5", status: "lead" }),
+      deservesOwnSection({ ...small, impact: impact(5, 5, 5, 5), status: "lead" }),
       false,
       "the lead itself is the lead, not a section",
     );
@@ -1647,11 +1856,12 @@ describe("whole-meeting writer", () => {
     const many = [1, 2, 3, 4].map((n) => ({
       ...small,
       itemNo: n,
-      sourceExcerpt: Array.from({ length: 4 + n }, (_, i) => `$${i}`).join(" "),
+      // Higher item number, higher impact: 3 sits in the ADVANCE band, 2 and 1 do not.
+      impact: n >= 3 ? impact(4, 4, 3, n >= 4 ? 5 : 3) : impact(2, 2, 2, 2),
     }));
     const chosen = chooseSectionItems(many);
     assert.equal(chosen.length, SECTION_MAX, "sections are capped at two");
-    assert.deepEqual(chosen.map((item) => item.itemNo), [4, 3], "the most-figured items are chosen first");
+    assert.deepEqual(chosen.map((item) => item.itemNo), [4, 3], "the highest-impact items are chosen first");
     assert.equal(chooseSectionItems([]).length, 0, "nothing to choose when nothing deserves a section");
 
     const long = Array.from({ length: 120 }, (_, i) => `Sentence number ${i} has several words in it.`).join(" ");
@@ -1853,9 +2063,12 @@ describe("whole-meeting writer", () => {
       },
       { segments: MOTIONS_SEGMENTS, agendaList: MOTIONS_AGENDA, packetPages: MOTIONS_PACKET },
     );
-    assert.equal(result.ledger[0]!.motions.length, 2, "both motions are found");
+    const firstLedgerItem = result.ledger[0];
+    assert.ok(firstLedgerItem, "the meeting ledger contains the item with both motions");
+    assert.ok(firstLedgerItem.motions, "the item retains its motion list");
+    assert.equal(firstLedgerItem.motions.length, 2, "both motions are found");
     assert.deepEqual(
-      result.ledger[0]!.motions.map((motion) => [motion.seconds, motion.result, motion.tally || motion.unanimous]),
+      firstLedgerItem.motions.map((motion) => [motion.seconds, motion.result, motion.tally || motion.unanimous]),
       [
         [330, "carries", "unanimous"],
         [630, "carries", "5-2"],
@@ -1933,5 +2146,166 @@ describe("whole-meeting writer", () => {
       "a line that denies a vote the code found is dropped",
     );
     assert.match(result.meetingNotes, /COLD CHECK:/, "the surviving mismatches are reported to the editor");
+  });
+
+  it("leads on the item with the most explained resident impact, even when another holds more votes", async () => {
+    /*
+      The Sept. 29 case in full: 6A (the airport presentation) holds three
+      unanimous results; 6B (the budget) holds one tally. The votes are recorded
+      as facts either way, but the rank follows the resident-impact score, which
+      here puts 6B ahead -- a first hearing on the tax levy residents must answer
+      for -- because the count of the meeting's own decisions is not the count of
+      what matters to residents. The story leads on 6B.
+    */
+    let leadPrompt = "";
+    const result = await run(
+      {
+        inventory: () => AIRPORT_INVENTORY,
+        status: () =>
+          JSON.stringify({
+            items: [
+              { item_no: 1, status: "lead", label: "Airport noise rules", reason: "the airport votes",
+                immediacy: 4, immediacy_reason: "recommendations adopted", impact: 4, impact_reason: "quiets homes",
+                conflict: 3, conflict_reason: "residents organised", novelty: 3, novelty_reason: "first rules" },
+              { item_no: 2, status: "roundup", label: "2027 city budget", reason: "the budget hearing",
+                immediacy: 5, immediacy_reason: "the levy is set tonight", impact: 5, impact_reason: "sets what residents pay",
+                conflict: 4, conflict_reason: "a proposed cut", novelty: 4, novelty_reason: "a first hearing" },
+            ],
+          }),
+        lead: (user) => {
+          // The lead writer also answers the section calls; only the lead call
+          // carries the lead item's source, so only that one is captured.
+          if (user.includes("LEAD ITEM SOURCE")) leadPrompt = user;
+          return JSON.stringify({ headline: "H", dek: "", lead: "The budget hearing opened." });
+        },
+        roundup: () => JSON.stringify({ paragraph: "The airport votes were reported." }),
+        cold: () => COLD_OK,
+      },
+      { segments: AIRPORT_SEGMENTS, agendaList: SEPT29_AGENDA },
+    );
+    const leadSource = leadPrompt.slice(
+      leadPrompt.indexOf("LEAD ITEM SOURCE"),
+      leadPrompt.indexOf("TRANSCRIPT EXCERPTS"),
+    );
+    assert.match(leadSource, /2027 budget/, "the higher-impact item is the one the writer leads on");
+    assert.equal(
+      result.ledger.find((item) => item.itemNo === 1)!.motions!.length,
+      3,
+      "the three-vote item keeps every motion as a fact even after being demoted",
+    );
+    assert.match(
+      result.meetingNotes,
+      /another item scored higher on resident impact/,
+      "the run explains why the model-lead was moved",
+    );
+  });
+
+  it("leaves an item unranked when it carries no score, and never fills one in as zero", async () => {
+    /*
+      A status pass that omits the score -- or returns a dimension that cannot be
+      read -- leaves the item UNRANKED: it sorts after every scored item, it leads
+      over nothing that was scored, and it has no fabricated zero. The item is
+      still accounted for: it stays in the ledger with a status.
+    */
+    const ledger: LedgerItem[] = [
+      { ...row({ kind: "staff-report", text: "The budget shortfall is $511,000" }), itemNo: 1 },
+      { ...row({ kind: "motion", text: "Move to approve the airport policy", sourceExcerpt: "carries 5 to 2" }), itemNo: 2 },
+    ];
+    const statused = applyStatuses(
+      ledger,
+      [
+        { itemNo: 1, status: "roundup", label: "2027 city budget", reason: "a money document" },
+        { itemNo: 2, status: "lead", label: "Airport noise rules", reason: "the vote" },
+      ],
+      // Only item 2 is scored; item 1 never gets a score.
+      new Map([[2, impact(4, 4, 3, 3)]]),
+    );
+    assert.equal(statused[0]!.impact, undefined, "the unscored item has no impact, not a zero-filled one");
+    assert.equal(rankLeadItems(statused)[0]!.itemNo, 2, "the scored item outranks the unscored one");
+    assert.equal(statused[0]!.status, "roundup", "the unscored item is still in the ledger with a status");
+  });
+
+  it("keeps every action accounted for even when it is demoted below the lead", async () => {
+    /*
+      civic-scanner's one hard rule: a low score is a ranking, not permission to
+      drop an action. An item scored DEMOTE (4-6) is not lost -- it stays in the
+      ledger, it keeps its score, and the run still counts it.
+    */
+    const ledger: LedgerItem[] = [
+      { ...row({ kind: "motion", text: "Move to approve the airport policy" }), itemNo: 1 },
+      { ...row({ kind: "proclamation", text: "Proclamation Declaring Electrify Longmont Day" }), itemNo: 2 },
+    ];
+    const statused = applyStatuses(
+      ledger,
+      [
+        { itemNo: 1, status: "lead", label: "Airport noise rules", reason: "the vote" },
+        { itemNo: 2, status: "roundup", label: "Electrify Longmont Day", reason: "a proclamation" },
+      ],
+      new Map([
+        [1, impact(4, 4, 3, 3)],
+        [2, impact(1, 2, 1, 1)],
+      ]),
+    );
+    assert.equal(statused.length, 2, "both items remain in the ledger");
+    assert.equal(impactTotal(statused[1]!.impact), 5, "the demoted item keeps its low score, not a zero");
+    assert.equal(statused[1]!.status, "roundup", "the demoted item is not deleted, just placed lower");
+  });
+
+  it("keeps the editor's stored statuses and scores when a ledger is rewritten", async () => {
+    /*
+      "Rewrite from ledger" must not re-decide what an editor already decided.
+      The rows handed in are the editor's own -- including an excluded item with
+      a reason and a lead the editor chose against the score -- and they survive
+      the rewrite unchanged, scores and all.
+    */
+    const stored: LedgerItem[] = [
+      {
+        ...row({ kind: "motion", text: "Move to approve the airport policy" }),
+        itemNo: 1,
+        status: "excluded",
+        reason: "the editor left this out for legal reasons",
+        impact: impact(4, 4, 3, 3),
+      },
+      {
+        ...row({ kind: "staff-report", text: "The budget shortfall is $511,000" }),
+        itemNo: 2,
+        status: "lead",
+        reason: "the editor chose the budget",
+        impact: impact(5, 5, 4, 4),
+      },
+    ];
+    // No status proposals and no scores: the pipeline has nothing new to say, so
+    // the editor's own rows pass straight through.
+    const rewritten = applyStatuses(stored, []);
+    assert.equal(rewritten[0]!.status, "excluded", "the editor's exclusion stands");
+    assert.equal(rewritten[0]!.reason, "the editor left this out for legal reasons", "and its reason is kept");
+    assert.equal(rewritten[1]!.status, "lead", "the editor's lead stands");
+    assert.equal(impactTotal(rewritten[0]!.impact), 14, "the stored impact survives the rewrite");
+  });
+
+  it("assigns by rule only a fresh row the editor has not judged, and keeps a judged one", async () => {
+    /*
+      The rule assignment is for the pipeline's own silence, not for the
+      editor's work. A row nobody has judged -- still holding the empty
+      placeholder reason the ledger was built with -- is filled in by the rule
+      when the pass says nothing about it. A row the editor has already given a
+      reason to keeps the editor's status and reason, even when that status is
+      "excluded" and the old behavior would have re-opened it.
+    */
+    const fresh: LedgerItem[] = [
+      { ...row({ kind: "motion", text: "Move to approve the airport policy" }), itemNo: 1, status: "excluded", reason: "" },
+      { ...row({ kind: "staff-report", text: "The budget shortfall is $511,000" }), itemNo: 2, status: "excluded", reason: "" },
+    ];
+    const ruled = applyStatuses(fresh, []);
+    assert.equal(ruled[0]!.status, "lead", "an unjudged row with a decision is assigned the lead by rule");
+    assert.equal(ruled[0]!.reason, RULE_ASSIGNED_REASON, "and says the assignment came from the rule");
+    assert.equal(ruled[1]!.status, "roundup", "an unjudged row without a decision roundups");
+
+    const judged: LedgerItem[] = [
+      { ...row({ kind: "motion", text: "Move to approve the airport policy" }), itemNo: 1, status: "excluded", reason: "the editor left this out for legal reasons" },
+    ];
+    const kept = applyStatuses(judged, []);
+    assert.equal(kept[0]!.status, "excluded", "a judged exclusion is not re-opened by the rule");
+    assert.equal(kept[0]!.reason, "the editor left this out for legal reasons");
   });
 });

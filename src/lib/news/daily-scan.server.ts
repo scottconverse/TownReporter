@@ -1,7 +1,7 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
-import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanRuntime, planDailySourceRotation, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
   resolveAutomaticForcedRuntime,
@@ -221,27 +221,44 @@ export async function tickDailyScans(
           current.configured_by_user_id !== owner.user_id
         )
           return false;
-        const stillOwner = await tx.query(
+        const _stillOwner = await tx.query(
           "select 1 from newsroom_members where newsroom_id=$1 and user_id=$2 and role='owner'",
           [p.newsroom_id, owner.user_id],
         );
-        if (!stillOwner[0]) return false;
-        const sources = await tx.query<any>(
-          /*
-            SH-B: the snapshot carries the politeness columns too.
+        /*
+          THE ROTATION, NOT A FIXED DOZEN (migration 0128).
 
-            The unattended scan reads its source list from here rather than
-            from the table, so a snapshot without `retry_after` would hand a
-            parked source straight to the fetch loop -- the one place the desk
-            could still ask a site before the time it asked us to come back.
-            The scan's own skip reads these, so they have to travel with it.
-          */
-          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,retry_after,blocked_at,blocked_attempts from sources where newsroom_id=$1 and status='accepted' and id=any($2::int[]) order by id",
-          [p.newsroom_id, p.selected_source_ids],
+          The schedule used to read exactly `selected_source_ids` every day, so
+          with 201 accepted sources the other 189 were never read. It now reads
+          the editor's picks FIRST -- they are the policy's floor and this never
+          overwrites them -- and fills the rest of the day's budget from
+          `planDailySourceRotation`, which orders the accepted pool by due /
+          longest-waiting and defers parked rows rather than dropping them.
+
+          WHY THE SNAPSHOT QUERY CHANGED SHAPE. It selects the whole accepted
+          POOL (still with the politeness columns SH-B added, so `retry_after`
+          travels with the run), then the pure planner cuts it to `source_cap`.
+          A pool read is a larger select but it is the only way the rotation can
+          see what is due; it is still one indexed read of a 201-row table.
+        */
+        const pool = await tx.query<any>(
+          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
+          [p.newsroom_id],
         );
-        if (sources.length !== p.selected_source_ids.length || sources.length > p.source_cap)
+        const rotation = planDailySourceRotation({
+          facts: pool,
+          selectedSourceIds: p.selected_source_ids ?? [],
+          cap: p.source_cap,
+        });
+        const sources =
+          rotation.sourceIds.length === pool.length
+            ? pool
+            : rotation.sourceIds
+                .map((id: number) => pool.find((row: { id: number }) => row.id === id))
+                .filter(Boolean);
+        if (sources.length > p.source_cap)
           throw new Error(
-            "Scheduled sources changed after configuration. Review the selected accepted sources and resume manually.",
+            "Scheduled sources exceed the configured limit. Review the selected accepted sources and resume manually.",
           );
         const [r] = await tx.query<{ id: number }>(
           "insert into daily_scan_reservations(newsroom_id,local_day,status,policy_revision,policy_snapshot,source_snapshot,model_snapshot) values($1,$2,'queued',$3,$4::jsonb,$5::jsonb,$6::jsonb) on conflict(newsroom_id,local_day) do nothing returning id",

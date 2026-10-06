@@ -1,4 +1,5 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
+import type { Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 /**
@@ -23,7 +24,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * (see textflowkit-transcribe.server.ts); the lane's concurrency of 2 is about
  * how many jobs may be *open*, not how many may burn CPU.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up" | "reporting";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -48,6 +49,7 @@ export const JOB_KINDS = [
   "pull",
   "audio-transcribe",
   "follow-up",
+  "reporting",
 ] as const satisfies readonly JobKind[];
 
 /**
@@ -152,8 +154,8 @@ const jobGlobal = globalThis as typeof globalThis &
   Record<symbol, Record<JobLane, boolean> | undefined>;
 const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: false, default: false });
 
-export async function ensureJobsSchema() {
-  const sql = await getSql();
+export async function ensureJobsSchema(sql?: Sql) {
+  const runner = sql ?? (await getSql());
   /*
     The statement list, not a sequence of awaits.
 
@@ -249,7 +251,7 @@ export async function ensureJobsSchema() {
       on desk_jobs (newsroom_id, id desc)
       where status in ('queued', 'running')`,
   ];
-  await ensureSchemaOnce(sql, "desk-jobs", statements);
+  await ensureSchemaOnce(runner, "desk-jobs", statements);
 }
 
 /**
@@ -324,6 +326,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "follow-up") {
     const { performFollowUpRun } = await import("./follow-up-run.server.ts");
     await performFollowUpRun(job);
+  } else if (job.kind === "reporting") {
+    const { performReportingWork } = await import("./civic-reporting-run.server.ts");
+    await performReportingWork(job);
   }
 }
 
@@ -364,16 +369,25 @@ export async function latestJob(opts: {
   return rows[0] ?? null;
 }
 
+/**
+ * The still-open job for a subject, or null.
+ *
+ * `sql` is optional and exists for one caller only:
+ * `startReportingForAuthenticatedEditor` must look for the open reporting job
+ * on the SAME transaction that inserted (or found) the request, so the request
+ * row and its job commit together. Every other caller leaves it out and gets
+ * the pooled connection this always used.
+ */
 export async function findOpenJob(opts: {
   newsroomId: number;
   kind: JobKind;
   subjectId?: number;
-}): Promise<DeskJob | null> {
-  await ensureJobsSchema();
-  const sql = await getSql();
+}, sql?: Sql): Promise<DeskJob | null> {
+  await ensureJobsSchema(sql);
+  const runner = sql ?? (await getSql());
   const rows =
     opts.subjectId != null
-      ? await sql<DeskJob>`
+      ? await runner<DeskJob>`
           select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                  stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
                  created_at, updated_at, started_at, finished_at
@@ -385,7 +399,7 @@ export async function findOpenJob(opts: {
           order by id desc
           limit 1
         `
-      : await sql<DeskJob>`
+      : await runner<DeskJob>`
           select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
                  stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
                  created_at, updated_at, started_at, finished_at
@@ -410,17 +424,46 @@ export async function enqueueJob(opts: {
   /** Narrow job-specific input/result receipt for a queued artifact OCR read. */
   resultJson?: string;
   kick?: boolean;
+  /**
+   * Run the whole enqueue on THIS transaction instead of the process's own
+   * connection. Optional, and unused by every existing caller, so the default
+   * path is unchanged.
+   *
+   * It exists for one ordering guarantee. `startReportingForAuthenticatedEditor`
+   * must commit the `reporting_requests` row and the `desk_jobs` row that points
+   * at it as ONE unit: a worker draining between the two commits would otherwise
+   * read a request with no job (or a job with no request). Passing the
+   * transaction in lets both inserts share one commit while the caller's
+   * serialization lock (the newsroom's `paper_settings` row) is held across
+   * both -- so a second identical press waits, then sees the first press's job,
+   * and `findOpenMatchingReportingRequest` reuses the request instead of
+   * opening a second run.
+   *
+   * On the default path none of this changes: `sql` becomes the pooled client
+   * and the `on conflict do nothing` partial unique index still coalesces
+   * concurrent callers exactly as before.
+   */
+  sql?: Sql;
 }): Promise<DeskJob> {
-  await ensureJobsSchema();
-  const sql = await getSql();
+  const sql = opts.sql ?? (await getSql());
+  await ensureJobsSchema(sql);
   const newsroomId = opts.newsroomId ?? DEFAULT_NEWSROOM_ID;
+  /*
+    A kick inside the caller's transaction is a lie: the job row is not
+    committed yet, so a drain started now sees nothing, and the wake-up is
+    spent before the insert lands. When `sql` is a transaction the CALLER owns
+    the post-commit kick (`startReportingForAuthenticatedEditor` does it once,
+    after `withTransaction` resolves). This also keeps a fixture proof from
+    draining a real model mid-transaction.
+  */
+  const kickNow = opts.kick !== false && !opts.sql;
   const open = await findOpenJob({
     newsroomId,
     kind: opts.kind,
     subjectId: opts.subjectId,
-  });
+  }, sql);
   if (open) {
-    if (opts.kick !== false) kickJobs();
+    if (kickNow) kickJobs();
     return open;
   }
   /*
@@ -447,7 +490,7 @@ export async function enqueueJob(opts: {
   `;
   const job =
     created[0] ??
-    (await findOpenJob({ newsroomId, kind: opts.kind, subjectId: opts.subjectId }));
+    (await findOpenJob({ newsroomId, kind: opts.kind, subjectId: opts.subjectId }, sql));
   if (!job) {
     // Lost the race and the winner finished before we looked. Rare, and the
     // honest answer is to try once more rather than invent a job row.
@@ -469,7 +512,7 @@ export async function enqueueJob(opts: {
               created_at, updated_at, started_at, finished_at
     `;
     if (retry[0]) {
-      if (opts.kick !== false) kickJobs();
+      if (kickNow) kickJobs();
       return retry[0];
     }
     // Lost the race a second time: another caller inserted an open row while
@@ -478,9 +521,9 @@ export async function enqueueJob(opts: {
       newsroomId,
       kind: opts.kind,
       subjectId: opts.subjectId,
-    });
+    }, sql);
     if (coalescedJob) {
-      if (opts.kick !== false) kickJobs();
+      if (kickNow) kickJobs();
       return coalescedJob;
     }
     // If we still have nothing, that is a real error — something went wrong
@@ -489,7 +532,7 @@ export async function enqueueJob(opts: {
       `Failed to enqueue job after double-race: no open job for newsroom=${newsroomId}, kind=${opts.kind}, subject=${opts.subjectId}`,
     );
   }
-  if (opts.kick !== false) kickJobs();
+  if (kickNow) kickJobs();
   return job;
 }
 
@@ -1270,6 +1313,22 @@ export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
     "Reading the routine sources",
     "Planning the edition",
     "Filing the notices",
+  ],
+  /*
+    The editor's civic-reporting run (see civic-reporting.ts). Its eight arrivals
+    are the method's own reporting stages, in the order performReportingWork walks
+    them. These are REPORTING sentences, not job-log lines -- the editor is
+    watching a reporter work, not a process run.
+  */
+  reporting: [
+    "Reading the assignment",
+    "Finding the reporting",
+    "Reading the meeting record",
+    "Checking the votes and actions",
+    "Looking for contrary evidence",
+    "Scoring the lead",
+    "Writing the story",
+    "Filing the package",
   ],
 };
 

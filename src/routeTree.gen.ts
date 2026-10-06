@@ -29,6 +29,7 @@ import { Route as DeskDarkRouteImport } from './routes/desk.dark'
 import { Route as DeskDraftsRouteImport } from './routes/desk.drafts'
 import { Route as DeskFollowUpsRouteImport } from './routes/desk.follow-ups'
 import { Route as DeskImportRouteImport } from './routes/desk.import'
+import { Route as DeskInventoryRouteImport } from './routes/desk.inventory'
 import { Route as DeskLegalRemovalsRouteImport } from './routes/desk.legal-removals'
 import { Route as DeskMemoryRouteImport } from './routes/desk.memory'
 import { Route as DeskModelsRouteImport } from './routes/desk.models'
@@ -149,6 +150,11 @@ const DeskImportRoute = DeskImportRouteImport.update({
   path: '/import',
   getParentRoute: () => DeskRoute,
 } as any)
+const DeskInventoryRoute = DeskInventoryRouteImport.update({
+  id: '/inventory',
+  path: '/inventory',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskLegalRemovalsRoute = DeskLegalRemovalsRouteImport.update({
   id: '/legal-removals',
   path: '/legal-removals',
@@ -266,6 +272,7 @@ export interface FileRoutesByFullPath {
   '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
+  '/desk/inventory': typeof DeskInventoryRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/models': typeof DeskModelsRoute
@@ -306,6 +313,7 @@ export interface FileRoutesByTo {
   '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
+  '/desk/inventory': typeof DeskInventoryRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/models': typeof DeskModelsRoute
@@ -348,6 +356,7 @@ export interface FileRoutesById {
   '/desk/drafts': typeof DeskDraftsRoute
   '/desk/follow-ups': typeof DeskFollowUpsRoute
   '/desk/import': typeof DeskImportRoute
+  '/desk/inventory': typeof DeskInventoryRoute
   '/desk/legal-removals': typeof DeskLegalRemovalsRoute
   '/desk/memory': typeof DeskMemoryRoute
   '/desk/models': typeof DeskModelsRoute
@@ -391,6 +400,7 @@ export interface FileRouteTypes {
     | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
+    | '/desk/inventory'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/models'
@@ -431,6 +441,7 @@ export interface FileRouteTypes {
     | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
+    | '/desk/inventory'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/models'
@@ -472,6 +483,7 @@ export interface FileRouteTypes {
     | '/desk/drafts'
     | '/desk/follow-ups'
     | '/desk/import'
+    | '/desk/inventory'
     | '/desk/legal-removals'
     | '/desk/memory'
     | '/desk/models'
@@ -658,6 +670,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DeskImportRouteImport
       parentRoute: typeof DeskRoute
     }
+    '/desk/inventory': {
+      id: '/desk/inventory'
+      path: '/inventory'
+      fullPath: '/desk/inventory'
+      preLoaderRoute: typeof DeskInventoryRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/legal-removals': {
       id: '/desk/legal-removals'
       path: '/legal-removals'
@@ -799,6 +818,7 @@ interface DeskRouteChildren {
   DeskDraftsRoute: typeof DeskDraftsRoute
   DeskFollowUpsRoute: typeof DeskFollowUpsRoute
   DeskImportRoute: typeof DeskImportRoute
+  DeskInventoryRoute: typeof DeskInventoryRoute
   DeskLegalRemovalsRoute: typeof DeskLegalRemovalsRoute
   DeskMemoryRoute: typeof DeskMemoryRoute
   DeskModelsRoute: typeof DeskModelsRoute
@@ -822,6 +842,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskDraftsRoute: DeskDraftsRoute,
   DeskFollowUpsRoute: DeskFollowUpsRoute,
   DeskImportRoute: DeskImportRoute,
+  DeskInventoryRoute: DeskInventoryRoute,
   DeskLegalRemovalsRoute: DeskLegalRemovalsRoute,
   DeskMemoryRoute: DeskMemoryRoute,
   DeskModelsRoute: DeskModelsRoute,

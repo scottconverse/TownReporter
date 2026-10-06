@@ -9,6 +9,8 @@ import {
   persistDailyScanPolicy,
   runSnapshotRuntimes,
   setDailyScanPaused,
+  planDailySourceRotation,
+  dailyRotationNote,
 } from "./daily-scan.ts";
 import { getSql } from "../db.ts";
 import { planAutomaticFailover } from "./automatic-failover.ts";
@@ -383,5 +385,206 @@ describe("daily scan run record names the model", () => {
   it("says nothing rather than guessing at a snapshot it cannot read", () => {
     for (const value of [null, undefined, "auto", {}, { requestedRuntime: 7, resolvedRuntime: "  " }])
       assert.deepEqual(runSnapshotRuntimes(value), { requestedRuntime: null, resolvedRuntime: null });
+  });
+});
+
+/*
+  THE DAILY ROTATION PLAN (migration 0128 and adaptive-source-selection.ts).
+
+  The scheduled pass used to read exactly the editor's stored twelve every day,
+  so with 201 accepted sources the other 189 were never read. These pin the
+  replacement: the editor's picks still come first and are never dropped, the
+  rest of the budget rotates by due/longest-waiting, parked rows are deferred
+  not deleted, and the plan states the freshness it actually buys.
+*/
+describe("daily scan rotation plan", () => {
+  const DAY = 86_400_000;
+  const NOW = Date.parse("2026-10-05T12:00:00Z");
+  const ago = (days: number) => new Date(NOW - days * DAY).toISOString();
+  const src = (id: number, over: Record<string, unknown> = {}) => ({
+    id,
+    url: `https://city.example.gov/source-${id}`,
+    title: `Source ${id}`,
+    kind: "official",
+    tier: "A",
+    status: "accepted",
+    ...over,
+  });
+
+  it("reads the editor's selected sources first and never drops one", () => {
+    const plan = planDailySourceRotation({
+      facts: [src(1, { last_ok_at: ago(40) }), src(2, { last_ok_at: ago(30) }), src(3)],
+      selectedSourceIds: [2],
+      cap: 3,
+      nowMs: NOW,
+    });
+    assert.equal(plan.sourceIds[0], 2);
+    assert.equal(plan.selectedCount, 1);
+    assert.equal(plan.rotatedCount, 2);
+  });
+
+  it("fills the remaining budget from the rotation, oldest waiting first", () => {
+    const plan = planDailySourceRotation({
+      facts: [
+        src(1, { last_ok_at: ago(1) }),
+        src(2, { last_ok_at: ago(40) }),
+        src(3, { last_ok_at: ago(20) }),
+      ],
+      selectedSourceIds: [],
+      cap: 2,
+      nowMs: NOW,
+    });
+    assert.deepEqual(plan.sourceIds, [2, 3]);
+    assert.equal(plan.budget, 2);
+  });
+
+  it("defers a parked source and reports the gap instead of hiding it", () => {
+    const plan = planDailySourceRotation({
+      facts: [
+        src(1, { last_ok_at: ago(5) }),
+        src(2, { retry_after: new Date(NOW + 3_600_000).toISOString() }),
+      ],
+      selectedSourceIds: [],
+      cap: 12,
+      nowMs: NOW,
+    });
+    assert.deepEqual(plan.sourceIds, [1]);
+    assert.ok(plan.deferredIds.includes(2));
+  });
+
+  it("states the full-pass interval truthfully rather than promising coverage", () => {
+    const facts = Array.from({ length: 20 }, (_, i) => src(i + 1, { last_ok_at: ago(i) }));
+    const plan = planDailySourceRotation({ facts, selectedSourceIds: [], cap: 10, nowMs: NOW });
+    assert.equal(plan.poolSize, 20);
+    assert.equal(plan.fullPassDays, 2);
+    assert.match(plan.note, /full pass takes about 2 days/);
+  });
+
+  it("names quiet sources that carry no priority flag", () => {
+    const plan = planDailySourceRotation({
+      facts: [
+        src(1, { url: "https://x.gov/rss.xml", last_ok_at: ago(9) }),
+        src(2, { url: "https://x.gov/council/agenda", last_ok_at: ago(9) }),
+      ],
+      selectedSourceIds: [],
+      preferences: [{ sourceId: 2, highPriority: true }],
+      cap: 12,
+      nowMs: NOW,
+    });
+    assert.deepEqual(plan.unmarkedQuietIds, [1]);
+    assert.match(plan.note, /1 quiet source/);
+  });
+
+  it("clamps the budget to the schema's cap and says so plainly when the pool is empty", () => {
+    const plan = planDailySourceRotation({ facts: [], selectedSourceIds: [], cap: 99, nowMs: NOW });
+    assert.equal(plan.budget, 12);
+    assert.equal(plan.sourceIds.length, 0);
+    assert.equal(dailyRotationNote({
+      poolSize: 0,
+      selectedCount: 0,
+      rotatedCount: 0,
+      budget: 12,
+      fullPassDays: 1,
+      unmarkedQuietCount: 0,
+    }), "No accepted sources to read.");
+  });
+
+  /*
+    CONTRADICTION 1 (issue 3): a source the host parked must not be BOTH selected
+    and read. The old planner re-added every stored pick over the rotation's
+    deferral list, so a blocked/parked source could be read in the same pass that
+    the plan also reported it deferred. The stored pick is preserved (it is named
+    in `selectedDeferredIds`), but the automatic run does not read it.
+  */
+  it("never reads a parked or blocked source the editor selected, and says it waits", () => {
+    const plan = planDailySourceRotation({
+      facts: [
+        src(1, { last_ok_at: ago(5) }),
+        src(2, { retry_after: new Date(NOW + 3_600_000).toISOString() }),
+        src(3, { blocked_at: "2026-10-04T00:00:00Z" }),
+      ],
+      selectedSourceIds: [2, 3],
+      cap: 12,
+      nowMs: NOW,
+    });
+    assert.ok(!plan.sourceIds.includes(2), "a parked pick must not be read");
+    assert.ok(!plan.sourceIds.includes(3), "a blocked pick must not be read");
+    assert.deepEqual(plan.selectedDeferredIds.sort((a, b) => a - b), [2, 3]);
+    const reasons = new Map(plan.deferrals.map((d) => [d.sourceId, d.reason]));
+    assert.equal(reasons.get(2), "parked");
+    assert.equal(reasons.get(3), "blocked");
+    assert.match(plan.note, /selections wait/);
+  });
+
+  /*
+    CONTRADICTION 2 (issue 5): selected IDs can exceed the cap. The plan must NOT
+    claim a bounded budget while returning more IDs than the cap; it schedules a
+    bounded eligible subset and defers the rest VISIBLY. `sourceIds.length` must
+    never exceed `budget`, and every selected source that did not run is named.
+  */
+  it("keeps sourceIds within the cap when the editor selected more than the budget", () => {
+    const facts = Array.from({ length: 20 }, (_, i) => src(i + 1, { last_ok_at: ago(i) }));
+    const plan = planDailySourceRotation({
+      facts,
+      selectedSourceIds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+      cap: 5,
+      nowMs: NOW,
+    });
+    assert.equal(plan.budget, 5);
+    assert.ok(
+      plan.sourceIds.length <= plan.budget,
+      `read set ${plan.sourceIds.length} must not exceed budget ${plan.budget}`,
+    );
+    // The first five picks ran, in order; the other ten are visibly deferred.
+    assert.deepEqual(plan.sourceIds, [1, 2, 3, 4, 5]);
+    assert.equal(plan.selectedDeferredIds.length, 10);
+    assert.deepEqual(plan.selectedDeferredIds, [6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+    const reasons = plan.deferrals.filter((d) => plan.selectedDeferredIds.includes(d.sourceId));
+    assert.ok(reasons.every((d) => d.reason === "over-budget"));
+  });
+
+  /*
+    CONTRADICTION 3 (issue 5): freshness must be computed from the ACTUAL chosen
+    and deferred set, not from the internal pre-selection rotation. Here the
+    editor's pick forces a very old source OUT of the read set, so the stalest
+    deferred day must reflect that source's real age.
+  */
+  it("reports freshness from the real chosen set, not the internal rotation", () => {
+    const facts = [
+      src(1, { last_ok_at: ago(90) }), // the stalest source in the pool
+      src(2, { last_ok_at: ago(1) }),
+      src(3, { last_ok_at: ago(2) }),
+    ];
+    const plan = planDailySourceRotation({
+      facts,
+      selectedSourceIds: [2, 3],
+      cap: 2,
+      nowMs: NOW,
+    });
+    // The picks fill the budget, so source 1 (90 days old) is deferred, and that
+    // is the stalest deferred day the plan must report.
+    assert.deepEqual(plan.sourceIds, [2, 3]);
+    assert.equal(plan.stalestDeferredDays, 90);
+    assert.equal(plan.fullPassDays, 2);
+  });
+});
+/*
+  THE WIRING PIN. `daily-scan.ts` owns the plan; `daily-scan.server.ts` has to
+  CALL it, or the schedule goes on reading the same fixed dozen. This is the
+  same source-text pin style the trust-boundary suite above uses, because the
+  server module pulls in `jobs.ts` and `@tanstack/react-start` and cannot be
+  imported by a plain `node --test` run.
+
+  THE MUTATION it defends against: reverting the pool read back to
+  `id=any($2::int[])` over the stored selection, which is exactly the old
+  behaviour the brief says not to keep.
+*/
+describe("daily scan server calls the rotation", () => {
+  const server = readFileSync(new URL("./daily-scan.server.ts", import.meta.url), "utf8");
+  it("selects the accepted pool and cuts it with planDailySourceRotation", () => {
+    assert.match(server, /planDailySourceRotation\(/);
+    assert.match(server, /selectedSourceIds: p\.selected_source_ids/);
+    assert.match(server, /cap: p\.source_cap/);
+    assert.match(server, /status='accepted' order by id/);
   });
 });
