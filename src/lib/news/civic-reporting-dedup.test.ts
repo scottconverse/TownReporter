@@ -316,7 +316,7 @@ describe("reporting submission concurrency (deferred)", () => {
   it("records whether a real Postgres integration lane is opted in", () => {
     const optedIn = Boolean(process.env.TEST_POSTGRES_ADMIN_URL?.trim());
     if (getDbSource() !== "neon") {
-      assert.equal(optedIn, false, "the offline lane must not have a live Postgres URL configured");
+      assert.equal(Boolean(process.env.DATABASE_URL?.trim()), false, "the offline backend must not have an app Postgres URL configured");
       return;
     }
     assert.equal(optedIn, true, "the neon lane requires TEST_POSTGRES_ADMIN_URL");
