@@ -1220,7 +1220,7 @@ function DeskHome() {
           */}
           <details className="row-more desk-start-reporting">
             <summary className="btn quiet">
-              Start reporting <span aria-hidden="true">&#9662;</span>
+              Start reporting
             </summary>
             <div className="row-more-panel">
               <InkButton tone="ghost" onClick={() => setReportingAction("report-town")}>

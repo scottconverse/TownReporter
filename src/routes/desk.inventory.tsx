@@ -80,7 +80,7 @@ function InventoryPage() {
                   >
                     {row.title || row.host}
                   </a>
-                  <div className="text-xs text-ink-3">{row.url}</div>
+                  <div className="text-sm text-ink-3">{row.url}</div>
                 </td>
                 <td className="p-2">{row.purpose}</td>
                 <td className="p-2">{row.observation}</td>
@@ -89,7 +89,7 @@ function InventoryPage() {
                   {row.duplicateOf ? ` (repeats ${row.duplicateOf})` : ""}
                 </td>
                 <td className="p-2">{row.lastReadAt ? row.lastReadAt.slice(0, 10) : "never"}</td>
-                <td className="p-2 text-xs text-ink-3">{row.unverified}</td>
+                <td className="p-2 text-sm text-ink-3">{row.unverified}</td>
               </tr>
             ))}
           </tbody>
