@@ -130,6 +130,8 @@ export type ReportingNotes = {
   suppliedUrls?: string[];
   /** Explicit editor direction from an authenticated control, never from source text. */
   editorialAssignment?: EditorialAssignment;
+  /** Full imported claims and qualifications, kept separately from editable direction. */
+  importedReport?: string;
   /**
    * A captured meeting, when this lead came from one.
    *
@@ -190,6 +192,45 @@ function todoSource(raw: unknown): NoteTodo["src"] {
   return "machine";
 }
 
+/**
+ * The most to-do rows a stored list may hold, and the one place the cap is applied.
+ *
+ * The cap used to be a bare `.slice(0, 24)` in several places -- here, `sanitizeTodos`,
+ * `addHumanLine` and the desk's save path -- which dropped whatever happened to be
+ * last. That is fine for machine errands, which the memo rebuilds, but a claim of
+ * absence is a publication block: the 2026-09-05 story would have passed every other
+ * check while its central claim was false. A list of 24 editor errands plus one newly
+ * generated gate put the gate in position 25, the slice dropped it, and `parseNotes`
+ * came back with no gate at all -- `uncheckedGateTodos` then saw nothing to stop the
+ * story, and the editor saw a run that looked clean.
+ *
+ * The cap counts only rows the desk rebuilds or an editor retypes -- the memo's
+ * machine errands and the editor's own lines. Gates are NEVER dropped; they get
+ * reserved headroom on top of `max`, because a lost claim of absence prints a
+ * clean-looking run over a false story (the 2026-09-05 case: 24 errands plus one
+ * fresh gate put the gate at position 25 and the slice dropped it).
+ *
+ * Within the cap the editor's current src:`you` lines are protected ahead of the
+ * memo's rebuildable machine errands: humans claim slots first (newest lines win,
+ * matching how callers build the list), and machine errands take only what the
+ * humans leave, so a completion never evicts a human task to seat its own. A list
+ * already within the cap is returned untouched, order and all, so historical
+ * stored rows are never rewritten.
+ */
+export const TODO_LIST_MAX = 24;
+
+export function capTodos(rows: NoteTodo[], max: number = TODO_LIST_MAX): NoteTodo[] {
+  const human = rows.filter((row) => row.src === "you");
+  const machine = rows.filter((row) => row.src === "machine");
+  if (human.length + machine.length <= max) return rows;
+  // Humans get first claim on the cap (newest lines win); the memo's
+  // rebuildable machine errands only get what the editor's own lines leave,
+  // so AI completion never evicts a current human task. Gates are headroom.
+  const keptHumans = new Set(human.slice(human.length - Math.min(human.length, max)));
+  const keptMachines = new Set(machine.slice(machine.length - Math.max(0, max - keptHumans.size)));
+  return rows.filter((row) => row.src === "gate" || keptHumans.has(row) || keptMachines.has(row));
+}
+
 export function emptyNotes(): ReportingNotes {
   return { news: "", why: "", angle: "", todo: [], found: [], verify: [], opened: [], scratch: "" };
 }
@@ -237,8 +278,8 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
             };
           })
           .filter((x): x is NoteTodo => Boolean(x))
-          .slice(0, 24)
       : [];
+    const cappedTodo = capTodos(todo);
     const found: NoteFound[] = Array.isArray(o.found)
       ? o.found
           .map((row) => {
@@ -274,7 +315,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       news: String(o.news ?? "").trim().slice(0, 500),
       why: String(o.why ?? o.why_it_matters ?? "").trim().slice(0, 800),
       angle: String(o.angle ?? "").trim().slice(0, 400),
-      todo,
+      todo: cappedTodo,
       found,
       verify: strs(o.verify),
       opened,
@@ -283,6 +324,11 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
         ? { editorialAssignment: editorialAssignmentFromText((o.editorialAssignment as EditorialAssignment).text) } : {}),
       ...((o.editorialAssignment as EditorialAssignment | undefined)?.origin === "story-workspace" && typeof (o.editorialAssignment as EditorialAssignment).text === "string" && (o.editorialAssignment as EditorialAssignment).text.trim()
         ? { editorialAssignment: { origin: "story-workspace" as const, text: (o.editorialAssignment as EditorialAssignment).text.trim().slice(0, 1000) } } : {}),
+      ...(typeof o.importedReport === "string"
+        ? { importedReport: o.importedReport }
+        : (o.editorialAssignment as { origin?: string; text?: unknown } | undefined)?.origin === "import" && typeof (o.editorialAssignment as { text?: unknown }).text === "string"
+          ? { importedReport: (o.editorialAssignment as { text: string }).text }
+          : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...topicConfirmationFromRaw(o),
@@ -642,7 +688,7 @@ export function addHumanLine(notes: ReportingNotes, line: string): ReportingNote
   const t = clipTodoText(line);
   if (!t) return notes;
   if (notes.todo.some((x) => x.t.toLowerCase() === t.toLowerCase() && x.src === "you")) return notes;
-  return { ...notes, todo: [...notes.todo, { t, done: false, src: "you" as const }].slice(0, 24) };
+  return { ...notes, todo: capTodos([...notes.todo, { t, done: false, src: "you" as const }]) };
 }
 
 export function sanitizeTodos(raw: unknown): NoteTodo[] {
@@ -680,8 +726,7 @@ export function sanitizeTodos(raw: unknown): NoteTodo[] {
         ...(queries.length ? { queries } : {}),
       };
     })
-    .filter((x): x is NoteTodo => Boolean(x))
-    .slice(0, 24);
+    .filter((x): x is NoteTodo => Boolean(x));
 }
 
 export function applyTodoPatch(
@@ -858,6 +903,9 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     researchScope: work.researchScope,
     suppliedUrls: work.suppliedUrls,
     editorialAssignment: work.editorialAssignment,
+    importedReport: work.importedReport,
+    meeting: work.meeting,
+    transcriptCitations: work.transcriptCitations,
     // Kept, not shed: it is a gate on publishing, and losing it silently would
     // look to the editor exactly like a confirmation that never took.
     topicConfirmation: work.topicConfirmation,
@@ -877,4 +925,33 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     opened: [],
     scratch: "",
   });
+}
+
+/** Merge under the lead lock, retaining the latest editor work rather than the pre-run snapshot. */
+export function mergeCompletedReportingNotes(
+  before: ReportingNotes,
+  current: ReportingNotes,
+  generated: ReportingNotes,
+): ReportingNotes {
+  const todo = current.todo.filter((row) => row.src === "you");
+  for (const row of [...current.todo.filter((row) => row.src === "gate"), ...generated.todo.filter((row) => row.src !== "you")]) {
+    if (todo.some((existing) => existing.t === row.t && existing.src === row.src)) continue;
+    const latest = current.todo.find((existing) => existing.t === row.t && existing.src === row.src);
+    todo.push(latest ? { ...row, done: latest.done } : row);
+  }
+  const unique = <T,>(rows: T[], key: (row: T) => string): T[] =>
+    [...new Map(rows.map((row) => [key(row), row])).values()];
+  // The cap belongs here too: the desk builds this list under the lead lock and
+  // writes it as one row, so it must already be what parseNotes will read back.
+  const capped = capTodos(todo);
+  return {
+    ...current,
+    news: current.news === before.news ? generated.news : current.news,
+    why: current.why === before.why ? generated.why : current.why,
+    angle: current.angle === before.angle ? generated.angle : current.angle,
+    todo: capped,
+    found: unique([...generated.found, ...current.found], (row) => `${row.t}\n${row.src ?? ""}`),
+    verify: [...new Set([...generated.verify, ...current.verify])],
+    opened: unique([...generated.opened, ...current.opened], (row) => row.url),
+  };
 }

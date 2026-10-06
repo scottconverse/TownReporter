@@ -7519,6 +7519,16 @@
 .desk-ltr .transcript-line:first-child {
   border-top: 0;
 }
+/* The line the ledger's timestamp sent you to (`?at=<seconds>`). `--sel` is the
+   token that means "you are here" -- ink in light, gold in dark -- so the mark
+   reads the same as the active nav row and the current filter. The ground tint
+   is `--bg2` with the ordinary `--fg` text on it, so the words keep the same
+   contrast they have everywhere else on this page. */
+.desk-ltr .transcript-line-at {
+  background: var(--bg2);
+  box-shadow: inset 3px 0 0 var(--sel);
+  padding-left: 10px;
+}
 .desk-ltr .transcript-stamp {
   flex: none;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

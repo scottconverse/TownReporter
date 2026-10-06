@@ -45,6 +45,35 @@ import type { NameCheck } from "@/lib/news/name-check";
 import type { NoteTodo } from "@/lib/news/notes";
 import { citationResolution, meetingCitationUrl, meetingClock } from "@/components/meeting-source-block-utils";
 import { transcriptViewPath } from "@/lib/news/meeting-transcript-view";
+import type { ReportingReviewClaim } from "@/lib/news/reporting-evidence-adapter";
+import type { CurrentReportingDocumentCheck } from "@/lib/news/reporting-document-check";
+
+function ClaimReferences({ claim, currentCheck }: { claim: ReportingReviewClaim; currentCheck?: CurrentReportingDocumentCheck }) {
+  if (!claim.reporting) return <p className="mt-2 break-all text-sm text-muted">Returned URL: {claim.url}</p>;
+  return <div className="mt-2 space-y-2 text-sm text-muted">
+    <p>Reporter status: {claim.reporting.status}. Your evidence judgment is saved separately.</p>
+    {currentCheck ? <div className="border-l border-rule pl-2">
+      <p>Current saved-document check: {currentCheck.status ?? "Unavailable"}.</p>
+      <p>{currentCheck.note}</p>
+      <p>This checks the filed claim, separately from your current copy and evidence judgment.</p>
+      {currentCheck.references.map((ref, index) => <p key={`${ref.id}:${index}`}>{ref.title}: {ref.locator || "Locator unresolved"}</p>)}
+    </div> : null}
+    {claim.reporting.item ? <p>Claim item: {claim.reporting.item}</p> : null}
+    {claim.reporting.nextCheck ? <p>Next check: {claim.reporting.nextCheck}</p> : null}
+    <ul className="space-y-2">
+      {claim.reporting.references.map((ref, index) => <li key={`${ref.id}:${index}`}>
+        <p>{ref.title} · Tier {ref.tier}</p>
+        {/^https?:\/\//i.test(ref.url)
+          ? <a className="break-all underline" href={ref.url} target="_blank" rel="noreferrer">Open source: {ref.url}</a>
+          : <p>{ref.offlineReference || ref.url || "Source location unavailable"}</p>}
+        <p>Locator: {ref.locator || "No precise locator recorded"}</p>
+        {ref.versionId == null ? <p>No captured version was pinned to this reference.</p> : null}
+      </li>)}
+    </ul>
+    {claim.reporting.missingSourceIds.length ? <p>Missing source records: {claim.reporting.missingSourceIds.join(", ")}</p> : null}
+    {!claim.reporting.references.length ? <p>No supporting reference travels with this claim.</p> : null}
+  </div>;
+}
 
 type JudgmentDraft = {
   value: FindingJudgment;
@@ -1159,7 +1188,7 @@ export function FindingEvidenceReviewPanel({
             Claim {at.index + 1} · {claim.claim.kind}
           </p>
           <p className="mt-2 whitespace-pre-wrap font-medium text-ink">{claim.claim.fact}</p>
-          <p className="mt-2 break-all text-sm text-muted">Returned URL: {claim.claim.url}</p>
+          <ClaimReferences claim={claim.claim} currentCheck={claim.currentDocumentCheck} />
           <CitedRecordChecks
             variant="claim"
             captures={claim.captures}
@@ -1313,7 +1342,7 @@ export function FindingEvidenceReviewPanel({
                     Claim {index + 1} · {claim.claim.kind}
                   </p>
                   <p className="mt-1 whitespace-pre-wrap text-ink-2">{claim.claim.fact}</p>
-                  <p className="mt-1 break-all text-muted">Returned URL: {claim.claim.url}</p>
+                  <ClaimReferences claim={claim.claim} currentCheck={claim.currentDocumentCheck} />
                   <p className="mt-1 text-muted">
                     This claim’s record checks and judgment are on its own row in the list above.
                   </p>
@@ -1802,6 +1831,10 @@ export function FindingEvidenceReviewPanel({
         compareLabel={list.compareLabel}
         onCompare={list.onCompare}
         onStylePress={list.onStylePress}
+        onOpenRecord={(href) => {
+          const versionId = Number(href.match(/^\/evidence\/(\d+)$/)?.[1]);
+          if (Number.isSafeInteger(versionId) && versionId > 0) captureRead.mutate(versionId);
+        }}
         detail={renderRowDetail}
         footer={extras}
       />

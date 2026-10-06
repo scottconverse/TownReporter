@@ -67,6 +67,15 @@ export type PaperConfig = {
    * newsroom credits no outlets; only a NULL column falls back.
    */
   namedOutlets: NamedOutlet[];
+  /**
+   * The people this newsroom's meeting captions are about: one name and title
+   * per line ("Diane Crist, Council member"), plain text. The whole-meeting
+   * writer corrects a garbled caption surname against this list before it
+   * writes. Empty is a real answer -- a newsroom that has written no list still
+   * gets the packet and entity names, and an uncorrected caption name is
+   * flagged, not guessed.
+   */
+  electedOfficials: string;
 };
 
 type PaperSettingsRow = {
@@ -85,6 +94,7 @@ type PaperSettingsRow = {
   seed_sources: unknown;
   named_outlets: unknown;
   editor_email: string | null;
+  elected_officials: string | null;
 };
 
 /**
@@ -142,6 +152,8 @@ const PAPER_SETTINGS_SCHEMA: readonly string[] = [
     the card off their desk. See ./first-run-model-settings.ts.
   */
   `alter table paper_settings add column if not exists model_prompt_state text`,
+  // WR1 fixes round 1: mirrors migrations/0122_meeting_ledger_evidence.sql
+  `alter table paper_settings add column if not exists elected_officials text`,
 ];
 
 export async function ensurePaperSettingsSchema() {
@@ -165,6 +177,9 @@ function defaultConfig(): PaperConfig {
     seedSources: SEED_SOURCES.map((s) => ({ ...s })),
     editorEmail: EDITOR_EMAIL,
     namedOutlets: NAMED_OUTLETS.map((o) => ({ ...o, aliases: [...o.aliases], domains: [...o.domains] })),
+    // No shipped default: the officials of a town are the newsroom's own
+    // knowledge, not something a build can carry for every install.
+    electedOfficials: "",
   };
 }
 
@@ -208,6 +223,9 @@ const UNCONFIGURED_PAPER_CONFIG: PaperConfig = {
     never reads it (getPaperConfig is the desk-only read performPublish uses).
   */
   namedOutlets: [],
+  // No officials named, like every other list here: this is what an
+  // unconfigured install shows the public, and never reaches the writer.
+  electedOfficials: "",
 };
 
 /**
@@ -305,6 +323,17 @@ function mergeRow(row: PaperSettingsRow | undefined, base: PaperConfig): PaperCo
       row.editor_email === null || row.editor_email === undefined
         ? base.editorEmail
         : row.editor_email.trim() || null,
+    /*
+      An empty string is a real answer -- "this newsroom has named no
+      officials" -- and only a NULL column (never set) falls back to the base,
+      which ships with none. Stored blank stays blank rather than inheriting
+      another paper's officials, which on a shared build would be wrong names
+      in a different town's story.
+    */
+    electedOfficials:
+      row.elected_officials === null || row.elected_officials === undefined
+        ? base.electedOfficials
+        : row.elected_officials.trim(),
   };
 }
 
@@ -314,7 +343,7 @@ async function loadPaperConfig(newsroomId: number): Promise<PaperConfig> {
   const rows = await sql<PaperSettingsRow>`
     select name, city, state, location, timezone, tagline, kicker, deck, trust,
            council_votes_url, youtube_channels, meeting_keywords, seed_sources,
-           named_outlets, editor_email
+           named_outlets, editor_email, elected_officials
     from paper_settings
     where newsroom_id = ${newsroomId}
     limit 1
@@ -465,6 +494,7 @@ export type PaperConfigPatch = Partial<{
   seedSources: SeedSource[] | null;
   editorEmail: string | null;
   namedOutlets: NamedOutlet[] | null;
+  electedOfficials: string | null;
 }>;
 
 const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
@@ -483,6 +513,7 @@ const COLUMN_BY_FIELD: Record<keyof PaperConfigPatch, string> = {
   seedSources: "seed_sources",
   editorEmail: "editor_email",
   namedOutlets: "named_outlets",
+  electedOfficials: "elected_officials",
 };
 
 const JSONB_FIELDS = new Set<keyof PaperConfigPatch>([
@@ -742,6 +773,13 @@ export type FirstRunSetupInput = {
   watchlist: SeedSource[];
   youtubeChannels: string[];
   meetingKeywords: string[];
+  /**
+   * The newsroom's own list of elected officials and staff, one name and title
+   * per line. Blank is a real answer: the whole-meeting writer still corrects
+   * caption names against the packet and the desk's entities, and flags any it
+   * cannot match.
+   */
+  electedOfficials: string;
 };
 
 export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
@@ -809,6 +847,7 @@ export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
       LIMITS.meetingKeywordEntries,
       LIMITS.meetingKeyword,
     ),
+    electedOfficials: cut(v.electedOfficials, LIMITS.electedOfficials),
   };
 }
 
@@ -869,6 +908,10 @@ export const completeFirstRunSetup = createServerFn({ method: "POST" })
         seedSources: data.watchlist,
         youtubeChannels: data.youtubeChannels,
         meetingKeywords: data.meetingKeywords,
+        // Always written, even blank: an empty column is "this newsroom has
+        // named no officials", which is a real answer and must not fall back
+        // to whatever another install left behind.
+        electedOfficials: data.electedOfficials ?? "",
       });
 
       await ensurePaperSettingsSchema();

@@ -119,6 +119,13 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
+    /**
+     * Rewrite from ledger: the queued draft job reuses the ledger already stored
+     * for this lead instead of reading the tape again. Carried in the job's
+     * `result_json` -- the only free-form column `desk_jobs` has -- so the worker
+     * reads it when the job runs, not now.
+     */
+    reuseLedger?: boolean;
   },
   deps: StoryDraftCommitDeps = {},
 ) {
@@ -193,15 +200,18 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoice: effectiveChoice,
     researchScope,
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
-    resultJson: JSON.stringify(initialModelRuntimeReceipt({
-      requestedRuntime: input.modelChoice,
-      requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
-      actualRuntime: effectiveChoice,
-      actualEffort: effectiveEffort,
-      localModel: providerProbe.ok ? providerProbe.localModel : undefined,
-      skippedRungs: providerProbe.skippedRungs,
-      preflightFailover: preflight.switchReceipt,
-    })),
+    resultJson: JSON.stringify({
+      ...initialModelRuntimeReceipt({
+        requestedRuntime: input.modelChoice,
+        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        actualRuntime: effectiveChoice,
+        actualEffort: effectiveEffort,
+        localModel: providerProbe.ok ? providerProbe.localModel : undefined,
+        skippedRungs: providerProbe.skippedRungs,
+        preflightFailover: preflight.switchReceipt,
+      }),
+      ...(input.reuseLedger ? { reuseLedger: true } : {}),
+    }),
   });
   if (preflight.switchReceipt) {
     await setJobStage(job.id, preflight.switchReceipt.stage);

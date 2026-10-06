@@ -56,6 +56,7 @@ const WORKER_FILES: Record<JobKind, readonly string[]> = {
   "artifact-ocr": ["dark.ts"],
   pull: ["pull.server.ts"],
   "audio-transcribe": ["textflowkit-transcribe.server.ts"],
+  reporting: ["civic-reporting-run.server.ts"],
 };
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -70,7 +71,7 @@ describe("every job kind's stage list", () => {
     // the same list -- `kindCoverage` in jobs.ts is what makes that true at
     // compile time. Here it is asserted at runtime so a mutation is a FAILING
     // TEST and not only a red squiggle.
-    assert.equal(JOB_KINDS.length, 11);
+    assert.equal(JOB_KINDS.length, 12);
     assert.equal(new Set(JOB_KINDS).size, JOB_KINDS.length, "no duplicates");
     assert.deepEqual(
       Object.keys(JOB_STAGE_LISTS).sort(),
@@ -135,7 +136,7 @@ describe("every job kind's stage list", () => {
     assert.deepEqual(JOB_STAGE_LISTS["follow-up"], ["Running the check", "Recording the result"]);
   });
 
-  it("gives the eight kinds that had none a list their worker can actually reach", () => {
+  it("gives the nine kinds that had none a list their worker can actually reach", () => {
     /*
       The headline of the report's R2: eight kinds seeded NULL at claim, so the
       card showed no chip row for any of them. This is the same fact stated as a
@@ -151,6 +152,7 @@ describe("every job kind's stage list", () => {
       "artifact-ocr",
       "pull",
       "audio-transcribe",
+      "reporting",
     ];
     for (const kind of wasMissing) {
       assert.ok(JOB_STAGE_LISTS[kind]?.length, `${kind} has stages now`);

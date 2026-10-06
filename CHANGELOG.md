@@ -1,6 +1,6 @@
 # Changelog
 
-Current software version: **0.6.82**. Publication state is recorded by GitHub.
+Current software version: **0.6.83**. Publication state is recorded by GitHub.
 
 ## Unreleased
 
@@ -15,6 +15,14 @@ Current software version: **0.6.82**. Publication state is recorded by GitHub.
 - **The server refuses to serve a database that is behind its migrations.** Until now nothing at runtime read the migration ledger back: a server started any way other than the installer or the ops script served whatever schema the database happened to have, and the gap surfaced later as a column-not-found error on an editor's save. Every request is now answered **503 "Service unavailable: the paper's database needs an update. The operator has been told what to run."** until the ledger is current, and the operator gets the file names and the command to apply them in the server log. It does not exit — the appliers already refuse to start on a failed migration, and a server that answers 503 is easier to diagnose from outside than one that vanished — and a database that was briefly unreachable at boot starts serving as soon as it is reachable again. The 503 body names no host, port, user or table.
 - **The draft keeps what the model wrote, so an editor's changes can be measured.** Until now an editor's save overwrote the draft body in place, which meant the version the model produced was gone the moment the editor touched the story — and there was no way to see, after the fact, what the editor had changed or whether the drafts were getting better. One additive migration, **0119**, adds `drafts.model_body`, set once when a model writes the draft (the research write pass, the reconcile pass, the batch and desk paths) and never written by an editor's save. It mirrors `model_headline`, which already worked this way. Nullable with no default, so there is nothing to backfill and no rewrite of existing rows: a draft written before this release, or one no model wrote, simply has no `model_body`. Editing and publishing are unchanged.
 - Past entries below that describe Grok or SuperGrok are history and are left as written.
+
+## 0.6.83 — 2026-10-06
+
+- **Assignment-scoped reporting packages.** A meeting or lead assignment files its research brief, coverage ledger, claim/source references, readiness and score beside the draft. Saved-document checks show the current retained-document result alongside the reporter's recorded claim status.
+- **Corrections and follow-ups keep their scope.** Editors can save dated, sourced corrections, dispositions or source notes for the relevant assignment. A targeted follow-up starts a new run and keeps the existing draft, notes and checked states intact.
+- **Meeting coverage uses an editor-visible action ledger.** The six existing WR1 commits add whole-meeting accounting, editor review and treatment, packet agenda grouping, vote counting, a single lead, meeting-specific procedure, plain labels, a second major-item section, and packet name/spelling fidelity.
+- **Source discovery is reviewable.** The desk adds observed source inventory and source-selection signals while leaving replacement and acceptance decisions with the editor.
+- Release boundaries and remaining evidence limits are recorded in [docs/releases/0.6.83.md](docs/releases/0.6.83.md).
 
 ## 0.6.82 — 2026-09-28
 

@@ -9,6 +9,8 @@ import {
   persistFindingEvidenceJudgment,
 } from "./finding-evidence-review.ts";
 import { takeDownCapture } from "./evidence-takedown.ts";
+import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
+import type { PackageStory } from "./civic-reporting.ts";
 
 const room = 73001;
 const otherRoom = 73002;
@@ -83,6 +85,81 @@ async function reset() {
   );
 }
 beforeEach(reset);
+
+it("reviews every complete reporting claim and multiple precise references with durable draft-scoped judgments", async () => {
+  const f = await fixture();
+  const fact = "A consequential documentary statement. ".repeat(20);
+  const story: PackageStory = {
+    id: "story-a", headline: "Headline", draft: "Body", plainBrief: "", cannotSay: "", readinessTier: 2,
+    sources: [
+      { id: "agenda", title: "Agenda", tier: "A", url: "https://city.test/agenda", locator: "page 4", offlineReference: "" },
+      { id: "budget", title: "Budget", tier: "A", url: "https://city.test/budget", locator: "page 8", offlineReference: "" },
+      { id: "offline", title: "Interview", tier: "C", url: "", locator: "paragraph 2", offlineReference: "Reporter notes 2026-09-01" },
+    ],
+    claims: Array.from({ length: 25 }, (_, index) => ({
+      id: `claim-${index}`, text: fact + index, status: "VERIFIED", sourceIds: ["agenda", "budget", "offline", "missing"], nextCheck: "Read both pages", item: "Budget proposal",
+    })),
+  };
+  const claims = await reportingStoryReviewClaims(f.sql, room, story, "2026-09-01T23:59:59Z");
+  await f.sql.query("update drafts set research_json=$1,found_note='[]' where id=$2", [JSON.stringify({ reportedClaims: claims }), f.draft.id]);
+  const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.equal(review.claimRows.length, 25);
+  assert.equal(review.claimRows[24].claim.fact, fact + "24");
+  assert.deepEqual(review.claimRows[0].claim.reporting?.references.map((ref) => ref.locator), ["page 4", "page 8", "paragraph 2"]);
+  assert.deepEqual(review.claimRows[0].claim.reporting?.missingSourceIds, ["missing"]);
+  assert.deepEqual(review.claimRows[0].captures.map((capture) => capture.versionId), [f.cited.id, f.mismatch.id]);
+  assert.equal(review.claimRows[0].judgment.value, "unreviewed");
+  await persistFindingEvidenceJudgment({ newsroomId: room }, {
+    leadId, draftId: f.draft.id, findingKey: review.claimRows[0].key, judgment: "needs-reporting",
+    reason: "Budget proposal is not adoption", contraryVersionId: null, evidenceToken: review.evidenceToken,
+  });
+  const reloaded = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.equal(reloaded.claimRows[0].judgment.value, "needs-reporting");
+  assert.equal(reloaded.claimRows[0].judgment.reason, "Budget proposal is not adoption");
+  assert.equal(reloaded.claimRows[0].claim.reporting?.status, "VERIFIED");
+  // A stored reference ID cannot grant access to another URL's captured text.
+  const wrongSource = structuredClone(claims);
+  wrongSource.rows[0].reporting!.references[0].versionId = f.mismatch.id;
+  wrongSource.rows[0].reporting!.references[1].versionId = f.foreign.id;
+  await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({ reportedClaims: wrongSource }), f.draft.id]);
+  const guarded = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.equal(guarded.claimRows[0].captures.every((capture) => !capture.available), true);
+  await assert.rejects(persistFindingEvidenceJudgment({ newsroomId: room }, {
+    leadId, draftId: f.draft.id, findingKey: guarded.claimRows[0].key, judgment: "supports",
+    reason: "", contraryVersionId: null, evidenceToken: guarded.evidenceToken,
+  }), /readable captured record/);
+  // Same ledger in a follow-up draft cannot inherit the previous editor decision.
+  await f.sql.query(`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,research_json,updated_at)
+    values('editor',$1,$2,'Follow-up','','New copy','council',$3,now()+interval '1 second')`, [room, leadId, JSON.stringify({ reportedClaims: claims })]);
+  const followUp = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.notEqual(followUp.draftId, review.draftId);
+  assert.equal(followUp.claimRows[0].judgment.value, "unreviewed");
+});
+
+it("hydrates historical reporting drafts from their own saved package without writing on load", async () => {
+  const f = await fixture();
+  const story: PackageStory = { id: "historical", headline: "Old", draft: "Body", plainBrief: "", cannotSay: "", readinessTier: 2,
+    sources: [{ id: "s", title: "Agenda", tier: "A", url: "https://city.test/agenda", locator: "page 4", offlineReference: "" }],
+    claims: [{ id: "c", text: "An archived claim", status: "UNVERIFIED", sourceIds: ["s"], nextCheck: "Check page" }],
+  };
+  const [pack] = await f.sql.query<{ request_id: number }>(`insert into reporting_packages(request_id,newsroom_id,lead_id,draft_id,package,created_at)
+    values(73001001,$1,$2,$3,$4::jsonb,'2026-09-01T23:59:59Z') returning request_id`, [room, leadId, f.draft.id, JSON.stringify({ stories: [story] })]);
+  const original = JSON.stringify({ civicReporting: true, requestId: Number(pack.request_id), storyId: "historical" });
+  await f.sql.query("update drafts set research_json=$1,found_note='[]' where id=$2", [original, f.draft.id]);
+  const review = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.equal(review.claimRows.length, 1);
+  const checkedAgain = await loadFindingEvidenceReview(f.sql, room, leadId);
+  assert.equal(checkedAgain.evidenceToken, review.evidenceToken, "derived documentary check timestamps cannot change the judgment token");
+  assert.equal(checkedAgain.contentToken, review.contentToken);
+  assert.equal(checkedAgain.claimRows[0].key, review.claimRows[0].key);
+  assert.equal(checkedAgain.claimRows[0].currentDocumentCheck?.state, "unavailable");
+  assert.equal(review.claimRows[0].captures[0].versionId, f.cited.id);
+  const [stored] = await f.sql.query<{ research_json: string }>("select research_json from drafts where id=$1", [f.draft.id]);
+  assert.equal(stored.research_json, original);
+  await persistFindingEvidenceJudgment({ newsroomId: room }, { leadId, draftId: f.draft.id, findingKey: review.claimRows[0].key,
+    judgment: "needs-reporting", reason: "Needs page check", contraryVersionId: null, evidenceToken: review.evidenceToken });
+  assert.equal((await loadFindingEvidenceReview(f.sql, room, leadId)).claimRows[0].judgment.value, "needs-reporting");
+});
 
 async function fixture() {
   const sql = await getSql();

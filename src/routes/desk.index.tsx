@@ -105,6 +105,17 @@ import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import { Dialog } from "@/components/dialog";
+/*
+  CIVIC REPORTING (editor UI). The four direct assignment actions -- report a
+  town, a beat, a date, an issue -- have no lead behind them, so they start
+  from the desk home rather than the story page. This dialog is their one
+  entry; report-this-lead.tsx covers the two lead-anchored presses. Neither
+  runs a report itself: each files ONE request and hands it to the runner.
+*/
+import {
+  ReportingAssignmentDialog,
+  type ReportingDirectAction,
+} from "@/components/reporting-assignment";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
@@ -185,6 +196,31 @@ function openJob(
       return { label: "Open Opinion", go: () => void navigate({ to: "/desk/opinion" }) };
     case "follow-up":
       return { label: "Open the follow-up", go: () => void navigate({ to: "/desk/follow-ups" }) };
+    case "reporting": {
+      /*
+        CIVIC REPORTING. A reporting job's subject is a `reporting_requests` id,
+        NOT a lead, so the default rule below ("no lead, no button") would be
+        right to refuse -- but this kind DOES have a screen: the run files its
+        package onto the story page of the lead it created. The runner writes
+        `result_href` as `/desk/story/<leadId>` once a lead exists; we read the
+        id back out of that string and navigate the typed way (a `to` read out
+        of a table would not typecheck -- see the note on this function).
+
+        Before the run files a lead there is nothing to open yet, so the press
+        goes to the queue, where the desk's Own stories list will carry it the
+        moment it lands. Either way the editor never gets a button that guesses
+        a lead id out of a request id.
+      */
+      const match = /^\/desk\/story\/(\d+)$/.exec(job.resultHref ?? "");
+      const leadId = match ? Number(match[1]) : 0;
+      return {
+        label: leadId ? "Open the reporting" : "Open the desk",
+        go: () =>
+          leadId
+            ? void navigate({ to: "/desk/story/$leadId", params: { leadId: String(leadId) } })
+            : void navigate({ to: "/desk/queue" }),
+      };
+    }
     default:
       // brief, artifact-ocr, pull, audio-transcribe, routine-notice: real jobs
       // with no screen of their own. A button that guessed (or that went to the
@@ -1057,6 +1093,14 @@ function DeskHome() {
   const [newStoryOpen, setNewStoryOpen] = useState(false);
 
   /*
+    CIVIC REPORTING (editor UI). Which direct assignment the editor is
+    starting, or null for none. One dialog serves all four actions -- the town
+    / beat / date / issue choice is just which label and placeholder it wears --
+    so the header carries one press, not four. See reporting-assignment.tsx.
+  */
+  const [reportingAction, setReportingAction] = useState<ReportingDirectAction | null>(null);
+
+  /*
     WHICH LEAD IS BEING HELD (Unit BN, item 2). One dialog, re-pointed by the
     row that opened it -- the same shape the Queue uses -- so a page of eight
     rows does not carry eight shut dialogs, and the two screens open the same
@@ -1166,6 +1210,33 @@ function DeskHome() {
           <Link to="/desk/opinion" className="btn">
             + Opinion
           </Link>
+          {/*
+            CIVIC REPORTING (editor UI). The direct reporting assignments:
+            report a town, a beat, a date or an issue -- work that has no lead
+            behind it yet, so it starts here rather than on a story page. The
+            four share one dialog (reporting-assignment.tsx), so this is a menu
+            of which one, and each choice opens the ask-and-model box. A press
+            files ONE request and hands it to the runner; nothing runs here.
+          */}
+          <details className="row-more desk-start-reporting">
+            <summary className="btn quiet">
+              Start reporting
+            </summary>
+            <div className="row-more-panel">
+              <InkButton tone="ghost" onClick={() => setReportingAction("report-town")}>
+                Report a town
+              </InkButton>
+              <InkButton tone="ghost" onClick={() => setReportingAction("report-beat")}>
+                Report a beat
+              </InkButton>
+              <InkButton tone="ghost" onClick={() => setReportingAction("report-date")}>
+                Report a date
+              </InkButton>
+              <InkButton tone="ghost" onClick={() => setReportingAction("report-issue")}>
+                Report an issue
+              </InkButton>
+            </div>
+          </details>
         </div>
       }
     >
@@ -2677,6 +2748,15 @@ function DeskHome() {
           }}
         />
       ) : null}
+
+      {/* CIVIC REPORTING (editor UI): the one direct-assignment dialog, opened
+          by the header's "Start reporting" menu. Mounted once, like the two
+          dialogs above. */}
+      <ReportingAssignmentDialog
+        action={reportingAction ?? "report-town"}
+        open={reportingAction !== null}
+        onClose={() => setReportingAction(null)}
+      />
     </DeskShell>
   );
 }

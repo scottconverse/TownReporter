@@ -8,6 +8,10 @@ import { sha256 } from "./url-guard.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { ProvenanceItem, StoryClaim } from "./report.ts";
 import type { DraftRow } from "./types.ts";
+import { reportingStoryReviewClaims, type ReportingReviewClaim } from "./reporting-evidence-adapter.ts";
+import type { ReportingPackage } from "./civic-reporting.ts";
+import type { CurrentReportingDocumentCheck } from "./reporting-document-check.ts";
+import { reportingDocumentClaimIdentity } from "./reporting-document-check.ts";
 
 export type FindingJudgment =
   "unreviewed" | "supports" | "does-not-support" | "contradicts" | "needs-reporting";
@@ -52,9 +56,10 @@ export type FindingEvidenceRow = {
 
 export type ClaimEvidenceRow = {
   key: string;
-  claim: StoryClaim;
+  claim: ReportingReviewClaim;
   captures: FindingCaptureEvidence[];
   judgment: FindingEvidenceRow["judgment"];
+  currentDocumentCheck?: CurrentReportingDocumentCheck;
 };
 
 export type ManualClaimReferenceRelation = "corroborating" | "contrary" | "context";
@@ -294,12 +299,30 @@ function assertReadableStoredFindings(raw: unknown): void {
   }
 }
 
-function storedClaims(draft: DraftRow): StoryClaim[] {
+function storedClaims(draft: DraftRow): ReportingReviewClaim[] {
   const claims = objectMemo(draft.research_json).reportedClaims;
   if (claims == null) return [];
   if (!claims || typeof claims !== "object" || Array.isArray(claims))
     throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
   const value = claims as Partial<StoredReportedClaims>;
+  if ((value as { version?: number }).version === 2 && Array.isArray(value.rows)) {
+    return value.rows.map((raw) => {
+      const row = raw as ReportingReviewClaim;
+      const reporting = row?.reporting;
+      if (!row || typeof row.fact !== "string" || !row.fact.trim() || row.kind !== "record" ||
+          typeof row.url !== "string" || !reporting || typeof reporting.id !== "string" ||
+          !["VERIFIED", "CONTESTED", "UNVERIFIED"].includes(reporting.status) ||
+          typeof reporting.nextCheck !== "string" || typeof reporting.item !== "string" ||
+          !Array.isArray(reporting.missingSourceIds) || !reporting.missingSourceIds.every((id) => typeof id === "string") ||
+          !Array.isArray(reporting.references) || reporting.references.some((ref) =>
+            !ref || typeof ref.id !== "string" || typeof ref.url !== "string" ||
+            typeof ref.locator !== "string" || typeof ref.title !== "string" ||
+            typeof ref.offlineReference !== "string" || !["A", "B", "C"].includes(ref.tier) ||
+            (ref.versionId !== null && (!Number.isInteger(ref.versionId) || ref.versionId < 1))))
+        throw new ReviewError("invalid-input", "Stored reporting claims are incomplete or unreadable.");
+      return row;
+    });
+  }
   if (value.version !== 1 || !Array.isArray(value.rows) || value.rows.length > 16)
     throw new ReviewError("invalid-input", "Stored draft claims are incomplete or unreadable.");
   return value.rows.map((row) => {
@@ -418,7 +441,14 @@ function sameCaptureUrl(left: string | null | undefined, right: string): boolean
   }
 }
 
-function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
+function provenanceForClaim(draft: DraftRow, claim: ReportingReviewClaim): StoryFinding {
+  if (claim.reporting) return {
+    text: claim.fact,
+    source_urls: claim.reporting.references.flatMap((ref) => ref.url ? [ref.url] : []),
+    artifact_version_ids: claim.reporting.references.flatMap((ref) => ref.versionId == null ? [] : [ref.versionId]),
+    capture_event_ids: [],
+    locators: claim.reporting.references.map((ref) => ref.locator).filter(Boolean),
+  };
   let provenance: unknown = [];
   try {
     provenance = JSON.parse(draft.provenance_json || "[]");
@@ -445,8 +475,8 @@ function provenanceForClaim(draft: DraftRow, claim: StoryClaim): StoryFinding {
   };
 }
 
-async function claimKey(index: number, claim: StoryClaim) {
-  return `claim:${index}:${await sha256(JSON.stringify([claim.fact, claim.url, claim.kind]))}`;
+async function claimKey(index: number, claim: ReportingReviewClaim) {
+  return `claim:${index}:${await sha256(JSON.stringify([claim.fact, claim.url, claim.kind, ...(claim.reporting ? [claim.reporting] : [])]))}`;
 }
 
 function excerptState(excerpt: string | undefined, fullText: string | null) {
@@ -489,6 +519,22 @@ async function currentDraft(sql: Sql, newsroomId: number, leadId: number): Promi
     [leadId, newsroomId],
   );
   if (!draft) throw new ReviewError("not-found", "Draft not found.");
+  const memo = objectMemo(draft.research_json);
+  if (memo.civicReporting === true && memo.reportedClaims == null &&
+      Number.isInteger(memo.requestId) && typeof memo.storyId === "string") {
+    const [stored] = await sql.query<{ package: ReportingPackage; created_at: string | Date }>(
+      `select package,created_at from reporting_packages where newsroom_id=$1 and request_id=$2`,
+      [newsroomId, memo.requestId],
+    );
+    const pack = typeof stored?.package === "string" ? JSON.parse(stored.package) : stored?.package;
+    const story = pack?.stories?.find((row: { id: string }) => row.id === memo.storyId);
+    if (story) {
+      memo.reportedClaims = await reportingStoryReviewClaims(sql, newsroomId, story, new Date(stored.created_at).toISOString());
+      // Read-only compatibility hydration. The existing judgment save persists
+      // this snapshot in the draft memo; another request never replaces it.
+      draft.research_json = JSON.stringify(memo);
+    } else throw new ReviewError("not-found", "The reporting ledger for this draft is unavailable. Reload after filing completes or restore its saved package before reviewing claims.");
+  }
   return draft;
 }
 
@@ -560,7 +606,7 @@ async function fullReviewToken(
   newsroomId: number,
   draft: DraftRow,
   findings: StoryFinding[],
-  claims: StoryClaim[],
+  claims: ReportingReviewClaim[],
   manualClaims: StoredManualClaim[],
   lock = false,
 ): Promise<string> {
@@ -705,7 +751,7 @@ async function resolveClaim(
   sql: Sql,
   newsroomId: number,
   draft: DraftRow,
-  claim: StoryClaim,
+  claim: ReportingReviewClaim,
   index: number,
 ): Promise<ClaimEvidenceRow> {
   const key = await claimKey(index, claim);
@@ -719,7 +765,8 @@ async function resolveClaim(
     "claimEvidenceReview",
   );
   const captures = resolved.captures.map((capture) =>
-    sameCaptureUrl(capture.url, claim.url)
+    (claim.reporting ? claim.reporting.references.some((ref) =>
+      ref.versionId === capture.versionId && sameCaptureUrl(capture.url, ref.url)) : sameCaptureUrl(capture.url, claim.url))
       ? capture
       : {
           versionId: capture.versionId,
@@ -868,6 +915,11 @@ export async function loadFindingEvidenceReview(
   const findings = parseFindings(draft.found_note);
   const claims = storedClaims(draft);
   const manualClaims = storedManualClaims(draft);
+  const reporting = objectMemo(draft.research_json);
+  const currentDocumentChecks = reporting.civicReporting === true && Number.isSafeInteger(reporting.requestId)
+    ? await (await import("./reporting-document-check.server.ts")).loadCurrentReportingDocumentChecks(sql, newsroomId, Number(reporting.requestId))
+    : {};
+  const storyChecks = typeof reporting.storyId === "string" ? currentDocumentChecks[reporting.storyId] : undefined;
   return {
     leadId,
     draftId: draft.id,
@@ -883,7 +935,18 @@ export async function loadFindingEvidenceReview(
       findings.map((finding, index) => resolveFinding(sql, newsroomId, draft, finding, index)),
     ),
     claimRows: await Promise.all(
-      claims.map((claim, index) => resolveClaim(sql, newsroomId, draft, claim, index)),
+      claims.map(async (claim, index) => {
+        const row = await resolveClaim(sql, newsroomId, draft, claim, index);
+        if (!claim.reporting) return row;
+        const check = storyChecks?.[claim.reporting.id];
+        const sameClaim = !check?.filedClaimIdentity || check.filedClaimIdentity === reportingDocumentClaimIdentity(
+          claim.reporting.id, claim.fact, claim.reporting.item, claim.reporting.references);
+        return { ...row, currentDocumentCheck: check && sameClaim ? check : {
+          state: "unavailable" as const, status: null,
+          note: "The retained package does not match this draft claim's text and references, or its current check is unavailable.",
+          references: [], checkedAt: new Date().toISOString(), inputFingerprint: "",
+        } };
+      }),
     ),
     manualClaimRows: await Promise.all(
       manualClaims.map((claim) => resolveManualClaim(sql, newsroomId, draft, claim)),

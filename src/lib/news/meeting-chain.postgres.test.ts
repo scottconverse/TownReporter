@@ -105,6 +105,36 @@ async function confirmSectionForCurrentDraft(leadId: number) {
   return confirmed.ok ? confirmed.topic : "";
 }
 
+/** These persistence scenarios are for the focused, one-item meeting path. */
+async function assignHousingAgendaItem(leadId: number, editorState: Record<string, unknown> = {}) {
+  const [existing] = await sql.query<{ notes_json: string | null }>(
+    "select notes_json from leads where newsroom_id=$1 and id=$2",
+    [newsroomId, leadId],
+  );
+  const notes = existing?.notes_json ? JSON.parse(existing.notes_json) as Record<string, unknown> : {};
+  await sql.query(
+    "update leads set notes_json=$1 where newsroom_id=$2 and id=$3",
+    [JSON.stringify({
+      ...notes,
+      ...editorState,
+      editorialAssignment: { origin: "story-workspace", text: "Cover Item 4: Housing plan." },
+    }), newsroomId, leadId],
+  );
+}
+
+async function draftFromReportedFixture(job: DeskJob, reported: ReportedDraftResult) {
+  let fixtureUsed = false;
+  await performDraftWork(job, {
+    readStoryDocuments: async () => "",
+    reportAndDraft: async () => {
+      fixtureUsed = true;
+      return reported;
+    },
+    setJobStage: async () => undefined,
+  });
+  assert.equal(fixtureUsed, true, "the Item 4 assignment must select the focused writer fixture used by this test");
+}
+
 const housingStoryFocus = {
   candidateId: "housing-plan",
   summary: "Council approves the housing plan.",
@@ -167,10 +197,11 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     assert.equal(capturedA.failures.length, 0);
     const [lead] = await sql.query<{ id: number }>("select id from leads where newsroom_id=$1 and meeting_video_id=$2", [newsroomId, videoId]);
     assert.ok(lead?.id, "the real capture path must file the meeting lead");
+    await assignHousingAgendaItem(lead.id);
     const [jobRow] = await sql.query<{ id: number }>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'draft',$3,'local-model','editor','supplied','default','running','Drafting','meeting-chain-claim') returning id", [userId, newsroomId, lead.id]);
     const job = { id: jobRow!.id, newsroom_id: newsroomId, user_id: userId, kind: "draft", subject_id: lead.id, model_choice: "local-model", model_choice_source: "editor", research_scope: "supplied", lane: "default", status: "running", stage: "Drafting", claim_token: "meeting-chain-claim" } as DeskJob;
     const reported = { headline: "Council approves housing plan", dek: "The council voted Tuesday.", body: captionA.text, topic: "council", source_urls: [`https://www.youtube.com/watch?v=${videoId}`], integrity_notes: "", memory_entities: [], form: "news", provenance: [], found_note: "", findings: [], unanswered: [], claims: [], research_memo: { meetingFocus: housingStoryFocus } } as unknown as ReportedDraftResult;
-    await performDraftWork(job, { readStoryDocuments: async () => "", reportAndDraft: async () => reported, setJobStage: async () => undefined });
+    await draftFromReportedFixture(job, reported);
     const [draftA] = await sql.query<{ id: number; research_json: string }>("select id,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by id desc limit 1", [newsroomId, lead.id]);
     assert.equal(JSON.parse(draftA!.research_json).meetingEvidence?.used, true, "a missing transcript link must block publication for this draft");
     const [linkA] = await sql.query<{ artifact_id: number; citation_snapshot: string }>("select artifact_id,citation_snapshot from meeting_draft_transcript_links where newsroom_id=$1 and draft_id=$2", [newsroomId, draftA!.id]);
@@ -298,6 +329,10 @@ describe("meeting chain uses real application entrypoints in its own disposable 
       [newsroomId, secondVideoId],
     );
     assert.ok(lead?.id);
+    await assignHousingAgendaItem(lead!.id, {
+      scratch: "Editor note: check the housing-plan agenda wording.",
+      todo: [{ t: "Confirm the item 4 title", done: false, src: "you" }],
+    });
 
     const draftFrom = async (label: "a" | "b", caption: ReturnType<typeof capturedCaption>) => {
       const claimToken = `meeting-chain-${secondVideoId}-${label}`;
@@ -319,11 +354,7 @@ describe("meeting chain uses real application entrypoints in its own disposable 
         integrity_notes: "", memory_entities: [], form: "news", provenance: [], found_note: "",
         findings: [], unanswered: [], claims: [], research_memo: { meetingFocus: housingStoryFocus },
       } as unknown as ReportedDraftResult;
-      await performDraftWork(job, {
-        readStoryDocuments: async () => "",
-        reportAndDraft: async () => reported,
-        setJobStage: async () => undefined,
-      });
+      await draftFromReportedFixture(job, reported);
       const [draft] = await sql.query<{ id: number; research_json: string }>(
         "select id,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by updated_at desc,id desc limit 1",
         [newsroomId, lead!.id],
@@ -409,11 +440,23 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     }
     const appliedB = await captureB;
     assert.equal(appliedB.revised, true);
-    const [leadAfterB] = await sql.query<{ meeting_artifact_id: number }>(
-      "select meeting_artifact_id from leads where newsroom_id=$1 and id=$2",
+    const [leadAfterB] = await sql.query<{ meeting_artifact_id: number; notes_json: string }>(
+      "select meeting_artifact_id,notes_json from leads where newsroom_id=$1 and id=$2",
       [newsroomId, lead!.id],
     );
     assert.equal(leadAfterB!.meeting_artifact_id, appliedB.artifactId, "the meeting lead must advance to the captured B artifact before redrafting");
+    const notesAfterB = JSON.parse(leadAfterB!.notes_json) as {
+      editorialAssignment?: { text?: string };
+      scratch?: string;
+      todo?: { t: string; done: boolean; src: string }[];
+      meeting?: { artifactId: number };
+      transcriptCitations?: { captionSha256: string }[];
+    };
+    assert.equal(notesAfterB.editorialAssignment?.text, "Cover Item 4: Housing plan.", "B capture must preserve the editor's one-item assignment");
+    assert.equal(notesAfterB.scratch, "Editor note: check the housing-plan agenda wording.", "B capture must preserve editor scratch notes");
+    assert.deepEqual(notesAfterB.todo, [{ t: "Confirm the item 4 title", done: false, src: "you" }], "B capture must preserve editor to-dos");
+    assert.equal(notesAfterB.meeting?.artifactId, appliedB.artifactId, "the current capture identity must replace A");
+    assert.deepEqual(notesAfterB.transcriptCitations?.map((citation) => citation.captionSha256), [captionB.sha256], "current transcript citations must replace A's hashes");
     const staleResult = await stalePublish;
     assert.ok(
       staleResult instanceof Error || (typeof staleResult === "object" && staleResult !== null && "ok" in staleResult && staleResult.ok === false),
@@ -487,6 +530,7 @@ describe("meeting chain uses real application entrypoints in its own disposable 
       [newsroomId, publicationFirstVideoId],
     );
     assert.ok(lead?.id);
+    await assignHousingAgendaItem(lead.id);
 
     const claimToken = `meeting-chain-${publicationFirstVideoId}-a`;
     const [jobRow] = await sql.query<{ id: number }>(
@@ -507,7 +551,7 @@ describe("meeting chain uses real application entrypoints in its own disposable 
       integrity_notes: "", memory_entities: [], form: "news", provenance: [], found_note: "",
       findings: [], unanswered: [], claims: [], research_memo: { meetingFocus: housingStoryFocus },
     } as unknown as ReportedDraftResult;
-    await performDraftWork(job, { readStoryDocuments: async () => "", reportAndDraft: async () => reported, setJobStage: async () => undefined });
+    await draftFromReportedFixture(job, reported);
     const [draft] = await sql.query<{ id: number; research_json: string }>(
       "select id,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by updated_at desc,id desc limit 1",
       [newsroomId, lead!.id],

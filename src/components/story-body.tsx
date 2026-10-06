@@ -43,6 +43,34 @@ function Inline({ text, publicReading = false }: { text: string; publicReading?:
   if (last < text.length) nodes.push(text.slice(last));
   return nodes.length ? nodes : text;
 }
+/**
+ * What a body block is, for the renderer: the public reading's `claims` heading
+ * (the "Claims and sources" anchor), an ordinary `h2`, or not a heading at all.
+ *
+ * Two things make a heading. An explicit `## ` marker, as before. And one
+ * standing section title the whole-meeting writer emits as its own block --
+ * "ALSO AT THE MEETING", which `assembleStory` joins in above the roundup
+ * paragraphs. Without this it printed as a plain paragraph; the editor's
+ * preview and the published page now agree that it is a heading.
+ *
+ * Kept module-local: a file that exports both a component and a plain function
+ * trips eslint's react-refresh/only-export-components (see job-card-state.ts),
+ * and the rule is cheap enough to prove through the renderer -- story-body's
+ * own test draws the block and looks for the `<h2>`.
+ */
+function storyBlockHeading(
+  block: string,
+  { publicReading = false, claimsUsed = false }: { publicReading?: boolean; claimsUsed?: boolean } = {},
+): "claims" | "h2" | null {
+  const heading = block
+    .replace(/^#{1,3}\s+/, "")
+    .replace(/^\*\*|\*\*$/g, "")
+    .trim();
+  if (publicReading && !claimsUsed && /^claims and sources\s*:?$/i.test(heading)) return "claims";
+  if (block.startsWith("## ") || /^also at the meeting\s*:?$/i.test(heading)) return "h2";
+  return null;
+}
+
 export function StoryBody({
   body,
   publicReading = false,
@@ -63,16 +91,19 @@ export function StoryBody({
           .replace(/^#{1,3}\s+/, "")
           .replace(/^\*\*|\*\*$/g, "")
           .trim();
-        const claims = publicReading && !claimsUsed && /^claims and sources\s*:?$/i.test(heading);
-        if (claims) claimsUsed = true;
-        if (block.startsWith("## ") || claims)
+        const kind = storyBlockHeading(block, { publicReading, claimsUsed });
+        if (kind === "claims") claimsUsed = true;
+        if (kind)
           return (
             <h2
               key={i}
-              id={claims ? "claims" : undefined}
+              id={kind === "claims" ? "claims" : undefined}
               className="font-display text-xl font-semibold text-ink"
             >
-              <Inline text={claims ? heading : block.slice(3)} publicReading={publicReading} />
+              <Inline
+                text={block.startsWith("## ") ? block.slice(3) : heading}
+                publicReading={publicReading}
+              />
             </h2>
           );
         // `- item` and `* item` are both bullets (the same two markers the

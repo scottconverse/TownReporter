@@ -78,6 +78,9 @@ export function PaperSetupForm({
   const [meetingKeywords, setMeetingKeywords] = useState(
     (initial?.meetingKeywords ?? []).join("\n"),
   );
+  const [electedOfficials, setElectedOfficials] = useState(
+    initial?.electedOfficials ?? "",
+  );
   /*
     On a first run the watch list starts EMPTY.
 
@@ -114,6 +117,7 @@ export function PaperSetupForm({
             .split(/\r?\n/)
             .map((line) => line.trim())
             .filter(Boolean),
+          electedOfficials: electedOfficials.trim(),
           watchlist: rows
             .filter((r) => r.url.trim())
             .map((r) => ({
@@ -266,6 +270,23 @@ export function PaperSetupForm({
           </span>
         </label>
       </div>
+
+      <label className="block text-sm">
+        Elected officials and staff <span className="text-ink-2">(optional)</span>
+        <textarea
+          className={inputClass + " mt-1 min-h-32 w-full"}
+          value={electedOfficials}
+          onChange={(e) => setElectedOfficials(e.target.value)}
+          placeholder={
+            "Susie Hidalgo-Fahring, Mayor\nDiane Crist, Council member\nHarold Dominguez, City Manager"
+          }
+        />
+        <span className="mt-1 block text-xs text-ink-2">
+          One name and title per line. Meeting captions often misspell names;
+          the whole-meeting writer corrects caption names against this list
+          before it writes, and flags any name it cannot match.
+        </span>
+      </label>
 
       <div>
         <p className="text-sm font-medium">Starting watch list</p>

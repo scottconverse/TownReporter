@@ -161,18 +161,13 @@ export function assertHttpUrl(raw: string): URL {
  * keys on the raw string (0002's `unique (user_id, url)`, reindexed by 0056 as
  * `sources_user_newsroom_url_key`), so as URLs those are three rows -- and the
  * scan, which sees the same page linked from a dozen different articles, will
- * happily propose all three. This is the identity the duplicate guard compares
- * on: the host and the path, nothing else.
- *
- * The query string is deliberately not part of it, which is the stricter
- * reading of "the same host+path is not proposed again": two URLs that differ
- * only in their query name the same page as far as this is concerned. That is
- * what keeps a re-run from proposing `?utm_source=` variants of a page already
- * waiting, at the cost of collapsing genuinely different rows behind one path
- * (`/feed?year=2025` and `/feed?year=2026` look alike here). Suggestions are
- * cheap and the editor can add a source by hand; a review list that grows 175
- * rows per scan is not. If that trade ever bites, this is the one place to
- * change.
+ * happily propose all three. Usually the identity compares the host and path.
+ * Tracking and other query parameters are ignored so reordered queries and
+ * `utm_source` variants do not create duplicate suggestions. One bounded
+ * exception preserves PrimeGov compiled-document identity: its
+ * `meetingTemplateId` names a particular meeting packet, so different IDs on
+ * `/Public/CompiledDocument` are different pages. Other query variants keep
+ * the existing host-and-path behavior.
  *
  * Null for anything that is not a fetchable public http(s) page, so a caller
  * cannot use this to smuggle in a `javascript:` or private-host URL.
@@ -186,6 +181,15 @@ export function sourceIdentity(raw: string): string | null {
   }
   const host = url.hostname.toLowerCase().replace(/^www\./, "");
   const path = url.pathname.replace(/\/+$/, "");
+  const meetingTemplateIds = url.searchParams.getAll("meetingTemplateId");
+  if (
+    host.endsWith(".primegov.com") &&
+    path.toLowerCase() === "/public/compileddocument" &&
+    meetingTemplateIds.length === 1 &&
+    /^[1-9]\d*$/.test(meetingTemplateIds[0]!)
+  ) {
+    return `${host}${path.toLowerCase()}?meetingTemplateId=${meetingTemplateIds[0]}`;
+  }
   return `${host}${path}`;
 }
 

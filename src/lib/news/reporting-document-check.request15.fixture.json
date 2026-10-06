@@ -1,0 +1,107 @@
+{
+  "accepted": {
+    "id": "longmont-2027-budget-hsa-airport-followup-2026-10-06",
+    "headline": "Longmont's 2027 budget: a $15,330 human-services trim, a $495,670 placeholder, and a First and Main shuffle",
+    "draft": "Longmont's 2027 budget is still a proposal, and the numbers residents will feel most are the ones staff revised after the county's property-tax figures came in low.\n\nIn a Sept. 29 memo to council, staff wrote that preliminary property-tax certifications from Boulder County came in $511,000 below what the city had assumed. Because Human Services Agency funding is set by a formula — 3% of budgeted tax revenue — that shortfall mechanically pulls the agency pool down by $15,330, from the $2,962,875 proposed in the Sept. 15 memo to $2,947,545 in the Sept. 29 revision. It is a formula-driven adjustment inside a proposal, not an adopted cut, and it is not a year-over-year comparison: both figures are 2027 proposals at different points in the same budget cycle. The Sept. 15 memo describes the $2,962,875 as supporting nonprofits across six named impact areas plus unhoused services, and names no individual organization.\n\nTo balance the same property-tax reduction, staff propose budgeting a $495,670 \"savings\" in the non-departmental budget service. The memo is explicit that the department lines behind that number are not yet identified: after the first of the year, the city manager and finance staff will begin zero-based budgeting meetings and will identify which department line items the 2027 savings come from, with budget adjustments to follow. So residents asking which programs absorb the $495,670 cannot get an answer from the documents filed so far.\n\nTwo First and Main items are also moving. The Sept. 29 memo's One-Time Budget Adjustments section states the proposed General Fund budget includes a one-time transfer of $672,625 to the Public Improvement Fund for costs associated with the 1st and Main Transit Hub; the memo says those funds are instead needed in 2026 and are being removed from the 2027 proposal, with an ordinance coming to council in October to appropriate the amount in 2026. In its separate Public Improvement Fund section, the memo states the 2027 proposal included $1,646,233 set aside for CIP project TRP131, 1st and Main Transit Station Area Improvements; those funds are needed in 2026 to begin construction before year end and are likewise being removed from the 2027 proposal and included in the October appropriation ordinance. The memo does not state that one amount funds or nests inside the other, so the two are reported here as separate lines rather than a combined figure.\n\nAfter those changes, the memo puts the General Fund 2027 proposed budget at $132,532,296 in its One-Time Budget Adjustments section and the Public Improvement Fund 2027 proposed budget at $11,388,343 in its own Public Improvement Fund section.\n\nThe schedule is not adoption. The Sept. 29 presentation's budget-meetings slide lists Oct. 6 as final direction from Council, the second public hearing, and first reading of mill levy ordinances, with second reading of the mill levy ordinances Oct. 20, first reading of the budget adoption and appropriation ordinances Nov. 17, and second reading Dec. 1. The city's 2027 Budget Documents page carries the same sequence. The Sept. 29 meeting itself was a study session and first public hearing, and the memo's executive summary says council will also need to hold the first public hearing on the proposed budget, the 2027-2031 CIP and the proposed pay plan.\n\nWhat residents can still influence: the Oct. 6 regular meeting is the advertised point for final council direction and the second public hearing, and the Human Services Agency funding hearings continue on a published schedule through late October at the Housing and Human Services Advisory Board. Those hearings are scheduled presentations by agencies, not awards or named cuts.",
+    "plainBrief": "Longmont's 2027 budget is a proposal, not a done deal. A Sept. 29 staff memo says lower-than-expected county property-tax certifications cut $511,000 from the General Fund, and because Human Services Agency funding is set at 3% of budgeted tax revenue, the agency pool drops $15,330 — from $2,962,875 in the Sept. 15 proposal to $2,947,545 in the Sept. 29 revision. That is a formula adjustment inside the proposal, not an adopted cut. To offset the same shortfall, staff propose a $495,670 \"savings\" in the non-departmental budget service, but the memo says the department lines behind it will only be identified later through zero-based budgeting. Two First and Main items — a $672,625 General Fund transfer and a $1,646,233 TRP131 set-aside — are being pulled from the 2027 proposal because the money is needed in 2026, with an October appropriation ordinance planned; the memo does not say one funds the other. Revised fund totals are $132,532,296 for the General Fund and $11,388,343 for the Public Improvement Fund. Council's own calendar puts final direction and the second public hearing on Oct. 6, with adoption ordinance readings Nov. 17 and Dec. 1.",
+    "cannotSay": "The department line items behind the $495,670 non-departmental \"savings\" are not identified in any document read for this story; the memo says they will be identified through zero-based budgeting after the first of the year. The relationship between the $672,625 General Fund transfer and the $1,646,233 TRP131 set-aside is not established by the memo, so no combined or nested total is reported. The Sept. 15 memo states a 2027 proposed budget total of $547.5 million while the Sept. 29 memo states a revised total of $544,645,951; the memos attribute the difference to $1,183,625 in revenue and $2,829,858 in expense changes, so the two totals describe different points in the same proposal and are not treated as contradictory. The Sept. 15 memo's Public Safety Fund figure is built on the current 0.58% tax and would be updated if voters approve the November increase, so it is not a final 2027 number. The Sept. 15 memo also reports 2026 outcomes (sales and use tax $1.73 million under budget; just under $1.0 million drawn from the stabilization reserve) that are not 2027 effects. The Oct. 6 agenda packet and any Oct. 6 staff communication were not read for this story, so the exact official heading of the Oct. 6 hearing item and whether any department line items were named on the record remain unverified. Caption-only votes, identities and quotations from the Sept. 29 recording are excluded from this copy. An airport-fund arithmetic discrepancy noted in the private ledger remains unresolved and is not reported here.",
+    "readinessTier": 2,
+    "claims": [
+      {
+        "id": "c11",
+        "text": "The Sept. 29 budget presentation's budget-meetings slide lists October 6 as final direction from Council, the second public hearing, and first reading of mill levy ordinances.",
+        "status": "VERIFIED",
+        "item": "2027 Proposed Budget Presentation and First Public Hearing",
+        "sourceIds": [
+          "s3"
+        ],
+        "nextCheck": ""
+      },
+      {
+        "id": "c12",
+        "text": "The Sept. 29 budget presentation's budget-meetings slide lists October 20 as second reading of mill levy ordinances, November 17 as first reading of budget adoption and appropriation ordinances, and December 1 as second reading of budget adoption and appropriation ordinances and associated resolutions.",
+        "status": "VERIFIED",
+        "item": "2027 Proposed Budget Presentation and First Public Hearing",
+        "sourceIds": [
+          "s3"
+        ],
+        "nextCheck": ""
+      }
+    ],
+    "sources": [
+      {
+        "id": "s3",
+        "title": "2027 Proposed Budget Presentation, September 29, 2026",
+        "tier": "A",
+        "url": "https://longmontcolorado.gov/wp-content/uploads/2026/09/2027_Budget-Presentation-9-29-26smaller.pdf",
+        "locator": "page 31, Budget Meetings",
+        "offlineReference": ""
+      }
+    ]
+  },
+  "provenance": "Exact request-15 writer-citation-revision.txt claims c11/c12, package.json references, all-documents.json page 31. Bounded regression fixture, not a complete reporting package.",
+  "filed": {
+    "id": "longmont-2027-budget-hsa-airport-followup-2026-10-06",
+    "headline": "Longmont's 2027 budget: a $15,330 human-services trim, a $495,670 placeholder, and a First and Main shuffle",
+    "draft": "Longmont's 2027 budget is still a proposal, and the numbers residents will feel most are the ones staff revised after the county's property-tax figures came in low.\n\nIn a Sept. 29 memo to council, staff wrote that preliminary property-tax certifications from Boulder County came in $511,000 below what the city had assumed. Because Human Services Agency funding is set by a formula — 3% of budgeted tax revenue — that shortfall mechanically pulls the agency pool down by $15,330, from the $2,962,875 proposed in the Sept. 15 memo to $2,947,545 in the Sept. 29 revision. It is a formula-driven adjustment inside a proposal, not an adopted cut, and it is not a year-over-year comparison: both figures are 2027 proposals at different points in the same budget cycle. The Sept. 15 memo describes the $2,962,875 as supporting nonprofits across six named impact areas plus unhoused services, and names no individual organization.\n\nTo balance the same property-tax reduction, staff propose budgeting a $495,670 \"savings\" in the non-departmental budget service. The memo is explicit that the department lines behind that number are not yet identified: after the first of the year, the city manager and finance staff will begin zero-based budgeting meetings and will identify which department line items the 2027 savings come from, with budget adjustments to follow. So residents asking which programs absorb the $495,670 cannot get an answer from the documents filed so far.\n\nTwo First and Main items are also moving. The Sept. 29 memo's One-Time Budget Adjustments section states the proposed General Fund budget includes a one-time transfer of $672,625 to the Public Improvement Fund for costs associated with the 1st and Main Transit Hub; the memo says those funds are instead needed in 2026 and are being removed from the 2027 proposal, with an ordinance coming to council in October to appropriate the amount in 2026. In its separate Public Improvement Fund section, the memo states the 2027 proposal included $1,646,233 set aside for CIP project TRP131, 1st and Main Transit Station Area Improvements; those funds are needed in 2026 to begin construction before year end and are likewise being removed from the 2027 proposal and included in the October appropriation ordinance. The memo does not state that one amount funds or nests inside the other, so the two are reported here as separate lines rather than a combined figure.\n\nAfter those changes, the memo puts the General Fund 2027 proposed budget at $132,532,296 in its One-Time Budget Adjustments section and the Public Improvement Fund 2027 proposed budget at $11,388,343 in its own Public Improvement Fund section.\n\nThe schedule is not adoption. The Sept. 29 presentation's budget-meetings slide lists Oct. 6 as final direction from Council, the second public hearing, and first reading of mill levy ordinances, with second reading of the mill levy ordinances Oct. 20, first reading of the budget adoption and appropriation ordinances Nov. 17, and second reading Dec. 1. The city's 2027 Budget Documents page carries the same sequence. The Sept. 29 meeting itself was a study session and first public hearing, and the memo's executive summary says council will also need to hold the first public hearing on the proposed budget, the 2027-2031 CIP and the proposed pay plan.\n\nWhat residents can still influence: the Oct. 6 regular meeting is the advertised point for final council direction and the second public hearing, and the Human Services Agency funding hearings continue on a published schedule through late October at the Housing and Human Services Advisory Board. Those hearings are scheduled presentations by agencies, not awards or named cuts.",
+    "plainBrief": "Longmont's 2027 budget is a proposal, not a done deal. A Sept. 29 staff memo says lower-than-expected county property-tax certifications cut $511,000 from the General Fund, and because Human Services Agency funding is set at 3% of budgeted tax revenue, the agency pool drops $15,330 — from $2,962,875 in the Sept. 15 proposal to $2,947,545 in the Sept. 29 revision. That is a formula adjustment inside the proposal, not an adopted cut. To offset the same shortfall, staff propose a $495,670 \"savings\" in the non-departmental budget service, but the memo says the department lines behind it will only be identified later through zero-based budgeting. Two First and Main items — a $672,625 General Fund transfer and a $1,646,233 TRP131 set-aside — are being pulled from the 2027 proposal because the money is needed in 2026, with an October appropriation ordinance planned; the memo does not say one funds the other. Revised fund totals are $132,532,296 for the General Fund and $11,388,343 for the Public Improvement Fund. Council's own calendar puts final direction and the second public hearing on Oct. 6, with adoption ordinance readings Nov. 17 and Dec. 1.",
+    "cannotSay": "The department line items behind the $495,670 non-departmental \"savings\" are not identified in any document read for this story; the memo says they will be identified through zero-based budgeting after the first of the year. The relationship between the $672,625 General Fund transfer and the $1,646,233 TRP131 set-aside is not established by the memo, so no combined or nested total is reported. The Sept. 15 memo states a 2027 proposed budget total of $547.5 million while the Sept. 29 memo states a revised total of $544,645,951; the memos attribute the difference to $1,183,625 in revenue and $2,829,858 in expense changes, so the two totals describe different points in the same proposal and are not treated as contradictory. The Sept. 15 memo's Public Safety Fund figure is built on the current 0.58% tax and would be updated if voters approve the November increase, so it is not a final 2027 number. The Sept. 15 memo also reports 2026 outcomes (sales and use tax $1.73 million under budget; just under $1.0 million drawn from the stabilization reserve) that are not 2027 effects. The Oct. 6 agenda packet and any Oct. 6 staff communication were not read for this story, so the exact official heading of the Oct. 6 hearing item and whether any department line items were named on the record remain unverified. Caption-only votes, identities and quotations from the Sept. 29 recording are excluded from this copy. An airport-fund arithmetic discrepancy noted in the private ledger remains unresolved and is not reported here.",
+    "readinessTier": 2,
+    "claims": [
+      {
+        "id": "c11",
+        "text": "The Sept. 29 budget presentation's budget-meetings slide lists October 6 as final direction from Council, the second public hearing, and first reading of mill levy ordinances.",
+        "status": "UNVERIFIED",
+        "sourceIds": [
+          "s3-c11-1"
+        ],
+        "nextCheck": "Date is not in this item's own record.",
+        "item": "2027 Proposed Budget Presentation and First Public Hearing"
+      },
+      {
+        "id": "c12",
+        "text": "The Sept. 29 budget presentation's budget-meetings slide lists October 20 as second reading of mill levy ordinances, November 17 as first reading of budget adoption and appropriation ordinances, and December 1 as second reading of budget adoption and appropriation ordinances and associated resolutions.",
+        "status": "UNVERIFIED",
+        "sourceIds": [
+          "s3-c12-1"
+        ],
+        "nextCheck": "Date is not in this item's own record.",
+        "item": "2027 Proposed Budget Presentation and First Public Hearing"
+      }
+    ],
+    "sources": [
+      {
+        "id": "s3-c11-1",
+        "title": "2027 Proposed Budget Presentation, September 29, 2026",
+        "tier": "A",
+        "url": "https://longmontcolorado.gov/wp-content/uploads/2026/09/2027_Budget-Presentation-9-29-26smaller.pdf",
+        "locator": "p. 31, BUDGET MEETINGS",
+        "offlineReference": ""
+      },
+      {
+        "id": "s3-c12-1",
+        "title": "2027 Proposed Budget Presentation, September 29, 2026",
+        "tier": "A",
+        "url": "https://longmontcolorado.gov/wp-content/uploads/2026/09/2027_Budget-Presentation-9-29-26smaller.pdf",
+        "locator": "p. 31, BUDGET MEETINGS",
+        "offlineReference": ""
+      }
+    ]
+  },
+  "documents": [
+    {
+      "url": "https://longmontcolorado.gov/wp-content/uploads/2026/09/2027_Budget-Presentation-9-29-26smaller.pdf",
+      "title": "2027_Budget-Presentation-9-29-26smaller.pdf",
+      "ok": true,
+      "text": "BUDGET MEETINGS September 1 – Regular Meeting • Presentation of the 2027 Proposed Budget and the 2027-2031 Capital Improvement Program • CIP overview and projects September 8 – Regular Meeting • Employee compensation and benefits • LDDA budgets September 15 – Study Session • 2027 budget summary • General Fund budget summary • Public Safety Fund budget summary • One-time expenses • Financial policies September 22 – Regular Meeting • Transportation funding • Utilities budget summaries September 29 – Study Session • NextLight budget summary • Airport budget summary • First public hearing October 6 – Regular Meeting • Final direction from Council • Second public hearing • First reading of mill levy ordinances October 20 – Regular Meeting • Second reading of mill levy ordinances November 17 - Regular Meeting • First reading ordinances for budget adoption and appropriation and UBCIS changes December 1 - Regular Meeting • Second reading ordinances for budget adoption and appropriation and UBCIS changes and associated resolutions 31",
+      "reason": "",
+      "pages": [
+        {
+          "page": 31,
+          "layoutText": "BUDGET MEETINGS\nSeptember 1 – Regular Meeting\n• Presentation of the 2027 Proposed\nBudget and the 2027-2031 Capital\nImprovement Program\n• CIP overview and projects\nSeptember 8 – Regular Meeting\n• Employee compensation and\nbenefits\n• LDDA budgets\nSeptember 15 – Study Session\n• 2027 budget summary\n• General Fund budget summary\n• Public Safety Fund budget\nsummary\n• One-time expenses\n• Financial policies\nSeptember 22 – Regular Meeting\n• Transportation funding\n• Utilities budget summaries\nSeptember 29 – Study Session\n• NextLight budget summary\n• Airport budget summary\n• First public hearing\nOctober 6 – Regular Meeting\n• Final direction from Council\n• Second public hearing\n• First reading of mill levy\nordinances\nOctober 20 – Regular Meeting\n• Second reading of mill levy\nordinances\nNovember 17 - Regular Meeting\n• First reading ordinances for\nbudget adoption and\nappropriation and UBCIS\nchanges\nDecember 1 - Regular Meeting\n• Second reading ordinances for\nbudget adoption and\nappropriation and UBCIS\nchanges and associated\nresolutions\n31",
+          "text": "BUDGET MEETINGS September 1 – Regular Meeting • Presentation of the 2027 Proposed Budget and the 2027-2031 Capital Improvement Program • CIP overview and projects September 8 – Regular Meeting • Employee compensation and benefits • LDDA budgets September 15 – Study Session • 2027 budget summary • General Fund budget summary • Public Safety Fund budget summary • One-time expenses • Financial policies September 22 – Regular Meeting • Transportation funding • Utilities budget summaries September 29 – Study Session • NextLight budget summary • Airport budget summary • First public hearing October 6 – Regular Meeting • Final direction from Council • Second public hearing • First reading of mill levy ordinances October 20 – Regular Meeting • Second reading of mill levy ordinances November 17 - Regular Meeting • First reading ordinances for budget adoption and appropriation and UBCIS changes December 1 - Regular Meeting • Second reading ordinances for budget adoption and appropriation and UBCIS changes and associated resolutions 31"
+        }
+      ]
+    }
+  ]
+}

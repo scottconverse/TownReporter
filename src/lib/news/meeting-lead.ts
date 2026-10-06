@@ -34,6 +34,17 @@ function timestamp(seconds: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function storedNotes(raw: string | null): Record<string, unknown> {
+  if (raw === null) return {};
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  } catch {
+    // Refuse to replace a note blob we cannot preserve as an object.
+  }
+  throw new Error("Cannot refresh the meeting lead because its saved notes are not a JSON object.");
+}
+
 /**
  * The desk's own headline cap: an edited headline is stored at `desk.ts` at 180,
  * so a capture headline is bounded here rather than arriving longer than the
@@ -235,27 +246,6 @@ export async function fileMeetingLead(
     }),
     votes: input.votes,
   });
-  const notesJson = JSON.stringify({
-    meeting: {
-      videoId: input.videoId,
-      title: input.title,
-      date: input.meetingDate,
-      artifactId: input.artifactId,
-    },
-    /*
-      The draft step reads these and records which positions the prose actually
-      drew from. Carried on the lead so the citations survive the trip from the
-      capture pass into the desk, which is where they were being dropped.
-    */
-    transcriptCitations: input.citations.map((c) => ({
-      item: c.item,
-      segmentIndex: c.segmentIndex,
-      timestampSeconds: c.timestampSeconds,
-      timestamp: timestamp(c.timestampSeconds),
-      excerpt: c.excerpt,
-      captionSha256: c.captionSha256,
-    })),
-  });
   /*
     researchScope must be on the lead.
 
@@ -265,10 +255,44 @@ export async function fileMeetingLead(
     different story on the web while the transcript sits unused in scratch.
     Supplied scope is what makes this lead draft from its own record.
   */
+  const priorLeads = await sql.query<{ notes_json: string | null }>(
+    `select notes_json from leads
+       where newsroom_id=$1 and meeting_video_id=$2 and meeting_lead_purpose='transcript-story'
+       order by id desc limit 1 for update`,
+    [input.newsroomId, input.videoId],
+  );
+  const priorNotes = storedNotes(priorLeads[0]?.notes_json ?? null);
+  // Scratch is editor state after filing and can contain a generated excerpt,
+  // edited text, or both; retain it as saved. The immutable artifact and
+  // citation fields below are the current-capture evidence and always advance.
+  const scratchForLead = Object.hasOwn(priorNotes, "scratch") && typeof priorNotes.scratch === "string"
+    ? priorNotes.scratch
+    : scratch;
+  const researchScope = priorNotes.researchScope === "public" || priorNotes.researchScope === "supplied"
+    ? priorNotes.researchScope
+    : "supplied";
   const notesWithScratch = JSON.stringify({
-    ...(JSON.parse(notesJson) as Record<string, unknown>),
-    researchScope: "supplied",
-    scratch,
+    ...priorNotes,
+    meeting: {
+      videoId: input.videoId,
+      title: input.title,
+      date: input.meetingDate,
+      artifactId: input.artifactId,
+    },
+    /*
+      These immutable references describe the current capture. Replacing them
+      on revision keeps A's hashes from being presented as evidence for B.
+    */
+    transcriptCitations: input.citations.map((c) => ({
+      item: c.item,
+      segmentIndex: c.segmentIndex,
+      timestampSeconds: c.timestampSeconds,
+      timestamp: timestamp(c.timestampSeconds),
+      excerpt: c.excerpt,
+      captionSha256: c.captionSha256,
+    })),
+    researchScope,
+    scratch: scratchForLead,
   });
   const rows = await sql.query<{ id: number }>(
     `insert into leads (user_id, newsroom_id, headline, why, topic, source_urls, evidence, newsworthiness, status, notes_json,

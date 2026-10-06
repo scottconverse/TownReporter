@@ -82,3 +82,8 @@ artifacts/**
 # Written at run time by the meeting-capture tests and the live desk; never source.
 meeting-capture/
 meeting-captions/
+
+# Durable civic-reporting run evidence belongs to this installation, not Git.
+.townreporter/reporting/
+# Temporary patch input created by local coding workers.
+.tmp-patch/

@@ -10,6 +10,12 @@ import {
   type AutomaticRungId,
   type ModelEffort,
 } from "./provider-registry.ts";
+import {
+  selectRotation,
+  unmarkedQuietInstitutions,
+  type SourcePreference,
+} from "./adaptive-source-selection.ts";
+import { type SourceHealthFacts } from "./source-inventory.ts";
 
 /**
  * What a daily-scan policy may store as its runtime.
@@ -592,3 +598,267 @@ export const resumeDailyScan = createServerFn({ method: "POST" })
           error: "The policy revision is invalid.",
         }),
   );
+
+/**
+ * THE DAILY ROTATION, decided here so the schedule stops reading the same fixed
+ * dozen forever.
+ *
+ * THE PROBLEM THIS SOLVES, in one number: the accepted pool is 201 sources and
+ * the policy cap is 12 a day, so reading exactly the editor's stored twelve
+ * every day means a full pass takes at least 17 days AND the other 189 are never
+ * read at all. Raising the cap to 201 would make one pass cost seventeen times
+ * what it costs now, which is not a fix -- the schedule would still spend its
+ * budget in the wrong order on the days it could afford to run.
+ *
+ * WHAT IT DOES INSTEAD. The editor's own selections are the schedule's floor:
+ * every source they picked is read, in their order, before anything else, and
+ * the stored policy is NOT overwritten. What is left of the day's budget is
+ * filled from `selectRotation`, which reads the sources that are due or have
+ * waited longest, honours `retry_after`/blocked (a parked row is deferred, never
+ * deleted), and cannot starve the tail. The result is a run that reads the
+ * editor's picks AND rotates the rest, so the pool is covered over time instead
+ * of freezing.
+ *
+ * WHY IT IS PURE AND HERE. `daily-scan.server.ts` runs inside a transaction with
+ * a network fetch loop; this decision is a sort, and pinning it offline under
+ * `node --test` is how "nothing starves" and "editor control is absolute" get
+ * proved without a database. The server passes facts in and takes a plan out.
+ *
+ * WHAT IT REFUSES TO DO. It never invents a reason to drop an accepted source
+ * and never touches `selected_source_ids`; a deferred source is deferred for
+ * this pass only. It also reports the freshness the plan actually buys and the
+ * quiet institutions that carry no priority flag, so the screen can say the gap
+ * rather than imply full coverage.
+ */
+export type DailyRotationPlan = {
+  /** The exact source IDs this run would read, editor selections first. */
+  sourceIds: number[];
+  /** How the run was filled: how many were the editor's, how many rotated. */
+  selectedCount: number;
+  rotatedCount: number;
+  /** The accepted pool the rotation chose from. */
+  poolSize: number;
+  /**
+   * The budget the plan spent, `<= cap`. The INVARIANT, checked by the tests:
+   * `sourceIds.length <= budget` always. A selected source can no longer push
+   * the read set past the cap.
+   */
+  budget: number;
+  /** Whole days a full rotation takes at this budget, floor 1. */
+  fullPassDays: number;
+  /** Age in days of the stalest source this pass did not read, or null. */
+  stalestDeferredDays: number | null;
+  /** Sources deferred this pass (over budget, parked, or blocked). */
+  deferredIds: number[];
+  /**
+   * WHY each deferred source sat out, keyed by id, so the run record can say
+   * "over budget" versus "the host asked us to wait" rather than lumping them.
+   */
+  deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" }[];
+  /**
+   * Editor-selected sources the automatic run did NOT read this pass because
+   * they are ineligible right now (parked/blocked) or beyond the cap. Their
+   * stored selection is preserved; they are named here so the desk can show
+   * "your pick will run when the wait clears", never a silent unselect.
+   */
+  selectedDeferredIds: number[];
+  /** Watch sources with no priority flag -- the quiet institutions to check. */
+  unmarkedQuietIds: number[];
+  /** A plain sentence for the run record and the screen. */
+  note: string;
+};
+
+export type DailyRotationInput = {
+  facts: readonly SourceHealthFacts[];
+  /** The editor's stored selections, in order. Read first, never dropped. */
+  selectedSourceIds: readonly number[];
+  /** Per-source priority the editor set on the Sources screen, if any. */
+  preferences?: readonly SourcePreference[];
+  /** The policy's cap. Clamped to the schema's 1..12 in `clean*`; read here. */
+  cap: number;
+  nowMs?: number;
+};
+
+/**
+ * Build the run's source set: the editor's eligible picks first, then the
+ * rotation, up to `cap`. Three properties this keeps, each a fix for a real
+ * defect the first cut had:
+
+ *   1. RETRY ELIGIBILITY BEATS A STORED PICK. A selected source that is parked
+ *      or blocked right now is NOT re-added to the read set -- the automatic run
+ *      respects the wait. Its selection is preserved (it stays in the policy and
+ *      comes back when `retry_after` clears); it is reported in
+ *      `selectedDeferredIds`, so the desk can say why. A pick that must run
+ *      DESPITE a wait is a separate, conscious editor action, not the stored
+ *      selection this function reads.
+ *   2. THE BUDGET IS A CEILING ON THE READ SET, NOT ON THE PICK LIST. When the
+ *      editor has selected more sources than the cap allows, the first `budget`
+ *      eligible picks run and the rest are deferred with reason `over-budget`.
+ *      They are never silently unselected. `sourceIds.length <= budget` always,
+ *      so the plan's "bounded" claim is true.
+ *   3. FRESHNESS IS COMPUTED FROM WHAT THIS RUN ACTUALLY CHOSE AND DEFERRED,
+ *      not from the internal pre-selection rotation, whose contents can differ.
+ */
+export function planDailySourceRotation(input: DailyRotationInput): DailyRotationPlan {
+  const nowMs = input.nowMs ?? Date.now();
+  const budget = Math.max(1, Math.min(CAP, Math.floor(input.cap) || CAP));
+  const byId = new Map(input.facts.map((f) => [f.id, f]));
+
+  // The rotation over the WHOLE pool decides eligibility (who is parked/blocked)
+  // and the fair order for the fill. Its own read/defer split is discarded below
+  // in favour of the actual chosen set.
+  const rotation = selectRotation({
+    sources: input.facts,
+    preferences: input.preferences,
+    budget,
+    nowMs,
+  });
+  const ineligible = new Map<number, "parked" | "blocked">();
+  for (const d of rotation.deferred) {
+    if (d.reason === "parked" || d.reason === "blocked") ineligible.set(d.sourceId, d.reason);
+  }
+
+  // The editor's picks, in their stored order, de-duplicated, and kept even when
+  // the pool no longer contains them (that gap is reported by `selectedCount`).
+  const selectedAll: number[] = [];
+  const seen = new Set<number>();
+  for (const id of input.selectedSourceIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    selectedAll.push(id);
+  }
+  const selectedInPool = selectedAll.filter((id) => byId.has(id));
+  // Eligible picks run; an ineligible pick waits for its retry (never re-added).
+  const eligibleSelected = selectedInPool.filter((id) => !ineligible.has(id));
+
+  const overBudget: number[] = [];
+  const selected: number[] = [];
+  for (const id of eligibleSelected) {
+    if (selected.length < budget) selected.push(id);
+    else overBudget.push(id);
+  }
+  const selectedDeferred = [
+    ...selectedInPool.filter((id) => ineligible.has(id)),
+    ...overBudget,
+  ];
+
+  const taken = new Set(selected);
+  const remaining = Math.max(0, budget - selected.length);
+  const fill = rotation.read
+    .map((r) => r.sourceId)
+    .filter((id) => !taken.has(id) && !ineligible.has(id))
+    .slice(0, remaining);
+  const sourceIds = [...selected, ...fill];
+
+  // A source-by-source deferral map for the ACTUAL chosen set: everything the run
+  // did not read, with its reason. Parked/blocked come first (they are facts), and
+  // the rest are over-budget against this run's real read set.
+  const chosen = new Set(sourceIds);
+  const deferrals: { sourceId: number; reason: "over-budget" | "parked" | "blocked" }[] = [];
+  const deferredIds = new Set<number>();
+  // Parked/blocked first: a wait or a block is a fact and outranks "over budget".
+  for (const [id, reason] of ineligible)
+    if (!chosen.has(id)) {
+      deferrals.push({ sourceId: id, reason });
+      deferredIds.add(id);
+    }
+  // Everything else the run did not read is deferred for the budget alone.
+  for (const f of input.facts)
+    if (!chosen.has(f.id) && !deferredIds.has(f.id)) {
+      deferrals.push({ sourceId: f.id, reason: "over-budget" });
+      deferredIds.add(f.id);
+    }
+
+  const freshness = freshnessOfFromChosen(sourceIds, input.facts, nowMs);
+  const unmarkedQuietIds = unmarkedQuietInstitutions(input.facts, input.preferences ?? [], nowMs);
+  return {
+    sourceIds,
+    selectedCount: selected.length,
+    rotatedCount: fill.length,
+    poolSize: input.facts.length,
+    budget,
+    fullPassDays: freshness.fullPassDays,
+    stalestDeferredDays: freshness.stalestDeferredDays,
+    deferredIds: deferrals.map((d) => d.sourceId),
+    deferrals,
+    selectedDeferredIds: selectedDeferred,
+    unmarkedQuietIds,
+    note: dailyRotationNote({
+      poolSize: input.facts.length,
+      selectedCount: selected.length,
+      rotatedCount: fill.length,
+      budget,
+      fullPassDays: freshness.fullPassDays,
+      unmarkedQuietCount: unmarkedQuietIds.length,
+      selectedDeferredCount: selectedDeferred.length,
+    }),
+  };
+}
+
+/**
+ * One sentence, in the editor's language, that says what the run will do and
+ * what it will not cover. Kept plain on purpose: no percentage that implies a
+ * promise the schedule cannot keep.
+ */
+export function dailyRotationNote(input: {
+  poolSize: number;
+  selectedCount: number;
+  rotatedCount: number;
+  budget: number;
+  fullPassDays: number;
+  unmarkedQuietCount: number;
+  selectedDeferredCount?: number;
+}): string {
+  if (input.poolSize === 0) return "No accepted sources to read.";
+  const parts: string[] = [];
+  parts.push(
+    input.selectedCount
+      ? `Reading your ${input.selectedCount} selected source${input.selectedCount === 1 ? "" : "s"} first`
+      : "Reading the daily rotation",
+  );
+  if (input.selectedDeferredCount)
+    parts.push(
+      `${input.selectedDeferredCount} of your selections wait${input.selectedDeferredCount === 1 ? "s" : ""} for its retry or the next pass`,
+    );
+  if (input.rotatedCount)
+    parts.push(
+      `then ${input.rotatedCount} from the rotation of ${input.poolSize}`,
+    );
+  parts.push(`a full pass takes about ${input.fullPassDays} day${input.fullPassDays === 1 ? "" : "s"} at this rate`);
+  if (input.unmarkedQuietCount)
+    parts.push(
+      `${input.unmarkedQuietCount} quiet source${input.unmarkedQuietCount === 1 ? "" : "s"} carry no priority flag`,
+    );
+  return `${parts.join("; ")}.`;
+}
+
+/**
+ * FRESHNESS FROM THE ACTUAL CHOSEN SET, not from the internal rotation.
+ *
+ * `freshnessOf` in the selection module describes the rotation's own read set,
+ * which is computed BEFORE the editor's picks are merged in -- so its counts can
+ * describe different IDs than the run will really read. This derives the same
+ * figures from the IDs this plan actually chose, so the "days a full pass takes"
+ * and "stalest source this pass skipped" the run records are true of the run.
+ */
+export function freshnessOfFromChosen(
+  chosenIds: readonly number[],
+  facts: readonly SourceHealthFacts[],
+  nowMs: number,
+): { fullPassDays: number; stalestDeferredDays: number | null } {
+  const chosen = new Set(chosenIds);
+  let stalest: number | null = null;
+  for (const fact of facts) {
+    if (chosen.has(fact.id)) continue;
+    const at = fact.last_ok_at ? Date.parse(fact.last_ok_at) : Number.NaN;
+    if (!Number.isFinite(at)) continue;
+    const days = Math.floor((nowMs - at) / 86_400_000);
+    if (stalest == null || days > stalest) stalest = days;
+  }
+  return {
+    fullPassDays: chosenIds.length
+      ? Math.max(1, Math.ceil(facts.length / chosenIds.length))
+      : Number.POSITIVE_INFINITY,
+    stalestDeferredDays: stalest,
+  };
+}

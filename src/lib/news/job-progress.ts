@@ -126,6 +126,7 @@ const TITLES: Partial<Record<JobKind, string>> = {
   "artifact-ocr": "Reading the PDF",
   pull: "Pulling the public record",
   "audio-transcribe": "Transcribing the audio",
+  reporting: "Reporting the assignment",
 };
 
 const DONE_TEXT: Partial<Record<JobKind, string>> = {
@@ -140,6 +141,7 @@ const DONE_TEXT: Partial<Record<JobKind, string>> = {
   "artifact-ocr": "The PDF pages are read",
   pull: "The pull is done",
   "audio-transcribe": "The transcript is saved",
+  reporting: "Your reporting package is ready",
 };
 
 const OPEN_LABEL: Partial<Record<JobKind, string>> = {
@@ -154,6 +156,7 @@ const OPEN_LABEL: Partial<Record<JobKind, string>> = {
   "artifact-ocr": "Open the file",
   pull: "Open the story",
   "audio-transcribe": "Open the transcript",
+  reporting: "Open the reporting",
 };
 
 /*
@@ -171,6 +174,9 @@ const RESULT_HREF: Partial<Record<JobKind, (subjectId: number) => string>> = {
   // the audio artifact -- `performAudioTranscribeWork` refuses to run when the
   // receipt's `audioArtifactId` and the subject disagree.
   "audio-transcribe": (subjectId) => `/desk/transcript/${subjectId}`,
+  // A reporting subject is a request ID. Until its lead is resolved, use the
+  // queue rather than interpreting that request ID as a story ID.
+  reporting: () => "/desk/queue",
   // Pull's result is a document under a story, and a `pull` job's subject is
   // the job's own receipt rather than a lead, so there is no honest id to put
   // in a URL here. Null: the card offers no Open button rather than a wrong one.
@@ -257,7 +263,9 @@ export function jobProgressView(
         ? draftId
           ? `/desk/story/draft/${draftId}`
           : `/desk/story/${leadId}`
-        : RESULT_HREF[kind]?.(row.subject_id) ?? null),
+        : kind === "reporting" && leadId
+          ? `/desk/story/${leadId}`
+          : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
     doneText: DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
@@ -439,10 +447,15 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       order by (j.status in ('queued', 'running')) desc, j.id desc
       limit 30
     `;
+    const reportingRequestIds = rows.filter((row) => row.kind === "reporting").map((row) => row.subject_id);
+    const reportingLeads = reportingRequestIds.length
+      ? await sql<{ id: number; lead_id: number | null }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`
+      : [];
+    const leadByRequest = new Map(reportingLeads.map((request) => [Number(request.id), request.lead_id == null ? null : Number(request.lead_id)]));
     return rows.map((row) =>
       jobProgressView(
         row,
-        row.kind === "draft" || row.kind === "reconcile" ? row.subject_id : 0,
+        row.kind === "reporting" ? leadByRequest.get(row.subject_id) ?? 0 : row.kind === "draft" || row.kind === "reconcile" ? row.subject_id : 0,
         row.kind === "draft" || row.kind === "reconcile" ? row.draft_id : null,
         row.headline,
       ),

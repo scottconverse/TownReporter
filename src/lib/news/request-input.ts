@@ -81,6 +81,13 @@ export const LIMITS = {
   meetingKeywordEntries: 100,
   listItem: 200,
   meetingKeyword: 120,
+  /**
+   * WR1 fixes round 1: the newsroom's own list of elected officials and staff,
+   * one name and title per line. A plain text block, not a list of entries --
+   * a town's council, staff and board members run to a few dozen lines, and
+   * 4,000 chars is generous room for them.
+   */
+  electedOfficials: 4_000,
 
   /*
     0.6.63, the full sweep. The first group was written against the column
@@ -1087,8 +1094,135 @@ export const pullTodoInput = z.object({
 /** `desk.ts:2065` listPullJobs. */
 export const leadIdInput = z.object({ leadId: rowId });
 
+/*
+  WR1 phase 2 (the screens): the ledger panel's two writes and the rewrite.
+
+  `ledgerItemStatusInput` is scoped by draft id, not lead id: the panel edits the
+  ledger of the draft it is showing, and `saveLedgerItemStatus` matches that
+  `(newsroom_id, draft_id, item_no)` exactly -- a draft from another newsroom
+  updates no row and is refused. The enum is the three decisions an editor makes;
+  `unread` is not one of them, because an editor does not decide that a window
+  was never read. `reason` is optional here and required for `excluded` by the
+  writer itself, so "excluded without a reason" is refused at the boundary that
+  can say why.
+
+  `claimReviewedInput` carries the whole mark: `reviewed: false` clears it.
+*/
+export const ledgerItemStatusInput = z.object({
+  rowId: z.number().int().optional(),
+  reporting: z.object({ packageId: rowId, requestId: rowId, storyId: z.string(), actionIndex: z.number().int().min(0), actionId: z.string(), actionSnapshot: z.string() }).optional(),
+  draftId: rowId,
+  itemNo: z.number().int().min(0).max(1_000_000),
+  status: z.enum(["lead", "roundup", "excluded"]),
+  reason: z.string().trim().max(2_000).optional(),
+});
+
+/** `desk.ts` markClaimReviewed (WR1 phase 2). */
+export const claimReviewedInput = z.object({
+  claimId: rowId,
+  reviewed: z.boolean(),
+});
+
+/**
+ * `desk.ts` rewriteFromLedger (WR1 phase 2): the same form the Draft button
+ * posts, because it queues the same kind of draft job -- the difference
+ * (`reuseLedger`) is a server-side decision, not something the screen picks.
+ */
+export const rewriteFromLedgerInput = z.object({
+  leadId: rowId,
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  researchScope: researchScopeValue.optional(),
+});
+
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
 export const jobIdInput = z.object({ jobId: rowId });
+
+/*
+  Editor-facing civic reporting (civic-reporting.ts). The one press behind
+  "Report this meeting" / "Develop this lead" and a direct town/beat/date/issue
+  assignment. These are SHAPE checks only: the handler still runs
+  deskMiddleware (authenticated editor, newsroom scope) and the SAME model
+  preflight the draft path uses (model-request-commit.server.ts).
+*/
+/**
+  A reporting action is the press the editor made. The four direct assignments
+  have no lead row yet (the runner creates the lead), so they carry no leadId.
+*/
+export const reportingActionValue = z.enum([
+  "report-meeting",
+  "develop-lead",
+  "report-town",
+  "report-beat",
+  "report-date",
+  "report-issue",
+]);
+
+/**
+  One reporting assignment. `leadId` is required for the two lead-anchored
+  actions and left absent for the four direct ones -- the server decides which
+  by action, and a direct assignment with a lead id pasted in is not silently
+  attached to an unrelated lead.
+*/
+export const startReportingInput = z.object({
+  action: reportingActionValue,
+  leadId: rowId.optional(),
+  /** The editor's own words: subject, direction, what to account for separately. */
+  assignment: z.string().trim().max(4_000),
+  /** Optional seed sources, one URL per line or space-separated. */
+  seedUrls: z.string().max(20_000).optional(),
+  /** Set only by a follow-up press: the run this one continues. */
+  parentRequestId: rowId.optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  researchScope: researchScopeValue.optional(),
+});
+
+/** `desk.ts` answerReportingFollowUp: a follow-up points at the run it continues. */
+export const reportingFollowUpInput = z.object({
+  parentRequestId: rowId,
+  /** The targeted work this follow-up asks for. */
+  assignment: z.string().trim().max(4_000),
+  seedUrls: z.string().max(20_000).optional(),
+  modelChoice: modelChoiceText.optional(),
+  modelEffort: modelEffortOrNull.optional(),
+  researchScope: researchScopeValue.optional(),
+});
+
+/**
+  The editor's dated, sourced correction-or-disposition, saved for a later
+  relevant assignment. Scope and evidence are REQUIRED: an unattributed note
+  is not a record, and this changes nothing about the model's own prompts.
+*/
+export const reportingObservationInput = z.object({
+  requestId: rowId.optional(),
+  leadId: rowId.optional(),
+  kind: z.enum(["correction", "disposition", "source"]),
+  /** What the editor is recording, in their own words. */
+  text: z.string().trim().min(1).max(4_000),
+  /** The dated, sourced justification: a URL or an honest offline reference. */
+  evidence: z.string().trim().min(1).max(4_000),
+});
+
+/** `desk.ts` loadLeadReportingPackage (the story route's package read). */
+export const leadReportingPackageInput = z.object({ leadId: rowId });
+
+/** `desk.ts` cancelReportingRequest (stop a reporting run the editor started). */
+export const reportingRequestIdInput = z.object({ requestId: rowId });
+
+/**
+  `desk.ts` listReportingObservations: the assignment scope for "records kept
+  for the next assignment". All fields are optional at the boundary because a
+  lead with no package yet still has a lead; the reader scopes by whatever is
+  present and never falls back to a newsroom-wide read. The cap on seed URLs
+  matches the writer's own cap so a pasted paragraph cannot widen the scope.
+*/
+export const reportingObservationsScopeInput = z.object({
+  leadId: rowId.optional(),
+  requestId: rowId.optional(),
+  seedUrls: z.array(z.string().max(2_000)).max(30).optional(),
+});
+
 /** `desk.ts:2208` setLeadStatus. */
 export const leadStatusInput = z.object({
   id: rowId,
