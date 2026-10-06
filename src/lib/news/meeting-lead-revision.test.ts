@@ -53,7 +53,19 @@ test("a revised transcript refreshes one meeting lead without resetting its edit
       artifactId: 10,
       citations: [{ item: "8", segmentIndex: 1, timestampSeconds: 30, excerpt: "artifact A", captionSha256: "a" }],
     });
-    await db.query("update leads set status='drafted' where id=$1", [first.leadId]);
+    const [firstLead] = (await db.query<{ notes_json: string }>(
+      "select notes_json from leads where id=$1",
+      [first.leadId],
+    )).rows;
+    const editorNotes = {
+      ...JSON.parse(firstLead!.notes_json) as Record<string, unknown>,
+      editorialAssignment: { origin: "story-workspace", text: "Cover Item 8: Annexation." },
+      scratch: "Editor note: check the revised annexation language.",
+      todo: [{ t: "Confirm the item 8 title", done: false, src: "you" }],
+      researchScope: "public",
+      editorExtension: { keep: "the unmodeled editor field" },
+    };
+    await db.query("update leads set status='drafted',notes_json=$2 where id=$1", [first.leadId, JSON.stringify(editorNotes)]);
     const revised = await fileMeetingLead(sql, {
       ...base,
       artifactId: 11,
@@ -66,8 +78,22 @@ test("a revised transcript refreshes one meeting lead without resetting its edit
     assert.equal(rows.length, 1, "one meeting video must not create a second transcript-story lead");
     assert.equal(rows[0]!.status, "drafted", "the revision must preserve the editor's workflow state");
     assert.equal(rows[0]!.meeting_artifact_id, 11, "the existing lead must point at artifact B for redrafting");
-    assert.equal(JSON.parse(rows[0]!.notes_json).meeting.artifactId, 11);
-    assert.match(rows[0]!.notes_json, /artifact B/);
+    const revisedNotes = JSON.parse(rows[0]!.notes_json) as {
+      meeting: { artifactId: number };
+      transcriptCitations: { captionSha256: string }[];
+      editorialAssignment: { text: string };
+      scratch: string;
+      todo: { t: string; done: boolean; src: string }[];
+      researchScope: string;
+      editorExtension: { keep: string };
+    };
+    assert.equal(revisedNotes.meeting.artifactId, 11);
+    assert.deepEqual(revisedNotes.transcriptCitations.map((citation) => citation.captionSha256), ["b"], "the revision must replace A's citation hash");
+    assert.equal(revisedNotes.editorialAssignment.text, "Cover Item 8: Annexation.");
+    assert.equal(revisedNotes.scratch, "Editor note: check the revised annexation language.");
+    assert.deepEqual(revisedNotes.todo, [{ t: "Confirm the item 8 title", done: false, src: "you" }]);
+    assert.equal(revisedNotes.researchScope, "public", "the revision must preserve the editor's explicit scope");
+    assert.deepEqual(revisedNotes.editorExtension, { keep: "the unmodeled editor field" }, "the revision must retain raw note fields it does not interpret");
   } finally {
     await db.close();
   }

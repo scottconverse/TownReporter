@@ -108,6 +108,7 @@ describe("meeting lead", () => {
     const sql = (async () => [] as never[]) as unknown as Sql;
     sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
       calls.push({ text, params });
+      if (/^\s*select notes_json/i.test(text)) return [] as unknown as T[];
       return [{ id: 5 }] as unknown as T[];
     };
     await fileMeetingLead(sql, {
@@ -118,8 +119,11 @@ describe("meeting lead", () => {
       citations: [], artifactId: 1,
       votes: [{ item: "3", established: false, motion: null, mover: null, seconder: null, tally: null, result: "not established", source: null }],
     });
-    assert.equal(calls.length, 1, "only the idempotent lead insert; nothing else is touched");
-    const params = calls[0]!.params;
+    assert.match(calls[0]!.text, /select notes_json from leads[\s\S]*for update/i, "saved notes are locked before deciding what editor state to preserve");
+    assert.deepEqual(calls[0]!.params, [1, "v"]);
+    const writes = calls.filter((call) => /insert into leads/i.test(call.text));
+    assert.equal(writes.length, 1, "exactly one idempotent lead insert is made");
+    const params = writes[0]!.params;
     assert.equal(params[7], 0, "newsworthiness is not asserted by the capture pass");
     assert.equal(params[8], "new", "the lead enters the ordinary queue");
   });
@@ -129,6 +133,7 @@ describe("meeting lead", () => {
     const sql = (async () => [] as never[]) as unknown as Sql;
     sql.query = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) => {
       calls.push({ text, params });
+      if (/^\s*select notes_json/i.test(text)) return [] as unknown as T[];
       return [{ id: 12 }] as unknown as T[];
     };
     await fileMeetingLead(sql, {
@@ -137,7 +142,10 @@ describe("meeting lead", () => {
       items: [{ item: "8", title: "Annexation" }],
       establishedVotes: 0, citations: [], artifactId: 9, votes: [],
     });
-    const write = calls[0]!.text;
+    assert.match(calls[0]!.text, /select notes_json from leads[\s\S]*for update/i, "the existing note record is read under lock before the revision");
+    const writes = calls.filter((call) => /insert into leads/i.test(call.text));
+    assert.equal(writes.length, 1, "the refresh remains a single insert/upsert");
+    const write = writes[0]!.text;
     assert.match(write, /meeting_artifact_id=excluded\.meeting_artifact_id/i);
     assert.doesNotMatch(write, /status=excluded\.status/i, "drafted, killed, or assigned state must not reset to new");
     assert.doesNotMatch(write, /user_id=excluded\.user_id/i, "the revision must not reassign the editor's lead");
