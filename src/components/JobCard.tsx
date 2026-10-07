@@ -7,11 +7,6 @@ import {
 } from "@/lib/news/job-progress";
 import { jobCardState, useDeskJobs } from "./job-card-state";
 
-/** A base URL as a machine to read: no scheme, no trailing `/v1` or slash. */
-function endpointHost(baseUrl: string): string {
-  return baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "").replace(/\/+$/, "");
-}
-
 /*
   The job card (redesign phase 3).
 
@@ -128,16 +123,6 @@ export function JobCard({
   const stalled = running && quiet >= stallSeconds * (1 + waived);
   const col = state === "done" ? "done" : state === "failed" ? "failed" : stalled ? "stalled" : "running";
 
-  /*
-    B5: the exact model and endpoint that answered, once the receipt has them.
-    A model with no endpoint still renders -- the id is the half that matters.
-  */
-  const executedLine = job.executedModel
-    ? `Executed: ${job.executedModel}` +
-      (job.executedEndpoint ? ` on ${endpointHost(job.executedEndpoint)}` : "") +
-      (job.executedProvider && !job.executedEndpoint ? ` via ${job.executedProvider}` : "")
-    : "";
-
   return (
     <div className={`job-card${compact ? " compact" : ""} state-${col}`}>
       {/*
@@ -207,12 +192,6 @@ export function JobCard({
       {failoverNote && job.failoverNote ? (
         <p className="job-card-quiet">Model switch: {job.failoverNote}</p>
       ) : null}
-
-      {/*
-        B5: what actually ran, when the receipt knows -- "Local model" alone
-        does not name which model on which machine answered.
-      */}
-      {executedLine ? <p className="job-card-quiet">{executedLine}</p> : null}
 
       {job.cancelRequested && running ? (
         <p className="job-card-quiet" role="status" aria-live="polite">

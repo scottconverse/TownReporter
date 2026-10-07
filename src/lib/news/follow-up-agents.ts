@@ -46,7 +46,6 @@ import {
   throwIfJobCancelled,
   waitForModel,
   setJobModelChoice,
-  recordJobExecutedModel,
   type DeskJob,
 } from "./jobs.ts";
 import {
@@ -117,16 +116,7 @@ export type SearchJudgeInput = {
  * never be recorded as "nothing changed".
  */
 export type SearchJudgeResult =
-  | {
-      ok: true;
-      answers: boolean;
-      url: string;
-      title: string;
-      summary: string;
-      /** The exact model and endpoint the judge's transport reported (B5). */
-      executedModel?: string;
-      executedEndpoint?: string;
-    }
+  | { ok: true; answers: boolean; url: string; title: string; summary: string }
   | { ok: false; error: string };
 
 export type FollowUpAgentDeps = {
@@ -171,15 +161,6 @@ export type FollowUpAgentInput = {
 export type FollowUpAgentOutcome = {
   state: "found" | "no-change" | "could-not-check";
   finding: Partial<FollowUpFinding>;
-  /**
-   * The exact model and endpoint that ACTUALLY answered, when the agent made a
-   * model call whose transport reported them (B5). Absent for an agent that
-   * never reached a model -- a `recheck` that only fetched a page, or a search
-   * whose judge was never reached -- because "the model that ran" is not a fact
-   * on a run that ran no model.
-   */
-  executedModel?: string;
-  executedEndpoint?: string;
 };
 
 /** The one phrase every agent writes, so the job's chip row means something. */
@@ -444,18 +425,6 @@ async function judgeSearchHits(input: SearchJudgeInput): Promise<SearchJudgeResu
       url,
       title: typeof parsed.title === "string" ? parsed.title.slice(0, 200) : "",
       summary,
-      /*
-        B5. The model that answered the judge call, from the transport's own
-        report (`ai.meta`), falling back to the exact local pair the run was
-        given. `meta.model` is preferred because a local server can answer with
-        the model it actually loaded rather than the alias asked for.
-      */
-      ...(ai.meta?.model || input.localModel?.id
-        ? {
-            executedModel: ai.meta?.model || input.localModel?.id || "",
-            executedEndpoint: ai.meta?.endpoint || input.localModel?.baseUrl || "",
-          }
-        : {}),
     };
   } catch (e) {
     handle?.finish({ result: "failed" });
@@ -516,16 +485,6 @@ export async function runSearchAgent(
     // Not `no-change`: the judge failing is the agent being unable to check.
     return couldNotCheck(`Could not tell whether the results answer it: ${verdict.error}`);
   }
-  /*
-    B5. The judge call is this agent's one model call, so whatever it reported
-    is what the follow-up ran on -- carried on every outcome below, `no-change`
-    and `found` alike, because a check that ran and found nothing still ran.
-  */
-  const executed = {
-    ...(verdict.executedModel
-      ? { executedModel: verdict.executedModel, executedEndpoint: verdict.executedEndpoint ?? "" }
-      : {}),
-  };
   if (!verdict.answers) {
     return {
       state: "no-change",
@@ -538,7 +497,6 @@ export async function runSearchAgent(
         reason: "",
         changed: false,
       },
-      ...executed,
     };
   }
   // The same answer as last time is not news. Without this every search
@@ -554,7 +512,6 @@ export async function runSearchAgent(
         reason: "",
         changed: false,
       },
-      ...executed,
     };
   }
   return {
@@ -566,7 +523,6 @@ export async function runSearchAgent(
       reason: "",
       changed: true,
     },
-    ...executed,
   };
 }
 
@@ -900,14 +856,7 @@ export async function performFollowUpRun(
     // already found something before the cap closed (a finding is a finding).
     const stopped = outcome.state === "found" ? "" : budgetStopReason(budget);
     const final = stopped
-      ? {
-          state: "could-not-check" as const,
-          finding: { ...outcome.finding, reason: stopped.slice(0, 300) },
-          // A run that hit a cap after its model had answered still ran that
-          // model; the pair travels with it rather than being dropped.
-          executedModel: outcome.executedModel,
-          executedEndpoint: outcome.executedEndpoint,
-        }
+      ? { state: "could-not-check" as const, finding: { ...outcome.finding, reason: stopped.slice(0, 300) } }
       : outcome;
 
     await step(FOLLOW_UP_STAGE_RECORD);
@@ -925,16 +874,6 @@ export async function performFollowUpRun(
       finding: final.finding,
       nextRunAt: nextRunAt(row.schedule)?.toISOString() ?? null,
     });
-    /*
-      B5. The exact model that answered, saved onto the job beside the rest of
-      its runtime. Written AFTER the fenced record: a run whose write the fence
-      refused must not leave a model pair on a job whose finding was never
-      recorded. Only the agents that actually call a model carry the pair, so a
-      recheck or a portal-only run records nothing rather than a fabricated one.
-    */
-    if (recorded.ok && final.executedModel) {
-      await recordJobExecutedModel(job.id, final.executedModel, final.executedEndpoint ?? "");
-    }
     /*
       The fence refused the write: a Stop committed after the boundary above,
       so there is a finding that must NOT be recorded. This is the same

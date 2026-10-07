@@ -430,64 +430,6 @@ describe("the run, end to end with the queue and the notes column", () => {
     assert.equal(savedJob?.model_choice, "local-model");
   });
 
-  it("saves the executed model/endpoint the judge ran on onto the job", async () => {
-    const sql = await getSql();
-    const newsroomId = 97103;
-    const userId = "agent-executed-pair-editor";
-    const created = await performCreateAiFollowUp(
-      { userId, newsroomId },
-      {
-        what: "Has the clerk posted the notice?",
-        agentKind: "search",
-        schedule: "daily",
-        modelChoice: "local-model",
-      },
-    );
-    assert.equal(created.ok, true);
-    const followUpId = created.ok ? created.id : 0;
-    const job = await enqueueJob({
-      userId,
-      newsroomId,
-      kind: "follow-up",
-      subjectId: followUpId,
-      modelChoice: "local-model",
-      kick: false,
-    });
-    /*
-      The judge reports the transport's own account of what answered, which for
-      a local server can differ from the alias that was asked for -- exactly the
-      case the pair has to survive. The run's pinned model is deliberately
-      different, so an assert that passes can only be reading the executed pair
-      the judge reported and not the pin.
-    */
-    await performFollowUpRun(job, {
-      resolveLocalModel: async () => ({ baseUrl: "http://127.0.0.1:1234/v1", id: "pinned-alias" }),
-      agents: {
-        search: async () => attempt([hit("https://clerk.test/notice")]),
-        judge: async () => ({
-          ok: true,
-          answers: true,
-          url: "https://clerk.test/notice",
-          title: "The notice",
-          summary: "Posted on 24 September.",
-          executedModel: "qwen3-14b-local",
-          executedEndpoint: "http://127.0.0.1:1234/v1",
-        }),
-      },
-    });
-
-    const [saved] = await sql<{ result_json: string }>`
-      select result_json from desk_jobs where id = ${job.id}
-    `;
-    const receipt = JSON.parse(saved!.result_json) as { modelId?: string; modelEndpoint?: string };
-    assert.equal(receipt.modelId, "qwen3-14b-local", "the executed model id is saved on the job");
-    assert.equal(
-      receipt.modelEndpoint,
-      "http://127.0.0.1:1234/v1",
-      "the executed endpoint is saved on the job",
-    );
-  });
-
   it("writes the finding to the story's notes and never publishes", async () => {
     const sql = await getSql();
     const newsroomId = 97101;

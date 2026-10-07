@@ -1,3 +1,4 @@
+// guards: Server health could claim an unloaded model is ready to write.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -527,6 +528,20 @@ describe("Server card rows (CX2)", () => {
     assert.equal(onLadder?.source === "status" ? onLadder.status : null, codex);
     const byName = chipOf(lines, "Claude Opus");
     assert.equal(byName?.source === "status" ? byName.status : null, claude);
+  });
+
+  it("an answering server with only downloaded models is not ready to write", () => {
+    const baseUrl = "http://127.0.0.1:1234/v1";
+    const model = {
+      id: "downloaded-model", label: "downloaded-model", loaded: false,
+      kind: "chat" as const, thinking: false, vision: false, cloud: false, contextLength: null,
+    };
+    const chip = wordsOf(chipOf(writingModelLines({
+      times: [timeRow({ providerId: "qwen-local", label: "Local model", endpoint: baseUrl })],
+      statuses: [],
+      catalog: catalogOf([{ kind: "lmstudio", baseUrl, reachable: true, models: [model] }], { baseUrl, id: model.id }),
+    }), "Local model"));
+    assert.notEqual(chip.tone, "ready");
   });
 
   it("Writing models: a local rung's chip is built from its own settings and the live catalog", () => {

@@ -1,6 +1,5 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
-import { withJobModelExecution } from "./job-model-execution.server.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 /**
@@ -25,19 +24,7 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * (see textflowkit-transcribe.server.ts); the lane's concurrency of 2 is about
  * how many jobs may be *open*, not how many may burn CPU.
  */
-export type JobKind =
-  | "scan"
-  | "draft"
-  | "reconcile"
-  | "dark"
-  | "editorial"
-  | "brief"
-  | "routine-notice"
-  | "artifact-ocr"
-  | "pull"
-  | "audio-transcribe"
-  | "follow-up"
-  | "reporting";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up" | "reporting";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
@@ -391,14 +378,11 @@ export async function latestJob(opts: {
  * row and its job commit together. Every other caller leaves it out and gets
  * the pooled connection this always used.
  */
-export async function findOpenJob(
-  opts: {
-    newsroomId: number;
-    kind: JobKind;
-    subjectId?: number;
-  },
-  sql?: Sql,
-): Promise<DeskJob | null> {
+export async function findOpenJob(opts: {
+  newsroomId: number;
+  kind: JobKind;
+  subjectId?: number;
+}, sql?: Sql): Promise<DeskJob | null> {
   await ensureJobsSchema(sql);
   const runner = sql ?? (await getSql());
   const rows =
@@ -473,14 +457,11 @@ export async function enqueueJob(opts: {
     draining a real model mid-transaction.
   */
   const kickNow = opts.kick !== false && !opts.sql;
-  const open = await findOpenJob(
-    {
-      newsroomId,
-      kind: opts.kind,
-      subjectId: opts.subjectId,
-    },
-    sql,
-  );
+  const open = await findOpenJob({
+    newsroomId,
+    kind: opts.kind,
+    subjectId: opts.subjectId,
+  }, sql);
   if (open) {
     if (kickNow) kickJobs();
     return open;
@@ -536,14 +517,11 @@ export async function enqueueJob(opts: {
     }
     // Lost the race a second time: another caller inserted an open row while
     // we were retrying. Find and return it.
-    const coalescedJob = await findOpenJob(
-      {
-        newsroomId,
-        kind: opts.kind,
-        subjectId: opts.subjectId,
-      },
-      sql,
-    );
+    const coalescedJob = await findOpenJob({
+      newsroomId,
+      kind: opts.kind,
+      subjectId: opts.subjectId,
+    }, sql);
     if (coalescedJob) {
       if (kickNow) kickJobs();
       return coalescedJob;
@@ -722,43 +700,7 @@ export async function setJobModelRuntime(
            end)::text,
            updated_at=now()
      from receipt where j.id=receipt.id`,
-    [
-      id,
-      modelChoice,
-      modelEffort,
-      requestedRuntime ?? null,
-      requestedEffort ?? null,
-      phase ?? null,
-    ],
-  );
-}
-
-/**
- * Record the EXACT model and endpoint a run's model call answered with, merged
- * into `result_json` so it never erases the enqueue snapshot or any other key.
- *
- * Model identity can come from the transport's own meta when the provider
- * reports it; when it does not, the pair the run selected is written instead.
- * Callers must not call this on a path that ran no model at all -- a blank pair
- * here would read as a model having answered when none did.
- */
-export async function recordJobExecutedModel(
-  id: number,
-  executedModel: string,
-  executedEndpoint: string,
-) {
-  if (!executedModel) return;
-  const sql = await getSql();
-  await sql.query(
-    `update desk_jobs
-       set result_json = (coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb)
-             || jsonb_build_object(
-                  'modelId', $2::text,
-                  'modelEndpoint', $3::text
-                ))::text,
-           updated_at = now()
-     where id = $1`,
-    [id, executedModel, executedEndpoint ?? ""],
+    [id, modelChoice, modelEffort, requestedRuntime ?? null, requestedEffort ?? null, phase ?? null],
   );
 }
 
@@ -989,7 +931,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
       before the claim.
     */
     await throwIfJobCancelled(job.id);
-    await withJobModelExecution(job.id, () => runWork({ ...seeded, claim_token: token }), token);
+    await runWork({ ...seeded, claim_token: token });
     // `claim_token` guard: if we were declared stale and someone else took the
     // job, this write must not clobber their result.
     // Derive the editor-facing terminal stage from the receipt in the same
@@ -1203,7 +1145,9 @@ export class JobCancelledError extends Error {
  * every row written before 0099 does, so neither case is special-cased
  * anywhere downstream.
  */
-export function jobStages(job: Pick<DeskJob, "stages_json"> | null | undefined): string[] | null {
+export function jobStages(
+  job: Pick<DeskJob, "stages_json"> | null | undefined,
+): string[] | null {
   const raw = job?.stages_json;
   if (!raw) return null;
   try {
@@ -1365,7 +1309,11 @@ export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
     stage, no step, and no heartbeat at all -- so its card would have read
     "stalled" at 60s on a job that was working perfectly.
   */
-  "routine-notice": ["Reading the routine sources", "Planning the edition", "Filing the notices"],
+  "routine-notice": [
+    "Reading the routine sources",
+    "Planning the edition",
+    "Filing the notices",
+  ],
   /*
     The editor's civic-reporting run (see civic-reporting.ts). Its eight arrivals
     are the method's own reporting stages, in the order performReportingWork walks
@@ -1513,7 +1461,12 @@ export function pctFor(done: number, total: number): number | null {
  * takes, and they are deliberately round numbers rather than measurements
  * dressed up as facts. What they buy is a bar that only ever moves forwards.
  */
-export function spanPct(done: number, total: number, from: number, to: number): number | null {
+export function spanPct(
+  done: number,
+  total: number,
+  from: number,
+  to: number,
+): number | null {
   if (!Number.isFinite(done) || !Number.isFinite(total) || total <= 0) return null;
   const within = Math.max(0, Math.min(1, done / total));
   return clampPct(from + (to - from) * within);
@@ -1740,7 +1693,7 @@ export async function waitForModel<T>(opts: {
       .catch(() => undefined);
   }, tick);
   (timer as unknown as { unref?: () => void }).unref?.();
-  const run = withJobModelExecution(opts.jobId, opts.run);
+  const run = opts.run();
   try {
     return await Promise.race([run, cancelSignal]);
   } finally {

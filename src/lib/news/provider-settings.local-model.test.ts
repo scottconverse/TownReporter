@@ -1,4 +1,5 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, before, beforeEach, afterEach } from "node:test";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { resetLocalCatalogCacheForTests } from "./local-models.ts";
@@ -17,6 +18,9 @@ import {
   saveLocalModel,
 } from "./provider-settings.ts";
 
+before(async () => {
+  if (!process.env.DATABASE_URL?.trim()) await applyMigrationsToTestPglite();
+});
 const NEWSROOM_ID = 9001;
 /**
  * The desk's owner, and a plain editor on the same desk.

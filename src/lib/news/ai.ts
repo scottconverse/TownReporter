@@ -113,14 +113,7 @@ export type Provider =
 
 type GrokChatAdapter = (
   provider: Provider,
-  request: {
-    system: string;
-    user: string;
-    maxTokens: number;
-    model: string;
-    timeoutMs: number;
-    reasoningEffort?: ModelEffort | null;
-  },
+  request: { system: string; user: string; maxTokens: number; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null },
 ) => Promise<GrokOk | GrokErr>;
 
 /** Injectable runtime boundary for hermetic provider-dispatch tests. */
@@ -408,7 +401,9 @@ function explicitProvider(
     // resolved-override-or-LLM_BASE_URL behavior it has always had. The two
     // coexist because the rung never reads LLM_BASE_URL.
     const llm =
-      entry.ladderRank === undefined ? localGateway(localOverride) : rungGateway(entry, rungModel);
+      entry.ladderRank === undefined
+        ? localGateway(localOverride)
+        : rungGateway(entry, rungModel);
     return llm ? { kind: "openai", ...llm } : null;
   }
 
@@ -596,7 +591,8 @@ export const AUTOMATIC_LADDER = automaticLadder();
 
 /** What a rung that picks its model at call time resolved to, or why it may not run. */
 type RungResolution =
-  { ok: true; localModel: LocalModelOverride | null } | { ok: false; note: string };
+  | { ok: true; localModel: LocalModelOverride | null }
+  | { ok: false; note: string };
 
 /** What the desk calls each local server it knows how to probe. Moved to
  * preflight.ts (Unit BB) so the picker's client-side explanation names the
@@ -678,8 +674,7 @@ async function resolveRungLocalModel(
   const pinned = providerModel(entry);
   if (pinned) {
     const model = server.models.find((m) => m.id === pinned);
-    if (!model || model.loaded === false)
-      return { ok: false, note: `${label} skipped: not loaded` };
+    if (!model || model.loaded === false) return { ok: false, note: `${label} skipped: not loaded` };
     // A server that does not report load state cannot answer the question, and
     // the rule is that a model is used only when it IS loaded -- so unknown skips.
     if (model.loaded !== true) {
@@ -703,7 +698,10 @@ async function resolveRungLocalModel(
 export async function probeProvider(
   choice?: EffectiveProviderChoice | string,
   newsroomId?: number,
-  adapters?: Pick<GrokChatAdapters, "resolveCustom" | "resolveLocal" | "resolveLocalCatalog">,
+  adapters?: Pick<
+    GrokChatAdapters,
+    "resolveCustom" | "resolveLocal" | "resolveLocalCatalog"
+  >,
   scope?: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
@@ -802,9 +800,7 @@ export async function probeProvider(
     } else if (adapters?.resolveLocal) {
       localOverride = await adapters.resolveLocal(newsroomId);
     } else {
-      const resolved = await (
-        await import("./provider-settings.ts")
-      ).resolveLocalModelChoice(newsroomId, scope);
+      const resolved = await (await import("./provider-settings.ts")).resolveLocalModelChoice(newsroomId, scope);
       localOverride = resolved.override;
       useLoadedLocalModel = resolved.source === "loaded";
       localCatalog = resolved.catalog;
@@ -850,11 +846,13 @@ export async function probeProvider(
       choice: choice === "configured" ? "configured" : storyModelChoice(choice),
       // Item 2: the receipt names the model this run actually got, the same
       // way the Automatic rung's own receipt does.
-      ...(useLoadedLocalModel && localOverride
-        ? { label: `Local model (${localOverride.id})` }
-        : {}),
+      ...(useLoadedLocalModel && localOverride ? { label: `Local model (${localOverride.id})` } : {}),
       // The editor's own pick, or the model a picking rung just verified.
-      ...(localOverride ? { localModel: localOverride } : rungPair ? { localModel: rungPair } : {}),
+      ...(localOverride
+        ? { localModel: localOverride }
+        : rungPair
+          ? { localModel: rungPair }
+          : {}),
     };
   }
   if (provider.kind === "anthropic") {
@@ -1049,45 +1047,12 @@ export async function grokChat(
   // PLANNER_MODEL: planning and judging are different jobs with different
   // prices, and one provider setting for both overpays for one of them.
   const model = opts?.model?.trim() || provider.model;
-  const finish = async (reply: Promise<GrokOk | GrokErr> | GrokOk | GrokErr) => {
-    const result = await reply;
-    if (result.ok) {
-      const { captureExecutedModel } = await import("./job-model-execution.server.ts");
-      captureExecutedModel({
-        model: result.meta?.model || model,
-        endpoint:
-          result.meta?.endpoint ||
-          (provider.kind === "openai" ? receiptEndpoint(provider.baseUrl) : ""),
-        provider: result.meta?.provider || provider.kind,
-        runtime: String(opts?.choice ?? "configured"),
-      });
-    }
-    return result;
-  };
   const selectedAdapter = adapters?.[provider.kind];
   if (selectedAdapter) {
-    return finish(
-      selectedAdapter(provider, {
-        system,
-        user,
-        maxTokens,
-        model,
-        timeoutMs,
-        reasoningEffort: opts?.reasoningEffort,
-      }),
-    );
+    return selectedAdapter(provider, { system, user, maxTokens, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   if (provider.kind === "anthropic") {
-    return finish(
-      anthropicChat(
-        { ...provider, model },
-        system,
-        user,
-        maxTokens,
-        timeoutMs,
-        opts?.reasoningEffort,
-      ),
-    );
+    return anthropicChat({ ...provider, model }, system, user, maxTokens, timeoutMs, opts?.reasoningEffort);
   }
   if (provider.kind === "claude-code") {
     // Server-only module — dynamic import keeps node:child_process out of the
@@ -1099,22 +1064,18 @@ export async function grokChat(
     // 120s floor) let one call outlive the wall-clock budget the caller was
     // pacing against, so a draft "timed out" while a model call was still
     // happily running. Callers size their budget with `providerBudget()`.
-    return finish(
-      claudeCodeChat({
-        system,
-        user,
-        model,
-        timeoutMs,
-        noTools: opts?.noTools,
-        reasoningEffort: opts?.reasoningEffort,
-      }),
-    );
+    return claudeCodeChat({
+      system,
+      user,
+      model,
+      timeoutMs,
+      noTools: opts?.noTools,
+      reasoningEffort: opts?.reasoningEffort,
+    });
   }
   if (provider.kind === "codex") {
     const { codexChat } = await import("./ai-codex.server.ts");
-    return finish(
-      codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort }),
-    );
+    return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   const llm = provider;
   const url = `${llm.baseUrl}/chat/completions`;
@@ -1147,7 +1108,6 @@ export async function grokChat(
     const result: ChatResultMetadata = {
       provider: "openai-compatible",
       model: body?.model?.trim() || model,
-      endpoint: receiptEndpoint(llm.baseUrl),
       durationMs: Math.max(0, Date.now() - startedAt),
       timedOut,
     };
@@ -1209,9 +1169,7 @@ export async function grokChat(
   } catch {
     return {
       ok: false,
-      error: res.ok
-        ? `${llm.label} returned an unreadable response`
-        : `${llm.label} API error ${res.status}`,
+      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}`,
       meta: openAiMeta(),
     };
   }
@@ -1225,17 +1183,13 @@ export async function grokChat(
     const kind = typeof body.error === "object" ? body.error?.type : "";
     let localEndpoint = false;
     try {
-      localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(
-        new URL(llm.baseUrl).hostname,
-      );
+      localEndpoint = /^(?:127\.0\.0\.1|localhost|\[::1\]|::1)$/i.test(new URL(llm.baseUrl).hostname);
     } catch {
       localEndpoint = false;
     }
     const localContextFailure =
-      llm.label !== "Custom AI" &&
-      localEndpoint &&
-      (/context/i.test(kind ?? "") ||
-        /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
+      llm.label !== "Custom AI" && localEndpoint &&
+      (/context/i.test(kind ?? "") || /exceeds?.{0,30}context|context.{0,30}(?:size|window|length)/i.test(detail ?? ""));
     return {
       ok: false,
       error: localContextFailure
@@ -1281,21 +1235,7 @@ export async function grokChat(
     }
     return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
   }
-  return finish({ ok: true, text, meta: openAiMeta(body) });
-}
-
-/** Receipts identify the transport without retaining URL credentials. */
-function receiptEndpoint(baseUrl: string): string {
-  try {
-    const url = new URL(baseUrl);
-    url.username = "";
-    url.password = "";
-    url.search = "";
-    url.hash = "";
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return "";
-  }
+  return { ok: true, text, meta: openAiMeta(body) };
 }
 
 const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"]);
@@ -1536,11 +1476,7 @@ export function parseJsonBlock<T>(raw: string): T | null {
  * tail -- which is the difference between a hop that plans and a hop that
  * silently falls back to keyword matching.
  */
-type JsonCutPoints = {
-  safe: { at: number; stack: string[] }[];
-  openStack: string[];
-  inString: boolean;
-};
+type JsonCutPoints = { safe: { at: number; stack: string[] }[]; openStack: string[]; inString: boolean };
 
 function jsonCutPoints(body: string): JsonCutPoints {
   const safe: { at: number; stack: string[] }[] = [];
@@ -1723,8 +1659,7 @@ export async function readableReplyOrRetry<T>(input: {
   const first = await input.attempt();
   if (!first.ok) return { ok: false, error: first.error, meta: first.meta, retried: false };
   const value = input.read(first.text);
-  if (value !== null)
-    return { ok: true, value, text: first.text, meta: first.meta, retried: false };
+  if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
 
   const second = await input.attempt();
   if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };

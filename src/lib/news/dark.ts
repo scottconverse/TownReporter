@@ -1451,10 +1451,6 @@ type ArtifactOcrReceipt = {
   modelCalls?: number;
   budgetPaused?: boolean;
   provider?: string;
-  /** B5. The exact model id and endpoint the read was pinned to, so the card
-   * names the model that read the pages rather than only its transport label. */
-  modelId?: string;
-  modelEndpoint?: string;
   reason?: string | null;
 };
 
@@ -1508,16 +1504,7 @@ export const queueArtifactOcr = createServerFn({ method: "POST" })
       kind: "artifact-ocr",
       subjectId: data.artifactId,
       modelChoice: data.modelChoice,
-      resultJson: JSON.stringify({
-        request: data,
-        ...initialModelRuntimeReceipt({
-          requestedRuntime: data.modelChoice,
-          requestedEffort: data.modelEffort ?? null,
-          actualRuntime: data.modelChoice,
-          actualEffort: data.modelEffort ?? null,
-          localModel: null,
-        }),
-      }),
+      resultJson: JSON.stringify(data),
     });
     return { ok: true as const, jobId: job.id, status: job.status };
   });
@@ -2735,11 +2722,6 @@ export async function performArtifactOcrWork(
       modelCalls,
       budgetPaused,
       provider,
-      // Only a completed local read proves this exact pair ran. Runtime
-      // choice labels and a budget pause before any call are not model ids.
-      ...(modelCalls > 0 && ocrChoice === "local-model" && exactLocalModel
-        ? { modelId: exactLocalModel.id, modelEndpoint: exactLocalModel.baseUrl }
-        : {}),
       reason,
     };
     await withTransaction(async (tx) => {
@@ -2816,17 +2798,8 @@ export async function performArtifactOcrWork(
           where id = ${request.artifactId} and newsroom_id = ${job.newsroom_id}
         `;
       }
-      /*
-        B5. Merge rather than overwrite. The OCR receipt is the row's terminal
-        answer, but the ENQUEUE snapshot (`initialModelRuntimeReceipt`) -- the
-        exact local model and endpoint this read was pinned to -- lives in the
-        same text and must survive the write, or the card cannot say which model
-        read the PDF. The receipt's own keys win where they overlap.
-      */
       await tx`
-        update desk_jobs
-        set result_json = (coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify(result)}::jsonb)::text,
-            updated_at = now()
+        update desk_jobs set result_json = ${JSON.stringify(result)}, updated_at = now()
         where id = ${job.id} and newsroom_id = ${job.newsroom_id} and claim_token = ${job.claim_token}
       `;
     });
