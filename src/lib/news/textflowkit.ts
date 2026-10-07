@@ -66,11 +66,11 @@ function positiveNumber(raw: string | undefined, fallback: number): number {
  */
 export function resolveTextflowkitConfig(env: NodeJS.ProcessEnv = {}): TextflowkitConfig {
   const explicit = (env.TEXTFLOWKIT_CLI_PATH ?? "").trim();
-  const engine = (env.TEXTFLOWKIT_ENGINE ?? "").trim() || "whistle";
+  const model = (env.TEXTFLOWKIT_MODEL ?? "").trim();
+  const engine = (env.TEXTFLOWKIT_ENGINE ?? "").trim() || (model && model !== "whistle" ? "whisper" : "whistle");
   if (engine !== "whistle" && engine !== "whisper" && engine !== "faster-whisper") {
     throw new Error("TEXTFLOWKIT_ENGINE must be one of whistle, whisper, faster-whisper.");
   }
-  const model = (env.TEXTFLOWKIT_MODEL ?? "").trim();
   return {
     engine,
     cliPath: explicit || "textflowkit",
@@ -80,6 +80,17 @@ export function resolveTextflowkitConfig(env: NodeJS.ProcessEnv = {}): Textflowk
     timeoutFactor: positiveNumber(env.TEXTFLOWKIT_TIMEOUT_FACTOR, TEXTFLOWKIT_DEFAULT_TIMEOUT_FACTOR),
     timeoutFloorSeconds: positiveNumber(env.TEXTFLOWKIT_TIMEOUT_FLOOR_SECONDS, TEXTFLOWKIT_DEFAULT_TIMEOUT_FLOOR_SECONDS),
   };
+}
+
+/** Old CLIs can still transcribe with their original Whisper/small defaults. */
+export function textflowkitConfigForVersion(config: TextflowkitConfig, version: string | null): TextflowkitConfig {
+  const parts = version?.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][\w.]+)?$/);
+  if (!parts || config.engine !== "whistle") return config;
+  const [, major, minor, patch = "0"] = parts;
+  if (Number(major) === 0 && (Number(minor) < 1 || (Number(minor) === 1 && Number(patch) < 9))) {
+    return { ...config, engine: "whisper", model: TEXTFLOWKIT_DEFAULT_MODEL };
+  }
+  return config;
 }
 
 /**
@@ -266,5 +277,5 @@ export function textflowkitStatusLine(input: {
       : `Speech-to-text: textflowkit not installed (looked for ${input.cliPath} and on PATH) — meetings without captions stay audio-only`;
   }
   const version = input.version ? ` ${input.version}` : "";
-  return `Speech-to-text: textflowkit${version} found at ${input.cliPath} — ${input.engine ? `engine ${input.engine}, ` : ""}model ${input.model || "engine default"}, language ${input.language}`;
+  return `Speech-to-text: textflowkit${version} found at ${input.cliPath} — ${input.engine ? `engine ${input.engine}, ` : ""}model ${input.model || "engine default"}, language ${input.language}${input.detail ? ` — ${input.detail}` : ""}`;
 }
