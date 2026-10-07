@@ -4945,29 +4945,8 @@ export const setLeadStatus = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => leadStatusInput.parse(input))
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const reason = data.killReason?.trim();
-    if (data.status === "killed") {
-      // Unit AK items 4 and 6 (migration 0094): a kill keeps a record. The
-      // timestamp is always written -- "when was this killed" has an answer
-      // the moment the kill happens -- and the reason is written when the
-      // editor's press stated one ("Kill as duplicate" and the Compare view's
-      // "Same story" both do). A plain Kill from the Queue states none, and
-      // the page says so in words rather than showing an empty line
-      // (killRecordLine, lib/news/desk-copy.ts).
-      await sql`
-        update leads set status = 'killed', killed_at = now(),
-                kill_reason = ${reason || null},
-                kill_reason_url = ${data.killReasonUrl?.trim() || null}
-        where id = ${data.id} and newsroom_id = ${owned(context)}
-      `;
-      return { ok: true as const };
-    }
-    await sql`
-      update leads set status = ${data.status}
-      where id = ${data.id} and newsroom_id = ${owned(context)}
-    `;
-    return { ok: true as const };
+    const { setLeadStatusForEditor } = await import("./lead-lifecycle.ts");
+    return setLeadStatusForEditor(await getSql(), owned(context), data);
   });
 
 /**
@@ -5060,31 +5039,8 @@ export const resolveLeadDuplicate = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => leadDuplicateResolutionInput.parse(input))
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const room = owned(context);
-    if (data.action === "not-a-duplicate") {
-      const rows = await sql<{ id: number }>`
-        update leads
-        set possible_duplicate_of = null, dup_kind = null,
-            status = case when status = 'held' then 'new' else status end
-        where id = ${data.id} and newsroom_id = ${room}
-        returning id
-      `;
-      if (!rows.length) return { ok: false as const, error: "That lead is no longer on the desk." };
-      return { ok: true as const, action: data.action };
-    }
-    const reopened = await sql<{ id: number }>`
-      update leads
-      set status = 'new'
-      where newsroom_id = ${room}
-        and id = (select possible_duplicate_of from leads
-                  where id = ${data.id} and newsroom_id = ${room})
-      returning id
-    `;
-    if (!reopened.length) {
-      return { ok: false as const, error: "There is no earlier lead to reopen for this one." };
-    }
-    return { ok: true as const, action: data.action, priorId: reopened[0]!.id };
+    const { resolveLeadDuplicateForEditor } = await import("./lead-lifecycle.ts");
+    return resolveLeadDuplicateForEditor(await getSql(), owned(context), data);
   });
 
 export {
