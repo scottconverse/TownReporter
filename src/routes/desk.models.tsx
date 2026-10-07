@@ -65,7 +65,11 @@ import {
   testCustomAiConnectionFn,
   type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
-import { isCustomModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import {
+  isCustomModelChoice,
+  modelChoiceLabel,
+  type StoryModelChoice,
+} from "@/lib/news/model-choice";
 import type { LocalModelEntry, LocalServer } from "@/lib/news/local-models";
 import {
   MODEL_JOBS,
@@ -479,24 +483,8 @@ function AssignmentsTab({
         rows become labelled cards, so every assignment remains visible
         without horizontal scrolling or clipped select text.
       */}
-      <div
-        className="models-table"
-        role="region"
-        aria-label="Which model does what"
-        tabIndex={0}
-      >
+      <div className="models-table" role="region" aria-label="Which model does what" tabIndex={0}>
         <div className="models-table-inner" style={{ minWidth: MODEL_TABLE_MIN }}>
-          <div
-            className="models-table-head text-sm font-extrabold tracking-[0.05em] text-ink-2 uppercase"
-            style={{ ...ROW_GRID, gap: "0 14px", padding: "10px 0", borderBottom: "2px solid var(--fg)" }}
-          >
-            <span>Job</span>
-            <span>First choice · effort</span>
-            <span>Fallback 1</span>
-            <span>Fallback 2</span>
-            <span />
-          </div>
-
           {MODEL_JOBS.map((job) => (
             <JobRow
               key={job.key}
@@ -598,8 +586,9 @@ function JobRow({
     ? (local.data.override?.id ?? local.data.catalog.defaultModel?.id ?? null)
     : null;
   const localEntry: LocalModelEntry | null = localId
-    ? (local.data?.catalog.servers.flatMap((server) => server.models).find((m) => m.id === localId) ??
-      null)
+    ? (local.data?.catalog.servers
+        .flatMap((server) => server.models)
+        .find((m) => m.id === localId) ?? null)
     : null;
 
   /** The exact model behind a choice, which is what the effort list needs. */
@@ -683,7 +672,7 @@ function JobRow({
         borderBottom: "1px solid var(--fg2)",
       }}
     >
-      <div className="flex flex-col gap-0.5">
+      <div className="model-job-name flex flex-col gap-0.5">
         <span className="text-base font-extrabold">{job?.label ?? jobKey}</span>
         <span className="text-sm text-ink-2">{job?.note ?? ""}</span>
         {resolvedSaved.notice ? (
@@ -793,12 +782,18 @@ function JobRow({
         </div>
       )}
 
-      {job?.built && resolvedSaved.providerId && readinessLabel ? <StatusChip
-        label={readinessLabel}
-        help={jobStatusHelp(facts)}
-        /* Name the resolved default without making it a readiness state. */
-        below={kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined}
-      /> : null}
+      {job?.built && resolvedSaved.providerId && readinessLabel ? (
+        <div className="model-job-status">
+          <StatusChip
+            label={readinessLabel}
+            help={jobStatusHelp(facts)}
+            /* Name the resolved default without making it a readiness state. */
+            below={
+              kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined
+            }
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -839,98 +834,15 @@ const SELECT_STYLE: CSSProperties = {
   fontSize: "15px",
 };
 
-/**
- * Where a native `<select>` stops painting text, measured on this build at 1280
- * by cloning the control into the live page at fourteen widths, twice each
- * (with and without `appearance`), and finding the rightmost column of ink.
- *
- * The answer is not the content box. With `appearance: none` the text is
- * clipped exactly at the padding edge -- 180px of box paints 162px of text --
- * but a select that SHIPS has the browser's dropdown arrow inside it, and that
- * arrow costs 15px of the row as well. So the whole of "Claude Sonnet ·
- * sign-in", 166.7px of advance width at 15px/700, is painted only once the
- * border box reaches 200px: at 195px the last nine pixels of the word are gone.
- * Both halves of the model row therefore start from a measured FLOOR rather
- * than from a share of whatever width is left over.
- */
-const SELECT_ARROW_RESERVE = 15;
-const LONGEST_OPTION_ADVANCE = 166.7;
-const MODEL_COLUMN_MIN = Math.ceil(
-  2 /* borders */ + 16 /* the 8px side padding */ + SELECT_ARROW_RESERVE + LONGEST_OPTION_ADVANCE,
-);
-
-/**
- * The effort box, narrower than the prototype's 130px `selSmall` by exactly what
- * the three model columns need: at 1280 the panel is 968px, and 200px of floor
- * for each model select plus 56px of gaps, the status column and a job column
- * that can still hold "Story drafting" leaves 112px. The drawn effort words are
- * "none" to "medium", the longest 60.2px.
- */
-const EFFORT_MIN_WIDTH = 112;
-const EFFORT_WIDTH = `${EFFORT_MIN_WIDTH}px`;
-
-/** The first cell is its model select, the 6px gap, then the effort box. */
-const FIRST_CELL_MIN = MODEL_COLUMN_MIN + 6 + EFFORT_MIN_WIDTH;
-
-/**
- * The row grid: the prototype's five columns (`rows` in `Desk Models.dc.html`,
- * `minmax(0,1.1fr) minmax(0,1.3fr) minmax(0,1fr) minmax(0,1fr) auto`) with the
- * weights replaced by those measured floors, so what the design guarantees at
- * 1440 holds at 1280 too.
- *
- * The prototype's own weights do not, and this is the one place this build
- * departs from it. At 1280 they hand the first-choice cell 249px -- 113px for
- * its select, which paints "Claude Sonnet · sign-in" as "Claude Sonnet · sig",
- * and 192px for each fallback, 4px short of the same word. The job column takes
- * the squeeze instead: its note wraps and nothing in it is clipped. At 968px
- * the four `fr`s leave it 125px, and every one of the eight model options is
- * whole in all three boxes.
- */
+/** Job identity and status span three readable picker columns. */
+const EFFORT_WIDTH = "112px";
 const ROW_GRID: CSSProperties = {
   display: "grid",
-  gridTemplateColumns:
-    `minmax(72px, 1fr) minmax(${FIRST_CELL_MIN}px, 1fr) ` +
-    `minmax(${MODEL_COLUMN_MIN}px, 1fr) minmax(${MODEL_COLUMN_MIN}px, 1fr) auto`,
-  gap: "6px 14px",
-  alignItems: "center",
+  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gap: "16px",
+  alignItems: "start",
 };
-
-/**
- * The widest the status chip can be. It is the one `auto` track, so it is the
- * one column no floor above pins down: the longest word it carries is
- * "Sign-in" / "Saving…" at 14px/800 inside the chip's own 8px of padding.
- * Measured on this build: 81px. 110 leaves room for the longest label the chip
- * table can produce without guessing a number that only just holds.
- */
-const STATUS_COLUMN_MAX = 110;
-/** The four 14px column gaps the row grid puts between its five tracks. */
-const ROW_GRID_GAPS = 4 * 14;
-
-/**
- * The narrowest the table can be drawn, and the reason this file has a scroll
- * container at all (unit F6).
- *
- * The auditor measured the page itself: `/desk/models` was 135px wider than a
- * 1024px window, 259px wider at 900 and 554px at 390 -- the whole page scrolled
- * sideways, so the right-hand columns (the status chip, and on a phone the
- * model select itself) sat off the edge of the screen.
- *
- * The cause is the four floors above. They add up to 927px of track whatever
- * the window is, and the desk's main column at 1024 is 766px, at 900 is 642
- * and at 390 is 356 -- so the table was never going to fit, and there was
- * nothing to make it fit: the floors are what stop a model name being painted
- * as "Claude Sonnet · sig". Fitting by shrinking them is not fitting; it is
- * clipping, which is the thing the floors exist to stop.
- *
- * So the table gets the other answer the brief allows: it SCROLLS INSIDE ITS
- * OWN CONTAINER. `.models-table` (desk-astra.css) is `overflow-x: auto` and
- * the block inside it is held at this width, so every row is drawn at the
- * width the columns need, the row rules span the whole table, and the sideways
- * movement is the table's own -- the page never moves. The select is still a
- * 44px target and still reachable; it is one swipe away rather than off the
- * screen.
- */
-const MODEL_TABLE_MIN = 72 + FIRST_CELL_MIN + 2 * MODEL_COLUMN_MIN + STATUS_COLUMN_MAX + ROW_GRID_GAPS;
+const MODEL_TABLE_MIN = 0;
 
 /** Why the effort box has nothing to choose, on its `title`. */
 const PROVIDER_DEFAULT_HELP =
@@ -1086,13 +998,7 @@ function ConnectionsTab({
  * moment the provider was removed, which is exactly the kind of stale claim a
  * chip nobody draws any more keeps making.
  */
-type ConnectionChipKind =
-  | "connected"
-  | "signedin"
-  | "running"
-  | "off"
-  | "notset"
-  | "unreachable";
+type ConnectionChipKind = "connected" | "signedin" | "running" | "off" | "notset" | "unreachable";
 
 const CONNECTION_CHIP: Readonly<
   Record<ConnectionChipKind, { tone: ChipTone; label: string; help: string }>
@@ -1245,16 +1151,17 @@ function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
           }}
         >
           <span className="text-base font-bold">{entry.label}</span>
-          <span
-            className="text-sm text-ink-2"
-            title={entry.detail}
-          >
+          <span className="text-sm text-ink-2" title={entry.detail}>
             {entry.optionDetail ?? entry.detail} · {connectionWord(entry.kind)}
           </span>
           <EffortChips providerId={entry.id} />
         </div>
       ))}
-      {entries.length > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${entries.length}`}</InkButton> : null}
+      {entries.length > 5 ? (
+        <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>
+          {showAll ? "Show fewer" : `Show all ${entries.length}`}
+        </InkButton>
+      ) : null}
     </div>
   );
 }
@@ -1288,7 +1195,8 @@ function ApiKeyConnections({
   }
 
   const remove = useMutation({
-    mutationFn: (row: PublicCustomAiConnection) => deleteCustomAiConnectionFn({ data: { id: row.id } }),
+    mutationFn: (row: PublicCustomAiConnection) =>
+      deleteCustomAiConnectionFn({ data: { id: row.id } }),
     onSuccess: (_res, row) => {
       onNote(`${row.name} was removed.`);
       refresh();
@@ -1296,7 +1204,8 @@ function ApiKeyConnections({
     onError: () => onNote("That connection could not be removed."),
   });
   const test = useMutation({
-    mutationFn: (row: PublicCustomAiConnection) => testCustomAiConnectionFn({ data: { id: row.id } }),
+    mutationFn: (row: PublicCustomAiConnection) =>
+      testCustomAiConnectionFn({ data: { id: row.id } }),
     onSuccess: (res, row) => {
       onNote(
         res.ok
@@ -1590,7 +1499,17 @@ function LocalServerCard({ server }: { server: LocalServer }) {
             : " · nothing in memory"
           : " · not reachable")
       }
-      chip={<ConnectionChip kind={!server.reachable ? "unreachable" : "running"} label={server.reachable ? "Ready" : undefined} help={server.reachable ? "This server answers. Its models and load states are listed below." : undefined} />}
+      chip={
+        <ConnectionChip
+          kind={!server.reachable ? "unreachable" : "running"}
+          label={server.reachable ? "Ready" : undefined}
+          help={
+            server.reachable
+              ? "This server answers. Its models and load states are listed below."
+              : undefined
+          }
+        />
+      }
       actions={
         <>
           {/*
@@ -1664,7 +1583,11 @@ function LocalServerCard({ server }: { server: LocalServer }) {
           ))
         )}
       </div>
-      {server.models.length > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${server.models.length}`}</InkButton> : null}
+      {server.models.length > 5 ? (
+        <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>
+          {showAll ? "Show fewer" : `Show all ${server.models.length}`}
+        </InkButton>
+      ) : null}
     </ConnectionCard>
   );
 }

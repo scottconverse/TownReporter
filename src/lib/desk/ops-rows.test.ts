@@ -591,17 +591,72 @@ describe("Server card rows (CX2)", () => {
     /* Answering with one loaded -- and the rung that needs nothing loaded is
        Ready on the same catalog, which is the difference the two help lines
        carry. */
+    const withLoaded = (id: string): LocalCatalog =>
+      catalogOf([
+        {
+          kind: "lmstudio",
+          baseUrl: "http://127.0.0.1:1234/v1",
+          reachable: true,
+          models: [
+            {
+              id,
+              label: id,
+              loaded: true,
+              kind: "chat",
+              thinking: false,
+              vision: false,
+              cloud: false,
+              contextLength: null,
+            },
+          ],
+        },
+      ]);
     const ready = wordsOf(
+      chipOf(writingModelLines(read({ catalog: withLoaded("halo/qwen") })), "Local model"),
+    );
+    assert.equal(ready.label, "Ready");
+    assert.equal(ready.tone, "ready");
+    assert.match(ready.help, /with halo\/qwen loaded/);
+
+    /*
+      B4's regression, in this file. A server that is REACHABLE and whose disk
+      is full of models -- a non-null `defaultModel`, exactly what `pickDefault`
+      used to hand out -- but whose MEMORY is empty is NOT ready. Ready reads
+      the catalog's own `loaded` flags now, not `defaultModel`.
+    */
+    const reachableNotLoaded = {
+      kind: "lmstudio" as const,
+      baseUrl: "http://127.0.0.1:1234/v1",
+      reachable: true,
+      models: [
+        {
+          id: "halo/qwen3-coder-30b-a3b-q6k",
+          label: "halo/qwen3-coder-30b-a3b-q6k",
+          loaded: false,
+          kind: "chat" as const,
+          thinking: false,
+          vision: false,
+          cloud: false,
+          contextLength: null,
+        },
+      ],
+    };
+    const emptyMemory = wordsOf(
       chipOf(
         writingModelLines(
-          read({ catalog: catalogOf([server], { baseUrl: "http://127.0.0.1:1234/v1", id: "halo/qwen" }) }),
+          read({
+            catalog: catalogOf([reachableNotLoaded], {
+              baseUrl: "http://127.0.0.1:1234/v1",
+              id: "halo/qwen3-coder-30b-a3b-q6k",
+            }),
+          }),
         ),
         "Local model",
       ),
     );
-    assert.equal(ready.label, "Ready");
-    assert.equal(ready.tone, "ready");
-    assert.match(ready.help, /with a chat model loaded/);
+    assert.equal(emptyMemory.label, "No model loaded");
+    assert.equal(emptyMemory.tone, "slow");
+    assert.match(emptyMemory.help, /no chat model is loaded in memory/);
     const first = wordsOf(
       chipOf(
         writingModelLines(

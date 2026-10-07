@@ -87,11 +87,11 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function fetchWithOllamaOnly(): typeof fetch {
+function fetchWithOllamaOnly(loadedIds: string[] = []): typeof fetch {
   return (async (input) => {
     const url = String(input);
     if (url === `${OLLAMA_BASE}/models`) return jsonResponse(CURRENT_MODELS);
-    if (url === `${OLLAMA_BASE.replace("/v1", "")}/api/ps`) return jsonResponse({ models: [] });
+    if (url === `${OLLAMA_BASE.replace("/v1", "")}/api/ps`) return jsonResponse({ models: loadedIds.map((name) => ({ name })) });
     throw new Error(`unreachable: ${url}`);
   }) as typeof fetch;
 }
@@ -271,26 +271,38 @@ describe("the per-newsroom local-model override resolves against the live catalo
 
   it("falls back to the discovered default and returns a notice when the stored model vanished", async () => {
     await storeRawLocalModel(OLLAMA_BASE, "a-model-that-was-removed");
-    const result = await withFetch(fetchWithOllamaOnly(), () => resolveLocalModelChoice(NEWSROOM_ID));
-    assert.equal(result.override?.id, "gemma4:12b"); // first model in the list = the default
+    const result = await withFetch(fetchWithOllamaOnly(["gemma4:12b"]), () => resolveLocalModelChoice(NEWSROOM_ID));
+    assert.equal(result.override?.id, "gemma4:12b"); // the loaded model is the default
     assert.match(result.notice ?? "", /a-model-that-was-removed is no longer on the server/);
     assert.match(result.notice ?? "", /using gemma4:12b/);
   });
 
   it("readProviderOverrides applies the same resolution for every model-calling caller", async () => {
     await storeRawLocalModel(OLLAMA_BASE, "a-model-that-was-removed");
-    const overrides = await withFetch(fetchWithOllamaOnly(), () => readProviderOverrides(NEWSROOM_ID));
+    const overrides = await withFetch(fetchWithOllamaOnly(["gemma4:12b"]), () => readProviderOverrides(NEWSROOM_ID));
     assert.deepEqual(overrides["local-model"]?.localModel, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
   });
 
   it("uses the discovered default when nothing has ever been stored", async () => {
-    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+    const result = await withFetch(fetchWithOllamaOnly(["gemma4:12b"]), async () => ({
       global: await resolveLocalModelChoice(NEWSROOM_ID),
       scan: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
     }));
     assert.deepEqual(result.global.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" });
     assert.equal(result.global.notice, null);
     assert.deepEqual(result.scan.override, { baseUrl: OLLAMA_BASE, id: "gemma4:12b" }, "when the preferred cloud model is absent, keep the normal discovered fallback");
+  });
+
+  it("does not invent a default from available on-device models when none is loaded", async () => {
+    const result = await withFetch(fetchWithOllamaOnly(), async () => ({
+      global: await resolveLocalModelChoice(NEWSROOM_ID),
+      scan: await resolveLocalModelChoice(NEWSROOM_ID, "scan"),
+      run: await readProviderOverrides(NEWSROOM_ID),
+    }));
+    assert.equal(result.global.override, null);
+    assert.equal(result.scan.override, null);
+    assert.equal(result.run["local-model"]?.localModel ?? null, null);
+    assert.equal(result.global.catalog.servers.some((server) => server.reachable), true);
   });
 });
 
@@ -494,7 +506,7 @@ describe("a stored local-model address the desk may not use is never called", ()
 
   it("refuses a stored scoped address that is not on this computer, and says why", async () => {
     await storeScoped("scan", ATTACKER, "exfiltrate");
-    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly());
+    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly(["gemma4:12b"]));
     const result = await withFetch(wrapped, () => resolveLocalModelChoice(NEWSROOM_ID, "scan"));
 
     // Not the attacker's address -- the discovered Ollama model instead.
@@ -512,7 +524,7 @@ describe("a stored local-model address the desk may not use is never called", ()
 
   it("refuses the same stored scoped address on the run path, where every draft and scan reads it", async () => {
     await storeScoped("scan", ATTACKER, "exfiltrate");
-    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly());
+    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly(["gemma4:12b"]));
     const overrides = await withFetch(wrapped, () => readProviderOverrides(NEWSROOM_ID, "scan"));
 
     assert.notEqual(overrides["local-model"]?.localModel?.baseUrl, ATTACKER);
@@ -522,7 +534,7 @@ describe("a stored local-model address the desk may not use is never called", ()
 
   it("refuses a stored unscoped address the same way, on both readers", async () => {
     await storeRawLocalModel(ATTACKER, "exfiltrate");
-    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly());
+    const { wrapped, seen } = recordingFetch(fetchWithOllamaOnly(["gemma4:12b"]));
     const result = await withFetch(wrapped, async () => ({
       picker: await resolveLocalModelChoice(NEWSROOM_ID),
       run: await readProviderOverrides(NEWSROOM_ID),

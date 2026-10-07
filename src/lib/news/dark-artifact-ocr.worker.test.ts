@@ -9,6 +9,7 @@ let getSql: typeof import("../db.ts").getSql;
 let ensureDarkSchema: typeof import("./dark.ts").ensureDarkSchema;
 let performArtifactOcrWork: typeof import("./dark.ts").performArtifactOcrWork;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
+let initialModelRuntimeReceipt: typeof import("./model-runtime-receipt.ts").initialModelRuntimeReceipt;
 
 before(async () => {
   vite = await createServer({
@@ -21,6 +22,7 @@ before(async () => {
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
   ({ ensureDarkSchema, performArtifactOcrWork } = await vite.ssrLoadModule("/src/lib/news/dark.ts"));
   ({ ensureJobsSchema } = await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
+  ({ initialModelRuntimeReceipt } = await vite.ssrLoadModule("/src/lib/news/model-runtime-receipt.ts"));
   await ensureDarkSchema();
   await ensureJobsSchema();
 });
@@ -45,7 +47,21 @@ test("later-page OCR preserves the captured PDF and deduplicates identical evide
   `;
   const raw = Buffer.from("%PDF-retained-original");
   await sql`insert into artifact_blobs(version_id,user_id,newsroom_id,sha256,mime,original_url,byte_length,body_b64) values(${version!.id},${user},${room},'raw-hash','application/pdf','https://example.org/packet.pdf',${raw.byteLength},${raw.toString("base64")})`;
-  const request = JSON.stringify({ artifactId: artifact!.id, start: 13, end: 13, modelChoice: "claude-frontier" });
+  /*
+    B5. The production enqueue writes the request nested under a model-runtime
+    snapshot, exactly as `queueArtifactOcr` does, so the terminal write's merge
+    preserves the snapshot rather than the bare request.
+  */
+  const enqueueReceipt = JSON.stringify({
+    request: { artifactId: artifact!.id, start: 13, end: 13, modelChoice: "claude-frontier", modelEffort: "medium", mode: "range" },
+    ...initialModelRuntimeReceipt({
+      requestedRuntime: "claude-frontier",
+      requestedEffort: "medium",
+      actualRuntime: "claude-frontier",
+      actualEffort: "medium",
+      localModel: null,
+    }),
+  });
   const calls: { provider?: string; start?: number; end?: number }[] = [];
   const run = async (id: number, claimToken: string) => performArtifactOcrWork({ id, user_id: user, newsroom_id: room, kind: "artifact-ocr", subject_id: artifact!.id, model_choice: "claude-frontier", claim_token: claimToken } as never, {
     ocr: async (_bytes, options) => {
@@ -56,7 +72,7 @@ test("later-page OCR preserves the captured PDF and deduplicates identical evide
   let finalJobId = 0;
   for (let n = 0; n < 2; n++) {
     const claimToken = `claim-${n}`;
-    const [job] = await sql<{ id: number }>`insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,status,claim_token,result_json) values(${user},${room},'artifact-ocr',${artifact!.id},'claude-frontier','running',${claimToken},${request}) returning id`;
+    const [job] = await sql<{ id: number }>`insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,status,claim_token,result_json) values(${user},${room},'artifact-ocr',${artifact!.id},'claude-frontier','running',${claimToken},${enqueueReceipt}) returning id`;
     finalJobId = job!.id;
     await run(job!.id, claimToken);
     // The queue marks a successful worker complete before another read is allowed.
@@ -71,6 +87,12 @@ test("later-page OCR preserves the captured PDF and deduplicates identical evide
   assert.equal(blob!.body_b64, raw.toString("base64"));
   const [receipt] = await sql<{ result_json: string }>`select result_json from desk_jobs where id=${finalJobId}`;
   assert.deepEqual(JSON.parse(receipt!.result_json), {
+    // The B5 enqueue snapshot survives the terminal write, key for key.
+    requestedRuntime: "claude-frontier",
+    requestedEffort: "medium",
+    actualRuntime: "claude-frontier",
+    modelEffort: "medium",
+    preflightFailover: null,
     request: {
       artifactId: artifact!.id,
       start: 13,
@@ -128,6 +150,9 @@ test("retained-PDF OCR sends the exact saved local endpoint and model", async ()
     },
   });
   assert.deepEqual(received, { provider: "local-model", localModel: selected });
+  const [receipt] = await sql<{ result_json: string }>`select result_json from desk_jobs where id=${job!.id}`;
+  assert.equal(JSON.parse(receipt!.result_json).modelId, selected.id);
+  assert.equal(JSON.parse(receipt!.result_json).modelEndpoint, selected.baseUrl);
 });
 
 test("complete packet OCR resumes after retained pages and checkpoints every bounded batch", async () => {

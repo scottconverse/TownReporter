@@ -183,7 +183,7 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
     return (
       <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
         <span className="model-picker-label">
-          {selectedModel?.cloud ? "Ollama Cloud model" : "On-device model"}
+          {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "On-device model"}
         </span>
         <span className="model-picker-help">
           {selected
@@ -198,7 +198,7 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
   return (
     <div className="model-picker local-model-picker" style={{ gridColumn: "1 / -1" }}>
       <label htmlFor={selectId} className="model-picker-label">
-        {selectedModel?.cloud ? "Ollama Cloud model" : "On-device model"}
+        {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "On-device model"}
       </label>
       {reachable.length === 0 ? (
         <span className="model-picker-help">
@@ -207,6 +207,20 @@ export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-
         </span>
       ) : (
         <>
+          {/*
+            B6. An Ollama Cloud tag is listed beside the on-device models but
+            it does not run here: picking one spends Ollama credits. The option
+            text now carries "cloud · spends credits" (localModelOptionText),
+            and this is the same warning on the help line the moment the
+            selection IS one -- an editor who picks a cloud model should not
+            have to reopen the closed select to find out it was hosted.
+          */}
+          {reachable.some((server) => server.models.some((model) => model.cloud)) ? (
+            <span className="model-picker-help">
+              Models marked “cloud · spends credits” run on Ollama&apos;s hosted service, not on
+              this computer. Picking one uses your Ollama allowance rather than your machine.
+            </span>
+          ) : null}
           <select
             id={selectId}
             disabled={save.isPending}

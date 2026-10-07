@@ -574,12 +574,20 @@ function QueuePage() {
   */
   const [editFor, setEditFor] = useState<LeadRow | null>(null);
   const fileFormRef = useRef<HTMLFormElement>(null);
+  /*
+    B3. The new-run picker opens on Automatic, and STAYS where the editor put
+    it for this session. It used to be hydrated from whatever batch happened to
+    be on screen (`batch.data`), so opening the panel to start a new run
+    silently inherited the last batch's runtime/effort instead of the Automatic
+    ladder the editor expects. The historic batch read still drives the RUNNING
+    panel's progress and its "started with X" line (below); it no longer writes
+    the picker's state, which is the editor's alone until they submit.
+  */
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("auto");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
-  const hydratedBatchId = useRef<number | null>(null);
   const batch = useQuery({
     queryKey: ["draft-batch", newsroomId, activeBatchId ?? "latest"],
     queryFn: () => getDraftBatch({ data: activeBatchId ? { batchId: activeBatchId } : {} }),
@@ -594,13 +602,6 @@ function QueuePage() {
         : false;
     },
   });
-  useEffect(() => {
-    const current = batch.data?.ok ? batch.data.batch : null;
-    if (!current || hydratedBatchId.current === current.id) return;
-    hydratedBatchId.current = current.id;
-    setBatchRuntime(current.runtime.modelChoice);
-    setBatchEffort(current.runtime.modelEffort);
-  }, [batch.data]);
   useEffect(() => {
     const current = batch.data?.ok ? batch.data.batch : null;
     if (!current) return;

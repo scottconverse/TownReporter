@@ -72,6 +72,10 @@ import type { ChipTone } from "@/components/status-chip";
   the same (`src/lib/news/daily-scan.ts` imports `"../db.ts"`).
 */
 import { automaticLadder, providerEntry, type ProviderEntry } from "../news/provider-registry.ts";
+/* B4: the same "what is in memory there" rule a run uses (`resolveRungLocalModel`,
+   `ai.ts`), read from the same catalog, so Server health's Ready chip and the
+   Models screen's Connections list cannot answer the loaded question differently. */
+import { pickLoadedLocalModel } from "../news/local-models.ts";
 import { TRASH_DAYS } from "../news/trash-store.ts";
 import { formatAgo } from "../ops/health.ts";
 
@@ -579,7 +583,28 @@ function rungWords(
       help: `Nothing answered at ${where} when the desk last looked. A run moves on to the next model.`,
     };
   }
-  if (needsLoadedModel && catalog?.defaultModel?.baseUrl !== where) {
+  /*
+    B4: Ready is a claim about the model, not about the endpoint.
+
+    `reachable` above answers "did something answer at that address". This
+    answers "is there a chat model in MEMORY there" -- the fact the rung
+    actually needs, because a local rung refuses to page a model in from disk
+    (`requiresLoadedLocalModel`, and `ai.ts`'s `resolveRungLocalModel` skips
+    the rung with "nothing loaded"). Read straight from the catalog's own
+    `loaded` flags.
+
+    This used to ask `catalog.defaultModel?.baseUrl !== where`, which was
+    wrong twice: `defaultModel` comes from `pickDefault`, which falls back to
+    the FIRST downloaded model when nothing is loaded (see local-models.ts),
+    so a server with an empty memory but a populated disk looked Ready; and
+    two servers can both hold `defaultModel`, so a non-empty one could make a
+    genuinely empty server look Ready too. The two conditions cannot be
+    collapsed into one -- "reachable", "available on disk" and "loaded in
+    memory" are three different facts, and the Models screen's Connections
+    list reads the loaded one.
+  */
+  const loaded = pickLoadedLocalModel(server);
+  if (needsLoadedModel && !loaded) {
     return {
       source: "words",
       tone: "slow",
@@ -592,7 +617,7 @@ function rungWords(
     tone: "ready",
     label: "Ready",
     help: needsLoadedModel
-      ? `${named} is answering at ${where} with a chat model loaded.`
+      ? `${named} is answering at ${where} with ${loaded?.id ?? "a chat model"} loaded.`
       : `${named} is answering at ${where}.`,
   };
 }

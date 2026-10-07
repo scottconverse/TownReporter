@@ -10,6 +10,8 @@ export type ChatResultMetadata = {
   provider: string;
   /** Provider-reported model ID when available; otherwise the CLI model selector. */
   model: string;
+  /** Actual HTTP endpoint, with credentials and query parameters removed. */
+  endpoint?: string;
   /** CLI-reported duration when available, otherwise this process's elapsed wall time. */
   durationMs: number;
   /** True only when TownReporter ended the attempt at its configured deadline. */

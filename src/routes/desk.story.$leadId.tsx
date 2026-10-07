@@ -124,6 +124,7 @@ import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import {
   lastDraftLine,
   lastDraftWhen,
+  executedModelFromReceipt,
   readinessDot,
   saveState,
   writerIsReady,
@@ -560,11 +561,15 @@ function StoryPage() {
     The Reporting package shows its own run status; until the page has a
     truthful reporting receipt line, suppress this stale attribution.
   */
+  /* B5: the draft's own receipt, read for the model that actually wrote it. */
+  const executed = executedModelFromReceipt(data?.job?.result_json);
   const lastDraft = civicReportingDraft
     ? ""
     : lastDraftLine({
         modelLabel: data?.job?.model_choice ? modelChoiceLabel(data.job.model_choice) : "",
         when: lastDraftWhen(data?.job?.finished_at),
+        executedModel: executed.model,
+        executedEndpoint: executed.endpoint,
       });
 
   useEffect(() => {

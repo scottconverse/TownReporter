@@ -607,14 +607,35 @@ export function isUseLoadedLocalModelPick(
 }
 
 /**
- * Item 1: the local option text says which models are loaded, id first.
- *
- * The id comes first because that is what an editor is choosing between; the
- * load state is the qualifier. `loaded === null` (a server that reports no
- * load state at all) says nothing -- an unknown state is not an unloaded one.
+ * Whether an id names an Ollama model that runs on Ollama's HOSTED service
+ * rather than on this computer. The marker is a trailing `cloud` word after
+ * `:`, `.` or `-` -- the `name:cloud` tag Ollama documents, plus the hosted
+ * catalog's `model-1.2-cloud` / `model.1.2.cloud` shapes. Same test
+ * `local-models.ts` sets its catalog `cloud` flag with.
  */
-export function localModelOptionText(model: { id: string; loaded: boolean | null }): string {
-  return model.loaded === true ? `${model.id} · loaded` : model.id;
+function isHostedCloudModelId(id: string): boolean {
+  return /[:.-]cloud$/i.test(id);
+}
+
+/**
+ * Item 1: the local option text leads with the id and says which models are
+ * loaded and which are HOSTED cloud models -- those spend credits, so the
+ * option has to say so before it is picked. `loaded === null` (a server
+ * reporting no load state) says nothing; unknown is not unloaded. The cloud
+ * marker is the model's own `cloud` flag OR the id alone, since this module is
+ * client-safe and cannot import the catalog's flag.
+ */
+export function localModelOptionText(model: {
+  id: string;
+  loaded: boolean | null;
+  cloud?: boolean;
+}): string {
+  const cloud = model.cloud === true || isHostedCloudModelId(model.id);
+  const qualifiers = [
+    cloud ? "cloud · spends credits" : null,
+    model.loaded === true ? "loaded" : null,
+  ].filter(Boolean);
+  return qualifiers.length ? `${model.id} · ${qualifiers.join(" · ")}` : model.id;
 }
 
 /**

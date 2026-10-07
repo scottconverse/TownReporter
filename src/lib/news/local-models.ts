@@ -364,6 +364,35 @@ function orderedServers(servers: LocalServer[]): LocalServer[] {
     .sort((a, b) => SERVER_PRIORITY.indexOf(a.kind) - SERVER_PRIORITY.indexOf(b.kind));
 }
 
+/**
+ * The catalog's `defaultModel`: the pair the picker calls the default when the
+ * newsroom has stored no pick of its own.
+ *
+ * B4. The order is deliberate and ends in `null` more often than it used to:
+ *
+ *   1. a model that is LOADED right now (`pickLoadedLocalModelAcrossServers`,
+ *      loaded === true, chat only) -- so the picker's default is a model a run
+ *      can actually call without the desk paging anything in from disk;
+ *   2. the operator's pinned `LLM_MODEL`, if a reachable server lists it -- an
+ *      explicit instruction from the install, and a run pinned to it will say
+ *      "not loaded" rather than start it, which is the honest behaviour;
+ *   3. otherwise NOTHING.
+ *
+ * Step 3 used to fall back to the FIRST downloaded entry on the first
+ * reachable server, and that is the bug: LM Studio and Ollama list every model
+ * on disk, loaded or not, so "first entry" is usually a model that is NOT in
+ * memory. Two things then read that pair as a claim that something was ready:
+ * a run would be pinned to a model the desk then refused to page in (a draft
+ * that stops with "not loaded"), and `ops-rows.ts` used to treat a non-null
+ * `defaultModel` as "this server has a model loaded" and print Ready next to a
+ * server with an empty memory. Null is the correct answer -- "the desk cannot
+ * name a default because nothing is loaded" -- and the picker already renders
+ * that state ("Choose a model…"/"Use whatever is loaded") rather than a
+ * fabricated id.
+ *
+ * This is the ONE place the picker's default is decided, and `defaultModel` is
+ * what `rungWords` must not read as load state -- see ops-rows.ts.
+ */
 function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | null {
   const ordered = orderedServers(servers);
 
@@ -376,10 +405,6 @@ function pickDefault(servers: LocalServer[]): { baseUrl: string; id: string } | 
         return { baseUrl: server.baseUrl, id: wantedModel };
       }
     }
-  }
-  for (const server of ordered) {
-    const first = server.models.find((m) => m.kind !== "embedding");
-    if (first) return { baseUrl: server.baseUrl, id: first.id };
   }
   return null;
 }

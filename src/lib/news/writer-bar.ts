@@ -55,9 +55,7 @@ export function writerIsReady(input: {
  * on an option it cannot reach, in the desk's warn color.
  */
 export function readinessDot(ready: boolean): { label: string; tone: WriterTone } {
-  return ready
-    ? { label: "● Ready", tone: "ok" }
-    : { label: "● Not set up", tone: "warn" };
+  return ready ? { label: "● Ready", tone: "ok" } : { label: "● Not set up", tone: "warn" };
 }
 
 /**
@@ -89,11 +87,59 @@ export function lastDraftWhen(iso: string | null | undefined, now: Date = new Da
  * a.m." -- but an empty `when` drops the whole line rather than printing
  * "Last draft: Codex Sol, ". A draft whose model the desk never recorded is
  * not a draft that was written at an unknown hour.
+ *
+ * B5. When the receipt carries an executed model, it replaces the pinned label
+ * -- "qwen3-coder:30b-a3b-q4_K_M on 127.0.0.1:11434" is what actually wrote
+ * the draft. Without it, the pinned label stands, as before.
  */
-export function lastDraftLine(input: { modelLabel: string; when: string }): string {
+export function lastDraftLine(input: {
+  modelLabel: string;
+  when: string;
+  executedModel?: string;
+  executedEndpoint?: string;
+}): string {
   if (!input.when.trim()) return "";
+  const exact = (input.executedModel ?? "").trim();
+  if (exact) {
+    const host = endpointHost(input.executedEndpoint);
+    const named = host ? `${exact} on ${host}` : exact;
+    return `Last draft: ${named}, ${input.when}`;
+  }
   const model = input.modelLabel.trim();
   return model ? `Last draft: ${model}, ${input.when}` : `Last draft: ${input.when}`;
+}
+
+/** A base URL as a machine to read: no scheme, no trailing `/v1` or slash. */
+export function endpointHost(baseUrl: string | null | undefined): string {
+  return (baseUrl ?? "")
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/v1\/?$/, "")
+    .replace(/\/+$/, "");
+}
+
+/**
+ * The executed model and endpoint out of a job's stored `result_json` (B5):
+ * the receipt's `modelId`/`modelEndpoint`, falling back to its `localModel`
+ * block. Unreadable input answers two empty strings rather than throwing.
+ */
+export function executedModelFromReceipt(raw: unknown): { model: string; endpoint: string } {
+  if (!raw) return { model: "", endpoint: "" };
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return { model: "", endpoint: "" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { model: "", endpoint: "" };
+  }
+  const receipt = parsed as Record<string, unknown>;
+  const str = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    model: str(receipt.modelId),
+    endpoint: str(receipt.modelEndpoint),
+  };
 }
 
 /**
@@ -107,11 +153,10 @@ export function lastDraftLine(input: { modelLabel: string; when: string }): stri
  * instead: its save is "Publish", and a redraft of it goes through the
  * corrections desk.
  */
-export function saveState(input: {
-  published: boolean;
-  dirty: boolean;
-  when: string;
-}): { label: string; tone: WriterTone } {
+export function saveState(input: { published: boolean; dirty: boolean; when: string }): {
+  label: string;
+  tone: WriterTone;
+} {
   if (input.published) return { label: "Published story", tone: "mut" };
   if (input.dirty) return { label: "Unsaved changes", tone: "warn" };
   const when = input.when.trim();

@@ -4920,17 +4920,55 @@
   /* The 12px the outer column's own `gap-3` gave the header and every row. */
   gap: 12px;
 }
+/* Job pickers use a single column so their general-purpose grid cannot
+   overflow into the effort field. */
 .desk-ltr.astra .model-job-first {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 16px;
   min-width: 0;
+  align-items: stretch;
 }
-.desk-ltr.astra .model-job-field { min-width: 0; }
-.desk-ltr.astra .model-job-first .model-job-field:first-child { flex: 1; }
-.desk-ltr.astra .model-job-effort { flex: none; }
-.desk-ltr.astra .model-job-label { display: none; }
+.desk-ltr.astra .model-job-field {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.desk-ltr.astra .model-job-field .model-picker {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  margin: 0;
+}
+.desk-ltr.astra .model-job-field .model-picker > * { grid-column: 1; }
+.desk-ltr.astra .model-job-field select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+}
+.desk-ltr.astra .model-job-label {
+  display: block;
+  font: 700 calc(14px * var(--ts)) var(--fd);
+}
+/* Preserve accessible names; nested Local picker labels remain visible. */
+.desk-ltr.astra .model-job-field > .model-picker > .model-picker-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.desk-ltr.astra .model-job-name,
+.desk-ltr.astra .model-job-status { grid-column: 1 / -1; }
+@media (min-width: 1800px) {
+  .desk-ltr.astra .model-job-first { flex-direction: row; }
+  .desk-ltr.astra .model-job-first > .model-job-field:first-child { flex: 1; }
+  .desk-ltr.astra .model-job-effort { flex: 0 0 112px; }
+}
 
-@media (max-width: 1279px) {
+@media (max-width: 1000px) {
   .desk-ltr.astra .models-table { overflow-x: visible; }
   .desk-ltr.astra .models-table-inner {
     min-width: 0 !important;

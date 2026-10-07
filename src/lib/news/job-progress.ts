@@ -2,13 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import {
-  jobStages,
-  requestJobCancel,
-  type DeskJob,
-  type JobKind,
-  type JobStatus,
-} from "./jobs.ts";
+import { jobStages, requestJobCancel, type DeskJob, type JobKind, type JobStatus } from "./jobs.ts";
 /*
   The failover planner and the provider probe are imported inside the retry
   handler rather than here. This module is imported by a client component, so
@@ -71,6 +65,15 @@ export type JobProgressView = {
   headline: string | null;
   /** Resolved provider label ("Codex Sol", "Local model"), never "auto". */
   model: string;
+  /**
+   * The exact model and endpoint the run reported executing (B5), read back
+   * from the job's own receipt. `model` above is the pinned label; these are
+   * what actually answered, so "Local model" can name the loaded model and its
+   * host. Empty for a row written before the receipt carried them.
+   */
+  executedModel: string;
+  executedEndpoint: string;
+  executedProvider: string;
   stages: string[] | null;
   stageIndex: number | null;
   pct: number | null;
@@ -209,13 +212,45 @@ type ProgressShape = Omit<
   | "canRetry"
 >;
 
+/**
+ * The executed model/endpoint/provider from a job row's own receipt (B5). Read
+ * on the server so the card never sees the blob; an absent or unparseable
+ * receipt answers empty strings rather than throwing inside a render.
+ */
+function executedModelOf(row: DeskJob): {
+  executedModel: string;
+  executedEndpoint: string;
+  executedProvider: string;
+} {
+  const raw = row.result_json;
+  if (!raw) return { executedModel: "", executedEndpoint: "", executedProvider: "" };
+  let parsed: unknown;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return { executedModel: "", executedEndpoint: "", executedProvider: "" };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { executedModel: "", executedEndpoint: "", executedProvider: "" };
+  }
+  const receipt = parsed as Record<string, unknown>;
+  const str = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    executedModel: str(receipt.modelId),
+    executedEndpoint: str(receipt.modelEndpoint),
+    executedProvider: str(receipt.runtimeProvider) || "",
+  };
+}
+
 function progressShape(row: DeskJob, model: string): ProgressShape {
+  const executed = executedModelOf(row);
   return {
     id: row.id,
     kind: row.kind,
     subjectId: row.subject_id,
     status: row.status,
     model,
+    ...executed,
     stages: jobStages(row),
     stageIndex: row.stage_index ?? null,
     pct: row.pct ?? null,
@@ -225,14 +260,16 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
       whose kind never reports a step -- still has a sentence to show rather
       than an empty line under the bar.
     */
-    step: row.step_text || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
+    step:
+      row.step_text || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
     startedAt: ms(row.started_at),
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
     updatedAt: ms(row.updated_at),
     error: row.error ?? null,
     failoverNote: row.failover_note ?? "",
-    cancelRequested: (row.status === "queued" || row.status === "running") && Boolean(row.cancel_requested),
+    cancelRequested:
+      (row.status === "queued" || row.status === "running") && Boolean(row.cancel_requested),
   };
 }
 
@@ -265,7 +302,7 @@ export function jobProgressView(
           : `/desk/story/${leadId}`
         : kind === "reporting" && leadId
           ? `/desk/story/${leadId}`
-          : RESULT_HREF[kind]?.(row.subject_id) ?? null),
+          : (RESULT_HREF[kind]?.(row.subject_id) ?? null)),
     resultDraftId: draftId,
     doneText: DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
@@ -447,15 +484,29 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       order by (j.status in ('queued', 'running')) desc, j.id desc
       limit 30
     `;
-    const reportingRequestIds = rows.filter((row) => row.kind === "reporting").map((row) => row.subject_id);
+    const reportingRequestIds = rows
+      .filter((row) => row.kind === "reporting")
+      .map((row) => row.subject_id);
     const reportingLeads = reportingRequestIds.length
-      ? await sql<{ id: number; lead_id: number | null }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`
+      ? await sql<{
+          id: number;
+          lead_id: number | null;
+        }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`
       : [];
-    const leadByRequest = new Map(reportingLeads.map((request) => [Number(request.id), request.lead_id == null ? null : Number(request.lead_id)]));
+    const leadByRequest = new Map(
+      reportingLeads.map((request) => [
+        Number(request.id),
+        request.lead_id == null ? null : Number(request.lead_id),
+      ]),
+    );
     return rows.map((row) =>
       jobProgressView(
         row,
-        row.kind === "reporting" ? leadByRequest.get(row.subject_id) ?? 0 : row.kind === "draft" || row.kind === "reconcile" ? row.subject_id : 0,
+        row.kind === "reporting"
+          ? (leadByRequest.get(row.subject_id) ?? 0)
+          : row.kind === "draft" || row.kind === "reconcile"
+            ? row.subject_id
+            : 0,
         row.kind === "draft" || row.kind === "reconcile" ? row.draft_id : null,
         row.headline,
       ),
@@ -532,7 +583,9 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     `;
     if (!row) throw new Error("That job is not in this newsroom.");
     if (row.kind !== "draft" && row.kind !== "reconcile") {
-      throw new Error("This job's request is not stored with the job, so it cannot be retried here.");
+      throw new Error(
+        "This job's request is not stored with the job, so it cannot be retried here.",
+      );
     }
     const leadId = row.subject_id;
     let choice = storyModelChoice(row.model_choice);
@@ -568,7 +621,8 @@ export const retryStoryJob = createServerFn({ method: "POST" })
       const { requestDraftReconciliation } = await import("./draft-reconcile.server.ts");
       await requestDraftReconciliation(context2, { leadId, modelChoice: choice });
     } else {
-      const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
+      const { commitStoryDraftForAuthenticatedEditor } =
+        await import("./model-request-commit.server.ts");
       const result = await commitStoryDraftForAuthenticatedEditor({
         context: context2,
         leadId,
