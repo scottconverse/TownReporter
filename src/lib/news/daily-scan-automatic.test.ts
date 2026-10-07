@@ -161,7 +161,7 @@ describe("daily scan on Automatic", () => {
     );
   });
 
-  it("skips a rung that is not loaded, records why, and lands on Codex Terra", async () => {
+  it("skips a rung that is not loaded, records why, and lands on Codex Sol 6.1 (balanced)", async () => {
     await withEnvAsync(
       {
         ...BARE,

@@ -643,10 +643,10 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     ].join("");
     const result = await withEnv(
       { CODEX_CLI_PATH: process.execPath, NODE_OPTIONS: nodeImport(fakeCli) },
-      () => probeCodex("Codex Terra"),
+      () => probeCodex("Codex Sol 6.1 (balanced)"),
     );
 
-    assert.deepEqual(result, { ok: true, label: "Codex Terra" });
+    assert.deepEqual(result, { ok: true, label: "Codex Sol 6.1 (balanced)" });
   });
 
   it("turns an expired Codex OAuth session into actionable sign-in guidance", async () => {

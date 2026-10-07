@@ -534,7 +534,7 @@ export function opinionProviderProblem(
     return "Opinion can write with DeepSeek v4.1 Flash, and its Ollama server is not answering on this machine: start Ollama (or set TOWNREPORTER_DEEPSEEK_BASE_URL to its address), then try again.";
   }
   if (candidate === "codex-frontier") {
-    return "Opinion can write with Codex Sol, and Codex is not set up on this machine: open Codex and log in.";
+    return `Opinion can write with ${modelChoiceLabel(candidate, "opinion")}, and Codex is not set up on this machine: open Codex and log in.`;
   }
   if (candidate === "claude-frontier" || candidate === "claude-sonnet") {
     return "Opinion can write with Claude, and Claude Code is not signed in on this machine: open Claude Code and sign in.";

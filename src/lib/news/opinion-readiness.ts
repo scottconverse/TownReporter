@@ -1,5 +1,6 @@
 import {
   opinionModelChoice,
+  modelChoiceLabel,
   OPINION_AUTOMATIC_LADDER,
   opinionProviderProblem,
   type OpinionModelChoice,
@@ -44,7 +45,7 @@ type CandidateProbe =
  * `opinionProviderProblem`) says what is missing for that one.
  */
 export const OPINION_MODEL_UNIVERSE =
-  "Opinion's Automatic writes with DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet, and none of them answered. Two more models are yours to pick by name in Opinion's model menu: a local model, or a saved connection. DeepSeek is also the model the desk's story writer drafts with, and Opinion reaches it first.";
+  `Opinion's Automatic writes with ${OPINION_AUTOMATIC_LADDER.map((rung) => modelChoiceLabel(rung, "opinion")).join(", then ")}, and none of them answered. Two more models are yours to pick by name in Opinion's model menu: a local model, or a saved connection. DeepSeek is also the model the desk's story writer drafts with, and Opinion reaches it first.`;
 
 /**
  * The first rung of Opinion's Automatic ladder that answers right now, or

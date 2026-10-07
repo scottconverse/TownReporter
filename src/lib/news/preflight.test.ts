@@ -111,7 +111,7 @@ describe("scan preflight", () => {
 
   it("becomes ready on a fresh probe after either provider signs in", () => {
     for (const [detail, label] of [
-      ["Codex is signed out. Open Codex, sign in, then try again.", "Codex Sol"],
+      ["Codex is signed out. Open Codex, sign in, then try again.", "Codex Sol 6.1"],
       ["Claude Code OAuth session expired.", "Claude Opus"],
     ] as const) {
       assert.equal(scanPreflight({ ok: false, error: detail }).ok, false);

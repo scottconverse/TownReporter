@@ -328,7 +328,7 @@ describe("Dark Desk carries the editor's model choice onto the job", { timeout: 
       const result = await startDarkRound({ userId }, id, "claude-frontier");
       assert.equal(result.ok, false);
       assert.equal((result as { kind?: string }).kind, "model-conflict");
-      assert.match(String((result as { error?: string }).error), /Codex Terra/);
+      assert.match(String((result as { error?: string }).error), /Codex Sol 6\.1 \(balanced\)/);
 
       const jobs = await darkJobs(id);
       assert.equal(jobs.length, 1, "the conflict must not have queued a second round");

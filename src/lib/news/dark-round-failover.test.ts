@@ -179,7 +179,7 @@ describe("planDarkRoundFailover", () => {
     assert.deepEqual(result, {
       next: "deepseek-flash",
       label: "DeepSeek v4.1 Flash",
-      switchedBecause: "Codex Terra sign-in lapsed",
+      switchedBecause: "Codex Sol 6.1 (balanced) sign-in lapsed",
     });
     assert.deepEqual(probed, ["deepseek-flash"]);
     assert.equal(modelChoiceSet, true);
@@ -228,7 +228,7 @@ describe("planDarkRoundFailover", () => {
     const result = await planDarkRoundFailover(job(), "The writing model declined this request", {
       probe: async () => {
         probed = true;
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
 
@@ -260,7 +260,7 @@ describe("runCheckpointedDarkStages", () => {
         events.push(`failover:${stage}`);
         return {
           next: "codex-balanced",
-          label: "Codex Terra",
+          label: "Codex Sol 6.1 (balanced)",
           switchedBecause: "Claude timed out",
         };
       },
@@ -274,7 +274,7 @@ describe("runCheckpointedDarkStages", () => {
       "research:claude-sonnet",
       "synthesis:claude-sonnet",
       "failover:synthesis",
-      "stage:Claude timed out → Codex Terra retrying synthesis",
+      "stage:Claude timed out → Codex Sol 6.1 (balanced) retrying synthesis",
       "synthesis:codex-balanced",
     ]);
   });

@@ -293,7 +293,7 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders Automatic with DeepSeek first and Codex Terra last", () => {
+  it("orders Automatic with DeepSeek first and Codex Sol 6.1 (balanced) last", () => {
     // 0.6.63, Unit Y item 1, on the owner's measured blind research test:
     // DeepSeek v4.1 Flash 30.9, Qwen3.6-35B 15.8, Terra 15.3.
     const ladder = automaticLadder();
@@ -314,7 +314,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
     );
   });
 
-  it("orders Opinion's own Automatic with DeepSeek first, then Codex Sol, then Sonnet", () => {
+  it("orders Opinion's own Automatic with DeepSeek first, then Codex Sol 6.1, then Sonnet", () => {
     /*
       Unit U29, the owner's decision of 2026-09-30 ("use deepseek ... deepseek
       is the best model at the lowest price we have"). Read from the registry's

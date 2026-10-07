@@ -141,13 +141,13 @@ test("Story retries only the failed writer call and keeps completed research", a
   );
   const [jobRow] = await sql.query<{ id: number }>(
     "insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token,result_json) values($1,$2,'draft',$3,'codex-balanced','editor','supplied','default','running','Writing','writer-failover-claim',$4) returning id",
-    [user, room, lead.id, JSON.stringify({ modelEffort: "none" })],
+    [user, room, lead.id, JSON.stringify({ modelEffort: "low" })],
   );
   const job = {
     id: jobRow.id, user_id: user, newsroom_id: room, kind: "draft", subject_id: lead.id,
     model_choice: "codex-balanced", model_choice_source: "editor", research_scope: "supplied",
     lane: "default", status: "running", stage: "Writing", claim_token: "writer-failover-claim",
-    result_json: JSON.stringify({ modelEffort: "none" }),
+    result_json: JSON.stringify({ modelEffort: "low" }),
   } as DeskJob;
   let reportCalls = 0;
   let upstreamResearchCalls = 0;
@@ -194,8 +194,8 @@ test("Story retries only the failed writer call and keeps completed research", a
     the probe now answers about the rung it actually got.
   */
   assert.deepEqual(providerCalls, [
-    { choice: "codex-balanced", effort: "none" },
-    { choice: "deepseek-flash", effort: "none" },
+    { choice: "codex-balanced", effort: "low" },
+    { choice: "deepseek-flash", effort: "low" },
   ]);
 });
 

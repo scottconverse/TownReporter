@@ -91,7 +91,7 @@ function report(over: Partial<ReportingPackage>): ReportingPackage {
       methodDir: "/methods/civic-scanner",
       mode: "full-pipeline",
       modelChoice: "sol",
-      modelLabel: "Codex Sol",
+      modelLabel: "Codex Sol 6.1",
       researchToolsAvailable: true,
       elapsedMs: 1000,
     },

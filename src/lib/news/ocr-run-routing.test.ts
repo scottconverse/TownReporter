@@ -516,7 +516,7 @@ describe("ordinary public-document OCR model routing", () => {
         modelChoice: "auto",
       },
       {
-        probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+        probe: async () => ({ ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" }),
         paper: async () => ({ name: "Test Paper", city: "Longmont", state: "Colorado" }),
         search: async () => [],
         capture: async () => ({ version_id: 1, capture_event_id: 2 }),

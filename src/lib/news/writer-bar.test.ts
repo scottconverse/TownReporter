@@ -124,8 +124,8 @@ describe("lastDraftWhen", () => {
 describe("lastDraftLine", () => {
   it("writes the drawn line from the model and the hour the desk recorded", () => {
     assert.equal(
-      lastDraftLine({ modelLabel: "Codex Sol", when: "7:48 a.m." }),
-      "Last draft: Codex Sol, 7:48 a.m.",
+      lastDraftLine({ modelLabel: "Codex Sol 6.1", when: "7:48 a.m." }),
+      "Last draft: Codex Sol 6.1, 7:48 a.m.",
     );
   });
 
@@ -144,8 +144,8 @@ describe("lastDraftLine", () => {
     -- `lastDraftWhen` is where that "" comes from.
   */
   it("draws no line at all when the desk recorded no time", () => {
-    assert.equal(lastDraftLine({ modelLabel: "Codex Sol", when: "" }), "");
-    assert.equal(lastDraftLine({ modelLabel: "Codex Sol", when: "   " }), "");
+    assert.equal(lastDraftLine({ modelLabel: "Codex Sol 6.1", when: "" }), "");
+    assert.equal(lastDraftLine({ modelLabel: "Codex Sol 6.1", when: "   " }), "");
     assert.equal(lastDraftLine({ modelLabel: "", when: "" }), "");
   });
 });

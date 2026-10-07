@@ -16,8 +16,8 @@ test("Opinion preserves the requested local runtime and records Codex's destinat
       requestedEffort: null,
       actualRuntime: "codex-frontier",
       actualEffort: "medium",
-      stage: "Switched to Codex Sol: Local model was unavailable",
-      note: "This draft moved to Codex Sol because Local model was unavailable",
+      stage: "Switched to Codex Sol 6.1: Local model was unavailable",
+      note: "This draft moved to Codex Sol 6.1 because Local model was unavailable",
     },
   );
 });

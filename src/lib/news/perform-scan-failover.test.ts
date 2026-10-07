@@ -269,7 +269,7 @@ describe("runScanChatWithFailover", () => {
       },
       probe: async () => ({
         ok: true as const,
-        label: "Codex Terra",
+        label: "Codex Sol 6.1 (balanced)",
         choice: "codex-balanced" as const,
       }),
       setModelChoice: async () => undefined,
@@ -278,8 +278,8 @@ describe("runScanChatWithFailover", () => {
 
     assert.equal(result.ok, true);
     // The Qwen rung has no measured effort list, so nothing is sent for it;
-    // Codex Terra accepts "none", so the retry sends that.
-    assert.deepEqual(efforts, [undefined, "none"]);
+    // Codex Sol 6.1 (balanced) replaces unsupported "none" with its default "medium".
+    assert.deepEqual(efforts, [undefined, "medium"]);
   });
 
   /**
@@ -338,7 +338,7 @@ describe("runScanChatWithFailover", () => {
       },
       probe: async () => {
         probeCalled = true;
-        return { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const };
+        return { ok: true as const, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" as const };
       },
       setModelChoice: async () => {
         assert.fail("a refusal must never switch models");

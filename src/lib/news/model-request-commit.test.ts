@@ -349,7 +349,7 @@ describe("authenticated Codex commit boundary", () => {
       {
         probeProvider: async () => ({
           ok: true as const,
-          label: "Codex Sol",
+          label: "Codex Sol 6.1",
           choice: "codex-frontier" as const,
         }),
         enqueueJob: async (opts) => {
@@ -697,7 +697,7 @@ describe("authenticated Codex commit boundary", () => {
       {
         probeProvider: async () => ({
           ok: true as const,
-          label: "Codex Sol",
+          label: "Codex Sol 6.1",
           choice: "codex-frontier" as const,
         }),
         assertRate: async () => {
@@ -728,7 +728,7 @@ describe("authenticated Codex commit boundary", () => {
       {
         probeProvider: async (choice) => {
           assert.equal(choice, "codex-frontier");
-          return { ok: true as const, label: "Codex Sol", choice: "codex-frontier" as const };
+          return { ok: true as const, label: "Codex Sol 6.1", choice: "codex-frontier" as const };
         },
         assertRate: async () => undefined,
         enqueueJob: async (opts) => {
@@ -761,7 +761,7 @@ describe("authenticated Codex commit boundary", () => {
       {
         probeProvider: async () => ({
           ok: true as const,
-          label: "Codex Sol",
+          label: "Codex Sol 6.1",
           choice: "codex-frontier" as const,
         }),
         assertRate: async () => {
