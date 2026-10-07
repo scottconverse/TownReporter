@@ -23,6 +23,7 @@ import {
   methodLine,
   packageGaps,
   readinessLabel,
+  reportingNotice,
   reportingRunState,
   scoreLine,
 } from "@/lib/news/reporting-package-view";
@@ -140,6 +141,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     <PackageBody
       leadId={leadId}
       requestId={row.requestId}
+      latestStatus={row.latestRun?.status}
       draftId={row.draftId ?? null}
       report={row.pkg}
       currentDocumentChecks={row.currentDocumentChecks ?? {}}
@@ -157,6 +159,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
 function PackageBody({
   leadId,
   requestId,
+  latestStatus,
   draftId,
   report,
   currentDocumentChecks,
@@ -166,6 +169,7 @@ function PackageBody({
 }: {
   leadId: number;
   requestId: number;
+  latestStatus: string | undefined;
   draftId: number | null;
   report: ReportingPackage;
   currentDocumentChecks: CurrentReportingDocumentChecks;
@@ -243,7 +247,7 @@ function PackageBody({
         </p>
       ) : null}
       <ScoreAndReceipt report={report} />
-      <FollowUpBox requestId={requestId} onRefresh={onRefresh} />
+      <FollowUpBox requestId={requestId} latestStatus={latestStatus} onRefresh={onRefresh} />
       <CorrectionBox leadId={leadId} requestId={requestId} onRefresh={onRefresh} />
       <ObservationsList observations={observations} />
     </section>
@@ -483,7 +487,7 @@ type ObservationRow = {
   states -- the runner files its result as a new version, and the existing
   draft stays where it is until a new one lands.
 */
-function FollowUpBox({ requestId, onRefresh }: { requestId: number; onRefresh: () => void }) {
+function FollowUpBox({ requestId, latestStatus, onRefresh }: { requestId: number; latestStatus: string | undefined; onRefresh: () => void }) {
   const qc = useQueryClient();
   const [ask, setAsk] = useState("");
   const [seeds, setSeeds] = useState("");
@@ -539,7 +543,7 @@ function FollowUpBox({ requestId, onRefresh }: { requestId: number; onRefresh: (
       >
         Start a follow-up run
       </ActionButton>
-      {follow.data?.ok ? (
+      {reportingNotice(follow.data, latestStatus) === "started" ? (
         <Notice kind="ok">A new reporting run was started. Watch its progress under Running.</Notice>
       ) : null}
       {refused ? <Notice kind="warn">{refused}</Notice> : null}
