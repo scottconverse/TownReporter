@@ -2090,7 +2090,9 @@ export function kindFromSourceUrl(
     ])
   )
     return "news";
-  if (host.endsWith(".gov") || matches(["longmont.primegov.com", "svvsd.org", "rtd-denver.com"]))
+  // Government prefixes in the state/locality .us namespace, not commercial .us hosts.
+  const governmentUs = /(?:^|\.)(?:ci|town|co|county|state)\.(?:[a-z0-9-]+\.)?[a-z]{2}\.us$/.test(host);
+  if (host.endsWith(".gov") || governmentUs || matches(["longmont.primegov.com", "svvsd.org", "rtd-denver.com"]))
     return "official";
   return "unclassified";
 }
