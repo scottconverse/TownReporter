@@ -93,7 +93,7 @@ describe("model-specific thinking effort", () => {
   it("offers only values accepted by each exact Codex model", () => {
     assert.deepEqual(modelEffortsFor("codex-astra"), ["low", "medium", "high", "xhigh", "max"]);
     for (const choice of ["codex-frontier", "codex-balanced", "codex-luna"] as const) {
-      assert.deepEqual(modelEffortsFor(choice), ["none", "low", "medium", "high", "xhigh", "max"]);
+      assert.deepEqual(modelEffortsFor(choice), ["low", "medium", "high", "xhigh", "max"]);
       assert.equal(defaultModelEffort(choice), "medium");
     }
     for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) {
@@ -424,7 +424,7 @@ describe("environment overrides are config, not code", () => {
       assert.equal(providerModel(providerEntry("codex-balanced")!), "gpt-9-terra");
     });
     withEnv({}, () => {
-      assert.equal(providerModel(providerEntry("codex-balanced")!), "gpt-5.6-terra");
+      assert.equal(providerModel(providerEntry("codex-balanced")!), "gpt-6.1-sol");
     });
   });
 
@@ -462,15 +462,15 @@ describe("the planner substitution rule", () => {
   it("substitutes a cheaper model from the SAME provider, never another's", () => {
     withEnv({}, () => {
       // Claude plans on Haiku: same searches as Opus, more claims, a quarter
-      // of the cost. Both Codex entries plan on Terra.
+      // of the cost. All Codex entries plan on Sol 6.1.
       assert.match(plannerModelFor("claude-frontier"), /haiku/i);
       assert.match(plannerModelFor("claude-fable"), /haiku/i);
       assert.match(plannerModelFor("claude-sonnet"), /haiku/i);
       assert.match(plannerModelFor("claude-haiku"), /haiku/i);
-      assert.equal(plannerModelFor("codex-astra"), "gpt-5.6-luna");
-      assert.equal(plannerModelFor("codex-luna"), "gpt-5.6-luna");
-      assert.equal(plannerModelFor("codex-balanced"), "gpt-5.6-terra");
-      assert.equal(plannerModelFor("codex-frontier"), "gpt-5.6-terra");
+      assert.equal(plannerModelFor("codex-astra"), "gpt-6.1-sol");
+      assert.equal(plannerModelFor("codex-luna"), "gpt-6.1-sol");
+      assert.equal(plannerModelFor("codex-balanced"), "gpt-6.1-sol");
+      assert.equal(plannerModelFor("codex-frontier"), "gpt-6.1-sol");
       /*
         Audit finding TW-001: the gateway gets NO opinion. Returning a Claude
         identifier here meant every Dark Desk hop against LM Studio or Ollama

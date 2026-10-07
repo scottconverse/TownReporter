@@ -190,7 +190,7 @@ test("the Story picker offers Automatic plus exactly the registry's story provid
     "Automatic",
     ...registry.providersFor("story").map((e) => e.label),
   ];
-  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
   // Zen and Local Qwen were removed from the picker 2026-09-02 ("it's not
   // working it seems" -- Claude/Codex only for now).
@@ -205,22 +205,22 @@ test("the Dark Desk picker offers the registry's dark providers, and says it dig
     "Automatic",
     ...registry.providersFor("dark").map((e) => e.label),
   ];
-  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
   assert.match(html, /Digging model/);
   assert.match(html, /unfinished stage moves to the next provider/);
 });
 
-test("the Opinion picker offers the registry's opinion providers, including Codex Terra and Sol", () => {
+test("the Opinion picker offers the registry's opinion providers, including Codex Sol 6.1 (balanced) and Sol", () => {
   const html = render({ scope: "opinion" });
   const expected = [
     "Automatic",
     ...registry.providersFor("opinion").map((e) => e.label),
   ];
-  const rendered = [...html.matchAll(/<option[^>]*>([^<—]+)—/g)].map((m) => m[1].trim());
+  const rendered = [...html.matchAll(/<option[^>]*>([^<]+)<\/option>/g)].map((m) => m[1].split(" — ")[0].trim());
   assert.deepEqual(rendered, expected);
-  assert.ok(rendered.includes("Codex Terra"), "Opinion must offer Codex Terra");
-  assert.ok(rendered.includes("Codex Sol"), "Opinion must offer Codex Sol");
+  assert.ok(rendered.includes("Codex Sol 6.1 (balanced)"), "Opinion must offer Codex Sol 6.1 (balanced)");
+  assert.ok(rendered.includes("Codex Sol 6.1"), "Opinion must offer Codex Sol 6.1");
   assert.doesNotMatch(html, /Local Qwen|Zen MiMo/);
 });
 
@@ -235,7 +235,7 @@ test("Opinion setup help explains its voice prerequisite without advertising Sto
 test("disabled picker retains accessible setup help, associated label, and technical-fallback explanation", () => {
   const html = render({ value: "codex-frontier", disabled: true });
   assert.match(html, /<select[^>]* disabled=""/);
-  assert.match(html, /Prefers Codex Sol for this run/);
+  assert.match(html, /Prefers Codex Sol 6\.1 for this run/);
   assert.match(html, /technical failure.*unfinished call.*next ready writing model/);
   assert.match(html, /content refusal stops the run/);
   assert.match(html, /<summary[^>]*>Set up a writing model<\/summary>/);
@@ -423,7 +423,7 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   // Automatic will actually do, read from the ladder itself. The middle rung
   // reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of its
   // own, because it runs whatever LM Studio has loaded.
-  assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Terra/);
+  assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/);
 });
 
 test("a stored SuperGrok choice on the forced surface falls back to Automatic", () => {

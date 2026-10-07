@@ -24,7 +24,7 @@ describe("named-runtime technical preflight fallback", () => {
     assert.equal(result.modelChoice, "codex-balanced");
     assert.equal(result.modelEffort, "max");
     assert.equal(result.requestedRuntime, "claude-sonnet");
-    assert.match(result.switchNote ?? "", /moved to Codex Terra because Claude Sonnet was unavailable/i);
+    assert.match(result.switchNote ?? "", /moved to Codex Sol 6\.1 \(balanced\) because Claude Sonnet was unavailable/i);
   });
 
   it("queues a batch on the ready fallback with requested and actual runtime receipt", async () => {

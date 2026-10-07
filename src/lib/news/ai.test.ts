@@ -230,9 +230,9 @@ describe("resolveProvider", () => {
     await withEnv({ ANTHROPIC_API_KEY: undefined, TOWNREPORTER_CLAUDE_CODE: undefined, TOWNREPORTER_CODEX: undefined }, () => {
       for (const [choice, model] of [
         ["codex-astra", "gpt-6-astra"],
-        ["codex-frontier", "gpt-5.6-sol"],
-        ["codex-balanced", "gpt-5.6-terra"],
-        ["codex-luna", "gpt-5.6-luna"],
+        ["codex-frontier", "gpt-6.1-sol"],
+        ["codex-balanced", "gpt-6.1-sol"],
+        ["codex-luna", "gpt-6-luna"],
         ["claude-fable", "fable"],
         ["claude-frontier", "claude-opus-5"],
         ["claude-sonnet", "sonnet"],
@@ -269,8 +269,8 @@ describe("resolveProvider", () => {
       const choose = resolveProvider as unknown as (
         choice: string,
       ) => ReturnType<typeof resolveProvider>;
-      assert.equal(choose("codex-balanced")?.model, "gpt-5.6-terra");
-      assert.equal(choose("codex-frontier")?.model, "gpt-5.6-sol");
+      assert.equal(choose("codex-balanced")?.model, "gpt-6.1-sol");
+      assert.equal(choose("codex-frontier")?.model, "gpt-6.1-sol");
       assert.equal(choose("claude-frontier")?.model, "claude-opus-5");
     });
   });
@@ -473,8 +473,8 @@ describe("grokChat", () => {
 
   it("uses only the explicitly selected Story picker adapter", async () => {
     const cases = [
-      { choice: "codex-balanced", kind: "codex", label: "Codex Terra", vars: BARE },
-      { choice: "codex-frontier", kind: "codex", label: "Codex Sol", vars: BARE },
+      { choice: "codex-balanced", kind: "codex", label: "Codex Sol 6.1 (balanced)", vars: BARE },
+      { choice: "codex-frontier", kind: "codex", label: "Codex Sol 6.1", vars: BARE },
       {
         choice: "claude-frontier",
         kind: "anthropic",
@@ -1133,7 +1133,7 @@ describe("model-picker provider readiness", () => {
           assert.equal(result.ok, true);
           if (result.ok) {
             assert.equal(result.choice, "codex-balanced");
-            assert.equal(result.label, "Codex Terra");
+            assert.equal(result.label, "Codex Sol 6.1 (balanced)");
             // The brief's own words, verbatim.
             assert.deepEqual(result.skippedRungs, [
               "Local model skipped: nothing loaded in LM Studio",

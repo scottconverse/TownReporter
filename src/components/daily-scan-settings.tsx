@@ -290,7 +290,7 @@ export function DailyScanSettings() {
       />
       <p id="daily-scan-heading" className="mt-3 max-w-2xl text-sm text-muted">
         Choose the model for every scheduled run. Automatic works down the writing ladder — DeepSeek
-        v4.1 Flash first, then a model on this computer if one is already loaded, then Codex Terra —
+        v4.1 Flash first, then a model on this computer if one is already loaded, then Codex Sol 6.1 (balanced) —
         and the run record names the model that actually ran. If the chosen model is unavailable, out of quota,
         signed out, or returns no output, the unfinished model call can move to the next ready
         writing model and the run records that switch. A content refusal stops the run. Saved Custom

@@ -259,7 +259,7 @@ describe("ordinary public-document OCR model routing", () => {
         },
       });
       assert.match(result.text, /water contract was approved/);
-      assert.deepEqual(selected, [{ transport: "codex", model: "gpt-5.6-terra" }]);
+      assert.deepEqual(selected, [{ transport: "codex", model: "gpt-6.1-sol" }]);
     } finally {
       if (priorCodex === undefined) delete process.env.TOWNREPORTER_CODEX;
       else process.env.TOWNREPORTER_CODEX = priorCodex;
@@ -304,7 +304,7 @@ describe("ordinary public-document OCR model routing", () => {
 
       assert.match(result.text, /water contract was approved/);
       assert.deepEqual(selected, [
-        { transport: "codex", model: "gpt-5.6-terra" },
+        { transport: "codex", model: "gpt-6.1-sol" },
         { transport: "claude-code", model: "sonnet" },
       ]);
     } finally {
@@ -354,7 +354,7 @@ describe("ordinary public-document OCR model routing", () => {
       });
 
       assert.match(result.text, /water contract was approved/);
-      assert.deepEqual(selected, ["gpt-5.6-terra", "sonnet"]);
+      assert.deepEqual(selected, ["gpt-6.1-sol", "sonnet"]);
     } finally {
       if (priorTerraModel === undefined) delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
       else process.env.TOWNREPORTER_CODEX_TERRA_MODEL = priorTerraModel;
