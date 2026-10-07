@@ -1024,6 +1024,7 @@ export const getLead = createServerFn({ method: "GET" })
              -- dates and kill record travel with the row.
              case when prior.id is null then null else jsonb_build_object(
                'id', prior.id, 'headline', prior.headline, 'status', prior.status,
+               'topic', prior.topic,
                'why', prior.why, 'source_urls', prior.source_urls,
                'created_at', prior.created_at,
                'kill_reason', prior.kill_reason, 'kill_reason_url', prior.kill_reason_url,
@@ -2754,12 +2755,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     id: number;
     status: string;
     headline: string;
+    topic: string | null;
     source_urls: string;
     created_at: string;
     why: string | null;
     evidence: string | null;
   }>`
-    select id, status, headline, source_urls, created_at, why, evidence
+    select id, status, headline, topic, source_urls, created_at, why, evidence
     from leads
     where newsroom_id = ${owned(context)}
       and status <> 'published'
@@ -2769,6 +2771,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     id: l.id,
     status: l.status,
     headline: l.headline,
+    topic: l.topic,
     source_urls: parseLeadSourceUrls(l.source_urls),
     created_at: l.created_at,
     // Unit AK item 2: the killed lead's own words, so a strong match that
