@@ -27,6 +27,7 @@ export type TextflowkitProbe = {
   installed: boolean;
   version: string | null;
   cliPath: string;
+  engine: TextflowkitConfig["engine"];
   model: string;
   language: string;
   /** Why it is not installed, when that is the answer. Never a silent false. */
@@ -116,7 +117,7 @@ export async function probeTextflowkit(
   opts: { env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
 ): Promise<TextflowkitProbe> {
   const config = resolveTextflowkitConfig(opts.env ?? process.env);
-  const base = { cliPath: config.cliPath, model: config.model, language: config.language };
+  const base = { engine: config.engine, cliPath: config.cliPath, model: config.model, language: config.language };
   const run = await runTextflowkit(config.cliPath, ["--version"], { timeoutMs: opts.timeoutMs ?? 15_000 });
   if (run.spawnError) {
     return {
@@ -144,6 +145,7 @@ export type TextflowkitTranscribeSuccess = {
   /** Where the tool's own JSON was written; the caller stores it, then removes the temp directory. */
   jsonPath: string;
   jsonBytes: number;
+  engine: string | null;
   model: string | null;
   device: string | null;
   durationSeconds: number | null;
@@ -209,6 +211,7 @@ export async function transcribeAudioWithTextflowkit(input: {
   const argv = buildTextflowkitArgs({
     audioPath: resolve(input.audioPath),
     outputDir: resolve(input.outputDir),
+    engine: config.engine,
     model: config.model,
     language: config.language,
   });
@@ -275,6 +278,7 @@ export async function transcribeAudioWithTextflowkit(input: {
     parsed,
     jsonPath,
     jsonBytes: Buffer.byteLength(raw, "utf8"),
+    engine: details.engine,
     model: details.model,
     device: details.device,
     durationSeconds: details.durationSeconds,

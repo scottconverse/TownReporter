@@ -3,14 +3,13 @@
  * A stand-in for the real `textflowkit` console script (unit R).
  *
  * Point `TEXTFLOWKIT_CLI_PATH` at this file. It answers the two invocations the
- * product makes, in the shapes the real tool was measured to produce (0.1.6, and again on
- * 0.1.8, whose JSON, stdout and exit codes are identical):
+ * product makes, in the shapes the real tool was measured to produce (0.1.11):
  *
  *   fake-textflowkit.mjs --version
- *     -> "textflowkit 0.1.8" on stdout, exit 0
+ *     -> "textflowkit 0.1.11" on stdout, exit 0
  *
  *   fake-textflowkit.mjs transcribe <audio> --formats json --output-dir <dir> \
- *        --model small --language en
+ *        --engine whistle --language en
  *     -> writes `<stem>-<hex>.json` into <dir> and prints that path on stdout
  *
  * Everything steerable is a `FAKE_TEXTFLOWKIT_*` variable, because that prefix
@@ -21,8 +20,8 @@
  * secrets.)
  *
  * The JSON is deliberately the measured shape rather than a convenient one: no
- * top-level `text`, `metadata.{model,device}`, and segments carrying
- * `start`/`end`/`text` plus per-word timings. A fake that returns an easier
+ * top-level `text`, `engine`, `metadata`, and segments carrying
+ * `start`/`end`/`text` (per-word timings for the Whisper engines). A fake that returns an easier
  * document would let a parser pass here and fail on a real recording.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -39,7 +38,7 @@ if (dump) writeFileSync(dump, JSON.stringify(process.env));
 const mode = process.env.FAKE_TEXTFLOWKIT_MODE ?? "ok";
 
 if (argv[0] === "--version" || argv.includes("--version")) {
-  process.stdout.write(`textflowkit ${process.env.FAKE_TEXTFLOWKIT_VERSION ?? "0.1.8"}\n`);
+  process.stdout.write(`textflowkit ${process.env.FAKE_TEXTFLOWKIT_VERSION ?? "0.1.11"}\n`);
   process.exit(mode === "version-fail" ? 1 : 0);
 }
 
@@ -92,24 +91,28 @@ if (mode === "hang") {
       end: Number((start + index * 0.4 + 0.35).toFixed(2)),
       text,
     }));
+  const engine = process.env.FAKE_TEXTFLOWKIT_ENGINE ?? argValue("--engine") ?? "whistle";
   const body = {
     source: audio,
     language: argValue("--language") ?? "en",
     platform: process.platform,
     duration: Number(process.env.FAKE_TEXTFLOWKIT_DURATION ?? "15.0"),
-    engine: "whisper",
+    engine,
     metadata: {
-      model: process.env.FAKE_TEXTFLOWKIT_MODEL ?? argValue("--model") ?? "small",
+      model: process.env.FAKE_TEXTFLOWKIT_MODEL ?? argValue("--model") ?? (engine === "whistle" ? "whistle" : "small"),
+      model_sha256: "0".repeat(64),
+      binary_sha256: "0".repeat(64),
       device: process.env.FAKE_TEXTFLOWKIT_DEVICE ?? "cpu",
+      window_policy: "core=26;context<=2;max=30",
+      cores: 1,
+      timestamp_repairs: { zero_duration_repaired: 0, clamped_to_window: 0, rejected_reversed: 0, rejected_nonfinite: 0, rejected_probability: 0, rejected_out_of_range: 0 },
+      resumed_from_core: null,
     },
     segments: segments.map((segment) => ({
       start: segment.start,
       end: segment.end,
       text: segment.text,
-      speaker: null,
-      translated_text: null,
-      hidden: false,
-      words: words(segment.text, segment.start),
+      ...(engine === "whistle" ? {} : { speaker: null, translated_text: null, hidden: false, words: words(segment.text, segment.start) }),
     })),
   };
   if (mode === "garbage") {

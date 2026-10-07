@@ -1,3 +1,4 @@
+// guards: transcript provenance could misidentify the engine and model that produced meeting evidence.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -48,7 +49,7 @@ function setEnv(name: string, value: string) {
 
 /** The config the worker is handed. The child's own environment comes from the allow-list. */
 function cliEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
-  return { TEXTFLOWKIT_CLI_PATH: FAKE_CLI, TEXTFLOWKIT_MODEL: "small", TEXTFLOWKIT_LANGUAGE: "en", ...extra };
+  return { TEXTFLOWKIT_CLI_PATH: FAKE_CLI, TEXTFLOWKIT_ENGINE: "whisper", TEXTFLOWKIT_MODEL: "small", TEXTFLOWKIT_LANGUAGE: "en", ...extra };
 }
 
 /**
@@ -175,7 +176,7 @@ before(async () => {
   vite = await createServer({
     configFile: false,
     cacheDir: join(tmpdir(), `townreporter-textflowkit-${process.pid}`),
-    server: { middlewareMode: true, hmr: { port: 0 } },
+    server: { middlewareMode: true, hmr: false },
     appType: "custom",
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
@@ -223,7 +224,9 @@ test("textflowkit absent: the meeting stays audio-only and nothing is queued or 
   assert.equal((await transcriptArtifacts(sql, seed.room, seed.videoId)).length, 0);
 });
 
-test("textflowkit installed: the audio becomes a content-addressed revision with provenance and segments", async () => {
+test("the audio becomes a revision with the CLI-reported engine and model", async () => {
+  setEnv("FAKE_TEXTFLOWKIT_ENGINE", "whistle");
+  setEnv("FAKE_TEXTFLOWKIT_MODEL", "whistle");
   const sql = await getSql();
   const audio = Buffer.from("opus-bytes-for-the-transcribed-case");
   const seed = await seedCapturedMeeting(sql, 97102, { videoId: "stt-tool-1", audio, durationSeconds: 15 });
@@ -251,13 +254,14 @@ test("textflowkit installed: the audio becomes a content-addressed revision with
   const provenance = JSON.parse(artifact.provenance_json ?? "{}") as Record<string, unknown>;
   assert.equal(provenance.sourceMethod, "textflowkit-json");
   assert.equal(provenance.tool, "textflowkit");
-  assert.equal(provenance.toolVersion, "0.1.8");
-  assert.equal(provenance.model, "small");
+  assert.equal(provenance.toolVersion, "0.1.11");
+  assert.equal(provenance.engine, "whistle");
+  assert.equal(provenance.model, "whistle");
   assert.equal(provenance.device, "cpu");
   assert.equal(provenance.language, "en");
   assert.equal(provenance.audioArtifactId, seed.audioArtifactId);
   assert.equal(provenance.audioSha256, seed.audioSha256, "the provenance names the audio these words came from");
-  assert.equal(provenance.wordCount, 28, "the per-word timings the tool's JSON carries are counted, not dropped");
+  assert.equal(provenance.wordCount, 0, "Whistle reports segments without word timings");
 
   const segments = await sql.query<{ segment_index: number; start_seconds: string; end_seconds: string; excerpt: string; caption_sha256: string }>(
     "select segment_index,start_seconds,end_seconds,excerpt,caption_sha256 from meeting_transcript_segments where artifact_id=$1 order by segment_index",
@@ -281,8 +285,8 @@ test("textflowkit installed: the audio becomes a content-addressed revision with
   const videoDir = join(seed.root, `newsroom-${seed.room}`, seed.videoId);
   assert.equal(artifact.storage_path, join(videoDir, `transcript-${artifact.sha256}.json`));
   const storedJson = JSON.parse(storedBytes.toString("utf8")) as { metadata: { model: string }; segments: unknown[] };
-  assert.equal(storedJson.metadata.model, "small");
-  assert.equal(storedJson.segments.length, 3, "per-word timings survive inside the retained JSON");
+  assert.equal(storedJson.metadata.model, "whistle");
+  assert.equal(storedJson.segments.length, 3, "Whistle segments survive inside the retained JSON");
 
   const record = await captureRecord(sql, seed.room, seed.videoId);
   assert.equal(record.status, "captured");
@@ -305,8 +309,11 @@ test("textflowkit installed: the audio becomes a content-addressed revision with
   assert.equal(job, null, "a completed job is not open");
   const receipt = JSON.parse(jobs[0]!.result_json) as Record<string, unknown>;
   assert.equal(receipt.revisionArtifactId, artifact.id);
-  assert.equal(receipt.toolVersion, "0.1.8");
-  assert.equal(receipt.model, "small");
+  assert.equal(receipt.toolVersion, "0.1.11");
+  assert.equal(receipt.engine, "whistle");
+  assert.equal(receipt.model, "whistle");
+  delete process.env.FAKE_TEXTFLOWKIT_MODEL;
+  delete process.env.FAKE_TEXTFLOWKIT_ENGINE;
   assert.equal(readdirSync(videoDir).some((name) => name.startsWith("textflowkit-")), false, "the scratch directory is removed");
 });
 

@@ -10,6 +10,8 @@ export type MeetingActivityRow = {
   channelUrl: string;
   status: "not-captured" | "captured" | "failed";
   failureReason: string | null;
+  transcriptionEngine?: string | null;
+  transcriptionModel?: string | null;
   captionFormat: string | null;
   captionSha256: string | null;
   audioFormat: string | null;
@@ -70,11 +72,14 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
     );
 
     const artifacts = await sql.query<{
-      video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null;
+      video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null; provenance_json: string | null;
     }>(
-      "select video_id,artifact_type,storage_path,format,sha256,byte_size from meeting_transcript_artifacts where newsroom_id=$1 order by captured_at desc, id desc",
+      "select video_id,artifact_type,storage_path,format,sha256,byte_size,provenance_json from meeting_transcript_artifacts where newsroom_id=$1 order by captured_at desc, id desc",
       [newsroomId],
     );
+    // Bind provenance to the capture's current transcript hash, never to an audio artifact.
+    const transcriptsByHash = new Map(artifacts.filter((a) => a.artifact_type === "transcript")
+      .map((a) => [`${a.video_id}:${a.sha256}`, a]));
     const byVideo = new Map<string, typeof artifacts[number]>();
     for (const a of artifacts) if (!byVideo.has(a.video_id)) byVideo.set(a.video_id, a);
 
@@ -137,9 +142,14 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
       const leadRow = leadByVideo.get(r.video_id);
       const artifact = byVideo.get(r.video_id);
       const alignment = alignByVideo.get(r.video_id);
+      const transcript = transcriptsByHash.get(`${r.video_id}:${r.caption_sha256}`);
+      let provenance: Record<string, unknown> = {};
+      try { provenance = JSON.parse(transcript?.provenance_json ?? "{}") ?? {}; } catch { /* older unreadable provenance */ }
       return {
         videoId: r.video_id, title: r.title, published: r.published, channelUrl: r.channel_url,
         status: r.status, failureReason: r.failure_reason,
+        transcriptionEngine: typeof provenance.engine === "string" ? provenance.engine : null,
+        transcriptionModel: typeof provenance.model === "string" ? provenance.model : null,
         captionFormat: r.caption_format, captionSha256: r.caption_sha256,
         audioFormat: r.audio_format, audioSha256: r.audio_sha256, audioBytes: r.audio_bytes, audioTriggerReason: r.audio_trigger_reason,
         captureDisposition: r.capture_disposition, revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false,
