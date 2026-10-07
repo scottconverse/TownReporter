@@ -472,6 +472,7 @@ function SourcesPage() {
     the panel is answering "how many files can the scanner reach", which does
     not change when the editor turns a page.
   */
+
   const watch = counts?.watching ?? 0;
 
   return (
@@ -1275,6 +1276,7 @@ function SuggestedSources({
                   </td>
                   <td className="td-hl" data-label="Suggested source">
                     <span className="src-t">{s.title}</span>
+                    <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
                     <span className="meta-inline block">
                       <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                         {s.url}
@@ -1563,8 +1565,9 @@ function WatchRows({
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                     {hostLabel(s.url)} ↗
                   </a>
-                  {s.kind ? ` · ${s.kind}` : ""}
+                  {` · Kind: ${s.kind || "unclassified"} · Tier: ${s.tier || "unclassified"}`}
                 </p>
+                <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>
                 ) : null}
@@ -1976,6 +1979,7 @@ function SourceTable({
           >
             <td className="td-hl" data-label="Source">
               <span className="src-t">{s.title}</span>
+              <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
               <span className="meta-inline block">
                 {/^https?:/i.test(s.url) ? (
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">

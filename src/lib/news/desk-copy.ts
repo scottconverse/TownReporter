@@ -2059,19 +2059,40 @@ export function killRecordLine(input: {
     : "Killed before the desk started recording why — no reason was kept";
 }
 
-export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {
-  if (/youtube\.com|youtu\.be/i.test(url)) return "youtube";
-  if (/twitter\.com|x\.com|facebook\.com|instagram\.com|nextdoor\.com|reddit\.com/i.test(url)) {
-    return "social";
+export function kindFromSourceUrl(
+  url: string,
+): "youtube" | "official" | "news" | "social" | "unclassified" {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "unclassified";
   }
+  const matches = (domains: string[]) =>
+    domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  if (matches(["youtube.com", "youtu.be"])) return "youtube";
   if (
-    /times-?call|dailycamera|longmontleader|denverpost|bizwest|coloradopolitics|substack\.com|sentineltm|leftthandvalley/i.test(
-      url,
-    )
-  ) {
+    matches(["twitter.com", "x.com", "facebook.com", "instagram.com", "nextdoor.com", "reddit.com"])
+  )
+    return "social";
+  if (
+    matches([
+      "timescall.com",
+      "times-call.com",
+      "dailycamera.com",
+      "longmontleader.com",
+      "denverpost.com",
+      "bizwest.com",
+      "coloradopolitics.com",
+      "substack.com",
+      "sentineltm.com",
+      "lefthandvalley.com",
+    ])
+  )
     return "news";
-  }
-  return "official";
+  if (host.endsWith(".gov") || matches(["longmont.primegov.com", "svvsd.org", "rtd-denver.com"]))
+    return "official";
+  return "unclassified";
 }
 
 export function tierFromKind(kind: string): "A" | "B" | "C" {
