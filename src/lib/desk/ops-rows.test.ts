@@ -523,7 +523,7 @@ describe("Server card rows (CX2)", () => {
       statuses: [codex, claude],
       catalog: catalogOf([]),
     });
-    const onLadder = chipOf(lines, "Codex Terra");
+    const onLadder = chipOf(lines, "Codex Sol 6.1 (balanced)");
     assert.equal(onLadder?.source, "status");
     assert.equal(onLadder?.source === "status" ? onLadder.status : null, codex);
     const byName = chipOf(lines, "Claude Opus");

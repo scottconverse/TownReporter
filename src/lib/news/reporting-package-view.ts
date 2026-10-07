@@ -17,6 +17,7 @@
   readiness still owes. An empty ledger is nothing-was-read, never a filled-in
   one.
 */
+import { formatListDateTime } from "../paper.ts";
 import {
   CIVIC_SCANNER_METHOD_VERSION,
   type CoverageAction,
@@ -34,11 +35,49 @@ import {
   one-line reason for a PARTIAL/FAILED run and is quoted verbatim, never
   paraphrased into something calmer.
 */
-export function reportingRunState(report: ReportingPackage): {
+export type ReportingRequestView = {
+  requestId: number;
+  status: string;
+  error: string | null;
+  finishedAt: string | null;
+  modelLabel: string;
+  assignment: string;
+};
+
+export function reportingNotice(
+  result: { ok: boolean } | null | undefined,
+  latestStatus: string | null | undefined,
+): "none" | "started" | "failed" {
+  return latestStatus === "FAILED" ? "failed" : result?.ok ? "started" : "none";
+}
+
+export function reportingRunState(report: ReportingPackage | ReportingRequestView, timeZone?: string): {
   tone: "ok" | "warn" | "err";
   label: string;
   detail: string;
 } {
+  if ("status" in report) {
+    if (report.status === "FAILED") {
+      return {
+        tone: "err",
+        label: "The reporting request failed.",
+        detail: [
+          report.error || "No reason was saved.",
+          report.finishedAt ? `Ended: ${formatListDateTime(report.finishedAt, timeZone)}.` : "No end time was saved.",
+          `Model: ${report.modelLabel || "No model was saved"}.`,
+          "Use the reporting form to start again.",
+        ].join(" "),
+      };
+    }
+    return {
+      tone: "ok",
+      label: report.status === "PENDING" ? "Reporting started" : "The reporting request ended.",
+      detail:
+        report.status === "PENDING"
+          ? "The package will appear here when it is done."
+          : "Check the package below.",
+    };
+  }
   switch (report.runStatus) {
     case "COMPLETE":
       return {

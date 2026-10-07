@@ -46,7 +46,7 @@ test("a failed local batch item can redraft with the exact selected cloud runtim
   const tree = DraftBatchResult({
     headline: "Water-rate story",
     item,
-    redraftLabel: "Codex Sol",
+    redraftLabel: "Codex Sol 6.1",
     onRedraft: () => {
       queued = {
         leadId: item.leadId,
@@ -58,7 +58,7 @@ test("a failed local batch item can redraft with the exact selected cloud runtim
   });
   const button = findElement(tree, (node) => node.type === "button");
   assert.ok(button, "a terminal failed item must expose Redraft");
-  assert.equal(button.props.children, "Redraft with Codex Sol");
+  assert.equal(button.props.children, "Redraft with Codex Sol 6.1");
   button.props.onClick();
   assert.deepEqual(queued, {
     leadId: 14,

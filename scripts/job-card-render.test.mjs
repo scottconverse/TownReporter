@@ -108,7 +108,7 @@ function job(over = {}) {
     kind: "draft",
     status: "running",
     title: "Drafting story",
-    model: "Codex Sol",
+    model: "Codex Sol 6.1",
     stages: ["Planning the reporting", "Writing the draft", "Checking the draft against the evidence"],
     stageIndex: 1,
     pct: 42,
@@ -167,9 +167,9 @@ test("a running job shows the chip row, the current stage, the bar and Cancel", 
 });
 
 test("a job with no percentage draws the indeterminate bar", () => {
-  const html = render({ job: job({ pct: null, step: "Waiting on Codex Sol · 42s" }) });
+  const html = render({ job: job({ pct: null, step: "Waiting on Codex Sol 6.1 · 42s" }) });
   assert.match(html, /job-card-fill indeterminate/);
-  assert.match(html, /Now: Waiting on Codex Sol · 42s/);
+  assert.match(html, /Now: Waiting on Codex Sol 6\.1 · 42s/);
 });
 
 test("the stall box appears at 60s of quiet and not at 59s", () => {

@@ -35,6 +35,7 @@ import { spawn } from "node:child_process";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { spawnPlan } from "./cli-spawn.server.ts";
+import { resolvedCodexSolModel } from "./provider-registry.ts";
 import { claudeChildEnv, codexChildEnv } from "./cli-child-env.server.ts";
 
 export type ProviderId = "claude" | "codex";
@@ -897,7 +898,7 @@ export async function testProvider(provider: ProviderId): Promise<ProviderTest> 
     result = await codexChat({
       system,
       user,
-      model: process.env.TOWNREPORTER_CODEX_TERRA_MODEL?.trim() || "gpt-5.6-terra",
+      model: resolvedCodexSolModel(),
       timeoutMs: 30_000,
     });
   }

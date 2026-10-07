@@ -321,8 +321,8 @@ describe("failOverAndRetry", () => {
       because Codex Terra was the last rung and only Claude Sonnet followed it.
     */
     assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Terra next, but it was not ready/);
-    assert.match(result.error, /Codex Terra is not ready on this machine\./);
+    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next, but it was not ready/);
+    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready on this machine\./);
   });
 });
 
@@ -452,8 +452,8 @@ describe("Story provider failure and stage failover", () => {
     assert.equal(result.ok, false);
     if (result.ok) return;
     assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Terra next/);
-    assert.match(result.error, /Codex Terra is not ready/);
+    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next/);
+    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready/);
     assert.doesNotMatch(result.error, /Opinion request/);
   });
 });

@@ -461,7 +461,7 @@ describe("the lines the who-does-what selects show", () => {
       assert.ok(option, `story must offer ${value}`);
       return jobOptionLabel(option);
     };
-    assert.equal(label("codex-frontier"), "Codex Sol · sign-in");
+    assert.equal(label("codex-frontier"), "Codex Sol 6.1 · sign-in");
     assert.equal(label("claude-frontier"), "Claude Opus · sign-in");
     assert.equal(label("claude-sonnet"), "Claude Sonnet · sign-in");
     assert.equal(label("auto"), "Automatic (ladder)");
@@ -503,7 +503,7 @@ describe("the lines the who-does-what selects show", () => {
     const frontier = jobModelOptions("story-draft").find((one) => one.value === "codex-astra");
     assert.ok(frontier);
     assert.equal(jobOptionLabel(frontier), "Codex Astra · sign-in");
-    assert.match(jobOptionTitle(frontier), /Most capable/);
+    assert.match(jobOptionTitle(frontier), /Runs gpt-6-astra/);
   });
 
   it("calls a newsroom's own endpoint an API connection, by its name", () => {

@@ -307,14 +307,14 @@ describe("desk jobs", () => {
     });
     assert.equal(created.failover_note, "");
 
-    const timeoutNote = "This draft moved to Codex Terra because Claude Opus timed out";
+    const timeoutNote = "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus timed out";
     await setJobFailoverNote(created.id, timeoutNote);
     const foundAfterTimeout = await findOpenJob({ newsroomId, kind: "draft", subjectId: 616163 });
     assert.equal(foundAfterTimeout?.failover_note, timeoutNote);
     const latestAfterTimeout = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
     assert.equal(latestAfterTimeout?.failover_note, timeoutNote);
 
-    const authNote = "This draft moved to Codex Terra because Claude Opus sign-in lapsed";
+    const authNote = "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus sign-in lapsed";
     await setJobFailoverNote(created.id, authNote);
     const latestAfterAuth = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
     assert.equal(latestAfterAuth?.failover_note, authNote);

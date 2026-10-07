@@ -80,9 +80,9 @@ describe("forced runtime snapshots", () => {
 
   for (const [modelChoice, transport, model] of [
     ["codex-astra", "codex", "gpt-6-astra"],
-    ["codex-frontier", "codex", "gpt-5.6-sol"],
-    ["codex-balanced", "codex", "gpt-5.6-terra"],
-    ["codex-luna", "codex", "gpt-5.6-luna"],
+    ["codex-frontier", "codex", "gpt-6.1-sol"],
+    ["codex-balanced", "codex", "gpt-6.1-sol"],
+    ["codex-luna", "codex", "gpt-6-luna"],
     ["claude-fable", "claude-code", "fable"],
     ["claude-frontier", "claude-code", "claude-opus-5"],
     ["claude-sonnet", "claude-code", "sonnet"],

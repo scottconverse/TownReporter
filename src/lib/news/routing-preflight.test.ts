@@ -24,7 +24,7 @@ describe("named-runtime technical preflight fallback", () => {
     assert.equal(result.modelChoice, "codex-balanced");
     assert.equal(result.modelEffort, "max");
     assert.equal(result.requestedRuntime, "claude-sonnet");
-    assert.match(result.switchNote ?? "", /moved to Codex Terra because Claude Sonnet was unavailable/i);
+    assert.match(result.switchNote ?? "", /moved to Codex Sol 6\.1 \(balanced\) because Claude Sonnet was unavailable/i);
   });
 
   it("queues a batch on the ready fallback with requested and actual runtime receipt", async () => {
@@ -73,7 +73,7 @@ describe("named-runtime technical preflight fallback", () => {
     }, {
       requestedRuntime: first.requestedRuntime,
       requestedEffort: first.requestedEffort,
-      switchReason: "Codex Terra timed out",
+      switchReason: "Codex Sol 6.1 (balanced) timed out",
       switchNote: "Second switch",
     });
     assert.equal(second.requestedRuntime, "claude-sonnet");
@@ -99,8 +99,8 @@ describe("named-runtime technical preflight fallback", () => {
     }, {
       previousRuntime: "codex-balanced",
       previousEffort: "high",
-      switchReason: "Codex Terra reached its quota",
-      switchNote: "Moved to Claude Sonnet because Codex Terra reached its quota.",
+      switchReason: "Codex Sol 6.1 (balanced) reached its quota",
+      switchNote: "Moved to Claude Sonnet because Codex Sol 6.1 (balanced) reached its quota.",
     });
     assert.equal(first.requestedRuntime, "custom:11111111-1111-4111-8111-111111111111");
     assert.equal(first.requestedEffort, null);

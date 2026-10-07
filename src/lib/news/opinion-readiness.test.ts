@@ -108,13 +108,13 @@ describe("U24: Opinion says which models it writes with", () => {
     assert.equal(result.ready, false);
     assert.match(
       result.why,
-      /Opinion's Automatic writes with DeepSeek v4\.1 Flash, then Codex Sol, then Claude Sonnet/,
+      /Opinion's Automatic writes with DeepSeek v4\.1 Flash, then Codex Sol 6\.1, then Claude Sonnet/,
     );
     /* The generic sentence that started this is gone from what the editor reads. */
     assert.doesNotMatch(result.why, /No model is set up yet/);
     /* And each rung Automatic walked says what is missing for itself. */
     assert.match(result.why, /Opinion can write with DeepSeek v4\.1 Flash/);
-    assert.match(result.why, /Opinion can write with Codex Sol/);
+    assert.match(result.why, /Opinion can write with Codex Sol 6\.1/);
     assert.match(result.why, /Opinion can write with Claude, and Claude Code is not signed in/);
   });
 
@@ -177,7 +177,7 @@ describe("U24: Opinion says which models it writes with", () => {
     );
     assert.equal(result.ready, false);
     assert.match(result.why, /Opinion can write with Claude/);
-    assert.doesNotMatch(result.why, /Automatic writes with Codex Sol, then Claude Sonnet/);
+    assert.doesNotMatch(result.why, /Automatic writes with Codex Sol 6\.1, then Claude Sonnet/);
   });
 
   it("walks exactly the three rungs it names, in that order", () => {
@@ -294,7 +294,7 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
     assert.deepEqual(probed, ["deepseek-flash"], "the first ready rung ends the walk");
   });
 
-  it("Automatic falls through to Codex Sol when DeepSeek cannot answer", async () => {
+  it("Automatic falls through to Codex Sol 6.1 when DeepSeek cannot answer", async () => {
     const probed: string[] = [];
     const result = await checkOpinionReadiness("auto", {
       findVoice: async () => ({ ok: true as const, voice: { path: "C:\\voice.md" } }),
@@ -302,7 +302,7 @@ describe("Opinion provider readiness", { concurrency: false }, () => {
         probed.push(choice);
         return choice === "deepseek-flash"
           ? { ok: false as const, error: "Ollama is unreachable. Check that it is running." }
-          : { ok: true as const, label: "Codex Sol", choice };
+          : { ok: true as const, label: "Codex Sol 6.1", choice };
       },
     });
     assert.equal(result.ready, true);

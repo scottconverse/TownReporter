@@ -480,7 +480,7 @@ it("fails over only after a technical selected-transport failure", async () => {
       },
       probe: async (choice) =>
         choice === "codex-balanced"
-          ? { ok: true as const, label: "Codex Terra", choice: "codex-balanced" as const }
+          ? { ok: true as const, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" as const }
           : { ok: false as const, error: `${choice} unavailable` },
       validateBatchRuntime: async (_room, choice) => ({
         runtime: "codex-terra" as const,

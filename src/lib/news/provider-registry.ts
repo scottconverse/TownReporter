@@ -398,9 +398,8 @@ export const PIPELINE_BUDGET: ProviderBudget = {
 
 /** The Haiku half of the Dark Desk planner split. See `plannerModelFor`. */
 export const CLAUDE_PLANNER_MODEL = "claude-haiku-4-5-20251001";
-const CODEX_TERRA_MODEL = "gpt-5.6-terra";
-const CODEX_SOL_MODEL = "gpt-5.6-sol";
-const CODEX_LUNA_MODEL = "gpt-5.6-luna";
+const CODEX_SOL_MODEL = "gpt-6.1-sol";
+const CODEX_LUNA_MODEL = "gpt-6-luna";
 
 const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
   story: true,
@@ -447,12 +446,12 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "codex-astra",
     label: "Codex Astra",
-    detail: "Most capable",
+    detail: "Runs gpt-6-astra",
     kind: "codex",
     model: "gpt-6-astra",
     envOverrides: {},
     budget: KIND_BUDGETS.codex,
-    plannerModel: CODEX_LUNA_MODEL,
+    plannerModel: CODEX_SOL_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
     offeredFor: EVERY_SURFACE,
@@ -460,25 +459,26 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   {
     id: "codex-luna",
     label: "Codex Luna",
-    detail: "Fast",
+    detail: "Runs gpt-6-luna",
     kind: "codex",
     model: CODEX_LUNA_MODEL,
     envOverrides: {},
     budget: KIND_BUDGETS.codex,
-    plannerModel: CODEX_LUNA_MODEL,
+    plannerModel: CODEX_SOL_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
     offeredFor: EVERY_SURFACE,
   },
   {
     id: "codex-balanced",
-    label: "Codex Terra",
-    detail: "More depth",
+    label: "Codex Sol 6.1 (balanced)",
+    detail: "Runs gpt-6.1-sol",
+    optionDetail: "",
     kind: "codex",
-    model: CODEX_TERRA_MODEL,
+    model: CODEX_SOL_MODEL,
     envOverrides: { model: "TOWNREPORTER_CODEX_TERRA_MODEL" },
     budget: KIND_BUDGETS.codex,
-    plannerModel: CODEX_TERRA_MODEL,
+    plannerModel: CODEX_SOL_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
     // Earlier refusals remain delivery failures; they were not a reason to
@@ -548,15 +548,14 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
   },
   {
     id: "codex-frontier",
-    label: "Codex Sol",
-    detail: "Frontier",
+    label: "Codex Sol 6.1",
+    detail: "Runs gpt-6.1-sol",
     kind: "codex",
     model: CODEX_SOL_MODEL,
     envOverrides: { model: "TOWNREPORTER_CODEX_SOL_MODEL" },
     budget: KIND_BUDGETS.codex,
-    // Planning is the cheap half of the split even when the frontier model
-    // does the judging; see `plannerModelFor`.
-    plannerModel: CODEX_TERRA_MODEL,
+    // All Codex choices plan on the resolved Sol model; see `plannerModelFor`.
+    plannerModel: CODEX_SOL_MODEL,
     enabled: () => notSwitchedOff("TOWNREPORTER_CODEX"),
     offSwitchEnv: "TOWNREPORTER_CODEX",
     offeredFor: EVERY_SURFACE,
@@ -843,7 +842,7 @@ export function providerRunsToolPass(entry: ProviderEntry | null | undefined): b
   return entry?.kind === "claude-code" || entry?.kind === "codex";
 }
 
-const ASTRA_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
+const CODEX_6_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const CODEX_56_EFFORTS: readonly ModelEffort[] = ["none", "low", "medium", "high", "xhigh", "max"];
 export const CLAUDE_CLI_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
 const AUTOMATIC_EFFORTS: readonly ModelEffort[] = ["low", "medium", "high", "xhigh", "max"];
@@ -916,7 +915,7 @@ export function modelEffortsFor(
 
 export function modelEffortsForModel(model: string | undefined | null): readonly ModelEffort[] {
   if (!model) return [];
-  if (/^gpt-6-astra$/i.test(model)) return ASTRA_EFFORTS;
+  if (/^gpt-(?:6\.1-sol|6-(?:sol|luna|astra))$/i.test(model)) return CODEX_6_EFFORTS;
   if (/^gpt-5\.6-(?:sol|terra|luna)$/i.test(model)) return CODEX_56_EFFORTS;
   return [];
 }
@@ -1128,10 +1127,10 @@ export function providerSwitchedOff(entry: ProviderEntry): boolean {
  * Over a 25-hop round that is $7.09 against $1.77. Synthesis and the brief
  * stay on the chosen model, because that is where the judgment concentrates.
  *
- * THE RULE, stated once: substitute a cheaper model from the SAME provider,
- * never a different provider's identifier. Claude gets Haiku; both Codex
- * entries get Terra; everything else -- a gateway, a future local model --
- * gets an empty string, which means "no opinion, keep the provider's own
+ * THE RULE, stated once: choose a planner from the SAME provider,
+ * never a different provider's identifier. Claude gets Haiku; all Codex
+ * entries get the resolved Sol model; everything else -- a gateway, a future
+ * local model -- gets an empty string, which means "no opinion, keep the provider's own
  * model". Returning "claude-haiku-..." unconditionally is exactly what
  * audit finding TW-001 was: point LLM_BASE_URL at LM Studio and every hop
  * asked it for a Claude model it had never heard of, the call failed, and
@@ -1140,12 +1139,15 @@ export function providerSwitchedOff(entry: ProviderEntry): boolean {
 export function plannerModelFor(id: string | undefined | null): string {
   const entry = providerEntry(id);
   if (!entry?.plannerModel) return "";
-  // Honour the same env override the entry's own model honours, so an install
-  // that renames Codex Terra does not end up planning on a stale identifier.
-  if (entry.plannerModel === CODEX_TERRA_MODEL) {
-    return env("TOWNREPORTER_CODEX_TERRA_MODEL") || CODEX_TERRA_MODEL;
-  }
+  if (entry.kind === "codex") return resolvedCodexSolModel();
   return entry.plannerModel;
+}
+
+/** Shared Codex planner and sign-in model, including legacy install overrides. */
+export function resolvedCodexSolModel(): string {
+  return (
+    env("TOWNREPORTER_CODEX_SOL_MODEL") || env("TOWNREPORTER_CODEX_TERRA_MODEL") || CODEX_SOL_MODEL
+  );
 }
 
 /** A paper's stored deviation from an entry's shipped defaults. */

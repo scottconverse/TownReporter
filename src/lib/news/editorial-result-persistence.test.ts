@@ -185,7 +185,7 @@ describe("Automatic Opinion provider persistence", () => {
           readEditorialDocuments,
           documentProbe: async (choice) => ({
             ok: true as const,
-            label: choice === "deepseek-flash" ? "DeepSeek v4.1 Flash" : choice === "codex-frontier" ? "Codex Sol" : "Claude Sonnet",
+            label: choice === "deepseek-flash" ? "DeepSeek v4.1 Flash" : choice === "codex-frontier" ? "Codex Sol 6.1" : "Claude Sonnet",
             choice: choice as "deepseek-flash" | "codex-frontier" | "claude-sonnet",
           }),
           documentChat: async (_system, _user, _tokens, options) => {

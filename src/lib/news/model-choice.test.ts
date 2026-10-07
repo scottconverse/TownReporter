@@ -51,8 +51,8 @@ describe("model choice contract", () => {
       [
         "Automatic",
         "Codex Astra",
-        "Codex Sol",
-        "Codex Terra",
+        "Codex Sol 6.1",
+        "Codex Sol 6.1 (balanced)",
         "Codex Luna",
         "Claude Fable",
         "Claude Opus",
@@ -62,7 +62,7 @@ describe("model choice contract", () => {
       ],
     );
   });
-  it("runs Automatic on DeepSeek, then Qwen, then Codex Terra", () => {
+  it("runs Automatic on DeepSeek, then Qwen, then Codex Sol 6.1 (balanced)", () => {
     assert.deepEqual([...automaticLadder()], [
       "deepseek-flash",
       "qwen-local",
@@ -145,7 +145,7 @@ describe("model choice contract", () => {
     );
     assert.match(pickerOptionTitle(deepseek), /research and drafting/);
     // A pick that says DeepSeek says DeepSeek back: not Automatic, and not the
-    // page default Codex Sol.
+    // page default Codex Sol 6.1.
     assert.equal(opinionModelChoice("deepseek-flash"), "deepseek-flash");
     assert.equal(modelChoiceLabel("deepseek-flash", "opinion"), "DeepSeek v4.1 Flash");
     assert.match(modelChoiceHelp("deepseek-flash", "opinion"), /Prefers DeepSeek v4\.1 Flash/);
@@ -216,7 +216,7 @@ describe("model choice contract", () => {
     assert.equal(opinionModelChoice("codex-frontier"), "codex-frontier");
     assert.equal(
       modelChoiceLabel(opinionModelChoice("codex-frontier"), "opinion"),
-      "Codex Sol",
+      "Codex Sol 6.1",
       "a saved explicit Codex choice still loads as Codex",
     );
     // Story and Scan already default this way; Opinion agreeing is the point.
@@ -230,7 +230,7 @@ describe("model choice contract", () => {
       providersFor("forced").map((entry) => entry.id),
     );
     assert.equal(FORCED_MODEL_CHOICES[0]?.value, "auto");
-    assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Terra");
+    assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Sol 6.1 (balanced)");
   });
 
   it("round-trips every valid Story choice and defaults invalid input safely", () => {
@@ -265,7 +265,7 @@ describe("model choice contract", () => {
     assert.equal(storyModelChoice("grok-oauth"), "auto");
     /*
       Unit U29b: all three normalisers now answer the same thing for a value
-      nobody can read. Opinion used to fall to a pinned Codex Sol, so a stored
+      nobody can read. Opinion used to fall to a pinned Codex Sol 6.1, so a stored
       id from an older build spent on the frontier model without anyone
       choosing it; Automatic is what the desk would have run anyway.
     */
@@ -335,11 +335,11 @@ describe("model choice contract", () => {
   it("explains each automatic order and technical fallback for explicit choices", () => {
     assert.equal(
       modelChoiceHelp("auto"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Terra. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. If the first provider reaches a usage limit, becomes unavailable, loses its login, or does not respond in time, the unfinished call moves to the next. A content refusal stops the run.",
     );
     assert.equal(
       modelChoiceHelp("auto", "opinion"),
-      "Tries DeepSeek v4.1 Flash, Codex Sol, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
+      "Tries DeepSeek v4.1 Flash, Codex Sol 6.1, then Claude Sonnet. If one reaches a usage limit or has a technical failure, the editorial moves to the next ready provider. A provider refusal stops the run.",
     );
     /*
       0.6.63 (Unit Y item 1). Dark Desk's Automatic ladder used to be a typed
@@ -351,11 +351,11 @@ describe("model choice contract", () => {
     */
     assert.equal(
       modelChoiceHelp("auto", "dark"),
-      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Terra. A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
+      "Uses your configured gateway when set; otherwise tries DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced). A model on this computer is used only when it is already loaded. The desk writes with whichever one is loaded. Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.",
     );
     assert.equal(
       modelChoiceHelp("codex-frontier"),
-      "Prefers Codex Sol for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
+      "Prefers Codex Sol 6.1 for this run. If it has a technical failure, the unfinished call can move to the next ready writing model; a content refusal stops the run.",
     );
   });
 
@@ -370,7 +370,7 @@ describe("model choice contract", () => {
       reordered or retired rung cannot leave this wording behind.
     */
     const help = modelChoiceHelp("auto", "scan");
-    assert.match(help, /DeepSeek v4\.1 Flash, Local model, then Codex Terra/);
+    assert.match(help, /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/);
     assert.match(help, /records which one ran/i);
     assert.doesNotMatch(help, /configured gateway/i);
     /*
@@ -384,7 +384,7 @@ describe("model choice contract", () => {
     assert.ok(pickerOptionText(automatic!).length <= PICKER_OPTION_TEXT_MAX);
     assert.match(
       pickerOptionTitle(automatic!),
-      /DeepSeek v4\.1 Flash, Local model, then Codex Terra/,
+      /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/,
     );
   });
 
@@ -520,16 +520,16 @@ describe("the Writing models panel's ladder sentence", () => {
     const sentence = await orderSentenceFn();
     assert.equal(
       sentence(),
-      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Terra.",
+      "Automatic uses DeepSeek v4.1 Flash first, then the model on this computer if it is loaded, then Codex Sol 6.1 (balanced).",
     );
   });
 
   it("follows the ladder it is given, and says so when there is none", async () => {
     const sentence = await orderSentenceFn();
-    assert.equal(sentence(["codex-balanced"]), "Automatic uses Codex Terra.");
+    assert.equal(sentence(["codex-balanced"]), "Automatic uses Codex Sol 6.1 (balanced).");
     assert.equal(
       sentence(["codex-balanced", "deepseek-flash"]),
-      "Automatic uses Codex Terra first, then DeepSeek v4.1 Flash.",
+      "Automatic uses Codex Sol 6.1 (balanced) first, then DeepSeek v4.1 Flash.",
     );
     assert.equal(sentence([]), "Automatic has no writing model set up on this machine.");
   });

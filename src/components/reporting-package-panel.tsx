@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePaper } from "@/lib/paper-context-state";
 import { useState } from "react";
 import { ActionButton } from "@/components/action-button";
 import { Field } from "@/components/desk-chrome";
@@ -22,6 +23,7 @@ import {
   methodLine,
   packageGaps,
   readinessLabel,
+  reportingNotice,
   reportingRunState,
   scoreLine,
 } from "@/lib/news/reporting-package-view";
@@ -52,6 +54,7 @@ import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting
 */
 export function ReportingPackagePanel({ leadId }: { leadId: number }) {
   const qc = useQueryClient();
+  const { timezone } = usePaper();
   const query = useQuery({
     queryKey: ["reporting-package", leadId],
     queryFn: () => loadLeadReportingPackage({ data: { leadId } }),
@@ -111,6 +114,10 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     return (
       <section className="reporting-package" aria-label="Reporting package">
         <h2>Reporting package</h2>
+        {row?.latestRun ? (() => {
+          const state = reportingRunState(row.latestRun, timezone);
+          return <Notice kind={state.tone}><p>{state.label}</p><p>{state.detail}</p></Notice>;
+        })() : null}
         <p className="meta">
           No reporting run has filed a package for this lead yet. Use Report this
           meeting or Develop this lead to start one.
@@ -122,9 +129,8 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     <>
     {row.latestRun && row.latestRun.requestId !== row.requestId ? (
       <Notice kind={row.latestRun.status === "FAILED" ? "err" : "ok"}>
-        {row.latestRun.status === "FAILED"
-          ? `The latest reporting run failed: ${row.latestRun.error || "No usable result was filed."} Your earlier draft and package are preserved. Use Ask for more reporting below to try again.`
-          : "A new reporting run is in progress. This earlier draft and package remain available while it works."}
+        {reportingRunState(row.latestRun, timezone).label} {reportingRunState(row.latestRun, timezone).detail}
+        {" "}Your earlier draft and package are still here.
       </Notice>
     ) : null}
     <button type="button" className="inline-link" disabled={query.isFetching} onClick={() => {
@@ -135,6 +141,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     <PackageBody
       leadId={leadId}
       requestId={row.requestId}
+      latestStatus={row.latestRun?.status}
       draftId={row.draftId ?? null}
       report={row.pkg}
       currentDocumentChecks={row.currentDocumentChecks ?? {}}
@@ -152,6 +159,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
 function PackageBody({
   leadId,
   requestId,
+  latestStatus,
   draftId,
   report,
   currentDocumentChecks,
@@ -161,6 +169,7 @@ function PackageBody({
 }: {
   leadId: number;
   requestId: number;
+  latestStatus: string | undefined;
   draftId: number | null;
   report: ReportingPackage;
   currentDocumentChecks: CurrentReportingDocumentChecks;
@@ -238,7 +247,7 @@ function PackageBody({
         </p>
       ) : null}
       <ScoreAndReceipt report={report} />
-      <FollowUpBox requestId={requestId} onRefresh={onRefresh} />
+      <FollowUpBox requestId={requestId} latestStatus={latestStatus} onRefresh={onRefresh} />
       <CorrectionBox leadId={leadId} requestId={requestId} onRefresh={onRefresh} />
       <ObservationsList observations={observations} />
     </section>
@@ -478,7 +487,7 @@ type ObservationRow = {
   states -- the runner files its result as a new version, and the existing
   draft stays where it is until a new one lands.
 */
-function FollowUpBox({ requestId, onRefresh }: { requestId: number; onRefresh: () => void }) {
+function FollowUpBox({ requestId, latestStatus, onRefresh }: { requestId: number; latestStatus: string | undefined; onRefresh: () => void }) {
   const qc = useQueryClient();
   const [ask, setAsk] = useState("");
   const [seeds, setSeeds] = useState("");
@@ -534,7 +543,7 @@ function FollowUpBox({ requestId, onRefresh }: { requestId: number; onRefresh: (
       >
         Start a follow-up run
       </ActionButton>
-      {follow.data?.ok ? (
+      {reportingNotice(follow.data, latestStatus) === "started" ? (
         <Notice kind="ok">A new reporting run was started. Watch its progress under Running.</Notice>
       ) : null}
       {refused ? <Notice kind="warn">{refused}</Notice> : null}

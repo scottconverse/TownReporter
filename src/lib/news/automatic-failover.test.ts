@@ -120,11 +120,11 @@ describe("planAutomaticFailover", () => {
       ladder: ["claude-sonnet", "codex-balanced"],
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
 
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Sol 6.1 (balanced)", reason: "timeout" });
     assert.deepEqual(calls, ["codex-balanced"]);
   });
 
@@ -178,9 +178,9 @@ describe("planAutomaticFailover", () => {
       current: "claude-frontier",
       error: "Claude Code readiness check timed out.",
       ladder: ["claude-frontier", "codex-balanced"],
-      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      probe: async () => ({ ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" }),
     });
-    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Terra", reason: "timeout" });
+    assert.deepEqual(plan, { next: "codex-balanced", label: "Codex Sol 6.1 (balanced)", reason: "timeout" });
   });
 
   it("does not fail over on a timeout when Automatic's next rung is not ready either", async () => {
@@ -202,7 +202,7 @@ describe("planAutomaticFailover", () => {
       error: LIVE_TIMEOUT_NO_OUTPUT,
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
     assert.equal(plan, null);
@@ -214,7 +214,7 @@ describe("planAutomaticFailover", () => {
       source: "auto",
       current: "claude-frontier",
       error: "The writing model declined this request",
-      probe: async () => ({ ok: true, label: "Codex Terra", choice: "codex-balanced" }),
+      probe: async () => ({ ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" }),
     });
     assert.equal(plan, null);
   });
@@ -228,7 +228,7 @@ describe("planAutomaticFailover", () => {
         "The selected model declined to produce the requested editorial: I cannot write this. A quota reset will not change that.",
       probe: async () => {
         probes += 1;
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
     assert.equal(plan, null);
@@ -255,7 +255,7 @@ describe("planAutomaticFailover", () => {
         "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.",
       probe: async (choice) => {
         calls.push(choice);
-        return { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+        return { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
     assert.equal(plan, null);
@@ -315,13 +315,13 @@ describe("an unreadable reply is a provider failure like any other", () => {
         calls.push(choice);
         return choice === "qwen-local"
           ? { ok: false, error: "Qwen 3.6 35B skipped: not loaded" }
-          : { ok: true, label: "Codex Terra", choice: "codex-balanced" };
+          : { ok: true, label: "Codex Sol 6.1 (balanced)", choice: "codex-balanced" };
       },
     });
 
     assert.deepEqual(plan, {
       next: "codex-balanced",
-      label: "Codex Terra",
+      label: "Codex Sol 6.1 (balanced)",
       reason: "unreadable",
     });
     assert.deepEqual(calls, ["qwen-local", "codex-balanced"]);
@@ -335,15 +335,15 @@ describe("an unreadable reply is a provider failure like any other", () => {
 describe("failoverNoteSentence", () => {
   it("builds the durable sentence for a timeout switch", () => {
     assert.equal(
-      failoverNoteSentence("Codex Terra", "Claude Opus", "timeout"),
-      "This draft moved to Codex Terra because Claude Opus timed out",
+      failoverNoteSentence("Codex Sol 6.1 (balanced)", "Claude Opus", "timeout"),
+      "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus timed out",
     );
   });
 
   it("builds the durable sentence for a sign-in-lapse switch", () => {
     assert.equal(
-      failoverNoteSentence("Codex Terra", "Claude Opus", "auth"),
-      "This draft moved to Codex Terra because Claude Opus sign-in lapsed",
+      failoverNoteSentence("Codex Sol 6.1 (balanced)", "Claude Opus", "auth"),
+      "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus sign-in lapsed",
     );
   });
 });
