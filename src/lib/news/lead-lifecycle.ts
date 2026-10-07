@@ -34,6 +34,7 @@ export async function setLeadStatusForEditor(
       and not exists (
         select 1 from drafts
         where drafts.lead_id = leads.id and drafts.newsroom_id = ${newsroomId}
+          and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')
       )
       and not exists (
         select 1 from articles
@@ -49,7 +50,7 @@ export async function setLeadStatusForEditor(
       has_published: boolean;
     }>`
       select leads.status,
-        exists (select 1 from drafts where drafts.lead_id = leads.id and drafts.newsroom_id = ${newsroomId}) as has_draft,
+        exists (select 1 from drafts where drafts.lead_id = leads.id and drafts.newsroom_id = ${newsroomId} and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')) as has_draft,
         exists (select 1 from articles where articles.lead_id = leads.id and articles.newsroom_id = ${newsroomId} and articles.status = 'published') as has_published
       from leads where id = ${data.id} and newsroom_id = ${newsroomId}
     `;
@@ -91,6 +92,7 @@ export async function resolveLeadDuplicateForEditor(
       and not exists (
         select 1 from drafts
         where drafts.lead_id = prior.id and drafts.newsroom_id = ${newsroomId}
+          and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')
       )
       and not exists (
         select 1 from articles
@@ -107,7 +109,7 @@ export async function resolveLeadDuplicateForEditor(
       has_published: boolean;
     }>`
       select prior.id as prior_id, prior.status as prior_status,
-        exists (select 1 from drafts where drafts.lead_id = prior.id and drafts.newsroom_id = ${newsroomId}) as has_draft,
+        exists (select 1 from drafts where drafts.lead_id = prior.id and drafts.newsroom_id = ${newsroomId} and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')) as has_draft,
         exists (select 1 from articles where articles.lead_id = prior.id and articles.newsroom_id = ${newsroomId} and articles.status = 'published') as has_published
       from leads current
       left join leads prior on prior.id = current.possible_duplicate_of and prior.newsroom_id = ${newsroomId}

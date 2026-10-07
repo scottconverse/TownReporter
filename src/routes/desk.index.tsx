@@ -1,6 +1,6 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
-import { todayInProgressJobs } from "@/lib/news/today-in-progress";
+import { todayInProgressJobs, todayPublishedLeadIds } from "@/lib/news/today-in-progress";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
@@ -818,9 +818,7 @@ function DeskHome() {
     `listRecentStoryWork` returned -- one row per lead, newest first, five of
     them -- read off the shared query instead of a reader of its own.
   */
-  const publishedLeadIds = new Set(
-    allLeads.filter((lead) => lead.status === "published").map((lead) => lead.id),
-  );
+  const publishedLeadIds = todayPublishedLeadIds(allLeads);
   const inProgress = todayInProgressJobs(deskJobs.data ?? [], publishedLeadIds).slice(0, 5);
   /*
     THE SCAN'S OWN CARD (FB6, item 3). The open scan, if there is one, read from

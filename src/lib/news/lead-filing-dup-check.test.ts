@@ -535,3 +535,22 @@ describe("U28: a verdict about a different target is not this row's verdict", ()
     }
   });
 });
+
+// guards: unrelated stories sharing a place and date can receive inconsistent duplicate links.
+it("duplicate checking and filing agree when stories belong to different sections", async () => {
+  const db = await scratch();
+  try {
+    const sql = makeSql(db);
+    const existing = [{ id: 1, status: "new", headline: "Bohn Farm Sets Oct. 17 Rezoning Hearing", topic: "council", source_urls: [] }];
+    const candidate = { headline: "Bohn Farm Hosts Oct. 17 Concert With Chamber Orchestra", topic: "arts", source_urls: [] };
+    await sql`insert into leads(id, newsroom_id, headline, topic, status) values (1, 1, ${existing[0]!.headline}, 'council', 'new')`;
+    await db.exec("select setval('leads_id_seq', 1)");
+    const { pairs } = collectDupPairs({ candidates: [candidate], existing, printed: [], place: PLACE });
+    await fileScanLeads(sql, { userId: "u" }, 1, 901, [candidate], existing, PLACE);
+    const [filed] = (await filedRows(sql)).filter(row => row.id !== 1);
+    assert.equal(filed!.possible_duplicate_of, null);
+    assert.equal(pairs.length, 0);
+  } finally {
+    await db.close();
+  }
+});
