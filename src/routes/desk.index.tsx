@@ -1132,7 +1132,13 @@ function DeskHome() {
   */
   const [killLead, setKillLead] = useState<{ id: number; headline: string } | null>(null);
 
-  const booting = (leads.isPending && !leads.data) || (sources.isPending && !sources.data);
+  // These initial reads populate controls throughout Today, including the
+  // recent-story links above The wire. Presenting the ready heading before
+  // they settle lets controls move underneath an accessibility audit (or an
+  // editor navigating the page). Background refetches keep the desk mounted.
+  const booting = [
+    leads, sources, drafts, published, investigations, worth, followUps, findings, scans, deskJobs,
+  ].some((query) => query.isPending && !query.data);
   // The two queries the front page cannot render anything useful without.
   // Everything else on this page degrades gracefully to "empty"; these two
   // don't, so a failed fetch needs its own terminal state rather than an
@@ -1141,7 +1147,7 @@ function DeskHome() {
 
   return (
     <DeskShell
-      title="Good morning. Here’s today’s paper."
+      title={booting ? "Loading today’s desk…" : "Good morning. Here’s today’s paper."}
       kicker={`${deskDateLine(nowMs, timezone)} · ${city}`}
       actions={
         /*

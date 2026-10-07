@@ -5,6 +5,11 @@ import { resetLocalCatalogCacheForTests } from "./local-models.ts";
 import { probeProvider } from "./ai.ts";
 import { ForbiddenError, ONLY_OWNER_CHANGES_MODEL_CONNECTIONS } from "./membership.ts";
 import { USE_LOADED_LOCAL_MODEL } from "./model-choice.ts";
+import { MODEL_JOBS } from "./model-assignments.ts";
+import { saveModelAssignments } from "./model-assignments-store.ts";
+import { performCreateAiFollowUp } from "./follow-ups.ts";
+import { enqueueJob } from "./jobs.ts";
+import { performFollowUpRun } from "./follow-up-agents.ts";
 import {
   ensureProviderSettingsSchema,
   readProviderOverrides,
@@ -142,6 +147,37 @@ describe("the per-newsroom local-model override resolves against the live catalo
       const followUp = await resolveLocalModelChoice(NEWSROOM_ID, "follow-up");
       assert.deepEqual(scan.override, scanChoice);
       assert.deepEqual(followUp.override, followUpChoice);
+    });
+  });
+
+  it("runs the exact local choice saved through the Models follow-up assignment surface", async () => {
+    await addDeskMembers();
+    const surface = MODEL_JOBS.find((job) => job.key === "follow-up")!.surface;
+    const choice = { baseUrl: OLLAMA_BASE, id: "owner-picked-follow-up" };
+    await withFetch(fetchWithModels([...CLOUD_MODELS, choice.id]), async () => {
+      await saveLocalModel(OWNER_ID, choice, surface);
+      await saveModelAssignments(NEWSROOM_ID, [{ jobKey: "follow-up", rank: 0, providerId: "local-model" }]);
+      const context = { userId: OWNER_ID, newsroomId: NEWSROOM_ID };
+      const created = await performCreateAiFollowUp(context, {
+        what: "Has the clerk posted the notice?", agentKind: "search", schedule: "daily", modelChoice: "auto",
+      });
+      assert.equal(created.ok, true);
+      if (!created.ok) return;
+      const job = await enqueueJob({ ...context, kind: "follow-up", subjectId: created.id, modelChoice: "auto", kick: false });
+      let judged = false;
+      let received: unknown;
+      await performFollowUpRun(job, {
+        agents: {
+          search: async () => ({ state: "SEARCH_SUCCESS_RESULTS", hits: [{ url: "https://clerk.test/notice", title: "Notice", snippet: "Notice" }], provider: "test" }),
+          judge: async (input) => {
+            judged = true;
+            received = { provider: input.modelChoice, choice: input.localModel };
+            return { ok: true, answers: false, url: "", title: "", summary: "No answer yet." };
+          },
+        },
+      });
+      assert.equal(judged, true);
+      assert.deepEqual(received, { provider: "local-model", choice });
     });
   });
 
