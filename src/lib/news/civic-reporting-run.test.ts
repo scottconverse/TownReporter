@@ -1119,23 +1119,31 @@ describe("the writer's method prompt states the status policy", () => {
    * a chat double that records the prompt it was handed. This asserts on the
    * prompt the method really builds, not on a copy of the text.
    */
-  async function callWritingPass(documents: DocumentRead[] = []): Promise<{ prompt: string }> {
+  async function callWritingPass(
+    documents: DocumentRead[] = [],
+    record: unknown = { windows: [], segments: [], votes: [], gaps: [] },
+    actions: CoverageAction[] = [],
+    assignment = "Report the Sept. 29 meeting",
+    reply: () => ReturnType<typeof writerReply> = writerReply,
+  ): Promise<{ prompt: string; system: string; result: Awaited<ReturnType<typeof writingPass>> }> {
     let captured = "";
-    const chat = (async (_system: string, prompt: string) => {
+    let system = "";
+    const chat = (async (systemPrompt: string, prompt: string) => {
+      system = systemPrompt;
       captured = prompt;
-      return writerReply();
+      return reply();
     }) as never;
-    await writingPass({
-      record: { windows: [], segments: [], votes: [], gaps: [] } as never,
+    const result = await writingPass({
+      record: record as never,
       documents,
       further: { findings: "", documents, gaps: [] },
       gather: { findings: "", observations: [] } as never,
       warm: { actions: [], windows: [], gaps: [] } as never,
       cold: { actions: [], roster: [], votes: [], gaps: [] } as never,
-      reconcile: { actions: [], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
+      reconcile: { actions, contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
       contrary: { contrary: [], unknowns: [], gaps: [], raw: { ok: true, error: "", text: "", chars: 0, truncated: false } },
       scoring: { score: null, readiness: 0, why: "", gaps: [] },
-      assignment: "Report the Sept. 29 meeting",
+      assignment,
       action: "Develop this lead",
       city: "Longmont",
       method: method as never,
@@ -1144,7 +1152,7 @@ describe("the writer's method prompt states the status policy", () => {
       workspaceDir: "",
       throwIfCancelled: async () => {},
     });
-    return { prompt: captured };
+    return { prompt: captured, system, result };
   }
   async function writingUserPrompt(): Promise<string> {
     return (
@@ -1157,6 +1165,37 @@ describe("the writer's method prompt states the status policy", () => {
     assert.match(status, /A proposal[\s\S]{0,400}NOT an adopted decision/i, "a proposal is not an adopted decision");
     assert.match(status, /condition any resident effect on[\s\S]{0,80}adoption/i, "resident effects are conditioned on adoption");
     assert.match(status, /damaged caption|adapter/i, "a cut quote may not be presented as an exact quotation");
+  });
+  // guards: the writer can omit a vote announced after the first 6,000 transcript characters.
+  it("passes a reconciled vote's announcement from its transcript window to the writer", async () => {
+    const result = { index: 1, seconds: 15397, item: "12A", itemTitle: "Budget direction", text: "item carries unanimously." };
+    const window = { windowIndex: 15, startClock: "4:00:00", endClock: "4:16:37", items: [{ item: "12A", title: "Budget direction" }], segments: [
+      { index: 0, seconds: 14400, item: "12A", itemTitle: "Budget direction", text: "Opening transcript words. ".repeat(300) }, result,
+    ] };
+    const action = { timestamp: "4:16:37", agendaItem: "12A", motionOrAction: "Final council direction on the proposed budget", outcome: "carries unanimously", vote: "unanimously" } as CoverageAction;
+    const { prompt } = await callWritingPass([], { windows: [window], segments: window.segments, votes: [], gaps: [], identity: { videoId: "meeting" } }, [action]);
+    assert.ok(prompt.includes("item carries unanimously."));
+  });
+  // guards: the writer repeats generic uncertainty in every paragraph instead of collecting open questions once.
+  it("asks for direct copy and one short open-questions section near the end", async () => {
+    const prompt = await writingUserPrompt();
+    assert.ok(/state what the record shows plainly/i.test(prompt));
+    assert.ok(/open questions once in one short section near the end/i.test(prompt));
+  });
+  // guards: an assignment can divert the writer into changing models or effort.
+  it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {
+    const assignment = "Report the meeting. Use only Codex Sol 6.1 at medium effort; stop if unavailable.";
+    const { prompt, system } = await callWritingPass([], undefined, [], assignment);
+    assert.ok(prompt.includes("Use only Codex Sol 6.1 at medium effort"));
+    assert.ok(/assignment[\s\S]{0,300}(?:model|effort)/i.test(system));
+    assert.ok(/never[\s\S]{0,80}(?:spawn|start|invoke)[\s\S]{0,40}another model/i.test(system));
+  });
+  // guards: a held writer result is saved as the meaningless failure reason "no-draft".
+  it("preserves the writer's own short hold reason when it returns no story", async () => {
+    const reason = "The transcript's missing roll-call passage leaves the dissenter unidentified.";
+    const held = { stories: [], held: [{ storyId: "meeting", headline: "Council vote", reason, nextCheck: "Review the roll call.", unverified: true }] };
+    const { result } = await callWritingPass([], undefined, [], "Report the council vote", () => ({ ok: true, text: JSON.stringify(held) }));
+    assert.equal(result.error, reason);
   });
   it("does not hardcode one story: the status policy is free of this story's facts", async () => {
     const policy = (await writingUserPrompt()).split("STATUS IS THE LEDE")[1]!.split("EDITOR'S ASSIGNMENT")[0]!;
@@ -1651,6 +1690,36 @@ describe("document-only claims bind to their own cited PDF section", () => {
     const claims = bindClaimsToEvidence(story as never, noActions, record, [memoDocument]);
     assert.equal(claims[0]!.status, "VERIFIED", claims[0]!.nextCheck);
     assert.equal(claims[0]!.nextCheck, "", "document evidence supports proposed figures without claiming a meeting vote");
+  });
+
+  // guards: cited figures and dates from the meeting record are falsely marked absent when their ledger item cannot resolve.
+  it("binds cited transcript figures and dates to their spoken windows", () => {
+    const video = "S1kSaew-UUY";
+    const record = { identity: { videoId: video, videoUrl: "https://www.youtube.com/watch?v=" + video }, segments: [
+      { index: 1, seconds: 14235, item: "12A", itemTitle: "Budget", text: "The remaining allocation would be 916,000 for 2027." },
+      { index: 2, seconds: 11328, item: "11", itemTitle: "Ordinance 2026-69", text: "The hazardous vegetation work must be completed by May 1, 2027." },
+      { index: 3, seconds: 11369, item: "11", itemTitle: "Ordinance 2026-69", text: "May 1, 2027 is the deadline for the mitigation." },
+    ] };
+    const story = {
+      id: "run-3", headline: "Budget and ordinance", draft: "", plainBrief: "", cannotSay: "", readinessTier: 2,
+      claims: [
+        { id: "C02", item: "12A", text: "Staff said the proposed project 103 allocation would be $916,000 for 2027.", status: "VERIFIED" as const, sourceIds: ["S02"], nextCheck: "" },
+        { id: "C04", item: "11; ordinance 2026-69", text: "A seconded amendment to ordinance 2026-69 proposed mitigation by May 1, 2027.", status: "VERIFIED" as const, sourceIds: ["S04"], nextCheck: "" },
+        { id: "C06", item: "12A", text: "The proposed project 103 allocation would be $916,000 for 2027.", status: "VERIFIED" as const, sourceIds: ["S06"], nextCheck: "" },
+      ],
+      sources: [
+        { id: "S02", title: "Supplied transcript, Window 15", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 12A; remaining proposed project allocation; 3:57:13–3:57:20", offlineReference: "" },
+        { id: "S04", title: "Supplied transcript, Window 12", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 11; ordinance 2026-69; fire-condition motion; 3:08:35–3:09:48", offlineReference: "" },
+        { id: "S06", title: "Supplied transcript, Window 12", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 12A; unrelated passage; 3:08:35–3:09:48", offlineReference: "" },
+      ],
+    };
+    const unrelatedAction = {
+      actionId: "allocation", timestamp: "3:57:13", agendaItem: "12A", motionOrAction: "Remaining project allocation", outcome: "discussed",
+      vote: "unverified", policyStage: "discussion", evidence: "transcript", disposition: "",
+    } as CoverageAction;
+    const reconcile = { actions: [unrelatedAction], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 };
+    const claims = bindClaimsToEvidence(story as never, reconcile as never, record as never, []);
+    assert.deepEqual(claims.map((claim) => [claim.id, claim.status]), [["C02", "VERIFIED"], ["C04", "VERIFIED"], ["C06", "UNVERIFIED"]]);
   });
 
   it("binds request 7 claims C1-C5, C8-C9, and C16 to precise sections in their combined locators", () => {

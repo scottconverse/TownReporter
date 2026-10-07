@@ -48,7 +48,9 @@ export function reportingNotice(
   result: { ok: boolean } | null | undefined,
   latestStatus: string | null | undefined,
 ): "none" | "started" | "failed" {
-  return latestStatus === "FAILED" ? "failed" : result?.ok ? "started" : "none";
+  if (latestStatus === "FAILED") return "failed";
+  if (latestStatus === "COMPLETE" || latestStatus === "PARTIAL") return "none";
+  return result?.ok ? "started" : "none";
 }
 
 export function reportingRunState(report: ReportingPackage | ReportingRequestView, timeZone?: string): {

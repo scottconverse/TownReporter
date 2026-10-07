@@ -1829,6 +1829,26 @@ const DATE =
   /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*\d{4}\b/gi;
 const QUOTED = /"([^"]{3,})"/g;
 
+function normalizedMoneyAmount(value: string): string {
+  const amount = value.replace(/[$,\s]/g, "");
+  return amount.includes(".") ? amount.replace(/0+$/, "").replace(/\.$/, "") : amount;
+}
+
+function sourceContainsMoneyAmount(source: string, claimAmount: string): boolean {
+  const wanted = normalizedMoneyAmount(claimAmount);
+  const candidates = /\$\s*(\d[\d,]*(?:\.\d+)?)|\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b|\b(\d+\.\d+)\b/g;
+  const financialContext = /\b(?:allocat\w*|budget\w*|costs?|dollars?|revenue|expense\w*|appropriat\w*|tax(?:es)?|payment|spend(?:ing)?|grant|balance|amount)\b/i;
+  return [...source.matchAll(candidates)].some((match) => {
+    const amount = match[1] ?? match[2] ?? match[3] ?? "";
+    if (normalizedMoneyAmount(amount) !== wanted) return false;
+    if (match[1]) return true;
+    const start = source.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = source.indexOf("\n", match.index + match[0].length);
+    const context = source.slice(start, lineEnd < 0 ? source.length : lineEnd);
+    return financialContext.test(context);
+  });
+}
+
 /** A tally the draft states as a figure: "5 to 2", "5-2", "6–1". */
 const TALLY_FIGURE = /\b\d{1,2}\s*(?:to|-|–|—)\s*\d{1,2}\b/gi;
 /** The verbs that make a nearby tally a vote rather than a measurement. */
@@ -1998,9 +2018,10 @@ export function checkDraftClaims(input: {
     // The item's own span of tape is part of its record -- but only ITS span.
     // The whole tape is where the wrong-item match lived, so it is never used.
     const ownTape = spanTape(item, segments, COLD_LEAD_CHARS);
-    const figureSource = normalizeForMatch(item.kind === "document-source"
+    const figureRecord = item.kind === "document-source"
       ? documentMoneyText(`${own.text}\n${ownTape}`)
-      : `${own.text}\n${ownTape}`);
+      : `${own.text}\n${ownTape}`;
+    const figureSource = normalizeForMatch(figureRecord);
     const locator = own.locator;
     const page = item.packetPage;
     const packetPageText = page === null
@@ -2033,7 +2054,8 @@ export function checkDraftClaims(input: {
         .join(" "),
     );
     for (const match of unit.text.match(DOLLAR) ?? []) {
-      const found = figureSource.includes(normalizeForMatch(item.kind === "document-source" ? documentMoneyText(match) : match));
+      const found = figureSource.includes(normalizeForMatch(item.kind === "document-source" ? documentMoneyText(match) : match)) ||
+        sourceContainsMoneyAmount(figureRecord, match);
       push(
         match,
         `${label} (${locator})`,
