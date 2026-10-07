@@ -184,7 +184,7 @@ describe("local model discovery", () => {
     });
   });
 
-  it("falls back to LLM_MODEL when nothing is loaded, else the first chat model", async () => {
+  it("falls back to LLM_MODEL when nothing is loaded, and to null -- not a first downloaded model -- otherwise", async () => {
     const unloadedLmStudioNative = {
       data: [
         { id: "halo/qwen3-coder-30b-a3b-q6k", state: "not-loaded", type: "llm" },
@@ -207,8 +207,16 @@ describe("local model discovery", () => {
       id: "google/gemma-4-12b-qat",
     });
 
-    const byFirst = await withEnv({}, () => discoverLocalModels(true));
-    assert.equal(byFirst.defaultModel?.id, "halo/qwen3-coder-30b-a3b-q6k");
+    /*
+      B4. With nothing loaded and no LLM_MODEL pin, the default is null: the
+      desk will not name a model it would then have to page in from disk. The
+      first downloaded entry (halo/qwen3-coder-30b-a3b-q6k) is deliberately NOT
+      chosen, even though it is the first chat entry on the first reachable
+      server -- that was the bug, and a server with a populated disk but an
+      empty memory must not look ready.
+    */
+    const byNone = await withEnv({}, () => discoverLocalModels(true));
+    assert.equal(byNone.defaultModel, null);
   });
 
   it("flags an LM Studio vlm as vision, and a plain llm as not", async () => {

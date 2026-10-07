@@ -36,6 +36,27 @@ describe("named-runtime technical preflight fallback", () => {
     assert.match(result.switchReason ?? "", /Claude Sonnet was unavailable/i);
   });
 
+  it("resolves a batch Automatic choice to the exact ready local rung and records the request", async () => {
+    const exact = { baseUrl: "http://127.0.0.1:11434/v1", id: "loaded-local-model" };
+    const result = await validateBatchRuntime(
+      7,
+      "auto",
+      "high",
+      undefined,
+      async (_room, effort) => ({
+        runtime: "deepseek-flash",
+        modelChoice: "deepseek-flash",
+        transport: "local",
+        localModel: exact,
+        ...(effort ? { modelEffort: effort } : {}),
+      }),
+    );
+    assert.equal(result.requestedRuntime, "auto");
+    assert.equal(result.runtime, "deepseek-flash");
+    assert.deepEqual(result.localModel, exact);
+    assert.equal(result.modelEffort, "high");
+  });
+
   it("preserves the editor's original request across two switches in one batch job", () => {
     const first = attachDraftBatchRuntimeReceipt(terra("max"), {
       requestedRuntime: "claude-sonnet",

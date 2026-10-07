@@ -1,5 +1,5 @@
 import { getSql } from "../db.ts";
-import { grokChat, type EffectiveProviderChoice } from "./ai.ts";
+import { grokChat, type EffectiveProviderChoice, type LocalModelOverride } from "./ai.ts";
 import type { Editorial } from "./editorial.ts";
 import { checkStoryNames, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, type NameCheck } from "./name-check.ts";
@@ -21,6 +21,8 @@ type Options = {
   /** Focused-test seam; production always uses the authorized request query. */
   documents?: EditorialNameDocument[]; chat?: ReportChat;
   modelEffort?: ModelEffort | null;
+  /** Exact endpoint/model pinned when this editorial job selected Local model. */
+  localModel?: LocalModelOverride;
   onProviderSwitch?: OcrOptions["onProviderSwitch"];
   publicDocs?: FetchedDoc[];
   search?: (query:string)=>Promise<ReportSearchHit[]>;
@@ -62,7 +64,7 @@ export async function checkEditorialNames(opts:Options):Promise<CheckedEditorial
       const load=opts.ingest ?? ingestDocument;
       for(const url of urls) {
         if(Date.now()-started>totalMs-12_000) break;
-        const got=await load(url,{provider:opts.modelChoice,reasoningEffort:opts.modelEffort,onProviderSwitch:opts.onProviderSwitch,newsroomId:String(opts.newsroomId)});
+        const got=await load(url,{provider:opts.modelChoice,reasoningEffort:opts.modelEffort,onProviderSwitch:opts.onProviderSwitch,newsroomId:String(opts.newsroomId),localModel:opts.modelChoice === "local-model" ? opts.localModel : undefined});
         if(!got?.ok || !got.text.trim()) continue;
         let version_id:number|null=null,capture_event_id:number|null=null;
         if(opts.capturePublic) {
@@ -78,7 +80,7 @@ export async function checkEditorialNames(opts:Options):Promise<CheckedEditorial
       }
     },
     timeLeft:()=>Math.max(0,totalMs-(Date.now()-started)),stage:opts.stage,
-    chat:opts.chat ?? ((system,user,maxTokens)=>grokChat(system,user,maxTokens,{choice:opts.modelChoice,newsroomId:opts.newsroomId,timeoutMs:120_000,noTools:true})),
+    chat:opts.chat ?? ((system,user,maxTokens)=>grokChat(system,user,maxTokens,{choice:opts.modelChoice,newsroomId:opts.newsroomId,timeoutMs:120_000,noTools:true,localModel:opts.modelChoice === "local-model" ? opts.localModel : undefined})),
   });
   const split=checked.draft.body.split(divider);
   const editorial={...opts.editorial,headline:checked.draft.headline,appendix:checked.draft.dek,body:split[0] ?? "",factSheet:split.slice(1).join(divider)};

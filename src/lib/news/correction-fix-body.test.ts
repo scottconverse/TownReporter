@@ -386,3 +386,28 @@ it("suggests the wording through the provider picker, and says so plainly when t
   );
   await setMode("ready");
 });
+
+it("sends the exact saved local endpoint and model for correction wording", async () => {
+  await reset();
+  await fixture();
+  const selected = { baseUrl: "http://127.0.0.1:11434/v1", id: "loaded-qwen-exact" };
+  let call: { choice?: string; localModel?: typeof selected | null } | undefined;
+  const result = await performSuggestCorrectionWording(
+    { userId: USER, newsroomId: NEWSROOM },
+    { articleSlug: SLUG, wasWrong: "the fee was $4,200", isRight: "the fee is $2,400", modelChoice: "local-model" },
+    {
+      resolveLocalModel: async (newsroomId, scope) => {
+        assert.equal(newsroomId, NEWSROOM);
+        assert.equal(scope, "story");
+        return selected;
+      },
+      chat: async (_system, _user, _maxTokens, options) => {
+        call = options;
+        return { ok: true as const, text: "Correction needed: the story said the fee was $4,200. The truth: the fee is $2,400." };
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(call?.choice, "local-model");
+  assert.deepEqual(call?.localModel, selected);
+});

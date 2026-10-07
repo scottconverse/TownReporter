@@ -7,7 +7,7 @@
  * moment an editor presses a button, and the wrong question to ask when
  * setting a paper up. The owner's ask (2026-09-26, KICKOFF section C) is per
  * JOB: the daily scan, lead scoring, drafting, the opinion, the evidence
- * check, headlines, Dark Desk research, AI follow-ups, OCR and transcripts.
+ * check, headlines, Dark Desk research, AI follow-ups and OCR.
  *
  * Everything in this file is pure. It is the resolution order, the option
  * lists, the effort validation and the status vocabulary; the table, the
@@ -51,7 +51,7 @@ import {
   type ProviderSurface,
 } from "./provider-registry.ts";
 
-/** The ten jobs the design draws, in the order it draws them. */
+/** The nine chat-model jobs this screen assigns, in the order it draws them. */
 export const MODEL_JOB_KEYS = [
   "scan",
   "lead-score",
@@ -62,7 +62,6 @@ export const MODEL_JOB_KEYS = [
   "dark",
   "follow-up",
   "ocr",
-  "transcript",
 ] as const;
 
 export type ModelJobKey = (typeof MODEL_JOB_KEYS)[number];
@@ -74,11 +73,8 @@ export type ModelJob = {
   /** The half-line under it, as the design draws it. */
   note: string;
   /**
-   * Which registry surface this job's options come from. `forced` is the
-   * surface for a run that must name ONE exact provider (a batch, a meeting
-   * redraft, OCR, a transcript), which is why Automatic is absent from those
-   * two rows' menus -- the same reason `FORCED_MODEL_CHOICES` has no
-   * Automatic.
+   * Which registry surface this job's options come from. `ocr` identifies
+   * the vision-capable OCR choices.
    */
   surface: ProviderSurface;
   /**
@@ -144,13 +140,11 @@ export const MODEL_JOBS: readonly ModelJob[] = [
     key: "follow-up",
     label: "AI follow-ups",
     note: "Re-checks pages, looks for answers",
-    surface: "scan",
+    surface: "follow-up",
     /*
       Turned on in redesign phase 6: ./follow-up-agents.ts is the backend that
-      was missing when phase 5 drew this row as "Not built yet". The `scan`
-      surface is still what an `auto` assignment falls back to -- a follow-up
-      is a background check with the same shape as the daily scan, not a
-      writing job.
+      was missing when phase 5 drew this row as "Not built yet". Use the same
+      scope as the worker so Models saves the exact local choice this job runs.
     */
     built: true,
   },
@@ -158,14 +152,7 @@ export const MODEL_JOBS: readonly ModelJob[] = [
     key: "ocr",
     label: "Document reading & OCR",
     note: "PDFs, scans, long packets",
-    surface: "forced",
-    built: true,
-  },
-  {
-    key: "transcript",
-    label: "Video & meeting transcripts",
-    note: "YouTube captions, recordings",
-    surface: "forced",
+    surface: "ocr",
     built: true,
   },
 ];
@@ -205,8 +192,8 @@ export function isOfferedForJob(jobKey: string, providerId: string): boolean {
 /**
  * The menu a job's three selects share.
  *
- * `modelChoicesFor` is `providersFor(surface)` with Automatic prepended on the
- * surfaces that have it, which is precisely the brief's rule; building the
+ * `modelChoicesFor` is `providersFor(surface)` with Automatic prepended,
+ * which is precisely the brief's rule; building the
  * list from the registry rather than from a literal is what keeps the retired
  * Grok out and keeps a newly-registered provider in without touching this
  * file.
@@ -565,7 +552,9 @@ export function nextJobFallback(input: {
     if (!isOfferedForJob(input.jobKey, row.providerId)) continue;
     return {
       providerId: row.providerId,
-      effort: cleanJobEffort(row.providerId, row.effort),
+      // Automatic starts its own ladder and has no single effort level to
+      // inherit from the fallback assignment.
+      effort: row.providerId === "auto" ? null : cleanJobEffort(row.providerId, row.effort),
       rank: row.rank,
     };
   }

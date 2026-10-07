@@ -5,6 +5,7 @@ import { kickJobs } from "./jobs.ts";
 import {
   forcedRuntimeLabel,
   parseForcedRuntimeSnapshot,
+  resolveAutomaticForcedRuntime,
   validateForcedRuntime,
   type ForcedRuntimeSnapshot,
 } from "./forced-runtime.server.ts";
@@ -25,6 +26,7 @@ import {
 import { FORCED_FAILOVER_LADDER, modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 import type { ForcedRuntime } from "./forced-runtime.server.ts";
+import type { DraftBatchRuntime } from "./draft-batch.ts";
 
 type BatchRuntimeReceipt = {
   requestedRuntime: string;
@@ -50,11 +52,21 @@ export function attachDraftBatchRuntimeReceipt(
 
 export async function validateBatchRuntime(
   newsroomId: number,
-  runtime: ForcedRuntime,
+  runtime: ForcedRuntime | "auto",
   effort?: ModelEffort | null,
   validate: typeof validateForcedRuntime = validateForcedRuntime,
+  resolveAutomatic: typeof resolveAutomaticForcedRuntime = resolveAutomaticForcedRuntime,
 ): Promise<ForcedRuntimeSnapshot & BatchRuntimeReceipt> {
-  const requestedEffort = modelEffort(runtime, effort);
+  const requestedEffort = runtime === "auto" ? effort ?? null : modelEffort(runtime, effort);
+  if (runtime === "auto") {
+    const snapshot = await resolveAutomatic(newsroomId, requestedEffort);
+    return attachDraftBatchRuntimeReceipt(snapshot, {
+      requestedRuntime: "auto",
+      requestedEffort,
+      switchReason: null,
+      switchNote: null,
+    });
+  }
   try {
     const snapshot = await validate(newsroomId, runtime, requestedEffort);
     return { ...snapshot, requestedRuntime: runtime, requestedEffort, resolvedRuntime: runtime, switchReason: null, switchNote: null };
@@ -92,6 +104,29 @@ export async function validateBatchRuntime(
       switchNote: failoverNoteSentence(plan.label, previousLabel, plan.reason),
     };
   }
+}
+
+/** Automatic batches may store internal rung snapshots; named batches may not. */
+function parseBatchRuntimeSnapshot(value: unknown): ForcedRuntimeSnapshot | null {
+  const row = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  if (!row) return null;
+  const parsed = row.requestedRuntime === "auto"
+    ? parseForcedRuntimeSnapshot(value, { automaticRung: true })
+    : parseForcedRuntimeSnapshot(value);
+  if (!parsed || row.requestedRuntime !== "auto") return parsed;
+  const requestedEffort = row.requestedEffort === null
+    ? null
+    : modelEffort(parsed.modelChoice, row.requestedEffort);
+  return {
+    ...parsed,
+    requestedRuntime: "auto",
+    requestedEffort,
+    resolvedRuntime: typeof row.resolvedRuntime === "string" ? row.resolvedRuntime : parsed.runtime,
+    switchReason: typeof row.switchReason === "string" ? row.switchReason : null,
+    switchNote: typeof row.switchNote === "string" ? row.switchNote : null,
+  } as ForcedRuntimeSnapshot & BatchRuntimeReceipt;
 }
 
 export function parseDraftBatchCompletion(value: unknown): {
@@ -251,8 +286,9 @@ async function batchView(
       ? { ok: true, batch: null }
       : { ok: false, code: "not-found", error: "Draft batch not found." };
   }
-  const snapshot = parseForcedRuntimeSnapshot(batch.runtime_snapshot);
+  const snapshot = parseBatchRuntimeSnapshot(batch.runtime_snapshot);
   if (!snapshot) return { ok: false, code: "not-found", error: "Draft batch not found." };
+  const requestedRuntime = (snapshot as ForcedRuntimeSnapshot & Partial<BatchRuntimeReceipt>).requestedRuntime;
   const jobs = await sql.query<{
     subject_id: number;
     id: number;
@@ -294,7 +330,7 @@ async function batchView(
       dismissed: batch.dismissed_at != null,
       runtime: {
         runtime: snapshot.runtime,
-        modelChoice: snapshot.modelChoice,
+        modelChoice: requestedRuntime === "auto" ? "auto" : snapshot.modelChoice as DraftBatchRuntime,
         modelEffort: snapshot.modelEffort ?? null,
         label: forcedRuntimeLabel(snapshot),
       },
@@ -405,7 +441,7 @@ export async function commitDraftBatchForAuthenticatedEditor(
   ) {
     return { ok: false, code: "invalid-input", error: "Draft batch input is invalid." };
   }
-  const runtimeSnapshot = parseForcedRuntimeSnapshot(input.runtimeSnapshot);
+  const runtimeSnapshot = parseBatchRuntimeSnapshot(input.runtimeSnapshot);
   if (!runtimeSnapshot) {
     return { ok: false, code: "invalid-input", error: "The selected runtime snapshot is invalid." };
   }
@@ -442,12 +478,13 @@ export async function commitDraftBatchForAuthenticatedEditor(
       for (const item of checked.items) {
         const receipt = runtimeSnapshot as ForcedRuntimeSnapshot & Partial<BatchRuntimeReceipt>;
         await tx.query(
-          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,failover_note,result_json,draft_batch_id) values($1,$2,'draft',$3,$4,'editor',$5,'default','queued',$6,$7,$8,$9)",
+          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,failover_note,result_json,draft_batch_id) values($1,$2,'draft',$3,$4,$5,$6,'default','queued',$7,$8,$9,$10)",
           [
             input.context.newsroomId,
             input.context.userId,
             item.leadId,
             runtimeSnapshot.modelChoice,
+            receipt.requestedRuntime === "auto" ? "auto" : "editor",
             item.researchScope,
             receipt.switchReason ? `Switched to ${modelChoiceLabel(runtimeSnapshot.modelChoice)}: ${receipt.switchReason}` : "Queued",
             receipt.switchNote ?? "",
@@ -505,7 +542,7 @@ export async function assertDraftBatchCanContinue(
     if (batchJob) throw new Error("Draft batch permission or job lease was withdrawn.");
     return null;
   }
-  const snapshot = parseForcedRuntimeSnapshot(row.runtime_snapshot);
+  const snapshot = parseBatchRuntimeSnapshot(row.runtime_snapshot);
   if (!snapshot) throw new Error("Draft batch runtime snapshot is invalid.");
   return snapshot;
 }
@@ -524,7 +561,7 @@ export async function withDraftBatchLease<T>(
       "select b.runtime_snapshot from desk_jobs j join draft_batches b on b.id=j.draft_batch_id and b.newsroom_id=j.newsroom_id and b.user_id=j.user_id where j.id=$1 and j.newsroom_id=$2 and j.user_id=$3 and j.status='running' and j.claim_token=$4 for update of j",
       [job.id, job.newsroom_id, job.user_id, job.claim_token],
     );
-    if (!row || !parseForcedRuntimeSnapshot(row.runtime_snapshot)) {
+    if (!row || !parseBatchRuntimeSnapshot(row.runtime_snapshot)) {
       throw new Error("Draft batch permission or job lease was withdrawn.");
     }
     const [member] = await sql.query(

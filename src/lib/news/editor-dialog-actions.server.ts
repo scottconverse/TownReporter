@@ -26,7 +26,7 @@
  * in the unit's report rather than hidden.
  */
 import { getSql, type Sql } from "../db.ts";
-import { grokChat, type EffectiveProviderChoice } from "./ai.ts";
+import { grokChat, type EffectiveProviderChoice, type LocalModelOverride } from "./ai.ts";
 import { storableText } from "./storable-text.ts";
 import type { StoryModelChoice } from "./model-choice.ts";
 import {
@@ -36,6 +36,7 @@ import {
   type ModelAssignmentRow,
 } from "./model-assignments.ts";
 import { readModelAssignments } from "./model-assignments-store.ts";
+import { resolveLocalModelChoice } from "./provider-settings.ts";
 import { saveDraftForEditor, type DraftEditInput } from "./draft-edit.server.ts";
 import { beatsForSource, replacementTopic } from "./source-replacements.ts";
 import { insertProposedNewsroomSource } from "./source-seeds.server.ts";
@@ -82,6 +83,7 @@ export type EditorDialogDeps = {
   getSql: () => Promise<Sql>;
   chat: typeof grokChat;
   readAssignments: (newsroomId?: number) => Promise<ModelAssignmentRow[]>;
+  resolveLocalModel: (newsroomId: number, scope: "story" | "scan") => Promise<LocalModelOverride | null>;
   saveDraft: (context: { userId: string; newsroomId: number }, data: DraftEditInput) => Promise<{ ok: true }>;
   proposeSource: typeof insertProposedNewsroomSource;
   linkDocuments: typeof linkStoryDocuments;
@@ -118,6 +120,16 @@ export function jobModelFor(
   const resolved = resolveJobModel({ jobKey, explicit, assignments, exactModel: null });
   if (resolved.source !== "explicit") return resolved;
   return { ...resolved, effort: cleanJobEffort(resolved.providerId, effort ?? null, null) };
+}
+
+async function localOverrideFor(
+  deps: EditorDialogDeps,
+  newsroomId: number,
+  providerId: string,
+  scope: "story" | "scan",
+): Promise<LocalModelOverride | undefined> {
+  if (providerId !== "local-model") return undefined;
+  return (await deps.resolveLocalModel(newsroomId, scope)) ?? undefined;
 }
 
 async function resolveFor(
@@ -234,11 +246,13 @@ export async function performAddLead(
   const notice = noticeLine(resolution);
 
   if (data.then === "score") {
+    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
     const prompt = scorePrompt({ headline, text: paste });
     const got = await deps.chat(prompt.system, prompt.user, 700, {
       choice: resolution.providerId as EffectiveProviderChoice,
       newsroomId: context.newsroomId,
       reasoningEffort: resolution.effort,
+      localModel,
     });
     if (!got.ok) {
       return {
@@ -452,11 +466,13 @@ export async function performFindSources(
   if (topic.length < 4) return { ok: false as const, error: "Say what the paper should cover." };
 
   const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
+  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
   const prompt = findSourcesPrompt(topic, data.scope);
   const got = await deps.chat(prompt.system, prompt.user, 1400, {
     choice: resolution.providerId as EffectiveProviderChoice,
     newsroomId: context.newsroomId,
     reasoningEffort: resolution.effort,
+    localModel,
   });
   if (!got.ok) {
     return {
@@ -628,11 +644,13 @@ export async function performFindReplacement(
   }
 
   const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
+  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
   const prompt = findSourcesPrompt(topic, "records");
   const got = await deps.chat(prompt.system, prompt.user, 1400, {
     choice: resolution.providerId as EffectiveProviderChoice,
     newsroomId: context.newsroomId,
     reasoningEffort: resolution.effort,
+    localModel,
     /*
       No tools, deliberately. This is a "name some pages" question; an agent
       that can fetch would go and read the very host that just refused the
@@ -784,12 +802,14 @@ export async function performWeaveIntoStory(
     after = insertUpdateAtTop(draft.body, material, deps.now());
   } else {
     const resolution = await resolveFor(deps, "story-draft", data.modelChoice, data.modelEffort, context.newsroomId);
+    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "story");
     notice = noticeLine(resolution);
     const prompt = weavePrompt({ headline: draft.headline, body: draft.body, material });
     const got = await deps.chat(prompt.system, prompt.user, 2400, {
       choice: resolution.providerId as EffectiveProviderChoice,
       newsroomId: context.newsroomId,
       reasoningEffort: resolution.effort,
+      localModel,
     });
     if (!got.ok) {
       return {
@@ -869,6 +889,8 @@ export function editorDialogDeps(overrides: Partial<EditorDialogDeps> & Pick<Edi
     getSql,
     chat: grokChat,
     readAssignments: readModelAssignments,
+    resolveLocalModel: async (newsroomId, scope) =>
+      (await resolveLocalModelChoice(newsroomId, scope)).override,
     saveDraft: saveDraftForEditor,
     proposeSource: insertProposedNewsroomSource,
     linkDocuments: linkStoryDocuments,

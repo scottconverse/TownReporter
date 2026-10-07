@@ -207,6 +207,12 @@ const cls="btn"+(tone==="solid"||tone==="invert"||tone==="danger"?" solid":"")+(
 return createElement("button",{type,onClick,disabled,className:cls,"aria-label":ariaLabel},children);}`,
 );
 
+const modelPickerStub = stub(
+  `import{createElement}from${JSON.stringify(import.meta.resolve("react"))};
+export function ModelPicker({label,value,onChange}){
+return createElement("label",null,label||"Model",createElement("select",{value,onChange:onChange||(()=>{}),"aria-label":"Model"},createElement("option",{value},value)));}`,
+);
+
 /* The live region. Real behaviour is `desk-chrome-utils.ts`'s, and the dialogs
    call it on every press; a stub that records is enough to keep the module
    graph off the router. */
@@ -364,6 +370,7 @@ assert.equal(
 const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx", {
   "@tanstack/react-query": import.meta.resolve("@tanstack/react-query"),
   "@/components/dialog": dialogUrl,
+  "@/components/model-picker": modelPickerStub,
   /* UI1a3: the Hold dialog hands the foot its pending word through this module,
      so the real one is loaded rather than stubbed. */
   "@/lib/news/dialog-press": await load("src/lib/news/dialog-press.ts"),

@@ -716,8 +716,15 @@ export async function fileEditorial(
           timeoutMs: options?.timeoutMs,
           noTools: true,
           reasoningEffort: snapshot.modelEffort,
+          localModel: snapshot.modelChoice === "local-model" ? input.localModel : undefined,
         }),
-        probe: (choice) => probeProvider(choice, input.newsroomId, undefined, "opinion"),
+        probe: (choice) => probeProvider(
+          choice,
+          input.newsroomId,
+          undefined,
+          "opinion",
+          choice === "local-model" ? input.localModel : undefined,
+        ),
         resolve: async (choice) => ({
           modelChoice: choice as EffectiveOpinionModelChoice,
           modelEffort: modelEffort(choice, nameRuntime.modelEffort),
@@ -735,6 +742,7 @@ export async function fileEditorial(
       editorialRequestId: input.completion.requestId,
       modelChoice: nameRuntime.modelChoice,
       modelEffort: nameRuntime.modelEffort,
+      localModel: input.localModel,
       onProviderSwitch: async ({ transport, model, reason }) => {
         const nextChoice: EffectiveOpinionModelChoice | null = transport === "codex"
           ? "codex-balanced"

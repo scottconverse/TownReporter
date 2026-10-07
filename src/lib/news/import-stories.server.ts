@@ -98,6 +98,7 @@ export async function readImportStructure(
     newsroomId: number;
     modelChoice?: unknown;
     modelEffort?: unknown;
+    localModel?: { baseUrl: string; id: string };
   },
   deps: { chat?: typeof grokChat; probe?: typeof probeProvider } = {},
 ): Promise<StructureResult> {
@@ -139,6 +140,7 @@ export async function readImportStructure(
         timeoutMs: 180_000,
         noTools: true,
         reasoningEffort: snapshot.modelEffort,
+        localModel: snapshot.modelChoice === "local-model" ? input.localModel : undefined,
       }),
     resolve: async (next) => ({ modelChoice: next, modelEffort: modelEffort(next, effort) }),
     onSwitch: async ({ nextChoice }) => {

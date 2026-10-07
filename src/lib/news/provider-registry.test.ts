@@ -62,7 +62,7 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
   }
 }
 
-const SURFACES: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
+const SURFACES: ProviderSurface[] = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"];
 
 /**
  * `withEnv`, for a check that wants the value back instead of just a verdict.
@@ -591,7 +591,7 @@ describe("what the editor is allowed to type", () => {
 });
 
 describe("the local model is a named pick, everywhere an AI acts", () => {
-  it("is offered on all four surfaces", () => {
+  it("is offered on every model work surface", () => {
     const entry = providerEntry("local-model")!;
     for (const surface of SURFACES) {
       assert.equal(entry.offeredFor[surface], true, `local-model must be offered for ${surface}`);

@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
+import { ModelPicker } from "@/components/model-picker";
 import { addCorrection, suggestCorrectionWording } from "@/lib/news/desk";
 import { correctionTemplate } from "@/lib/news/correction-wording";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { formatShortDate } from "@/lib/paper";
 
 /**
@@ -74,6 +76,7 @@ export function CorrectionDialog({
   const [storyBody, setStoryBody] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [wording, setWording] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
 
   const deskNote = correctionTemplate(wasWrong, isRight) ?? "";
@@ -90,7 +93,7 @@ export function CorrectionDialog({
     setWording({ kind: "working", text: "Writing a correction note…" });
     try {
       const res = await suggestCorrectionWording({
-        data: { articleSlug, wasWrong: wasWrong.trim(), isRight: isRight.trim() },
+        data: { articleSlug, wasWrong: wasWrong.trim(), isRight: isRight.trim(), modelChoice },
       });
       if (!res || typeof res !== "object" || !("ok" in res)) {
         setWording({ kind: "err", text: "The desk did not answer. Your box is exactly as you left it." });
@@ -186,6 +189,13 @@ export function CorrectionDialog({
           placeholder="What the story should have said"
         />
       </label>
+      <ModelPicker
+        scope="story"
+        label="Correction wording model"
+        value={modelChoice}
+        onChange={setModelChoice}
+        disabled={busy}
+      />
       <div className="astra-field">
         <span className="astra-field-label" id="correction-story-text">
           The story text

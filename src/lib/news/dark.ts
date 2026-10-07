@@ -21,9 +21,10 @@ import {
   type EffectiveProviderChoice,
 } from "./ai.ts";
 import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { isOfferedForJob } from "./model-assignments.ts";
 import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
-import { readProviderOverrides } from "./provider-settings.ts";
+import { readProviderOverrides, resolveLocalModelChoice } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot } from "./job-local-model.ts";
 import {
   modelEffort as validatedModelEffort,
@@ -1432,6 +1433,7 @@ type ArtifactOcrRequest = {
   start: number;
   end: number;
   modelChoice: string;
+  modelEffort?: ModelEffort | null;
   mode: "range" | "complete";
 };
 type ArtifactOcrReceipt = {
@@ -1466,9 +1468,19 @@ function artifactOcrRequest(raw: ArtifactOcrRequest | ArtifactOcrReceipt): Artif
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end - start >= 12) {
     throw new Error("Choose one to twelve PDF pages.");
   }
-  const modelChoice = storyModelChoice(input?.modelChoice);
-  if (modelChoice === "auto") throw new Error("Choose the named model that will read these retained PDF pages.");
-  return { artifactId, start, end, modelChoice, mode };
+  const requestedChoice = String(input?.modelChoice ?? "").trim();
+  if (!requestedChoice || !isOfferedForJob("ocr", requestedChoice)) {
+    throw new Error("Choose a model this PDF reader can use.");
+  }
+  const modelChoice = storyModelChoice(requestedChoice);
+  return {
+    artifactId,
+    start,
+    end,
+    modelChoice,
+    modelEffort: validatedModelEffort(modelChoice, input?.modelEffort),
+    mode,
+  };
 }
 
 /** Queue a bounded range or a checkpointed complete read; never refetches a live URL. */
@@ -2595,6 +2607,7 @@ export async function performArtifactOcrWork(
   deps: {
     ocr?: typeof productionOcr;
     pageCount?: typeof pdfPageCount;
+    resolveLocalModel?: (newsroomId: number, scope: "ocr") => Promise<{ baseUrl: string; id: string } | null>;
     /** Test seam for replacing a claim immediately before the checkpoint transaction. */
     beforeCheckpoint?: () => Promise<void>;
   } = {},
@@ -2659,8 +2672,12 @@ export async function performArtifactOcrWork(
   `;
   const retainedPages = new Set(existingRows.map((row) => Number(row.page_number)));
   const jobStarted = Date.now();
-  let ocrChoice = effectiveStoryModelChoice(job.model_choice);
-  let ocrEffort = savedJobEffort(job);
+  let ocrChoice = effectiveStoryModelChoice(request.modelChoice);
+  let ocrEffort = request.modelEffort ?? savedJobEffort(job);
+  const exactLocalModel = ocrChoice === "local-model"
+    ? await (deps.resolveLocalModel ?? (async (newsroomId: number, scope: "ocr") =>
+        (await resolveLocalModelChoice(newsroomId, scope)).override))(job.newsroom_id, "ocr")
+    : undefined;
   let modelCalls = 0;
   let budgetPaused = false;
   let totalPages = 0;
@@ -2845,6 +2862,7 @@ export async function performArtifactOcrWork(
           reasoningEffort: ocrEffort,
           pageRange: batch,
           newsroomId: String(job.newsroom_id),
+          localModel: exactLocalModel,
           jobLabel: `Dark artifact ${request.artifactId}, pages ${batch.start}-${batch.end}`,
           startedAt: jobStarted,
           maxModelCalls: ARTIFACT_OCR_MAX_MODEL_CALLS - modelCalls,

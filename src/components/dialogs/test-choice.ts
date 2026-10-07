@@ -18,7 +18,7 @@
  * in the unit's report; it is not closed here.
  */
 import { createElement, type ReactNode } from "react";
-import type { ChoiceRender } from "./editor-dialog-bodies.ts";
+import type { ChoiceRender, ModelPickerRender } from "./editor-dialog-bodies.ts";
 
 export const ChoiceDouble: ChoiceRender = ({
   label,
@@ -41,5 +41,23 @@ export const ChoiceDouble: ChoiceRender = ({
       { className: "astra-choice-text" },
       createElement("b", null, label),
       note ? createElement("span", { className: "astra-choice-note" }, note) : null,
+    ),
+  );
+
+/** Minimal renderer double for dialog body tests; production supplies ModelPicker. */
+export const ModelPickerDouble: ModelPickerRender = ({ label, value, effort }): ReactNode =>
+  createElement(
+    "div",
+    { className: "test-model-picker" },
+    createElement("label", null, label),
+    createElement(
+      "select",
+      { "aria-label": "Model", value, readOnly: true },
+      createElement("option", { value }, value === "auto" ? "Automatic (Recommended)" : value),
+    ),
+    createElement(
+      "select",
+      { "aria-label": "Effort", value: effort ?? "high", readOnly: true },
+      createElement("option", { value: effort ?? "high" }, effort ?? "high"),
     ),
   );

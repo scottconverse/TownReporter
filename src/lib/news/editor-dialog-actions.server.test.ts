@@ -73,6 +73,7 @@ function fakeSql(plan: Plan, queries: Query[], chatCalls: { n: number }) {
 function makeDeps(plan: Plan) {
   const queries: Query[] = [];
   const chatCalls = { n: 0 };
+  const chatOptions: Record<string, unknown>[] = [];
   const saved: unknown[] = [];
   const linked: unknown[] = [];
   const proposed: unknown[] = [];
@@ -80,11 +81,13 @@ function makeDeps(plan: Plan) {
 
   const deps: EditorDialogDeps = {
     getSql: async () => sql,
-    chat: (async () => {
+    chat: (async (_system: string, _user: string, _maxTokens: number, options: Record<string, unknown>) => {
       chatCalls.n += 1;
+      chatOptions.push(options);
       return plan.chat ?? { ok: false as const, error: "no fake model planned" };
     }) as unknown as EditorDialogDeps["chat"],
     readAssignments: async () => [],
+    resolveLocalModel: async () => ({ baseUrl: "http://127.0.0.1:1234/v1", id: "loaded-exact-model" }),
     saveDraft: (async (_ctx: unknown, data: unknown) => {
       saved.push(data);
       return { ok: true as const };
@@ -102,7 +105,7 @@ function makeDeps(plan: Plan) {
     now: () => new Date("2026-09-26T14:05:00Z"),
   };
   const writes = () => queries.filter((q) => q.write);
-  return { deps, queries, writes, saved, linked, proposed, chatCalls };
+  return { deps, queries, writes, saved, linked, proposed, chatCalls, chatOptions };
 }
 describe("the source kill pattern", () => {
   const SOURCE = { id: 7, url: "https://records.example/news", title: "Records" };
@@ -155,6 +158,20 @@ describe("the source kill pattern", () => {
 });
 
 describe("add to this story", () => {
+  it("passes the saved exact local endpoint and model to the model call", async () => {
+    const { deps, chatOptions } = makeDeps({ drafts: [DRAFT], chat: { ok: true as const, text: "The council met on Tuesday. It voted 4-3." } });
+    const result = await performWeaveIntoStory(
+      context,
+      { leadId: 5, mode: "weave", material: "It voted 4-3.", modelChoice: "local-model" },
+      deps,
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(chatOptions[0]?.localModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "loaded-exact-model",
+    });
+  });
+
   it("shows the new body on the review press and saves exactly those bytes on the confirm", async () => {
     const plan = { drafts: [DRAFT], chat: { ok: true as const, text: "The council met on Tuesday. It voted 4-3." } };
     const { deps, saved, linked, chatCalls } = makeDeps(plan);
@@ -220,6 +237,22 @@ describe("add to this story", () => {
 });
 
 describe("add a lead", () => {
+  it("sends the exact saved local endpoint and model to lead scoring", async () => {
+    const { deps, chatOptions } = makeDeps({
+      chat: { ok: true as const, text: '{"score": 72, "reason": "New and checkable."}' },
+    });
+    const result = await performAddLead(
+      context,
+      { paste: "A neighbor says the vote was 4-3", then: "score", modelChoice: "local-model" },
+      deps,
+    );
+    assert.equal(result.ok && result.score, 72);
+    assert.deepEqual(chatOptions[0]?.localModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "loaded-exact-model",
+    });
+  });
+
   it("files it and reports the score on the happy path", async () => {
     const filed: { headline: string; why: string; topic: string; urls: string[] }[] = [];
     const { deps, writes, chatCalls } = makeDeps({
@@ -382,6 +415,25 @@ describe("choose a headline", () => {
 });
 
 describe("find sources", () => {
+  it("sends the exact saved local endpoint and model to source discovery", async () => {
+    const { deps, chatOptions } = makeDeps({
+      chat: {
+        ok: true as const,
+        text: "Records | https://records.example/minutes | keeps the minutes",
+      },
+    });
+    const result = await performFindSources(
+      context,
+      { topic: "Longmont water", scope: "records", modelChoice: "local-model" },
+      deps,
+    );
+    assert.equal(result.ok && result.proposed, 1);
+    assert.deepEqual(chatOptions[0]?.localModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "loaded-exact-model",
+    });
+  });
+
   it("counts what the desk accepted, not what the model offered", async () => {
     const { deps, proposed } = makeDeps({
       chat: {

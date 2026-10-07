@@ -3,6 +3,7 @@ import {
   parseJsonBlock,
   providerBudget,
   type EffectiveProviderChoice,
+  type LocalModelOverride,
 } from "./ai.ts";
 import { createDarkRunBudget, type DarkRunBudget } from "./dark-run-budget.ts";
 import {
@@ -17,6 +18,7 @@ import {
 } from "./follow-ups.ts";
 import { readModelAssignments } from "./model-assignments-store.ts";
 import { resolveJobModel, type JobModelResolution } from "./model-assignments.ts";
+import { resolveLocalModelChoice } from "./provider-settings.ts";
 import { storyModelChoice } from "./model-choice.ts";
 import {
   checkPageWatchFor,
@@ -43,6 +45,7 @@ import {
   progressReporterFor,
   throwIfJobCancelled,
   waitForModel,
+  setJobModelChoice,
   type DeskJob,
 } from "./jobs.ts";
 import {
@@ -101,6 +104,7 @@ export type SearchJudgeInput = {
   hits: WebHit[];
   /** The resolved provider id for this run, so the judge call bills to it. */
   modelChoice: string;
+  localModel?: LocalModelOverride;
   newsroomId: number;
   budget?: DarkRunBudget;
 };
@@ -148,6 +152,8 @@ export type FollowUpAgentInput = {
   /** The provider this run resolved to (per-follow-up pick, else the
    * `follow-up` assignment, else the surface default). */
   modelChoice: string;
+  /** Exact local endpoint/model pair selected for the follow-up scope. */
+  localModel?: LocalModelOverride;
   /** What the last run found -- "is this still the same URL?" lives here. */
   lastFinding: FollowUpFinding;
 };
@@ -390,6 +396,7 @@ async function judgeSearchHits(input: SearchJudgeInput): Promise<SearchJudgeResu
         timeoutMs: Math.min(callMs, budget?.remainingMs() ?? callMs),
         choice: storyModelChoice(input.modelChoice) as EffectiveProviderChoice,
         newsroomId: input.newsroomId,
+        localModel: input.localModel,
         noTools: true,
       },
     );
@@ -465,6 +472,7 @@ export async function runSearchAgent(
         question,
         hits,
         modelChoice: input.modelChoice,
+        localModel: input.localModel,
         newsroomId: input.newsroomId,
         budget: deps.budget,
       });
@@ -747,6 +755,7 @@ export async function performFollowUpRun(
      * into, and what fails if the claim's refusal is swallowed (M1).
      */
     beforeClaim?: () => Promise<void>;
+    resolveLocalModel?: (newsroomId: number) => Promise<LocalModelOverride | null>;
   } = {},
 ): Promise<void> {
   const context = { userId: job.user_id, newsroomId: job.newsroom_id };
@@ -782,7 +791,15 @@ export async function performFollowUpRun(
   // the claim's refusal can reach it too.
   const throwIfCancelled = () => throwIfJobCancelled(job.id);
   const step = progressReporterFor(job);
-  const budget = createDarkRunBudget(followUpRunLimits(row.model_choice), { now: deps.now });
+  const resolution = await resolveFollowUpModel(row);
+  const modelChoice = resolution.providerId;
+  const localModel = modelChoice === "local-model"
+    ? (await (deps.resolveLocalModel ?? (async (newsroomId: number) =>
+        (await resolveLocalModelChoice(newsroomId, "follow-up")).override))(row.newsroom_id)) ?? undefined
+    : undefined;
+  await setJobModelChoice(job.id, modelChoice);
+  job.model_choice = modelChoice;
+  const budget = createDarkRunBudget(followUpRunLimits(modelChoice), { now: deps.now });
   const model =
     deps.agents?.model ??
     (<T,>(label: string, run: () => Promise<T>) => waitForModel({ jobId: job.id, label, run }));
@@ -827,7 +844,8 @@ export async function performFollowUpRun(
         newsroomId: job.newsroom_id,
         what: row.what,
         targets: followUpTargets(row.targets_json),
-        modelChoice: row.model_choice,
+        modelChoice,
+        localModel,
         lastFinding: parseFinding(row.finding_json),
       },
       { ...deps.agents, budget, step, throwIfCancelled, model },

@@ -178,6 +178,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/lib/news/provider-availability": names(["localModelCatalog", "refreshLocalModelCatalog"]),
       "@/components/provider-status-card": inlineModule(`export const ProviderStatusCard = () => null;`),
       "@/components/status-chip": inlineModule(`export const Chip = () => null;`),
+      "@/components/model-picker": inlineModule(`export const LocalModelSelect = () => null;`),
     },
   );
 

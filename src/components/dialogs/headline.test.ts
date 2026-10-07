@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HeadlineBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import {
   headlineChoice,
   headlineInitial,
@@ -24,13 +24,13 @@ const base = {
   set: () => undefined,
   problem: null as string | null,
   note: null as string | null,
-  models,
   Choice: ChoiceDouble,
+  ModelPicker: ModelPickerDouble,
 };
 
-const render = (over: Partial<HeadlineState>, extra: { models?: typeof models } = {}) =>
+const render = (over: Partial<HeadlineState>) =>
   renderToStaticMarkup(
-    createElement(HeadlineBody, { ...base, models: extra.models ?? models, state: { ...base.state, ...over } }),
+    createElement(HeadlineBody, { ...base, state: { ...base.state, ...over } }),
   );
 
 const state = (over: Partial<HeadlineState>): HeadlineState => ({ ...headlineInitial(CURRENT), ...over });
@@ -71,19 +71,18 @@ describe("Headline dialog", () => {
   it("draws the model row the reference draws, carrying the pick Suggest 3 more sends", () => {
     assert.match(render({ suggestions: SUGGESTED }), /aria-label="Model"/);
     assert.match(render({ suggestions: SUGGESTED }), /aria-label="Effort"/);
-    // No rows offered: no picker, rather than a select with nothing in it.
-    assert.ok(!render({ suggestions: SUGGESTED }, { models: [] as typeof models }).includes('aria-label="Model"'));
+    assert.match(render({ suggestions: SUGGESTED }), /aria-label="Model"/);
 
     assert.ok(named, "modelRowFor('story') offers a named model beside Automatic");
     const picked = headlineSuggestRequest(state({ model: named!.value, effort: "low" }));
     assert.equal(picked.headline, CURRENT);
     assert.equal(picked.modelChoice, named!.value);
     assert.equal(picked.modelEffort, "low");
-    // Automatic is the absent pick, so the server's own resolution runs, and an
-    // empty current headline is absent rather than an empty string.
+    // Automatic is explicit; an empty current headline is absent rather than
+    // an empty string.
     const auto = headlineSuggestRequest(headlineInitial(""));
     assert.equal(auto.headline, undefined);
-    assert.ok(!("modelChoice" in auto), JSON.stringify(auto));
+    assert.equal(auto.modelChoice, "auto");
   });
 
   it("saves the typed line first, then Keep mine, then the chosen suggestion", () => {

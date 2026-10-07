@@ -17,6 +17,7 @@ import {
   providerRunsToolPass,
   providersFor,
   providerEntry,
+  OCR_AUTOMATIC_ORDER,
   type AutomaticChoiceId,
   type AutomaticRungId,
   type PickerProviderId,
@@ -90,9 +91,8 @@ const AUTOMATIC: ModelChoiceOption = {
 };
 
 export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceOption[] {
-  const automatic = surface === "forced" ? [] : [AUTOMATIC];
   return [
-    ...automatic,
+    AUTOMATIC,
     ...providersFor(surface).map((entry) => ({
       value: entry.id as StoryModelChoice,
       label: entry.label,
@@ -201,8 +201,10 @@ export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesF
  * gets, because every provider that can draft can also dig.
  */
 export const DARK_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("dark");
+export const OCR_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("ocr");
 /**
- * Batch and meeting runs must name one exact provider, so Automatic is absent.
+ * Automatic is offered for every model work surface, including batch and OCR.
+ * The run records the ladder rung it actually reaches.
  * The SCHEDULED daily scan is no longer one of these as of 0.6.64 (Unit AA):
  * it has its own list -- the story/scan list, Automatic included, which is what
  * `scope="scan"` renders -- and the server resolves Automatic to a rung before
@@ -213,20 +215,15 @@ export const FORCED_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFo
 export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
 /**
- * Batch and meeting runs must name ONE exact provider, so Automatic is absent
- * -- and so are Automatic's own rungs. A rung is what Automatic resolved to on
- * the day, which is why `dailyScanRuntime` and `draftBatchRuntime` narrow the
- * rungs away too. The daily scan keeps "auto" itself (Unit AA): a rung is
- * refused, Automatic is allowed, and the server names the rung it resolved to
- * on the run record.
+ * Forced jobs show Automatic as their recommended task-specific ladder.
+ * Automatic's internal rungs remain absent from the picker: the run resolves
+ * and records the exact provider/model used before work begins.
  *
  * Unit U29: Opinion's menu does offer one rung by name (DeepSeek v4.1 Flash),
- * and that changes nothing here. These are the FORCED surfaces -- a batch, a
- * meeting redraft, OCR, a transcript -- whose runs have to name a runtime
- * before they start; none of them opens the Opinion picker, and
- * `validateForcedRuntime` still refuses a rung that reaches one.
+ * and that changes nothing here. OCR uses this list so the surface can choose
+ * either its own Automatic ladder or a named provider.
  */
-export type ForcedModelChoice = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
+export type ForcedModelChoice = Exclude<StoryModelChoice, AutomaticRungId>;
 
 /**
  * Turn an untrusted stored string back into a choice a job may hold.
@@ -289,7 +286,7 @@ export function shouldHydrateDarkModel(
 export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story"): string {
   if (isCustomModelChoice(value)) return "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";
-  for (const surface of [scope, "story", "scan", "opinion", "dark", "forced"] as const) {
+  for (const surface of [scope, "story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const) {
     const match = modelChoicesFor(surface).find((choice) => choice.value === value);
     if (match) return match.label;
   }
@@ -454,6 +451,9 @@ export function modelChoiceHelp(value: unknown, scope: ProviderSurface = "story"
   if (scope === "dark") {
     return `Uses your configured gateway when set; otherwise tries ${ladderSentence(DARK_AUTOMATIC_LADDER)}.${loadedRungNote(DARK_AUTOMATIC_LADDER)} Planning uses the selected provider's faster planning model. If the first provider's login has lapsed or synthesis does not respond in time, only the unfinished stage moves to the next provider.`;
   }
+  if (scope === "ocr") {
+    return `Uses ${ladderSentence(OCR_AUTOMATIC_ORDER)} first, then the selected local vision model if one is available. If a provider cannot read the page, OCR moves to the next ready reader.`;
+  }
   /*
     0.6.64 (Unit AA) item 2: the Scan picker offers Automatic now, and a
     scheduled run cannot mean what Story's sentence means. A story resolves
@@ -607,14 +607,35 @@ export function isUseLoadedLocalModelPick(
 }
 
 /**
- * Item 1: the local option text says which models are loaded, id first.
- *
- * The id comes first because that is what an editor is choosing between; the
- * load state is the qualifier. `loaded === null` (a server that reports no
- * load state at all) says nothing -- an unknown state is not an unloaded one.
+ * Whether an id names an Ollama model that runs on Ollama's HOSTED service
+ * rather than on this computer. The marker is a trailing `cloud` word after
+ * `:`, `.` or `-` -- the `name:cloud` tag Ollama documents, plus the hosted
+ * catalog's `model-1.2-cloud` / `model.1.2.cloud` shapes. Same test
+ * `local-models.ts` sets its catalog `cloud` flag with.
  */
-export function localModelOptionText(model: { id: string; loaded: boolean | null }): string {
-  return model.loaded === true ? `${model.id} · loaded` : model.id;
+function isHostedCloudModelId(id: string): boolean {
+  return /[:.-]cloud$/i.test(id);
+}
+
+/**
+ * Item 1: the local option text leads with the id and says which models are
+ * loaded and which are HOSTED cloud models -- those spend credits, so the
+ * option has to say so before it is picked. `loaded === null` (a server
+ * reporting no load state) says nothing; unknown is not unloaded. The cloud
+ * marker is the model's own `cloud` flag OR the id alone, since this module is
+ * client-safe and cannot import the catalog's flag.
+ */
+export function localModelOptionText(model: {
+  id: string;
+  loaded: boolean | null;
+  cloud?: boolean;
+}): string {
+  const cloud = model.cloud === true || isHostedCloudModelId(model.id);
+  const qualifiers = [
+    cloud ? "cloud · spends credits" : null,
+    model.loaded === true ? "loaded" : null,
+  ].filter(Boolean);
+  return qualifiers.length ? `${model.id} · ${qualifiers.join(" · ")}` : model.id;
 }
 
 /**

@@ -37,6 +37,7 @@ import {
   type FollowUpFilter,
 } from "@/lib/news/follow-up-copy";
 import type { FollowUpRow } from "@/lib/news/types";
+import { storyModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/follow-ups")({ component: FollowUpsPage });
 
@@ -283,6 +284,7 @@ function asWireInput(input: FollowUpDialogInput) {
     schedule: input.schedule,
     targets: input.targets,
     leadId: input.leadId,
+    modelChoice: input.modelChoice,
   };
 }
 
@@ -309,5 +311,6 @@ function initialFor(row: FollowUpRow): FollowUpDialogInitial {
     targets: followUpTargets(row.targets_json).join("\n"),
     leadId: row.lead_id,
     leadHeadline: row.lead_headline ?? null,
+    modelChoice: storyModelChoice(row.model_choice),
   };
 }

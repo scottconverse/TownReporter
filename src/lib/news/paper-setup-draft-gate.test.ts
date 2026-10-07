@@ -262,6 +262,7 @@ describe("Add lead with then: 'draft' refuses the draft but keeps the lead", () 
       getSql: async () => tag,
       chat: (async () => ({ ok: false as const, error: "no model in this test" })) as unknown as EditorDialogDeps["chat"],
       readAssignments: async () => [],
+      resolveLocalModel: async () => null,
       saveDraft: (async () => ({ ok: true as const })) as unknown as EditorDialogDeps["saveDraft"],
       proposeSource: (async () => true) as unknown as EditorDialogDeps["proposeSource"],
       linkDocuments: (async () => ({ ok: true as const })) as unknown as EditorDialogDeps["linkDocuments"],

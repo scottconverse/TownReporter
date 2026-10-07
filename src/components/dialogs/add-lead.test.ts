@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AddLeadBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import {
   ADD_LEAD_THENS,
   addLeadInitial,
@@ -21,6 +21,7 @@ const base = {
   problem: null as string | null,
   note: null as string | null,
   Choice: ChoiceDouble,
+  ModelPicker: ModelPickerDouble,
 };
 
 const render = (state: Partial<AddLeadState>) =>
@@ -35,7 +36,7 @@ const selectedCard = (html: string) => {
 };
 
 describe("Add a lead dialog", () => {
-  it("draws the three controls the reference draws, and no model picker", () => {
+  it("draws the lead controls and model picker for its default AI scoring action", () => {
     const html = render({});
     assert.match(html, /astra-field-label">Link or tip</);
     assert.match(html, /Paste a URL, or describe what you heard/);
@@ -48,10 +49,8 @@ describe("Add a lead dialog", () => {
       // either form rather than by `includes`.
       assert.match(html, new RegExp(t.note.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/&#x27;|'/g, "(?:&#x27;|')")), t.note);
     }
-    // The drawing has no picker here: the server resolves the job through
-    // `model_assignments`. A select appearing on this body is the drift.
-    assert.ok(!html.includes('aria-label="Model"'), html.slice(0, 200));
-    assert.ok(!html.includes('aria-label="Effort"'));
+    assert.match(html, /aria-label="Model"/);
+    assert.match(html, /aria-label="Effort"/);
   });
 
   it("marks the drawn default (Research and score it) as the selected card", () => {
@@ -88,9 +87,9 @@ describe("Add a lead dialog", () => {
       const ai = addLeadRequest(state({ paste: "a real tip here", then, ...pick }));
       assert.equal(ai.modelChoice, named!.value);
       assert.equal(ai.modelEffort, "high");
-      // Automatic is the absent pick, so the server's own resolution runs.
+      // Automatic is an explicit editor choice and uses the recommended ladder.
       const auto = addLeadRequest(state({ paste: "a real tip here", then }));
-      assert.ok(!("modelChoice" in auto));
+      assert.equal(auto.modelChoice, "auto");
     }
   });
 

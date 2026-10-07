@@ -72,14 +72,16 @@ export type ChoiceRender = (props: {
   onSelect?: () => void;
 }) => ReactNode;
 
-/**
- * The effort options, in the order the reference lists them.
- *
- * Only meaningful with a named model: "Automatic" means the desk's own
- * resolution decides the effort too, and the row says so rather than showing a
- * second control whose value would be thrown away.
- */
-const EFFORT_OPTIONS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type ModelPickerRenderProps = {
+  scope: "story" | "scan" | "opinion" | "dark" | "forced";
+  label: string;
+  value: string;
+  effort: string | null;
+  onChange: (value: string) => void;
+  onEffortChange: (value: string | null) => void;
+};
+
+export type ModelPickerRender = (props: ModelPickerRenderProps) => ReactNode;
 
 /* ----------------------------------------------------------------- pieces -- */
 
@@ -202,46 +204,22 @@ function choiceSet(
  * parameter no caller set.
  */
 function modelRow(
-  rows: readonly { value: string; label: string }[],
+  Picker: ModelPickerRender,
+  scope: ModelPickerRenderProps["scope"],
   value: string,
   effort: string | null,
   onValue: (v: string) => void,
-  onEffort: (v: string) => void,
+  onEffort: (v: string | null) => void,
+  label = "Model",
 ): ReactNode {
-  const auto = !value || value === "auto";
-  return createElement(
-    "div",
-    { className: "astra-model-row" },
-    createElement("span", { className: "astra-model-row-label" }, "Model"),
-    createElement(
-      "select",
-      {
-        className: "astra-input",
-        value: auto ? "auto" : value,
-        "aria-label": "Model",
-        onChange: (e: { target: { value: string } }) => onValue(e.target.value),
-      },
-      ...rows.map((r) => createElement("option", { key: r.value, value: r.value }, r.label)),
-    ),
-    createElement("span", { className: "astra-model-row-label" }, "Effort"),
-    createElement(
-      "select",
-      {
-        className: "astra-input",
-        value: effort ?? "high",
-        "aria-label": "Effort",
-        disabled: auto,
-        title: auto ? "Automatic sets the effort too" : undefined,
-        onChange: (e: { target: { value: string } }) => onEffort(e.target.value),
-      },
-      ...EFFORT_OPTIONS.map((v) => createElement("option", { key: v, value: v }, v)),
-    ),
-    createElement(
-      "span",
-      { className: "astra-model-row-note" },
-      auto ? "Automatic, per job in Server → Models" : "Set per job in Server → Models",
-    ),
-  );
+  return createElement(Picker, {
+    scope,
+    label,
+    value,
+    effort,
+    onChange: onValue,
+    onEffortChange: onEffort,
+  });
 }
 
 /**
@@ -357,7 +335,7 @@ export type NewStoryBodyProps = {
   set: (patch: Partial<NewStoryState>) => void;
   problem: string | null;
   note: string | null;
-  models: readonly { value: string; label: string }[];
+  ModelPicker: ModelPickerRender;
   /**
    * Tabs (b) and (c): the newsroom's own sections, for the row that decides
    * what the editor's text is filed under. The shell reads them with the desk's
@@ -479,7 +457,7 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
             "scope",
           ),
         ]),
-        modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+        modelRow(p.ModelPicker, "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
       ),
     );
   } else if (s.tab === "self") {
@@ -516,7 +494,7 @@ export function NewStoryBody(p: NewStoryBodyProps): ReactNode {
         ),
         s.pasteMode === "nothing"
           ? null
-          : modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+          : modelRow(p.ModelPicker, "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
         /*
           Unit BW3: bulk import has to stay reachable from the editor's path.
 
@@ -602,19 +580,12 @@ export type AddLeadBodyProps = {
   problem: string | null;
   note: string | null;
   Choice: ChoiceRender;
+  ModelPicker: ModelPickerRender;
 };
 
 /**
- * NO MODEL ROW HERE, and that is the drawing.
- *
- * `Desk Dialogs.dc.html`'s add-lead view is Link or tip, Why it might matter and
- * Then -- three controls and no picker -- and the reference's own "Add a lead"
- * rows are the same three. Adding a picker the design does not draw would be
- * this build inventing a control; where the editor has not chosen, the phase-5
- * order starts at `model_assignments` on the server, which is the rule for
- * every job in the desk. `AddLeadState.model`/`effort` survive because
- * `addLeadRequest` still drops them when they are "auto" -- so a future screen
- * that DOES draw the row can pass one without touching this body.
+ * The model follows the selected action: scoring uses the scan surface, while
+ * writing uses the story surface. Filing without AI does not show a picker.
  */
 export function AddLeadBody(p: AddLeadBodyProps): ReactNode {
   const s = p.state;
@@ -627,6 +598,9 @@ export function AddLeadBody(p: AddLeadBodyProps): ReactNode {
       field("Why it might matter", "optional", line(s.why, "Optional note for the AI", (v) => set({ why: v })), "why"),
     ]),
     choiceSet("Then", ADD_LEAD_THENS, s.then, (key) => set({ then: key as AddLeadState["then"] }), p.Choice),
+    s.then === "as-is"
+      ? null
+      : modelRow(p.ModelPicker, s.then === "score" ? "scan" : "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Model for this lead"),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );
@@ -641,7 +615,7 @@ export type AddSourcesBodyProps = {
   note: string | null;
   /** The parsed rows for the list/file tabs; the desk's own watcher list is the input. */
   preview: SourcePreview | null;
-  models: readonly { value: string; label: string }[];
+  ModelPicker: ModelPickerRender;
   /** The upload tab's drop zone: the file is read into lines by the shell. */
   onFiles?: (files: File[]) => void;
   Choice: ChoiceRender;
@@ -707,7 +681,7 @@ export function AddSourcesBody(p: AddSourcesBodyProps): ReactNode {
         (key) => set({ scope: key }),
         p.Choice,
       ),
-      modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+      modelRow(p.ModelPicker, "scan", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Model for source discovery"),
     );
   }
 
@@ -728,14 +702,9 @@ export type AddToBodyProps = {
   /** The drop zone: documents are uploaded and attached to the story. */
   onFiles?: (files: File[]) => void;
   Choice: ChoiceRender;
+  ModelPicker: ModelPickerRender;
 };
 
-/**
- * NO MODEL ROW HERE EITHER. The reference's add-to view is the drop zone, the
- * material and How -- "the AI weaves it in" carries its model in the note, not
- * in a picker, and the two no-AI modes could not use one. The weaving call
- * resolves through `model_assignments` on the server, like every other job.
- */
 export function AddToBody(p: AddToBodyProps): ReactNode {
   const s = p.state;
   const set = p.set;
@@ -756,6 +725,9 @@ export function AddToBody(p: AddToBodyProps): ReactNode {
       field("New material", "", textarea(s.material, "Paste text, a link, or your own paragraph", (v) => set({ material: v }), 100), "material"),
     ]),
     choiceSet("How", ADD_TO_MODES, s.mode, (key) => set({ mode: key as AddToState["mode"] }), p.Choice),
+    ADD_TO_MODES.find((mode) => mode.key === s.mode)?.ai
+      ? modelRow(p.ModelPicker, "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Model for this story change")
+      : null,
   );
   if (p.review) {
     parts.push(
@@ -793,8 +765,8 @@ export type DarkFileBodyProps = {
   set: (patch: Partial<DarkFileState>) => void;
   problem: string | null;
   note: string | null;
-  models: readonly { value: string; label: string }[];
   Choice: ChoiceRender;
+  ModelPicker: ModelPickerRender;
 };
 
 export function DarkFileBody(p: DarkFileBodyProps): ReactNode {
@@ -829,7 +801,7 @@ export function DarkFileBody(p: DarkFileBodyProps): ReactNode {
       `opts.modelEffort` into `reasoningEffort` since it was written
       (src/lib/news/dark.ts:1882) -- so the wire, not the runner, was the gap.
     */
-    modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+    modelRow(p.ModelPicker, "dark", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );
@@ -878,13 +850,13 @@ export type HeadlineBodyProps = {
   problem: string | null;
   note: string | null;
   /**
-   * The rows for "Suggest 3 more", which now carries the pick
+   * The shared model picker for "Suggest 3 more", which now carries the pick
    * (`headlineSuggestRequest`). The reference draws this row on the headline
    * view, so unlike Add-a-lead and Add-to-story there is one here -- and unlike
    * them it is a control the press actually reads.
    */
-  models: readonly { value: string; label: string }[];
   Choice: ChoiceRender;
+  ModelPicker: ModelPickerRender;
 };
 
 export function HeadlineBody(p: HeadlineBodyProps): ReactNode {
@@ -919,9 +891,7 @@ export function HeadlineBody(p: HeadlineBodyProps): ReactNode {
     fields([
       field("Or write a new one", "", line(s.written, "Type a headline here; it replaces the choice above", (v) => set({ written: v })), "written"),
     ]),
-    p.models.length
-      ? modelRow(p.models, s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }))
-      : null,
+    modelRow(p.ModelPicker, "story", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Model for headline suggestions"),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );

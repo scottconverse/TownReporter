@@ -60,6 +60,7 @@ import { automaticOrderSentence } from "@/lib/news/model-choice";
 import { localModelCatalog, refreshLocalModelCatalog } from "@/lib/news/provider-availability";
 import { ProviderStatusCard } from "@/components/provider-status-card";
 import { Chip } from "@/components/status-chip";
+import { LocalModelSelect } from "@/components/model-picker";
 
 /**
  * Color carries no information on its own here.
@@ -761,6 +762,10 @@ export function LocalModelCatalogTable({ onNote }: { onNote: (text: string) => v
         <InkButton tone="quiet" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
           {refresh.isPending ? "Checking…" : "Refresh"}
         </InkButton>
+      </div>
+      <div className="mt-3 rounded-md border border-rule p-3">
+        <p className="mb-2 text-sm font-semibold">Exact local model for story writing</p>
+        <LocalModelSelect scope="story" />
       </div>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full text-left text-sm">

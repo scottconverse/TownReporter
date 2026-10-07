@@ -64,6 +64,7 @@ function makeDeps(plan: Plan) {
       return plan.chat ?? { ok: false as const, error: "no fake model planned" };
     }) as unknown as EditorDialogDeps["chat"],
     readAssignments: async () => [],
+    resolveLocalModel: async () => ({ baseUrl: "http://127.0.0.1:1234/v1", id: "test-model" }),
     saveDraft: (async () => ({ ok: true as const })) as unknown as EditorDialogDeps["saveDraft"],
     proposeSource: (async (_sql: unknown, input: Record<string, unknown>) => {
       proposed.push(input);
@@ -95,6 +96,21 @@ const TWO_ROWS = {
 };
 
 describe("performFindReplacement", () => {
+  it("sends the selected local endpoint and model to the replacement search", async () => {
+    const f = makeDeps({
+      source: [SOURCE],
+      filed: [{ section_key: "planning" }],
+      sections: SECTIONS,
+      chat: TWO_ROWS,
+    });
+    const result = await performFindReplacement(context, { sourceId: 7, modelChoice: "local-model" }, f.deps);
+    assert.equal(result.ok, true);
+    assert.deepEqual(f.calls[0]?.opts.localModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "test-model",
+    });
+  });
+
   it("makes exactly one call, with no tools, and asks the beat's question", async () => {
     const f = makeDeps({
       source: [SOURCE],
