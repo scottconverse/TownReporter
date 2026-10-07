@@ -278,7 +278,6 @@ function StoryPage() {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, [body, headline, dek]);
-  const [topic, setTopic] = useState(() => initialStoryTopic(data?.lead.topic));
   /*
     The geography the paper's pills filter on (0.6.71). One more field on the
     existing publish step, not a new step: the editor sets it here and the
@@ -480,6 +479,8 @@ function StoryPage() {
     refetchOnReconnect: true,
   });
 
+  const [topic, setTopic] = useState(() => initialStoryTopic(data?.lead.topic));
+
   currentDraftFields.current = { headline, dek, body, topic };
   /*
     Unit U11b: whether this editor is the owner, so the evidence review knows
@@ -603,7 +604,10 @@ function StoryPage() {
   useEffect(() => {
     if (data?.articleSlug) setPublishedSlug(data.articleSlug);
     const d = data?.draft;
-    if (!d) return;
+    if (!d) {
+      if (data?.lead && !topicTouched) setTopic(initialStoryTopic(data.lead.topic));
+      return;
+    }
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
     if (!waitingSince) {
       if (appliedFp.current === "") {
@@ -652,7 +656,7 @@ function StoryPage() {
     setMsg(completion?.quality.reviewRequired
       ? "Draft saved. Review the source and name-check warnings before publication."
       : "Draft saved.");
-  }, [awaitingDraftJobAck, data, waitingSince]);
+  }, [topicTouched, awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
     if (!waitingSince) return;

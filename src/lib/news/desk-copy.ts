@@ -2646,6 +2646,7 @@ export function initialStoryTopic(leadTopic: string | null | undefined): string 
 }
 
 type DarkRunNote = {
+  investigation_id: number | null;
   stopReason: string | null;
   started_at: string;
   usage: { totals: { documentReads: number } };
@@ -2656,6 +2657,7 @@ export function shouldShowDarkRunStopNote(run: DarkRunNote, history: readonly Da
   if (run.stopReason !== "document-read-limit") return true;
   const startedAt = Date.parse(run.started_at);
   return !history.some((later) =>
+    run.investigation_id != null && later.investigation_id === run.investigation_id &&
     Date.parse(later.started_at) > startedAt &&
     later.stopReason === "completed" &&
     later.usage.totals.documentReads > 0,

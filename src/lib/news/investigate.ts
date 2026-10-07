@@ -3062,6 +3062,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
         why: f.why,
         priority: f.priority,
         pendingQueries: f.queries,
+        status: f.status === "closed" ? "closed" : undefined,
+        closedReason: f.closed_reason,
       });
     }
 
