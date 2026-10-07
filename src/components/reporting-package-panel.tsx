@@ -22,12 +22,15 @@ import {
   heldLine,
   methodLine,
   packageGaps,
-  readinessLabel,
+  readinessQuestion,
   reportingNotice,
+  reportingPackageHistory,
+  reportingScoreLabel,
   reportingRunState,
-  scoreLine,
 } from "@/lib/news/reporting-package-view";
 import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting";
+
+type EarlierReportingPackage = { requestId: number; createdAt: string; pkg: ReportingPackage };
 
 /*
   The structured reporting package, drawn BESIDE the editable copy.
@@ -125,6 +128,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
       </section>
     );
   }
+  const history = reportingPackageHistory({ requestId: row.requestId, pkg: row.pkg }, row.earlierPackages ?? []);
   return (
     <>
     {row.latestRun && row.latestRun.requestId !== row.requestId ? (
@@ -143,7 +147,8 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
       requestId={row.requestId}
       latestStatus={row.latestRun?.status}
       draftId={row.draftId ?? null}
-      report={row.pkg}
+      report={history.current.pkg}
+      earlierPackages={history.earlier}
       currentDocumentChecks={row.currentDocumentChecks ?? {}}
       storyLeads={row.storyLeads ?? []}
       observations={observations.data ?? []}
@@ -162,6 +167,7 @@ function PackageBody({
   latestStatus,
   draftId,
   report,
+  earlierPackages,
   currentDocumentChecks,
   storyLeads,
   observations,
@@ -172,6 +178,7 @@ function PackageBody({
   latestStatus: string | undefined;
   draftId: number | null;
   report: ReportingPackage;
+  earlierPackages: EarlierReportingPackage[];
   currentDocumentChecks: CurrentReportingDocumentChecks;
   /**
    * Where each story landed, from the runner's own job result. A story the
@@ -195,7 +202,7 @@ function PackageBody({
         <p className="meta">{run.detail}</p>
       </div>
       <p className="meta">
-        {readinessLabel(report.readinessTier)} - score {scoreLine(report.score)}
+        {reportingScoreLabel(report.score)} · {readinessQuestion(report.readinessTier)}
       </p>
       {report.stories.length > 1 ? (
         <nav className="reporting-story-links" aria-label="Stories in this package">
@@ -250,6 +257,25 @@ function PackageBody({
       <FollowUpBox requestId={requestId} latestStatus={latestStatus} onRefresh={onRefresh} />
       <CorrectionBox leadId={leadId} requestId={requestId} onRefresh={onRefresh} />
       <ObservationsList observations={observations} />
+      {earlierPackages.length ? (
+        <details className="reporting-earlier">
+          <summary>Earlier</summary>
+          <ol>
+            {earlierPackages.map((entry) => (
+              <li key={entry.requestId}>
+                <h3>Package from {new Date(entry.createdAt).toLocaleString()}</h3>
+                <p className="meta">{reportingScoreLabel(entry.pkg.score)} · {readinessQuestion(entry.pkg.readinessTier)}</p>
+                {entry.pkg.stories.map((story) => (
+                  <div key={story.id}>
+                    <h4>{story.headline || "Untitled"}</h4>
+                    {story.plainBrief ? <p>{story.plainBrief}</p> : null}
+                  </div>
+                ))}
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -303,7 +329,7 @@ function StoryPackets({
             return (
             <li id={`reporting-story-${story.id}`} key={story.id} className="reporting-story">
               <h4>{story.headline || "Untitled"}</h4>
-              <p className="meta">{readinessLabel(story.readinessTier)}</p>
+              <p className="meta">{readinessQuestion(story.readinessTier)}</p>
               {story.plainBrief ? <p className="reporting-brief">{story.plainBrief}</p> : null}
               {filed ? (
                 <p>

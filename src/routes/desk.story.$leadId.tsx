@@ -80,6 +80,7 @@ import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-con
 import {
   applyTodoPatch,
   clipTodoText,
+  earlierReportingNotes,
   mergeDraftEvidenceIntoNotes,
   notesHaveMemo,
   parseNotes,
@@ -91,6 +92,8 @@ import {
   editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
+  initialStoryTopic,
+  leadScoreLabel,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
@@ -275,7 +278,7 @@ function StoryPage() {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, [body, headline, dek]);
-  const [topic, setTopic] = useState("council");
+  const [topic, setTopic] = useState(() => initialStoryTopic(data?.lead.topic));
   /*
     The geography the paper's pills filter on (0.6.71). One more field on the
     existing publish step, not a new step: the editor sets it here and the
@@ -2256,7 +2259,7 @@ function StoryPage() {
       */}
       <div className="astra-wb-context">
         <span>
-          Story from lead · {sectionNameNow} · score {score}
+          Story from lead · {sectionNameNow} · {leadScoreLabel(score)}
         </span>
         <Chip s={data.lead.status} />
         {/*
@@ -2567,7 +2570,7 @@ function StoryPage() {
             <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
-              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · {leadScoreLabel(score)}
               · {leadOrigin(data.lead)}
               {data.lead.investigation_id ? (
                 <>
@@ -4211,6 +4214,7 @@ function ReportingNotesPane({
   const [startingPullKey, setStartingPullKey] = useState<string | null>(null);
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
+  const earlierNotes = earlierReportingNotes(notes);
   const filled =
     notesHaveMemo(notes) ||
     notes.opened.length > 0 ||
@@ -4457,14 +4461,16 @@ function ReportingNotesPane({
         </div>
       ) : null}
       {meetingSourceBlock}
-      {notes.importedReport ? (
-        <section className="note-sec" aria-label="Imported reporting evidence">
-          <p className="side-label">Reporting package: claims, sources and gaps</p>
-          <p className="note-hint">These are the reporter's qualifications. Editing your assignment keeps this evidence attached.</p>
-          <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-            {notes.importedReport}
-          </div>
-        </section>
+      {earlierNotes.length ? (
+        <details className="note-sec">
+          <summary className="side-label">Earlier</summary>
+          {earlierNotes.map((entry) => (
+            <section key={entry.label}>
+              <p className="side-label">{entry.label}</p>
+              <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.text}</div>
+            </section>
+          ))}
+        </details>
       ) : null}
       {/*
         WR1 phase 2: the whole-meeting run's ledger, beside the transcript block
@@ -4507,12 +4513,6 @@ function ReportingNotesPane({
             <div className="note-sec">
               <p className="side-label">Why it matters</p>
               <p className="note-one">{notes.why}</p>
-            </div>
-          ) : null}
-          {notes.angle ? (
-            <div className="note-sec">
-              <p className="side-label">Angle</p>
-              <p className="note-one">{notes.angle}</p>
             </div>
           ) : null}
           {absenceBlock}

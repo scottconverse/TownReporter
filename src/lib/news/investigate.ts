@@ -74,6 +74,7 @@ import {
   type ResearchActionReceipt,
 } from "./research-actions.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { gateFrontierRelevance } from "./frontier-relevance.ts";
 /*
   FB1: `pctFor` only -- the one clamp/divide-by-zero rule the whole app uses for
   a percentage. Imported from jobs.ts rather than re-derived here so a hop that
@@ -157,7 +158,15 @@ export type HopPlan = {
     capture_event_id?: number;
     locator?: string;
   }[];
-  frontier: { label: string; kind: string; why: string; priority: number; queries?: string[] }[];
+  frontier: {
+    label: string;
+    kind: string;
+    why: string;
+    priority: number;
+    queries?: string[];
+    status?: string;
+    closed_reason?: string;
+  }[];
   anomalies: { kind: string; summary: string; url?: string }[];
   dead_ends: { hypothesis: string; reason: string }[];
   questions: string[];
@@ -208,17 +217,22 @@ function frontierSemanticKey(item: HopPlan["frontier"][number]): string {
 }
 
 /** Sanitize and bound one planner hop before anything reaches frontier_items. */
-export function boundedFrontierItems(items: HopPlan["frontier"], cap: number): HopPlan["frontier"] {
+export function boundedFrontierItems(
+  items: HopPlan["frontier"],
+  cap: number,
+  context?: { subject: string; town: string },
+): HopPlan["frontier"] {
   const merged = new Map<string, HopPlan["frontier"][number]>();
   for (const raw of items) {
     if (!validFrontierItem(raw)) continue;
-    const item = {
+    const clean = {
       ...raw,
       label: raw.label.replace(/\s+/g, " ").trim(),
       why: raw.why.replace(/\s+/g, " ").trim().slice(0, 800),
       priority: Math.max(1, Math.min(15, Math.round(raw.priority || 5))),
       queries: [...new Set((raw.queries ?? []).map((q) => q.replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, 12),
     };
+    const item = context ? gateFrontierRelevance(clean, context) : clean;
     const key = frontierSemanticKey(item);
     if (!key) continue;
     const prior = merged.get(key);
@@ -1423,6 +1437,8 @@ export async function persistDiscovery(
     /** Planned searches that have not run yet. Unlike `query`, these are not provenance. */
     pendingQueries?: string[];
     query?: string;
+    status?: "closed";
+    closedReason?: string;
   },
 ) {
   const sql = await getSql();
@@ -1441,6 +1457,10 @@ export async function persistDiscovery(
     storable-text.ts.
   */
   const whyInput = storableText(item.why);
+  const isClosed = item.status === "closed";
+  const closedReason = isClosed
+    ? storableText(item.closedReason || "off-topic: no link to the subject or the town").slice(0, 800)
+    : null;
   const evidenceInput = storableText(item.evidence ?? "");
   const queryInput = item.query ? storableText(item.query) : "";
   const { label: canonLabel, norm } = frontierDedupKey(item.kind, storableText(item.label));
@@ -1533,6 +1553,7 @@ export async function persistDiscovery(
     limit 1
   `;
   if (existing[0]) {
+    if (isClosed) return;
     await mergeIntoExisting(existing[0]);
     return;
   }
@@ -1562,7 +1583,7 @@ export async function persistDiscovery(
     const created = await sql<{ id: number }>`
       insert into frontier_items (
         user_id, newsroom_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
-        strategies_tried, strategies_budget, search_zero_count
+        strategies_tried, strategies_budget, search_zero_count, status, closed_reason
       ) values (
         ${userId}, ${newsroomId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
         ${whyVal}, ${evidenceVal},
@@ -1570,7 +1591,7 @@ export async function persistDiscovery(
         ${queriesTriedJson},
         ${JSON.stringify([])},
         ${strategiesBudgetJson},
-        ${0}
+        ${0}, ${isClosed ? "closed" : "open"}, ${closedReason}
       )
       on conflict (investigation_id, label_norm) do nothing
       returning id
@@ -1585,13 +1606,14 @@ export async function persistDiscovery(
     limit 1
   `;
   if (raced[0]) {
+    if (isClosed) return;
     await mergeIntoExisting(raced[0]);
     return;
   }
   await sql`
     insert into frontier_items (
       user_id, newsroom_id, investigation_id, kind, label, label_norm, why, evidence, priority, next_steps, queries_tried,
-      strategies_tried, strategies_budget, search_zero_count
+      strategies_tried, strategies_budget, search_zero_count, status, closed_reason
     ) values (
       ${userId}, ${newsroomId}, ${investigationId}, ${kindVal}, ${label}, ${norm},
       ${whyVal}, ${evidenceVal},
@@ -1599,7 +1621,7 @@ export async function persistDiscovery(
       ${queriesTriedJson},
       ${JSON.stringify([])},
       ${strategiesBudgetJson},
-      ${0}
+      ${0}, ${isClosed ? "closed" : "open"}, ${closedReason}
     )
   `;
 }
@@ -2988,7 +3010,10 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
       if (!plan.fetch_urls.length && heur.fetch_urls.length) plan.fetch_urls = heur.fetch_urls;
       plan.frontier = [...plan.frontier, ...heur.frontier];
     }
-    plan.frontier = boundedFrontierItems(plan.frontier, NEW_FRONTIER_PER_HOP);
+    plan.frontier = boundedFrontierItems(plan.frontier, NEW_FRONTIER_PER_HOP, {
+      subject: investigationTitle,
+      town: place.city,
+    });
 
     /*
       Unit DD1, item 1: hold the whole hop to the grounding rule before any of
@@ -4592,6 +4617,8 @@ async function persistPlan(
       why: f.why,
       priority: f.priority,
       pendingQueries: f.queries,
+      status: f.status === "closed" ? "closed" : undefined,
+      closedReason: f.closed_reason,
     });
   }
   for (const a of plan.anomalies) {
