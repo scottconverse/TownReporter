@@ -2761,7 +2761,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     why: string | null;
     evidence: string | null;
   }>`
-    select id, status, headline, topic, source_urls, created_at, why, evidence
+    select id, status, headline, source_urls, created_at, why, evidence, topic
     from leads
     where newsroom_id = ${owned(context)}
       and status <> 'published'
