@@ -35,7 +35,7 @@ import {
   type ObservationKind,
 } from "./source-observations.server.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
-import { scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai";
+import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
 import {
@@ -3260,7 +3260,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   // exact preflighted runtime on the batch row, so document reading must use
   // that already-validated snapshot too instead of resolving a newer paper
   // preference while the batch writer stays pinned to its original model.
-  const batchLocalModel = batchSnapshot?.runtime === "local" ? batchSnapshot.localModel : null;
+  const batchLocalModel = batchSnapshot && "localModel" in batchSnapshot ? batchSnapshot.localModel : null;
+  const batchWasAutomatic = (snapshot: typeof batchSnapshot) =>
+    Boolean(snapshot && (snapshot as typeof snapshot & { requestedRuntime?: string }).requestedRuntime === "auto");
   const jobLocalModel = pinnedLocalModelForJob(job);
   const queuedLocalModel = batchLocalModel ?? jobLocalModel;
   const storyProviderOverrides = applyJobLocalModelSnapshot(
@@ -3286,11 +3288,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       {
         modelEffort: effortFromJob(job),
         source: job.model_choice_source ?? "editor",
-        // A batch job's document stage moves along the hand-pick ladder with
-        // its writer (see FORCED_FAILOVER_LADDER): a batch row cannot hold one
-        // of Automatic's own rungs. An ordinary Story job keeps the shared
-        // Automatic ladder.
-        ladder: batchSnapshot ? FORCED_FAILOVER_LADDER : undefined,
+        // Hand-picked batch jobs use the selectable-model ladder. Automatic
+        // batches retain the story ladder that resolved their first rung.
+        ladder: batchSnapshot && !batchWasAutomatic(batchSnapshot) ? FORCED_FAILOVER_LADDER : undefined,
         localModel: queuedLocalModel ?? undefined,
         probe: (choice) => probe(choice, owned(context), undefined, "story", choice === "local-model" ? queuedLocalModel ?? undefined : undefined),
         chat: deps.chat,
@@ -3302,12 +3302,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           const switchNote = failoverNoteSentence(nextLabel, previousLabel, reason);
           await setFailoverNote(job.id, switchNote);
           if (batchSnapshot) {
-            if (nextChoice === "auto" || nextChoice === "configured" || isAutomaticRungId(nextChoice))
+            if (nextChoice === "auto" || nextChoice === "configured" || (isAutomaticRungId(nextChoice) && !batchWasAutomatic(batchSnapshot)))
               throw new Error("Draft batch fallback did not resolve to a selectable runtime.");
             const old = batchSnapshot as typeof batchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
             const { validateForcedRuntime } = await import("./forced-runtime.server.ts");
             const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
-            const nextSnapshot = await validateBatchRuntime(job.newsroom_id, nextChoice, nextEffort);
+            const nextSnapshot = isAutomaticRungId(nextChoice)
+              ? await validateForcedRuntime(job.newsroom_id, nextChoice, nextEffort, { automaticRung: true })
+              : await validateBatchRuntime(job.newsroom_id, nextChoice, nextEffort);
             const receipt = {
               requestedRuntime: old.requestedRuntime ?? old.runtime,
               requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
@@ -3564,21 +3566,15 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       );
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeBatchSnapshot,
-        source: "editor",
+        source: batchWasAutomatic(activeBatchSnapshot) ? "auto" : "editor",
         run,
         probe: (choice) => probe(choice, job.newsroom_id),
-        ladder: FORCED_FAILOVER_LADDER,
+        ladder: batchWasAutomatic(activeBatchSnapshot) ? AUTOMATIC_LADDER : FORCED_FAILOVER_LADDER,
         resolve: (choice) => {
-          // Unreachable with FORCED_FAILOVER_LADDER, which carries no rung --
-          // but Automatic's own rung is not a runtime a batch row can hold, so
-          // it must never reach the batch validator either.
-          if (isAutomaticRungId(choice))
-            throw new Error("A draft batch cannot run on Automatic's own rung.");
-          return validateBatchRuntime(
-            job.newsroom_id,
-            choice,
-            "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
-          );
+          const effort = "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null;
+          return isAutomaticRungId(choice)
+            ? validateForcedRuntime(job.newsroom_id, choice, effort, { automaticRung: true })
+            : validateBatchRuntime(job.newsroom_id, choice, effort);
         },
         onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
           void nextChoice;
@@ -4525,11 +4521,15 @@ export const structureImportStories = createServerFn({ method: "POST" })
   .validator((input: unknown) => importStructureInput.parse(input))
   .handler(async ({ context, data }) => {
     const { readImportStructure } = await import("./import-stories.server.ts");
+    const localModel = data.modelChoice === "local-model"
+      ? (await import("./provider-settings.ts")).resolveLocalModelChoice(owned(context), "story").then((choice) => choice.override ?? undefined)
+      : undefined;
     return readImportStructure({
       text: data.text,
       newsroomId: owned(context),
       modelChoice: data.modelChoice,
       modelEffort: data.modelEffort,
+      localModel: await localModel,
     });
   });
 
@@ -6306,6 +6306,10 @@ export async function performSuggestHeadlines(
   leadId: number,
   currentHeadline?: string,
   model?: { choice?: string | null; effort?: string | null },
+  deps: {
+    chat?: typeof grokChat;
+    resolveLocalModel?: (newsroomId: number, scope: "story") => Promise<LocalModelOverride | null>;
+  } = {},
 ): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
   const sql = await getSql();
   const leads = await sql<LeadRow>`
@@ -6333,9 +6337,17 @@ export async function performSuggestHeadlines(
     is what this call has always done. The pick is the dialog's own row, and
     `grokChat` is still the thing that resolves an "auto".
   */
-  const got = await grokChat(prompt.system, prompt.user, 700, {
-    choice: (model?.choice || "auto") as EffectiveProviderChoice,
-    newsroomId: owned(context),
+  const choice = (model?.choice || "auto") as EffectiveProviderChoice;
+  const newsroomId = owned(context);
+  const localModel = choice === "local-model"
+    ? await (deps.resolveLocalModel
+      ? deps.resolveLocalModel(newsroomId, "story")
+      : import("./provider-settings.ts").then((settings) => settings.resolveLocalModelChoice(newsroomId, "story")).then((resolved) => resolved.override))
+    : undefined;
+  const got = await (deps.chat ?? grokChat)(prompt.system, prompt.user, 700, {
+    choice,
+    newsroomId,
+    ...(localModel ? { localModel } : {}),
     reasoningEffort: (model?.effort ?? null) as ModelEffort | null,
   });
   if (!got.ok) {
@@ -6390,7 +6402,11 @@ export const suggestHeadlines = createServerFn({ method: "POST" })
  */
 export async function performSuggestCorrectionWording(
   context: { userId: string; newsroomId?: number },
-  input: { articleSlug: string; wasWrong: string; isRight: string },
+  input: { articleSlug: string; wasWrong: string; isRight: string; modelChoice?: string },
+  deps: {
+    resolveLocalModel?: (newsroomId: number, scope: "story") => Promise<LocalModelOverride | null>;
+    chat?: typeof grokChat;
+  } = {},
 ): Promise<
   | { ok: true; wording: string; source: "model" | "template" }
   | { ok: false; error: string }
@@ -6439,9 +6455,17 @@ export async function performSuggestCorrectionWording(
     headline: String(article.headline ?? "").trim(),
     body: String(article.body ?? ""),
   });
-  const got = await grokChat(prompt.system, prompt.user, 700, {
-    choice: "auto",
-    newsroomId: owned(context),
+  const newsroomId = owned(context);
+  const choice = storyModelChoice(input.modelChoice);
+  const localModel = choice === "local-model"
+    ? await (deps.resolveLocalModel
+      ? deps.resolveLocalModel(newsroomId, "story")
+      : import("./provider-settings.ts").then((settings) => settings.resolveLocalModelChoice(newsroomId, "story")).then((resolved) => resolved.override))
+    : undefined;
+  const got = await (deps.chat ?? grokChat)(prompt.system, prompt.user, 700, {
+    choice,
+    newsroomId,
+    ...(localModel ? { localModel } : {}),
   });
   if (!got.ok) {
     return {
@@ -6490,6 +6514,7 @@ export const suggestCorrectionWording = createServerFn({ method: "POST" })
       articleSlug: data.articleSlug,
       wasWrong: data.wasWrong,
       isRight: data.isRight,
+      modelChoice: data.modelChoice,
     }));
 
 export const addCorrection = createServerFn({ method: "POST" })

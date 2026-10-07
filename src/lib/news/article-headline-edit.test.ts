@@ -211,3 +211,36 @@ it("says so in a sentence, without offering an option, when the lead does not ex
   assert.equal(result.ok, false);
   assert.match(result.ok === false ? result.error : "", /lead not found/i);
 });
+
+it("sends the exact saved local model to headline suggestions", async () => {
+  await reset();
+  const sql = await getSql();
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id, newsroom_id, headline, why, topic) values($1,$2,$3,'','council') returning id",
+    [USER, NEWSROOM, "Council approves the plan"],
+  );
+  assert.ok(lead);
+  const selected = { baseUrl: "http://127.0.0.1:11434/v1", id: "loaded-headline-model" };
+  let call: { choice?: string; localModel?: typeof selected | null } | undefined;
+  const result = await performSuggestHeadlines(
+    { userId: USER, newsroomId: NEWSROOM },
+    lead.id,
+    "Council approves the plan",
+    { choice: "local-model" },
+    {
+      resolveLocalModel: async (newsroomId, scope) => {
+        assert.equal(newsroomId, NEWSROOM);
+        assert.equal(scope, "story");
+        return selected;
+      },
+      chat: async (_system, _user, _maxTokens, options) => {
+        call = options;
+        return { ok: true as const, text: "1. Council approves plan after Tuesday vote\n2. Officials approve the revised city plan\n3. Council approves changes to city proposal" };
+      },
+    },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(call?.choice, "local-model");
+  assert.deepEqual(call?.localModel, selected);
+  await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);
+});

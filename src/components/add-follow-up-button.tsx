@@ -62,6 +62,7 @@ export function AddFollowUpButton({
           schedule: input.schedule,
           targets: input.targets,
           leadId: input.leadId,
+          modelChoice: input.modelChoice,
         },
       }),
     onSuccess: (result) => {

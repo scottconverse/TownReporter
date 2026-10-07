@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AddSourcesBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import {
   SOURCE_TABS,
   addSourcesInitial,
@@ -27,7 +27,7 @@ const base = {
   problem: null as string | null,
   note: null as string | null,
   preview: null,
-  models,
+  ModelPicker: ModelPickerDouble,
   Choice: ChoiceDouble,
 };
 
@@ -155,7 +155,7 @@ describe("Add sources dialog", () => {
     const picked = sourcesRequest(state({ tab: "ai", topic: "water", model: named!.value, effort: "low" }));
     assert.equal(picked.input.modelChoice, named!.value);
     assert.equal(picked.input.modelEffort, "low");
-    assert.ok(!("modelChoice" in sourcesRequest(state({ tab: "ai", topic: "water" })).input));
+    assert.equal(sourcesRequest(state({ tab: "ai", topic: "water" })).input.modelChoice, "auto");
 
     // The three no-AI tabs never carry a pick, whatever the state holds.
     for (const tab of ["one", "list", "file"] as const) {

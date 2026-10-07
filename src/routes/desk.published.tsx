@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useDeferredValue, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { Dialog } from "@/components/dialog";
+import { ModelPicker } from "@/components/model-picker";
 import { LegalRemovalDialog } from "@/components/dialogs/LegalRemovalDialog";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -25,6 +26,7 @@ import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 export const Route = createFileRoute("/desk/published")({ component: PublishedPage });
 
@@ -100,6 +102,7 @@ function PublishedPage() {
   */
   const [corrWrongBySlug, setCorrWrongBySlug] = useState<Record<string, string>>({});
   const [corrRightBySlug, setCorrRightBySlug] = useState<Record<string, string>>({});
+  const [corrModelBySlug, setCorrModelBySlug] = useState<Record<string, StoryModelChoice>>({});
   /*
     "Also fix the story text", per slug, and the text being worked on. The
     printed body is seeded from the row when the box is opened, so the editor
@@ -219,18 +222,19 @@ function PublishedPage() {
    * that silently did nothing looks the same as one that worked.
    */
   const suggestWording = useMutation({
-    mutationFn: (slug: string) =>
+    mutationFn: ({ slug, modelChoice }: { slug: string; modelChoice: StoryModelChoice }) =>
       suggestCorrectionWording({
         data: {
           articleSlug: slug,
           wasWrong: (corrWrongBySlug[slug] ?? "").trim(),
           isRight: (corrRightBySlug[slug] ?? "").trim(),
+          modelChoice,
         },
       }),
-    onMutate: (slug) => {
+    onMutate: ({ slug }) => {
       setWordingFor({ slug, kind: "working", text: "Writing a correction note…" });
     },
-    onSuccess: (res, slug) => {
+    onSuccess: (res, { slug }) => {
       if (res.ok) {
         setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
         setWordingFor({
@@ -242,7 +246,7 @@ function PublishedPage() {
         setWordingFor({ slug, kind: "err", text: res.error });
       }
     },
-    onError: (err, slug) => {
+    onError: (err, { slug }) => {
       setWordingFor({
         slug,
         kind: "err",
@@ -918,6 +922,13 @@ function PublishedPage() {
                       }
                       placeholder="The fee is $2,400"
                     />
+                    <ModelPicker
+                      scope="story"
+                      label="Correction wording model"
+                      value={corrModelBySlug[p.slug] ?? "auto"}
+                      onChange={(value) => setCorrModelBySlug((prev) => ({ ...prev, [p.slug]: value }))}
+                      disabled={suggestWording.isPending}
+                    />
                     <div className="row-acts static">
                       <InkButton
                         disabled={
@@ -925,7 +936,7 @@ function PublishedPage() {
                           !(corrRightBySlug[p.slug] ?? "").trim() ||
                           suggestWording.isPending
                         }
-                        onClick={() => suggestWording.mutate(p.slug)}
+                        onClick={() => suggestWording.mutate({ slug: p.slug, modelChoice: corrModelBySlug[p.slug] ?? "auto" })}
                       >
                         {suggestWording.isPending && wordingFor?.slug === p.slug
                           ? "Suggesting…"

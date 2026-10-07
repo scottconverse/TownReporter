@@ -90,7 +90,6 @@ describe("draft batch validation", () => {
     { items: [{ leadId: 0 }], runtime: "local" },
     { items: [{ leadId: 1 }, { leadId: 1 }], runtime: "local" },
     { items: [{ leadId: 1, researchScope: "everything" }], runtime: "local" },
-    { items: [{ leadId: 1 }], runtime: "auto" },
     { items: [{ leadId: 1 }], runtime: "claude-api" },
   ];
   for (const value of invalid) {
@@ -105,6 +104,12 @@ describe("draft batch validation", () => {
       assert.equal(result.ok, true, runtime);
       if (result.ok) assert.equal(result.runtime, runtime);
     }
+  });
+
+  it("accepts Automatic as the batch runtime", () => {
+    const result = cleanDraftBatchInput({ items: [{ leadId: 1 }], runtime: "auto" });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.equal(result.runtime, "auto");
   });
 
   it("accepts one saved Custom AI connection as the batch runtime", () => {
@@ -172,6 +177,42 @@ describe("draft batch panel filter", () => {
 });
 
 describe("draft batch transaction and read", () => {
+  it("stores Automatic's exact resolved endpoint and source in the batch and job receipt", async () => {
+    const leadId = await addLead();
+    const automaticSnapshot = {
+      runtime: "deepseek-flash" as const,
+      modelChoice: "deepseek-flash" as const,
+      transport: "local" as const,
+      localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "loaded-newsroom-model" },
+      requestedRuntime: "auto",
+      requestedEffort: null,
+      resolvedRuntime: "deepseek-flash",
+      switchReason: null,
+      switchNote: null,
+    };
+    const result = await commitDraftBatchForAuthenticatedEditor(
+      { context, items: [{ leadId }], runtimeSnapshot: automaticSnapshot },
+      { accountRate: false, kick: false },
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    assert.equal(result.batch.runtime.modelChoice, "auto");
+    const sql = await getSql();
+    const [saved] = await sql.query<{ runtime_snapshot: unknown }>(
+      "select runtime_snapshot from draft_batches where id=$1",
+      [result.batch.id],
+    );
+    const [job] = await sql.query<{ model_choice: string; model_choice_source: string }>(
+      "select model_choice,model_choice_source from desk_jobs where draft_batch_id=$1",
+      [result.batch.id],
+    );
+    const savedSnapshot = typeof saved!.runtime_snapshot === "string"
+      ? JSON.parse(saved!.runtime_snapshot)
+      : saved!.runtime_snapshot;
+    assert.equal((savedSnapshot as { localModel: { id: string } }).localModel.id, "loaded-newsroom-model");
+    assert.deepEqual(job, { model_choice: "deepseek-flash", model_choice_source: "auto" });
+  });
+
   it("server commit helper refuses empty and duplicate selections", async () => {
     const leadId = await addLead();
     for (const items of [[], [{ leadId }, { leadId }]]) {

@@ -39,12 +39,11 @@
  * was not shown.
  */
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
 
 import { ChoiceCard, Dialog } from "@/components/dialog";
+import { ModelPicker as SharedModelPicker } from "@/components/model-picker";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
-import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { dialogPressProps } from "@/lib/news/dialog-press";
 import { openDarkInvestigation } from "@/lib/news/dark";
 import {
@@ -88,6 +87,7 @@ import {
   NewStoryBody,
   SourceKillPatternBody,
   type ChoiceRender,
+  type ModelPickerRender,
 } from "./editor-dialog-bodies";
 import {
   addLeadInitial,
@@ -112,7 +112,6 @@ import {
   holdRequest,
   killPatternLine,
   KILL_PATTERN_EMPTY,
-  modelRowFor,
   newStoryInitial,
   newStoryProblem,
   newStoryRequest,
@@ -129,6 +128,10 @@ import {
   type NewStoryState,
   type NewStoryStep,
 } from "./editor-dialog-forms";
+
+/* The .ts dialog bodies accept one renderer and return exact choice strings;
+   the shared picker owns its supported model unions. */
+const DialogModelPicker = SharedModelPicker as unknown as ModelPickerRender;
 
 /* ------------------------------------------------------------ the one card -- */
 
@@ -361,21 +364,6 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
   */
   const [duplicate, setDuplicate] = React.useState<DuplicateWarning | null>(null);
   /*
-    Unit BW3: the row carries the editor's own saved connections as well.
-
-    `modelRowFor` reads the static registry, and a custom connection lives in
-    the database, so the same merge `ModelPicker` does for this surface is done
-    here (`model-picker.tsx:273-315`): the built-ins, then one row per saved
-    connection, keyed `custom:<id>` -- the id the server resolves
-    (`model-choice.ts` `isCustomModelChoice`). Without this the dialog could not
-    pin a newsroom's own connection for a story at all.
-  */
-  const connections = useQuery({
-    queryKey: ["custom-ai-connections"],
-    queryFn: () => getCustomAiConnectionsFn(),
-    staleTime: 15_000,
-  });
-  /*
     Unit BW3: tabs (b) and (c) save the editor's own text, and `saveDraft`
     writes `topic` -- which the database refuses unless it names a section of
     this newsroom (`sections.server.ts:38`). Tabs (b) and (c) had no control for
@@ -383,13 +371,6 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
     the write box and the import screen draw (`use-sections.ts:3`).
   */
   const sectionQuery = useEditorSections();
-  const models = React.useMemo(
-    () => [
-      ...modelRowFor("story"),
-      ...(connections.data ?? []).map((c) => ({ value: `custom:${c.id}`, label: c.name })),
-    ],
-    [connections.data],
-  );
 
   React.useEffect(() => {
     if (open) {
@@ -542,7 +523,7 @@ export function NewStoryDialog({ open, onClose, onDone }: NewStoryDialogProps) {
         set={set}
         problem={press.problem ?? newStoryProblem(state, documents.length)}
         note={press.note}
-        models={models}
+        ModelPicker={DialogModelPicker}
         sections={sectionQuery.sections}
         onFiles={onFiles}
         duplicate={duplicate}
@@ -611,6 +592,7 @@ export function AddLeadDialog({ open, onClose, onDone }: AddLeadDialogProps) {
         problem={press.problem ?? addLeadProblem(state)}
         note={press.note}
         Choice={Choice}
+        ModelPicker={DialogModelPicker}
       />
     </Dialog>
   );
@@ -646,7 +628,6 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
   const press = usePress();
   const [state, set] = useDialogState<AddSourcesState>(addSourcesInitial, open, press.clear);
   const [watched, setWatched] = React.useState<string[] | null>(null);
-  const models = React.useMemo(() => modelRowFor("scan"), []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -758,7 +739,7 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
         problem={problem}
         note={press.note}
         preview={preview}
-        models={models}
+        ModelPicker={DialogModelPicker}
         onFiles={onFiles}
         Choice={Choice}
       />
@@ -904,6 +885,7 @@ export function AddToStoryDialog({
         documentNames={names}
         onFiles={onFiles}
         Choice={Choice}
+        ModelPicker={DialogModelPicker}
       />
     </Dialog>
   );
@@ -990,7 +972,6 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
     [seed, prefillQuestion, prefillTip],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
-  const models = React.useMemo(() => modelRowFor("dark"), []);
 
   const onPrimary = () =>
     press.run(async () => {
@@ -1019,7 +1000,7 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
         set={set}
         problem={press.problem ?? darkProblem(state)}
         note={press.note}
-        models={models}
+        ModelPicker={DialogModelPicker}
         Choice={Choice}
       />
     </Dialog>
@@ -1164,7 +1145,6 @@ export function HeadlineDialog({
   const press = usePress();
   const factory = React.useCallback(() => headlineInitial(current), [current]);
   const [state, set] = useDialogState<HeadlineState>(factory, open, press.clear);
-  const models = React.useMemo(() => modelRowFor("story"), []);
 
   const done = (text: string): PressAnswer => {
     announceToDesk(text);
@@ -1215,7 +1195,7 @@ export function HeadlineDialog({
         set={set}
         problem={press.problem ?? headlineProblem(state)}
         note={press.note}
-        models={models}
+        ModelPicker={DialogModelPicker}
         Choice={Choice}
       />
     </Dialog>

@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { ModelPicker } from "@/components/model-picker";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
@@ -20,7 +21,8 @@ import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
 import { myDesk } from "@/lib/news/claim";
 import { getDailyScanPolicy } from "@/lib/news/daily-scan";
 import { sourceStatusUndoTo, type SingleRowStatus } from "@/lib/news/source-status-undo";
-import { modelChoiceLabel } from "@/lib/news/model-choice";
+import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
+import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import {
   dailyScheduleLabel,
   editorActionError,
@@ -201,6 +203,8 @@ function SourcesPage() {
   const scanPolicy =
     scanPolicyQuery.data && scanPolicyQuery.data.ok ? scanPolicyQuery.data.policy : null;
   const [scanNotice, setScanNotice] = useState<string | null>(null);
+  const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
+  const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   /*
     Unit U24: what the last per-row check said, and which row it belongs to.
     The editor pressed a row, so the answer is drawn on that row -- "Read OK
@@ -214,7 +218,7 @@ function SourcesPage() {
     line: string;
   } | null>(null);
   const runScanNow = useMutation({
-    mutationFn: () => runScan({ data: { modelChoice: "auto", modelEffort: null } }),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setScanNotice(res.error);
@@ -792,6 +796,16 @@ function SourcesPage() {
               <dd>{scanPolicy ? modelChoiceLabel(scanPolicy.runtime, "scan") : "Automatic"}</dd>
             </dl>
             <p className="astra-note">Scans file leads only. They never draft or publish.</p>
+            <div className="mb-3 max-w-xl">
+              <ModelPicker
+                scope="scan"
+                label="Model for this scan"
+                value={scanModel}
+                onChange={setScanModel}
+                effort={scanModelEffort}
+                onEffortChange={setScanModelEffort}
+              />
+            </div>
             {scanNotice ? (
               <p className="note err" role="alert">
                 {scanNotice}
@@ -1791,17 +1805,21 @@ function ReplacementPanel({ source }: { source: SourceRow }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   const found = useQuery({
     queryKey: ["replacement-candidates", source.id],
     queryFn: () => replacementCandidates({ data: source.id }),
     enabled: open,
   });
   const file = useDeskMutation({
-    mutationFn: (input: { url?: string; title?: string }) =>
+    mutationFn: (input: { url?: string; title?: string; modelChoice?: StoryModelChoice; modelEffort?: ModelEffort | null }) =>
       findReplacement({
         data: {
           sourceId: source.id,
-          ...(input.url ? { url: input.url, title: input.title } : {}),
+          ...(input.url
+            ? { url: input.url, title: input.title }
+            : { modelChoice: input.modelChoice, modelEffort: input.modelEffort }),
         },
       }),
     pending: "Filing…",
@@ -1884,8 +1902,20 @@ function ReplacementPanel({ source }: { source: SourceRow }) {
                 : "No other source shares a beat with this one."}
             </p>
           )}
+          <ModelPicker
+            scope="scan"
+            label="Replacement search model"
+            value={modelChoice}
+            onChange={(choice) => {
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            effort={modelEffort}
+            onEffortChange={setModelEffort}
+            disabled={file.isPending}
+          />
           <p className="astra-row-meta">
-            <InkButton tone="quiet" disabled={file.isPending} onClick={() => file.mutate({})}>
+            <InkButton tone="quiet" disabled={file.isPending} onClick={() => file.mutate({ modelChoice, modelEffort })}>
               {file.isPending ? "Asking the model…" : "Ask AI to look further"}
             </InkButton>{" "}
             Uses one model call. We have not checked whether any of these is free to read.

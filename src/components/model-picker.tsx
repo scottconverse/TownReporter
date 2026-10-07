@@ -3,14 +3,12 @@ import {
   FORCED_MODEL_CHOICES,
   OPINION_MODEL_CHOICES,
   STORY_MODEL_CHOICES,
-  USE_LOADED_LOCAL_MODEL,
-  USE_LOADED_LOCAL_MODEL_LABEL,
-  isUseLoadedLocalModelPick,
   localModelOptionLabel,
   localModelOptionText,
   localModelSelectionHelp,
   sortLocalModelsForPicker,
   isCustomModelChoice,
+  modelChoicesFor,
   modelChoiceHelp,
   pickerOptionText,
   pickerOptionTitle,
@@ -37,7 +35,7 @@ import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
 import { writerIsReady } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useId } from "react";
+import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 
 /*
@@ -56,58 +54,34 @@ const LOCAL_SERVER_LABELS: Record<string, string> = {
   "openai-compatible": "Configured server",
 };
 
+/* Several slots can render the same scoped local picker. Materialize the
+   discovered default only once while those controls are mounted. */
+const attemptedDiscoveredDefaultSaveFor = new Set<string>();
+
 function localServerLabel(kind: string, baseUrl: string): string {
   const host = baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "");
   return `${LOCAL_SERVER_LABELS[kind] ?? "Server"} · ${host}`;
 }
 
+type PickerControls<T extends StoryModelChoice> = {
+  label?: string;
+  value: T | "none";
+  onChange: (value: T) => void;
+  noneOption?: boolean;
+  onClear?: () => void;
+  disabled?: boolean;
+  compact?: boolean;
+  excludeAutomatic?: boolean;
+  effort?: ModelEffort | null;
+  onEffortChange?: (value: ModelEffort | null) => void;
+};
+
 type Props =
-  | {
-      scope?: "story" | "scan";
-      value: StoryModelChoice;
-      onChange: (value: StoryModelChoice) => void;
-      disabled?: boolean;
-      compact?: boolean;
-      excludeAutomatic?: boolean;
-      effort?: ModelEffort | null;
-      onEffortChange?: (value: ModelEffort | null) => void;
-    }
-  | {
-      scope: "opinion";
-      value: OpinionModelChoice;
-      onChange: (value: OpinionModelChoice) => void;
-      disabled?: boolean;
-      compact?: boolean;
-      excludeAutomatic?: boolean;
-      effort?: ModelEffort | null;
-      onEffortChange?: (value: ModelEffort | null) => void;
-    }
-  | {
-      /**
-       * Dark Desk (0.6.2). The same component, because "which model does
-       * this" should look and behave identically wherever the desk spends --
-       * and because a fourth hand-written picker is a fourth place to forget
-       * a provider.
-       */
-      scope: "dark";
-      value: DarkModelChoice;
-      onChange: (value: DarkModelChoice) => void;
-      disabled?: boolean;
-      compact?: boolean;
-      excludeAutomatic?: boolean;
-      effort?: ModelEffort | null;
-      onEffortChange?: (value: ModelEffort | null) => void;
-    }
-  | {
-      scope: "forced";
-      value: Exclude<StoryModelChoice, "auto">;
-      onChange: (value: Exclude<StoryModelChoice, "auto">) => void;
-      disabled?: boolean;
-      compact?: boolean;
-      excludeAutomatic?: boolean;
-      effort?: ModelEffort | null;
-      onEffortChange?: (value: ModelEffort | null) => void;
-    };
+  | (PickerControls<StoryModelChoice> & { scope?: "story" | "scan" | "follow-up" })
+  | (PickerControls<OpinionModelChoice> & { scope: "opinion" })
+  | (PickerControls<DarkModelChoice> & { scope: "dark" })
+  | (PickerControls<StoryModelChoice> & { scope: "forced" })
+  | (PickerControls<StoryModelChoice> & { scope: "ocr" });
 
 /**
  * What the desk shows when the option the editor has selected -- or the one
@@ -129,7 +103,7 @@ function notSetUpHelp(option: ModelChoiceOption): string {
  * queries (the live catalog, the newsroom's stored pick) only ever run when
  * they are needed.
  */
-function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "dark" | "forced" }) {
+export function LocalModelSelect({ scope }: { scope: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced" }) {
   const qc = useQueryClient();
   const selectId = useId();
   /*
@@ -143,6 +117,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   */
   const me = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
   const readOnly = me.data !== undefined && me.data.role !== "owner";
+  const ownerKnown = me.data?.role === "owner";
   const catalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
@@ -157,12 +132,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
     mutationFn: (picked: { baseUrl: string; id: string }) => saveLocalModelFn({ data: { ...picked, scope } }),
     onSuccess: (_result, picked) => {
       qc.invalidateQueries({ queryKey: ["local-model-choice"] });
-      // Reading out "set to *" would be the sentinel leaking to an editor.
-      announceToDesk(
-        isUseLoadedLocalModelPick(picked)
-          ? "Local model set to whatever is loaded."
-          : `Local model set to ${picked.id}.`,
-      );
+      announceToDesk(`Local model set to ${picked.id}.`);
     },
   });
   const refresh = useMutation({
@@ -180,19 +150,25 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
   const servers = catalog.data?.servers ?? [];
   const reachable = servers.filter((s) => s.reachable);
   const selected = choice.data?.override ?? catalog.data?.defaultModel ?? null;
-  /*
-    Item 2/3: "Use whatever is loaded" is shown by its own first option, not
-    by the model it happens to resolve to right now. The server resolves the
-    sentinel per run (`resolveLocalModelChoice`), so `selected` is still the
-    model that would run THIS minute -- that is what the help line names.
-  */
   const source = choice.data?.source ?? "stored";
-  const useLoaded = source === "loaded";
+  /* Store and display the exact endpoint/model pair that a run will use. */
   const selectedServer = selected
     ? reachable.find((server) => server.baseUrl === selected.baseUrl) ?? null
     : null;
   const selectedModel = selectedServer?.models.find((model) => model.id === selected?.id) ?? null;
   const notice = choice.data?.notice;
+
+  useEffect(() => {
+    if (
+      !ownerKnown ||
+      !choice.data ||
+      !selected ||
+      source === "stored" ||
+      attemptedDiscoveredDefaultSaveFor.has(scope)
+    ) return;
+    attemptedDiscoveredDefaultSaveFor.add(scope);
+    save.mutate(selected);
+  }, [choice.data, ownerKnown, save, scope, selected, source]);
 
   if (catalog.isLoading) return null;
 
@@ -233,26 +209,14 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
         <>
           <select
             id={selectId}
-            value={
-              useLoaded
-                ? `${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`
-                : selected
-                  ? `${selected.baseUrl} ${selected.id}`
-                  : ""
-            }
+            disabled={save.isPending}
+            value={selected ? `${selected.baseUrl} ${selected.id}` : ""}
             onChange={(event) => {
               const [baseUrl, id] = event.target.value.split(" ");
               if (baseUrl && id) save.mutate({ baseUrl, id });
             }}
           >
-            {!selected && !useLoaded ? <option value="">Choose a model…</option> : null}
-            {/* Item 2: the first option, always, before any server group. */}
-            <option
-              value={`${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`}
-              title="Runs whichever model is in memory when the run starts. TownReporter never loads a model for you."
-            >
-              {USE_LOADED_LOCAL_MODEL_LABEL}
-            </option>
+            {!selected ? <option value="">Choose a model…</option> : null}
             {selected && !selectedModel
               ? <option value={`${selected.baseUrl} ${selected.id}`}>{selected.id} (currently unavailable)</option>
               : null}
@@ -293,6 +257,7 @@ function LocalModelSelect({ scope }: { scope: "story" | "scan" | "opinion" | "da
               : ""}
           </span>
           {notice ? <span className="model-picker-help">{notice}</span> : null}
+          {save.isError ? <span className="model-picker-help" role="alert">Could not save this local model. Choose it again to retry.</span> : null}
         </>
       )}
       <button
@@ -332,8 +297,12 @@ export function ModelPicker(props: Props) {
       ? OPINION_MODEL_CHOICES
       : props.scope === "dark"
         ? DARK_MODEL_CHOICES
-        : props.scope === "forced"
+      : props.scope === "forced"
           ? FORCED_MODEL_CHOICES
+          : props.scope === "ocr"
+            ? modelChoicesFor("ocr")
+          : props.scope === "follow-up"
+            ? modelChoicesFor("follow-up")
           : STORY_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
@@ -348,7 +317,11 @@ export function ModelPicker(props: Props) {
     */
     detail: connection.modelId ?? "",
   }));
+  const noneOptions: ModelChoiceOption[] = props.noneOption
+    ? [{ value: "none" as StoryModelChoice, label: "None", detail: "" }]
+    : [];
   const options = [
+    ...noneOptions,
     ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
     ...customOptions,
   ];
@@ -370,8 +343,11 @@ export function ModelPicker(props: Props) {
     row, or a page-watch row from a build that still offered it); a menu that
     offered it again would be the bug this is the fallback for.
   */
-  const retiredNote = retiredModelChoiceNote(props.value);
-  const shownValue = retiredNote
+  const noFallback = Boolean(props.noneOption && props.value === "none");
+  const retiredNote = noFallback ? null : retiredModelChoiceNote(props.value);
+  const shownValue = noFallback
+    ? "none"
+    : retiredNote
     ? options.some((option) => option.value === "auto")
       ? "auto"
       : options[0]?.value ?? "auto"
@@ -410,6 +386,7 @@ export function ModelPicker(props: Props) {
     way (see commitStoryDraftForAuthenticatedEditor).
   */
   function isAvailable(value: string): boolean {
+    if (value === "none") return true;
     return writerIsReady({
       choice: value,
       availability: availability.data,
@@ -426,7 +403,9 @@ export function ModelPicker(props: Props) {
   // selection, so an editor sees "not set up" before picking it rather than
   // after a failed draft.
   const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
-  const help = retiredNote
+  const help = noFallback
+    ? "No fallback model is set for this rank."
+    : retiredNote
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
     : isCustomModelChoice(shownValue)
       ? selectedUnavailable
@@ -438,10 +417,10 @@ export function ModelPicker(props: Props) {
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
-  const exactModel = shownValue === "local-model"
+  const exactModel = !noFallback && shownValue === "local-model"
     ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
     : customConnection?.modelId ?? null;
-  const effortOptions = modelEffortsFor(shownValue, exactModel);
+  const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
       ? props.effort
@@ -449,7 +428,7 @@ export function ModelPicker(props: Props) {
   return (
     <div className={props.compact ? "model-picker compact" : "model-picker"}>
       <label htmlFor={selectId} className="model-picker-label">
-        {props.scope === "dark" ? "Digging model" : "Writing model"}
+        {props.label ?? (props.scope === "dark" ? "Digging model" : "Writing model")}
       </label>
       <select
         id={selectId}
@@ -462,7 +441,13 @@ export function ModelPicker(props: Props) {
           select clips its own text and there is no CSS that can recover it.
         */
         title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? " — not set up" : ""}` : undefined}
-        onChange={(event) => props.onChange(event.target.value as never)}
+        onChange={(event) => {
+          if (props.noneOption && event.target.value === "none") {
+            props.onClear?.();
+            return;
+          }
+          props.onChange(event.target.value as never);
+        }}
       >
         {options.map((option) => {
           const available = isAvailable(option.value);
@@ -508,7 +493,7 @@ export function ModelPicker(props: Props) {
           {notSetUpHelp(flagged)}
         </span>
       ) : null}
-      {props.value === "local-model" && !selectedUnavailable ? (
+      {props.value === "local-model" ? (
         <LocalModelSelect scope={props.scope ?? "story"} />
       ) : null}
       {connections.isError ? (

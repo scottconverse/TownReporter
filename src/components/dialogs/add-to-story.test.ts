@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AddToBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import { ADD_TO_MODES } from "../../lib/news/editor-dialog-logic.ts";
 import {
   addToConfirm,
@@ -25,6 +25,7 @@ const base = {
   review: null as { before: string; after: string } | null,
   documentNames: [] as string[],
   Choice: ChoiceDouble,
+  ModelPicker: ModelPickerDouble,
 };
 
 const render = (
@@ -49,7 +50,7 @@ const selectedCard = (html: string) => {
 };
 
 describe("Add to story dialog", () => {
-  it("draws the drop zone, the material box and the three How cards, and no picker", () => {
+  it("draws the drop zone, material box, How cards and picker for AI weaving", () => {
     const html = render({});
     assert.match(html, /astra-drop-title">Drop new documents</);
     // Apostrophes are escaped by React, so the note is matched on a run of
@@ -63,11 +64,8 @@ describe("Add to story dialog", () => {
       assert.ok(html.includes(m.label), m.label);
       assert.ok(html.includes(m.note), m.note);
     }
-    // "AI weaves it in" carries its model in its note; the other two spend
-    // nothing. A picker here would be a control two of the three modes cannot
-    // use, and a fourth thing for the server to resolve twice.
-    assert.ok(!html.includes('aria-label="Model"'), html.slice(0, 200));
-    assert.ok(!html.includes('aria-label="Effort"'));
+    assert.match(html, /aria-label="Model"/);
+    assert.match(html, /aria-label="Effort"/);
     assert.match(selectedCard(html), /<b>AI weaves it in<\/b>/);
   });
 

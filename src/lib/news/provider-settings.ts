@@ -127,8 +127,10 @@ export type { LocalModelScope } from "./request-input.ts";
 const PREFERRED_CLOUD_MODEL_BY_SCOPE: Readonly<Record<LocalModelScope, string>> = {
   story: "deepseek-v4.1-flash:cloud",
   scan: "deepseek-v4.1-flash:cloud",
+  "follow-up": "deepseek-v4.1-flash:cloud",
   opinion: "deepseek-v4.1-flash:cloud",
   dark: "deepseek-v4.1-flash:cloud",
+  ocr: "deepseek-v4.1-flash:cloud",
   forced: "deepseek-v4.1-flash:cloud",
 };
 
@@ -337,10 +339,13 @@ async function rawStoredLocalModel(
 
 async function rawScopedLocalModel(newsroomId: number, scope: LocalModelScope) {
   const sql = await getSql();
-  const scoped = await sql<{ base_url: string; model_id: string }>`
-    select base_url, model_id from newsroom_local_model_choices
-    where newsroom_id = ${newsroomId} and scope = ${scope}
-  `;
+  const table = scope === "follow-up" || scope === "ocr"
+    ? "newsroom_local_model_choices_additional"
+    : "newsroom_local_model_choices";
+  const scoped = await sql.query<{ base_url: string; model_id: string }>(
+    `select base_url, model_id from ${table} where newsroom_id = $1 and scope = $2`,
+    [newsroomId, scope],
+  );
   return scoped[0] ? { baseUrl: scoped[0].base_url, id: scoped[0].model_id } : null;
 }
 
@@ -573,15 +578,18 @@ export async function saveLocalModel(
       unscoped save writes can move a seeded page.
     */
     const before = await rawScopedLocalModel(me.newsroomId, scope);
+    const table = scope === "follow-up" || scope === "ocr"
+      ? "newsroom_local_model_choices_additional"
+      : "newsroom_local_model_choices";
     if (choice) {
       await sql.query(`
-        insert into newsroom_local_model_choices (newsroom_id, scope, base_url, model_id)
+        insert into ${table} (newsroom_id, scope, base_url, model_id)
         values ($1, $2, $3, $4)
         on conflict (newsroom_id, scope) do update
           set base_url = excluded.base_url, model_id = excluded.model_id, updated_at = now()
       `, [me.newsroomId, scope, choice.baseUrl, choice.id]);
     } else {
-      await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1 and scope = $2`, [me.newsroomId, scope]);
+      await sql.query(`delete from ${table} where newsroom_id = $1 and scope = $2`, [me.newsroomId, scope]);
     }
     const moved =
       choice === null

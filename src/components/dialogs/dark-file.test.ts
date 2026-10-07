@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DarkFileBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import { DARK_LIMITS, hopsForLimit } from "../../lib/news/editor-dialog-logic.ts";
 import {
   darkFileFromSeed,
@@ -23,8 +23,8 @@ const base = {
   set: () => undefined,
   problem: null as string | null,
   note: null as string | null,
-  models,
   Choice: ChoiceDouble,
+  ModelPicker: ModelPickerDouble,
 };
 
 const render = (over: Partial<DarkFileState>) =>
@@ -72,9 +72,8 @@ describe("Start a Dark Desk file dialog", () => {
     const html = render({});
     assert.match(html, /aria-label="Model"/);
     assert.match(html, /aria-label="Effort"/);
-    assert.match(html, /Automatic, per job in Server → Models/);
+    assert.match(html, /Automatic \(Recommended\)/);
     assert.match(render({ model: named!.value, effort: "high" }), /<option value="high" selected/);
-    assert.match(html, /title="Automatic sets the effort too"/);
   });
 
   it("refuses the press until the question and the starting point are real", () => {
@@ -93,7 +92,7 @@ describe("Start a Dark Desk file dialog", () => {
     assert.equal(req.open.paste, "The 2024 audit");
     assert.equal(req.open.budget, hopsForLimit("deep"));
     assert.equal(req.run.paste, "The 2024 audit");
-    assert.ok(!("modelChoice" in req.run) || req.run.modelChoice === undefined);
+    assert.equal(req.run.modelChoice, "auto");
   });
 
   it("carries the ordinary explanation into the material rather than dropping it", () => {
@@ -117,7 +116,7 @@ describe("Start a Dark Desk file dialog", () => {
     // is -- never on a row left on Automatic.
     assert.equal(picked.run.modelEffort, "high");
     const auto = darkRequest(state({ question: "Where did the money go?", tip: "The 2024 audit" }));
-    assert.equal(auto.run.modelChoice, undefined);
+    assert.equal(auto.run.modelChoice, "auto");
     assert.ok(!("modelEffort" in auto.run), "Automatic sends no effort: the desk's own default stands");
   });
 

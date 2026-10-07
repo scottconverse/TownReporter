@@ -342,7 +342,7 @@ export const LIMITS = {
   re-exports both names, so every existing importer is unchanged.
 */
 
-export const LOCAL_MODEL_SCOPES = ["story", "scan", "opinion", "dark", "forced"] as const;
+export const LOCAL_MODEL_SCOPES = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const;
 
 export type LocalModelScope = (typeof LOCAL_MODEL_SCOPES)[number];
 
@@ -1377,6 +1377,7 @@ export const correctionWordingInput = z.object({
   articleSlug: z.string().max(LIMITS.slug),
   wasWrong: z.string().max(LIMITS.correctionLine),
   isRight: z.string().max(LIMITS.correctionLine),
+  modelChoice: z.string().max(160).optional(),
 });
 
 /**

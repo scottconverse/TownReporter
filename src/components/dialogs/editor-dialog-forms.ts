@@ -53,10 +53,8 @@ export function automaticLabel(surface: "story" | "scan" | "opinion" | "dark"): 
 /**
  * The pick, or nothing at all.
  *
- * "auto" is the absent pick, so it is dropped rather than sent: the server's
- * own resolution already falls through to `model_assignments` and the surface
- * default, and sending "auto" explicitly would skip the editor's assignments
- * for this job -- the one thing the brief's resolution order puts second.
+ * Automatic is an explicit editor choice. It means the recommended fallback
+ * ladder, while an empty value means the server can use the job assignment.
  *
  * Unit BW3: a saved custom connection (`custom:<uuid>`) is a real pick the
  * server resolves (`model-choice.ts` `isCustomModelChoice`), and it is NOT in
@@ -68,10 +66,10 @@ export function automaticLabel(surface: "story" | "scan" | "opinion" | "dark"): 
  * row cannot carry is still dropped.
  */
 export function modelPick(surface: "story" | "scan" | "opinion" | "dark", value: string, effort: string | null): ModelPick {
-  if (!value || value === "auto") return {};
+  if (!value) return {};
   const rows = modelRowFor(surface);
   if (!rows.some((r) => r.value === value) && !/^custom:/.test(value)) return {};
-  return { modelChoice: value, modelEffort: effort };
+  return value === "auto" ? { modelChoice: "auto" } : { modelChoice: value, modelEffort: effort };
 }
 
 /* ------------------------------------------------------------- validation -- */
@@ -482,7 +480,9 @@ export function addLeadRequest(state: AddLeadState) {
     paste: state.paste.trim(),
     why: state.why.trim() || undefined,
     then: then.key,
-    ...(then.ai ? modelPick("story", state.model, state.effort) : {}),
+    ...(then.ai
+      ? modelPick(then.key === "score" ? "scan" : "story", state.model, state.effort)
+      : {}),
   };
 }
 

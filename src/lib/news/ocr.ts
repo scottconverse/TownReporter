@@ -30,7 +30,7 @@ import {
   modelEffort,
   providerEntry,
   providerModel,
-  type ProviderId,
+  OCR_AUTOMATIC_ORDER,
   type ProviderKind,
 } from "./provider-registry.ts";
 import { automaticFailoverReason, looksLikeContentRefusal } from "./automatic-failover.ts";
@@ -211,11 +211,6 @@ async function resolveVisionLocal(
   A local vision model is still OCR's final capability, but it is appended
   after these rungs by the builders below rather than named in this list.
 */
-export const OCR_AUTOMATIC_ORDER = [
-  "codex-balanced",
-  "claude-sonnet",
-] as const satisfies readonly ProviderId[];
-
 const NO_VISION_AVAILABLE =
   "No vision-capable model is available to read this scan. OCR's unattended order is Codex Terra, then Claude (an ANTHROPIC_API_KEY when one is set, otherwise the signed-in Claude Code CLI), then a local model marked vision (· vision in the picker) — and none of them answered.";
 

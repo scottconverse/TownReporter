@@ -150,6 +150,8 @@ function QueuePage() {
   const newsroomId = desk.data?.ok ? desk.data.newsroomId : null;
   const scans = useQuery({ queryKey: ["scans"], queryFn: () => listScans() });
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
+  const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
+  const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   /*
     The drawn Queue header's own "Run scan now" (README "3. Queue", handoff
     Desk Screens.dc.html line 21). It is the same scan Today's button runs --
@@ -166,7 +168,7 @@ function QueuePage() {
     reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan(),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -572,7 +574,7 @@ function QueuePage() {
   */
   const [editFor, setEditFor] = useState<LeadRow | null>(null);
   const fileFormRef = useRef<HTMLFormElement>(null);
-  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("local-model");
+  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("auto");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -1107,6 +1109,16 @@ function QueuePage() {
       kicker="Every open lead"
       actions={
         <>
+          <div className="max-w-sm">
+            <ModelPicker
+              scope="scan"
+              label="Model for this scan"
+              value={scanModel}
+              onChange={setScanModel}
+              effort={scanModelEffort}
+              onEffortChange={setScanModelEffort}
+            />
+          </div>
           <InkButton
             tone="ghost"
             disabled={scan.isPending}
@@ -2007,7 +2019,6 @@ function QueuePage() {
             onEffortChange={setBatchEffort}
             disabled={startBatch.isPending}
             compact
-            excludeAutomatic
           />
           <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
           {/*

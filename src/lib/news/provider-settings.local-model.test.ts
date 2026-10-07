@@ -112,6 +112,7 @@ describe("the per-newsroom local-model override resolves against the live catalo
     await storeRawLocalModel(null, null);
     const sql = await getSql();
     await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1`, [NEWSROOM_ID]);
+    await sql.query(`delete from newsroom_local_model_choices_additional where newsroom_id = $1`, [NEWSROOM_ID]);
     await sql.query(`delete from newsroom_members where user_id in ('scoped-model-owner', 'scoped-model-editor')`);
     resetLocalCatalogCacheForTests();
   });
@@ -130,14 +131,30 @@ describe("the per-newsroom local-model override resolves against the live catalo
     assert.equal(result.picker.override?.id, "gemma4:e4b");
   });
 
+  it("stores the follow-up model separately from the scan model", async () => {
+    await addDeskMembers();
+    const scanChoice = { baseUrl: OLLAMA_BASE, id: "scan-only" };
+    const followUpChoice = { baseUrl: OLLAMA_BASE, id: "follow-up-only" };
+    await withFetch(fetchWithModels([...CLOUD_MODELS, scanChoice.id, followUpChoice.id]), async () => {
+      assert.deepEqual(await saveLocalModel(OWNER_ID, scanChoice, "scan"), { ok: true });
+      assert.deepEqual(await saveLocalModel(OWNER_ID, followUpChoice, "follow-up"), { ok: true });
+      const scan = await resolveLocalModelChoice(NEWSROOM_ID, "scan");
+      const followUp = await resolveLocalModelChoice(NEWSROOM_ID, "follow-up");
+      assert.deepEqual(scan.override, scanChoice);
+      assert.deepEqual(followUp.override, followUpChoice);
+    });
+  });
+
   it("prefers DeepSeek across scopes while every requested cloud model remains selectable", async () => {
     await addDeskMembers();
-    const scopes = ["story", "scan", "opinion", "dark", "forced"] as const;
+    const scopes = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const;
     const expectedDefault: Record<(typeof scopes)[number], string> = {
       story: "deepseek-v4.1-flash:cloud",
       scan: "deepseek-v4.1-flash:cloud",
+      "follow-up": "deepseek-v4.1-flash:cloud",
       opinion: "deepseek-v4.1-flash:cloud",
       dark: "deepseek-v4.1-flash:cloud",
+      ocr: "deepseek-v4.1-flash:cloud",
       forced: "deepseek-v4.1-flash:cloud",
     };
 
@@ -258,6 +275,7 @@ describe("the local-model pick is the owner's, and its address must be local", (
     await storeRawLocalModel(null, null);
     const sql = await getSql();
     await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1`, [NEWSROOM_ID]);
+    await sql.query(`delete from newsroom_local_model_choices_additional where newsroom_id = $1`, [NEWSROOM_ID]);
     await sql.query(`delete from newsroom_members where user_id in ('scoped-model-owner', 'scoped-model-editor')`);
     resetLocalCatalogCacheForTests();
   });
@@ -406,11 +424,13 @@ describe("a stored local-model address the desk may not use is never called", ()
     await storeRawLocalModel(null, null);
     const sql = await getSql();
     await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1`, [NEWSROOM_ID]);
+    await sql.query(`delete from newsroom_local_model_choices_additional where newsroom_id = $1`, [NEWSROOM_ID]);
   });
   afterEach(async () => {
     await storeRawLocalModel(null, null);
     const sql = await getSql();
     await sql.query(`delete from newsroom_local_model_choices where newsroom_id = $1`, [NEWSROOM_ID]);
+    await sql.query(`delete from newsroom_local_model_choices_additional where newsroom_id = $1`, [NEWSROOM_ID]);
     resetLocalCatalogCacheForTests();
   });
 

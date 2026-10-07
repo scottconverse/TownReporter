@@ -65,6 +65,26 @@ describe("readImportStructure: one model call, structure only", () => {
     assert.equal(result.rejected, 0);
   });
 
+  it("sends the exact saved local endpoint and model to the import review call", async () => {
+    const localModel = { baseUrl: "http://127.0.0.1:1234/v1", id: "review-local" };
+    let received: { localModel?: typeof localModel | null } | undefined;
+    const result = await readImportStructure(
+      { text: MESSY, newsroomId: 91, modelChoice: "local-model", localModel },
+      {
+        probe: async () => ({ ok: true, label: "Local review model", choice: "local-model" }),
+        chat: async (_system, _user, _tokens, options) => {
+          received = options;
+          return {
+            ok: true,
+            text: JSON.stringify({ stories: [{ headline: "Transit vote delayed", body: splitParagraphs(MESSY) }] }),
+          };
+        },
+      },
+    );
+    assert.equal(result.method, "model");
+    assert.deepEqual(received?.localModel, localModel);
+  });
+
   it("rejects a split that alters a sentence, and hands back the paste unchanged instead", async () => {
     const result = await readImportStructure(
       { text: MESSY, newsroomId: 91, modelChoice: "claude-sonnet" },

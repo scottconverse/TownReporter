@@ -66,6 +66,7 @@ import {
 type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
+import { ModelPicker } from "@/components/model-picker";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
 import { getDarkDials } from "@/lib/news/dark";
@@ -237,14 +238,10 @@ function DarkPage() {
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
-  /*
-    F3b: a fresh install that finished setup with a local model in memory
-    opens this picker on Local model. That is also what satisfies
-    `mustChooseReader` below -- Dark Desk makes the owner choose a reader
-    before it will send retained PDF pages, and a stored local default IS that
-    choice. The owner's own touch wins, and every other paper opens on
-    Automatic as before (see first-run-picker-default.ts).
-  */
+  const [ocrModelChoice, setOcrModelChoice] = useState<StoryModelChoice>("auto");
+  const [ocrModelEffort, setOcrModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  /* The Dark Desk's own first-run default; retained-PDF OCR has a separate
+     picker because its automatic reader order is different. */
   const modelChoiceTouched = useRef(false);
   useFirstRunPickerSeed({
     surface: "dark",
@@ -1272,7 +1269,10 @@ function DarkPage() {
               onFollow={(seed) => followLead.mutate(seed)}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
-              modelChoice={modelChoice}
+              ocrModelChoice={ocrModelChoice}
+              onOcrModelChoiceChange={setOcrModelChoice}
+              ocrModelEffort={ocrModelEffort}
+              onOcrModelEffortChange={setOcrModelEffort}
             />
           ) : null}
 
@@ -1631,7 +1631,10 @@ function InvestigationWorkspace({
   onFollow,
   onWriteBrief,
   briefPending,
-  modelChoice,
+  ocrModelChoice,
+  onOcrModelChoiceChange,
+  ocrModelEffort,
+  onOcrModelEffortChange,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -1658,12 +1661,10 @@ function InvestigationWorkspace({
   onFollow: (seed: { paste: string; title: string }) => void;
   onWriteBrief: () => void;
   briefPending: boolean;
-  /*
-    The chosen model, read-only here: this component prints it (the file's own
-    line, the PDF reader's "Uses …"), while the picker that sets it lives with
-    the dials in `DarkDialsPanel`. The effort is not read here at all.
-  */
-  modelChoice: StoryModelChoice;
+  ocrModelChoice: StoryModelChoice;
+  onOcrModelChoiceChange: (choice: StoryModelChoice) => void;
+  ocrModelEffort: ModelEffort | null;
+  onOcrModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
   const { formatShortDate } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
@@ -2251,7 +2252,13 @@ function InvestigationWorkspace({
           sub="Click a title. The captured page opens below — that is the file."
         />
         {artifacts.length > 0 ? (
-          <OpenedRecords artifacts={artifacts} modelChoice={modelChoice} />
+          <OpenedRecords
+            artifacts={artifacts}
+            modelChoice={ocrModelChoice}
+            onModelChoiceChange={onOcrModelChoiceChange}
+            modelEffort={ocrModelEffort}
+            onModelEffortChange={onOcrModelEffortChange}
+          />
         ) : digging ? (
           <p className="meta">Opening pages now. They land on the file as they are read…</p>
         ) : (
@@ -2372,6 +2379,9 @@ function ocrStatusLine(method: string | null | undefined): string | null {
 function OpenedRecords({
   artifacts,
   modelChoice,
+  onModelChoiceChange,
+  modelEffort,
+  onModelEffortChange,
 }: {
   artifacts: {
     id: number;
@@ -2386,6 +2396,9 @@ function OpenedRecords({
     extraction_method?: string | null;
   }[];
   modelChoice: StoryModelChoice;
+  onModelChoiceChange: (choice: StoryModelChoice) => void;
+  modelEffort: ModelEffort | null;
+  onModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
   const qc = useQueryClient();
   const { formatShortDate } = usePaperDateFormatters();
@@ -2440,7 +2453,6 @@ function OpenedRecords({
   });
   const [pageStart, setPageStart] = useState("1");
   const [pageEnd, setPageEnd] = useState("1");
-  const mustChooseReader = modelChoice === "auto";
   useEffect(() => {
     setPageStart("1");
     setPageEnd("1");
@@ -2462,6 +2474,7 @@ function OpenedRecords({
           start: Number(pageStart),
           end: Number(pageEnd),
           modelChoice,
+          modelEffort,
           mode,
         },
       });
@@ -2580,7 +2593,18 @@ function OpenedRecords({
               Next
             </button>
           </p>
-          {body.data?.retained_pdf ? <form
+          {body.data?.retained_pdf ? <>
+          <div className="mb-3 max-w-xl">
+            <ModelPicker
+              scope="ocr"
+              label="Model for reading this PDF"
+              value={modelChoice}
+              onChange={onModelChoiceChange}
+              effort={modelEffort}
+              onEffortChange={onModelEffortChange}
+            />
+          </div>
+          <form
             className="read-acts"
             onSubmit={(event) => {
               event.preventDefault();
@@ -2594,7 +2618,7 @@ function OpenedRecords({
                 min="1"
                 value={pageStart}
                 onChange={(event) => setPageStart(event.target.value)}
-                disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+                disabled={requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
               />
             </label>
             <span>through</span>
@@ -2605,22 +2629,23 @@ function OpenedRecords({
                 min="1"
                 value={pageEnd}
                 onChange={(event) => setPageEnd(event.target.value)}
-                disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+                disabled={requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
               />
             </label>
-            <button type="submit" className="inline-link" disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}>
+            <button type="submit" className="inline-link" disabled={requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}>
               {pageRead.data?.status === "queued" || pageRead.data?.status === "running" ? "Reading retained PDF…" : "Read selected pages"}
             </button>
             <button
               type="button"
               className="inline-link"
-              disabled={mustChooseReader || requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
+              disabled={requestPageRead.isPending || pageRead.data?.status === "queued" || pageRead.data?.status === "running"}
               onClick={() => requestPageRead.mutate("complete")}
             >
               Read entire PDF
             </button>
-            <span className="np-meta">{mustChooseReader ? "Choose a named model in the Dark Desk picker before sending retained PDF pages." : `Uses ${modelChoiceLabel(modelChoice)} · the entire packet is saved in batches of up to 12 pages · original retained PDF only`}</span>
-          </form> : null}
+            <span className="np-meta">Uses {modelChoiceLabel(modelChoice, "forced")} · the entire packet is saved in batches of up to 12 pages · original retained PDF only</span>
+          </form>
+          </> : null}
           {ocrJob ? (
             <div className="dark-job-card">
               <DeskJobCard job={ocrJob} />

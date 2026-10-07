@@ -383,7 +383,7 @@ export const getFirstRunPickerDefault = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((raw: unknown): { surface: ProviderSurface } => {
     const value = (raw ?? {}) as { surface?: unknown };
-    const allowed: ProviderSurface[] = ["story", "scan", "opinion", "dark", "forced"];
+    const allowed: ProviderSurface[] = ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"];
     return {
       surface: allowed.includes(value.surface as ProviderSurface) ? (value.surface as ProviderSurface) : "story",
     };

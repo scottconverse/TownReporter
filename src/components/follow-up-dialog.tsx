@@ -1,7 +1,10 @@
 import { useState } from "react";
 
 import { Dialog, ChoiceCard } from "@/components/dialog";
+import { ModelPicker } from "@/components/model-picker";
 import { scheduleForAgent, type FollowUpSchedule } from "@/lib/news/follow-up-copy";
+import { validateFollowUpDialog } from "@/lib/news/follow-up-dialog-validation";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 import type { FollowUpAgentKind } from "@/lib/news/types";
 
 /**
@@ -39,6 +42,7 @@ export type FollowUpDialogInput = {
   schedule: FollowUpSchedule;
   targets: string[];
   leadId: number | null;
+  modelChoice: StoryModelChoice;
 };
 
 export type FollowUpDialogInitial = {
@@ -48,6 +52,7 @@ export type FollowUpDialogInitial = {
   schedule?: FollowUpSchedule;
   targets?: string;
   leadId?: number | null;
+  modelChoice?: StoryModelChoice;
   /** Shown when the linked lead is outside the picker's recent window. */
   leadHeadline?: string | null;
 };
@@ -95,25 +100,15 @@ export function FollowUpDialog({
   );
   const [targetsText, setTargetsText] = useState(initial?.targets ?? "");
   const [leadId, setLeadId] = useState<string>(initial?.leadId ? String(initial.leadId) : "");
+  const [modelChoice, setModelChoice] = useState<StoryModelChoice>(initial?.modelChoice ?? "auto");
 
   const targets = parseTargets(targetsText);
   const overCap = targets.length > MAX_TARGETS;
-  const badTarget = targets.find((target) => !/^https?:\/\//i.test(target)) ?? null;
-  const needsTargets = kind !== "search" && targets.length === 0;
-
-  /*
-    The refusal is shown only once there is a question to attach it to: an
-    empty dialog that opens complaining about links reads as broken, not as
-    helpful.
-  */
-  const problem = !what.trim()
-    ? null
-    : badTarget
-      ? "Links to look at must start with http:// or https://"
-      : needsTargets
-        ? "Add at least one link to check."
-        : null;
-  const primaryDisabled = pending || !what.trim() || Boolean(badTarget) || needsTargets;
+  const validationIssues = validateFollowUpDialog({ what, agentKind: kind, targets });
+  const whatIssue = validationIssues.find((issue) => issue.field === "what");
+  const targetIssues = validationIssues.filter((issue) => issue.field === "targets");
+  const targetsRequired = kind !== "search";
+  const primaryDisabled = pending || validationIssues.length > 0;
 
   // The picker's window is recent leads; a row linked to an older one keeps its
   // headline in the list rather than silently showing the wrong story.
@@ -129,6 +124,7 @@ export function FollowUpDialog({
       title={mode === "create" ? "New AI follow-up" : "Edit AI follow-up"}
       subtitle="An AI agent keeps looking for an answer and tells you what it finds."
       primaryLabel={mode === "create" ? "Start follow-up" : "Save changes"}
+      primaryPendingLabel={mode === "create" ? "Starting…" : "Saving…"}
       onPrimary={() => {
         if (primaryDisabled) return;
         onSubmit({
@@ -138,6 +134,7 @@ export function FollowUpDialog({
           schedule,
           targets: targets.slice(0, MAX_TARGETS),
           leadId: leadId ? Number(leadId) : null,
+          modelChoice,
         });
       }}
       primaryDisabled={primaryDisabled}
@@ -152,22 +149,39 @@ export function FollowUpDialog({
             maxLength={WHAT_MAX}
             placeholder="e.g. Which Oct. 8 meeting was cancelled?"
             value={what}
+            required
+            aria-invalid={Boolean(whatIssue)}
             onChange={(event) => setWhat(event.target.value)}
           />
         </label>
+        {whatIssue ? (
+          <p className="fu-err" role="alert" aria-live="polite">
+            {whatIssue.message}
+          </p>
+        ) : null}
 
         <label className="fu-field">
           <span>
-            Where to look <span className="fu-field-hint">optional</span>
+            Where to look <span className="fu-field-hint">{targetsRequired ? "required for this method" : "optional"}</span>
           </span>
           <textarea
             className="fu-input"
             style={{ minHeight: 60 }}
-            placeholder="Links, one per line (optional; the AI can search)"
+            placeholder={
+              targetsRequired
+                ? "http:// or https:// links, one per line"
+                : "Links, one per line (optional; the AI can search)"
+            }
             value={targetsText}
+            aria-invalid={targetIssues.length > 0}
             onChange={(event) => setTargetsText(event.target.value)}
           />
         </label>
+        {targetIssues.map((issue) => (
+          <p key={issue.message} className="fu-err" role="alert" aria-live="polite">
+            {issue.message}
+          </p>
+        ))}
 
         <label className="fu-field">
           <span>
@@ -186,6 +200,13 @@ export function FollowUpDialog({
             ))}
           </select>
         </label>
+
+        <ModelPicker
+          scope="follow-up"
+          label="Model for this follow-up"
+          value={modelChoice}
+          onChange={setModelChoice}
+        />
 
         <div className="fu-choices" role="radiogroup" aria-label="How">
           <span className="fu-choices-label">How</span>
@@ -207,8 +228,7 @@ export function FollowUpDialog({
         {overCap ? (
           <p className="fu-err">Only the first {MAX_TARGETS} links are watched.</p>
         ) : null}
-        {problem ? <p className="fu-err">{problem}</p> : null}
-        {error ? <p className="fu-err">{error}</p> : null}
+        {error ? <p className="fu-err" role="alert">{error}</p> : null}
       </div>
     </Dialog>
   );

@@ -6,9 +6,10 @@ import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-
 import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
 
-export type DraftBatchRuntime = Exclude<StoryModelChoice, "auto" | AutomaticRungId>;
+export type DraftBatchRuntime = Exclude<StoryModelChoice, AutomaticRungId>;
 export type DraftBatchStoredRuntime =
   | DraftBatchRuntime
+  | AutomaticRungId
   | "local"
   | "claude-cli"
   | "codex-terra"
@@ -89,7 +90,7 @@ export function visibleDraftBatchItems<T extends { leadStatus: string | null }>(
   return items.filter((item) => item.leadStatus !== "published" && item.leadStatus !== "killed");
 }
 
-const runtimes = new Set<string>(PICKER_PROVIDER_IDS);
+const runtimes = new Set<string>([...PICKER_PROVIDER_IDS, "auto"]);
 
 export function cleanDraftBatchInput(
   value: unknown,
@@ -110,7 +111,7 @@ export function cleanDraftBatchInput(
         removed the provider itself -- so a refusal that names it as a thing
         to choose would be advertising a model the batch dialog cannot offer.
       */
-      error: "Choose one named Codex, Claude, Local, or saved Custom AI model for this batch.",
+      error: "Choose Automatic, a named Codex, Claude, Local, or saved Custom AI model for this batch.",
     };
   }
   if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 5) {

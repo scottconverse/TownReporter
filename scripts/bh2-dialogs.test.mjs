@@ -249,6 +249,7 @@ const correctionUrl = moduleUrl(
   "CorrectionDialog.tsx",
   {
     "@/components/dialog": dialogUrl,
+    "@/components/model-picker": modelPickerStubUrl,
     "@/lib/news/desk": deskStubUrl,
     "@/lib/news/correction-wording": moduleUrl(
       await source("src/lib/news/correction-wording.ts"),
@@ -717,7 +718,7 @@ test("suggesting wording posts nothing, and Cancel keeps the two lines", async (
   assert.deepEqual(desk.calls, [
     {
       fn: "suggestCorrectionWording",
-      data: { articleSlug: "the-fee", wasWrong: "the fee was $4,200", isRight: "it was $4,000" },
+      data: { articleSlug: "the-fee", wasWrong: "the fee was $4,200", isRight: "it was $4,000", modelChoice: "auto" },
     },
   ]);
   assert.equal(

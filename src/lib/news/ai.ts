@@ -702,7 +702,7 @@ export async function probeProvider(
     GrokChatAdapters,
     "resolveCustom" | "resolveLocal" | "resolveLocalCatalog"
   >,
-  scope?: "story" | "scan" | "opinion" | "dark" | "forced",
+  scope?: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
   if (choice && isCustomModelChoice(choice)) {

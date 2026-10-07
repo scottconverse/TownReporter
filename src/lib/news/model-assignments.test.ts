@@ -18,8 +18,8 @@
  * Every value asserted below was measured from the registry rather than typed
  * from memory: `claude-sonnet` takes low..max with medium as its default,
  * `codex-astra` takes low..max, DeepSeek v4.1 Flash takes none/low/high/max,
- * an unknown model id takes nothing, and `forced` (OCR, transcripts) has no
- * Automatic at all. `grok-oauth` has no registry entry at all since GR-C
+ * an unknown model id takes nothing, and the job menus derive from their
+ * dedicated surfaces. `grok-oauth` has no registry entry at all since GR-C
  * removed Grok (xAI), which is why it can be asserted absent from every menu
  * without naming a menu.
  */
@@ -35,6 +35,7 @@ import {
   MODEL_JOBS,
   cleanJobEffort,
   connectionWord,
+  isModelJobKey,
   isOfferedForJob,
   jobEffortLabel,
   jobEffortOptionTitle,
@@ -82,6 +83,11 @@ const REFUSAL_MENTIONING_QUOTA =
   "The selected model declined to write this: I cannot write this. A quota reset will not change that.";
 
 describe("the resolution order", () => {
+  it("does not offer a chat-model assignment for audio transcription", () => {
+    assert.equal(isModelJobKey("transcript"), false);
+    assert.equal(MODEL_JOBS.some((job) => job.key === ("transcript" as typeof job.key)), false);
+  });
+
   it("runs an explicit per-run pick ahead of anything saved", () => {
     const resolved = resolveJobModel({
       jobKey: "story-draft",
@@ -146,13 +152,22 @@ describe("the resolution order", () => {
     assert.equal(resolved.rank, 1, "rank 1 was the first row that could actually run");
   });
 
+  it("keeps an Automatic fallback distinct from an unset fallback rank", () => {
+    const next = nextJobFallback({
+      jobKey: "story-draft",
+      tried: ["claude-sonnet"],
+      assignments: [row("story-draft", 1, "auto")],
+    });
+    assert.deepEqual(next, { providerId: "auto", effort: null, rank: 1 });
+  });
+
   it("prefers Automatic on a surface that has it and a named model on one that does not", () => {
-    // OCR and transcripts are `forced`: no Automatic, so their default is the
-    // first registry entry. This is asserted against the menus themselves,
+    // OCR's surface exposes its own Automatic choice and stays the default.
+    // This is asserted against the menus themselves,
     // because a default that is not in the menu is a select that renders empty.
     assert.equal(surfaceDefaultChoice("story"), "auto");
-    assert.equal(surfaceDefaultChoice("forced"), "codex-astra");
-    for (const surface of ["story", "scan", "opinion", "dark", "forced"] as const) {
+    assert.equal(surfaceDefaultChoice("forced"), "auto");
+    for (const surface of ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const) {
       const options = modelChoicesFor(surface).map((option) => option.value);
       assert.ok(
         options.includes(surfaceDefaultChoice(surface) as never),

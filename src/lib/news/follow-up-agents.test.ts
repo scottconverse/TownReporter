@@ -18,6 +18,7 @@ import {
   searchQuestionFor,
   watchOutcomeState,
   type FollowUpAgentInput,
+  type SearchJudgeInput,
   type SearchJudgeResult,
 } from "./follow-up-agents.ts";
 import {
@@ -391,6 +392,44 @@ describe("agenda, on a meeting body's portal", () => {
 });
 
 describe("the run, end to end with the queue and the notes column", () => {
+  it("runs an explicitly saved local choice with its exact endpoint and model id", async () => {
+    const sql = await getSql();
+    const newsroomId = 97100;
+    const userId = "agent-local-choice-editor";
+    const created = await performCreateAiFollowUp(
+      { userId, newsroomId },
+      {
+        what: "Has the clerk posted the notice?",
+        agentKind: "search",
+        schedule: "daily",
+        modelChoice: "local-model",
+      },
+    );
+    assert.equal(created.ok, true);
+    const followUpId = created.ok ? created.id : 0;
+    const createdRows = await performListFollowUps({ userId, newsroomId }, {});
+    assert.equal(createdRows.find((row) => row.id === followUpId)?.model_choice, "local-model");
+    const job = await enqueueJob({ userId, newsroomId, kind: "follow-up", subjectId: followUpId, modelChoice: "local-model", kick: false });
+    const observed: { received: SearchJudgeInput | null } = { received: null };
+    await performFollowUpRun(job, {
+      resolveLocalModel: async () => ({ baseUrl: "http://127.0.0.1:1234/v1", id: "picked-local-model" }),
+      agents: {
+        search: async () => attempt([hit("https://clerk.test/notice")]),
+        judge: async (judgeInput) => {
+          observed.received = judgeInput;
+          return { ok: true, answers: false, url: "", title: "", summary: "No answer yet." };
+        },
+      },
+    });
+    assert.equal(observed.received?.modelChoice, "local-model");
+    assert.deepEqual(observed.received?.localModel, {
+      baseUrl: "http://127.0.0.1:1234/v1",
+      id: "picked-local-model",
+    });
+    const [savedJob] = await sql<{ model_choice: string }>`select model_choice from desk_jobs where id = ${job.id}`;
+    assert.equal(savedJob?.model_choice, "local-model");
+  });
+
   it("writes the finding to the story's notes and never publishes", async () => {
     const sql = await getSql();
     const newsroomId = 97101;

@@ -405,6 +405,8 @@ function DeskHome() {
     failedLead: "Could not change that source. ",
     what: "change that source",
   });
+  const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
+  const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
   /*
     FB6, item 3: `Run scan now` was a LAZY BAR and a SILENT FAIL (FB0-Report
     Table B). The button swapped its own word to "Scanning…" and that was the
@@ -414,7 +416,7 @@ function DeskHome() {
     `["desk-jobs"]` query every other card on this desk already reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan(),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -2500,6 +2502,16 @@ function DeskHome() {
               <b>Writing model</b> · {modelChoiceLabel(storyModel)} ·{" "}
               {writeStory.isPending ? "writing now" : "ready"}
             </p>
+            <div className="mb-3 max-w-xl">
+              <ModelPicker
+                scope="scan"
+                label="Model for this scan"
+                value={scanModel}
+                onChange={setScanModel}
+                effort={scanModelEffort}
+                onEffortChange={setScanModelEffort}
+              />
+            </div>
             <div className="wire-acts">
               {/*
                 UI1b-5: SECONDARY, NOT PRIMARY. The designer: "'Run scan now'

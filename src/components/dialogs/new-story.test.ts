@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NewStoryBody } from "./editor-dialog-bodies.ts";
-import { ChoiceDouble } from "./test-choice.ts";
+import { ChoiceDouble, ModelPickerDouble } from "./test-choice.ts";
 import { SECTION_REQUIRED } from "../../lib/news/import-review.ts";
 import {
   NEW_STORY_SCOPES,
@@ -37,7 +37,7 @@ const base = {
   set: () => undefined,
   problem: null as string | null,
   note: null as string | null,
-  models,
+  ModelPicker: ModelPickerDouble,
   sections: [
     { key: "council", name: "Council" },
     { key: "schools", name: "Schools" },
@@ -63,7 +63,7 @@ describe("New story dialog", () => {
     assert.match(html, /astra-field-label">Assignment</);
     assert.match(html, /aria-label="Model"/);
     assert.match(html, /aria-label="Effort"/);
-    assert.match(html, /Automatic, per job in Server/);
+    assert.match(html, /Automatic \(Recommended\)/);
     /*
       Unit BW3: the scope row, drawn on tab (a) because `writeStoryInput`
       carries `researchScope` and the server reads an absent one as "public"
@@ -430,7 +430,7 @@ The council voted to delay it until November ([minutes](https://records.example/
     const ai = newStoryRequest(state({ tab: "ai", assignment: "A whole assignment", ...pick })).steps[0]!;
     assert.equal(inputOf(ai).modelChoice, named!.value);
     assert.equal(inputOf(ai).modelEffort, "high");
-    assert.ok(!("modelChoice" in inputOf(newStoryRequest(state({ tab: "ai", assignment: "A whole assignment" })).steps[0]!)));
+    assert.equal(inputOf(newStoryRequest(state({ tab: "ai", assignment: "A whole assignment" })).steps[0]!).modelChoice, "auto");
 
     // The paste tab's row has a reader: the step it plans carries the pick, so
     // the editor's choice is not a control the desk ignores.
@@ -438,7 +438,7 @@ The council voted to delay it until November ([minutes](https://records.example/
     assert.deepEqual(clean.steps.map((s) => s.call), ["fileLead", "saveDraft", "suggestHeadlines"]);
     assert.equal(inputOf(clean.steps[2]!).modelChoice, named!.value);
     assert.equal(inputOf(clean.steps[2]!).modelEffort, "high");
-    assert.deepEqual(inputOf(newStoryRequest(state({ tab: "paste", pastedStory: "q".repeat(60), pasteMode: "clean" })).steps[2]!), {});
+    assert.deepEqual(inputOf(newStoryRequest(state({ tab: "paste", pastedStory: "q".repeat(60), pasteMode: "clean" })).steps[2]!), { modelChoice: "auto" });
   });
 
   it("sends a saved custom connection the static registry does not carry", () => {

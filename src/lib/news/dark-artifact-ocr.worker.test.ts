@@ -76,6 +76,7 @@ test("later-page OCR preserves the captured PDF and deduplicates identical evide
       start: 13,
       end: 13,
       modelChoice: "claude-frontier",
+      modelEffort: "medium",
       mode: "range",
     },
     artifactId: artifact!.id, start: 13, end: 13,
@@ -91,6 +92,42 @@ test("later-page OCR preserves the captured PDF and deduplicates identical evide
     provider: "Claude",
     reason: null,
   });
+});
+
+test("retained-PDF OCR sends the exact saved local endpoint and model", async () => {
+  const sql = await getSql();
+  const room = 97005;
+  const user = `artifact-ocr-local-${Date.now()}`;
+  const selected = { baseUrl: "http://127.0.0.1:11434/v1", id: "loaded-vision-model" };
+  await sql.query("insert into newsrooms(id,name) values($1,'Local OCR room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  const [inv] = await sql<{ id: number }>`insert into investigations(user_id,newsroom_id,title) values(${user},${room},'Local packet') returning id`;
+  const [version] = await sql<{ id: number }>`
+    insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome,content_type,extraction_method)
+    values(${user},${room},'https://example.org/local.pdf','local-pdf-hash','Local packet','',200,'fetched','application/pdf','ocr-pages-partial:Local:0/1') returning id
+  `;
+  const [artifact] = await sql<{ id: number }>`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,classification,fetch_status,fetch_outcome,version_id,extraction_method)
+    values(${user},${room},${inv!.id},'https://example.org/local.pdf','Local packet','local-pdf-hash','','discovered',200,'fetched',${version!.id},'ocr-pages-partial:Local:0/1') returning id
+  `;
+  const raw = Buffer.from("%PDF-local-ocr");
+  await sql`insert into artifact_blobs(version_id,user_id,newsroom_id,sha256,mime,original_url,byte_length,body_b64) values(${version!.id},${user},${room},'local-raw-hash','application/pdf','https://example.org/local.pdf',${raw.byteLength},${raw.toString("base64")})`;
+  const request = JSON.stringify({ artifactId: artifact!.id, start: 1, end: 1, modelChoice: "local-model" });
+  const claimToken = "local-ocr-claim";
+  const [job] = await sql<{ id: number }>`insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,status,claim_token,result_json) values(${user},${room},'artifact-ocr',${artifact!.id},'local-model','running',${claimToken},${request}) returning id`;
+  let received: { provider?: string; localModel?: typeof selected | null } | undefined;
+  await performArtifactOcrWork({ id: job!.id, user_id: user, newsroom_id: room, kind: "artifact-ocr", subject_id: artifact!.id, model_choice: "local-model", claim_token: claimToken } as never, {
+    resolveLocalModel: async (newsroomId, scope) => {
+      assert.equal(newsroomId, room);
+      assert.equal(scope, "ocr");
+      return selected;
+    },
+    ocr: async (_bytes, options) => {
+      received = { provider: options?.provider, localModel: options?.localModel };
+      return { text: "Local packet page text.", pages: [{ page: 1, text: "Local packet page text." }], provider: "Local", pagesRead: 1, pagesTotal: 1 };
+    },
+  });
+  assert.deepEqual(received, { provider: "local-model", localModel: selected });
 });
 
 test("complete packet OCR resumes after retained pages and checkpoints every bounded batch", async () => {

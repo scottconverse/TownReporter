@@ -426,10 +426,9 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Terra/);
 });
 
-test("a stored SuperGrok choice on a picker that has no Automatic falls back to that surface's first choice", () => {
+test("a stored SuperGrok choice on the forced surface falls back to Automatic", () => {
   const html = render({ scope: "forced", value: "grok-oauth" });
   matchesRetiredNote(html);
-  const [first] = registry.providersFor("forced");
-  assert.match(html, new RegExp(`value="${first.id}"[^>]*selected=""`));
+  assert.match(html, /value="auto"[^>]*selected=""/);
   assert.doesNotMatch(html, /value="grok-oauth"/);
 });

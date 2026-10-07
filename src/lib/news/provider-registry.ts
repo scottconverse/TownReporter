@@ -50,7 +50,7 @@ export type ProviderKind =
   | "local";
 
 /** The four places this desk asks a model for something. */
-export type ProviderSurface = "story" | "scan" | "opinion" | "dark" | "forced";
+export type ProviderSurface = "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced";
 
 /** Per-request reasoning depth. Entries declare this only when their actual
  * transport accepts a run-scoped setting. */
@@ -405,8 +405,10 @@ const CODEX_LUNA_MODEL = "gpt-5.6-luna";
 const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
   story: true,
   scan: true,
+  "follow-up": true,
   opinion: true,
   dark: true,
+  ocr: true,
   forced: true,
 };
 
@@ -414,10 +416,15 @@ const EVERY_SURFACE: Record<ProviderSurface, boolean> = {
 const NO_SURFACE: Record<ProviderSurface, boolean> = {
   story: false,
   scan: false,
+  "follow-up": false,
   opinion: false,
   dark: false,
+  ocr: false,
   forced: false,
 };
+
+/** OCR keeps its established vision-capable order, separate from writing. */
+export const OCR_AUTOMATIC_ORDER = ["codex-balanced", "claude-sonnet"] as const;
 
 /*
   Measured on the exact Ollama model the DeepSeek rung names: off/low/high/max,

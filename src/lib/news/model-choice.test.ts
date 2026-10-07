@@ -224,12 +224,12 @@ describe("model choice contract", () => {
     assert.equal(OPINION_MODEL_CHOICES[0]?.value, "auto");
   });
 
-  it("derives the forced batch list directly and excludes Automatic", () => {
+  it("derives the forced list from its registry and offers Automatic first", () => {
     assert.deepEqual(
-      FORCED_MODEL_CHOICES.map((choice) => choice.value),
+      FORCED_MODEL_CHOICES.slice(1).map((choice) => choice.value),
       providersFor("forced").map((entry) => entry.id),
     );
-    assert.ok(!FORCED_MODEL_CHOICES.some((choice) => choice.value === "auto"));
+    assert.equal(FORCED_MODEL_CHOICES[0]?.value, "auto");
     assert.equal(modelChoiceLabel("codex-balanced", "forced"), "Codex Terra");
   });
 
@@ -282,7 +282,7 @@ describe("model choice contract", () => {
       assert.equal(retiredModelChoiceNote(value), null);
     }
     // Retired means retired: no menu offers it on any surface.
-    for (const surface of ["story", "scan", "opinion", "dark", "forced"] as const) {
+    for (const surface of ["story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const) {
       assert.ok(!providersFor(surface).some((entry) => entry.id === "grok-oauth"));
     }
   });

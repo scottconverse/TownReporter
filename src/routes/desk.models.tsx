@@ -47,6 +47,7 @@ import { ListSkeleton } from "@/components/states";
 import { CustomAiConnectionsPanel } from "@/components/custom-ai-connections-panel";
 import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { ProviderStatusCard } from "@/components/provider-status-card";
+import { ModelPicker } from "@/components/model-picker";
 import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
@@ -56,7 +57,7 @@ import {
   providerAvailability,
   refreshLocalModelCatalog,
 } from "@/lib/news/provider-availability";
-import { modelReadiness, modelReadinessOption, type ReadinessFacts } from "@/lib/news/model-readiness";
+import { modelReadiness, type ReadinessFacts } from "@/lib/news/model-readiness";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import {
   deleteCustomAiConnectionFn,
@@ -64,7 +65,7 @@ import {
   testCustomAiConnectionFn,
   type PublicCustomAiConnection,
 } from "@/lib/news/custom-ai-settings";
-import { isCustomModelChoice, modelChoiceLabel, type ModelChoiceOption } from "@/lib/news/model-choice";
+import { isCustomModelChoice, modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import type { LocalModelEntry, LocalServer } from "@/lib/news/local-models";
 import {
   MODEL_JOBS,
@@ -73,13 +74,9 @@ import {
   jobEffortLabel,
   jobEffortOptionTitle,
   jobEffortOptions,
-  jobModelOptions,
-  jobOptionTitle,
-  jobSlotEmptyLabel,
   jobStatusHelp,
   jobStatusKind,
   resolveJobModel,
-  withCustomConnections,
   type ModelAssignmentRow,
   type ModelJobKey,
 } from "@/lib/news/model-assignments";
@@ -514,6 +511,10 @@ function AssignmentsTab({
         </div>
       </div>
 
+      <p className="max-w-[900px] text-sm text-ink-2">
+        Transcription runs on TextFlowKit (Whisper). The chat model picker does not apply.
+      </p>
+
       {err ? (
         <p className="text-sm" role="alert" style={{ color: "var(--danger)" }}>
           {err}
@@ -611,13 +612,6 @@ function JobRow({
     return null;
   }
 
-  /*
-    Every stored value in this row, handed to the menu builder, so a value this
-    build no longer offers still has a labelled option instead of an empty
-    select -- which would read as "no fallback" when a fallback is stored.
-  */
-  const menu = withCustomConnections(jobModelOptions(jobKey), connections, chosen);
-
   const firstExact = exactModelFor(draft.first.providerId);
   const efforts = jobEffortOptions(draft.first.providerId, firstExact);
   /*
@@ -680,11 +674,6 @@ function JobRow({
     default (the editor saved a choice, and the saved value is what the box
     holds), and a row where nothing could be resolved at all.
   */
-  const defaultFirstLabel =
-    facts.fromDefault && resolvedSaved.providerId
-      ? modelChoiceLabel(resolvedSaved.providerId, surface)
-      : jobSlotEmptyLabel("first");
-
   return (
     <div
       className="model-job-row"
@@ -715,16 +704,14 @@ function JobRow({
         <div className="model-job-first">
           <div className="model-job-field">
             <span className="model-job-label">First choice</span>
-            <ModelSelect
+            <ModelPicker
+              scope={surface}
               label={`First choice for ${job?.label ?? jobKey}`}
-              value={draft.first.providerId}
-              options={menu}
-              readinessFor={readinessFor}
-              emptyLabel={defaultFirstLabel}
+              value={(draft.first.providerId || "auto") as StoryModelChoice}
               disabled={disabled}
               onChange={(next) =>
                 onPatch(jobKey, "first", {
-                  providerId: next,
+                  providerId: next === "auto" ? "" : next,
                   /* The design resets effort when the model changes, and it is
                      the right thing to do: "high" on a model that does not take
                      levels is a level for a run that cannot exist. */
@@ -778,12 +765,12 @@ function JobRow({
       ) : (
         <div className="model-job-field">
           <span className="model-job-label">Fallback 1</span>
-          <ModelSelect
+          <ModelPicker
+            scope={surface}
             label={`Fallback 1 for ${job?.label ?? jobKey}`}
-            value={draft.fallback1.providerId}
-            options={menu}
-              readinessFor={readinessFor}
-            emptyLabel={jobSlotEmptyLabel("fallback1")}
+            value={(draft.fallback1.providerId || "none") as StoryModelChoice}
+            noneOption
+            onClear={() => onPatch(jobKey, "fallback1", { providerId: "" })}
             disabled={disabled}
             onChange={(next) => onPatch(jobKey, "fallback1", { providerId: next })}
           />
@@ -794,12 +781,12 @@ function JobRow({
       ) : (
         <div className="model-job-field">
           <span className="model-job-label">Fallback 2</span>
-          <ModelSelect
+          <ModelPicker
+            scope={surface}
             label={`Fallback 2 for ${job?.label ?? jobKey}`}
-            value={draft.fallback2.providerId}
-            options={menu}
-              readinessFor={readinessFor}
-            emptyLabel={jobSlotEmptyLabel("fallback2")}
+            value={(draft.fallback2.providerId || "none") as StoryModelChoice}
+            noneOption
+            onClear={() => onPatch(jobKey, "fallback2", { providerId: "" })}
             disabled={disabled}
             onChange={(next) => onPatch(jobKey, "fallback2", { providerId: next })}
           />
@@ -962,44 +949,6 @@ const PROVIDER_DEFAULT_HELP =
  * choice means the desk's default runs the job, and an empty fallback means
  * there is none. "Not set — use the desk's default" was 203px in that box.
  */
-function ModelSelect({
-  label,
-  value,
-  options,
-  emptyLabel,
-  disabled,
-  onChange,
-  readinessFor,
-}: {
-  label: string;
-  value: string;
-  options: readonly ModelChoiceOption[];
-  readinessFor: (providerId: string) => ReadinessFacts;
-  emptyLabel: string;
-  disabled: boolean;
-  onChange: (next: string) => void;
-}) {
-  const shown = options.find((option) => option.value === value) ?? null;
-  return (
-    <select
-      className="w-full min-w-0"
-      style={SELECT_STYLE}
-      aria-label={label}
-      title={shown ? jobOptionTitle(shown) : emptyLabel}
-      disabled={disabled}
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <option value="">{emptyLabel}</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value} title={jobOptionTitle(option)}>
-          {modelReadinessOption(option.label, readinessFor(option.value))}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 /**
  * The live status chip, drawn as the design draws it: mixed case, 14px, and
  * three colors that mean something. Not the desk's `.chip` class, which
