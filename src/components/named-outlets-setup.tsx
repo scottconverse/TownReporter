@@ -127,10 +127,10 @@ export function NamedOutletsSetup() {
     setMessage("");
   };
   const edit = (index: number, patch: Partial<NamedOutlet>) => {
-    if (!draft) return;
+    const current = draft ?? { rows, builtIn: false };
     startDraft({
-      ...draft,
-      rows: draft.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+      ...current,
+      rows: current.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     });
   };
   const cancel = () => {

@@ -192,6 +192,7 @@ jobs:
           node-version: "22"
           cache: npm
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: npm test
 
   # One check that is green only when the whole unit gate is green.
