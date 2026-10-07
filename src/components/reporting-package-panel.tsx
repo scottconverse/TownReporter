@@ -111,6 +111,10 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     return (
       <section className="reporting-package" aria-label="Reporting package">
         <h2>Reporting package</h2>
+        {row?.latestRun ? (() => {
+          const state = reportingRunState(row.latestRun);
+          return <Notice kind={state.tone}><p>{state.label}</p><p>{state.detail}</p></Notice>;
+        })() : null}
         <p className="meta">
           No reporting run has filed a package for this lead yet. Use Report this
           meeting or Develop this lead to start one.
@@ -122,9 +126,8 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     <>
     {row.latestRun && row.latestRun.requestId !== row.requestId ? (
       <Notice kind={row.latestRun.status === "FAILED" ? "err" : "ok"}>
-        {row.latestRun.status === "FAILED"
-          ? `The latest reporting run failed: ${row.latestRun.error || "No usable result was filed."} Your earlier draft and package are preserved. Use Ask for more reporting below to try again.`
-          : "A new reporting run is in progress. This earlier draft and package remain available while it works."}
+        {reportingRunState(row.latestRun).label} {reportingRunState(row.latestRun).detail}
+        {" "}Your earlier draft and package are still here.
       </Notice>
     ) : null}
     <button type="button" className="inline-link" disabled={query.isFetching} onClick={() => {

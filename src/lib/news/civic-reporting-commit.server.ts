@@ -57,6 +57,7 @@ import {
   type RelevantReportingObservation,
 } from "./civic-reporting.server.ts";
 import { parseReportingPackage, type ReportingPackage } from "./civic-reporting.ts";
+import type { ReportingRequestView } from "./reporting-package-view.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { CurrentReportingDocumentChecks } from "./reporting-document-check.ts";
 
@@ -738,10 +739,10 @@ export async function loadLeadReportingPackageForEditor(
 ): Promise<{
   requestId: number;
   draftId: number | null;
-  pkg: ReportingPackage;
+  pkg: ReportingPackage | null;
   currentDocumentChecks: CurrentReportingDocumentChecks;
   storyLeads: StoryLeadLink[];
-  latestRun: { requestId: number; status: string; error: string | null; assignment: string } | null;
+  latestRun: ReportingRequestView | null;
   /**
    * The seed URLs the run was opened with, read from its own request row.
    * The panel uses these to scope "records kept for the next assignment" to
@@ -757,7 +758,37 @@ export async function loadLeadReportingPackageForEditor(
   `;
   if (!row) return null;
   const loaded = await loadLeadReportingPackage(sql, leadId, context.newsroomId);
-  if (!loaded) return null;
+  const [latest] = await sql<{
+    id: number; run_status: string; error: string | null; assignment: string;
+    finished_at: string | null; model_receipt: unknown; model_choice: string;
+  }>`
+    select r.id, case when j.status = 'failed' then 'FAILED' else r.run_status end as run_status,
+      coalesce(nullif(r.error, ''), j.error) as error, r.assignment,
+      coalesce(r.finished_at, j.finished_at) as finished_at, r.model_receipt, r.model_choice
+    from reporting_requests r
+    left join lateral (
+      select status, error, finished_at from desk_jobs
+      where newsroom_id = r.newsroom_id and kind = 'reporting' and subject_id = r.id
+      order by id desc limit 1
+    ) j on true
+    where r.newsroom_id = ${context.newsroomId} and r.lead_id = ${leadId}
+    order by r.created_at desc, r.id desc limit 1
+  `;
+  let receipt: Record<string, unknown> = {};
+  try {
+    const parsed = typeof latest?.model_receipt === "string" ? JSON.parse(latest.model_receipt) : latest?.model_receipt;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) receipt = parsed;
+  } catch { /* Legacy receipts can be empty; keep the saved request fields. */ }
+  const latestRun: ReportingRequestView | null = latest ? {
+    requestId: Number(latest.id), status: latest.run_status,
+    error: typeof receipt.reason === "string" && receipt.reason.trim() ? receipt.reason : latest.error,
+    assignment: latest.assignment, finishedAt: latest.finished_at,
+    modelLabel: typeof receipt.modelLabel === "string" ? receipt.modelLabel : modelChoiceLabel(latest.model_choice),
+  } : null;
+  if (!loaded) return latestRun ? {
+    requestId: latestRun.requestId, draftId: null, pkg: null, latestRun,
+    storyLeads: [], seedUrls: [], currentDocumentChecks: {},
+  } : null;
   const storyLeads = await storyLeadLinksForRequest(sql, loaded.requestId, context.newsroomId);
   /*
     Seeds are stored as a jsonb array of strings on the request. Read them
@@ -769,12 +800,6 @@ export async function loadLeadReportingPackageForEditor(
     where id = ${loaded.requestId} and newsroom_id = ${context.newsroomId} limit 1
   `;
   const seedUrls = parseSeedUrls(requestRow?.seed_urls);
-  const [latest] = await sql<{ id: number; run_status: string; error: string | null; assignment: string }>`
-    select id, run_status, error, assignment from reporting_requests
-    where newsroom_id = ${context.newsroomId} and lead_id = ${leadId}
-    order by created_at desc, id desc limit 1
-  `;
-  const latestRun = latest ? { requestId: Number(latest.id), status: latest.run_status, error: latest.error, assignment: latest.assignment } : null;
   const { loadCurrentReportingDocumentChecks } = await import("./reporting-document-check.server.ts");
   const currentDocumentChecks = await loadCurrentReportingDocumentChecks(sql, context.newsroomId, loaded.requestId);
   return { ...loaded, storyLeads, seedUrls, latestRun, currentDocumentChecks };

@@ -34,11 +34,42 @@ import {
   one-line reason for a PARTIAL/FAILED run and is quoted verbatim, never
   paraphrased into something calmer.
 */
-export function reportingRunState(report: ReportingPackage): {
+export type ReportingRequestView = {
+  requestId: number;
+  status: string;
+  error: string | null;
+  finishedAt: string | null;
+  modelLabel: string;
+  assignment: string;
+};
+
+export function reportingRunState(report: ReportingPackage | ReportingRequestView): {
   tone: "ok" | "warn" | "err";
   label: string;
   detail: string;
 } {
+  if ("status" in report) {
+    if (report.status === "FAILED") {
+      return {
+        tone: "err",
+        label: "The reporting request failed.",
+        detail: [
+          report.error || "No reason was saved.",
+          report.finishedAt ? `Ended: ${report.finishedAt}.` : "No end time was saved.",
+          `Model: ${report.modelLabel || "No model was saved"}.`,
+          "Use the reporting form to start again.",
+        ].join(" "),
+      };
+    }
+    return {
+      tone: "ok",
+      label: report.status === "PENDING" ? "Reporting started" : "The reporting request ended.",
+      detail:
+        report.status === "PENDING"
+          ? "The package will appear here when it is done."
+          : "Check the package below.",
+    };
+  }
   switch (report.runStatus) {
     case "COMPLETE":
       return {
@@ -89,7 +120,10 @@ export function readinessLabel(tier: number): string {
   This reads the sources in THIS package only, so a source id that does not
   resolve here is not counted as evidence.
 */
-export function claimBadge(claim: PackageClaim, story: PackageStory): {
+export function claimBadge(
+  claim: PackageClaim,
+  story: PackageStory,
+): {
   status: string;
   tone: "ok" | "warn" | "err";
   note: string;
@@ -180,7 +214,8 @@ export function methodLine(report: ReportingPackage): string {
   const provider = report.receipt.runtimeProvider;
   const effort = report.receipt.modelEffort;
   const exactRuntime = model
-    ? " - Model " + model +
+    ? " - Model " +
+      model +
       (modelId ? " [" + modelId + "]" : "") +
       (provider ? " via " + provider : "") +
       (endpoint ? " at " + endpoint : "") +

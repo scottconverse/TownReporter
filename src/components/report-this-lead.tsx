@@ -1,11 +1,12 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ActionButton } from "@/components/action-button";
 import { Field } from "@/components/desk-chrome";
 import { ModelPicker } from "@/components/model-picker";
 import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
-import { startReporting } from "@/lib/news/desk";
+import { loadLeadReportingPackage, startReporting } from "@/lib/news/desk";
+import { reportingRunState } from "@/lib/news/reporting-package-view";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
@@ -53,7 +54,12 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
   const [open, setOpen] = useState(false);
   const [assignment, setAssignment] = useState("");
   const [seedUrls, setSeedUrls] = useState("");
-  const [startedJobId, setStartedJobId] = useState<number | null>(null);
+  const request = useQuery({
+    queryKey: ["reporting-package", props.leadId],
+    queryFn: () => loadLeadReportingPackage({ data: { leadId: props.leadId } }),
+    refetchInterval: (state) => (state.state.data?.latestRun?.status === "PENDING" ? 2000 : false),
+    refetchIntervalInBackground: true,
+  });
   const run = useMutation({
     mutationFn: () =>
       startReporting({
@@ -69,7 +75,7 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
       }),
     onSuccess: (result) => {
       if (result.ok) {
-        setStartedJobId(result.jobId);
+        void qc.invalidateQueries({ queryKey: ["reporting-package", props.leadId] });
         invalidateDeskJobs(qc);
         void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       }
@@ -77,17 +83,21 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
   });
   const refused =
     run.data && !run.data.ok ? run.data.error : run.isError ? String(run.error) : null;
-  const buttonWord = props.action === "report-meeting" ? "Report this meeting" : "Develop this lead";
+  const buttonWord =
+    props.action === "report-meeting" ? "Report this meeting" : "Develop this lead";
   const ready = !props.disabled && assignment.trim().length > 0;
+  const latestRun = request.data?.latestRun;
+  const failed = latestRun?.status === "FAILED";
+  const started = Boolean(run.data?.ok && !failed);
   return (
     <div className="report-this-lead">
       <ActionButton
         tone={props.hasDraft ? "quiet" : "primary"}
-        phase={run.isPending ? "working" : run.data?.ok ? "done" : "idle"}
+        phase={run.isPending ? "working" : started ? "done" : "idle"}
         workingLabel="Starting..."
         doneLabel="Reporting started"
         disabled={props.disabled || run.isPending}
-        disabledReason={props.disabled ? props.disabledReason ?? null : null}
+        disabledReason={props.disabled ? (props.disabledReason ?? null) : null}
         onAct={() => {
           /*
             The press opens the ask-and-model box rather than firing blind: the
@@ -119,7 +129,10 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
               }
             />
           </Field>
-          <Field label="Sources to start from" hint="Optional. One public link per line -- the agenda, the recording, a document.">
+          <Field
+            label="Sources to start from"
+            hint="Optional. One public link per line -- the agenda, the recording, a document."
+          >
             <textarea
               rows={2}
               value={seedUrls}
@@ -138,7 +151,10 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
             onEffortChange={props.onModelEffort}
             disabled={run.isPending}
           />
-          <Field label="Research" hint="Public research lets the run look things up; supplied uses only what you gave it.">
+          <Field
+            label="Research"
+            hint="Public research lets the run look things up; supplied uses only what you gave it."
+          >
             <select
               value={props.researchScope}
               disabled={run.isPending}
@@ -159,11 +175,16 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
             Start reporting
           </ActionButton>
           {refused ? <Notice kind="warn">{refused}</Notice> : null}
-          {run.data?.ok ? (
+          {failed ? (
+            <Notice kind="err">
+              <p>{reportingRunState(latestRun).label}</p>
+              <p>{reportingRunState(latestRun).detail}</p>
+            </Notice>
+          ) : null}
+          {started && run.data?.ok ? (
             <Notice kind="ok">
               Reporting started on {run.data.modelLabel}. Its progress shows under Running, and the
               package will appear beside this story when it is done.
-              {startedJobId ? null : null}
             </Notice>
           ) : null}
         </section>

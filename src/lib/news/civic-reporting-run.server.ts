@@ -90,8 +90,14 @@ import { runDeskResearch, type DeskModelFn, type DeskResearchOutcome } from "./e
 import { insertProposedNewsroomSource } from "./source-seeds.server.ts";
 import { ingestDocument, type PdfPage } from "./ingest.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
-import { grokChat, probeProvider, type EffectiveProviderChoice } from "./ai.ts";
-import { modelEffort, PROVIDER_REGISTRY, type ModelEffort } from "./provider-registry.ts";
+import { grokChat, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
+import { KIND_BUDGETS, modelEffort, PROVIDER_REGISTRY, providerEntry, type ModelEffort } from "./provider-registry.ts";
+import { readProviderOverrides } from "./provider-settings.ts";
+
+// Whole-meeting writing asks for 18,000 tokens, rather than a short pass reply.
+// Reuse the registry long-call allowance; the 913-second rehearsal failed with
+// 45-second calls and does not establish a successful writer duration.
+const WHOLE_MEETING_CODEX_WRITER_MS = KIND_BUDGETS.local.callMs;
 import {
   TAPE_WINDOW_CHARS,
   evidenceAt,
@@ -304,6 +310,7 @@ export type PinnedRuntime = {
   choice: EffectiveProviderChoice;
   localModel: { baseUrl: string; id: string } | null;
   effort: ModelEffort | null;
+  timeoutMs?: number;
 };
 
 /* ------------------------------------------------------------------ *
@@ -988,6 +995,8 @@ export async function gatherIndependentSources(input: {
         newsroomId: input.request.newsroom_id,
         localModel: input.researchRuntime.localModel,
         reasoningEffort: input.researchRuntime.effort,
+        timeoutMs: input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
+          await readProviderOverrides(input.request.newsroom_id, "story")).callMs,
         noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };
@@ -1477,6 +1486,8 @@ export async function performReportingWork(
   }
 
   const model = await resolveModel(request, job, deps);
+  const overrides = await readProviderOverrides(request.newsroom_id, "story");
+  const callMs = providerBudget(model.effective, overrides).callMs;
   const methodDir = resolveMethodDir();
   const method = loadMethodInstructions(methodDir.dir);
   method.source = methodDir.source;
@@ -1572,7 +1583,7 @@ export async function performReportingWork(
     sql,
     deps,
     paper: { city, state, officialHost: scope?.officialHost ?? null },
-    researchRuntime: { choice: model.effective as EffectiveProviderChoice, localModel: model.localModel, effort: model.effort },
+    researchRuntime: { choice: model.effective as EffectiveProviderChoice, localModel: model.localModel, effort: model.effort, timeoutMs: callMs },
     researchScope: jobResearchScope(job),
     report,
     throwIfCancelled: () => throwIfCancelled(job.id),
@@ -1676,6 +1687,7 @@ export async function performReportingWork(
     localModel: model.localModel,
     reasoningEffort: model.effort,
     noTools: false,
+    timeoutMs: callMs,
   };
 
   const warm = await warmActionPass({
@@ -1787,7 +1799,7 @@ export async function performReportingWork(
   const further = await furtherResearchPass({
     request,
     deps,
-    researchRuntime: { choice: model.effective as EffectiveProviderChoice, localModel: model.localModel, effort: model.effort },
+    researchRuntime: { choice: model.effective as EffectiveProviderChoice, localModel: model.localModel, effort: model.effort, timeoutMs: callMs },
     researchScope: jobResearchScope(job),
     contrary,
     action: request.action,
@@ -1892,7 +1904,12 @@ export async function performReportingWork(
     city,
     method,
     chat,
-    chatOpts,
+    chatOpts: {
+      ...chatOpts,
+      timeoutMs: providerEntry(model.effective)?.kind === "codex"
+        ? Math.max(callMs, WHOLE_MEETING_CODEX_WRITER_MS)
+        : callMs,
+    },
     workspaceDir,
     throwIfCancelled: () => throwIfCancelled(job.id),
   });
@@ -3835,6 +3852,8 @@ export async function furtherResearchPass(input: {
         newsroomId: input.request.newsroom_id,
         localModel: input.researchRuntime.localModel,
         reasoningEffort: input.researchRuntime.effort,
+        timeoutMs: input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
+          await readProviderOverrides(input.request.newsroom_id, "story")).callMs,
         noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };
