@@ -995,8 +995,8 @@ export async function gatherIndependentSources(input: {
         newsroomId: input.request.newsroom_id,
         localModel: input.researchRuntime.localModel,
         reasoningEffort: input.researchRuntime.effort,
-        timeoutMs: input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
-          await readProviderOverrides(input.request.newsroom_id, "story")).callMs,
+        timeoutMs: Math.max(45_000, input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
+          await readProviderOverrides(input.request.newsroom_id, "story")).callMs),
         noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };
@@ -1487,7 +1487,7 @@ export async function performReportingWork(
 
   const model = await resolveModel(request, job, deps);
   const overrides = await readProviderOverrides(request.newsroom_id, "story");
-  const callMs = providerBudget(model.effective, overrides).callMs;
+  const callMs = Math.max(45_000, providerBudget(model.effective, overrides).callMs);
   const methodDir = resolveMethodDir();
   const method = loadMethodInstructions(methodDir.dir);
   method.source = methodDir.source;
@@ -3852,8 +3852,8 @@ export async function furtherResearchPass(input: {
         newsroomId: input.request.newsroom_id,
         localModel: input.researchRuntime.localModel,
         reasoningEffort: input.researchRuntime.effort,
-        timeoutMs: input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
-          await readProviderOverrides(input.request.newsroom_id, "story")).callMs,
+        timeoutMs: Math.max(45_000, input.researchRuntime.timeoutMs ?? providerBudget(input.researchRuntime.choice,
+          await readProviderOverrides(input.request.newsroom_id, "story")).callMs),
         noTools: true,
       } as never);
       return reply.ok ? { ok: true, text: reply.text } : { ok: false, error: reply.error };

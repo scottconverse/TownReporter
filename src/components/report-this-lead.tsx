@@ -6,8 +6,9 @@ import { ModelPicker } from "@/components/model-picker";
 import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
 import { loadLeadReportingPackage, startReporting } from "@/lib/news/desk";
-import { reportingRunState } from "@/lib/news/reporting-package-view";
+import { reportingNotice, reportingRunState } from "@/lib/news/reporting-package-view";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { usePaper } from "@/lib/paper-context-state";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 
 /*
@@ -51,6 +52,7 @@ export type ReportThisLeadControlProps = {
 
 export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
   const qc = useQueryClient();
+  const { timezone } = usePaper();
   const [open, setOpen] = useState(false);
   const [assignment, setAssignment] = useState("");
   const [seedUrls, setSeedUrls] = useState("");
@@ -83,12 +85,11 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
   });
   const refused =
     run.data && !run.data.ok ? run.data.error : run.isError ? String(run.error) : null;
-  const buttonWord =
-    props.action === "report-meeting" ? "Report this meeting" : "Develop this lead";
+  const buttonWord = props.action === "report-meeting" ? "Report this meeting" : "Develop this lead";
   const ready = !props.disabled && assignment.trim().length > 0;
   const latestRun = request.data?.latestRun;
-  const failed = latestRun?.status === "FAILED";
-  const started = Boolean(run.data?.ok && !failed);
+  const notice = reportingNotice(run.data, latestRun?.status);
+  const started = notice === "started";
   return (
     <div className="report-this-lead">
       <ActionButton
@@ -97,7 +98,7 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
         workingLabel="Starting..."
         doneLabel="Reporting started"
         disabled={props.disabled || run.isPending}
-        disabledReason={props.disabled ? (props.disabledReason ?? null) : null}
+        disabledReason={props.disabled ? props.disabledReason ?? null : null}
         onAct={() => {
           /*
             The press opens the ask-and-model box rather than firing blind: the
@@ -129,10 +130,7 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
               }
             />
           </Field>
-          <Field
-            label="Sources to start from"
-            hint="Optional. One public link per line -- the agenda, the recording, a document."
-          >
+          <Field label="Sources to start from" hint="Optional. One public link per line -- the agenda, the recording, a document.">
             <textarea
               rows={2}
               value={seedUrls}
@@ -151,10 +149,7 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
             onEffortChange={props.onModelEffort}
             disabled={run.isPending}
           />
-          <Field
-            label="Research"
-            hint="Public research lets the run look things up; supplied uses only what you gave it."
-          >
+          <Field label="Research" hint="Public research lets the run look things up; supplied uses only what you gave it.">
             <select
               value={props.researchScope}
               disabled={run.isPending}
@@ -175,10 +170,10 @@ export function ReportThisLeadControl(props: ReportThisLeadControlProps) {
             Start reporting
           </ActionButton>
           {refused ? <Notice kind="warn">{refused}</Notice> : null}
-          {failed ? (
+          {notice === "failed" && latestRun ? (
             <Notice kind="err">
-              <p>{reportingRunState(latestRun).label}</p>
-              <p>{reportingRunState(latestRun).detail}</p>
+              <p>{reportingRunState(latestRun, timezone).label}</p>
+              <p>{reportingRunState(latestRun, timezone).detail}</p>
             </Notice>
           ) : null}
           {started && run.data?.ok ? (

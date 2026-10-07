@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePaper } from "@/lib/paper-context-state";
 import { useState } from "react";
 import { ActionButton } from "@/components/action-button";
 import { Field } from "@/components/desk-chrome";
@@ -52,6 +53,7 @@ import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting
 */
 export function ReportingPackagePanel({ leadId }: { leadId: number }) {
   const qc = useQueryClient();
+  const { timezone } = usePaper();
   const query = useQuery({
     queryKey: ["reporting-package", leadId],
     queryFn: () => loadLeadReportingPackage({ data: { leadId } }),
@@ -112,7 +114,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
       <section className="reporting-package" aria-label="Reporting package">
         <h2>Reporting package</h2>
         {row?.latestRun ? (() => {
-          const state = reportingRunState(row.latestRun);
+          const state = reportingRunState(row.latestRun, timezone);
           return <Notice kind={state.tone}><p>{state.label}</p><p>{state.detail}</p></Notice>;
         })() : null}
         <p className="meta">
@@ -126,7 +128,7 @@ export function ReportingPackagePanel({ leadId }: { leadId: number }) {
     <>
     {row.latestRun && row.latestRun.requestId !== row.requestId ? (
       <Notice kind={row.latestRun.status === "FAILED" ? "err" : "ok"}>
-        {reportingRunState(row.latestRun).label} {reportingRunState(row.latestRun).detail}
+        {reportingRunState(row.latestRun, timezone).label} {reportingRunState(row.latestRun, timezone).detail}
         {" "}Your earlier draft and package are still here.
       </Notice>
     ) : null}
