@@ -1141,6 +1141,8 @@ type NearDuplicateSignals = {
   sharedNames: number;
   sharedSubjects: string[];
   sectionsAgree: boolean;
+  sectionsDisagree: boolean;
+  subjectsDisagree: boolean;
   /** Every name one side has, the other has too (and it has at least one). */
   namesOneSided: boolean;
   oneSided: boolean;
@@ -1167,6 +1169,8 @@ function nearDuplicateSignals(
   const namesA = nonStoplistedProperNouns(a, place);
   const namesB = nonStoplistedProperNouns(b, place);
   const sharedNames = sharedWordCount(namesA, namesB);
+  const candidateSection = normalizedSection(sections?.candidateTopic);
+  const leadSection = normalizedSection(sections?.leadTopic);
   const sharedAnchors = specificAnchors(
     [...anchorsA].filter((anchor) => anchorsB.has(anchor)),
   );
@@ -1176,8 +1180,10 @@ function nearDuplicateSignals(
     sharedNames,
     sharedSubjects,
     sectionsAgree:
-      Boolean(normalizedSection(sections?.candidateTopic)) &&
-      normalizedSection(sections?.candidateTopic) === normalizedSection(sections?.leadTopic),
+      Boolean(candidateSection) && candidateSection === leadSection,
+    sectionsDisagree:
+      Boolean(candidateSection) && Boolean(leadSection) && candidateSection !== leadSection,
+    subjectsDisagree: sa.size > 0 && sb.size > 0 && sharedSubjects.length === 0,
     /*
       The name half of the same idea as `oneSided` below, and its own signal
       because the two fail apart on the headline shape this desk keeps hitting:
@@ -1236,6 +1242,20 @@ function nearDuplicateSignals(
 }
 
 /**
+ * A shared amount, count or date cannot override clear evidence that the leads
+ * cover different subjects. Missing subject words or sections alone are not
+ * disagreement: scan headlines are often Title Case and still need the name
+ * and wording routes below.
+ */
+function factsAreTheOnlySharedEvidence(signals: NearDuplicateSignals): boolean {
+  return (
+    signals.sharedSpecificAnchors > 0 &&
+    signals.sharedSubjects.length === 0 &&
+    (signals.subjectsDisagree || signals.sectionsDisagree)
+  );
+}
+
+/**
  * Unit AO, stage 1: is this pair worth a second look? The filter is deliberately
  * wider than the classifier below -- every pair the classifier calls the same
  * story is a pair this accepts -- and it is the cheap signals that decide it,
@@ -1270,12 +1290,10 @@ function nearDuplicateSignals(
  *     Village and King Soopers Reopens" sit at 0.74 with seven names in common
  *     and are two different retellings, not one story said twice.
  *
- * Every way in also requires that the two do not each bring a subject the other
- * lacks, and that they share subject words or the same section. Empty subject
- * sets no longer count as agreement. The filter is wide, but not so wide that two
- * agenda items on one board's meeting page are worth the desk's AI check every
- * time they share a date -- NEG-11 "Twin Peaks rezoning application" against
- * "Twin Peaks parking variance" is null before this and stays null.
+ * A shared amount, count or date cannot bridge two explicitly different
+ * subjects or section tags when no subject word is shared. Missing subject
+ * tokens or section tags alone are not disagreement; scan headlines often use
+ * Title Case and still need the name and wording routes below.
  */
 function nearDuplicateCandidate(
   a: string,
@@ -1288,7 +1306,7 @@ function nearDuplicateCandidate(
     signals.sharedNames < 1 ||
     !signals.factsAgree ||
     !signals.subjectsAgree ||
-    (!signals.sharedSubjects.length && !signals.sectionsAgree)
+    factsAreTheOnlySharedEvidence(signals)
   ) {
     return false;
   }
@@ -1390,7 +1408,7 @@ function nearDuplicateStrong(
     signals.sharedNames < 1 ||
     !signals.factsAgree ||
     !signals.subjectsAgree ||
-    (!signals.sharedSubjects.length && !signals.sectionsAgree)
+    factsAreTheOnlySharedEvidence(signals)
   ) {
     return false;
   }
