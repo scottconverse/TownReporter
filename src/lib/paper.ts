@@ -139,8 +139,8 @@ export const SEED_SOURCES: {
   {
     url: "https://mynextlight.com/",
     title: "NextLight",
-    kind: "unclassified",
-    tier: "C",
+    kind: "official",
+    tier: "A",
   },
   {
     url: "https://www.svvsd.org/",
