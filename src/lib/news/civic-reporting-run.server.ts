@@ -1165,6 +1165,7 @@ export async function fileRunLeads(input: {
   sql: Sql;
   request: ReportingRequestRow;
   stories: PackageStory[];
+  held?: PackageHeld[];
   score: PackageScore | null;
   actions?: CoverageAction[];
   receipt: RunReceipt;
@@ -1198,6 +1199,7 @@ export async function fileRunLeads(input: {
     if (leadId && story.draft.trim()) {
       const urls = story.sources.filter((s) => s.url).map((s) => s.url);
       const readiness = storyReadiness({ headline: story.headline, body: story.draft, claims: story.claims });
+      const openItem = input.held?.find((entry) => entry.storyId === story.id && entry.unverified);
       const [draft] = await input.sql<{ id: number }>`
         insert into drafts (
           user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
@@ -1209,7 +1211,7 @@ export async function fileRunLeads(input: {
           ${"Reported with the civic-scanner method; verify the claims ledger before publication."},
           ${JSON.stringify({ civicReporting: true, requestId: input.request.id, storyId: story.id,
             reportedActions: input.actions ?? [],
-            storyReadiness: { version: 1, ...readiness },
+            storyReadiness: { version: 1, ...readiness, ...(openItem ? { state: "not-ready", reason: openItem.reason } : {}) },
             reportedClaims: await reportingStoryReviewClaims(input.sql, input.request.newsroom_id, story) })}
         ) returning id
       `;
@@ -1395,6 +1397,7 @@ export async function fileReportingPackage(input: {
       sql: tx,
       request: input.request,
       stories: input.stories,
+      held: input.pkg.held,
       score: input.score,
       actions: input.pkg.actions,
       receipt: input.receipt,
@@ -2140,6 +2143,15 @@ export type WritingPass = {
   gaps: string[];
 };
 
+function readableWriterStories(reply: Record<string, unknown>): PackageStory[] {
+  if (!Array.isArray(reply.stories)) return [];
+  return reply.stories.flatMap((raw, index) => {
+    if (!raw || typeof raw !== "object") return [];
+    const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
+    return story.draft.trim() ? [story] : [];
+  });
+}
+
 function shortWriterFailureReason(error: string, held: PackageHeld[]): string {
   const reason = held.find((entry) => entry.reason.trim())?.reason || error;
   const compact = reason.replace(/\s+/g, " ").trim();
@@ -2547,37 +2559,71 @@ export async function writingPass(input: {
       ? "writer-citation-revision.txt" : "writer-result-revision.txt";
     writeWorkspace(input.workspaceDir, revisionFile, revision.ok ? revision.text : revision.error);
     const revised = revision.ok ? readJsonBlock<Record<string, unknown>>(revision.text) : null;
-    if (!revised || writerLengthProblems(revised, input.assignment).length || !Array.isArray(revised.stories) || !revised.stories.length) {
+    const revisedStories = revised ? readableWriterStories(revised) : [];
+    const selected = revisedStories.length ? revised! : parsed;
+    const selectedStories = revisedStories.length ? revisedStories : readableWriterStories(parsed);
+    const selectedPackage: Record<string, unknown> = { ...selected, stories: selectedStories };
+    if (!selectedStories.length) {
       const fallback = lengthProblems.length
         ? "The writer did not deliver a readable story within the editor's requested word range after one revision."
         : voteResultProblems.length
           ? "The writer did not deliver a readable story with its announced result after one revision."
           : "The writer did not deliver a readable story after one citation revision.";
-      const held = normalizeHeld(parsed.held);
+      const held = normalizeHeld(selectedPackage.held);
       const error = shortWriterFailureReason(fallback, []);
       gaps.push(fallback);
       return { stories: [], held, error, gaps };
     }
-    const remainingRelationships = financialRelationshipProblems(revised, input.documents);
+    const held = normalizeHeld(selectedPackage.held);
+    const holdStory = (story: PackageStory, reason: string, nextCheck: string) => {
+      const existing = held.find((entry) => entry.storyId === story.id);
+      if (existing) {
+        existing.reason = [existing.reason.trim(), reason].filter(Boolean).join(" ");
+        existing.nextCheck = nextCheck;
+        existing.unverified = true;
+      } else {
+        held.push({ storyId: story.id, headline: story.headline, reason, nextCheck, unverified: true });
+      }
+    };
+    if (!revisedStories.length) {
+      const reason = "The single revision did not produce a readable story; the first readable draft is filed for review.";
+      gaps.push(reason);
+      holdStory(selectedStories[0]!, reason, "Review the first draft and resolve its remaining evidence checks.");
+    }
+    const remainingLengthProblems = writerLengthProblems(selectedPackage, input.assignment);
+    if (remainingLengthProblems.length) {
+      const fallback = "The story remained outside the editor's requested word range after one revision.";
+      gaps.push(fallback, ...remainingLengthProblems);
+      for (const problem of remainingLengthProblems) {
+        const storyIndex = Number(problem.match(/^Story (\d+):/)?.[1] ?? 1) - 1;
+        const story = selectedStories[storyIndex] ?? selectedStories[0]!;
+        holdStory(story, `${fallback} ${problem}`, "Revise the story to the editor's requested word range.");
+      }
+    }
+    const remainingRelationships = financialRelationshipProblems(selectedPackage, input.documents);
     if (remainingRelationships.length) {
       const fallback = "The writer retained an unsupported financial relationship after one revision.";
-      const held = normalizeHeld(revised.held);
-      const error = shortWriterFailureReason(fallback, []);
       gaps.push(fallback, ...remainingRelationships);
-      return { stories: [], held, error, gaps };
+      for (const problem of remainingRelationships) {
+        const storyIndex = Number(problem.match(/^Story (\d+):/)?.[1] ?? 1) - 1;
+        const story = selectedStories[storyIndex] ?? selectedStories[0]!;
+        holdStory(story, `An unsupported financial relationship remains: ${problem.replace(/^Story \d+:\s*/, "")}`, "Remove or qualify the relationship using directly read evidence.");
+      }
     }
-    const remainingVoteResults = revised.stories.flatMap((raw, index) => {
-      if (!raw || typeof raw !== "object") return [];
-      const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
-      return missingAnnouncedResults(story, input.reconcile.actions, input.record);
-    });
+    const remainingVoteResults = selectedStories.flatMap((story) =>
+      missingAnnouncedResults(story, input.reconcile.actions, input.record).map((result) => ({ story, result })),
+    );
     if (remainingVoteResults.length) {
       const fallback = "The writer omitted an announced result for an agenda item already in the draft after one revision.";
-      const held = normalizeHeld(revised.held);
-      gaps.push(fallback, ...remainingVoteResults.map((result) => `${result.item}: ${result.result}`));
-      return { stories: [], held, error: shortWriterFailureReason(fallback, []), gaps };
+      gaps.push(fallback);
+      for (const { story, result } of remainingVoteResults) {
+        const action = result.action.replace(/^(?:approve|adopt|pass)\s+/i, "");
+        const reason = `The final result for ${action || `agenda item ${result.item}`} is not stated; the transcript announced that it ${result.result}.`;
+        gaps.push(reason);
+        holdStory(story, reason, "Add the announced result from the retained transcript.");
+      }
     }
-    parsed = revised;
+    parsed = { ...selectedPackage, held };
   }
   const stories: PackageStory[] = [];
   if (Array.isArray(parsed.stories)) {

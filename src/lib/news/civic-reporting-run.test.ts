@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureReportingSchema, loadLeadReportingPackage, loadReportingRequest } from "./civic-reporting.server.ts";
-import { performReportingWork, loadMethodInstructions, normalizeClaims, normalizeScore, readJsonBlock, seedUrlsOf, loadScopedObservations, gatherIndependentSources, furtherResearchPass, resolveModel } from "./civic-reporting-run.server.ts";
+import { performReportingWork, fileRunLeads, loadMethodInstructions, normalizeClaims, normalizeScore, readJsonBlock, seedUrlsOf, loadScopedObservations, gatherIndependentSources, furtherResearchPass, resolveModel } from "./civic-reporting-run.server.ts";
 import {
   FIXTURE_VIDEO,
   coldReplyColdOnly, ingestDouble, passChat,
@@ -25,6 +25,7 @@ import type { CoverageAction } from "./civic-reporting.ts";
 import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
 import { evidenceCheckRows } from "./evidence-check-list.ts";
 import { firstSentenceForDek } from "./dek-fallback.ts";
+import { publishBlockers } from "./publish-blockers.ts";
 import type { Sql } from "../db.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1281,6 +1282,30 @@ describe("the writer's method prompt states the status policy", () => {
     assert.match(prompt, /missing announced final result/i);
     assert.ok(result.stories[0]?.draft.includes("approved the measure unanimously"));
   });
+  // guards: the editor could lose a readable draft and its known vote gap before the Publish gate sees it.
+  it("files a result gap as not ready and blocks Publish", async () => {
+    const headline = "Council considers Dry Creek ordinance";
+    const draft = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting.";
+    const packageText = JSON.stringify({ stories: [{ id: "dry-creek", headline, dek: "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand the measure before the chair's announced result.", draft, plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [] });
+    const segments = [{ index: 1, seconds: 110, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "I move to approve Dry Creek ordinance 2026-62 as amended." }, { index: 2, seconds: 120, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "That motion carries unanimously." }];
+    const action = { actionId: "dry-creek-vote", timestamp: "00:02:00", agendaItem: "9A", motionOrAction: "Approve Dry Creek ordinance 2026-62 as amended", outcome: "carries unanimously", vote: "unanimously", policyStage: "final", evidence: "tape 00:02:00", disposition: "Lead" } as CoverageAction;
+    let calls = 0;
+    const { result } = await callWritingPass([], { identity: { videoId: "meeting" }, segments, votes: [], gaps: [], agenda: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }], windows: [] }, [action], "Develop this lead", () => { calls++; return { ok: true, text: packageText }; });
+    assert.equal(calls, 2);
+    assert.equal(result.stories.length, 1);
+    const held = result.held.find((row) => row.storyId === "dry-creek");
+    assert.match(held?.reason ?? "", /Dry Creek ordinance 2026-62.*not stated/i);
+    const sql = await getSql();
+    const request = await loadReportingRequest(sql, await newRequest({ action: "Develop this lead", assignment: "Develop this lead" }), NEWSROOM);
+    const filed = await fileRunLeads({ sql, request: request!, stories: result.stories, score: null, actions: [], held: result.held, receipt: { methodVersion: "2.6.0", modelLabel: "fixture" } as never } as never);
+    const [row] = await sql<{ research_json: unknown }>`select research_json from drafts where id = ${filed[0]!.draftId}`;
+    const research = typeof row!.research_json === "string" ? JSON.parse(row!.research_json) : row!.research_json as Record<string, unknown>;
+    const readiness = research.storyReadiness as { state: string; reason: string };
+    assert.equal(readiness.state, "not-ready");
+    assert.equal(readiness.reason, held!.reason);
+    const blockers = publishBlockers({ headline, dek: "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand the measure before the chair's announced result.", body: draft, sectionReady: true, readiness: readiness.state as never, readinessReason: readiness.reason, openClaims: 0, unreviewedClaims: 0, unreviewedAccepted: false, namedOutlets: [], evidenceStale: false, reviewingEvidence: false, reconcileActive: false, publishing: false });
+    assert.equal(blockers.find((blocker) => blocker.key === "readiness")?.sentence, held!.reason);
+  });
   // guards: an assignment can divert the writer into changing models or effort.
   it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {
     const assignment = "Report the meeting. Use only Codex Sol 6.1 at medium effort; stop if unavailable.";
@@ -1669,7 +1694,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
   });
 
   // guards: the editor could be shown a different idea's hold reason for a rejected draft.
-  it("revises an overlength writer packet once and refuses a second overlength result", async () => {
+  it("files an overlength revision with its assignment gap", async () => {
     async function run(revisedWords: number) {
       let calls = 0;
       const result = await writingPass({
@@ -1700,8 +1725,10 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     assert.equal(revised.stories[0]!.draft.split(/\s+/).length, 700);
     assert.equal(revised.stories[0]!.cannotSay, "Pending ordinance");
     const refused = await run(860);
-    assert.equal(refused.stories.length, 0, "do not file an output that still violates the assignment");
-    assert.match(refused.error, /requested word range after one revision/);
+    assert.equal(refused.stories.length, 1, "keep the readable revision for the editor");
+    assert.equal(refused.error, "");
+    assert.match(refused.gaps.join(" "), /requested word range after one revision/);
+    assert.ok(refused.held.some((entry) => entry.storyId === "s1" && /requested word range/.test(entry.reason)));
     assert.doesNotMatch(refused.error, /library parking idea/);
   });
 
