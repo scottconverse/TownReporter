@@ -1,3 +1,4 @@
+import { ShortcutSheet } from "./shortcut-sheet";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -9,7 +10,6 @@ import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
 import { useAppearance } from "@/lib/appearance-context";
-import { Dialog } from "@/components/dialog";
 /*
   The drawn New-story dialog (Unit BN, item 1). `editor-dialogs.tsx` imports
   `InkButton` back from this file, so the two are a cycle; it is safe because
@@ -625,43 +625,6 @@ function RunningBox({
  * anything (phase 4 adds the reasons). A sheet whose whole job is telling the
  * editor what a key does cannot promise a prompt that never comes.
  */
-const SHORTCUTS: { keys: string; what: string }[] = [
-  { keys: "J / K", what: "Next / previous lead" },
-  { keys: "S", what: "Start a story from the selected lead" },
-  { keys: "H", what: "Hold the selected lead" },
-  { keys: "X", what: "Kill the selected lead" },
-  { keys: "U", what: "Put the selected lead back to new" },
-  { keys: "Enter", what: "Open the selected lead" },
-  { keys: "N", what: "Start a new story" },
-  { keys: "⌘S", what: "Save in the story workbench" },
-  { keys: "?", what: "This list" },
-  { keys: "Esc", what: "Close this list or the phone menu" },
-];
-
-function ShortcutSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Dialog
-      open={open}
-      onClose={onClose}
-      title="Keyboard shortcuts"
-      subtitle="Keys are ignored while you are typing in a box."
-      primaryLabel="Got it"
-      onPrimary={onClose}
-      cancelLabel="Close"
-    >
-      <dl className="astra-keys">
-        {SHORTCUTS.map((s) => (
-          <div key={s.keys}>
-            <dt>
-              <kbd>{s.keys}</kbd>
-            </dt>
-            <dd>{s.what}</dd>
-          </div>
-        ))}
-      </dl>
-    </Dialog>
-  );
-}
 function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);

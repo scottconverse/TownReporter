@@ -10,6 +10,7 @@
  * corroborate — so a mis-parsed header quietly files a competitor's reporting
  * as publication-grade evidence.
  */
+import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 
 export type ParsedSourceLine = {
@@ -39,7 +40,7 @@ export function parseHttpUrl(
 }
 
 export function parseSourceLines(text: string): ParsedSourceLine[] {
-  let currentTier: "A" | "B" | "C" = "A";
+  let currentTier: "A" | "B" | "C" | null = null;
   const out: ParsedSourceLine[] = [];
   const seen = new Set<string>();
   const urlRe = /https?:\/\/[^\s<>"'\\)\]]+/gi;
@@ -103,18 +104,15 @@ export function parseSourceLines(text: string): ParsedSourceLine[] {
       .trim()
       .replace(/[:：]\s*$/, "");
 
-    const kind = /youtube\.com|youtu\.be/i.test(parsed.url)
-      ? "youtube"
-      : currentTier === "B"
-        ? "news"
-        : currentTier === "C"
-          ? "community"
-          : "official";
+    const inferredKind = kindFromSourceUrl(parsed.url);
+    const kind = inferredKind === "youtube" ? "youtube"
+      : currentTier === "B" ? "news"
+        : currentTier === "C" ? "community" : inferredKind;
 
     out.push({
       title: sourceName(title) || parsed.host,
       url: parsed.url,
-      tier: currentTier,
+      tier: currentTier ?? tierFromKind(kind),
       kind,
     });
   }

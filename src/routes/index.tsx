@@ -1,3 +1,4 @@
+import { EmptyEdition } from "@/components/empty-edition";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -564,16 +565,7 @@ function Home() {
               </StoryGrid>
             </>
           ) : !query.isError ? (
-            <div className="empty">
-              <h2>The edition is still being set.</h2>
-              <p>
-                No published stories yet. Read about the newsroom while the editor prepares the
-                paper.
-              </p>
-              <Link to="/about" className="btn">
-                About this paper
-              </Link>
-            </div>
+            <EmptyEdition area={search.area} />
           ) : null}
           {/*
             "Around the region" beside "Opinion": the places this paper

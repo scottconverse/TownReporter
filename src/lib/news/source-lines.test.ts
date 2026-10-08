@@ -40,9 +40,9 @@ https://www.reddit.com/r/Longmont/
     );
   });
 
-  it("defaults to Tier A when no header is given — the wrong default for news", () => {
+  it("infers the news tier when no header is given", () => {
     const rows = parseSourceLines("https://www.timescall.com/");
-    assert.equal(rows[0]?.tier, "A");
+    assert.equal(rows[0]?.tier, "B");
   });
 
   it("accepts lower case and mixed case headers", () => {

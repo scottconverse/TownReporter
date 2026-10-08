@@ -35,6 +35,21 @@
 
 import { NAMED_OUTLETS, outletNameKey, type NamedOutlet } from "./outlet-credit.ts";
 
+export type OutletDraft = { rows: NamedOutlet[]; builtIn: boolean };
+
+export function applyOutletEdit(
+  draft: OutletDraft | null,
+  savedRows: NamedOutlet[],
+  index: number,
+  patch: Partial<NamedOutlet>,
+): OutletDraft {
+  const current = draft ?? { rows: savedRows, builtIn: false };
+  return {
+    ...current,
+    rows: current.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
+  };
+}
+
 /** Ceilings, stated once. Every one is far above the longest real value. */
 export const OUTLET_LIMITS = {
   /** More rows than any town has outlets to check. */

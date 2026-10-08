@@ -10,8 +10,8 @@ import ts from "typescript";
   reader-facing page does, so the assertions are on markup a reader actually
   receives rather than on a regex read out of the source file.
 
-  The component imports nothing but React, so it loads as a data: module with
-  only "react" and "react/jsx-runtime" resolved -- the same pattern
+  The component loads as a data: module with React and the real editorial
+  citation cleaner resolved -- the same pattern
   scripts/lead-badge-render.test.mjs uses for the desk components.
 */
 function moduleUrl(source, fileName, imports = {}) {
@@ -30,6 +30,10 @@ const { StoryBody } = await import(
     await readFile(new URL("../src/components/story-body.tsx", import.meta.url), "utf8"),
     "story-body.tsx",
     {
+      "../lib/news/editorial-citations.ts": moduleUrl(
+        await readFile(new URL("../src/lib/news/editorial-citations.ts", import.meta.url), "utf8"),
+        "editorial-citations.ts",
+      ),
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },

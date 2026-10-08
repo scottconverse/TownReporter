@@ -1,3 +1,4 @@
+// guards: the paste preview could present unverified sources as official records.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -25,7 +26,7 @@ import { sourceIdentity } from "./url-guard.ts";
 
 const PASTE = [
   "https://longmontcolorado.gov/news",
-  "The Boulder Beat | https://www.bouldercounty.example.org/records | County records",
+  "The Boulder Beat | https://www.bouldercounty.gov/records | County records",
 ].join("\n");
 
 describe("the add-sources preview", () => {
@@ -60,7 +61,7 @@ describe("the add-sources preview", () => {
     const rows = parseSourceLines("TIER B\nhttps://records.example/x");
     assert.equal(sourceKindLabel(rows[0]!), "News page");
     assert.equal(sourceKindLabel(parseSourceLines("https://x.example/feed")[0]!), "RSS");
-    assert.equal(sourceKindLabel(parseSourceLines("https://x.example/rss.xml")[0]!), "Official page");
+    assert.equal(sourceKindLabel(parseSourceLines("https://city.gov/rss.xml")[0]!), "Official page");
     assert.equal(sourceKindLabel(parseSourceLines("https://www.youtube.com/@council")[0]!), "Video");
   });
 });
@@ -309,4 +310,13 @@ describe("the kill pattern under a watch row", () => {
   it("has nothing to say when the watch list is empty", () => {
     assert.equal(badSourceKillsBySource([], [row(JSON.stringify([url]), "unreadable", 1)]).size, 0);
   });
+});
+
+
+it("keeps unknown and social sources distinct from official records in the preview", () => {
+  const rows = previewSources("https://unknown.example/page\nhttps://x.com/council\nhttps://city.gov/records", []).rows;
+  assert.notEqual(rows[0]!.kind, rows[2]!.kind);
+  assert.notEqual(rows[1]!.kind, rows[2]!.kind);
+  assert.notEqual(rows[0]!.kind, rows[1]!.kind);
+  assert.equal(sourceKindLabel({ url: "https://unknown.example", title: "", tier: "C", kind: "future-kind" }), rows[0]!.kind);
 });

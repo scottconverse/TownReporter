@@ -1,3 +1,4 @@
+// guards: the paste preview could present an unverified commercial source as official.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
@@ -88,7 +89,11 @@ describe("Add sources dialog", () => {
     );
     assert.ok(html.includes('<span class="astra-preview-mark on" aria-hidden="true">✓</span>'));
     assert.match(html, /astra-preview-kind">Already watched/);
-    assert.match(html, /astra-preview-kind on">Official page/);
+    const commercialRow = html
+      .split('<div class="astra-preview-row">')
+      .find((row) => row.includes("https://www.boulder.example.org/records"))!;
+    assert.doesNotMatch(commercialRow, /astra-preview-kind[^>]*>Official\b/i);
+    assert.match(commercialRow, /astra-preview-kind on">Unclassified\b/i);
     assert.match(html, /astra-preview-url">https:\/\/longmontcolorado\.gov\/news/);
 
     // Nothing watched: every row is new, and the split says only that.

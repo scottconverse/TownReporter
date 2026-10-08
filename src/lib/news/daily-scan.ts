@@ -44,6 +44,8 @@ export type DailyScanPolicy = {
   lastLocalDay: string | null;
   nextRunAt: string | null;
   openRun: null | { runId: number; jobId: number; localDay: string; status: "queued" | "running" };
+  /** Latest scan receipt, including manual scans, for both summary screens. */
+  lastScan?: { sources_fetched: number; leads_created: number } | null;
   lastRun: null | {
     runId: number;
     jobId: number | null;
@@ -308,6 +310,10 @@ export async function readDailyScanPolicy(
     "select r.*,j.status as job_status,j.error as job_error from daily_scan_reservations r left join desk_jobs j on j.id=r.desk_job_id where r.newsroom_id=$1 order by r.local_day desc limit 1",
     [newsroomId],
   );
+  const [lastScan] = await sql.query<{ sources_fetched: number; leads_created: number }>(
+    "select sources_fetched, leads_created from scan_runs where newsroom_id=$1 order by started_at desc, id desc limit 1",
+    [newsroomId],
+  );
   const enabled = p?.enabled === true,
     paused = p?.paused === true,
     localTime = p?.local_time ?? UNSAVED_DAILY_SCAN_POLICY.localTime;
@@ -349,6 +355,7 @@ export async function readDailyScanPolicy(
       last && (last.status === "queued" || last.status === "running")
         ? { runId: last.runId, jobId: last.jobId!, localDay: last.localDay, status: last.status }
         : null,
+    lastScan: lastScan ?? null,
     lastRun: last,
   };
 }

@@ -103,8 +103,8 @@ export const LONGMONT_YOUTUBE_CHANNELS = [
 export const SEED_SOURCES: {
   url: string;
   title: string;
-  kind: "official" | "news" | "youtube";
-  tier: "A" | "B";
+  kind: "official" | "news" | "youtube" | "social" | "unclassified";
+  tier: "A" | "B" | "C";
 }[] = [
   {
     url: "https://www.longmontcolorado.gov/",

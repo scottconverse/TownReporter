@@ -1,3 +1,4 @@
+import { kindFromSourceUrl, tierFromKind } from "@/lib/news/desk-copy";
 /*
   CITY-SETUP final slice: the first-run setup form, shared by the gate route
   (src/routes/desk.setup.tsx, shown once right after the owner claims a
@@ -123,8 +124,8 @@ export function PaperSetupForm({
             .map((r) => ({
               url: r.url.trim(),
               title: r.title.trim() || r.url.trim(),
-              kind: "official" as const,
-              tier: "A" as const,
+              kind: kindFromSourceUrl(r.url.trim()),
+              tier: tierFromKind(kindFromSourceUrl(r.url.trim())),
             })),
         },
       }),
