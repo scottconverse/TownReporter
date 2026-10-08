@@ -2332,13 +2332,25 @@ function agendaActionMentioned(paragraph: string, item: string, title: string, a
   return basis.length > 0 && hits >= Math.min(3, basis.length);
 }
 
-function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord): { item: string; action: string; result: string; passage: string }[] {
+function requiredResultPassages(record: WholeRecord): AnnouncedResultPassage[] {
+  const finalResults = new Map<string, AnnouncedResultPassage>();
+  for (const result of announcedResultPassages(record)) {
+    if (/^(?:PROC|procedural)$/i.test(result.item) || /\b(?:extend (?:the )?meeting|adjourn)\b/i.test(result.passage)) continue;
+    // One coarse agenda label can contain several ordinances. Never let a
+    // later vote on another ordinance replace an already detected result.
+    const ids = result.passage.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi) ?? [];
+    const identifier = ids[ids.length - 1];
+    const key = `${result.item}:${identifier ? normalizeForMatch(identifier) : ""}:${result.startSeconds}:${result.endSeconds}`;
+    finalResults.set(key, result);
+  }
+  return [...finalResults.values()];
+}
+
+function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord, wholeMeeting = false): { item: string; action: string; result: string; passage: string }[] {
   const paragraphs = [story.headline, story.dek ?? "", story.plainBrief, story.draft]
     .flatMap((text) => text.split(/\r?\n\s*\r?\n/)).map((text) => text.trim())
     .filter((text) => Boolean(text) && !/^receipts?\s*:/i.test(text));
-  const finalResultsByItem = new Map<string, AnnouncedResultPassage>();
-  for (const result of announcedResultPassages(record)) finalResultsByItem.set(result.item, result);
-  const results = [...finalResultsByItem.values()];
+  const results = requiredResultPassages(record);
   const missing: { item: string; action: string; result: string; passage: string }[] = [];
   for (const result of results) {
     const action = actions
@@ -2349,7 +2361,7 @@ function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[],
       })[0];
     const title = record.agenda?.find((entry) => entry.item === result.item)?.title ?? "";
     const related = paragraphs.filter((paragraph) => agendaActionMentioned(paragraph, result.item, title, action, result.passage));
-    if (!related.length) continue;
+    if (!related.length && !wholeMeeting) continue;
     const rawTallies = voteWordsIn(result.resultText);
     const expectedTally = tallyKey(rawTallies[rawTallies.length - 1] ?? (/\bunanimously\b|\ball in favor\b/i.test(result.resultText) ? "unanimously" : ""));
     const expectedOutcome = resultOutcome(result.resultText);
@@ -2361,7 +2373,8 @@ function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[],
     });
     if (!stated) {
       const passageIdentifier = result.passage.match(/\b(ordinance|resolution)\s+(\d{4}\s*[-–]\s*\d+)\b/i);
-      const actionLabel = action?.motionOrAction ?? (passageIdentifier ? `${passageIdentifier[1]} ${normalizeForMatch(passageIdentifier[2])}` : title);
+      const actionMatches = action && (!passageIdentifier || normalizeForMatch(action.motionOrAction).includes(normalizeForMatch(passageIdentifier[2])));
+      const actionLabel = actionMatches ? action.motionOrAction : passageIdentifier ? `${passageIdentifier[1]} ${passageIdentifier[2]}` : title;
       missing.push({
       item: result.item,
       action: actionLabel,
@@ -2491,6 +2504,8 @@ export async function writingPass(input: {
     "",
     "THE RECONCILED ACTION LEDGER (warm and cold passes; this is the truth about the meeting):",
     ledger || "(no substantive actions were recorded)",
+    "REQUIRED VOTE LIST — state one line per vote for the whole-meeting assignment, or file PARTIAL with each omitted vote named as a gap:",
+    ...requiredResultPassages(input.record).map((result) => `${result.item} ${clockLabel(result.startSeconds)}–${clockLabel(result.endSeconds)}: ${result.passage}`),
     "RAW TRANSCRIPT WINDOWS WITH ANNOUNCED RESULTS (read these passages directly; do not rely on the action summary alone):",
     writerDecisionWindowEvidence(input.record) || "(no announced result appears in the retained transcript passages; do not invent a tally)",
     "State each announced result plainly with council attribution. Name a dissenting Council Member only when the raw transcript names that person. If a motion has no announced result in the transcript, say the result was not announced; never infer a tally.",
@@ -2629,7 +2644,7 @@ export async function writingPass(input: {
   const voteResultProblems = Array.isArray(parsed.stories) ? parsed.stories.flatMap((raw, index) => {
     if (!raw || typeof raw !== "object") return [];
     const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
-    return missingAnnouncedResults(story, input.reconcile.actions, input.record).map((result) => ({ story: story.headline, ...result }));
+    return missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting").map((result) => ({ story: story.headline, ...result }));
   }) : [];
   if (lengthProblems.length || citationProblems.length || relationshipProblems.length || voteResultProblems.length) {
     await input.throwIfCancelled();
@@ -2642,7 +2657,7 @@ export async function writingPass(input: {
       writerLengthTarget(input.assignment),
       lengthProblems.length ? "Rewrite the publication draft to the editor's requested word range. Make a substantial editorial cut toward the target, rather than a small trim toward the upper limit. Count the draft words before returning the package. Do not mechanically truncate sentences or remove necessary qualifications." : "Retain the assignment's length and focus while repairing the cited support.",
       voteResultProblems.length
-        ? "Add each omitted announced result only for an agenda item the story already mentions. Use the raw transcript passage below, keep the existing copy and the writer's tone, and make no unrelated coverage or style changes."
+        ? "State each required vote for this assignment, including omitted subjects in a whole-meeting story. Use the raw transcript passage below, keep the existing copy and the writer's tone, and make no unrelated coverage or style changes."
         : "Do not change the writer's tone or make unrelated coverage changes.",
       "Retain useful evidence references and genuine unresolved findings. Keep background research out of publication copy unless it serves the assignment.",
       "Rebuild the claim list to match the revised draft and plain brief. Remove redundant or out-of-scope claim entries whose assertions are absent from both; retain all consequential assertions that remain in the copy and their exact support. The full research and action ledger remain saved separately.",
@@ -2709,7 +2724,7 @@ export async function writingPass(input: {
       }
     }
     const remainingVoteResults = selectedStories.flatMap((story) =>
-      missingAnnouncedResults(story, input.reconcile.actions, input.record).map((result) => ({ story, result })),
+      missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting").map((result) => ({ story, result })),
     );
     if (remainingVoteResults.length) {
       const fallback = "The writer omitted an announced result for an agenda item already in the draft after one revision.";
@@ -2718,7 +2733,8 @@ export async function writingPass(input: {
         const action = result.action.replace(/^(?:approve|adopt|pass)\s+/i, "");
         const reason = `The final result for ${action || `agenda item ${result.item}`} is not stated; the transcript announced that it ${result.result}.`;
         gaps.push(reason);
-        holdStory(story, reason, "Add the announced result from the retained transcript.");
+        held.push({ storyId: story.id, headline: `Required vote: ${action || result.item}`, reason,
+          nextCheck: "Add the announced result from the retained transcript.", unverified: true });
       }
     }
     parsed = { ...selectedPackage, held };
