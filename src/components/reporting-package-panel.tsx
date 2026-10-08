@@ -245,14 +245,14 @@ function PackageBody({
       ) : null}
       {draftId ? (
         <p className="meta">
-          This package sits beside your editable draft. Open it to compare:
+          Open the saved version to compare with your current draft:
           {" "}
-          <Link to="/desk/story/draft/$draftId" params={{ draftId: String(draftId) }} className="inline-link">
+          <Link to="/desk/filed-draft/$draftId" params={{ draftId: String(draftId) }} className="inline-link">
             Open the draft this run filed
           </Link>
           .
         </p>
-      ) : null}
+      ) : <p className="meta">This run filed no draft</p>}
       <ScoreAndReceipt report={report} />
       <FollowUpBox requestId={requestId} latestStatus={latestStatus} onRefresh={onRefresh} />
       <CorrectionBox leadId={leadId} requestId={requestId} onRefresh={onRefresh} />

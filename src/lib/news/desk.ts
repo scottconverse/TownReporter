@@ -4669,6 +4669,21 @@ export const saveReportingCorrection = createServerFn({ method: "POST" })
     );
   });
 
+/** Open the run's exact saved draft, without selecting a newer version. */
+export const getFiledReportingDraft = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => rowId.parse(input))
+  .handler(async ({ context, data: draftId }) => {
+    const sql = await getSql();
+    const [draft] = await sql<Pick<DraftRow, "id" | "lead_id" | "headline" | "dek" | "body">>`
+      select d.id, d.lead_id, d.headline, d.dek, d.body from drafts d
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+        and d.lead_id is not null
+      limit 1
+    `;
+    return draft ?? null;
+  });
+
 /** The structured reporting package for a lead, scoped to this newsroom. */
 export const loadLeadReportingPackage = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
