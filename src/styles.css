@@ -3138,3 +3138,9 @@
 .desk-ltr.astra-modal-layer .astra-msg.warn { color: var(--warn); }
 .desk-ltr.astra-modal-layer .astra-msg.ok { color: var(--ok); }
 .desk-ltr.astra-modal-layer .astra-msg.danger { color: var(--danger); }
+
+/* The explicit all-source action can wrap on a narrow Sources screen. */
+.desk-ltr .sources-general-scan .btn {
+  white-space: normal;
+  max-width: 100%;
+}

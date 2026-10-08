@@ -159,15 +159,6 @@ function SourcesPage() {
   const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
   const { formatListDateTime } = usePaperDateFormatters();
-  /*
-    The right column: what the scan last did, and "Run scan now".
-
-    This is the same `runScan` the Scan screen calls, with the same defaults --
-    no scope, no pack, the desk's own model choice. It is not a second runner.
-    The Scan screen is still where a run is scoped, paged and diagnosed; this
-    panel is the one-press version for an editor who is already looking at the
-    watch list and has just added a source.
-  */
   const scans = useQuery({
     queryKey: ["scans", 1],
     queryFn: () => listScans({ data: { limit: 6, offset: 0 } }),
@@ -225,7 +216,7 @@ function SourcesPage() {
     line: string;
   } | null>(null);
   const runScanNow = useMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: (daily: boolean) => runScan({ data: { daily, modelChoice: scanModel, modelEffort: scanModelEffort } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setScanNotice(res.error);
@@ -810,8 +801,13 @@ function SourcesPage() {
               </p>
             ) : null}
             <div className="astra-panel-acts">
-              <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate()}>
+              <InkButton disabled={runScanNow.isPending || !scanPolicy} onClick={() => runScanNow.mutate(true)}>
                 {runScanNow.isPending ? "Starting…" : "Run scan now"}
+              </InkButton>
+            </div>
+            <div className="astra-panel-acts sources-general-scan mt-3">
+              <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate(false)}>
+                Scan every accepted source ({counts?.accepted ?? sourcesTotal})
               </InkButton>
             </div>
             {/*

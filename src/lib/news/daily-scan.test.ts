@@ -630,23 +630,16 @@ describe("daily scan rotation plan", () => {
     assert.equal(plan.fullPassDays, 2);
   });
 });
-/*
-  THE WIRING PIN. `daily-scan.ts` owns the plan; `daily-scan.server.ts` has to
-  CALL it, or the schedule goes on reading the same fixed dozen. This is the
-  same source-text pin style the trust-boundary suite above uses, because the
-  server module pulls in `jobs.ts` and `@tanstack/react-start` and cannot be
-  imported by a plain `node --test` run.
-
-  THE MUTATION it defends against: reverting the pool read back to
-  `id=any($2::int[])` over the stored selection, which is exactly the old
-  behaviour the brief says not to keep.
-*/
-describe("daily scan server calls the rotation", () => {
-  const server = readFileSync(new URL("./daily-scan.server.ts", import.meta.url), "utf8");
-  it("selects the accepted pool and cuts it with planDailySourceRotation", () => {
-    assert.match(server, /planDailySourceRotation\(/);
-    assert.match(server, /selectedSourceIds: p\.selected_source_ids/);
-    assert.match(server, /cap: p\.source_cap/);
-    assert.match(server, /status='accepted' order by id/);
-  });
+// guards: daily runs must rotate the accepted pool rather than repeatedly reading only the saved picks.
+it("the saved daily plan fills rotating slots from the accepted pool", async () => {
+  const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
+  const sql = await getSql(), room = 9880;
+  await sql.query("insert into newsrooms(id,name) values($1,'Plan fixture')", [room]);
+  const pool = await sql.query<{ id: number }>("insert into sources(user_id,newsroom_id,url,title,kind,tier,status) select 'planner',$1,'https://example.test/'||n,'Source '||n,'page','A','accepted' from generate_series(1,20) n returning id", [room]);
+  const selected = pool.slice(0,12).map(s => s.id);
+  await sql.query("insert into daily_scan_policies(newsroom_id,configured_by_user_id,source_cap,every_day_source_count,selected_source_ids) values($1,'planner',12,7,$2::jsonb)", [room,JSON.stringify(selected)]);
+  const plan = await dailyScanPlan(sql, room);
+  assert.equal(plan.sources.length, 12);
+  assert.deepEqual(plan.sources.slice(0,7).map(s => s.id), selected.slice(0,7));
+  assert.equal(plan.coverage.length, 20);
 });

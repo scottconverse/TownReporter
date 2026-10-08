@@ -979,6 +979,7 @@ export const packDeleteInput = z.object({ packId: rowId });
 export const runScanInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),
   z.object({
+    daily: z.boolean().optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     sectionKey: z.string().max(LIMITS.sectionKey).optional(),

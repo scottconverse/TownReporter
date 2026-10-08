@@ -1422,6 +1422,7 @@ export const runScan = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
+      daily: data.daily,
       sectionKey: data.sectionKey,
       customSourceIds: data.customSourceIds,
       packId: data.packId,
@@ -1878,7 +1879,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
   const [scanRun] = await sql<{
     section_snapshot: string | null;
-  }>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
+    source_snapshot: string | null;
+    policy_snapshot: string | null;
+    source_coverage: unknown;
+  }>`select section_snapshot, source_snapshot, policy_snapshot, source_coverage from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
   const parsedSnapshot = scanRun?.section_snapshot ? JSON.parse(scanRun.section_snapshot) : null;
   const { isCustomScanSnapshot } = await import("./section-types.ts");
   // P0-1: a Custom scan carries its explicit accepted source set in the
@@ -1902,8 +1906,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     : sectionConfig.sections.filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key));
   const allowedTopics = filingSections.map((s) => s.key);
   const topicChoices = filingSections.map((s) => ({ key: s.key, name: s.name, brief: s.brief }));
+  // A manual daily run pins the same source plan as the schedule, while using
+  // the editor's chosen model and the normal manual claim/commit boundaries.
+  const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
+  const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
+    ? JSON.parse(scanRun.source_snapshot) : undefined;
   const allSources =
-    deps.scheduledSnapshot?.sources ??
+    deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- SH-B: the wait a site asked for, and the block it put on us. Both
@@ -2097,7 +2106,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
   failureReceipt.sourcesAttempted = watchSlice.length;
-  sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage);
+  sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
   if (!sourceCoverage.length && sources.length)
     sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
 

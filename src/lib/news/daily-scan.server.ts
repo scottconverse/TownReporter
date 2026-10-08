@@ -1,9 +1,8 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
-import { dailyScanRuntime, planDailySourceRotation, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
-import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
-import { scheduledScanCoverage } from "./scan-source-coverage.ts";
+import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanPlan } from "./daily-scan-plan.server.ts";
 import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
@@ -244,28 +243,8 @@ export async function tickDailyScans(
           A pool read is a larger select but it is the only way the rotation can
           see what is due; it is still one indexed read of a 201-row table.
         */
-        const pool = await tx.query<any>(
-          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,retry_after_note,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
-          [p.newsroom_id],
-        );
-        const preferences = await loadSourceScanPreferences(tx, p.newsroom_id);
-        const preferenceById = new Map(preferences.map((preference) => [preference.sourceId, preference]));
-        const rotation = planDailySourceRotation({
-          facts: pool.map((source: any) => ({
-            ...source,
-            purpose_preference: preferenceById.get(source.id)?.purpose ?? null,
-          })),
-          selectedSourceIds: p.selected_source_ids ?? [],
-          everyDayCount: p.every_day_source_count ?? 8,
-          preferences,
-          cap: p.source_cap,
-        });
-        const sources =
-          rotation.sourceIds.length === pool.length
-            ? pool
-            : rotation.sourceIds
-                .map((id: number) => pool.find((row: { id: number }) => row.id === id))
-                .filter(Boolean);
+        const plan = await dailyScanPlan(tx, p.newsroom_id, p);
+        const sources = plan.sources;
         if (sources.length > p.source_cap)
           throw new Error(
             "Scheduled sources exceed the configured limit. Review the selected accepted sources and resume manually.",
@@ -305,7 +284,7 @@ export async function tickDailyScans(
           tx,
           p.newsroom_id,
           run.id,
-          scheduledScanCoverage(pool, rotation.sourceIds, rotation.deferrals),
+          plan.coverage,
         );
         const [job] = await tx.query<{ id: number }>(
           "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,failover_note,result_json) values($1,$2,'scan',$3,$4,'scheduled','default','queued',$5,$6,$7) returning id",
