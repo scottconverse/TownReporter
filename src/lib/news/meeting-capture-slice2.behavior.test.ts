@@ -47,10 +47,14 @@ function statefulSql(storageRoot: string, channels = [{ channel_url: "https://yo
       if (/on conflict\s*\(newsroom_id,video_id\)\s*do nothing/i.test(text) && rows.has(videoId)) return [];
       const isCaptured = text.includes("'captured'");
       const isFailed = text.includes("'failed'");
+      const isYoutubeBlocked = /youtube_retry_at/i.test(text) && /YouTube rate limited/i.test(text);
       const status = isCaptured ? "captured" : isFailed ? "failed" : "not-captured";
       rows.set(videoId, {
         newsroom_id: newsroomId, video_id: videoId, channel_url: channelUrl, title, published,
-        status, failure_reason: isFailed ? (params[5] as string) : null,
+        status, failure_reason: isYoutubeBlocked ? "YouTube rate limited (HTTP 429)" : isFailed ? (params[5] as string) : null,
+        youtube_retry_day: isYoutubeBlocked ? params[5] : null,
+        youtube_retry_count: isYoutubeBlocked ? params[6] : 0,
+        youtube_retry_at: isYoutubeBlocked ? params[7] : null,
         caption_path: isCaptured ? (params[5] as string) : null,
         caption_format: isCaptured ? (params[6] as string) : null,
         caption_sha256: isCaptured ? (params[7] as string) : null,
@@ -222,7 +226,8 @@ describe("meeting capture Slice 2 second-run suppression", () => {
       withTransaction: state.withTransaction,
     } as never);
 
-    assert.deepEqual(result.failures, ["City Council Meeting: yt-dlp rate limited (HTTP 429)"]);
+    assert.equal(result.failures.length, 1);
+    assert.match(result.failures[0]!, /^City Council Meeting: Capture blocked by YouTube \(too many requests\)\. Next try /);
     assert.equal(result.failed.length, 1);
   });
 });

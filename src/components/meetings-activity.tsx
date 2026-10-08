@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { agendaTitle, meetingAudioIntegrityNotice } from "@/lib/news/desk-copy";
+import { agendaTitle, meetingAudioIntegrityNotice, meetingYoutubeBlockedLine } from "@/lib/news/desk-copy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
@@ -64,7 +64,13 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
         </div>
       ) : null}
 
-      {row.status === "failed" && (
+      {row.status === "failed" && row.youtubeRetryAt ? (
+        <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {meetingYoutubeBlockedLine(row.youtubeRetryAt)}
+        </p>
+      ) : null}
+
+      {row.status === "failed" && !row.youtubeRetryAt && (
         <p role="alert" className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
           {row.failureReason ?? "Capture failed with no reason recorded."}
         </p>

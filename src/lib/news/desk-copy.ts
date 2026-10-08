@@ -4,7 +4,19 @@ export const meetingAudioIntegrityNotice = "The saved audio does not match its r
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
-import { TOPICS } from "../paper.ts";
+import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
+
+export function meetingYoutubeBlockedLine(retryAt: string | Date, now: Date = new Date()): string {
+  const next = retryAt instanceof Date ? retryAt : new Date(retryAt);
+  const nextListDate = formatListDateTime(next, PAPER.timezone);
+  const currentListDate = formatListDateTime(now, PAPER.timezone);
+  const nextDate = nextListDate.slice(0, nextListDate.lastIndexOf(", "));
+  const currentDate = currentListDate.slice(0, currentListDate.lastIndexOf(", "));
+  const nextTry = nextDate === currentDate
+    ? formatClockTime(next, PAPER.timezone)
+    : `${nextDate} at ${formatClockTime(next, PAPER.timezone)}`;
+  return `Capture blocked by YouTube (too many requests). Next try ${nextTry}`;
+}
 
 export function organizationFromUrl(url: string): string {
   try {

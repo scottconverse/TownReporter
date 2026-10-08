@@ -10,6 +10,7 @@ export type MeetingActivityRow = {
   channelUrl: string;
   status: "not-captured" | "captured" | "failed";
   failureReason: string | null;
+  youtubeRetryAt: string | null;
   transcriptionEngine?: string | null;
   transcriptionModel?: string | null;
   captionFormat: string | null;
@@ -61,12 +62,13 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
     const records = await sql.query<{
       video_id: string; title: string; published: string; channel_url: string;
       status: MeetingActivityRow["status"]; failure_reason: string | null;
+      youtube_retry_at: string | null;
       caption_format: string | null; caption_sha256: string | null;
       audio_format: string | null; audio_sha256: string | null; audio_bytes: number | null; audio_trigger_reason: string | null;
       capture_disposition: "provisional" | "final" | null; revision_count: number | null; settled_under_churn: boolean | null;
       forced_recapture: boolean | null;
     }>(
-      `select video_id,title,published,channel_url,status,failure_reason,
+      `select video_id,title,published,channel_url,status,failure_reason,youtube_retry_at,
               caption_format,caption_sha256,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,
               capture_disposition,revision_count,settled_under_churn,forced_recapture
        from meeting_capture_records where newsroom_id=$1 order by captured_at desc nulls last, id desc`,
@@ -152,7 +154,7 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
       try { provenance = JSON.parse(transcript?.provenance_json ?? "{}") ?? {}; } catch { /* older unreadable provenance */ }
       return {
         videoId: r.video_id, title: r.title, published: r.published, channelUrl: r.channel_url,
-        status: r.status, failureReason: r.failure_reason,
+        status: r.status, failureReason: r.failure_reason, youtubeRetryAt: r.youtube_retry_at,
         transcriptionEngine: typeof provenance.engine === "string" ? provenance.engine : null,
         transcriptionModel: typeof provenance.model === "string" ? provenance.model : null,
         captionFormat: r.caption_format, captionSha256: r.caption_sha256,
