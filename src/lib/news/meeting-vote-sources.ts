@@ -84,9 +84,11 @@ export function parseStructuredVotePage(html: string): ParsedVoteRecord[] {
     const seconder = motionText.match(/seconded by\s+([A-Z][^,]*?),/i)?.[1]?.trim() ?? "";
 
     // Tally from the tally-yes / tally-no spans, in order.
-    const yes = Number(block.match(/<span class="tally-yes">\s*(\d+)\s*<\/span>/)?.[1] ?? "");
-    const no = Number(block.match(/<span class="tally-no">\s*(\d+)\s*<\/span>/)?.[1] ?? "");
-    const hasTally = Number.isFinite(yes) && Number.isFinite(no) && block.includes("tally-yes");
+    const yesMatch = block.match(/<span class="tally-yes">\s*(\d+)\s*<\/span>/);
+    const noMatch = block.match(/<span class="tally-no">\s*(\d+)\s*<\/span>/);
+    const yes = yesMatch ? Number(yesMatch[1]) : null;
+    const no = noMatch ? Number(noMatch[1]) : null;
+    const hasTally = yes !== null && no !== null && Number.isFinite(yes) && Number.isFinite(no);
     const tally = hasTally ? `${yes}-${no}` : "";
 
     if (!tally && !motionText) continue;
@@ -155,7 +157,7 @@ export async function fetchStructuredVotesForDate(
     if (!res.ok) {
       return { found: false, reason: `${host} returned HTTP ${res.status} for ${url}`, records: [], url };
     }
-    const records = parseStructuredVotePage(await res.text());
+    const records = parseStructuredVotePage(await res.text()).map((record) => ({ ...record, locator: url }));
     if (!records.length) {
       return { found: false, reason: `${host} page had no structured motion records: ${url}`, records: [], url };
     }
