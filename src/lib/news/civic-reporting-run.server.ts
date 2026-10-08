@@ -1970,10 +1970,6 @@ export async function performReportingWork(
     stories.push(validatePacketSources(rechecked, record));
   }
   const held = guardCorrectionHolds(writing.held, gather.observations, allDocuments);
-  for (const story of stories) {
-    writeWorkspace(workspaceDir, "story-" + story.id + ".md", "# " + story.headline + "\n\n" + story.draft);
-  }
-
   // ---- Stage 8: filing ----------------------------------------------------
   await report(STAGE.filing);
   /*
@@ -2095,6 +2091,9 @@ export async function performReportingWork(
     and the workspace files are additive record-keeping that must never hold the
     fence lock open, and a failure to write one is not a failure to file.
   */
+  for (const story of stories) {
+    writeWorkspace(workspaceDir, "story-" + story.id + ".md", "# " + story.headline + "\n\n" + story.draft);
+  }
   writeWorkspace(workspaceDir, "package.json", serializeReportingPackage(pkg));
   for (const action of actions) {
     await saveReportingObservation(sql, {

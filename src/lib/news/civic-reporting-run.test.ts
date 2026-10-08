@@ -27,7 +27,7 @@ import { evidenceCheckRows } from "./evidence-check-list.ts";
 import { firstSentenceForDek } from "./dek-fallback.ts";
 import { publishBlockers } from "./publish-blockers.ts";
 import type { Sql } from "../db.ts";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { JobCancelledError } from "./jobs.ts";
@@ -416,6 +416,30 @@ describe("performReportingWork: the run", () => {
         reviewingEvidence: false, reconcileActive: false, publishing: false,
       });
       assert.ok(blockers.some((blocker) => blocker.key === "readiness"), "the existing Publish gate remains closed");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not leave a story file when the package transaction rolls back", { skip: !haveMethod }, async () => {
+    // guards: an editor could mistake an unfiled story file for a saved draft.
+    const sql = await getSql();
+    const requestId = await newRequest({ seed_urls: ["https://youtu.be/" + FIXTURE_VIDEO] });
+    const workspaceRoot = mkdtempSync(pathJoin(tmpdir(), "ds-file-rollback-"));
+    try {
+      await assert.rejects(performReportingWork(await claimedJobFor(requestId), {
+        ...methodDeps(),
+        workspaceRoot,
+        ingest: ingestDouble(),
+        runResearch: researchWithCaptureVersionIds(),
+        chat: passChat() as never,
+        probe: async () => ({ ok: true, label: "Fake model", choice: "auto" }) as never,
+        savePackage: (async () => { throw new Error("fixture package save failure"); }) as never,
+      }), /fixture package save failure/);
+      const [count] = await sql<{ n: number }>`select count(*)::int as n from reporting_packages where request_id = ${requestId}`;
+      assert.equal(Number(count!.n), 0);
+      const files = readdirSync(pathJoin(workspaceRoot, "request-" + requestId));
+      assert.deepEqual(files.filter((name) => name === "package.json" || /^story-.*\.md$/.test(name)), []);
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
