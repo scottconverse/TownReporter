@@ -18,12 +18,15 @@ import {
   openDarkInvestigation,
   parkInvestigation,
   queueInvestigation,
+  queuePacket,
+  closeInvestigation,
   queueArtifactOcr,
   refreshBrief,
   reopenParkedInvestigation,
   scanTipSubreddit,
   getTipSubreddit,
   investigationActivity,
+  type InvestigationQueuePacket,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
@@ -79,6 +82,10 @@ import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { DarkFileDialog } from "@/components/dialogs/editor-dialogs";
 import { PageWatchPanel } from "@/components/page-watch-panel";
+import { Dialog } from "@/components/dialog";
+import { FollowUpDialog, type FollowUpDialogInput } from "@/components/follow-up-dialog";
+import { createAiFollowUp, listFollowUpStoryOptions } from "@/lib/news/desk";
+import { checkPageWatch, createPageWatch } from "@/lib/news/page-watch-actions";
 import {
   darkModelChoice,
   modelChoiceLabel,
@@ -578,6 +585,19 @@ function DarkPage() {
       invalidate();
     },
     onError: (error) => showNotice(error instanceof Error ? error.message : "Could not challenge this case."),
+  });
+
+  const closeWithoutFinding = useMutation({
+    mutationFn: (input: { id: number; note: string }) => closeInvestigation({ data: input }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        showNotice(result.error || "Could not close this file.");
+        return;
+      }
+      showNotice("Closed with no finding. The file stays readable.", true);
+      invalidate();
+    },
+    onError: (error) => showNotice(error instanceof Error ? error.message : "Could not close this file."),
   });
 
   const draftSignal = useMutation({
@@ -1254,6 +1274,7 @@ function DarkPage() {
             <InvestigationWorkspace
               openId={openId}
               detail={detail.data ?? undefined}
+              fileWaiting={Boolean(investigations.data?.find((row) => row.id === openId)?.waiting_follow_up || investigations.data?.find((row) => row.id === openId)?.waiting_watch)}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
               keepDisabled={digRunning}
@@ -1304,6 +1325,8 @@ function DarkPage() {
               onClose={() => rememberOpen(null)}
               onPark={() => park.mutate(openId)}
               onPullBack={() => pullBack.mutate(openId)}
+              onCloseWithoutFinding={(note) => closeWithoutFinding.mutate({ id: openId, note })}
+              closePending={closeWithoutFinding.isPending}
               onFollow={(seed) => followLead.mutate(seed)}
               onChallenge={() => challengeCase.mutate(openId)}
               challengePending={challengeCase.isPending}
@@ -1536,6 +1559,7 @@ function WorthSelector({ item, selected, onOpen }: { item: WorthSeed; selected: 
 function InvestigationWorkspace({
   openId,
   detail,
+  fileWaiting,
   pending,
   digging,
   keepDisabled,
@@ -1555,6 +1579,8 @@ function InvestigationWorkspace({
   onKeepDigging,
   onQueue,
   onClose,
+  onCloseWithoutFinding,
+  closePending,
   onPark,
   onPullBack,
   onFollow,
@@ -1567,6 +1593,7 @@ function InvestigationWorkspace({
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
+  fileWaiting: boolean;
   pending: boolean;
   digging: boolean;
   keepDisabled: boolean;
@@ -1586,6 +1613,8 @@ function InvestigationWorkspace({
   onKeepDigging: () => void;
   onQueue: () => void;
   onClose: () => void;
+  onCloseWithoutFinding: (note: string) => void;
+  closePending: boolean;
   onPark: () => void;
   onPullBack: () => void;
   onFollow: (seed: { paste: string; title: string }) => void;
@@ -1597,7 +1626,16 @@ function InvestigationWorkspace({
   ocrModelEffort: ModelEffort | null;
 }) {
   const { formatListDateTime } = usePaperDateFormatters();
+  const qc = useQueryClient();
   const [frN, setFrN] = useState(6);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpNotice, setFollowUpNotice] = useState("");
+  const [watchOpen, setWatchOpen] = useState(false);
+  const [watchPageIds, setWatchPageIds] = useState<number[]>([]);
+  const [watchNotice, setWatchNotice] = useState("");
+  const [queuePreviewOpen, setQueuePreviewOpen] = useState(false);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closeNote, setCloseNote] = useState("");
   useEffect(() => {
     setFrN(6);
   }, [openId]);
@@ -1629,6 +1667,74 @@ function InvestigationWorkspace({
     queryFn: () => investigationActivity({ data: openId }),
     refetchInterval: digging ? 2000 : false,
   });
+  const followUpLeads = useQuery({
+    queryKey: ["follow-up-story-options"],
+    queryFn: () => listFollowUpStoryOptions(),
+    enabled: followUpOpen,
+  });
+  const queuePacketQuery = useQuery({
+    queryKey: ["dark-queue-packet", openId],
+    queryFn: () => queuePacket({ data: openId }),
+    enabled: queuePreviewOpen,
+  });
+  const createFileFollowUp = useMutation({
+    mutationFn: (input: FollowUpDialogInput) => createAiFollowUp({
+      data: {
+        investigationId: openId,
+        what: input.what,
+        agentKind: input.agentKind,
+        schedule: input.schedule,
+        targets: input.targets,
+        leadId: input.leadId,
+        modelChoice: input.modelChoice,
+      },
+    }),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      setFollowUpOpen(false);
+      setFollowUpNotice("AI follow-up started. This file is now waiting on its next check.");
+      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      void qc.invalidateQueries({ queryKey: ["investigations"] });
+      void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+    },
+  });
+  const createFileWatches = useMutation({
+    mutationFn: async (pages: { id: number; title: string; url: string }[]) => {
+      const saved: string[] = [];
+      const failed: string[] = [];
+      for (const page of pages) {
+        try {
+          const result = await createPageWatch({ data: {
+            url: page.url,
+            name: page.title.slice(0, 200),
+            reason: `Watch for changes relevant to: ${detail?.investigation.title ?? "this file"}`,
+            investigationId: openId,
+          } });
+          if (!result.ok) {
+            failed.push(page.title);
+            continue;
+          }
+          if (!result.alreadyExists) await checkPageWatch({ data: result.id });
+          saved.push(page.title);
+        } catch {
+          failed.push(page.title);
+        }
+      }
+      return { saved, failed };
+    },
+    onSuccess: (result) => {
+      if (result.saved.length) {
+        setWatchNotice(result.failed.length
+          ? `Watching ${result.saved.length} ${result.saved.length === 1 ? "page" : "pages"}; ${result.failed.length} could not be added.`
+          : `Watching ${result.saved.length} ${result.saved.length === 1 ? "page" : "pages"}.`);
+        void qc.invalidateQueries({ queryKey: ["page-watches"] });
+        void qc.invalidateQueries({ queryKey: ["investigations"] });
+        void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+        void qc.invalidateQueries({ queryKey: ["investigation-activity", openId] });
+      }
+      if (!result.failed.length) setWatchOpen(false);
+    },
+  });
   const fileJob = (kind: "dark" | "brief" | "artifact-ocr" | "challenge", subjectId: number | null) =>
     subjectId == null
       ? null
@@ -1644,6 +1750,28 @@ function InvestigationWorkspace({
   const inv = detail?.investigation;
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
+  const watchPages = artifacts
+    .filter((artifact) => /^https?:\/\//i.test(artifact.url))
+    .map((artifact) => ({ id: artifact.id, title: editorTitle(artifact.title) || organizationFromUrl(artifact.url) || "Source page", url: artifact.url }));
+  const nextStep = String(detail?.brief?.next ?? "").toLowerCase();
+  const recommendedDecision = /queue|draft (?:the )?story|send to/.test(nextStep)
+    ? "queue"
+    : /wait|watch|monitor|check again/.test(nextStep)
+      ? "watch"
+      : /close|no finding/.test(nextStep)
+        ? "close"
+        : /keep|continue|investigat|research/.test(nextStep)
+          ? "continue"
+          : "follow-up";
+  const flowStep = inv?.status === "closed" || queuedLead != null || fileWaiting
+    ? "Decided"
+    : digging
+      ? "Investigating"
+      : detail?.latestChallenge
+        ? "Challenged"
+        : detail?.run
+          ? "Case file"
+          : "Investigating";
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
   // identical to a working one (Dark Desk F6).
@@ -1829,6 +1957,15 @@ function InvestigationWorkspace({
       <div>
         <p className="astra-label">The question</p>
         <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
+        <p className="astra-flow" aria-label={`Flow: Question complete, ${flowStep}`}>
+          <span>Question ✓</span><span aria-hidden="true"> · </span>
+          {["Investigating", "Case file", "Challenged", "Decided"].map((step, index) => (
+            <span key={step}>
+              <span className={flowStep === step ? "astra-flow-current" : undefined} aria-current={flowStep === step ? "step" : undefined}>{step}</span>
+              {index < 3 ? <span aria-hidden="true"> · </span> : null}
+            </span>
+          ))}
+        </p>
       </div>
       <div>
         <p className="astra-label">Ordinary explanation to rule out</p>
@@ -2033,87 +2170,149 @@ function InvestigationWorkspace({
         </div>
       </div>
 
-      {/*
-        Decide: the file's verbs, in the drawing's order. "Start an AI
-        follow-up" is the drawn primary. Follow-ups are lane 2's screen
-        (/desk/follow-ups); there is no add-follow-up component on this base,
-        so the drawn primary links there rather than pretending to start one
-        in place. Everything else is the same action it was before the
-        restyle, with the same label.
-      */}
+      {/* The five editor decisions stay on the file. */}
       <div className="astra-panel decide">
         <div className="astra-case-h">
           <p className="astra-label">Decide</p>
           <p className="astra-note">It digs; it never prints.</p>
         </div>
-        {/*
-          The drawing's Decide is the five verbs and the sentence under them.
-          Which model digs is a dial, not a verb, and it lives with the other
-          dials in "How hard to dig" below the file -- see the panel's own
-          comment. Nothing became unreachable: the state behind it is the same
-          one this route has always held, and the picker writes it from there.
-        */}
-        {/*
-          FB7, item 2. The dig round's card, under the verb that started it.
-
-          Table B's row for Keep digging was "LAZY BAR -- a whole dig round, no
-          card, no cancel": the round can run for minutes and spend real money,
-          and all it drew was the button reading "Reading…". The card carries
-          the stage list, the percent, the elapsed clock, the stall rule's
-          Keep waiting, and Cancel -- which the worker already honours (it
-          stops at its next hop boundary).
-        */}
         {digJob ? (
           <div className="dark-job-card">
             <DeskJobCard job={digJob} />
           </div>
         ) : null}
-        <div className="astra-panel-acts">
-          <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
-            {digging ? "Reading…" : "Keep digging"}
+        {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
+        {stopControl.visible ? (
+          <InkButton tone="quiet-danger" disabled={stopControl.disabled} onClick={onStopDig}>
+            {stopControl.label}
           </InkButton>
-          {/*
-            Unit U25, B4. Only while a run is in flight, and it asks rather
-            than kills: the worker stops at its next hop boundary, and the
-            sentence under the strip says so. Before this there was no press
-            here at all -- the walkthrough scanned every button and summary on
-            this page for /stop|pause|halt|cancel|abandon/ and found none.
-          */}
-          {stopControl.visible ? (
-            <InkButton tone="quiet" disabled={stopControl.disabled} onClick={onStopDig}>
-              {stopControl.label}
-            </InkButton>
-          ) : null}
-          <Link to="/desk/follow-ups" className="btn solid">
+        ) : null}
+        <div className="astra-panel-acts" aria-label="File decisions">
+          <InkButton tone={recommendedDecision === "continue" ? "solid" : "quiet"} disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
+            Keep investigating
+          </InkButton>
+          <InkButton tone={recommendedDecision === "follow-up" ? "solid" : "quiet"} disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
             Start an AI follow-up
-          </Link>
-          <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
-            {parkPending ? "Setting aside…" : "Set aside"}
           </InkButton>
-          {inv?.status === "closed" ? (
-            <InkButton tone="quiet" onClick={onPullBack}>Pull back</InkButton>
-          ) : null}
-          {queuedLead != null ? (
-            <Link
-              to="/desk/story/$leadId"
-              params={{ leadId: String(queuedLead) }}
-              className="btn queue-done"
-            >
-              {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
-            </Link>
-          ) : (
-            <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
-              {queuePending ? "Sending…" : "Send to the queue"}
-            </InkButton>
-          )}
-          <InkButton tone="quiet" onClick={onClose}>
-            Close file
+          <InkButton tone={recommendedDecision === "watch" ? "solid" : "quiet"} disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
+            Wait and watch
+          </InkButton>
+          <InkButton tone={recommendedDecision === "queue" ? "solid" : "quiet"} disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
+            {queuePending ? "Sending…" : "Send to the queue"}
+          </InkButton>
+          <InkButton tone={recommendedDecision === "close" ? "solid" : "quiet"} disabled={keepDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
+            Close: no finding
           </InkButton>
         </div>
+        {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}
+        {watchNotice ? <p className="note" role="status">{watchNotice}</p> : null}
         <p className="astra-note">
-          Nothing here prints. “Send to the queue” files a lead for you to review.
+          Publication remains an editorial decision.
         </p>
+        <details className="of-trail">
+          <summary>More file actions</summary>
+          <div className="astra-panel-acts">
+            <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
+            {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
+            <InkButton tone="quiet" onClick={onClose}>Close view</InkButton>
+          </div>
+        </details>
       </div>
+
+      {followUpOpen ? (
+        <FollowUpDialog
+          leads={followUpLeads.data ?? []}
+          initial={{
+            what: unanswered[0] ?? "",
+            agentKind: watchPages.length ? "recheck" : "search",
+            targets: watchPages.slice(0, 3).map((page) => page.url).join("\n"),
+            leadId: null,
+            leadHeadline: null,
+            modelChoice: "auto",
+          }}
+          onClose={() => setFollowUpOpen(false)}
+          onSubmit={(input) => createFileFollowUp.mutate(input)}
+          pending={createFileFollowUp.isPending}
+          error={createFileFollowUp.error instanceof Error
+            ? createFileFollowUp.error.message
+            : createFileFollowUp.data?.ok === false
+              ? createFileFollowUp.data.error
+              : null}
+        />
+      ) : null}
+
+      <Dialog
+        open={watchOpen}
+        onClose={() => setWatchOpen(false)}
+        title="Wait and watch"
+        subtitle="Choose public pages already in this file. Their watches stay linked to the file."
+        primaryLabel="Start watching"
+        primaryPendingLabel="Saving watches…"
+        pending={createFileWatches.isPending}
+        primaryDisabled={!watchPageIds.length || createFileWatches.isPending}
+        onPrimary={() => createFileWatches.mutate(watchPages.filter((page) => watchPageIds.includes(page.id)))}
+        footNote="The file moves to Waiting while its pages are watched."
+      >
+        {watchPages.length ? (
+          <div className="fu-form">
+            {watchPages.map((page) => (
+              <label key={page.id} className="fu-field">
+                <span className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={watchPageIds.includes(page.id)}
+                    onChange={(event) => setWatchPageIds((current) => event.target.checked
+                      ? [...current, page.id]
+                      : current.filter((id) => id !== page.id))}
+                  />
+                  <span><b>{page.title}</b><br /><span className="meta astra-case-v">{page.url}</span></span>
+                </span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p role="status">No captured public pages are ready to watch. Keep investigating to add pages to this file.</p>
+        )}
+        {createFileWatches.error instanceof Error ? <p className="fu-err" role="alert">{createFileWatches.error.message}</p> : null}
+        {createFileWatches.data?.failed.length ? <p className="fu-err" role="alert">Some pages could not be added. Retry the remaining pages or close this window.</p> : null}
+      </Dialog>
+
+      <Dialog
+        open={queuePreviewOpen}
+        onClose={() => setQueuePreviewOpen(false)}
+        title="Send to the queue"
+        subtitle="Review the AI-prepared packet before you hand this file to the reporting queue."
+        primaryLabel="Send to the queue"
+        primaryPendingLabel="Sending…"
+        pending={queuePending}
+        primaryDisabled={!queuePacketQuery.data || queuePending}
+        onPrimary={() => { setQueuePreviewOpen(false); onQueue(); }}
+        footNote="Publication remains an editorial decision."
+      >
+        {queuePacketQuery.isPending ? <p role="status">Preparing the file packet…</p> : null}
+        {queuePacketQuery.isError ? <p className="fu-err" role="alert">Could not prepare the queue packet. Close this window and try again.</p> : null}
+        {queuePacketQuery.data ? <QueuePacketPreview packet={queuePacketQuery.data} /> : null}
+      </Dialog>
+
+      <Dialog
+        open={closeDialogOpen}
+        onClose={() => setCloseDialogOpen(false)}
+        title="Close: no finding"
+        subtitle="The file stays readable in Set aside. Add a reason if there is one."
+        primaryLabel={closeNote.trim() ? "Close the file" : "Close, no reason"}
+        primaryPendingLabel="Closing file…"
+        pending={closePending}
+        onPrimary={() => { onCloseWithoutFinding(closeNote.trim()); setCloseDialogOpen(false); }}
+        altLabel={closeNote.trim() ? "Close, no reason" : undefined}
+        altDisabled={closePending}
+        onAlt={() => { onCloseWithoutFinding(""); setCloseDialogOpen(false); }}
+        footNote="This records a no-finding decision and keeps the research available."
+      >
+        <label className="fu-field">
+          <span>Reason (optional)</span>
+          <textarea className="fu-input" maxLength={500} value={closeNote} onChange={(event) => setCloseNote(event.target.value)} />
+        </label>
+      </Dialog>
 
       <details className="of-trail astra-records">
         <summary>The file's records ▸</summary>
@@ -2270,6 +2469,42 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   const raw = (method ?? "").trim();
   if (!/^(?:ocr(?:-pages(?:-partial)?)?|needs-ocr):/.test(raw)) return null;
   return describeExtractionMethod(raw);
+}
+
+function QueuePacketPreview({ packet }: { packet: InvestigationQueuePacket }) {
+  const safeSource = (url: string | null) => /^https?:\/\//i.test(url ?? "")
+    ? <a className="inline-link" href={url!} target="_blank" rel="noreferrer">{organizationFromUrl(url!) || "Source record"}</a>
+    : <span className="meta">Source record</span>;
+  return (
+    <div className="fu-form">
+      <section>
+        <p className="side-label">Suggested headline</p>
+        <p>{plainEditorText(packet.suggestedHeadline)}</p>
+      </section>
+      <section>
+        <p className="side-label">Evidence</p>
+        {packet.evidence.length ? packet.evidence.map((item, index) => (
+          <p key={`evidence-${index}`} className="side-item">{plainEditorText(item.text)} — {safeSource(item.source)}</p>
+        )) : <p className="meta">No sourced evidence is attached yet.</p>}
+      </section>
+      <section>
+        <p className="side-label">Uncertainties</p>
+        {packet.uncertainties.length ? packet.uncertainties.map((item, index) => <p key={`uncertainty-${index}`} className="side-item">{plainEditorText(item)}</p>) : <p className="meta">None listed.</p>}
+      </section>
+      <section>
+        <p className="side-label">Contradictions</p>
+        {packet.contradictions.length ? packet.contradictions.map((item, index) => (
+          <p key={`contradiction-${index}`} className="side-item">
+            {plainEditorText(item.first.text)}; another record says {plainEditorText(item.second.text)}
+          </p>
+        )) : <p className="meta">No captured records disagree yet.</p>}
+      </section>
+      <section>
+        <p className="side-label">What would kill the story</p>
+        {packet.whatWouldDisproveIt.length ? packet.whatWouldDisproveIt.map((item, index) => <p key={`disprove-${index}`} className="side-item">{plainEditorText(item)}</p>) : <p className="meta">No disconfirming fact is listed yet.</p>}
+      </section>
+    </div>
+  );
 }
 
 function OpenedRecords({
