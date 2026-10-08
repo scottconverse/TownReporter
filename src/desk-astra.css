@@ -6954,7 +6954,16 @@
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.desk-ltr.astra .astra-deep-file { gap: 16px; }
+.desk-ltr.astra .astra-deep-file { gap: 8px; }
+.desk-ltr.astra .astra-deep-file > .model-picker { margin: 0; }
+.desk-ltr.astra .astra-deep-file > .model-picker > .model-picker-help,
+.desk-ltr.astra .astra-deep-file > .model-picker > .model-picker > .model-picker-help {
+  max-height: 1.35em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-deep-file .astra-bound { padding-top: 8px; padding-bottom: 8px; }
 .desk-ltr.astra .astra-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .desk-ltr.astra .astra-plain > li {
   display: flex;
@@ -7085,7 +7094,7 @@
 
 /* The open file sits on the page background, not on the rail's panel fill. */
 .desk-ltr.astra .astra-deep-file {
-  padding: 24px;
+  padding: 16px;
   background: var(--bg);
 }
 

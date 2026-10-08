@@ -1768,7 +1768,7 @@ function InvestigationWorkspace({
   const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
 
   const activityAll = activityQuery.data ?? [];
-  const activityRows = activityAll.slice(-8);
+  const activityRows = activityAll.slice(-5);
   const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 
   // The saved scope is file-specific; the newsroom place supplies only its
@@ -1887,6 +1887,7 @@ function InvestigationWorkspace({
         effort={modelEffort}
         onEffortChange={onModelEffort}
         disabled={digging || keepDisabled}
+        compact
       />
 
       {digJob || failedDarkJob ? (
