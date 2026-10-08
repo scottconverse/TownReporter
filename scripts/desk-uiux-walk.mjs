@@ -14,6 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { prepareDarkDeskCapture } from "./desk-uiux-dark-case.mjs";
 
 const base = checkedUrl(process.env.UIWALK_BASE_URL || "http://127.0.0.1:3491").replace(/\/$/, "");
 const artifactDir = resolve(process.env.UIWALK_ARTIFACT_DIR || "../desk-uiux-walk");
@@ -931,6 +932,12 @@ async function captureSurface(page, scenario, surface) {
     timeout: 30_000,
   });
   await establishIdentity(page, surface, scenario);
+  if (surface.name === "Dark Desk") {
+    // A fresh desk hides the loading rail when its empty query resolves.
+    // Settle that state before recording numeric control positions to scroll.
+    await prepareDarkDeskCapture(page);
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+  }
   if (surface.name === "Queue") {
     await page.waitForFunction(
       () => document.querySelector('.queue-sel select[aria-label="Section"]')?.options.length > 1,
