@@ -397,13 +397,16 @@ describe("editor copy", () => {
     assert.ok(activity.every((line) => line.tone === "failure"));
   });
 
+  // guards: an editor could follow outdated guidance on the Dark Desk
   it("explains a stop after a round without hop or frontier", () => {
     const msg = editorPauseReason(
       "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.",
     );
     assert.ok(msg);
     assert.match(msg!, /65 open follow-up entries remain/);
-    assert.match(msg!, /Keep digging/);
+    assert.match(msg!, /Click Keep investigating/);
+    assert.match(msg!, /Click Keep investigating/);
+    assert.doesNotMatch(msg!, /Click Keep digging/);
     assert.match(msg!, /not an error/i);
     assert.doesNotMatch(msg!, /frontier/i);
     assert.doesNotMatch(msg!, /\bhop\b/i);
@@ -421,7 +424,7 @@ describe("editor copy", () => {
     assert.doesNotMatch(mostlyBlocked!, /that is normal/i);
     assert.match(mostlyBlocked!, /7 of 10/);
     assert.match(mostlyBlocked!, /blocks, paywalls, or empty pages/i);
-    assert.match(mostlyBlocked!, /Keep digging/);
+    assert.match(mostlyBlocked!, /Click Keep investigating/);
   });
 
   it("defaults to the normal reassurance when no capture stats are given", () => {

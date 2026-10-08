@@ -145,7 +145,7 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
       : event.failureReason ? editorError(event.failureReason) : null;
     const safeReason = mapped && event.failureReason && mapped !== plainEditorText(event.failureReason)
       && !/\bhop\b|synthesis|— ok|frontier|entries|model call/i.test(mapped)
-      ? mapped.replace(/Click Keep digging/gi, "choose Keep investigating")
+      ? plainSystemCopy(mapped)
       : null;
     return { text: safeReason ? `Could not finish: ${safeReason}` : "Could not finish — retry", tone: "failure" };
   }
@@ -341,13 +341,14 @@ export function editorPauseReason(
     const n = budget[1];
     if (isMostlyBlocked(captureStats)) {
       const blocked = captureStats!.total - captureStats!.ok;
-      return `Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep digging and it will try different pages.`;
+      return plainSystemCopy(`Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep digging and it will try different pages.`);
     }
-    return `Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
+    return plainSystemCopy(`Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`);
   }
   const copy = editorError(raw);
-  return copy && copy !== plainEditorText(raw)
-    ? copy
+  const displayCopy = copy ? plainSystemCopy(copy) : null;
+  return displayCopy && displayCopy !== plainEditorText(raw)
+    ? displayCopy
     : "Could not finish this round. What was found is still on the file.";
 }
 
@@ -2596,6 +2597,11 @@ export function humanFrontierLabel(label: string): string {
   const t = replaceRawUrls(plainEditorText(cleaned || label.trim()));
   if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || "Public page";
   return t;
+}
+
+/** Translate system-authored Dark Desk guidance at the point it is displayed. */
+export function plainSystemCopy(text: string): string {
+  return text.replace(/Click Keep digging/gi, "Click Keep investigating");
 }
 
 /*
