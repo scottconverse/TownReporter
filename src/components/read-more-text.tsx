@@ -1,14 +1,21 @@
 import { useEffect, useState } from "react";
-import { characterLength, pdfReadMarker } from "@/lib/news/pdf-read";
+import {
+  characterLength,
+  documentReadFailureReason,
+  logDocumentReadFailure,
+  pdfReadMarker,
+} from "@/lib/news/pdf-read";
 
 export function ReadMoreText({
   text,
   totalCharacters,
   onReadRest,
+  readError,
 }: {
   text: string;
   totalCharacters: number;
   onReadRest: (offset: number) => Promise<string>;
+  readError?: unknown;
 }) {
   const [shown, setShown] = useState(text);
   const [pending, setPending] = useState(false);
@@ -19,6 +26,9 @@ export function ReadMoreText({
     setShown(text);
     setFailed(false);
   }, [text]);
+  useEffect(() => {
+    if (readError != null) logDocumentReadFailure(readError);
+  }, [readError]);
 
   async function readRest() {
     setPending(true);
@@ -26,11 +36,20 @@ export function ReadMoreText({
     try {
       const next = await onReadRest(read);
       if (next) setShown((current) => current + next);
-    } catch {
+    } catch (error) {
+      logDocumentReadFailure(error);
       setFailed(true);
     } finally {
       setPending(false);
     }
+  }
+
+  if (readError != null) {
+    return (
+      <p className="note err" role="alert">
+        Could not read this document ({documentReadFailureReason(readError)}).
+      </p>
+    );
   }
 
   return (
@@ -50,7 +69,7 @@ export function ReadMoreText({
       ) : null}
       {failed ? (
         <p className="note err" role="alert">
-          Could not read the next part. Try again.
+          Could not read this document ({documentReadFailureReason("read-rest-failed")}).
         </p>
       ) : null}
     </>

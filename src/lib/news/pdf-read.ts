@@ -13,6 +13,19 @@ export function pdfReadMarker(read: number, total: number): string | null {
     : null;
 }
 
+function readErrorText(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return typeof error === "string" ? error : "Unknown document read error";
+}
+
+export function documentReadFailureReason(_error: unknown): string {
+  return "the saved copy could not be opened";
+}
+
+export function logDocumentReadFailure(error: unknown): void {
+  console.error("[document reader] Could not read this document:", readErrorText(error));
+}
+
 export function pdfTextPreview(text: string, totalCharacters = characterLength(text)) {
   const characters = Array.from(text);
   const preview = characters.slice(0, PDF_READ_CHUNK_CHARACTERS).join("");

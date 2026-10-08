@@ -41,5 +41,27 @@ test("a long PDF shows its cut and appends the next read when pressed", async ()
   assert.equal(requestedOffset, PDF_READ_CHUNK_CHARACTERS);
   assert.equal(container.querySelector(".read-full").textContent.length, 80_000);
   assert.match(container.textContent, /Read 80,000 of 212,000 characters/);
+
+  const rawFailure = new Error("invalid escape string");
+  const logged = [];
+  const originalConsoleError = console.error;
+  console.error = (...parts) => logged.push(parts.map(String).join(" "));
+  try {
+    await act(async () =>
+      root.render(
+        React.createElement(ReadMoreText, {
+          text: "excerpt kept only for context",
+          totalCharacters: 30_000,
+          readError: rawFailure,
+          onReadRest: async () => "",
+        }),
+      ),
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.match(container.textContent, /Could not read this document \(.+\)/);
+  assert.doesNotMatch(container.textContent, /invalid escape string|excerpt kept only for context/);
+  assert.ok(logged.some((line) => line.includes("invalid escape string")));
   await act(async () => root.unmount());
 });

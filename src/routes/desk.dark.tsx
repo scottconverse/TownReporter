@@ -2708,6 +2708,18 @@ function OpenedRecords({
           ) : null}
           {body.isPending && !body.data ? (
             <p className="meta">Opening the captured copy…</p>
+          ) : body.isError && isPdfCapture({
+            url: selected.url,
+            retained_pdf: body.data?.retained_pdf ?? selected.retained_pdf,
+            extraction_method: selected.extraction_method,
+          }) ? (
+            <ReadMoreText
+              key={selected.id}
+              text=""
+              totalCharacters={0}
+              readError={body.error}
+              onReadRest={async () => ""}
+            />
           ) : cap?.kind === "blocked" ? (
             <p className="note err">{cap.note}</p>
           ) : cap?.kind === "empty" ? (
@@ -2725,9 +2737,11 @@ function OpenedRecords({
               key={selected.id}
               text={body.data?.full_text ?? cap.body}
               totalCharacters={body.data?.total_characters ?? Array.from(cap.body).length}
-              onReadRest={async (offset) =>
-                (await getArtifact({ data: { id: selected.id, offset } }))?.full_text ?? ""
-              }
+              onReadRest={async (offset) => {
+                const next = await getArtifact({ data: { id: selected.id, offset } });
+                if (!next) throw new Error("No saved document was returned");
+                return next.full_text;
+              }}
             />
           ) : cap?.body ? (
             <div className="read-full">{cap.body}</div>
