@@ -130,13 +130,20 @@ export function DeskShell({
   const [newStoryOpen, setNewStoryOpen] = useState(false);
   const [mobile, setMobile] = useState(false);
   const menuButton = useRef<HTMLButtonElement>(null);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const hash = useRouterState({ select: (s) => s.location.hash });
   useEffect(() => {
-    const media = window.matchMedia("(max-width: 700px)");
-    const changed = () => setMobile(media.matches);
+    const media = window.matchMedia("(max-width: 960px)");
+    const phone = window.matchMedia("(max-width: 700px)");
+    const changed = () => setMobile(phone.matches || (pathname === "/desk/dark" && media.matches));
     changed();
     media.addEventListener("change", changed);
-    return () => media.removeEventListener("change", changed);
-  }, []);
+    phone.addEventListener("change", changed);
+    return () => {
+      media.removeEventListener("change", changed);
+      phone.removeEventListener("change", changed);
+    };
+  }, [pathname]);
   useEffect(() => {
     if (!mobile || !menuOpen) return;
     const sidebar = document.getElementById("desk-navigation");
@@ -167,8 +174,6 @@ export function DeskShell({
   }, [mobile, menuOpen]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const hash = useRouterState({ select: (s) => s.location.hash });
   /*
     THE RUNNING BOX'S DATA, and the nav's counts.
 

@@ -2565,6 +2565,57 @@
     order: 0;
   }
 }
+/* The Dark Desk drawing switches to a menu bar before the shared desk does.
+   At tablet width, that gives its two-column rail and file enough room while
+   keeping the other desk screens on their existing desktop navigation. */
+@media (min-width: 701px) and (max-width: 960px) {
+  .desk-ltr.astra[data-desk-page="dark"] {
+    display: block;
+    --desk-nav-w: 0px;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar {
+    position: fixed;
+    inset: 0 auto 0 -255px;
+    width: 240px;
+    height: 100dvh;
+    transition: left var(--motion-fast);
+    border-right: 1px solid var(--line);
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar.is-open { left: 0; }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar-close {
+    display: flex;
+    align-self: flex-end;
+    margin-top: -14px;
+    margin-bottom: 5px;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-scrim {
+    position: fixed;
+    inset: 0;
+    background: #172c385a;
+    border: 0;
+    z-index: 35;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-topbar {
+    display: flex;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    height: 60px;
+    gap: 9px;
+    padding: 0 26px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-menu {
+    display: inline-flex;
+    flex: none;
+    padding: 0 12px;
+    gap: 6px;
+  }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-breadcrumb { display: none; }
+  .desk-ltr.astra[data-desk-page="dark"] .deskmain { padding: 28px 32px 60px; }
+}
 @media (max-width: 700px) {
   .desk-ltr.astra #draft-batch {
     display: block;
@@ -6708,7 +6759,7 @@
 }
 .desk-ltr.astra .astra-split-deep.astra-empty-desk { display: block; }
 .desk-ltr.astra .astra-split-deep.astra-empty-desk > .astra-piles { display: none; }
-@container dark-desk (min-width: 900px) {
+@container dark-desk (min-width: 820px) {
   .desk-ltr.astra .astra-split-deep { grid-template-columns: 320px minmax(0, 1fr); }
   .desk-ltr.astra .astra-piles { border-right: 1px solid var(--line); border-bottom: 0; }
 }
