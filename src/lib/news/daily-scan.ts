@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getSql, type Sql } from "../db.ts";
+import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { deskMiddleware, assertOwner } from "./desk-auth.ts";
 import { getPaperConfig } from "./paper-settings.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
@@ -38,6 +38,7 @@ export type DailyScanPolicy = {
   runtime: DailyScanRuntime;
   modelEffort: ModelEffort | null;
   sourceCap: number;
+  everyDaySourceCount: number;
   selectedSourceIds: number[];
   revision: number;
   updatedAt: string | null;
@@ -72,6 +73,7 @@ export type SaveDailyScanPolicyInput = {
   runtime: DailyScanRuntime;
   modelEffort: ModelEffort | null;
   sourceCap: number;
+  everyDaySourceCount: number;
   selectedSourceIds: number[];
   expectedRevision: number;
 };
@@ -91,6 +93,15 @@ export type DailyScanPolicyResult =
     };
 const TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const CAP = 12;
+
+/** Additive schema compatibility for desks that saved a schedule before the
+ * daily and rotating source split was introduced. */
+export async function ensureDailyScanPolicySchema(sqlInput?: Sql) {
+  const sql = sqlInput ?? await getSql();
+  await ensureSchemaOnce(sql, "daily-scan-fixed-source-count", [
+    "alter table daily_scan_policies add column if not exists every_day_source_count integer not null default 8",
+  ]);
+}
 /** Why a paused row says it is paused: the one reason this code writes. */
 const PAUSED_BY_OWNER = "Paused by the owner.";
 const LEGACY_DAILY_SCAN_RUNTIMES = new Set<string>([
@@ -152,6 +163,12 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "auto",
     modelEffort: null,
     sourceCap: typeof value.sourceCap === "number" ? value.sourceCap : Number.NaN,
+    everyDaySourceCount:
+      typeof value.everyDaySourceCount === "number"
+        ? value.everyDaySourceCount
+        : typeof value.sourceCap === "number"
+          ? Math.max(0, Math.min(8, Math.floor(value.sourceCap)))
+          : 8,
     selectedSourceIds: sourceIds.filter((id): id is number => typeof id === "number"),
     expectedRevision:
       typeof value.expectedRevision === "number" ? value.expectedRevision : Number.NaN,
@@ -166,6 +183,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     typeof value.runtime !== "string" ||
     !validStoredDailyScanRuntime(value.runtime) ||
     typeof value.sourceCap !== "number" ||
+    (value.everyDaySourceCount !== undefined && typeof value.everyDaySourceCount !== "number") ||
     !Array.isArray(value.selectedSourceIds) ||
     input.selectedSourceIds.length !== sourceIds.length ||
     !Number.isInteger(input.expectedRevision) ||
@@ -182,6 +200,7 @@ export async function persistDailyScanPolicy(
   data: SaveDailyScanPolicyInput,
   selectedSourceIds: number[],
 ): Promise<boolean> {
+  await ensureDailyScanPolicySchema(sql);
   const params = [
     newsroomId,
     data.enabled,
@@ -189,17 +208,18 @@ export async function persistDailyScanPolicy(
     data.runtime,
     data.modelEffort,
     data.sourceCap,
+    data.everyDaySourceCount ?? UNSAVED_DAILY_SCAN_POLICY.everyDaySourceCount,
     JSON.stringify(selectedSourceIds),
     userId,
   ];
   const rows =
     data.expectedRevision === 0
       ? await sql.query(
-          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,false,null,$3,$4,$5,$6,$7::jsonb,1,now(),$8) on conflict(newsroom_id) do nothing returning revision",
+          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,every_day_source_count,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,false,null,$3,$4,$5,$6,$7,$8::jsonb,1,now(),$9) on conflict(newsroom_id) do nothing returning revision",
           params,
         )
       : await sql.query(
-          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,model_effort=$5,source_cap=$6,selected_source_ids=$7::jsonb,configured_by_user_id=$8,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$9 returning revision",
+          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,model_effort=$5,source_cap=$6,every_day_source_count=$7,selected_source_ids=$8::jsonb,configured_by_user_id=$9,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$10 returning revision",
           [...params, data.expectedRevision],
         );
   return Boolean(rows[0]);
@@ -293,6 +313,7 @@ export const UNSAVED_DAILY_SCAN_POLICY = {
   runtime: "auto",
   modelEffort: null,
   sourceCap: CAP,
+  everyDaySourceCount: 8,
   selectedSourceIds: [],
   revision: 0,
 } as const;
@@ -302,6 +323,7 @@ export async function readDailyScanPolicy(
   now = new Date(),
 ): Promise<DailyScanPolicy> {
   const sql = await getSql();
+  await ensureDailyScanPolicySchema(sql);
   const paper = await getPaperConfig(newsroomId);
   const [p] = await sql.query<any>("select * from daily_scan_policies where newsroom_id=$1", [
     newsroomId,
@@ -343,6 +365,7 @@ export async function readDailyScanPolicy(
     runtime: dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime),
     modelEffort: modelEffort(dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime), p?.model_effort),
     sourceCap: p?.source_cap ?? UNSAVED_DAILY_SCAN_POLICY.sourceCap,
+    everyDaySourceCount: p?.every_day_source_count ?? UNSAVED_DAILY_SCAN_POLICY.everyDaySourceCount,
     selectedSourceIds: p?.selected_source_ids ?? [...UNSAVED_DAILY_SCAN_POLICY.selectedSourceIds],
     revision: p?.revision ?? UNSAVED_DAILY_SCAN_POLICY.revision,
     updatedAt: p?.updated_at ? String(p.updated_at) : null,
@@ -393,12 +416,15 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
       !validDailyScanRuntime(data.runtime) ||
       !Number.isInteger(data.sourceCap) ||
       data.sourceCap < 1 ||
-      data.sourceCap > 12
+      data.sourceCap > 12 ||
+      !Number.isInteger(data.everyDaySourceCount) ||
+      data.everyDaySourceCount < 0 ||
+      data.everyDaySourceCount > data.sourceCap
     )
       return {
         ok: false,
         code: "invalid-config",
-        error: "Choose a valid time, runtime, and source limit from 1 to 12.",
+      error: "Choose a valid time, runtime, and source limit from 1 to 12, with no more daily sources than the limit.",
       };
     const ids = [...new Set(data.selectedSourceIds.filter(Number.isInteger))];
     if (ids.length !== data.selectedSourceIds.length)
@@ -679,6 +705,8 @@ export type DailyRotationInput = {
   facts: readonly SourceHealthFacts[];
   /** The editor's stored selections, in order. Read first, never dropped. */
   selectedSourceIds: readonly number[];
+  /** How many saved picks run every day; remaining slots rotate through the pool. */
+  everyDayCount?: number;
   /** Per-source priority the editor set on the Sources screen, if any. */
   preferences?: readonly SourcePreference[];
   /** The policy's cap. Clamped to the schema's 1..12 in `clean*`; read here. */
@@ -709,6 +737,10 @@ export type DailyRotationInput = {
 export function planDailySourceRotation(input: DailyRotationInput): DailyRotationPlan {
   const nowMs = input.nowMs ?? Date.now();
   const budget = Math.max(1, Math.min(CAP, Math.floor(input.cap) || CAP));
+  const everyDayCount =
+    input.everyDayCount === undefined
+      ? input.selectedSourceIds.length
+      : Math.max(0, Math.min(budget, Math.floor(input.everyDayCount)));
   const byId = new Map(input.facts.map((f) => [f.id, f]));
 
   // The rotation over the WHOLE pool decides eligibility (who is parked/blocked)
@@ -734,7 +766,10 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
     seen.add(id);
     selectedAll.push(id);
   }
-  const selectedInPool = selectedAll.filter((id) => byId.has(id));
+  const selectedInPool = (input.everyDayCount === undefined
+    ? selectedAll
+    : selectedAll.slice(0, everyDayCount)
+  ).filter((id) => byId.has(id));
   // Eligible picks run; an ineligible pick waits for its retry (never re-added).
   const eligibleSelected = selectedInPool.filter((id) => !ineligible.has(id));
 
@@ -776,7 +811,12 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
       deferredIds.add(f.id);
     }
 
-  const freshness = freshnessOfFromChosen(sourceIds, input.facts, nowMs);
+  const freshness = freshnessOfFromChosen(
+    sourceIds,
+    input.facts,
+    nowMs,
+    input.everyDayCount === undefined ? sourceIds.length : fill.length,
+  );
   const unmarkedQuietIds = unmarkedQuietInstitutions(input.facts, input.preferences ?? [], nowMs);
   return {
     sourceIds,
@@ -852,6 +892,7 @@ export function freshnessOfFromChosen(
   chosenIds: readonly number[],
   facts: readonly SourceHealthFacts[],
   nowMs: number,
+  rotatingCount = chosenIds.length,
 ): { fullPassDays: number; stalestDeferredDays: number | null } {
   const chosen = new Set(chosenIds);
   let stalest: number | null = null;
@@ -863,9 +904,15 @@ export function freshnessOfFromChosen(
     if (stalest == null || days > stalest) stalest = days;
   }
   return {
-    fullPassDays: chosenIds.length
-      ? Math.max(1, Math.ceil(facts.length / chosenIds.length))
-      : Number.POSITIVE_INFINITY,
+    fullPassDays:
+      facts.length <= chosenIds.length
+        ? 1
+        : rotatingCount > 0
+          ? Math.max(
+              1,
+              Math.ceil((facts.length - (chosenIds.length - rotatingCount)) / rotatingCount),
+            )
+          : Number.POSITIVE_INFINITY,
     stalestDeferredDays: stalest,
   };
 }

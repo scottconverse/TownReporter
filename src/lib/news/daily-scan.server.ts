@@ -248,6 +248,7 @@ export async function tickDailyScans(
         const rotation = planDailySourceRotation({
           facts: pool,
           selectedSourceIds: p.selected_source_ids ?? [],
+          everyDayCount: p.every_day_source_count ?? 8,
           cap: p.source_cap,
         });
         const sources =
@@ -272,6 +273,8 @@ export async function tickDailyScans(
               localTime: p.local_time,
               timezone,
               sourceCap: p.source_cap,
+              everyDaySourceCount: p.every_day_source_count ?? 8,
+              rotatingSourceCount: Math.max(0, p.source_cap - (p.every_day_source_count ?? 8)),
             }),
             JSON.stringify(sources),
             JSON.stringify(model),

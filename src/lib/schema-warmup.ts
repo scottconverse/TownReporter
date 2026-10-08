@@ -2,6 +2,7 @@ import { getSql, readSchemaEnsureMarker } from "./db.ts";
 import { ensureCustomAiConnectionsSchema } from "./news/custom-ai-connections.server.ts";
 import { ensureDarkSchema } from "./news/dark.ts";
 import { ensureDeskDraftMemoSchema } from "./news/desk.ts";
+import { ensureDailyScanPolicySchema } from "./news/daily-scan.ts";
 import { ensureDraftBatchSchema } from "./news/draft-batch.server.ts";
 import { ensureEditorialRequestSchema, ensureEditorialSchema } from "./news/editorial.server.ts";
 import { ensureFollowUpsSchema } from "./news/follow-ups.ts";
@@ -94,6 +95,13 @@ export const SCHEMA_WARMUP_REGISTRY: readonly SchemaWarmupEntry[] = [
     exportName: "ensureDarkSchema",
     fn: ensureDarkSchema,
     run: ensureDarkSchema,
+  },
+  {
+    name: "daily-scan-fixed-source-count",
+    module: "news/daily-scan.ts",
+    exportName: "ensureDailyScanPolicySchema",
+    fn: ensureDailyScanPolicySchema,
+    run: ensureDailyScanPolicySchema,
   },
   {
     name: "desk-draft-memo-columns",

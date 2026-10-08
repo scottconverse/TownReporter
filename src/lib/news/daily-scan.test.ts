@@ -1,3 +1,4 @@
+// guards: the saved daily source picks must keep their fixed slots while the rest of the pool rotates.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -452,6 +453,35 @@ describe("daily scan rotation plan", () => {
     assert.ok(plan.deferredIds.includes(2));
   });
 
+  it("keeps the daily picks fixed while rotating every other selected slot", () => {
+    const selectedSourceIds = Array.from({ length: 12 }, (_, index) => index + 1);
+    const facts = Array.from({ length: 20 }, (_, index) =>
+      src(index + 1, { last_ok_at: ago(index + 1) }),
+    );
+    const first = planDailySourceRotation({
+      facts,
+      selectedSourceIds,
+      cap: 12,
+      everyDayCount: 8,
+      nowMs: NOW,
+    });
+    const justRead = new Set(first.sourceIds);
+    const nextFacts = facts.map((fact) =>
+      justRead.has(fact.id) ? { ...fact, last_ok_at: new Date(NOW).toISOString() } : fact,
+    );
+    const second = planDailySourceRotation({
+      facts: nextFacts,
+      selectedSourceIds,
+      cap: 12,
+      everyDayCount: 8,
+      nowMs: NOW + 86_400_000,
+    });
+
+    assert.deepEqual(first.sourceIds.slice(0, 8), selectedSourceIds.slice(0, 8));
+    assert.deepEqual(second.sourceIds.slice(0, 8), selectedSourceIds.slice(0, 8));
+    assert.notDeepEqual(first.sourceIds.slice(8), second.sourceIds.slice(8));
+  });
+
   it("states the full-pass interval truthfully rather than promising coverage", () => {
     const facts = Array.from({ length: 20 }, (_, i) => src(i + 1, { last_ok_at: ago(i) }));
     const plan = planDailySourceRotation({ facts, selectedSourceIds: [], cap: 10, nowMs: NOW });
@@ -501,7 +531,10 @@ describe("daily scan rotation plan", () => {
       facts: [
         src(1, { last_ok_at: ago(5) }),
         src(2, { retry_after: new Date(NOW + 3_600_000).toISOString() }),
-        src(3, { blocked_at: "2026-10-04T00:00:00Z" }),
+        src(3, {
+          blocked_at: "2026-10-04T00:00:00Z",
+          retry_after: new Date(NOW + 3_600_000).toISOString(),
+        }),
       ],
       selectedSourceIds: [2, 3],
       cap: 12,

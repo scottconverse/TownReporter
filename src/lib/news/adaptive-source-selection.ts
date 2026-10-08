@@ -113,9 +113,14 @@ export function selectRotation(input: RotationInput): Rotation {
   const parked: RotationDeferral[] = [];
   const readable: SourceHealthFacts[] = [];
   for (const source of input.sources) {
-    const observation = classifyObservation(source, nowMs);
-    if (observation === "blocked") parked.push({ sourceId: source.id, reason: "blocked" });
-    else if (observation === "asked-to-wait")
+    const retryAt = source.retry_after ? Date.parse(source.retry_after) : Number.NaN;
+    const retryPending = Number.isFinite(retryAt) && retryAt > nowMs;
+    // `blocked_at` records the first refusal and remains for the editor's
+    // history. Eligibility comes from its saved backoff: once that time passes,
+    // a failed source returns to the rotation instead of staying parked forever.
+    if (source.blocked_at && retryPending)
+      parked.push({ sourceId: source.id, reason: "blocked" });
+    else if (retryPending)
       parked.push({ sourceId: source.id, reason: "parked" });
     else readable.push(source);
   }
