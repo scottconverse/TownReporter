@@ -38,11 +38,15 @@ export const TEXTFLOWKIT_DEFAULT_TIMEOUT_FLOOR_SECONDS = 600;
 /** When the capture never recorded a duration, there is nothing to scale by. */
 export const TEXTFLOWKIT_DEFAULT_TIMEOUT_UNKNOWN_SECONDS = 3600;
 
+export type TextflowkitEngine = "whistle" | "whisper" | "faster-whisper";
+
 export type TextflowkitConfig = {
   /** The executable to spawn: the configured path, or the bare name for PATH lookup. */
   cliPath: string;
   /** True when `TEXTFLOWKIT_CLI_PATH` named it, which makes absence an operator error rather than a missing optional tool. */
   explicitPath: boolean;
+  engine: TextflowkitEngine;
+  /** Empty means the CLI chooses its engine default. */
   model: string;
   language: string;
   timeoutFactor: number;
@@ -62,14 +66,31 @@ function positiveNumber(raw: string | undefined, fallback: number): number {
  */
 export function resolveTextflowkitConfig(env: NodeJS.ProcessEnv = {}): TextflowkitConfig {
   const explicit = (env.TEXTFLOWKIT_CLI_PATH ?? "").trim();
+  const model = (env.TEXTFLOWKIT_MODEL ?? "").trim();
+  const engine = (env.TEXTFLOWKIT_ENGINE ?? "").trim() || (model && model !== "whistle" ? "whisper" : "whistle");
+  if (engine !== "whistle" && engine !== "whisper" && engine !== "faster-whisper") {
+    throw new Error("TEXTFLOWKIT_ENGINE must be one of whistle, whisper, faster-whisper.");
+  }
   return {
+    engine,
     cliPath: explicit || "textflowkit",
     explicitPath: explicit.length > 0,
-    model: (env.TEXTFLOWKIT_MODEL ?? "").trim() || TEXTFLOWKIT_DEFAULT_MODEL,
+    model: engine === "whistle" ? (model === "whistle" ? model : "") : model || TEXTFLOWKIT_DEFAULT_MODEL,
     language: (env.TEXTFLOWKIT_LANGUAGE ?? "").trim() || TEXTFLOWKIT_DEFAULT_LANGUAGE,
     timeoutFactor: positiveNumber(env.TEXTFLOWKIT_TIMEOUT_FACTOR, TEXTFLOWKIT_DEFAULT_TIMEOUT_FACTOR),
     timeoutFloorSeconds: positiveNumber(env.TEXTFLOWKIT_TIMEOUT_FLOOR_SECONDS, TEXTFLOWKIT_DEFAULT_TIMEOUT_FLOOR_SECONDS),
   };
+}
+
+/** Old CLIs can still transcribe with their original Whisper/small defaults. */
+export function textflowkitConfigForVersion(config: TextflowkitConfig, version: string | null): TextflowkitConfig {
+  const parts = version?.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][\w.]+)?$/);
+  if (!parts || config.engine !== "whistle") return config;
+  const [, major, minor, patch = "0"] = parts;
+  if (Number(major) === 0 && (Number(minor) < 1 || (Number(minor) === 1 && Number(patch) < 9))) {
+    return { ...config, engine: "whisper", model: TEXTFLOWKIT_DEFAULT_MODEL };
+  }
+  return config;
 }
 
 /**
@@ -99,6 +120,7 @@ export function parseTextflowkitVersion(stdout: string): string | null {
 export function buildTextflowkitArgs(input: {
   audioPath: string;
   outputDir: string;
+  engine: TextflowkitEngine;
   model: string;
   language: string;
 }): string[] {
@@ -109,8 +131,9 @@ export function buildTextflowkitArgs(input: {
     "json",
     "--output-dir",
     input.outputDir,
-    "--model",
-    input.model,
+    "--engine",
+    input.engine,
+    ...(input.model && (input.engine !== "whistle" || input.model === "whistle") ? ["--model", input.model] : []),
     "--language",
     input.language,
   ];
@@ -131,6 +154,7 @@ export type TextflowkitTranscript = {
   segments: ParsedCaptionSegment[];
   durationSeconds: number | null;
   language: string | null;
+  engine: string | null;
   model: string | null;
   device: string | null;
   /** Present when the CLI reported per-word timings; kept, not projected away. */
@@ -145,7 +169,7 @@ type RawSegment = {
  * Read the canonical transcript out of textflowkit's JSON.
  *
  * The shape that matters is `segments[] {start, end, text, words[]}` plus
- * `metadata {model, device}` -- measured against 0.1.6 and 0.1.8 output. There is no
+ * `engine` and `metadata {model, device}` -- measured against 0.1.11 output. There is no
  * top-level `text` in that version, so the plain text is the segments joined;
  * inventing one from anywhere else would be a second copy of the same fact.
  *
@@ -160,7 +184,7 @@ export function parseTextflowkitJson(raw: string): TextflowkitTranscript {
     throw new Error(`textflowkit wrote JSON that could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
   }
   const root = (parsed ?? {}) as {
-    segments?: unknown; duration?: unknown; language?: unknown; metadata?: unknown;
+    segments?: unknown; duration?: unknown; language?: unknown; engine?: unknown; metadata?: unknown;
   };
   if (!Array.isArray(root.segments)) throw new Error("textflowkit JSON has no segments array.");
 
@@ -187,6 +211,7 @@ export function parseTextflowkitJson(raw: string): TextflowkitTranscript {
     segments,
     durationSeconds: Number.isFinite(duration) && duration > 0 ? duration : null,
     language: typeof root.language === "string" ? root.language : null,
+    engine: typeof root.engine === "string" ? root.engine : null,
     model: typeof metadata.model === "string" ? metadata.model : null,
     device: typeof metadata.device === "string" ? metadata.device : null,
     wordCount,
@@ -241,6 +266,7 @@ export function textflowkitStatusLine(input: {
   installed: boolean;
   version: string | null;
   cliPath: string;
+  engine?: TextflowkitEngine;
   model: string;
   language: string;
   detail?: string | null;
@@ -251,5 +277,5 @@ export function textflowkitStatusLine(input: {
       : `Speech-to-text: textflowkit not installed (looked for ${input.cliPath} and on PATH) — meetings without captions stay audio-only`;
   }
   const version = input.version ? ` ${input.version}` : "";
-  return `Speech-to-text: textflowkit${version} found at ${input.cliPath} — model ${input.model}, language ${input.language}`;
+  return `Speech-to-text: textflowkit${version} found at ${input.cliPath} — ${input.engine ? `engine ${input.engine}, ` : ""}model ${input.model || "engine default"}, language ${input.language}${input.detail ? ` — ${input.detail}` : ""}`;
 }

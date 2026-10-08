@@ -14,7 +14,6 @@ import { join } from "node:path";
 */
 
 const {
-  TEXTFLOWKIT_DEFAULT_MODEL,
   TEXTFLOWKIT_DEFAULT_LANGUAGE,
   TEXTFLOWKIT_SOURCE_METHOD,
   buildTextflowkitArgs,
@@ -59,7 +58,8 @@ describe("the configuration an operator states", () => {
     const config = resolveTextflowkitConfig({});
     assert.equal(config.cliPath, "textflowkit");
     assert.equal(config.explicitPath, false);
-    assert.equal(config.model, TEXTFLOWKIT_DEFAULT_MODEL);
+    assert.equal(config.model, "");
+    assert.equal(config.engine, "whistle");
     assert.equal(config.language, TEXTFLOWKIT_DEFAULT_LANGUAGE);
   });
 
@@ -71,6 +71,7 @@ describe("the configuration an operator states", () => {
 
   it("honours model, language and the timeout knobs", () => {
     const config = resolveTextflowkitConfig({
+      TEXTFLOWKIT_ENGINE: "whisper",
       TEXTFLOWKIT_MODEL: "medium",
       TEXTFLOWKIT_LANGUAGE: "es",
       TEXTFLOWKIT_TIMEOUT_FACTOR: "2",
@@ -96,6 +97,7 @@ describe("what the CLI is asked to do", () => {
     const argv = buildTextflowkitArgs({
       audioPath: "D:\\City Council\\2026-09-15 & minutes.opus",
       outputDir: "D:\\tmp\\run-1",
+      engine: "whisper",
       model: "small",
       language: "en",
     });
@@ -104,6 +106,7 @@ describe("what the CLI is asked to do", () => {
       "D:\\City Council\\2026-09-15 & minutes.opus",
       "--formats", "json",
       "--output-dir", "D:\\tmp\\run-1",
+      "--engine", "whisper",
       "--model", "small",
       "--language", "en",
     ]);
@@ -366,13 +369,13 @@ describe("a tool that talks on stderr while it works (0.1.7 and later)", () => {
     assert.match(quiet.run.stdout, /\.json/);
   });
 
-  it("still reads the version when the probe runs against the 0.1.8 stand-in", async () => {
+  it("still reads the version when the probe runs against the 0.1.11 stand-in", async () => {
     process.env.TEXTFLOWKIT_CLI_PATH = FAKE_CLI;
     delete process.env.FAKE_TEXTFLOWKIT_MODE;
     process.env.FAKE_TEXTFLOWKIT_STDERR = "progress";
     const { probeTextflowkit } = await import("./textflowkit-cli.server.ts");
     const probe = await probeTextflowkit();
     assert.equal(probe.installed, true);
-    assert.equal(probe.version, "0.1.8");
+    assert.equal(probe.version, "0.1.11");
   });
 });
