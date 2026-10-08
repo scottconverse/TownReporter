@@ -143,9 +143,10 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
     const mapped = event.failureReason && /cancel(?:led|ed)? by the editor/i.test(event.failureReason)
       ? "Stopped at the editor's request. What was found remains saved."
       : event.failureReason ? editorError(event.failureReason) : null;
-    const safeReason = mapped && event.failureReason && mapped !== plainEditorText(event.failureReason)
-      && !/\bhop\b|synthesis|— ok|frontier|entries|model call/i.test(mapped)
-      ? plainSystemCopy(mapped)
+    const displayed = mapped ? plainSystemCopy(mapped) : null;
+    const safeReason = displayed && event.failureReason && displayed !== plainEditorText(event.failureReason)
+      && !/synthesis|— ok|frontier|entries|model call/i.test(displayed)
+      ? displayed
       : null;
     return { text: safeReason ? `Could not finish: ${safeReason}` : "Could not finish — retry", tone: "failure" };
   }
@@ -502,24 +503,8 @@ export function progressLine(input: {
 /** Strip engine jargon from anything an editor might read. */
 export function plainEditorText(text: string): string {
   return text
-    .replace(
-      /Hops?\s+(\d+)\.?\s*Artifacts?\s+(\d+)\.?\s*Open frontier\s+(\d+)\.?/gi,
-      (_m, h, a, f) =>
-        `Looked through ${h} rounds. Saved ${a} records. ${f} things still to open.`,
-    )
-    .replace(
-      /Heuristic hop:\s*(\d+) searches,\s*(\d+) fetches,\s*(\d+) frontier items\.?/gi,
-      (_m, s, f, n) =>
-        `This round ran ${s} searches and opened ${f} pages. It added ${n} things to follow.`,
-    )
-    .replace(/Hop budget \d+ reached with (\d+) frontier item\(s\) still open[^.]*\./gi, (_m, n) => {
-      return `Stopped after this round with ${n} things still to open.`;
-    })
-    .replace(/\bhop budget\b/gi, "this round")
     .replace(/\bfrontier items?\b/gi, "things to follow")
     .replace(/\bfrontier\b/gi, "to-follow list")
-    .replace(/\bartifacts?\b/gi, "records")
-    .replace(/\bhops?\b/gi, "rounds")
     .replace(/\bSynthesis:\s*/gi, "")
     .replace(/xAI API error \d+/gi, "the writing model did not finish")
     // The Claude Code path returns its own wording. Without these the editor
@@ -536,7 +521,6 @@ export function plainEditorText(text: string): string {
     .replace(/Planner fetch target/gi, "mentioned in a record")
     .replace(/Queued for fetch/gi, "waiting to be opened")
     .replace(/Attachment\/document link on/gi, "linked from")
-    .replace(/Discovered this hop — fetch next/gi, "turned up this round — not opened yet")
     .replace(/Budget pauses work; evidence exhaustion would close it\.?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -2599,9 +2583,38 @@ export function humanFrontierLabel(label: string): string {
   return t;
 }
 
-/** Translate system-authored Dark Desk guidance at the point it is displayed. */
+/** Translate system-authored Dark Desk copy at the point it is displayed. */
 export function plainSystemCopy(text: string): string {
-  return text.replace(/Click Keep digging/gi, "Click Keep investigating");
+  const system = text
+    .replace(
+      /Hops?\s+(\d+)\.?\s*Artifacts?\s+(\d+)\.?\s*Open frontier\s+(\d+)\.?/gi,
+      (_m, h, a, f) => `Looked through ${h} rounds. Saved ${a} records. ${f} things still to open.`,
+    )
+    .replace(
+      /Heuristic hop:\s*(\d+) searches,\s*(\d+) fetches,\s*(\d+) frontier items\.?/gi,
+      (_m, s, f, n) => `This round ran ${s} searches and opened ${f} pages. It added ${n} things to follow.`,
+    )
+    .replace(/Hop budget \d+ reached with (\d+) frontier item\(s\) still open[^.]*\./gi, (_m, n) =>
+      `Stopped after this round with ${n} things still to open.`,
+    )
+    .replace(/Discovered this hop — fetch next/gi, "turned up this round — not opened yet");
+  return plainEditorText(system)
+    .replace(/\bhop budget\b/gi, "this round")
+    .replace(/\bartifacts?\b/gi, (word) => {
+      const plural = word.toLowerCase().endsWith("s");
+      const translated = plural ? "records" : "record";
+      return word[0] === word[0]?.toUpperCase()
+        ? translated[0]!.toUpperCase() + translated.slice(1)
+        : translated;
+    })
+    .replace(/\bhops?\b/gi, (word) => {
+      const plural = word.toLowerCase().endsWith("s");
+      const translated = plural ? "rounds" : "round";
+      return word[0] === word[0]?.toUpperCase()
+        ? translated[0]!.toUpperCase() + translated.slice(1)
+        : translated;
+    })
+    .replace(/Click Keep digging/gi, "Click Keep investigating");
 }
 
 /*

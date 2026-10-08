@@ -46,6 +46,7 @@ import {
   openLeads,
   plainEditorText,
   plainFinding,
+  plainSystemCopy,
   progressLine,
   clockFromLocalTime,
   dailyScheduleLabel,
@@ -482,7 +483,7 @@ describe("editor copy", () => {
   });
 
   it("translates engine dumps into English", () => {
-    const run = plainEditorText("Hops 5. Artifacts 34. Open frontier 149.");
+    const run = plainSystemCopy("Hops 5. Artifacts 34. Open frontier 149.");
     assert.match(run, /5 rounds/);
     assert.match(run, /34 records/);
     assert.match(run, /149 things still to open/);
@@ -490,6 +491,32 @@ describe("editor copy", () => {
     const finding = plainFinding("Document changed: https://youtube.com/@CityofLongmont");
     assert.match(finding, /YouTube|different/i);
     assert.doesNotMatch(finding, /Document changed/i);
+  });
+
+  // guards: a reported fact or source sentence could be rewritten as engine jargon
+  it("translates engine terms only on system lines", () => {
+    const source = "The artifact made two hops in 2024; the claim was $60,000.";
+    assert.equal(plainEditorText(source), source);
+    assert.equal(plainFinding(source), source);
+
+    const raw = "The engine saved 1 artifact after 2 hops. Click Keep digging to continue.";
+    const pause = editorPauseReason(raw)!;
+    assert.match(pause, /1 record/);
+    assert.match(pause, /2 rounds/);
+    assert.match(pause, /Click Keep investigating/);
+    assert.doesNotMatch(pause, /artifact|hops?|Keep digging/i);
+
+    const [activity] = buildInvestigationActivity([{
+      id: "system-failure",
+      at: "2026-10-08T12:00:00Z",
+      kind: "run-stop",
+      failed: true,
+      failureReason: raw,
+    }]);
+    assert.match(activity!.text, /1 record/);
+    assert.match(activity!.text, /2 rounds/);
+    assert.match(activity!.text, /Click Keep investigating/);
+    assert.doesNotMatch(activity!.text, /artifact|hops?|Keep digging/i);
   });
 });
 
