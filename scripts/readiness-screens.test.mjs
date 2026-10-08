@@ -1,10 +1,10 @@
 // guards: an editor could see conflicting readiness states for the same saved draft on Story, Drafts and Today.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createElement as h } from "react";
+import { act, createElement as h } from "react";
 import { renderToStaticMarkup as render } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { moduleUrl } from "./dom-harness.mjs";
+import { installDom, moduleUrl, stubUrl } from "./dom-harness.mjs";
 import { screenModule } from "./screen-render-harness.mjs";
 const { storyReadiness } = await import(await moduleUrl("src/lib/news/story-readiness.ts"));
 const real = [
@@ -24,6 +24,106 @@ const story = await screenModule(
 );
 const drafts = await screenModule("src/routes/desk.drafts.tsx", {}, real);
 const today = await screenModule("src/routes/desk.index.tsx", {}, real);
+const { publishBlockers } = await import(
+  await moduleUrl("src/lib/news/publish-blockers.ts", {
+    "./desk-copy.ts": stubUrl("export const editorActionError = () => '';"),
+  })
+);
+globalThis.readinessPublishBlockers = publishBlockers;
+const publishStory = await screenModule(
+  "src/routes/desk.story.$leadId.tsx",
+  {
+    publishBlockers:
+      "state => (globalThis.readinessBlockers = globalThis.readinessPublishBlockers(state))",
+    useMutation:
+      "({mutationFn}) => ({mutate(){}, isPending: Boolean(globalThis.readinessDecisionPending && /decision/.test(String(mutationFn)))})",
+    ActionButton: "({children, disabled}) => h('button', {disabled}, children)",
+    stripReporterNotebook: "body => body",
+  },
+  real,
+);
+
+// guards: a pasted story without an AI fact-check memo must still be publishable.
+test("a pasted story with its section confirmed can be published", async () => {
+  const draft = {
+    id: 8,
+    lead_id: 22,
+    headline: "Council votes",
+    dek: "A new plan.",
+    body: "Council approves the plan.",
+    topic: "government",
+    research_json: null,
+  };
+  globalThis.screenData = {
+    lead: {
+      lead: {
+        id: 22,
+        headline: draft.headline,
+        topic: draft.topic,
+        status: "drafted",
+        source_urls: "[]",
+      },
+      draft,
+      topicConfirmed: draft.topic,
+      namedOutlets: [],
+      outletOverrides: [],
+    },
+    sources: [],
+    memory: [],
+  };
+  const { document } = installDom();
+  const { createRoot } = await import("react-dom/client");
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let key = 0;
+  const draw = async () => {
+    await act(async () => root.render(h(publishStory.Route.component, { key: key++ })));
+    return document;
+  };
+  const button = (document) =>
+    [...document.querySelectorAll("button")].find((b) => /^Publish in /.test(b.textContent));
+  try {
+    await draw();
+    assert.ok(button(document), "the story must offer Publish in its section");
+    assert.equal(button(document).hasAttribute("disabled"), false);
+    assert.equal(document.querySelectorAll("[data-story-readiness]").length, 1);
+    for (const [state, openCount] of [
+      ["to-check", 1],
+      ["not-ready", 4],
+      ["checking", 0],
+    ]) {
+      draft.research_json = JSON.stringify({
+        storyReadiness: {
+          version: 1,
+          state,
+          openCount,
+          totalCount: 4,
+          reason: "A reporting check is open.",
+        },
+      });
+      assert.equal(
+        button(await draw()).hasAttribute("disabled"),
+        true,
+        `${state} must block Publish`,
+      );
+    }
+    draft.research_json = null;
+    globalThis.readinessDecisionPending = true;
+    assert.equal(
+      button(await draw()).hasAttribute("disabled"),
+      true,
+      "a pending evidence decision must block Publish",
+    );
+    assert.ok(
+      globalThis.readinessBlockers.some((blocker) => blocker.key === "evidence-review-saving"),
+    );
+  } finally {
+    globalThis.readinessDecisionPending = false;
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
 test("Story, Drafts and Today show one matching chip for all four readiness states", () => {
   for (const [openCount, checking, label] of [
     [0, true, "Checking facts"],
