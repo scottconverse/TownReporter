@@ -73,7 +73,10 @@ export async function realModule(relativePath, imports = pageImports) {
 }
 
 const aiDisclosureUrl = await realModule("../src/components/ai-disclosure.tsx");
-const storyBodyUrl = await realModule("../src/components/story-body.tsx");
+const storyBodyUrl = await realModule("../src/components/story-body.tsx", {
+  ...pageImports,
+  "../lib/news/editorial-citations.ts": await realModule("../src/lib/news/editorial-citations.ts"),
+});
 
 /*
   Unit U11b3: the reader's source list -- records first, then the cited URLs no

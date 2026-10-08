@@ -48,7 +48,8 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
   const stateUrl = moduleUrl(
     await readFile(new URL("../src/components/job-card-state.ts", import.meta.url), "utf8"),
     "job-card-state.ts",
-    { "@/lib/news/job-progress": jobProgress, "@tanstack/react-query": reactQuery },
+    { "@/lib/news/job-progress": jobProgress, "@tanstack/react-query": reactQuery,
+      "../lib/desk/scan-policy-refresh.ts": new URL("../src/lib/desk/scan-policy-refresh.ts", import.meta.url).href },
   );
   const cardUrl = moduleUrl(
     await readFile(new URL("../src/components/JobCard.tsx", import.meta.url), "utf8"),

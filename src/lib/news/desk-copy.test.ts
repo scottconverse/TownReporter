@@ -1,3 +1,4 @@
+// guards: government records could be downgraded to discovery clues.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
@@ -2215,4 +2216,12 @@ describe("keepsFailingNote", () => {
     // on the row around it.
     assert.doesNotMatch(keepsFailingNote(BASE), /Longmont|Colorado|Times-Call|Leader/i);
   });
+});
+
+
+it("recognizes government locality hosts without trusting commercial US domains", () => {
+  for (const host of ["ci.longmont.co.us", "sos.state.co.us", "co.boulder.co.us"])
+    assert.equal(kindFromSourceUrl(`https://${host}/records`), "official");
+  for (const host of ["shop.us", "longmont.us", "shop.co.us", "ci.longmont.co.us.example.com"])
+    assert.equal(kindFromSourceUrl(`https://${host}/records`), "unclassified");
 });

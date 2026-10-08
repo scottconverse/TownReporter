@@ -1,5 +1,6 @@
-import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { listDeskJobs, type JobProgressView } from "@/lib/news/job-progress";
+import { refreshFinishedScanPolicy } from "../lib/desk/scan-policy-refresh.ts";
 
 /*
   The job card's state rule and its data hook, apart from the card's markup.
@@ -69,9 +70,14 @@ export function invalidateDeskJobs(qc: QueryClient): void {
  * paint -- the query replaces it on its first tick.
  */
 export function useDeskJobs(initial?: JobProgressView[] | null) {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["desk-jobs"],
-    queryFn: () => listDeskJobs(),
+    queryFn: async () => {
+      const rows = await listDeskJobs();
+      refreshFinishedScanPolicy(qc, qc.getQueryData<JobProgressView[]>(DESK_JOBS_KEY) ?? [], rows);
+      return rows;
+    },
     ...(initial && initial.length
       ? { initialData: initial, initialDataUpdatedAt: Date.now() }
       : {}),

@@ -2059,19 +2059,42 @@ export function killRecordLine(input: {
     : "Killed before the desk started recording why — no reason was kept";
 }
 
-export function kindFromSourceUrl(url: string): "youtube" | "official" | "news" | "social" {
-  if (/youtube\.com|youtu\.be/i.test(url)) return "youtube";
-  if (/twitter\.com|x\.com|facebook\.com|instagram\.com|nextdoor\.com|reddit\.com/i.test(url)) {
-    return "social";
+export function kindFromSourceUrl(
+  url: string,
+): "youtube" | "official" | "news" | "social" | "unclassified" {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "unclassified";
   }
+  const matches = (domains: string[]) =>
+    domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+  if (matches(["youtube.com", "youtu.be"])) return "youtube";
   if (
-    /times-?call|dailycamera|longmontleader|denverpost|bizwest|coloradopolitics|substack\.com|sentineltm|leftthandvalley/i.test(
-      url,
-    )
-  ) {
+    matches(["twitter.com", "x.com", "facebook.com", "instagram.com", "nextdoor.com", "reddit.com"])
+  )
+    return "social";
+  if (
+    matches([
+      "timescall.com",
+      "times-call.com",
+      "dailycamera.com",
+      "longmontleader.com",
+      "denverpost.com",
+      "bizwest.com",
+      "coloradopolitics.com",
+      "substack.com",
+      "sentineltm.com",
+      "lefthandvalley.com",
+    ])
+  )
     return "news";
-  }
-  return "official";
+  // Government prefixes in the state/locality .us namespace, not commercial .us hosts.
+  const governmentUs = /(?:^|\.)(?:ci|town|co|county|state)\.(?:[a-z0-9-]+\.)?[a-z]{2}\.us$/.test(host);
+  if (host.endsWith(".gov") || governmentUs || matches(["longmont.primegov.com", "svvsd.org", "rtd-denver.com"]))
+    return "official";
+  return "unclassified";
 }
 
 export function tierFromKind(kind: string): "A" | "B" | "C" {
@@ -2635,6 +2658,33 @@ export function editorTitle(text: string): string {
     .trim()
     .replace(/^\[discovery\]\s*/i, "");
   return title === title.toUpperCase() ? agendaTitle(title) : title;
+}
+
+export function leadScoreLabel(score: number | null): string {
+  return `Lead score ${score ?? 0}/20`;
+}
+
+export function initialStoryTopic(leadTopic: string | null | undefined): string {
+  return leadTopic?.trim() || "council";
+}
+
+type DarkRunNote = {
+  investigation_id: number | null;
+  stopReason: string | null;
+  started_at: string;
+  usage: { totals: { documentReads: number } };
+};
+
+export function shouldShowDarkRunStopNote(run: DarkRunNote, history: readonly DarkRunNote[]): boolean {
+  if (!run.stopReason) return false;
+  if (run.stopReason !== "document-read-limit") return true;
+  const startedAt = Date.parse(run.started_at);
+  return !history.some((later) =>
+    run.investigation_id != null && later.investigation_id === run.investigation_id &&
+    Date.parse(later.started_at) > startedAt &&
+    later.stopReason === "completed" &&
+    later.usage.totals.documentReads > 0,
+  );
 }
 
 export function agendaTitle(text: string): string {

@@ -58,6 +58,7 @@ import {
   redditPostStateLabel,
   redditResultHeadline,
   sentenceCase,
+  shouldShowDarkRunStopNote,
   stalledRunCopy,
   worthItemOnDeskLine,
   worthItemOnDeskReason,
@@ -1114,7 +1115,7 @@ function DarkPage() {
                       </p>
                     ) : null}
                     {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
-                    <DarkRunMeter run={r} />
+                    <DarkRunMeter run={r} history={runs.data ?? []} />
                   </div>
                 ))}
                 {(runs.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => togglePile("runs")}>{expandedPiles.runs ? "Show fewer" : `Show all ${runs.data?.length}`}</InkButton> : null}
@@ -1577,7 +1578,8 @@ const DARK_STOP_COPY: Record<string, string> = {
   completed: "Completed within the run limits",
 };
 
-function DarkRunMeter({ run, active = false }: { run: DarkRunRow; active?: boolean }) {
+function DarkRunMeter({ run, active = false, history = [] }: { run: DarkRunRow; active?: boolean; history?: readonly DarkRunRow[] }) {
+  if (!active && run.usageRecorded === false) return <p className="of-stop">Not recorded for this older run</p>;
   const totals = run.usage.totals;
   const startedAt = Date.parse(run.started_at);
   const elapsedMs = active && Number.isFinite(startedAt)
@@ -1590,7 +1592,7 @@ function DarkRunMeter({ run, active = false }: { run: DarkRunRow; active?: boole
         <b>{active ? "Live run:" : "Run usage:"}</b>{" "}
         {totals.modelCalls} model call{totals.modelCalls === 1 ? "" : "s"} · {totals.searches} search{totals.searches === 1 ? "" : "es"} · {totals.documentReads} document read{totals.documentReads === 1 ? "" : "s"} · {elapsedLabel(Math.ceil(elapsedMs / 1000))} · {tokens}
       </p>
-      {!active && run.stopReason ? <p className="meta">{DARK_STOP_COPY[run.stopReason] ?? run.stopReason}</p> : null}
+      {!active && shouldShowDarkRunStopNote(run, history) ? <p className="meta">{DARK_STOP_COPY[run.stopReason!] ?? run.stopReason}</p> : null}
       {run.usage.calls.length ? (
         <details className="of-trail">
           <summary>Model calls — {run.usage.calls.length}</summary>
