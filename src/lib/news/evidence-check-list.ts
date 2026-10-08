@@ -140,6 +140,7 @@ export function captureIsReadable(capture: FindingCaptureEvidence): boolean {
  * the bar and the pane back to disagreeing, which is the thing U24 exists for.
  */
 export const NEEDS_REVIEW_CHIP = "! Needs review";
+export const COULD_NOT_CHECK_CHIP = "Could not check";
 
 /**
  * Is this row one the pane chips `! Needs review`?
@@ -179,13 +180,13 @@ export function judgmentChip(
       */
       return { chip: "Checked · not found", tone: "ink" };
     case "needs-reporting":
-      return { chip: "Could not check", tone: "fail" };
+      return { chip: COULD_NOT_CHECK_CHIP, tone: "fail" };
     case "contradicts":
       return { chip: NEEDS_REVIEW_CHIP, tone: "warn" };
     default:
       return claimNeedsReview(judgment, captures)
         ? { chip: NEEDS_REVIEW_CHIP, tone: "warn" }
-        : { chip: "Could not check", tone: "fail" };
+        : { chip: COULD_NOT_CHECK_CHIP, tone: "fail" };
   }
 }
 
