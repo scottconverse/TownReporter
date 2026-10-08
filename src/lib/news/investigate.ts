@@ -1217,7 +1217,7 @@ export async function grokPlanner(
     model: plannerModel(choice) || choice || "provider-default",
   });
   if (runBudget && !call) {
-    return { ...emptyPlan(), planner_error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
+    return { ...emptyPlan(), planner_error: runBudget.stopMessage };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
   const ai = await chat(darkPlannerFor(place), pack.slice(0, PLANNER_INPUT_CAP), PLANNER_OUTPUT_TOKENS, {
@@ -1243,6 +1243,7 @@ export async function grokPlanner(
       inputTokens: meta?.inputTokens,
       outputTokens: meta?.outputTokens,
       totalTokens: meta?.totalTokens,
+      costDollars: meta?.costDollars,
     });
     await onUsage?.(runBudget!.snapshot());
   }
@@ -3909,6 +3910,8 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   `;
   stopReason ??= opts.runBudget?.stopReason ?? null;
   const budgetStopped = Boolean(stopReason && [
+    "dollar-limit",
+    "dollar-limit",
     "elapsed-time-limit",
     "model-call-limit",
     "search-limit",
@@ -3920,7 +3923,7 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   // open/completed even while unresolved leads remained.
   const paused = budgetStopped || remainingOpen > 0;
   const pauseReason = budgetStopped
-    ? `Run stopped at the ${stopReason}. Completed work is checkpointed.`
+    ? stopReason === "dollar-limit" ? opts.runBudget!.stopMessage : `Run stopped at the ${stopReason}. Completed work is checkpointed.`
     : stopReason && remainingOpen > 0
       ? `This run paused at ${stopReason}; ${remainingOpen} unresolved lead(s) remain saved and can be pursued.`
     : paused

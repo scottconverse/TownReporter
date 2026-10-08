@@ -1101,7 +1101,7 @@ export async function grokChat(
   const openAiMeta = (
     body?: {
       model?: string;
-      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+      usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number };
     },
     timedOut = false,
   ): ChatResultMetadata => {
@@ -1115,6 +1115,7 @@ export async function grokChat(
     if (Number.isFinite(usage?.prompt_tokens)) result.inputTokens = usage!.prompt_tokens;
     if (Number.isFinite(usage?.completion_tokens)) result.outputTokens = usage!.completion_tokens;
     if (Number.isFinite(usage?.total_tokens)) result.totalTokens = usage!.total_tokens;
+    if (typeof usage?.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0) result.costDollars = usage.cost;
     return result;
   };
   const isTimeout = (err: unknown) =>
@@ -1161,7 +1162,7 @@ export async function grokChat(
   let body: {
     error?: { message?: string; type?: string; code?: string | number } | string;
     model?: string;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
+    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
   try {

@@ -1,4 +1,5 @@
 export type DarkRunStopReason =
+  | "dollar-limit"
   | "elapsed-time-limit"
   | "model-call-limit"
   | "search-limit"
@@ -37,6 +38,7 @@ export type DarkUsageCall = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  costDollars?: number;
 };
 
 export type DarkUsageTotals = {
@@ -47,6 +49,8 @@ export type DarkUsageTotals = {
   inputTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  costDollars?: number | null;
+  limitDollars?: number;
 };
 
 export type DarkRunUsageSnapshot = {
@@ -63,6 +67,7 @@ export type DarkModelCallFinish = {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  costDollars?: number;
 };
 
 export type DarkModelCallHandle = {
@@ -118,13 +123,22 @@ export function createDarkRunBudget(
     stopReason ??= reason;
     return false;
   };
-  const withinElapsed = () =>
-    elapsedMs() < limits.elapsedMs || markStop("elapsed-time-limit");
+  const reachedDollarLimit = () => limits.limitDollars != null &&
+    calls.reduce((sum, call) => sum + (call.costDollars ?? 0), 0) >= limits.limitDollars;
+  const withinElapsed = () => {
+    if (reachedDollarLimit()) return markStop("dollar-limit");
+    return elapsedMs() < limits.elapsedMs || markStop("elapsed-time-limit");
+  };
 
   return {
     get stopReason(): DarkRunStopReason | null {
       if (!stopReason) withinElapsed();
       return stopReason;
+    },
+    get stopMessage() {
+      return stopReason === "dollar-limit"
+        ? `Stopped: this file reached its $${limits.limitDollars} limit. What was found remains saved.`
+        : `Run stopped: ${stopReason ?? "budget-limit"}`;
     },
     limits,
     markStop(reason: DarkRunStopReason) {
@@ -169,7 +183,10 @@ export function createDarkRunBudget(
           if (Number.isFinite(result.inputTokens)) row.inputTokens = wholeNonNegative(result.inputTokens!);
           if (Number.isFinite(result.outputTokens)) row.outputTokens = wholeNonNegative(result.outputTokens!);
           if (Number.isFinite(result.totalTokens)) row.totalTokens = wholeNonNegative(result.totalTokens!);
+          if (typeof result.costDollars === "number" && Number.isFinite(result.costDollars) && result.costDollars >= 0)
+            row.costDollars = result.costDollars;
           calls.push(row);
+          if (reachedDollarLimit()) markStop("dollar-limit");
         },
       };
     },
@@ -187,6 +204,11 @@ export function createDarkRunBudget(
           inputTokens: completeTokenTotal("inputTokens"),
           outputTokens: completeTokenTotal("outputTokens"),
           totalTokens: completeTokenTotal("totalTokens"),
+          ...(calls.some(call => call.costDollars !== undefined) ? {
+            costDollars: calls.every(call => call.costDollars !== undefined)
+              ? calls.reduce((sum, call) => sum + call.costDollars!, 0) : null,
+          } : {}),
+          ...(limits.limitDollars != null ? { limitDollars: limits.limitDollars } : {}),
         },
         calls: calls.map((call) => ({ ...call })),
       };

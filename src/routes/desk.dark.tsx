@@ -38,6 +38,7 @@ import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
+  darkSpendLabel,
   editorError,
   editorKindLabel,
   elapsedLabel,
@@ -1927,9 +1928,7 @@ function InvestigationWorkspace({
   const limitTimeLabel = limitMinutes % 60 === 0
     ? `${limitMinutes / 60} hour${limitMinutes === 60 ? "" : "s"}`
     : `${limitMinutes} minutes`;
-  const limitSpendLabel = limitDollars == null
-    ? "no spending cap"
-    : `$${Number(limitDollars).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  const limitSpendLabel = darkSpendLabel(limitDollars, detail?.run?.usage.totals);
   const explanation = inv?.ordinary_explanation?.trim();
   const aiExplanation = !explanation && Boolean(brief?.benign?.trim());
   const sourceByCapture = new Map(sourceCaptures.map((capture) => [capture.id, capture]));
