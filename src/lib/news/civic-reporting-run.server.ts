@@ -1200,6 +1200,7 @@ export async function fileRunLeads(input: {
       const urls = story.sources.filter((s) => s.url).map((s) => s.url);
       const readiness = storyReadiness({ headline: story.headline, body: story.draft, claims: story.claims });
       const openItem = input.held?.find((entry) => entry.storyId === story.id && entry.unverified);
+      const needsReview = Boolean(openItem) || readiness.openCount > 0;
       const [draft] = await input.sql<{ id: number }>`
         insert into drafts (
           user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
@@ -1211,7 +1212,11 @@ export async function fileRunLeads(input: {
           ${"Reported with the civic-scanner method; verify the claims ledger before publication."},
           ${JSON.stringify({ civicReporting: true, requestId: input.request.id, storyId: story.id,
             reportedActions: input.actions ?? [],
-            storyReadiness: { version: 1, ...readiness, ...(openItem ? { state: "not-ready", reason: openItem.reason } : {}) },
+            storyReadiness: {
+              version: 1,
+              ...readiness,
+              ...(needsReview ? { state: "not-ready", reason: openItem?.reason || readiness.reason } : {}),
+            },
             reportedClaims: await reportingStoryReviewClaims(input.sql, input.request.newsroom_id, story) })}
         ) returning id
       `;
@@ -1984,7 +1989,7 @@ export async function performReportingWork(
   );
   const substantial = stories.some((story) => story.draft.trim().length >= 600);
   const runStatus: ReportingPackage["runStatus"] =
-    coverageComplete && stories.length > 0 && substantial && flaggedClaims === 0
+    coverageComplete && stories.length > 0 && substantial && flaggedClaims === 0 && held.every((entry) => !entry.unverified)
       ? gaps.length
         ? "PARTIAL"
         : "COMPLETE"
@@ -2158,6 +2163,21 @@ function shortWriterFailureReason(error: string, held: PackageHeld[]): string {
   if (!compact) return "";
   const sentence = compact.split(/(?<=[.!?])\s+/)[0] || compact;
   return sentence.length > 240 ? sentence.slice(0, 237).trimEnd() + "..." : sentence;
+}
+
+function writerErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function holdWriterIssue(held: PackageHeld[], story: PackageStory, reason: string, nextCheck: string): void {
+  const existing = held.find((entry) => entry.storyId === story.id);
+  if (existing) {
+    existing.reason = [existing.reason.trim(), reason].filter(Boolean).join(" ");
+    existing.nextCheck = nextCheck;
+    existing.unverified = true;
+  } else {
+    held.push({ storyId: story.id, headline: story.headline, reason, nextCheck, unverified: true });
+  }
 }
 
 type AnnouncedResultPassage = {
@@ -2530,7 +2550,9 @@ export async function writingPass(input: {
   }) : [];
   if (lengthProblems.length || citationProblems.length || relationshipProblems.length || voteResultProblems.length) {
     await input.throwIfCancelled();
-    const revision = await input.chat(methodSystemPrompt(input.method), [
+    let revision: Awaited<ReturnType<typeof input.chat>>;
+    try {
+      revision = await input.chat(methodSystemPrompt(input.method), [
       prompt,
       "EDITORIAL LENGTH REVISION AND CITATION REPAIR — one bounded attempt:",
       ...lengthProblems,
@@ -2554,7 +2576,11 @@ export async function writingPass(input: {
       "Return the complete stories/held JSON with revised copy and matching claims/sources.",
       "PREVIOUS WRITER PACKAGE:",
       JSON.stringify(parsed),
-    ].join("\n"), 18_000, input.chatOpts as never);
+      ].join("\n"), 18_000, input.chatOpts as never);
+    } catch (error) {
+      if (error instanceof JobCancelledError) throw error;
+      revision = { ok: false, error: writerErrorText(error) };
+    }
     const revisionFile = lengthProblems.length ? "writer-length-revision.txt" : citationProblems.length || relationshipProblems.length
       ? "writer-citation-revision.txt" : "writer-result-revision.txt";
     writeWorkspace(input.workspaceDir, revisionFile, revision.ok ? revision.text : revision.error);
@@ -2575,16 +2601,8 @@ export async function writingPass(input: {
       return { stories: [], held, error, gaps };
     }
     const held = normalizeHeld(selectedPackage.held);
-    const holdStory = (story: PackageStory, reason: string, nextCheck: string) => {
-      const existing = held.find((entry) => entry.storyId === story.id);
-      if (existing) {
-        existing.reason = [existing.reason.trim(), reason].filter(Boolean).join(" ");
-        existing.nextCheck = nextCheck;
-        existing.unverified = true;
-      } else {
-        held.push({ storyId: story.id, headline: story.headline, reason, nextCheck, unverified: true });
-      }
-    };
+    const holdStory = (story: PackageStory, reason: string, nextCheck: string) =>
+      holdWriterIssue(held, story, reason, nextCheck);
     if (!revisedStories.length) {
       const reason = "The single revision did not produce a readable story; the first readable draft is filed for review.";
       gaps.push(reason);
@@ -2626,6 +2644,9 @@ export async function writingPass(input: {
     parsed = { ...selectedPackage, held };
   }
   const stories: PackageStory[] = [];
+  let held = normalizeHeld(parsed.held);
+  const holdStory = (story: PackageStory, reason: string, nextCheck: string) =>
+    holdWriterIssue(held, story, reason, nextCheck);
   if (Array.isArray(parsed.stories)) {
     for (let index = 0; index < parsed.stories.length; index += 1) {
       const raw = parsed.stories[index];
@@ -2637,7 +2658,9 @@ export async function writingPass(input: {
       const problems = dekRuleProblems(story.dek ?? "", story.headline, story.draft);
       if (problems.length) {
         await input.throwIfCancelled();
-        const rewrite = await input.chat(methodSystemPrompt(input.method), [
+        let rewrite: Awaited<ReturnType<typeof input.chat>>;
+        try {
+          rewrite = await input.chat(methodSystemPrompt(input.method), [
           "DEK REWRITE — one bounded attempt. Rewrite only the dek; keep the headline, story and reporter's voice unchanged.",
           "Rules: one or two sentences; 20 to 40 words, hard cap 45; who, what, key number and stage; agree with paragraph one and add to, not repeat, the headline.",
           "Do not use process words: supplied, passage, record, establish, action account or tier. Every fact must match paragraph one and the claim ledger.",
@@ -2646,21 +2669,29 @@ export async function writingPass(input: {
           "FIRST PARAGRAPH: " + story.draft.split(/\r?\n\s*\r?\n/)[0],
           "CURRENT DEK: " + story.dek,
           'Return one JSON object: {"dek":"..."}',
-        ].join("\n\n"), 1_200, input.chatOpts as never);
+          ].join("\n\n"), 1_200, input.chatOpts as never);
+        } catch (error) {
+          if (error instanceof JobCancelledError) throw error;
+          rewrite = { ok: false, error: writerErrorText(error) };
+        }
         const candidate = rewrite.ok ? readJsonBlock<Record<string, unknown>>(rewrite.text) : null;
         const revisedDek = strOf(candidate?.dek).trim();
+        const dekReadable = Boolean(revisedDek) && !dekRuleProblems(revisedDek, story.headline, story.draft).length;
         story = {
           ...story,
-          dek: dekRuleProblems(revisedDek, story.headline, story.draft).length
-            ? firstSentenceForDek(story.draft)
-            : revisedDek,
+          dek: dekReadable ? revisedDek : firstSentenceForDek(story.draft),
         };
+        if (!dekReadable) {
+          const reason = "The dek rewrite returned no readable dek; the first readable draft is filed for review.";
+          gaps.push(reason);
+          holdStory(story, reason, "Review and replace the dek before publication.");
+        }
       }
       stories.push(story.dek?.trim() ? story : { ...story, dek: firstSentenceForDek(story.draft) });
     }
   }
-  const held = guardCorrectionHolds(
-    normalizeHeld(parsed.held),
+  held = guardCorrectionHolds(
+    held,
     input.gather.observations ?? [],
     input.documents,
   );
@@ -3710,7 +3741,13 @@ export async function reviewOpenStoryClaims(input: {
       "CLOSEST FULL-TRANSCRIPT PASSAGES: " + JSON.stringify(transcriptCandidates.map(({ quote, locator, url }) => ({ quote, locator, url }))),
       "CLOSEST ALREADY-READ DOCUMENT PASSAGES: " + JSON.stringify(documentCandidates.map(({ quote, title, locator, url }) => ({ quote, title, locator, url }))),
     ].join("\n\n");
-    const response = await input.chat(methodSystemPrompt(input.method), prompt, 3_000, input.chatOpts as never);
+    let response: Awaited<ReturnType<typeof input.chat>>;
+    try {
+      response = await input.chat(methodSystemPrompt(input.method), prompt, 3_000, input.chatOpts as never);
+    } catch (error) {
+      if (error instanceof JobCancelledError) throw error;
+      response = { ok: false, error: writerErrorText(error) };
+    }
     const answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
     const verdict = str(answer?.verdict).toUpperCase();
     const replacement = str(answer?.replacement).trim();
@@ -3721,18 +3758,20 @@ export async function reviewOpenStoryClaims(input: {
     const supported = Boolean(
       supportedText && candidate && claimEvidenceCheckPasses(supportedText, candidate, input.record),
     );
+    let rejectedUnreadableEdit = false;
     if (verdict === "CONTRADICTED" && answer?.cut === true) {
       const edit = storyTextChange(story, claim.text, null);
-      if (edit.changed) {
+      if (edit.changed && edit.story.draft.trim()) {
         story = { ...edit.story, claims: edit.story.claims.filter((row) => row.id !== claim.id) };
         continue;
       }
+      rejectedUnreadableEdit = edit.changed;
     }
     if (supported && candidate) {
       const textEdit = replacement && replacement !== claim.text
         ? storyTextChange(story, claim.text, replacement)
         : { story, changed: true };
-      if (textEdit.changed) {
+      if (textEdit.changed && textEdit.story.draft.trim()) {
         const source = checkSourceForCandidate(candidate, claim.id);
         const sources = textEdit.story.sources.some((row) => row.id === source.id)
           ? textEdit.story.sources
@@ -3762,10 +3801,13 @@ export async function reviewOpenStoryClaims(input: {
         };
         continue;
       }
+      rejectedUnreadableEdit = textEdit.changed;
     }
     const closest = (answer ? exactQuoteCandidate(reviewCandidates, answer) : null) ??
       [...reviewCandidates].sort((a, b) => b.score - a.score)[0];
-    const reason = oneLineReason(answer?.reason || (response.ok ? "The cited words did not verify this statement." : response.error));
+    const reason = oneLineReason(answer?.reason || (rejectedUnreadableEdit
+      ? "The later claim rewrite would remove the readable draft, so the earlier draft remains for review."
+      : response.ok ? "The cited words did not verify this statement." : response.error));
     story = {
       ...story,
       claims: story.claims.map((row) => row.id !== claim.id ? row : {

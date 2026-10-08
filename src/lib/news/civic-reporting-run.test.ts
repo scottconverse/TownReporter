@@ -27,7 +27,7 @@ import { evidenceCheckRows } from "./evidence-check-list.ts";
 import { firstSentenceForDek } from "./dek-fallback.ts";
 import { publishBlockers } from "./publish-blockers.ts";
 import type { Sql } from "../db.ts";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { JobCancelledError } from "./jobs.ts";
@@ -349,6 +349,73 @@ describe("performReportingWork: the run", () => {
       `;
       const total = observations.reduce((sum, row) => sum + Number(row.n), 0);
       assert.ok(total >= 2, "a source observation and a disposition observation were saved");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("files the readable budget draft when a later claim check returns no result", { skip: !haveMethod }, async () => {
+    // guards: the editor could lose a readable budget draft when a later writer check fails.
+    const sql = await getSql();
+    const artifactId = await seedMeetingFixture(sql);
+    const leadId = await seedScopedLead(sql, artifactId);
+    const requestId = await newRequest({ lead_id: leadId, seed_urls: ["https://youtu.be/" + FIXTURE_VIDEO] });
+    const job = await claimedJobFor(requestId);
+    const workspaceRoot = mkdtempSync(pathJoin(tmpdir(), "ds-later-writer-failure-"));
+    const headline = "Longmont’s proposed budget trims energy work as transit funding needs emerge";
+    const openReason = "The raw passage establishes an announced 6–1 result. The missing continuous interval prevents establishing that the adopted airport-fee motion retained the earlier wording and schedule.";
+    const run6Draft = readFileSync(new URL("./fixtures/civic-reporting-run6-budget-story.md", import.meta.url), "utf8")
+      .replace(/^#[^\r\n]*\r?\n+/, "")
+      .trim();
+    const story = {
+      id: "LONGMONT-20261006-BUDGET",
+      headline,
+      dek: "City staff proposed reducing energy-project funding while Longmont considers transit needs, leaving final budget action open for further council review.",
+      draft: run6Draft,
+      plainBrief: "The proposed energy allocation remains subject to final budget action.",
+      cannotSay: "The final budget action and the effect on residents.",
+      readinessTier: 3,
+      claims: [{ id: "energy-allocation", text: "The proposed energy allocation would leave $916,000.", status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the adopted budget." }],
+      sources: [],
+    };
+    const writer = { stories: [story], held: [{ storyId: story.id, headline: "Airport-fee motion and its announced 6–1 result", reason: openReason, nextCheck: "Review the continuous motion and result passage.", unverified: true }] };
+    const routedChat = passChat({ writer: () => ({ ok: true, text: JSON.stringify(writer) }) });
+    const chat = async (system: string, prompt: string) => {
+      if (prompt.includes("Check this one unresolved story claim")) throw new Error(openReason);
+      return routedChat(system, prompt);
+    };
+    try {
+      await performReportingWork(job, {
+        ...methodDeps(),
+        workspaceRoot,
+        ingest: ingestDouble(),
+        runResearch: researchWithCaptureVersionIds(),
+        chat: chat as never,
+        probe: async () => ({ ok: true, label: "Fake model", choice: "auto" }) as never,
+      });
+      const [filed] = await sql<{ package: { stories: { headline: string; draft: string }[]; held: { headline: string; reason: string }[]; runStatus: string }; draft_id: number | null }>`
+        select package, draft_id from reporting_packages where request_id = ${requestId}
+      `;
+      assert.ok(filed, "the first readable draft reached the editor's package row");
+      assert.equal(filed.package.stories.length, 1);
+      assert.match(filed.package.stories[0]!.headline, /Longmont’s proposed budget/);
+      assert.equal(filed.package.stories[0]!.draft.trim().split(/\s+/).length, 657);
+      assert.equal(filed.package.runStatus, "PARTIAL");
+      assert.ok(filed.package.held.some((item) => /6–1/.test(item.headline) && /continuous interval/.test(item.reason)));
+      const [draft] = await sql<{ headline: string; dek: string; body: string; research_json: unknown }>`
+        select headline, dek, body, research_json from drafts where id = ${filed.draft_id}
+      `;
+      const research = typeof draft!.research_json === "string" ? JSON.parse(draft!.research_json) : draft!.research_json as Record<string, unknown>;
+      const readiness = (research as Record<string, unknown>).storyReadiness as Record<string, unknown>;
+      assert.equal(readiness.state, "not-ready");
+      assert.equal(readiness.reason, openReason);
+      const blockers = publishBlockers({
+        headline: draft!.headline, dek: draft!.dek, body: draft!.body, sectionReady: true,
+        readiness: "not-ready", readinessReason: String(readiness.reason), openClaims: 0,
+        unreviewedClaims: 0, unreviewedAccepted: false, namedOutlets: [], evidenceStale: false,
+        reviewingEvidence: false, reconcileActive: false, publishing: false,
+      });
+      assert.ok(blockers.some((blocker) => blocker.key === "readiness"), "the existing Publish gate remains closed");
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
