@@ -5,7 +5,8 @@ import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
 import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
-import { tickYoutubeCaptureRetries } from "./meeting-capture.ts";
+import { restoreYoutubeCaptureRetries, tickYoutubeCaptureRetries } from "./meeting-capture.ts";
+import { getSql } from "../db.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -145,7 +146,7 @@ export function startUnattendedScheduler(): void {
   void reattachDurableJobsOnStartup().catch((err) => {
     console.error("[townreporter] startup job reattachment failed:", err);
   });
-  void tickYoutubeCaptureRetries().catch((err) => {
+  void getSql().then((sql) => restoreYoutubeCaptureRetries(sql)).catch((err) => {
     console.error("[townreporter] startup meeting retries failed:", err);
   });
 

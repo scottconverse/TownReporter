@@ -6,7 +6,7 @@ import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting
 import { meetingStatusLabel } from "@/lib/news/meeting-activity-label";
 import { captureAudioAgain } from "@/lib/news/meeting-manual-run";
 import { PAPER, formatListDate, formatListDateTime } from "@/lib/paper";
-import { isYoutubeRateLimit, nextYoutube429Retry } from "@/lib/news/meeting-capture-retry";
+import { isYoutubeRateLimit } from "@/lib/news/meeting-capture-retry";
 
 function captureTime(value: string): string {
   // A date-only publication is a calendar day, not an instant to shift between zones.
@@ -90,7 +90,8 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
 
       {row.status === "failed" && isYoutubeRateLimit(row.failureReason ?? "") ? (
         <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {meetingYoutubeBlockedLine(row.youtubeRetryAt ?? nextYoutube429Retry({}, new Date()).at)}
+          {row.youtubeRetryAt ? meetingYoutubeBlockedLine(row.youtubeRetryAt)
+            : "Capture blocked by YouTube (too many requests). Next try: waiting for the first slow retry"}
         </p>
       ) : null}
 

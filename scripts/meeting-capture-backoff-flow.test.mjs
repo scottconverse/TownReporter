@@ -6,6 +6,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { installDom, moduleUrl, transpileToUrl } from "./dom-harness.mjs";
 import { createServer } from "vite";
+import { chromium } from "playwright";
+import { existsSync } from "node:fs";
 
 test("a blocked meeting waits longer between retries and shows its next try", async () => {
   const root = await mkdtemp(join(tmpdir(), "tr-meeting-retry-"));
@@ -96,12 +98,21 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       youtube_retry_count: 0,
       youtube_retry_at: null,
     });
-    await runMeetingAwareness(sql, 9, { ...deps, listChannelVideos: async () => [] });
+    globalThis.__restoreMeetingRetries = () => restoreYoutubeCaptureRetries(sql, now, deps.scheduleYoutubeRetry, 9);
+    const noop = transpileToUrl("export const tickAllDueMonitors=async()=>{}; export const drainQueuedJobs=async()=>{}; export const reattachDurableJobsOnStartup=async()=>{}; export const tickDailyScans=async()=>{}; export const tickRoutineNoticeEditions=async()=>{}; export const tickStatsReports=async()=>{}; export const foldSmallPlaces=async()=>{}; export const pruneLocationDaily=async()=>{}; export const tickFollowUps=async()=>{};", "startup-stubs.js");
+    const schedulerUrl = await moduleUrl("src/lib/news/unattended-scheduler.ts", {
+      ...Object.fromEntries(["monitors-cron", "jobs", "daily-scan.server", "routine-notice-worker.server", "stats-reports.server", "reading.server", "follow-up-scheduler"].map((name) => [`./${name}.ts`, noop])),
+      "../db.ts": transpileToUrl("export const getSql=async()=>({});", "startup-db.js"),
+      "./meeting-capture.ts": transpileToUrl("export const restoreYoutubeCaptureRetries=()=>globalThis.__restoreMeetingRetries(); export const tickYoutubeCaptureRetries=async()=>{};", "startup-meeting.js"),
+    });
+    const { startUnattendedScheduler } = await import(schedulerUrl);
+    startUnattendedScheduler();
+    await new Promise((resolve) => setImmediate(resolve));
     assert.ok(
       rows.get(video.id).youtube_retry_at,
       "a legacy blocked meeting must receive a retry time even outside the current feed",
     );
-    await restoreYoutubeCaptureRetries(sql, now, deps.scheduleYoutubeRetry, 9);
+    const legacyRetryAt = rows.get(video.id).youtube_retry_at;
     rows.clear();
     scheduled.length = 0;
 
@@ -160,7 +171,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
         "./lead-match.ts": transpileToUrl("export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }", "lead-match-stub.js"),
       }),
     });
-    queryStub.setMeetingRows([{
+    const cardRow = {
       videoId: video.id,
       title: video.title,
       published: video.published,
@@ -186,16 +197,32 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       leadStatus: null,
       draftId: null,
       citationCount: 0,
-    }]);
+    };
+    queryStub.setMeetingRows([cardRow]);
     const { MeetingsActivity } = await import(activityUrl);
     const markup = renderToStaticMarkup(React.createElement(MeetingsActivity));
     assert.match(markup, /Capture blocked by YouTube \(too many requests\)\. Next try/);
     assert.doesNotMatch(markup, /yt-dlp rate limited/);
+    assert.doesNotMatch(markup, /\d+:\d+/, "without a stored retry the card must not invent a clock time");
+    queryStub.setMeetingRows([{ ...cardRow, youtubeRetryAt: legacyRetryAt }]);
+    const browser = await chromium.launch({ headless: true, ...(existsSync(chromium.executablePath()) ? {} : { channel: "msedge" }) });
+    try {
+      const page = await browser.newPage();
+      await page.route("**/*", (route) => route.abort());
+      await page.setContent(renderToStaticMarkup(React.createElement(MeetingsActivity)));
+      await page.getByRole("heading", { name: video.title }).click();
+      const { meetingYoutubeBlockedLine } = await import(await moduleUrl("src/lib/news/desk-copy.ts", {
+        "./preflight.ts": transpileToUrl("export const looksLikeProviderAuthFailure=()=>false; export const providerAuthTarget=()=>'';", "copy-preflight.js"),
+        "./lead-match.ts": transpileToUrl("export const distinguishingOverlap=()=>false;", "copy-lead.js"),
+      }));
+      assert.equal(await page.getByRole("status").textContent(), meetingYoutubeBlockedLine(legacyRetryAt));
+    } finally { await browser.close(); }
 
     now = thirdRetry;
     await runMeetingAwareness(sql, 9, deps);
     assert.equal(captureCount, 4, "the saved retry becomes eligible after the UTC day rolls over");
   } finally {
+    delete globalThis.__restoreMeetingRetries;
     await vite?.close();
     if (previousDataRoot === undefined) delete process.env.TOWNREPORTER_DATA_ROOT;
     else process.env.TOWNREPORTER_DATA_ROOT = previousDataRoot;
