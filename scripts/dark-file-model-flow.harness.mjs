@@ -87,7 +87,7 @@ const imports = {
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
   "@/components/PaperSetupGateNote": nullComponents,
   "@/lib/news/desk-copy": copyStub,
-  "@/lib/paper-context-state": stub(`export const usePaperDateFormatters = () => ({ formatListDateTime: () => "Sept. 26", formatShortDate: () => "Sept. 26" });`),
+  "@/lib/paper-context-state": stub(`export const usePaperDateFormatters = () => ({ formatListDateTime: () => "Sept. 26", formatShortDate: () => "Sept. 26", formatClockTime: () => "7:02 a.m." });`),
   "@/components/dark-dials-panel": nullComponents,
   "@/components/model-picker": modelPickerStub,
   "@/components/first-run-picker-default": stub(`export const useFirstRunPickerSeed = () => {}; export const useFirstRunPickerDefault = () => "claude-haiku";`),

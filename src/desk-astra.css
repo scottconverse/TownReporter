@@ -6907,7 +6907,7 @@
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 10px;
-  padding: 9px 0;
+  padding: 4px 0;
   border-bottom: 1px solid var(--line);
   font-size: calc(0.9375rem * var(--ts));
 }
@@ -6915,18 +6915,22 @@
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
 }
-.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-log-e { line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-log-e.find { font-weight: 700; }
 .desk-ltr.astra .astra-log-e.fail { color: var(--danger); font-weight: 700; }
 .desk-ltr.astra .astra-case {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 9px 0;
+  gap: 2px;
+  padding: 4px 0;
   border-bottom: 1px solid var(--line);
 }
 .desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-deep-file .side-item { overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-pair .of-block { margin-top: 8px; padding-top: 4px; }
+.desk-ltr.astra .astra-case-compact > .side-item { margin-top: 0; }
+.desk-ltr.astra .astra-pair .of-trail { margin-top: 4px; }
+.desk-ltr.astra .astra-pair .astra-case-compact .of-trail > summary { line-height: 1.3; }
 .desk-ltr.astra .astra-records > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
 .desk-ltr.astra .astra-flow { margin: 8px 0 0; color: var(--fg2); font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
 .desk-ltr.astra .astra-flow-current { color: var(--fg); font-weight: 700; }
@@ -6941,6 +6945,7 @@
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.desk-ltr.astra .astra-deep-file { gap: 16px; }
 .desk-ltr.astra .astra-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .desk-ltr.astra .astra-plain > li {
   display: flex;

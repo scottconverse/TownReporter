@@ -1764,7 +1764,8 @@ function InvestigationWorkspace({
   const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
 
   const activityAll = activityQuery.data ?? [];
-  const activityRows = activityAll.slice(-4);
+  const activityRows = activityAll.slice(-8);
+  const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 
   // The saved scope is file-specific; the newsroom place supplies only its
   // human-readable jurisdiction names.
@@ -1812,17 +1813,35 @@ function InvestigationWorkspace({
     const label = title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(source.url);
     return <a className="inline-link" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
   };
+  const renderCompactCaseText = (value: string, key: string) => {
+    const full = plainEditorText(value).replace(/\s+/g, " ").trim();
+    const preview = full.length > 132 ? `${full.slice(0, 132).trimEnd()}…` : full;
+    return (
+      <div key={key} className="astra-case-compact">
+        <p className="side-item astra-case-v">{preview}</p>
+        {preview !== full ? <details className="of-trail"><summary>More</summary><p className="side-item astra-case-v">{full}</p></details> : null}
+      </div>
+    );
+  };
   const renderFinding = (finding: (typeof sourcedFindings)[number], key: string) => (
-    <p key={key} className="side-item astra-case-v">
-      {finding.text} <span className="meta">— {sourceLink(finding.source!.id)}</span>
-    </p>
+    <div key={key} className="astra-case">
+      {renderCompactCaseText(finding.text, `${key}-text`)}
+      <span className="meta">— {sourceLink(finding.source!.id)}</span>
+    </div>
   );
-  const renderQuestion = (question: string, key: string) => <p key={key} className="side-item astra-case-v">{question}</p>;
+  const renderQuestion = (question: string, key: string) => <div key={key} className="astra-case">{renderCompactCaseText(question, `${key}-text`)}</div>;
   const renderContradiction = (pair: (typeof contradictions)[number], key: string) => (
-    <p key={key} className="side-item astra-case-v">
-      {plainEditorText(pair.first.text)}; another record says {plainEditorText(pair.second.text)}
-      <span className="meta"> — {sourceLink(pair.first.captureId)}; {sourceLink(pair.second.captureId)}</span>
-    </p>
+    <div key={key} className="astra-case">
+      {renderCompactCaseText(`${plainEditorText(pair.first.text)}; another record says ${plainEditorText(pair.second.text)}`, `${key}-text`)}
+      <span className="meta">— {sourceLink(pair.first.captureId)}; {sourceLink(pair.second.captureId)}</span>
+    </div>
+  );
+  const renderFollowUp = (followUp: (typeof linkedFollowUps)[number], key: string) => (
+    <div key={key} className="astra-case">
+      <p className="side-item astra-case-v"><span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"}</span></p>
+      {renderCompactCaseText(followUp.what, `${key}-what`)}
+      <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link>
+    </div>
   );
 
   return (
@@ -1972,9 +1991,6 @@ function InvestigationWorkspace({
         <div>
           <div className="astra-case-h">
             <p className="astra-label">Activity</p>
-            <p className="astra-note">
-              What the desk did, in order. Failures stay on the record.
-            </p>
           </div>
           {activityRows.length === 0 ? (
             <p className="astra-note">
@@ -1994,10 +2010,10 @@ function InvestigationWorkspace({
               </div>
             ))
           )}
-          {activityAll.length > activityRows.length ? (
+          {earlierActivity.length ? (
             <details className="of-trail">
-              <summary>Show all activity</summary>
-              {activityAll.slice(0, -activityRows.length).map((a) => (
+              <summary>Show earlier</summary>
+              {earlierActivity.map((a) => (
                 <div key={a.id} className="astra-log">
                   <time className="astra-log-t" dateTime={a.occurredAt}>{formatClockTime(a.occurredAt)}</time>
                   <span className={"astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")}>{a.text}</span>
@@ -2009,49 +2025,39 @@ function InvestigationWorkspace({
         <div>
           <div className="astra-case-h">
             <p className="astra-label">Case file</p>
-            <p className="astra-note">Findings, contradictions, unanswered questions and AI follow-ups.</p>
           </div>
-          <details className="of-trail">
-            <summary>Read the AI brief ▸</summary>
-            <InvestigationBriefCard brief={brief} onRefresh={onWriteBrief} refreshing={briefPending} />
-            {briefJob ? <div className="dark-job-card"><DeskJobCard job={briefJob} /></div> : null}
-          </details>
           {challengeJob ? <div className="dark-job-card"><DeskJobCard job={challengeJob} /></div> : null}
-          {detail?.latestChallenge ? (
-            <p className="meta">
-              Challenged {formatListDateTime(detail.latestChallenge.createdAt)}: {plainEditorText(detail.latestChallenge.summary).slice(0, 360)}
-            </p>
+          {briefJob ? <div className="dark-job-card"><DeskJobCard job={briefJob} /></div> : null}
+          {brief || detail?.latestChallenge ? (
+            <details className="of-trail">
+              <summary>More</summary>
+              {brief ? <InvestigationBriefCard brief={brief} onRefresh={onWriteBrief} refreshing={briefPending} /> : null}
+              {detail?.latestChallenge ? <p className="meta">Challenged {formatListDateTime(detail.latestChallenge.createdAt)}: {plainEditorText(detail.latestChallenge.summary)}</p> : null}
+            </details>
           ) : null}
           <div className="of-block">
             <p className="side-label">Findings</p>
-            {sourcedFindings.length ? sourcedFindings.slice(0, 3).map((finding, i) => renderFinding(finding, `finding-${i}`)) : <p className="side-item">No sourced findings yet.</p>}
-            {sourcedFindings.length > 3 ? (
-              <details className="of-trail"><summary>Show all findings</summary>{sourcedFindings.slice(3).map((finding, i) => renderFinding(finding, `finding-more-${i}`))}</details>
+            {sourcedFindings.length ? renderFinding(sourcedFindings[0]!, "finding-0") : <p className="side-item">No sourced findings yet.</p>}
+            {sourcedFindings.length > 1 ? (
+              <details className="of-trail"><summary>More</summary>{sourcedFindings.slice(1).map((finding, i) => renderFinding(finding, `finding-more-${i}`))}</details>
             ) : null}
           </div>
           <div className="of-block">
             <p className="side-label">Contradictions</p>
-            {contradictions.length ? contradictions.slice(0, 3).map((pair, i) => renderContradiction(pair, `contradiction-${i}`)) : <p className="side-item">No captured records disagree yet.</p>}
-            {contradictions.length > 3 ? (
-              <details className="of-trail"><summary>Show all contradictions</summary>{contradictions.slice(3).map((pair, i) => renderContradiction(pair, `contradiction-more-${i}`))}</details>
+            {contradictions.length ? renderContradiction(contradictions[0]!, "contradiction-0") : <p className="side-item">No captured records disagree yet.</p>}
+            {contradictions.length > 1 ? (
+              <details className="of-trail"><summary>More</summary>{contradictions.slice(1).map((pair, i) => renderContradiction(pair, `contradiction-more-${i}`))}</details>
             ) : null}
           </div>
           <div className="of-block">
             <p className="side-label">Unanswered</p>
-            {unanswered.length ? unanswered.slice(0, 3).map((question, i) => renderQuestion(question, `question-${i}`)) : <p className="side-item">No unanswered questions listed yet.</p>}
-            {unanswered.length > 3 ? <details className="of-trail"><summary>Show all unanswered</summary>{unanswered.slice(3).map((question, i) => renderQuestion(question, `question-more-${i}`))}</details> : null}
+            {unanswered.length ? renderQuestion(unanswered[0]!, "question-0") : <p className="side-item">No unanswered questions listed yet.</p>}
+            {unanswered.length > 1 ? <details className="of-trail"><summary>More</summary>{unanswered.slice(1).map((question, i) => renderQuestion(question, `question-more-${i}`))}</details> : null}
           </div>
           <div className="of-block">
-            <p className="side-label">{foundAnswer ? "AI follow-up result" : "AI follow-ups running"}</p>
-            {linkedFollowUps.length ? linkedFollowUps.slice(0, 3).map((followUp) => (
-              <p key={followUp.id} className="side-item astra-case-v">
-                <span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what}{" "}
-                <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link>
-              </p>
-            )) : <p className="side-item">No AI follow-ups running.</p>}
-            {linkedFollowUps.length > 3 ? <details className="of-trail"><summary>Show all AI follow-ups</summary>{linkedFollowUps.slice(3).map((followUp) => (
-              <p key={`more-${followUp.id}`} className="side-item astra-case-v"><span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what} <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link></p>
-            ))}</details> : null}
+            <p className="side-label">AI follow-ups running</p>
+            {linkedFollowUps.length ? renderFollowUp(linkedFollowUps[0]!, `follow-up-${linkedFollowUps[0]!.id}`) : <p className="side-item">No AI follow-ups are running.</p>}
+            {linkedFollowUps.length > 1 ? <details className="of-trail"><summary>More</summary>{linkedFollowUps.slice(1).map((followUp) => renderFollowUp(followUp, `follow-up-more-${followUp.id}`))}</details> : null}
           </div>
           <div className="astra-panel-acts">
             <InkButton tone="quiet" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !detail?.run} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
