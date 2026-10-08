@@ -24,6 +24,7 @@ export type DarkRunBudgetLimits = {
   modelCalls: number;
   searches: number;
   documentReads: number;
+  limitDollars?: number | null;
 };
 
 export type DarkUsageCall = {
@@ -74,6 +75,22 @@ function wholeNonNegative(value: number): number {
   return Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
 }
 
+export function createDarkRunBudgetForFile(
+  rawLimits: DarkRunBudgetLimits,
+  fileLimit: { minutes: number; dollars: number | null },
+  deps: { now?: () => number } = {},
+) {
+  const minutes = Number.isFinite(fileLimit.minutes) ? Math.max(1, Math.floor(fileLimit.minutes)) : 120;
+  return createDarkRunBudget(
+    {
+      ...rawLimits,
+      elapsedMs: Math.min(rawLimits.elapsedMs, minutes * 60_000),
+      limitDollars: fileLimit.dollars,
+    },
+    deps,
+  );
+}
+
 export function createDarkRunBudget(
   rawLimits: DarkRunBudgetLimits,
   deps: { now?: () => number } = {},
@@ -85,6 +102,10 @@ export function createDarkRunBudget(
     modelCalls: wholeNonNegative(rawLimits.modelCalls),
     searches: wholeNonNegative(rawLimits.searches),
     documentReads: wholeNonNegative(rawLimits.documentReads),
+    limitDollars:
+      rawLimits.limitDollars == null || !Number.isFinite(rawLimits.limitDollars)
+        ? null
+        : Math.max(0, rawLimits.limitDollars),
   };
   let modelCalls = 0;
   let searches = 0;

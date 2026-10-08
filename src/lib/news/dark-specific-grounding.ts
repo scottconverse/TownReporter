@@ -598,12 +598,18 @@ export function normaliseForGrounding(text: string): string {
  * around a place: "Doe Longmont" is still an ungrounded person, because the
  * surname is not a place word.
  */
+export type GroundingCapture = { captureEventId: number; text: string };
 export type GroundingCorpus = string | {
   readonly normalised: string;
   readonly place?: readonly string[];
+  readonly captures?: readonly GroundingCapture[];
 };
 
-export function prepareCorpus(text: string, place?: readonly string[]): GroundingCorpus {
+export function prepareCorpus(
+  text: string,
+  place?: readonly string[],
+  captures?: readonly GroundingCapture[],
+): GroundingCorpus {
   return {
     normalised: normaliseForGrounding(stripMarkedSpecifics(text)),
     /*
@@ -615,6 +621,7 @@ export function prepareCorpus(text: string, place?: readonly string[]): Groundin
     place: place?.length
       ? [...new Set(place.flatMap((part) => normaliseForGrounding(part).split(" ")).filter(Boolean))]
       : undefined,
+    ...(captures?.length ? { captures } : {}),
   };
 }
 

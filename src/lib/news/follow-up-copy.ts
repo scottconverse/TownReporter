@@ -213,6 +213,7 @@ export function findingNoteLine(finding: FollowUpFinding): string {
 export type CreateAiFollowUpInput = {
   leadId?: number | null;
   articleId?: number | null;
+  investigationId?: number;
   what: string;
   agentKind: FollowUpAgentKind;
   schedule: FollowUpSchedule;

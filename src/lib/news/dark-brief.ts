@@ -15,6 +15,11 @@
 
 export type BriefVerdict = "promising" | "thin" | "dead" | "unknown";
 export type BriefEvidenceStatus = "protocol-complete" | "unverified";
+export type BriefContradictionRecord = { text: string; captureId: number };
+export type BriefContradiction = {
+  first: BriefContradictionRecord;
+  second: BriefContradictionRecord;
+};
 
 export type InvestigationBrief = {
   /** One line. What this file is actually about, in the editor's language. */
@@ -39,6 +44,8 @@ export type InvestigationBrief = {
   strength: number;
   /** The evidence and connections that point at it. */
   supports: string[];
+  /** Two incompatible, verbatim record statements, each tied to a capture. */
+  contradictions: BriefContradiction[];
   /** The ordinary explanation that would also fit. Always at least one. */
   benign: string;
   /** The single thing that would settle it either way. */
@@ -164,6 +171,20 @@ export function parseBrief(
       return Number.isFinite(n) ? Math.min(1, Math.max(0, Number(n.toFixed(2)))) : 0;
     })(),
     supports: list(o.supports, 6, 2_000, true),
+    contradictions: Array.isArray(o.contradictions)
+      ? o.contradictions.slice(0, 3).map((value) => {
+          const pair = (value ?? {}) as Record<string, unknown>;
+          const record = (rawRecord: unknown): BriefContradictionRecord => {
+            const item = (rawRecord ?? {}) as Record<string, unknown>;
+            const captureId = Number(item.captureId ?? item.capture_id);
+            return {
+              text: str(item.text, 500),
+              captureId: Number.isSafeInteger(captureId) && captureId > 0 ? captureId : 0,
+            };
+          };
+          return { first: record(pair.first), second: record(pair.second) };
+        })
+      : [],
     benign: str(o.benign, 400),
     // This can be a multi-clause named-record instruction. Preserve normal
     // answers whole; if hostile/accidental output reaches the defensive 10k
@@ -195,6 +216,8 @@ The file below is four dense lists. The editor can read them. What they cannot d
 TABLES AND LISTS: A captured excerpt can contain adjacent records or split one record across locators. Attribute an applicant, owner, dollar figure, acreage, or other field only when the same record explicitly pairs that value with the subject. A name merely before or after the subject is not a connection. A continuation must repeat the subject or carry an unambiguous same-record label; otherwise say the attribute is unknown and name the record to check.
 
 NUMERIC COMPARISONS: Before asserting ahead/behind, more/less, a rank, a difference, or a contradiction, compare the actual numeric values paired with each subject. Row order is not rank. Compare the same measure, period, and geographic scope; do not mix a subtotal with a combined total. Do not call sources contradictory when they agree. An alleged discrepancy needs the two incompatible source statements, not an inference from their layout. Check comparisons across every JSON field against the numbers in DOCUMENTS READ and against one another. If a comparison cannot be established, omit that comparison and state what remains unknown; do not invent an inconsistency to make a connection interesting.
+
+CONTRADICTIONS: Return only a pair of incompatible statements copied verbatim from two captured records. Each record must include the numeric capture id shown in its DOCUMENTS READ header. Use {"first":{"text":"exact statement","captureId":31},"second":{"text":"exact statement","captureId":32}}. Do not paraphrase, infer, or cite an id whose record is not in DOCUMENTS READ. If no such pair is present, return [].
 
 Your job, in order:
 
@@ -228,6 +251,7 @@ Return ONLY JSON:
   "hypothesis": "one concrete falsifiable sentence, or 'Nothing supports a hypothesis yet'",
   "strength": 0.0,
   "supports": ["the evidence that points at it"],
+  "contradictions": [{"first":{"text":"exact statement","captureId":31},"second":{"text":"exact statement","captureId":32}}],
   "benign": "the ordinary explanation that also fits",
   "kills_it": "the one record that settles it",
   "verdict": "promising|thin|dead|unknown",

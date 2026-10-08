@@ -2,9 +2,12 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
 import { __setJobWorkForTest, drainQueuedJobs, ensureJobsSchema, laneForKind } from "./jobs.ts";
 import { startBriefJob, startDarkRound } from "./dark.ts";
+
+await applyMigrationsToTestPglite();
 
 /**
  * Dark Desk's commit boundary (0.6.2).

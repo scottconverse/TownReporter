@@ -698,6 +698,8 @@ export function darkRequest(state: DarkFileState) {
         .join("\n\n"),
       title: state.question.trim(),
       budget: hopsForLimit(limit.key),
+      ordinaryExplanation: explanation,
+      limitKey: limit.key,
     },
     /*
       Unit CY item 9: the dialog draws an Effort select beside the model, so
@@ -875,12 +877,11 @@ export function darkFileInitial(): DarkFileState {
 }
 
 /**
- * The two fields a caller may already know when it opens the file. Only the
- * question and the starting point: the Limits dial and the model pick are the
- * editor's calls, and a caller that guessed them would be choosing how much
- * money to spend.
+ * The file fields a caller may already know when it opens the dialog. The
+ * Limits dial and model pick stay with the editor, who is choosing how much to
+ * spend.
  */
-export type DarkFilePrefill = { question?: string; tip?: string };
+export type DarkFilePrefill = { question?: string; tip?: string; explanation?: string };
 
 /**
  * Unit BN2, item 4: the state the dialog opens on, seeded with what the caller
@@ -897,6 +898,7 @@ export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
   const seed = darkFileInitial();
   if (prefill?.question !== undefined) seed.question = prefill.question;
   if (prefill?.tip !== undefined) seed.tip = prefill.tip;
+  if (prefill?.explanation !== undefined) seed.explanation = prefill.explanation;
   return seed;
 }
 

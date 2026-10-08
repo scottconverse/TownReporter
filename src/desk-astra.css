@@ -6243,9 +6243,14 @@
   align-items: start;
 }
 /* Dark Desk: piles rail | the open file. */
+.desk-ltr.astra .astra-deep-container {
+  container-type: inline-size;
+  min-width: 0;
+  width: 100%;
+}
 .desk-ltr.astra .astra-split-deep {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
   border: 1px solid var(--line);
   align-items: stretch;
@@ -6697,8 +6702,12 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   min-width: 0;
+}
+@container (min-width: 900px) {
+  .desk-ltr.astra .astra-split-deep { grid-template-columns: 320px minmax(0, 1fr); }
+  .desk-ltr.astra .astra-piles { border-right: 1px solid var(--line); border-bottom: 0; }
 }
 .desk-ltr.astra .astra-pile {
   display: flex;
@@ -6750,7 +6759,7 @@
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
 }
-.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; }
+.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-log-e.find { font-weight: 700; }
 .desk-ltr.astra .astra-log-e.fail { color: var(--danger); font-weight: 700; }
 .desk-ltr.astra .astra-case {
@@ -6760,7 +6769,19 @@
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
-.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-deep-file .side-item { overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-records > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
+.desk-ltr.astra .astra-flow { margin: 8px 0 0; color: var(--fg2); font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .astra-flow-current { color: var(--fg); font-weight: 700; }
+.desk-ltr.astra .dark-round-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; }
+.desk-ltr.astra .dark-round-head { display: flex; justify-content: space-between; gap: 12px; font-size: calc(0.9375rem * var(--ts)); }
+.desk-ltr.astra .dark-round-steps { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .dark-round-steps .done { color: var(--fg2); }
+.desk-ltr.astra .dark-round-steps .current { color: var(--fg); font-weight: 700; border-bottom: 2px solid var(--sel); }
+.desk-ltr.astra .dark-round-message { margin: 8px 0; font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .dark-round-stall { border-left: 4px solid var(--warn); background: var(--panel2); padding: 12px; }
+.desk-ltr.astra .dark-round-stall > p { margin: 0 0 10px; font-weight: 700; }
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
@@ -6775,28 +6796,30 @@
 .desk-ltr.astra .astra-plain > li:last-child { border-bottom: 0; }
 
 /* --- Dark Desk: rail rows, pile chrome, and the open file ------------------
-   The drawing's rail is an index: one bold line, one line of metadata, one
-   action, and a rule between rows. The row itself is the control, so
-   .astra-file-open is a reset button that fills the row and inherits its
-   type; .astra-file keeps the padding and the selected bar. */
-/* UI1b-4: the row IS the control, so the row is what carries the edge. It had
-   none -- title, metadata and a hairline rule that was not even drawn -- so
-   every file in the Dark Desk rail measured as plain text. It wears the Quiet
-   button's 1px `--fg2` box now, inset in the rail's own 16px padding, and the
-   row's actions sit below it as they did. One box, not two: `.astra-file` is
-   the plain wrapper, this button is the press target. */
+   The rail is an index: a bold line, one line of metadata, and a rule between
+   rows. The selector itself is the 44px press target; `.astra-file` is only
+   the row wrapper. The selected row uses the ink marker for contrast. */
 .desk-ltr.astra .astra-file-open {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 12px;
-  border: 1px solid var(--fg2);
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 .desk-ltr.astra .astra-file-open:focus-visible { outline-offset: 2px; }
+.desk-ltr.astra .astra-file-open:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-file-open[aria-current="true"] {
+  background: var(--bg);
+  box-shadow: inset 4px 0 0 var(--sel);
+}
+.desk-ltr.astra .astra-pile-row { padding: 0; gap: 0; }
+.desk-ltr.astra .astra-signal-open { display: block; }
 .desk-ltr.astra .astra-file-t,
 .desk-ltr.astra .astra-file-m { display: block; }
 .desk-ltr.astra .astra-file-acts {
@@ -6817,6 +6840,15 @@
   gap: 8px;
 }
 .desk-ltr.astra .astra-pile-acts .btn { width: 100%; }
+.desk-ltr.astra .astra-other-actions > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  color: var(--fg2);
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-pile-aside > summary { list-style-position: inside; }
+.desk-ltr.astra .astra-signal-source { overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-signal-selected .astra-panel-acts { margin-top: 16px; }
 
 /*
   The rail's own paste box is the desk's top-of-rail start action, not a
@@ -7068,11 +7100,9 @@
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,
   .desk-ltr.astra .astra-split,
-  .desk-ltr.astra .astra-split-deep,
   .desk-ltr.astra .astra-pair { grid-template-columns: minmax(0, 1fr); }
   .desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: auto; }
   .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
-  .desk-ltr.astra .astra-piles { border-right: 0; border-bottom: 1px solid var(--line); }
   .desk-ltr.astra .astra-plain > li.astra-row.opinion,
   .desk-ltr.astra .astra-row.opinion,
   .desk-ltr.astra .astra-row.pub,

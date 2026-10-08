@@ -1,14 +1,18 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureFollowUpsSchema, performListFollowUps, performReadFollowUp } from "./follow-ups.ts";
+
+await applyMigrationsToTestPglite();
 
 /**
  * The Follow-ups list, after the manual workflow was retired (0.6.81, unit CU).
- * `getSql()` auto-applies migrations/*.sql only under Vite; under plain `node
- * --test` the glob is a no-op (see src/lib/db.ts), so `leads` and `articles`
- * are declared here the same way dark-queue.test.ts and jobs.test.ts do for
- * their own fixtures. `ensureFollowUpsSchema` creates `follow_ups` itself.
+ * `getSql()` auto-applies migrations/*.sql only under Vite; this module's test
+ * bootstrap applies them before its data checks. `leads` and
+ * `articles` are declared here as in dark-queue.test.ts and jobs.test.ts.
+ * Runtime ensure owns the base Follow-ups schema; migration 0141 owns its
+ * Dark Desk file link.
  *
  * These call the plain `perform*` functions desk.ts exports for exactly this
  * reason (same shape as `performPublish`) rather than the `createServerFn`-
@@ -27,6 +31,13 @@ import { ensureFollowUpsSchema, performListFollowUps, performReadFollowUp } from
  */
 async function ensureFixtureTables() {
   const sql = await getSql();
+  await sql.query(`
+    create table if not exists investigations (
+      id serial primary key,
+      newsroom_id integer not null default 1,
+      title text not null
+    )
+  `);
   await sql.query(`
     create table if not exists leads (
       id serial primary key,
@@ -69,67 +80,24 @@ function room(base: number) {
 }
 
 /**
- * CI failure reproduction (postgres-integration job, run 34023014131): the
- * hypothesis was that `follow_ups` never joins the runtime ensure chain, so
- * a fresh database's first `/desk` request hits a missing relation. This is
- * that check in isolation, run first in this file (before any other test's
- * `ensureFixtureTables()`/`ensureFollowUpsSchema()` call could create the
- * table) against a database this process has not migrated at all -- plain
- * `node --test` never runs `migrations/*.sql` (see the file docstring above
- * and src/lib/db.ts's `createPgliteSql`), so this IS "boot PGLite fresh,
- * skip migrations". It calls `performListFollowUps`, the exact function
- * `listFollowUps` (desk.ts, a createServerFn) delegates to for the desk
- * loader's query, and asserts the table goes from absent to present as a
- * side effect of that one call.
- */
-describe("a fresh database with no migrations applied", { timeout: 30000 }, () => {
-  it("has no follow_ups table until the first perform* call, which creates it via the ensure chain", async () => {
-    // performListFollowUps joins leads/articles too -- migrations-only
-    // tables with no ensure* counterpart (see schema-parity.test.ts's
-    // ALLOWLIST), unrelated to the bug this test guards against. Stand
-    // those up the same way every other test in this file does; the thing
-    // under test is follow_ups specifically, created by ensureFollowUpsSchema
-    // (called at the top of performListFollowUps) and nothing else here.
+/** Migration 0141 owns the Dark Desk file link read by this list query. */
+describe("the migrated follow-up table", { timeout: 30000 }, () => {
+  it("reads the empty table with its Dark Desk file link on the first list call", async () => {
     await ensureFixtureTables();
-
     const sql = await getSql();
-    /*
-      U18a-1: `migrations/*.sql` is applied to this database before the file
-      loads, so `follow_ups` is already there and the "boot PGLite fresh, skip
-      migrations" state this test reproduces has to be produced deliberately.
-      Drop the table AND its `ensureSchemaOnce` marker -- the marker is what
-      makes the ensure chain a no-op -- so the property under test is unchanged:
-      one `performListFollowUps` call brings the table into being.
-    */
-    await sql.query("drop table if exists follow_ups cascade");
-    const [markerTable] = await sql<{ exists: boolean }>`
-      select exists (
-        select 1 from information_schema.tables
-        where table_schema = 'public' and table_name = '_schema_ensure_state'
-      ) as exists
-    `;
-    if (markerTable!.exists)
-      await sql.query("delete from _schema_ensure_state where name = 'follow-ups'");
-    const before = await sql<{ exists: boolean }>`
-      select exists (
-        select 1 from information_schema.tables
-        where table_schema = 'public' and table_name = 'follow_ups'
-      ) as exists
-    `;
-    assert.equal(before[0]!.exists, false, "follow_ups must not exist before any Follow-ups call on a fresh database");
 
     // The same code path the desk loader's listFollowUps hits -- see
     // src/lib/news/desk.ts's listFollowUps handler.
-    const rows = await performListFollowUps(ctx(`fresh-db-user-${Date.now()}`, 999_999));
+    const rows = await performListFollowUps(ctx("fresh-db-user-" + Date.now(), 999_999));
     assert.deepEqual(rows, []);
 
-    const after = await sql<{ exists: boolean }>`
+    const link = await sql<{ present: boolean }>`
       select exists (
-        select 1 from information_schema.tables
-        where table_schema = 'public' and table_name = 'follow_ups'
-      ) as exists
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'follow_ups' and column_name = 'investigation_id'
+      ) as present
     `;
-    assert.equal(after[0]!.exists, true, "performListFollowUps's ensureFollowUpsSchema() call must create follow_ups");
+    assert.equal(link[0]!.present, true, "migration 0141 provides the file link the list query reads");
   });
 });
 

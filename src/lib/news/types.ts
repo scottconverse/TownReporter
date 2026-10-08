@@ -275,6 +275,7 @@ export type FollowUpRow = {
   user_id: string;
   lead_id: number | null;
   article_id: number | null;
+  investigation_id?: number | null;
   who: string;
   what: string;
   due_on: string | null;
@@ -300,6 +301,7 @@ export type FollowUpRow = {
   lead_headline?: string | null;
   article_slug?: string | null;
   article_headline?: string | null;
+  investigation_title?: string | null;
 };
 
 /** What an AI follow-up's agent does. Text + check in the database (0101). */

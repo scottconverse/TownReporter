@@ -24,14 +24,14 @@ import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
  * (see textflowkit-transcribe.server.ts); the lane's concurrency of 2 is about
  * how many jobs may be *open*, not how many may burn CPU.
  */
-export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up" | "reporting";
+export type JobKind = "scan" | "draft" | "reconcile" | "dark" | "editorial" | "brief" | "challenge" | "routine-notice" | "artifact-ocr" | "pull" | "audio-transcribe" | "follow-up" | "reporting";
 export type JobStatus = "queued" | "running" | "completed" | "failed";
 
 /**
  * Every kind, as a runtime list. The type above is erased, so this is the only
- * thing a TEST can loop over -- and the brief's rule is that every kind has a
- * stage list whose phrases its worker really writes, which is a claim about all
- * eleven, not about the three that happened to have one.
+ * thing a test can loop over. Every kind has a stage list presented by the
+ * progress model, which is a claim about all thirteen, not about the three that
+ * happened to have one.
  *
  * `kindCoverage` below is what keeps the two in step: it will not compile if
  * `JobKind` grows a member this list is missing, so the test that loops this
@@ -44,6 +44,7 @@ export const JOB_KINDS = [
   "dark",
   "editorial",
   "brief",
+  "challenge",
   "routine-notice",
   "artifact-ocr",
   "pull",
@@ -308,6 +309,9 @@ async function realWork(job: DeskJob): Promise<void> {
   } else if (job.kind === "brief") {
     const { performBriefWork } = await import("./dark.ts");
     await performBriefWork(job);
+  } else if (job.kind === "challenge") {
+    const { performChallengeWork } = await import("./dark.ts");
+    await performChallengeWork(job);
   } else if (job.kind === "editorial") {
     const { performEditorialWork } = await import("./editorial.server.ts");
     await performEditorialWork(job);
@@ -1269,6 +1273,7 @@ export const JOB_STAGE_LISTS: Record<JobKind, readonly string[]> = {
     chips, both arrivals, both written by `performBriefWork`.
   */
   brief: ["Reading the file", "Writing editor brief"],
+  challenge: ["Challenging the case"],
   /*
     The retained-PDF read: open it and count the pages, read them a batch at a
     time, save. `Reading batch 1 of 8 · PDF pages 1-6 · 0 of 47 already saved…`

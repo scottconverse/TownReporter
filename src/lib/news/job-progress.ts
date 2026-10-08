@@ -44,7 +44,7 @@ export type JobProgressView = {
    * The row's `subject_id`, uninterpreted -- what this job is ABOUT.
    *
    * FB7, item 2. What the subject MEANS depends on the kind: for a draft or a
-   * reconcile it is a lead, for a `dark` or a `brief` it is an investigation,
+   * reconcile it is a lead, for a `dark`, `brief` or `challenge` it is an investigation,
    * and for an `artifact-ocr` it is the artifact whose pages are being read.
    * `leadId` above is the story-card view of the same column and is 0 for
    * every kind that is not a story -- which is exactly why a screen cannot use
@@ -122,6 +122,7 @@ const TITLES: Partial<Record<JobKind, string>> = {
   dark: "Digging the file",
   editorial: "Writing an editorial",
   brief: "Writing the editor brief",
+  challenge: "Challenging the case",
   "routine-notice": "Filing the routine edition",
   "artifact-ocr": "Reading the PDF",
   pull: "Pulling the public record",
@@ -137,6 +138,7 @@ const DONE_TEXT: Partial<Record<JobKind, string>> = {
   dark: "The round is done",
   editorial: "The editorial is written",
   brief: "The brief is written",
+  challenge: "The case review is done",
   "routine-notice": "The routine edition is filed",
   "artifact-ocr": "The PDF pages are read",
   pull: "The pull is done",
@@ -152,6 +154,7 @@ const OPEN_LABEL: Partial<Record<JobKind, string>> = {
   dark: "Open the file",
   editorial: "Open Opinion",
   brief: "Open the file",
+  challenge: "Open the file",
   "routine-notice": "Open the routine desk",
   "artifact-ocr": "Open the file",
   pull: "Open the story",
@@ -168,6 +171,7 @@ const OPEN_LABEL: Partial<Record<JobKind, string>> = {
 const RESULT_HREF: Partial<Record<JobKind, (subjectId: number) => string>> = {
   scan: () => "/desk/scan",
   dark: () => "/desk/dark",
+  challenge: () => "/desk/dark",
   "artifact-ocr": () => "/desk/dark",
   editorial: () => "/desk/opinion",
   // The transcript screen is keyed by the ARTIFACT, and this job's subject IS
@@ -389,7 +393,7 @@ export const listFollowUpJobProgress = createServerFn({ method: "GET" })
  *
  * THE ONE READER. It replaces two narrow ones -- `listStoryJobProgress`
  * (`kind in ('draft','reconcile')`) and the shell's `listRecentStoryWork`
- * (`kind='draft'`) -- which between them meant six of the eleven kinds had no
+ * (`kind='draft'`) -- which between them meant six of the earlier kinds had no
  * card surface anywhere in the product: a Scan, a Dark Desk round, a brief, a
  * PDF read, a Pull, a transcription and a routine edition could all be running
  * with nothing on any screen that said so.
