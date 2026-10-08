@@ -5,7 +5,7 @@ import { headlineSourceAfterEdit } from "./headline-control.ts";
 import { researchJsonWithStyleAudit, styleRecordForSavedText, type DraftStyleRecord } from "./draft-audit-record.ts";
 import type { DraftRow } from "./types.ts";
 import { sanitizeJsonLeaves } from "./storable-text.ts";
-export type DraftEditInput = { leadId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string };
+export type DraftEditInput = { leadId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string; sourceAttachmentNote?: string };
 /**
  * Save the editor's draft.
  *
@@ -34,10 +34,14 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
     */
     const styleRecord = () =>
       style ?? styleRecordForSavedText({ headline: data.headline, dek: data.dek, body, form: existing[0]?.form });
+    const withSourceNote = (research: string) => {
+      if (data.sourceAttachmentNote === undefined) return research;
+      return JSON.stringify({ ...JSON.parse(research), sourceAttachmentNote: data.sourceAttachmentNote });
+    };
     if (existing[0]) {
       if (decision && data.evidenceToken !== evidenceReviewToken(existing[0])) throw new Error("The draft or its evidence changed. Reload and review the current evidence before confirming.");
       const evidence = reconcileDraftEvidence(existing[0], body, decision);
-      const researchJson = researchJsonWithStyleAudit(evidence.research_json, styleRecord());
+      const researchJson = withSourceNote(researchJsonWithStyleAudit(evidence.research_json, styleRecord()));
       /*
         WHO WROTE THIS HEADLINE (0.6.67). A redraft replaces the row, so the
         desk has to know whether the headline it is about to replace was the
@@ -63,7 +67,7 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
         would be a lie about a headline the model never wrote.
       */
       await sql`insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, headline_source, research_json)
-        values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, 'editor', ${researchJsonWithStyleAudit(null, styleRecord())})`;
+        values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, 'editor', ${withSourceNote(researchJsonWithStyleAudit(null, styleRecord()))})`;
     }
     return { ok: true as const };
   });

@@ -7,6 +7,7 @@ import { createServer } from "vite";
 let vite: Awaited<ReturnType<typeof createServer>>;
 let getSql: typeof import("../db.ts").getSql;
 let ensureDarkSchema: typeof import("./dark.ts").ensureDarkSchema;
+let readArtifactForEditor: typeof import("./dark.ts").readArtifactForEditor;
 let performArtifactOcrWork: typeof import("./dark.ts").performArtifactOcrWork;
 let ensureJobsSchema: typeof import("./jobs.ts").ensureJobsSchema;
 
@@ -19,13 +20,36 @@ before(async () => {
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
-  ({ ensureDarkSchema, performArtifactOcrWork } = await vite.ssrLoadModule("/src/lib/news/dark.ts"));
+  ({ ensureDarkSchema, readArtifactForEditor, performArtifactOcrWork } = await vite.ssrLoadModule("/src/lib/news/dark.ts"));
   ({ ensureJobsSchema } = await vite.ssrLoadModule("/src/lib/news/jobs.ts"));
   await ensureDarkSchema();
   await ensureJobsSchema();
 });
 
 after(async () => vite.close());
+
+// guards: a retained PDF can be replaced by an error when its saved text contains punctuation.
+test("a retained PDF with a backslash and quote can be read", async () => {
+  const sql = await getSql();
+  const room = 97021;
+  const user = `artifact-read-${Date.now()}`;
+  const original = String.raw`The file path is C:\records\budget and the note says "approved".`;
+  await sql.query("insert into newsrooms(id,name) values($1,'Artifact read room') on conflict(id) do nothing", [room]);
+  await sql.query("insert into newsroom_members(user_id,newsroom_id,role) values($1,$2,'editor')", [user, room]);
+  const [inv] = await sql<{ id: number }>`insert into investigations(user_id,newsroom_id,title) values(${user},${room},'Saved packet') returning id`;
+  const [version] = await sql<{ id: number }>`
+    insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,fetch_status,fetch_outcome,content_type,extraction_method)
+    values(${user},${room},'https://example.org/saved-packet.pdf','read-pdf-hash','Saved packet',${original},200,'fetched','application/pdf','text') returning id
+  `;
+  const [artifact] = await sql<{ id: number }>`
+    insert into artifacts(user_id,newsroom_id,investigation_id,url,title,content_hash,full_text,classification,fetch_status,fetch_outcome,version_id,extraction_method)
+    values(${user},${room},${inv!.id},'https://example.org/saved-packet.pdf','Saved packet','read-pdf-hash',${original},'discovered',200,'fetched',${version!.id},'text') returning id
+  `;
+
+  const result = await readArtifactForEditor(sql, artifact!.id, room, 0);
+  assert.equal(result?.full_text, original);
+  assert.equal(result?.total_characters, Array.from(original).length);
+});
 
 test("later-page OCR preserves the captured PDF and deduplicates identical evidence", async () => {
   const sql = await getSql();

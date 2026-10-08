@@ -1113,6 +1113,14 @@ function StoryPage() {
   );
   const toggleStyleTick = (rowId: string, ticked: boolean) =>
     setStyleTickOverrides((current) => ({ ...current, [rowId]: ticked }));
+  const sourceAttachmentNote = useMemo(() => {
+    try {
+      const note = JSON.parse(data?.draft?.research_json ?? "{}").sourceAttachmentNote;
+      return typeof note === "string" ? note : "";
+    } catch {
+      return "";
+    }
+  }, [data?.draft?.research_json]);
   /* What the desk said last time it measured this draft, from the record saved
      with it -- the plain sentence the repair or the save wrote. */
   const styleNote = useMemo(() => {
@@ -2595,6 +2603,7 @@ function StoryPage() {
             hidden={inspector !== "sources"}
           >
             <h2>Your source material</h2>
+            {sourceAttachmentNote && <p className="meta">{sourceAttachmentNote}</p>}
             <StoryDocumentList leadId={id} />
             {sources.length > 0 ? (
               <div className="side-block">
@@ -4513,7 +4522,7 @@ function ReportingNotesPane({
           );
         })}
         <p className="note-hint">
-          Pull searches that line and drops the excerpt in the box under the story. The checkbox
+          Pull opens a URL in that line, or searches the line when it has no URL, and drops the excerpt in the box under the story. The checkbox
           just strikes it.
         </p>
         {pullMsg ? <p className="note-one">{pullMsg}</p> : null}
