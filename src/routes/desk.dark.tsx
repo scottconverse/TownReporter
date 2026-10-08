@@ -122,6 +122,7 @@ function DarkPage() {
   const togglePile = (key: string) => setExpandedPiles((prev) => ({ ...prev, [key]: !prev[key] }));
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
+  const [noticeFor, setNoticeFor] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const requestedOpenId = useRef<number | null>(null);
   const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
@@ -199,13 +200,16 @@ function DarkPage() {
     dialog's own press now and reports its refusals inside itself, so the only
     notices left are the file's, and there is one place to put them.
   */
-  function showNotice(text: string | null, ok = false) {
+  function showNotice(text: string | null, ok = false, investigationId = openId) {
     setNotice(text);
     setNoticeOk(ok);
+    setNoticeFor(investigationId);
   }
 
   function rememberOpen(id: number) {
     setFileFocusRequest(null);
+    setNotice(null);
+    setNoticeFor(null);
     setOpenId(id);
     try {
       sessionStorage.removeItem(DARK_OPEN_KEY);
@@ -559,15 +563,18 @@ function DarkPage() {
 
   const challengeCase = useMutation({
     mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
-    onSuccess: (result) => {
+    onSuccess: (result, id) => {
+      if (openId !== id) return;
       if (!result.ok) {
-        showNotice(editorError(result.error ?? "") || "Could not challenge this case.");
+        showNotice(editorError(result.error ?? "") || "Could not challenge this case.", false, id);
         return;
       }
-      showNotice("Challenging the case…", true);
+      showNotice("Challenging the case…", true, id);
       invalidate();
     },
-    onError: (error) => showNotice(editorError(error instanceof Error ? error.message : "") || "Could not challenge this case."),
+    onError: (error, id) => {
+      if (openId === id) showNotice(editorError(error instanceof Error ? error.message : "") || "Could not challenge this case.", false, id);
+    },
   });
 
   const closeWithoutFinding = useMutation({
@@ -1130,6 +1137,7 @@ function DarkPage() {
 
           {openId != null && !noFiles ? (
             <InvestigationWorkspace
+              key={openId}
               openId={openId}
               onOpenFile={() => rememberOpen(openId)}
               detail={detail.data ?? undefined}
@@ -1145,7 +1153,7 @@ function DarkPage() {
                   : null
               }
               phase={liveJobStage || cardPhase || liveLine}
-              notice={notice}
+              notice={noticeFor === openId ? notice : null}
               noticeOk={noticeOk}
               queuedLead={queued?.invId === openId ? queued.leadId : null}
               queuePending={toQueue.isPending}
