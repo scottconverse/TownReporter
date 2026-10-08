@@ -2818,7 +2818,7 @@ export async function retryDarkRoundFor(
   if (nextModel) {
     const failure = job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
       ? job.error
-      : "the previous model did not answer";
+      : "the previous model timed out with no output";
     const planned = deps.nextModel
       ? await deps.nextModel(job, failure)
       : (await planDarkRoundFailover(job, failure, {
