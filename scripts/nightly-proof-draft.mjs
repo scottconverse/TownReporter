@@ -28,9 +28,10 @@ export async function waitForDraft(page, pool, leadId, beforeId, now = Date.now)
     } else if (now() >= queuedUntil) {
       const { rows: blockers } = await pool.query(
         `select id, kind, stage from desk_jobs where status = 'running'
-         and lane = $1 order by id`, [job?.lane ?? "desk"],
+         and lane = $1 order by id`,
+        [job?.lane ?? "desk"],
       );
-      const reason = blockers.map(b => `${b.kind} job ${b.id}: ${b.stage}`).join("; ");
+      const reason = blockers.map((b) => `${b.kind} job ${b.id}: ${b.stage}`).join("; ");
       throw new Error(`draft never started: ${reason || job?.stage || "no draft job was created"}`);
     }
     await page.waitForTimeout(3_000);

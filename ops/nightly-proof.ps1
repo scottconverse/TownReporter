@@ -89,7 +89,7 @@ if ($Now) {
   # Email/password-file overrides are passed through, and the private file
   # is read only at run time (never embedded in the scheduled action).
 
-  Say "running scripts\live-pipeline-proof.mjs (scan up to 6 min, draft up to 8 min)"
+  Say "running scripts\live-pipeline-proof.mjs (daily scan up to 10 min, draft queued up to 2 min then running up to 8 min)"
   $r = Invoke-External { node scripts/live-pipeline-proof.mjs }
   Write-Host $r.Output
   if ($r.ExitCode -ne 0) {

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import pg from "pg";
 import { resolveProofTarget } from "./nightly-proof-config.mjs";
+import { proofArtifact } from "./nightly-proof-artifact.mjs";
 import { afterScan, waitForDraft } from "./nightly-proof-draft.mjs";
 import { dailyScan } from "./nightly-proof-scan.mjs";
 import { storyDraftButton } from "./nightly-proof-actions.mjs";
@@ -125,7 +126,9 @@ async function runDraft(page, pool) {
     await draftButton.waitFor({ timeout: 90_000 });
     const { rows: before } = await pool.query("select coalesce(max(id), 0) as id from desk_jobs");
     await draftButton.click();
-    say(`draft requested on lead ${lead.id} ("${lead.headline}"), waiting up to 2 minutes queued, then 8 minutes running`);
+    say(
+      `draft requested on lead ${lead.id} ("${lead.headline}"), waiting up to 2 minutes queued, then 8 minutes running`,
+    );
 
     const job = await waitForDraft(page, pool, lead.id, before[0].id);
 
@@ -181,7 +184,7 @@ async function main() {
     const scan = await runScan(page, pool);
     const draft = await afterScan(scan, () => runDraft(page, pool));
 
-    const artifact = { ranAt: new Date().toISOString(), version, scan, draft, errors };
+    const artifact = proofArtifact(target, version, scan, draft, errors);
 
     const outDir = join(ROOT, "artifacts", "nightly");
     mkdirSync(outDir, { recursive: true });

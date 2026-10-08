@@ -14,9 +14,15 @@ Test database before the coordinator enables the nightly task.
 2. Signs in as `test-owner@townreporter.test`. The owner already exists;
    `scripts/stage-editor.mjs` is skipped. The editor password comes from
    the private file at run time, and is never put in the task definition.
-3. Runs Scan on Automatic, waiting up to six minutes.
+3. Opens Sources & scan and clicks the button **Run scan now**. This proves
+   the saved daily policy: 8 fixed + 4 rotating sources within a cap of 12.
+   It waits up to ten minutes for that new `scan_runs` receipt and its scan job
+   to finish. The general scan is a separate control and is not clicked.
 4. Opens the newest draftable lead and presses the primary Draft with AI
-   or Redraft button in the story action bar, waiting up to eight minutes.
+   or Redraft button in the story action bar, only after the scan completes.
+   A queued job gets two minutes to start; otherwise the proof reports
+   `draft never started` with its queue stage or running blocker. The eight-minute
+   draft budget starts at persisted `started_at`, not the click.
 5. Stops after drafting. It never publishes.
 6. Writes `artifacts/nightly/<YYYY-MM-DD>.json` and
    `artifacts/nightly/LATEST.txt` in the checkout that runs the script.
@@ -25,6 +31,13 @@ The browser asks the Test app to scan and draft. The proof's separate
 Postgres connection only reads the scan, job and draft results, using the
 SELECT-only `tr_test_admin` role and read-only transactions. The Test app
 uses its own database connection to save the work.
+
+On Test on October 8, the Slice 6 walker measured daily runs of **4 min 29 s**
+and **2 min 59 s** (268.669 s and 179.210 s). Each attempted 12 sources,
+read 8, recorded 4 blocked, and used one model batch. These are observed
+durations, not guarantees. The artifact names `scan.kind` (`daily policy`),
+`scan.policySize` (12), and `testDatabase`, and reports attempted/read/blocked,
+leads, provider and model batches from the receipt.
 
 ## Configuration
 
