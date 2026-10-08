@@ -179,6 +179,24 @@ export function scoreLine(score: PackageScore | null): string {
   return score.total + "/20";
 }
 
+export function reportingScoreLabel(score: PackageScore | null): string {
+  return `Reporting score ${scoreLine(score)}`;
+}
+
+export function readinessQuestion(tier: number): string {
+  return `Ready to print? ${readinessLabel(tier)}`;
+}
+
+export function reportingPackageHistory<
+  TCurrent extends { requestId: number },
+  TOlder extends { requestId: number },
+>(
+  current: TCurrent,
+  earlier: readonly TOlder[],
+): { current: TCurrent; earlier: TOlder[] } {
+  return { current, earlier: earlier.filter((item) => item.requestId !== current.requestId) };
+}
+
 /*
   A source one-line locator: URL and, when the package recorded one, the page,
   agenda item or recording time that makes it checkable. An empty URL with an

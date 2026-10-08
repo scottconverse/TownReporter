@@ -186,6 +186,15 @@ export type ReportingNotes = {
   }[];
 };
 
+export function earlierReportingNotes(
+  notes: Pick<ReportingNotes, "importedReport" | "angle">,
+): { label: string; text: string }[] {
+  return [
+    ...(notes.importedReport?.trim() ? [{ label: "Reporting package", text: notes.importedReport }] : []),
+    ...(notes.angle?.trim() ? [{ label: "Angle", text: notes.angle }] : []),
+  ];
+}
+
 function todoSource(raw: unknown): NoteTodo["src"] {
   if (raw === "you") return "you";
   if (raw === "gate") return "gate";

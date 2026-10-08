@@ -54,6 +54,8 @@ import {
   relevantReportingObservations,
   saveReportingObservation,
   loadLeadReportingPackage,
+  loadEarlierLeadReportingPackages,
+  type EarlierReportingPackage,
   type RelevantReportingObservation,
 } from "./civic-reporting.server.ts";
 import { parseReportingPackage, type ReportingPackage } from "./civic-reporting.ts";
@@ -740,6 +742,7 @@ export async function loadLeadReportingPackageForEditor(
   requestId: number;
   draftId: number | null;
   pkg: ReportingPackage | null;
+  earlierPackages: EarlierReportingPackage[];
   currentDocumentChecks: CurrentReportingDocumentChecks;
   storyLeads: StoryLeadLink[];
   latestRun: ReportingRequestView | null;
@@ -787,8 +790,9 @@ export async function loadLeadReportingPackageForEditor(
   } : null;
   if (!loaded) return latestRun ? {
     requestId: latestRun.requestId, draftId: null, pkg: null, latestRun,
-    storyLeads: [], seedUrls: [], currentDocumentChecks: {},
+    earlierPackages: [], storyLeads: [], seedUrls: [], currentDocumentChecks: {},
   } : null;
+  const earlierPackages = await loadEarlierLeadReportingPackages(sql, leadId, context.newsroomId, loaded.requestId);
   const storyLeads = await storyLeadLinksForRequest(sql, loaded.requestId, context.newsroomId);
   /*
     Seeds are stored as a jsonb array of strings on the request. Read them
@@ -802,7 +806,7 @@ export async function loadLeadReportingPackageForEditor(
   const seedUrls = parseSeedUrls(requestRow?.seed_urls);
   const { loadCurrentReportingDocumentChecks } = await import("./reporting-document-check.server.ts");
   const currentDocumentChecks = await loadCurrentReportingDocumentChecks(sql, context.newsroomId, loaded.requestId);
-  return { ...loaded, storyLeads, seedUrls, latestRun, currentDocumentChecks };
+  return { ...loaded, earlierPackages, storyLeads, seedUrls, latestRun, currentDocumentChecks };
 }
 
 /** Coerce a request's `seed_urls` jsonb into a clean string list. */
