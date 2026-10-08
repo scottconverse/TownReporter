@@ -950,9 +950,10 @@ function DarkPage() {
         The drawing's grid: a 320px rail of piles on the left, the open file on
         the right (desk-astra.css `.astra-split-deep`). The rail is the desk's
         index -- every file, every unopened signal -- so an editor can switch
-        files without leaving the one they are reading. Below 980px the two
-        columns stack and the rail becomes the top of the page.
+        files without leaving the one they are reading. The columns sit beside
+        each other when this content area reaches 900px; narrower areas stack.
       */}
+      <div className="astra-deep-container">
       <div className="astra-split-deep">
         <div className="astra-piles">
           <div className="astra-pile">
@@ -1354,6 +1355,7 @@ function DarkPage() {
 
 
         </div>
+      </div>
       </div>
     </DeskShell>
   );

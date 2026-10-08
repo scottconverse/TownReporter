@@ -6243,9 +6243,14 @@
   align-items: start;
 }
 /* Dark Desk: piles rail | the open file. */
+.desk-ltr.astra .astra-deep-container {
+  container-type: inline-size;
+  min-width: 0;
+  width: 100%;
+}
 .desk-ltr.astra .astra-split-deep {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0;
   border: 1px solid var(--line);
   align-items: stretch;
@@ -6697,8 +6702,12 @@
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   min-width: 0;
+}
+@container (min-width: 900px) {
+  .desk-ltr.astra .astra-split-deep { grid-template-columns: 320px minmax(0, 1fr); }
+  .desk-ltr.astra .astra-piles { border-right: 1px solid var(--line); border-bottom: 0; }
 }
 .desk-ltr.astra .astra-pile {
   display: flex;
@@ -7091,11 +7100,9 @@
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,
   .desk-ltr.astra .astra-split,
-  .desk-ltr.astra .astra-split-deep,
   .desk-ltr.astra .astra-pair { grid-template-columns: minmax(0, 1fr); }
   .desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: auto; }
   .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
-  .desk-ltr.astra .astra-piles { border-right: 0; border-bottom: 1px solid var(--line); }
   .desk-ltr.astra .astra-plain > li.astra-row.opinion,
   .desk-ltr.astra .astra-row.opinion,
   .desk-ltr.astra .astra-row.pub,
