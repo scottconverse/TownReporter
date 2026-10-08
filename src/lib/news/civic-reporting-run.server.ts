@@ -3604,7 +3604,10 @@ function candidateScore(claim: string, quote: string, itemTitle = ""): number {
   const hasClaimedResult = Boolean(claimedTally && hasAnnouncedResult(quote) &&
     [...spoken.matchAll(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/gi)]
       .some((match) => match[1] === claimedTally[1] && match[2] === claimedTally[2]));
-  return hits + numberHits * 4 + numberWordHits * 8 + topicHits * 4 + highValueTopicHits * 24 + namedPhraseHits * 40 + itemTitleTerms.length * 80 + keyHits + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 64 : 0) + (hasClaimedResult ? 240 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+  const operativeIdentifier = /\bmotion\b/i.test(claim) && ordinanceIds.some((id) =>
+    new RegExp(`\\b(?:i move|motion to|pass and adopt)\\b.{0,120}${id}`).test(normalized),
+  );
+  return hits + numberHits * 4 + numberWordHits * 8 + topicHits * 4 + highValueTopicHits * 24 + namedPhraseHits * 40 + itemTitleTerms.length * 80 + keyHits + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 64 : 0) + (hasClaimedResult ? 240 : 0) + (operativeIdentifier ? 400 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
 }
 
 function wholeTranscriptKeyScore(claim: string, quote: string): number {
@@ -3646,7 +3649,7 @@ function voteClaim(claim: string): boolean {
 }
 
 function motionSegment(segment: TapeSegment): boolean {
-  return /\b(?:i move|we have a motion|i have a motion|move that|move to|make (?:to )?(?:a )?(?:separate )?motion|the motion was made|the motion has been made)\b/i.test(segment.text);
+  return /\b(?:i move|we have a motion|i have a motion|there is a motion|move that|move to|make (?:to )?(?:a )?(?:separate )?motion|the motion was made|the motion has been made)\b/i.test(segment.text);
 }
 
 function cappedPassage(segments: TapeSegment[], focus: TapeSegment[] = []): string {
@@ -3667,6 +3670,18 @@ function readingStageFocusSegments(claim: string, segments: TapeSegment[]): Tape
     identifiers.some((identifier) => normalizeForMatch(segment.text).includes(identifier)) ||
     /\b(?:first|second)[\s-]+reading\b/i.test(segment.text),
   );
+}
+
+// Caption boundaries can separate the operative verb from the ordinance identifier.
+// Keep both together when a long discussion is shortened for the claim checker.
+function claimFocusSegments(claim: string, segments: TapeSegment[]): TapeSegment[] {
+  const ids = [...claim.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
+  const focus = readingStageFocusSegments(claim, segments);
+  segments.forEach((segment, index) => {
+    if (!ids.some((id) => normalizeForMatch(segment.text).includes(id))) return;
+    focus.push(...segments.slice(Math.max(0, index - 1), index + 2));
+  });
+  return [...new Set(focus)].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
 }
 
 function claimCitationStartSeconds(claim: PackageClaim): number | null {
@@ -3761,7 +3776,7 @@ function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, vid
     const last = context[context.length - 1] ?? anchor;
     const item = anchor.item || first.item;
     const contextSegments = context.length ? context : [anchor];
-    const readingFocus = isReadingClaim ? readingStageFocusSegments(claimText, contextSegments) : [];
+    const readingFocus = claimFocusSegments(claimText, contextSegments);
     const quote = cappedPassage(contextSegments, readingFocus.length ? readingFocus : [match]);
     return {
       kind: "transcript",
@@ -3790,7 +3805,7 @@ function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, vid
       const end = Math.max(prior.endSeconds!, passage.endSeconds!);
       const context = segments.filter((segment) => segment.seconds >= start && segment.seconds <= end &&
         (!passage.item || !segment.item || segment.item === passage.item));
-      const readingFocus = isReadingClaim ? readingStageFocusSegments(claimText, context) : [];
+      const readingFocus = claimFocusSegments(claimText, context);
       prior.quote = cappedPassage(context, readingFocus.length ? readingFocus : [
         segments.find((segment) => segment.seconds === prior.anchorSeconds),
         segments.find((segment) => segment.seconds === passage.anchorSeconds),
