@@ -1579,6 +1579,7 @@ export const editorialDraftInput = z.object({
  * names the field `leadId`, and the story editor saves through that path.
  */
 export const draftEditInput = z.object({
+  sourceAttachmentNote: z.string().max(1200).optional(),
   leadId: rowId,
   headline: z.string().max(LIMITS.draftHeadline),
   dek: z.string().max(LIMITS.draftDek),

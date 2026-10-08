@@ -2771,3 +2771,17 @@ export function chipLabel(status: string): string {
   src/components/follow-up-item.tsx, deleted with them; an agent has
   `next_run_at` and says when it runs next, not when something is overdue.
 */
+/** One sentence per reason, shared by the paste receipt and saved source note. */
+export function sourceAttachmentNote(counts: Partial<Record<"local" | "protocol" | "malformed" | "duplicate" | "limit", number>>): string {
+  const reasons = {
+    local: "local addresses are not allowed",
+    protocol: "only http(s) addresses are allowed",
+    malformed: "the addresses are malformed",
+    duplicate: "the links are duplicates",
+    limit: "the source link limit was reached",
+  };
+  return (Object.keys(reasons) as (keyof typeof reasons)[]).flatMap(reason => {
+    const count = counts[reason] ?? 0;
+    return count ? [`${count} source link${count === 1 ? " was" : "s were"} not attached: ${reasons[reason]}.`] : [];
+  }).join(" ");
+}
