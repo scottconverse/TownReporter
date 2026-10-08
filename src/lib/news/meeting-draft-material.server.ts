@@ -1,3 +1,4 @@
+import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import type { Sql } from "../db.ts";
 import { meetingClock, meetingEvidenceBlock } from "./meeting-draft-input.ts";
 
@@ -67,21 +68,28 @@ export async function loadMeetingDraftMaterial(
 ): Promise<LoadedMeetingDraftMaterial> {
   const artifacts = await sql.query<{ id: number; video_id: string; sha256: string }>(
     `select id,video_id,sha256 from meeting_transcript_artifacts
-      where id=$1 and newsroom_id=$2 and video_id=$3 and artifact_type='transcript'`,
-    [input.artifactId, input.newsroomId, input.videoId],
+      where id=$1 and newsroom_id=$2 and artifact_type='transcript'`,
+    [input.artifactId, input.newsroomId],
   );
   const artifact = artifacts[0];
   if (!artifact) throw new Error("The meeting transcript artifact for this lead is missing.");
 
+  if (artifact.video_id !== input.videoId) {
+    const choices = await loadMeetingTranscriptChoices(sql, input.newsroomId, input.videoId);
+    if (!choices.some((choice) => choice.artifactId === input.artifactId)) {
+      throw new Error("Choose a transcript saved for this meeting.");
+    }
+  }
+  const videoId = artifact.video_id;
   const captures = await sql.query<{ title: string | null; published: string | null }>(
     `select title,published from meeting_capture_records
       where newsroom_id=$1 and video_id=$2 limit 1`,
-    [input.newsroomId, input.videoId],
+    [input.newsroomId, videoId],
   );
   const chunks = await sql.query<ChunkRow>(
     `select item,title,start_seconds,segment_indexes from meeting_agenda_chunks
       where newsroom_id=$1 and video_id=$2 and artifact_id=$3 order by start_seconds,id`,
-    [input.newsroomId, input.videoId, input.artifactId],
+    [input.newsroomId, videoId, input.artifactId],
   );
   const segments = await sql.query<SegmentRow>(
     `select segment_index,start_seconds,excerpt,caption_sha256
@@ -125,12 +133,12 @@ export async function loadMeetingDraftMaterial(
   }>(
     `select item,established,motion,mover,seconder,tally,result,source
       from meeting_structured_votes where newsroom_id=$1 and video_id=$2 order by item`,
-    [input.newsroomId, input.videoId],
+    [input.newsroomId, videoId],
   );
   const capture = captures[0];
   const title = capture?.title?.trim() || input.fallbackTitle;
   const date = capture?.published ? String(capture.published).slice(0, 10) : null;
-  const videoUrl = input.videoUrl || `https://www.youtube.com/watch?v=${input.videoId}`;
+  const videoUrl = (videoId === input.videoId ? input.videoUrl : undefined) || `https://www.youtube.com/watch?v=${videoId}`;
   const evidence = meetingEvidenceBlock({
     title,
     meetingDate: date,
@@ -156,7 +164,7 @@ export async function loadMeetingDraftMaterial(
   return {
     evidence,
     videoUrl,
-    meeting: { videoId: input.videoId, title, date, artifactId: input.artifactId },
+    meeting: { videoId, title, date, artifactId: input.artifactId },
     citations,
   };
 }

@@ -25,7 +25,7 @@ import {
 import { useDeskMutation } from "@/components/desk-action";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
-import { LeadFlags } from "@/components/desk-leads";
+import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
@@ -2032,7 +2032,7 @@ function DeskHome() {
                                     <i key={i} />
                                   ))}
                                 </span>
-                                <b>{sources} opened</b>
+                                <LeadSourceEvidenceCount sourceUrls={l.source_urls} notesJson={l.notes_json} />
                               </span>
                               <span className="meta">
                                 {sectionName(l.topic)} · {formatAge(l.created_at)} · {leadOrigin(l)}

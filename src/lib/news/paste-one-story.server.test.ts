@@ -5,6 +5,7 @@ import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.t
 import { IMPORT_ORIGIN, performImportFinishedStories } from "./import-stories.server.ts";
 import { SECTION_REQUIRED, cardProblems, selectionFromCard } from "./import-review.ts";
 import { PASTE_ONE_ORIGIN, headlineFromPaste, pasteOneStoryCard } from "./paste-one-story.ts";
+import { leadSourceEvidenceLabel } from "./desk-copy.ts";
 
 /**
  * "Paste a story I already have", driven the whole way: the card the Desk
@@ -256,6 +257,23 @@ describe("a pasted story, through the real import path", () => {
     }[];
     assert.equal(printed!.n, 0);
     assert.equal(editorials!.n, 0);
+  });
+
+  // guards: source lines could stay in the story body while Queue and Sources show no attached links.
+  it("saves public Source lines on the lead and draft as attached links", async () => {
+    const text = "Council record\n\nThe city filed the notice.\nSource: https://records.example.org/one\nSource: https://records.example.org/two";
+    const sql = await ensureSchema();
+    await performImportFinishedStories({ userId: "source-lines", newsroomId: 71018 }, {
+      text, tool: "", stories: [selectionFromCard(pasteOneStoryCard({ text, section: "council" }))],
+    }, { capture: async () => ({ captured: 0, failed: 0 }) });
+    const [saved] = await sql.query<{ source_urls: string; notes_json: string | null; draft_urls: string }>(
+      "select l.source_urls,d.source_urls as draft_urls,l.notes_json from leads l join drafts d on d.lead_id=l.id where l.newsroom_id=$1",
+      [71018],
+    );
+    const urls = ["https://records.example.org/one", "https://records.example.org/two"];
+    assert.deepEqual(JSON.parse(saved!.source_urls), urls);
+    assert.deepEqual(JSON.parse(saved!.draft_urls), urls);
+    assert.equal(leadSourceEvidenceLabel(urls, saved!.notes_json), "2 attached");
   });
 
   it("files under the section the editor chose", async () => {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Sql } from "../db.ts";
-import { withTransaction } from "../db.ts";
+import { getSql, withTransaction } from "../db.ts";
 import { listChannelVideos, pickMeetingVideos, youtubeCaptureReadiness, type ListedVideo, type YoutubeCaptureReadiness } from "./youtube.ts";
 import { captureMeetingCaptions, captureMeetingAudio, requiresAudioFallback, type CaptionCaptureFailure, type CaptionCaptureResult, type AudioCaptureResult } from "./meeting-capture-ytdlp.ts";
 import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
@@ -14,12 +14,15 @@ import { fileMeetingLead } from "./meeting-lead.ts";
 import { capsFromSettings, checkDurationCap, checkSizeCap, type CaptureCaps } from "./meeting-capture-caps.ts";
 import { lockMeetingRevisionForCapture } from "./meeting-revision-lock.ts";
 import { flagPublishedArticlesForTranscriptRevision } from "./meeting-article-revision.ts";
+import { isYoutubeRateLimit, nextYoutube429Retry, withMeetingCapturePassLock, youtubeCaptureRetryIsDue } from "./meeting-capture-retry.ts";
+import { meetingYoutubeBlockedLine } from "./desk-copy.ts";
 
 export type MeetingChannel = { url: string; label?: string };
 export type MeetingCaptureStatus = "not-captured" | "captured" | "failed";
 export type MeetingCaptureRecord = {
   videoId: string; channelUrl: string; title: string; published: string;
   status: MeetingCaptureStatus; failureReason?: string | null;
+  youtubeRetryDay?: string | null; youtubeRetryCount?: number | null; youtubeRetryAt?: string | null;
   captionPath?: string | null; captionFormat?: string | null;
   captionSha256?: string | null; captionCapturedAt?: string | null;
   endedAt?: string | null; captureDisposition?: "provisional" | "final";
@@ -45,6 +48,7 @@ export type MeetingAwarenessDeps = {
   withTransaction?: typeof withTransaction;
   applyCapturedMeetingTranscript?: typeof applyCapturedMeetingTranscript;
   now?: () => Date;
+  scheduleYoutubeRetry?: (newsroomId: number, retryAt: Date) => void;
 };
 
 export function namedMeetingFailures(
@@ -53,8 +57,74 @@ export function namedMeetingFailures(
 ): string[] {
   return [...new Set([
     ...listingFailures,
-    ...failedRecords.map((record) => `${record.title}: ${record.failureReason ?? "capture failed"}`),
+    ...failedRecords.map((record) => `${record.title}: ${record.youtubeRetryAt
+      ? meetingYoutubeBlockedLine(record.youtubeRetryAt)
+      : record.failureReason ?? "capture failed"}`),
   ])];
+}
+
+const YOUTUBE_RETRY_TIMERS = Symbol.for("townreporter:meeting-youtube-retry-timers");
+type YoutubeRetryTimerRegistry = Map<number, { at: number; timer: NodeJS.Timeout }>;
+
+function scheduleYoutubeRetryPass(newsroomId: number, retryAt: Date): void {
+  const globalState = globalThis as typeof globalThis & Record<symbol, YoutubeRetryTimerRegistry | undefined>;
+  const timers = (globalState[YOUTUBE_RETRY_TIMERS] ??= new Map());
+  const at = retryAt.getTime();
+  const current = timers.get(newsroomId);
+  if (current && current.at <= at) return;
+  if (current) clearTimeout(current.timer);
+  const timer = setTimeout(() => {
+    if (timers.get(newsroomId)?.timer !== timer) return;
+    timers.delete(newsroomId);
+    void getSql().then((sql) => runMeetingAwareness(sql, newsroomId)).catch(() => undefined);
+  }, Math.max(0, at - Date.now()));
+  timer.unref?.();
+  timers.set(newsroomId, { at, timer });
+}
+
+// Reattach saved timers after a restart; legacy failures need their first wait.
+export async function restoreYoutubeCaptureRetries(
+  sql: Sql,
+  now = new Date(),
+  schedule = scheduleYoutubeRetryPass,
+  newsroomId?: number,
+): Promise<void> {
+  const rows = await sql.query<{
+    newsroom_id: number;
+    video_id: string;
+    failure_reason: string;
+    youtube_retry_day: string | null;
+    youtube_retry_count: number | null;
+    youtube_retry_at: string | null;
+  }>(
+    `select r.newsroom_id,r.video_id,r.failure_reason,r.youtube_retry_day,r.youtube_retry_count,r.youtube_retry_at
+      from meeting_capture_records r left join meeting_capture_settings s on s.newsroom_id=r.newsroom_id
+      where r.status='failed' and coalesce(s.enabled,true) and ($1::integer is null or r.newsroom_id=$1)`,
+    [newsroomId ?? null],
+  );
+  for (const row of rows) {
+    if (!isYoutubeRateLimit(row.failure_reason ?? "")) continue;
+    await withMeetingCapturePassLock(Number(row.newsroom_id), async () => {
+      let at = row.youtube_retry_at ? new Date(row.youtube_retry_at) : null;
+      if (!at) {
+        const retry = nextYoutube429Retry(
+          { retryDay: row.youtube_retry_day, retryCount: row.youtube_retry_count },
+          now,
+        );
+        const updated = await sql.query<{ youtube_retry_at: string }>(
+          `update meeting_capture_records set youtube_retry_day=$3,youtube_retry_count=$4,youtube_retry_at=$5,updated_at=now()
+           where newsroom_id=$1 and video_id=$2 and status='failed' and youtube_retry_at is null returning youtube_retry_at`,
+          [row.newsroom_id, row.video_id, retry.day, retry.count, retry.at.toISOString()],
+        );
+        at = updated[0] ? new Date(updated[0].youtube_retry_at) : null;
+      }
+      if (at) schedule(Number(row.newsroom_id), at);
+    });
+  }
+}
+
+export async function tickYoutubeCaptureRetries(): Promise<void> {
+  await restoreYoutubeCaptureRetries(await getSql());
 }
 
 const EMPTY_RESULT: MeetingAwarenessResult = {
@@ -135,7 +205,7 @@ function safeFileSize(path: string): number | null {
 /** N-5: a cap refusal is recorded with its named reason, not a silent truncation. */
 async function recordCaptureRefusal(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
   await sql.query(
-    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,refused_reason) values($1,$2,$3,$4,$5,'failed',$6,$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,refused_reason=excluded.refused_reason,updated_at=now()",
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,refused_reason) values($1,$2,$3,$4,$5,'failed',$6,$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,refused_reason=excluded.refused_reason,youtube_retry_day=null,youtube_retry_count=0,youtube_retry_at=null,updated_at=now()",
     [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
   );
 }
@@ -154,6 +224,7 @@ async function recordAudioCaptureSuccess(
      on conflict(newsroom_id,video_id) do update set
        channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
        status='captured',captured_at=now(),failure_reason=null,ended_at=excluded.ended_at,
+       youtube_retry_day=null,youtube_retry_count=0,youtube_retry_at=null,
        capture_disposition=excluded.capture_disposition,duration_seconds=excluded.duration_seconds,
        audio_path=excluded.audio_path,audio_format=excluded.audio_format,audio_sha256=excluded.audio_sha256,
        audio_bytes=excluded.audio_bytes,audio_captured_at=now(),audio_trigger_reason=excluded.audio_trigger_reason,
@@ -187,16 +258,43 @@ export function findResumablePartial(outputDir: string, videoId: string): string
 /** N-5: a capture the operator stopped is recorded as stopped, not failed. */
 async function recordCaptureStopped(sql: Sql, newsroomId: number, video: ListedVideo, reason: string, partialPath: string | null): Promise<void> {
   await sql.query(
-    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,partial_path) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(newsroom_id,video_id) do update set status=excluded.status,failure_reason=excluded.failure_reason,partial_path=excluded.partial_path,updated_at=now()",
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,partial_path) values($1,$2,$3,$4,$5,$6,$7,$8) on conflict(newsroom_id,video_id) do update set status=excluded.status,failure_reason=excluded.failure_reason,partial_path=excluded.partial_path,youtube_retry_day=null,youtube_retry_count=0,youtube_retry_at=null,updated_at=now()",
     [newsroomId, video.id, video.url, video.title, video.published ?? "", "stopped", reason, partialPath],
   );
 }
 
 async function recordCaptureFailure(sql: Sql, newsroomId: number, video: ListedVideo, reason: string): Promise<void> {
   await sql.query(
-    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason) values($1,$2,$3,$4,$5,'failed',$6) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,updated_at=now()",
+    "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status,failure_reason,youtube_retry_day,youtube_retry_count,youtube_retry_at) values($1,$2,$3,$4,$5,'failed',$6,null,0,null) on conflict(newsroom_id,video_id) do update set status='failed',failure_reason=excluded.failure_reason,youtube_retry_day=null,youtube_retry_count=0,youtube_retry_at=null,updated_at=now()",
     [newsroomId, video.id, video.url, video.title, video.published ?? "", reason],
   );
+}
+
+async function recordYoutubeRateLimit(
+  sql: Sql,
+  newsroomId: number,
+  video: ListedVideo,
+  previous: { retryDay: string | null; retryCount: number | null; retryAt: string | null } | undefined,
+  now: Date,
+): Promise<Date> {
+  const retry = nextYoutube429Retry({
+    retryDay: previous?.retryDay,
+    retryCount: previous?.retryCount,
+    retryAt: previous?.retryAt,
+  }, now);
+  await sql.query(
+    `insert into meeting_capture_records(
+       newsroom_id,video_id,channel_url,title,published,status,failure_reason,
+       youtube_retry_day,youtube_retry_count,youtube_retry_at)
+     values($1,$2,$3,$4,$5,'failed','YouTube rate limited (HTTP 429)',$6,$7,$8)
+     on conflict(newsroom_id,video_id) do update set
+       channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,
+       status='failed',failure_reason=excluded.failure_reason,
+       youtube_retry_day=excluded.youtube_retry_day,youtube_retry_count=excluded.youtube_retry_count,
+       youtube_retry_at=excluded.youtube_retry_at,updated_at=now()`,
+    [newsroomId, video.id, video.url, video.title, video.published ?? "", retry.day, retry.count, retry.at.toISOString()],
+  );
+  return retry.at;
 }
 /**
  * N-5 Continue: resume captures the operator stopped, in place.
@@ -274,6 +372,10 @@ export async function resumeStoppedMeetings(
 }
 
 export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps = {}): Promise<MeetingAwarenessResult> {
+  return await withMeetingCapturePassLock(newsroomId, () => runMeetingAwarenessUnlocked(sql, newsroomId, deps));
+}
+
+async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps): Promise<MeetingAwarenessResult> {
   // N-1: the operator enable/disable control. Disabled returns the same no-op
   // result as an unconfigured newsroom, without deleting any configuration.
   const meetingSettings = await sql.query<{ enabled: boolean | null }>("select enabled from meeting_capture_settings where newsroom_id=$1", [newsroomId]);
@@ -292,6 +394,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const storeAudio = deps.storeMeetingAudioArtifact ?? storeMeetingAudioArtifact;
   const runTransaction = deps.withTransaction ?? withTransaction;
   const applyCaptured = deps.applyCapturedMeetingTranscript ?? applyCapturedMeetingTranscript;
+  const scheduleYoutubeRetry = deps.scheduleYoutubeRetry ?? scheduleYoutubeRetryPass;
   const now = (deps.now ?? (() => new Date()))();
   type ListedMeetingVideo = ListedVideo & { channelUrl: string };
   const foundById = new Map<string, ListedMeetingVideo>();
@@ -313,19 +416,38 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const records = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
+    youtube_retry_day: string | null; youtube_retry_count: number | null; youtube_retry_at: string | null;
     caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
     caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
     duration_seconds: number | null; caption_revision_timestamp: number | null;
     revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+  }>("select video_id,channel_url,title,published,status,failure_reason,youtube_retry_day,youtube_retry_count,youtube_retry_at,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const captured: MeetingCaptureRecord[] = records.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
+    youtubeRetryDay: r.youtube_retry_day, youtubeRetryCount: r.youtube_retry_count, youtubeRetryAt: r.youtube_retry_at,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
     endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
+  for (const record of captured) {
+    if (record.status !== "failed" || !isYoutubeRateLimit(record.failureReason ?? "")) continue;
+    if (!record.youtubeRetryAt) {
+      const retry = nextYoutube429Retry({ retryDay: record.youtubeRetryDay, retryCount: record.youtubeRetryCount }, now);
+      await sql.query(
+        `update meeting_capture_records set youtube_retry_day=$3,youtube_retry_count=$4,youtube_retry_at=$5,updated_at=now()
+         where newsroom_id=$1 and video_id=$2 and youtube_retry_at is null`,
+        [newsroomId, record.videoId, retry.day, retry.count, retry.at.toISOString()],
+      );
+      record.youtubeRetryDay = retry.day;
+      record.youtubeRetryCount = retry.count;
+      record.youtubeRetryAt = retry.at.toISOString();
+    }
+    scheduleYoutubeRetry(newsroomId, new Date(record.youtubeRetryAt));
+    if (!foundById.has(record.videoId)) found.push({ id: record.videoId, url: `https://www.youtube.com/watch?v=${record.videoId}`,
+      channelUrl: record.channelUrl, title: record.title, published: record.published, duration: 0, tab: "rss" });
+  }
   // The database is the capture source of truth. Reconcile the yt-dlp cache
   // BEFORE asking yt-dlp to capture anything; doing this only after the pass
   // lets a stale file suppress a meeting the database says is uncaptured.
@@ -333,11 +455,18 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const beforeCapture = reconcileArchive(await readArchive(archivePath), captured);
   if (beforeCapture.changed) regenerateArchive(archivePath, captured);
   const known = new Set(captured.filter((r) => r.status === "captured").map((r) => r.videoId));
+  const retryByVideo = new Map(captured.map((record) => [record.videoId, record]));
   const uncaptured = found.filter((v) => !known.has(v.id));
   const readyToCapture: ListedMeetingVideo[] = [];
   let skippedLiveOrUpcoming = 0;
   let waitingForMetadata = 0;
   for (const v of uncaptured) {
+    const retryRecord = retryByVideo.get(v.id);
+    if (retryRecord && !youtubeCaptureRetryIsDue({
+      retryDay: retryRecord.youtubeRetryDay,
+      retryCount: retryRecord.youtubeRetryCount,
+      retryAt: retryRecord.youtubeRetryAt,
+    }, now)) continue;
     // RSS and scheduled-stream listings often have no duration. Never start a
     // caption download (or its audio fallback) for those ambiguous entries
     // until player metadata or yt-dlp's metadata-only check confirms readiness.
@@ -357,6 +486,7 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
     readyToCapture.push(v);
   }
   for (const v of readyToCapture) {
+    const retryRecord = retryByVideo.get(v.id);
     const { archivePath, outputDir } = prepareCapturePaths(newsroomId, v.id);
     await sql.query(
       "insert into meeting_capture_records(newsroom_id,video_id,channel_url,title,published,status) values($1,$2,$3,$4,$5,'not-captured') on conflict(newsroom_id,video_id) do update set channel_url=excluded.channel_url,title=excluded.title,published=excluded.published,updated_at=now()",
@@ -367,11 +497,29 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
       result = await capture({ videoId: v.id, outputDir, archivePath, sleepSubtitles: 2, sleepRequests: 1 });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      await recordCaptureFailure(sql, newsroomId, v, reason);
-      failures.push(`${v.title}: ${reason}`);
+      if (isYoutubeRateLimit(reason)) {
+        const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
+          retryDay: retryRecord.youtubeRetryDay ?? null,
+          retryCount: retryRecord.youtubeRetryCount ?? null,
+          retryAt: retryRecord.youtubeRetryAt ?? null,
+        }, now);
+        failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+      } else {
+        await recordCaptureFailure(sql, newsroomId, v, reason);
+        failures.push(`${v.title}: ${reason}`);
+      }
       continue;
     }
     if (!result.ok) {
+      if (isYoutubeRateLimit(result.reason)) {
+        const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
+          retryDay: retryRecord.youtubeRetryDay ?? null,
+          retryCount: retryRecord.youtubeRetryCount ?? null,
+          retryAt: retryRecord.youtubeRetryAt ?? null,
+        }, now);
+        failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+        continue;
+      }
       // M-1: audio is required ONLY when captions are missing or unusable.
       if (requiresAudioFallback(result)) {
         const triggerReason = `Captions unavailable or rejected; audio fallback required. yt-dlp caption result: ${result.reason}`;
@@ -380,11 +528,29 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
           audio = await captureAudio({ videoId: v.id, outputDir, archivePath, sleepRequests: 1 });
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
-          await recordCaptureFailure(sql, newsroomId, v, `audio fallback failed: ${reason}`);
-          failures.push(`${v.title}: audio fallback failed: ${reason}`);
+          if (isYoutubeRateLimit(reason)) {
+            const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
+              retryDay: retryRecord.youtubeRetryDay ?? null,
+              retryCount: retryRecord.youtubeRetryCount ?? null,
+              retryAt: retryRecord.youtubeRetryAt ?? null,
+            }, now);
+            failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+          } else {
+            await recordCaptureFailure(sql, newsroomId, v, `audio fallback failed: ${reason}`);
+            failures.push(`${v.title}: audio fallback failed: ${reason}`);
+          }
           continue;
         }
         if (!audio.ok) {
+          if (isYoutubeRateLimit(audio.reason)) {
+            const retryAt = await recordYoutubeRateLimit(sql, newsroomId, v, retryRecord && {
+              retryDay: retryRecord.youtubeRetryDay ?? null,
+              retryCount: retryRecord.youtubeRetryCount ?? null,
+              retryAt: retryRecord.youtubeRetryAt ?? null,
+            }, now);
+            failures.push(`${v.title}: ${meetingYoutubeBlockedLine(retryAt, now)}`);
+            continue;
+          }
           const reason = audio.stopped ? audio.reason : `audio fallback failed: ${audio.reason}`;
           await (audio.stopped ? recordCaptureStopped(sql, newsroomId, v, audio.reason, findResumablePartial(outputDir, v.id)) : recordCaptureFailure(sql, newsroomId, v, reason));
           failures.push(`${v.title}: ${reason}`);
@@ -464,19 +630,26 @@ export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: Me
   const refreshed = await sql.query<{
     video_id: string; channel_url: string; title: string; published: string;
     status: MeetingCaptureStatus; failure_reason: string | null;
+    youtube_retry_day: string | null; youtube_retry_count: number | null; youtube_retry_at: string | null;
     caption_path: string | null; caption_format: string | null; caption_sha256: string | null;
     caption_captured_at: string | null; ended_at: string | null; capture_disposition: "provisional" | "final" | null;
     duration_seconds: number | null; caption_revision_timestamp: number | null;
     revision_count: number | null; settled_under_churn: boolean | null; last_revision_at: string | null;
-  }>("select video_id,channel_url,title,published,status,failure_reason,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
+  }>("select video_id,channel_url,title,published,status,failure_reason,youtube_retry_day,youtube_retry_count,youtube_retry_at,caption_path,caption_format,caption_sha256,caption_captured_at,ended_at,capture_disposition,duration_seconds,caption_revision_timestamp,audio_path,audio_format,audio_sha256,audio_bytes,audio_trigger_reason,revision_count,settled_under_churn,last_revision_at from meeting_capture_records where newsroom_id=$1", [newsroomId]);
   const finalRecords: MeetingCaptureRecord[] = refreshed.map((r) => ({
     videoId: r.video_id, channelUrl: r.channel_url, title: r.title, published: r.published,
     status: r.status, failureReason: r.failure_reason, captionPath: r.caption_path,
+    youtubeRetryDay: r.youtube_retry_day, youtubeRetryCount: r.youtube_retry_count, youtubeRetryAt: r.youtube_retry_at,
     captionFormat: r.caption_format, captionSha256: r.caption_sha256, captionCapturedAt: r.caption_captured_at,
     endedAt: r.ended_at, captureDisposition: storedCaptureDisposition(r.capture_disposition, r.status),
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
+  const nextRetryAt = finalRecords
+    .map((record) => record.youtubeRetryAt)
+    .filter((value): value is string => Boolean(value) && Date.parse(value!) > now.getTime())
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0];
+  if (nextRetryAt) scheduleYoutubeRetry(newsroomId, new Date(nextRetryAt));
   const failed = finalRecords.filter((r) => r.status === "failed");
   const archiveText = await readArchive(archivePath);
   const reconciled = reconcileArchive(archiveText, finalRecords);
@@ -620,7 +793,9 @@ export async function applyCapturedMeetingTranscript(
           revisionRecorded: false,
         };
     const priorArtifacts = await tx.query<{ id: number }>(
-      "select id from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 order by captured_at desc, id desc limit 1",
+      `select id from meeting_transcript_artifacts
+        where newsroom_id=$1 and video_id=$2 and artifact_type='transcript'
+        order by captured_at desc,id desc limit 1`,
       [input.newsroomId, input.video.id],
     );
     const priorArtifactId = priorArtifacts[0]?.id ?? null;
@@ -704,7 +879,8 @@ export async function applyCapturedMeetingTranscript(
          consecutive_unchanged=$11,last_checked_at=$19,settled_under_churn=$12,
          revision_count=$13,last_revision_at=$14,
          forced_recapture=$15,forced_recapture_at=case when $15 then $19 else forced_recapture_at end,
-         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,updated_at=$19
+         prior_caption_sha256=case when $15 then $16 else prior_caption_sha256 end,
+         youtube_retry_day=null,youtube_retry_count=0,youtube_retry_at=null,updated_at=$19
        where newsroom_id=$17 and video_id=$18`,
       [
         input.video.channelUrl, input.video.title, input.video.published,

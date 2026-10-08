@@ -99,6 +99,8 @@ function darkDeskMonitorPlugin(): Plugin {
         if (ticking) return;
         ticking = true;
         try {
+          const retries = await server.ssrLoadModule("/src/lib/news/meeting-capture.ts");
+          await retries.tickYoutubeCaptureRetries();
           const mod = (await server.ssrLoadModule("/src/lib/news/monitors-cron.ts")) as {
             tickAllDueMonitors?: () => Promise<unknown>;
           };

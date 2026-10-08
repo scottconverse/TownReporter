@@ -53,7 +53,7 @@ before(async () => {
     `insert into meeting_transcript_artifacts
        (newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
      values ($1,$2,$3,$4,$5,$6,$7)
-     on conflict (newsroom_id,video_id,artifact_type,sha256) do update set updated_at=now()
+     on conflict (newsroom_id,video_id,artifact_type,sha256) where artifact_type='transcript' do update set updated_at=now()
      returning id`,
     [NEWSROOM, VIDEO, "/tmp/wr1.vtt", "vtt", "wr1testsha", "captions", "transcript-only"],
   );

@@ -6,6 +6,9 @@ import { resolveMeetingStorageRoot } from "./meeting-transcript-artifacts.ts";
 
 type ArtifactRow = {
   id: number;
+  artifact_type: "audio" | "transcript";
+  is_legacy: boolean;
+  newsroom_id: number;
   storage_path: string;
   sha256: string;
   info_path: string | null;
@@ -96,7 +99,12 @@ export async function reconcileMeetingArtifactStorage(
   const storageRoot = resolveMeetingStorageRoot(roots[0]?.storage_root ?? null);
   const newsroomRoot = join(storageRoot, `newsroom-${newsroomId}`);
   const artifacts = await sql.query<ArtifactRow>(
-    "select id,storage_path,sha256,info_path,info_sha256,info_missing_reason from meeting_transcript_artifacts where newsroom_id=$1 order by id",
+    `select id,'transcript' as artifact_type,false as is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason
+       from meeting_transcript_artifacts where newsroom_id=$1 and artifact_type='transcript'
+     union all
+     select id,'audio' as artifact_type,is_legacy,newsroom_id,storage_path,sha256,info_path,info_sha256,info_missing_reason
+       from meeting_audio_artifact_inventory where newsroom_id=$1
+     order by id`,
     [newsroomId],
   );
   const pathOwners = new Map<string, number[]>();
@@ -145,12 +153,25 @@ export async function reconcileMeetingArtifactStorage(
     } else {
       totals.valid += 1;
     }
-    await sql.query(
-      "update meeting_transcript_artifacts set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
-      [artifact.id, status, detail],
-    );
+    if (artifact.artifact_type === "audio" && !artifact.is_legacy) {
+      await sql.query(
+        "update meeting_audio_captures set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
+        [artifact.id, status, detail],
+      );
+    } else {
+      await sql.query(
+        "update meeting_transcript_artifacts set integrity_status=$2,integrity_detail=$3,integrity_checked_at=now() where id=$1",
+        [artifact.id, status, detail],
+      );
+    }
     if (status !== "valid") {
-      await recordFinding(sql, { newsroomId, artifactId: artifact.id, kind: status, originalPath: artifact.storage_path, detail });
+      await recordFinding(sql, {
+        newsroomId,
+        artifactId: artifact.artifact_type === "audio" && !artifact.is_legacy ? null : artifact.id,
+        kind: status,
+        originalPath: artifact.storage_path,
+        detail,
+      });
     }
   }
 

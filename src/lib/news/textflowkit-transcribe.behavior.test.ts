@@ -200,6 +200,31 @@ after(async () => {
   rmSync(storageRoot, { recursive: true, force: true });
 });
 
+// guards: a newer audio capture could break transcript revision storage or point a review at unrelated evidence.
+test("caption revisions retain the prior transcript after replacement audio", async () => {
+  const sql = await getSql();
+  const seed = await seedCapturedMeeting(sql, 97109, { videoId: "caption-after-audio", audio: Buffer.from("original audio"), durationSeconds: 15 });
+  const sourcePath = join(seed.root, "captions.vtt");
+  const apply = async (text: string) => {
+    writeFileSync(sourcePath, text);
+    return applyCapturedMeetingTranscript(sql, {
+      newsroomId: seed.room, userId: seed.user,
+      video: { id: seed.videoId, channelUrl: "https://www.youtube.com/@city", title: "Council", published: "2026-10-08" },
+      result: { ok: true, parsed: { text, format: "vtt", sha256: createHash("sha256").update(text).digest("hex"), sourcePath }, infoPath: "", info: { durationSeconds: 15, videoTimestamp: null, captionRevisionTimestamp: null }, argv: [], stdout: "", stderr: "" },
+    }, { runSection5: async () => ({ aligned: false, alignmentReason: null, chunkCount: 0, voteCount: 0, unalignedLead: null, structuredVoteReason: "fixture", citations: [], items: [], votes: [] }) });
+  };
+  const prior = await apply("Council approved the plan.");
+  const audioPath = join(seed.root, "replacement.opus");
+  writeFileSync(audioPath, "replacement audio");
+  const audio = await storeMeetingAudioArtifact(sql, { newsroomId: seed.room, videoId: seed.videoId, audioSourcePath: audioPath, format: "opus", triggerReason: "replacement" });
+  assert.notEqual(audio.id, prior.artifactId);
+  await sql.query("update meeting_audio_captures set captured_at=now()+interval '1 minute' where id=$1", [audio.id]);
+  const current = await apply("Council delayed the plan.");
+  assert.equal(current.revised, true);
+  const revisions = await sql.query("select artifact_id,prior_artifact_id from meeting_transcript_revisions where newsroom_id=$1 and video_id=$2", [seed.room, seed.videoId]);
+  assert.deepEqual(revisions, [{ artifact_id: current.artifactId, prior_artifact_id: prior.artifactId }]);
+});
+
 test("textflowkit absent: the meeting stays audio-only and nothing is queued or recorded as a failure", async () => {
   const sql = await getSql();
   const audio = Buffer.from("opus-bytes-for-the-not-installed-case");
@@ -222,6 +247,30 @@ test("textflowkit absent: the meeting stays audio-only and nothing is queued or 
   assert.equal(record.caption_sha256, null);
   assert.equal(readFileSync(seed.audioPath).equals(audio), true, "the retained audio is untouched");
   assert.equal((await transcriptArtifacts(sql, seed.room, seed.videoId)).length, 0);
+});
+
+// guards: a corrupted recording could be retried and fail on every scan
+test("a saved recording with a failed hash check is not queued again", async () => {
+  const sql = await getSql();
+  const audio = Buffer.from("bytes-with-a-recorded-hash-mismatch");
+  const seed = await seedCapturedMeeting(sql, 97110, { videoId: "stt-mismatch-1", audio, durationSeconds: 12 });
+  writeFileSync(seed.audioPath, "replacement bytes at the saved path");
+  const env = cliEnv();
+  runWorkerWith(env);
+  assert.equal((await enqueueMissingTranscriptions(sql, { newsroomId: seed.room, userId: seed.user, env })).queued, 1);
+  const failedJobs = await waitForJobSettled(sql, seed.room);
+  assert.equal(failedJobs.length, 1);
+  assert.equal(failedJobs[0]!.status, "failed");
+  const artifact = (await sql.query<{ integrity_status: string }>(
+    "select integrity_status from meeting_audio_captures where id=$1",
+    [seed.audioArtifactId],
+  ))[0]!;
+  assert.equal(artifact.integrity_status, "hash-mismatch", "the worker should record the failed hash check on the audio row");
+
+  const result = await enqueueMissingTranscriptions(sql, { newsroomId: seed.room, userId: seed.user, env });
+  assert.deepEqual(result, { withAudio: 0, queued: 0, alreadyQueued: 0, notInstalled: false });
+  assert.equal((await jobRows(sql, seed.room)).length, 1, "later scans should not create another job for the same bad audio");
+  assert.equal(readFileSync(seed.audioPath).equals(Buffer.from("replacement bytes at the saved path")), true, "checking the audio should not rewrite it");
 });
 
 test("the audio becomes a revision with the CLI-reported engine and model", async () => {

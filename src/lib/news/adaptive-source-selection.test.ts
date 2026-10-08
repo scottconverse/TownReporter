@@ -40,6 +40,18 @@ function ago(days: number): string {
   return new Date(NOW - days * DAY).toISOString();
 }
 
+// guards: missed packet deadlines must not lose a scan slot before a successful read.
+it("keeps overdue deadlines ahead of older watches until read", () => {
+  for (const deadline of ["2026-10-04", "2026-10-04T12:00:00Z"]) {
+    const preferences = [{ sourceId: 2, deadline, cadence: "as-needed" as const }];
+    const sources = [src({ id: 1, last_ok_at: ago(60) }), src({ id: 2, last_ok_at: ago(2) })];
+    const unread = selectRotation({ sources, preferences, budget: 1, nowMs: NOW });
+    assert.deepEqual(unread.read, [{ sourceId: 2, reason: "due-now" }]);
+    sources[1].last_ok_at = deadline.length === 10 ? `${deadline}T23:59:59.999Z` : deadline;
+    assert.equal(selectRotation({ sources, preferences, budget: 1, nowMs: NOW }).read[0].sourceId, 1);
+  }
+});
+
 describe("adaptive rotation: editor control comes first", () => {
   it("reads the editor's selected sources before anything else, in their order", () => {
     const rotation = selectRotation({
@@ -80,7 +92,11 @@ describe("adaptive rotation: deferral is not deletion, and retry is honoured", (
     const rotation = selectRotation({
       sources: [
         src({ id: 1, retry_after: new Date(NOW + 3_600_000).toISOString() }),
-        src({ id: 2, blocked_at: "2026-10-04T00:00:00Z" }),
+        src({
+          id: 2,
+          blocked_at: "2026-10-04T00:00:00Z",
+          retry_after: new Date(NOW + 3_600_000).toISOString(),
+        }),
         src({ id: 3, last_ok_at: ago(5) }),
       ],
       budget: 5,
@@ -105,6 +121,23 @@ describe("adaptive rotation: deferral is not deletion, and retry is honoured", (
     assert.equal(rotation.read.length, 1);
     assert.equal(rotation.deferred.length, 2);
     assert.ok(rotation.deferred.every((d) => d.reason === "over-budget"));
+  });
+
+  // guards: a failed accepted source must return to the rotation after its retry time.
+  it("reads a blocked source after its saved retry time passes", () => {
+    const rotation = selectRotation({
+      sources: [
+        src({
+          id: 1,
+          blocked_at: ago(2),
+          retry_after: new Date(NOW - 60_000).toISOString(),
+        }),
+      ],
+      budget: 1,
+      nowMs: NOW,
+    });
+    assert.deepEqual(rotation.read.map((row) => row.sourceId), [1]);
+    assert.deepEqual(rotation.deferred, []);
   });
 });
 

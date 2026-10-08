@@ -105,6 +105,7 @@ test("real queue and story projections carry persisted scanner provenance and im
       id integer primary key, newsroom_id integer not null, scan_run_id integer,
       headline text, why text, topic text, status text, source_urls text, evidence text,
       newsworthiness integer, created_at timestamptz, investigation_id integer, notes_json text,
+      meeting_video_id text, meeting_artifact_id integer, meeting_lead_purpose text,
       resurfaced_count integer default 0, last_resurfaced_at timestamptz,
       last_resurfaced_scan_run_id integer, possible_duplicate_of integer,
       origin text, provenance_json text,

@@ -346,3 +346,21 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
   assert.equal(rejectedReservation.status, "running");
   assert.match(String(boundaryError), /lease was lost/);
 });
+// guards: Cancel must stop further source reads and preserve an honest partial scan receipt.
+it("cancelling after the third source stops before the fifth source", async () => {
+  const sql = await getSql(), room = 9872, user = "cancel-reader";
+  await sql.query("insert into newsrooms(id,name) values($1,'Cancel fixture')", [room]);
+  await sql.query("insert into sources(user_id,newsroom_id,url,title,kind,tier,status) select $1,$2,'https://example.test/'||n,'Source '||n,'page','A','accepted' from generate_series(1,10) n", [user,room]);
+  const [run] = await sql.query<{id:number}>("insert into scan_runs(user_id,newsroom_id) values($1,$2) returning id", [user,room]);
+  const [job] = await sql.query<DeskJob>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,status,claim_token,model_choice) values($1,$2,'scan',$3,'running','cancel-lease','codex-balanced') returning *", [user,room,run.id]);
+  let reads = 0;
+  await assert.rejects(performScanWork(job, {
+    ingestUrl: async () => { if (++reads === 3) await sql.query("update desk_jobs set cancel_requested=true where id=$1", [job.id]); return {text:SOURCE_TEXT,titleHint:"Source",extras:[]}; },
+    setJobStage: async () => {}, grokChat: async () => { throw new Error("Cancelled work must not call a model"); },
+  }), /Cancelled/);
+  assert.ok(reads < 5, `Cancel read ${reads} sources`);
+  const [receipt] = await sql.query<{summary:string;sources_attempted:number;sources_fetched:number}>("select summary,sources_attempted,sources_fetched from scan_runs where id=$1", [run.id]);
+  assert.equal(receipt.summary, `Cancelled after ${reads} of 10 sources`);
+  assert.equal(receipt.sources_attempted, reads);
+  assert.equal(receipt.sources_fetched, reads);
+});

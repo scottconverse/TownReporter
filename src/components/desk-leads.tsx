@@ -12,6 +12,7 @@ import {
   killedAsDuplicateNote,
   killRecordLine,
   printedDuplicateLine,
+  leadSourceEvidenceLabel,
   type PrintedDup,
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
@@ -632,7 +633,7 @@ export function LeadRowView({
             <i key={i} />
           ))}
         </span>
-        <b>{sources} opened</b>
+        <LeadSourceEvidenceCount sourceUrls={lead.source_urls} notesJson={lead.notes_json} />
       </span>
       <span className="queue-filed">{formatAge(lead.created_at)}</span>
       <div className="lead-actions row-acts queue-acts">
@@ -719,6 +720,16 @@ export function LeadRowView({
  * Two screens printing the same lead is exactly how one of them ends up
  * saying something the other does not, so neither owns this: both render it.
  */
+export function LeadSourceEvidenceCount({
+  sourceUrls,
+  notesJson,
+}: {
+  sourceUrls: string | null | undefined;
+  notesJson: string | null | undefined;
+}) {
+  return <b>{leadSourceEvidenceLabel(parseUrlList(sourceUrls), notesJson)}</b>;
+}
+
 export function LeadFlags({ lead, dup }: { lead: LeadRow; dup?: PrintedDup | null }) {
   const { formatShortDate } = usePaperDateFormatters();
   return (

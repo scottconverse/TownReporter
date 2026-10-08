@@ -10,7 +10,7 @@ export function requestStopMeetingPass(newsroomId: number): boolean {
 }
 export function isMeetingPassRunning(newsroomId: number): boolean { return runningPasses.has(newsroomId); }
 import { authMiddleware } from "../auth/middleware.ts";
-import { getSql, type Sql } from "../db.ts";
+import { getSql, withTransaction, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
 import type { MeetingAwarenessResult } from "./meeting-capture.ts";
@@ -45,7 +45,9 @@ import type { MeetingAwarenessResult } from "./meeting-capture.ts";
 const loadMeetingEngine = createServerOnlyFn(async () => {
   const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
   const { captureMeetingCaptions } = await import("./meeting-capture-ytdlp.ts");
-  return { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions };
+  const { captureMeetingAudio } = await import("./meeting-capture-ytdlp.ts");
+  const { storeMeetingAudioArtifact } = await import("./meeting-audio-artifacts.ts");
+  return { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions, captureMeetingAudio, storeMeetingAudioArtifact };
 });
 
 export type MeetingManualRunResult =
@@ -281,6 +283,79 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
       const error = e instanceof Error ? e.message : String(e);
       await sql.query("update scan_runs set finished_at=now(), error=$1 where id=$2", [error, runId]);
       return { ok: false, error };
+    }
+  });
+
+export type AudioRecaptureResult = { ok: true; artifactId: number } | { ok: false; error: string };
+
+/** Replace audio that failed its recorded hash while preserving the old artifact. */
+export const captureAudioAgain = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((raw: unknown): { videoId: string } => {
+    const d = (raw ?? {}) as Record<string, unknown>;
+    return { videoId: String(d.videoId ?? "").trim() };
+  })
+  .handler(async ({ context, data }): Promise<AudioRecaptureResult> => {
+    const newsroomId = await ownedNewsroomId(context.userId);
+    if (!/^[\w-]{11}$/.test(data.videoId)) return { ok: false, error: "A valid YouTube video id is required." };
+    const notSetUp = await paperSetUpRefusal(newsroomId, "capture meeting audio again");
+    if (notSetUp) return { ok: false, error: notSetUp };
+
+    const sql = await getSql();
+    const meeting = (await sql.query<{
+      channel_url: string; title: string; published: string;
+    }>(
+      "select channel_url,title,published from meeting_capture_records where newsroom_id=$1 and video_id=$2",
+      [newsroomId, data.videoId],
+    ))[0];
+    if (!meeting) return { ok: false, error: "This meeting is no longer on the capture list." };
+    const currentAudio = (await sql.query<{ id: number; integrity_status: string }>(
+      `select id,integrity_status from meeting_audio_artifact_inventory
+        where newsroom_id=$1 and video_id=$2
+        order by captured_at desc,id desc limit 1`,
+      [newsroomId, data.videoId],
+    ))[0];
+    if (currentAudio?.integrity_status !== "hash-mismatch") {
+      return { ok: false, error: "This meeting no longer needs a replacement audio capture." };
+    }
+
+    try {
+      const { prepareMeetingCapturePaths } = await import("./meeting-capture.ts");
+      const engine = await loadMeetingEngine();
+      const { join } = await import("node:path");
+      const { randomUUID } = await import("node:crypto");
+      const paths = prepareMeetingCapturePaths(newsroomId, data.videoId);
+      const captureId = randomUUID();
+      const outputDir = join(paths.outputDir, `audio-retry-${captureId}`);
+      const audio = await engine.captureMeetingAudio({
+        videoId: data.videoId,
+        outputDir,
+        archivePath: join(outputDir, "download-archive.txt"),
+      });
+      if (!audio.ok) return { ok: false, error: audio.reason };
+
+      const triggerReason = "The prior saved audio failed its integrity check.";
+      const stored = await withTransaction(async (tx) => {
+        const artifact = await engine.storeMeetingAudioArtifact(tx, {
+          newsroomId,
+          videoId: data.videoId,
+          audioSourcePath: audio.audio.path,
+          format: audio.audio.format,
+          triggerReason,
+          infoSourcePath: audio.infoPath,
+        });
+        await tx.query(
+          `update meeting_capture_records set
+             status='captured',failure_reason=null,audio_path=$1,audio_format=$2,audio_sha256=$3,
+             audio_bytes=$4,audio_captured_at=now(),audio_trigger_reason=$5,updated_at=now()
+           where newsroom_id=$6 and video_id=$7`,
+          [artifact.storagePath, artifact.format, artifact.sha256, artifact.byteSize, triggerReason, newsroomId, data.videoId],
+        );
+        return artifact;
+      });
+      return { ok: true, artifactId: stored.id };
+    } catch {
+      return { ok: false, error: "The new audio capture could not be saved." };
     }
   });
 

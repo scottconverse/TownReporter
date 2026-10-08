@@ -2,7 +2,8 @@ import { dailyScanCounts } from "@/lib/desk/daily-scan-counts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
-import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
+import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
+import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
 import { ListSkeleton, ScreenError } from "@/components/states";
@@ -15,6 +16,7 @@ import {
   reviewSuggestedSources,
   runScan,
   setSourceStatus,
+  saveSourceScanPreference,
 } from "@/lib/news/desk";
 import { findReplacement } from "@/lib/news/editor-dialog-actions";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
@@ -31,6 +33,10 @@ import {
   keepsFailingNote,
   scanRowLine,
   suggestedOriginLine,
+  scanSourceCoverageAge,
+  SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS,
+  SOURCE_SCAN_PREFERENCE_COPY,
+  SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS,
 } from "@/lib/news/desk-copy";
 import { keepsFailing } from "@/lib/news/source-rows";
 import { candidateIsWatchedSource } from "@/lib/news/source-replacements";
@@ -153,15 +159,6 @@ function SourcesPage() {
   const canAssignSections = Boolean(sectionsQuery.data?.canEdit);
   const [rowKeys, setRowKeys] = useState<Record<number, string[]>>({});
   const { formatListDateTime } = usePaperDateFormatters();
-  /*
-    The right column: what the scan last did, and "Run scan now".
-
-    This is the same `runScan` the Scan screen calls, with the same defaults --
-    no scope, no pack, the desk's own model choice. It is not a second runner.
-    The Scan screen is still where a run is scoped, paged and diagnosed; this
-    panel is the one-press version for an editor who is already looking at the
-    watch list and has just added a source.
-  */
   const scans = useQuery({
     queryKey: ["scans", 1],
     queryFn: () => listScans({ data: { limit: 6, offset: 0 } }),
@@ -219,7 +216,7 @@ function SourcesPage() {
     line: string;
   } | null>(null);
   const runScanNow = useMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: (daily: boolean) => runScan({ data: { daily, modelChoice: scanModel, modelEffort: scanModelEffort } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setScanNotice(res.error);
@@ -804,8 +801,13 @@ function SourcesPage() {
               </p>
             ) : null}
             <div className="astra-panel-acts">
-              <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate()}>
+              <InkButton disabled={runScanNow.isPending || !scanPolicy} onClick={() => runScanNow.mutate(true)}>
                 {runScanNow.isPending ? "Starting…" : "Run scan now"}
+              </InkButton>
+            </div>
+            <div className="astra-panel-acts sources-general-scan mt-3">
+              <InkButton disabled={runScanNow.isPending} onClick={() => runScanNow.mutate(false)}>
+                Scan every accepted source ({counts?.accepted ?? sourcesTotal})
               </InkButton>
             </div>
             {/*
@@ -1558,6 +1560,13 @@ function WatchRows({
                   </a>
                   {` · Kind: ${s.kind || "unclassified"} · Tier: ${s.tier || "unclassified"}`}
                 </p>
+                {s.status === "accepted" ? (
+                  <p className="astra-row-meta source-coverage-age">
+                    {s.last_ok_at
+                      ? `Last read ${formatListDateTime(s.last_ok_at)} · ${scanSourceCoverageAge(s.last_ok_at)}`
+                      : "Never read"}
+                  </p>
+                ) : null}
                 <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>
@@ -1578,6 +1587,7 @@ function WatchRows({
                     {result.line}
                   </span>
                 ) : null}
+                {s.status === "accepted" ? <SourcePreferenceEditor source={s} /> : null}
               </div>
               <div className="astra-row-acts">
                 {paused ? (
@@ -1770,6 +1780,94 @@ function WatchRows({
         );
       })}
     </div>
+  );
+}
+
+function SourcePreferenceEditor({ source }: { source: SourceRow }) {
+  const queryClient = useQueryClient();
+  const [purpose, setPurpose] = useState(source.purpose_preference ?? "");
+  const [cadence, setCadence] = useState(source.scan_cadence ?? "");
+  const [deadline, setDeadline] = useState(source.scan_deadline ?? "");
+  const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const save = useMutation({
+    mutationFn: () =>
+      saveSourceScanPreference({
+        data: {
+          sourceId: source.id,
+          purpose: purpose || null,
+          cadence: cadence || null,
+          deadline: deadline || null,
+        },
+      }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setFeedback({ ok: false, text: result.error ?? SOURCE_SCAN_PREFERENCE_COPY.saveFailed });
+        return;
+      }
+      setFeedback({ ok: true, text: SOURCE_SCAN_PREFERENCE_COPY.saved });
+      void queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: () => setFeedback({ ok: false, text: SOURCE_SCAN_PREFERENCE_COPY.saveFailed }),
+  });
+
+  return (
+    <details className="mt-3 border border-rule p-3">
+      <summary className="flex min-h-11 cursor-pointer items-center font-medium focus-visible:outline focus-visible:outline-2">
+        {SOURCE_SCAN_PREFERENCE_COPY.summary}
+      </summary>
+      <form
+        className="mt-3 grid gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setFeedback(null);
+          save.mutate();
+        }}
+      >
+        <p className="text-sm text-muted">{SOURCE_SCAN_PREFERENCE_COPY.explanation}</p>
+        <Field label={SOURCE_SCAN_PREFERENCE_COPY.purpose}>
+          <select
+            className={`${inputClass} mt-1 w-full`}
+            value={purpose}
+            onChange={(event) => setPurpose(event.target.value as typeof purpose)}
+          >
+            <option value="">{SOURCE_SCAN_PREFERENCE_COPY.purposeBlank}</option>
+            {SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label={SOURCE_SCAN_PREFERENCE_COPY.cadence}>
+          <select
+            className={`${inputClass} mt-1 w-full`}
+            value={cadence}
+            onChange={(event) => setCadence(event.target.value as typeof cadence)}
+          >
+            <option value="">{SOURCE_SCAN_PREFERENCE_COPY.cadenceBlank}</option>
+            {SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label={SOURCE_SCAN_PREFERENCE_COPY.deadline}>
+          <input
+            className={`${inputClass} mt-1 w-full`}
+            type="date"
+            value={deadline}
+            onChange={(event) => setDeadline(event.target.value)}
+          />
+        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <button className={inkSolid} type="submit" disabled={save.isPending}>
+            {save.isPending ? SOURCE_SCAN_PREFERENCE_COPY.saving : SOURCE_SCAN_PREFERENCE_COPY.save}
+          </button>
+          {feedback ? (
+            <span className={feedback.ok ? "text-sm text-green-700" : "text-sm text-rust"} role={feedback.ok ? "status" : "alert"}>
+              {feedback.text}
+            </span>
+          ) : null}
+        </div>
+      </form>
+    </details>
   );
 }
 

@@ -979,6 +979,7 @@ export const packDeleteInput = z.object({ packId: rowId });
 export const runScanInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),
   z.object({
+    daily: z.boolean().optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     sectionKey: z.string().max(LIMITS.sectionKey).optional(),
@@ -995,6 +996,7 @@ export const draftLeadInput = z.union([
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     researchScope: researchScopeValue.optional(),
+    meetingArtifactId: rowId.optional(),
   }),
 ]);
 
@@ -1133,6 +1135,7 @@ export const rewriteFromLedgerInput = z.object({
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
+  meetingArtifactId: rowId.optional(),
 });
 
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
@@ -1579,6 +1582,7 @@ export const editorialDraftInput = z.object({
  * names the field `leadId`, and the story editor saves through that path.
  */
 export const draftEditInput = z.object({
+  sourceAttachmentNote: z.string().max(1200).optional(),
   leadId: rowId,
   headline: z.string().max(LIMITS.draftHeadline),
   dek: z.string().max(LIMITS.draftDek),

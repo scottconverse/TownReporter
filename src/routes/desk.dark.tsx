@@ -68,6 +68,7 @@ type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
 import { getDarkDials } from "@/lib/news/dark";
@@ -2378,6 +2379,15 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   return describeExtractionMethod(raw);
 }
 
+function isPdfCapture(record: {
+  url: string;
+  retained_pdf?: boolean;
+  extraction_method?: string | null;
+}): boolean {
+  return Boolean(record.retained_pdf) || recordKindFromUrl(record.url) === "PDF" ||
+    /^(?:unpdf|tj-regex|ocr(?:-pages(?:-partial)?)?:|needs-ocr:)/.test(record.extraction_method ?? "");
+}
+
 function OpenedRecords({
   artifacts,
   modelChoice,
@@ -2396,6 +2406,7 @@ function OpenedRecords({
     created_at: string;
     excerpt?: string;
     extraction_method?: string | null;
+    retained_pdf?: boolean;
   }[];
   modelChoice: StoryModelChoice;
   onModelChoiceChange: (choice: StoryModelChoice) => void;
@@ -2450,7 +2461,7 @@ function OpenedRecords({
         ) ?? null);
   const body = useQuery({
     queryKey: ["artifact", selected?.id ?? 0],
-    queryFn: () => getArtifact({ data: selected!.id }),
+    queryFn: () => getArtifact({ data: { id: selected!.id } }),
     enabled: selected != null,
   });
   const [pageStart, setPageStart] = useState("1");
@@ -2556,6 +2567,8 @@ function OpenedRecords({
               <span className="read-title">{rowTitle || "Captured page"}</span>
               {ocrStatusLine(a.extraction_method) ? (
                 <span className="np-meta">{ocrStatusLine(a.extraction_method)}</span>
+              ) : preview.kind === "ok" && preview.body && isPdfCapture(a) ? (
+                <span className="np-meta">PDF — select to read</span>
               ) : preview.kind === "ok" && preview.body ? (
                 <span className="np-meta">{excerptForEditor(preview.body, 140)}</span>
               ) : null}
@@ -2683,7 +2696,7 @@ function OpenedRecords({
                     : `Requested PDF pages ${result.start}-${result.end}`}
                   {` · ${result.provider ?? modelChoiceLabel(modelChoice)}`}
                 </p>
-                {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong><br />{page.text}</p>)}
+                {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong> saved to the captured reader above.</p>)}
                 {result.reason ? <p className="meta">{result.reason}</p> : null}
                 {result.unreadPages?.length ? <p className="note err">Still unread: {result.unreadPages.slice(0, 16).join(", ")}{result.unreadPages.length > 16 ? `, and ${result.unreadPages.length - 16} more` : ""}. Run Read entire PDF again to retry only these pages.</p> : null}
               </section>
@@ -2695,10 +2708,41 @@ function OpenedRecords({
           ) : null}
           {body.isPending && !body.data ? (
             <p className="meta">Opening the captured copy…</p>
+          ) : body.isError && isPdfCapture({
+            url: selected.url,
+            retained_pdf: body.data?.retained_pdf ?? selected.retained_pdf,
+            extraction_method: selected.extraction_method,
+          }) ? (
+            <ReadMoreText
+              key={selected.id}
+              text=""
+              totalCharacters={0}
+              readError={body.error}
+              onReadRest={async () => ""}
+            />
           ) : cap?.kind === "blocked" ? (
             <p className="note err">{cap.note}</p>
           ) : cap?.kind === "empty" ? (
-            <p className="read-ex">{cap.note}</p>
+            <p className="read-ex">
+              {selected.extraction_method?.startsWith("needs-ocr") && body.data?.retained_pdf
+                ? "This PDF needs OCR. Choose a model above, then read selected pages or the entire PDF."
+                : cap.note}
+            </p>
+          ) : cap?.body && isPdfCapture({
+            url: selected.url,
+            retained_pdf: body.data?.retained_pdf ?? selected.retained_pdf,
+            extraction_method: selected.extraction_method,
+          }) ? (
+            <ReadMoreText
+              key={selected.id}
+              text={body.data?.full_text ?? cap.body}
+              totalCharacters={body.data?.total_characters ?? Array.from(cap.body).length}
+              onReadRest={async (offset) => {
+                const next = await getArtifact({ data: { id: selected.id, offset } });
+                if (!next) throw new Error("No saved document was returned");
+                return next.full_text;
+              }}
+            />
           ) : cap?.body ? (
             <div className="read-full">{cap.body}</div>
           ) : (

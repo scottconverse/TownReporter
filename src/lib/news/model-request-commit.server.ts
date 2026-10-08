@@ -1,3 +1,4 @@
+import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
@@ -20,7 +21,15 @@ import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey } from "./sections.server.ts";
-import type { TopicSection } from "./desk-copy.ts";
+import {
+  meetingTranscriptRunConflict,
+  meetingTranscriptSelectionRefused,
+  noMeetingTranscriptToChoose,
+  type TopicSection,
+} from "./desk-copy.ts";
+import {
+  defaultMeetingTranscriptArtifactId,
+} from "./meeting-transcript-choice.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
 
@@ -119,6 +128,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
+    meetingArtifactId?: number;
     /**
      * Rewrite from ledger: the queued draft job reuses the ledger already stored
      * for this lead instead of reading the tape again. Carried in the job's
@@ -132,14 +142,31 @@ export async function commitStoryDraftForAuthenticatedEditor(
   const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
   if (refusal) return refusal;
   const sql = await (deps.getSql ?? getSql)();
-  const leads = await sql<{ id: number; status: string; notes_json?: string }>`
-    select id, status, to_jsonb(leads)->>'notes_json' as notes_json from leads
+  const leads = await sql<{
+    id: number; status: string; notes_json?: string; meeting_video_id: string | null;
+    meeting_artifact_id: number | null; meeting_lead_purpose: string | null;
+  }>`
+    select id, status, to_jsonb(leads)->>'notes_json' as notes_json,
+           meeting_video_id,meeting_artifact_id,meeting_lead_purpose from leads
     where id = ${input.leadId} and newsroom_id = ${input.context.newsroomId}
     limit 1
   `;
   if (!leads[0]) return { ok: false as const, error: "Lead not found" };
   if (leads[0].status === "killed") {
     return { ok: false as const, error: "Restore this lead before drafting." };
+  }
+
+  let meetingArtifactId: number | null = null;
+  if (leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id) {
+    const choices = await loadMeetingTranscriptChoices(sql, input.context.newsroomId, leads[0].meeting_video_id);
+    const requestedArtifactId = input.meetingArtifactId ?? defaultMeetingTranscriptArtifactId(choices)
+      ?? (leads[0].meeting_artifact_id == null ? null : Number(leads[0].meeting_artifact_id));
+    if (requestedArtifactId != null && !choices.some((choice) => choice.artifactId === requestedArtifactId)) {
+      return { ok: false as const, error: meetingTranscriptSelectionRefused };
+    }
+    meetingArtifactId = requestedArtifactId;
+  } else if (input.meetingArtifactId != null) {
+    return { ok: false as const, error: noMeetingTranscriptToChoose };
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
@@ -184,6 +211,16 @@ export async function commitStoryDraftForAuthenticatedEditor(
         jobId: open.id,
       };
     }
+    if (meetingArtifactId != null) {
+      let openArtifactId: number | null = null;
+      try {
+        const receipt = JSON.parse(open.result_json || "{}") as { meetingArtifactId?: unknown };
+        if (Number.isInteger(receipt.meetingArtifactId)) openArtifactId = Number(receipt.meetingArtifactId);
+      } catch { /* an older run has no transcript selection */ }
+      if (openArtifactId !== meetingArtifactId) {
+        return { ok: false as const, error: meetingTranscriptRunConflict };
+      }
+    }
     return {
       ok: true as const,
       pending: true as const,
@@ -211,6 +248,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
         preflightFailover: preflight.switchReceipt,
       }),
       ...(input.reuseLedger ? { reuseLedger: true } : {}),
+      ...(meetingArtifactId != null ? { meetingArtifactId } : {}),
     }),
   });
   if (preflight.switchReceipt) {
@@ -257,6 +295,7 @@ export async function commitScanForAuthenticatedEditor(
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
     sectionKey?: string;
+    daily?: boolean;
     /** P0-1: explicit accepted source IDs for a Custom scan. */
     customSourceIds?: number[];
     /** P0-2: saved pack to resolve at run time instead of a fixed ID list. */
@@ -326,6 +365,8 @@ export async function commitScanForAuthenticatedEditor(
       };
     }
   }
+  if (input.daily && (customSnapshot || sectionSnapshot))
+    return { ok: false as const, error: "Choose the daily scan or a separate source scope.", retryable: true };
   const scopeSnapshot = customSnapshot ?? sectionSnapshot;
   await ensureSectionsSchema();
   const open = await (deps.findOpenJob ?? findOpenJob)({
@@ -334,9 +375,9 @@ export async function commitScanForAuthenticatedEditor(
   });
   if (open) {
     const scanSql=await (deps.getSql??getSql)();
-    const [existing]=await scanSql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${open.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const [existing]=await scanSql<{section_snapshot:string|null;policy_snapshot:string|null}>`select section_snapshot,policy_snapshot from scan_runs where id=${open.subject_id} and newsroom_id=${input.context.newsroomId}`;
     const existingKey=existing?.section_snapshot?(JSON.parse(existing.section_snapshot).key??null):null;
-    if(existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true};
+    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true};
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
     if (persistedChoice !== effectiveChoice) {
       return {
@@ -358,8 +399,17 @@ export async function commitScanForAuthenticatedEditor(
 
   await (deps.assertRate ?? assertRate)(input.context.userId, "scan");
   const sql = await (deps.getSql ?? getSql)();
+  let dailyPlan;
+  if (input.daily) {
+    const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
+    try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId); }
+    catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true }; }
+  }
   const runRows = await sql<{ id: number }>`
-    insert into scan_runs (user_id, newsroom_id, section_snapshot) values (${input.context.userId}, ${input.context.newsroomId}, ${scopeSnapshot?JSON.stringify(scopeSnapshot):null}) returning id
+    insert into scan_runs (user_id, newsroom_id, section_snapshot, source_snapshot, policy_snapshot, source_coverage)
+    values (${input.context.userId}, ${input.context.newsroomId}, ${scopeSnapshot?JSON.stringify(scopeSnapshot):null},
+      ${dailyPlan ? JSON.stringify(dailyPlan.sources) : null}, ${dailyPlan ? JSON.stringify(dailyPlan.policy) : null},
+      ${JSON.stringify(dailyPlan?.coverage ?? [])}::jsonb) returning id
   `;
   const runId = runRows[0]!.id;
   const job = await (deps.enqueueJob ?? enqueueJob)({
@@ -385,9 +435,9 @@ export async function commitScanForAuthenticatedEditor(
   }
   if (job.subject_id !== runId) {
     await sql`update scan_runs set finished_at=now(),error='Another scan was queued first. This request did not run.' where id=${runId} and newsroom_id=${input.context.newsroomId}`;
-    const [existing]=await sql<{section_snapshot:string|null}>`select section_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
+    const [existing]=await sql<{section_snapshot:string|null;policy_snapshot:string|null}>`select section_snapshot,policy_snapshot from scan_runs where id=${job.subject_id} and newsroom_id=${input.context.newsroomId}`;
     const existingKey=existing?.section_snapshot?(JSON.parse(existing.section_snapshot).key??null):null;
-    if(existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope was queued first. Wait for it to finish before starting this scan.",detail:"Your requested section scan did not run.",retryable:true};
+    if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy was queued first. Wait for it to finish before starting this scan.",detail:"Your requested section scan did not run.",retryable:true};
   }
   const persistedChoice = effectiveStoryModelChoice(job.model_choice);
   if (persistedChoice !== effectiveChoice) {

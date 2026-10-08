@@ -35,12 +35,12 @@ test("reconciliation verifies rows and quarantines unowned files without deletin
       if (/select storage_root/i.test(text)) return [{ storage_root: root }] as T[];
       if (/from meeting_transcript_artifacts/i.test(text) && /^\s*select/i.test(text)) {
         return [
-          { id: 1, storage_path: validPath, sha256: hash("valid"), info_path: null, info_sha256: null },
-          { id: 2, storage_path: missingPath, sha256: hash("missing"), info_path: null, info_sha256: null },
-          { id: 3, storage_path: mismatchPath, sha256: hash("expected"), info_path: null, info_sha256: null },
-          { id: 4, storage_path: validPath, sha256: hash("valid"), info_path: null, info_sha256: null },
-          { id: 5, storage_path: optionalPath, sha256: hash("optional"), info_path: null, info_sha256: null, info_missing_reason: "yt-dlp did not write an info sidecar for this capture" },
-          { id: 6, storage_path: missingSidecarPath, sha256: hash("sidecar-missing"), info_path: null, info_sha256: null, info_missing_reason: "info sidecar missing at storage time: C:/capture/info.json" },
+          { id: 1, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: validPath, sha256: hash("valid"), info_path: null, info_sha256: null },
+          { id: 2, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: missingPath, sha256: hash("missing"), info_path: null, info_sha256: null },
+          { id: 3, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: mismatchPath, sha256: hash("expected"), info_path: null, info_sha256: null },
+          { id: 4, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: validPath, sha256: hash("valid"), info_path: null, info_sha256: null },
+          { id: 5, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: optionalPath, sha256: hash("optional"), info_path: null, info_sha256: null, info_missing_reason: "yt-dlp did not write an info sidecar for this capture" },
+          { id: 6, artifact_type: "transcript", is_legacy: false, newsroom_id: 7, storage_path: missingSidecarPath, sha256: hash("sidecar-missing"), info_path: null, info_sha256: null, info_missing_reason: "info sidecar missing at storage time: C:/capture/info.json" },
         ] as T[];
       }
       if (/update meeting_transcript_artifacts/i.test(text)) {

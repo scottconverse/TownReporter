@@ -59,15 +59,15 @@ describe("finalPullText", () => {
     );
   });
 
-  it("says the searches ran and mentions a failed provider briefly", () => {
+  it("keeps a failed search distinct when another search answered", () => {
     const text = finalPullText({
       documents: 0,
       failures: providerFailureNotes([LIVE_FAILURES[0]!]),
       answered: true,
     });
-    assert.match(text, /no relevant public document found/);
+    assert.match(text, /Failed · some searches could not be completed/);
     assert.match(text, /Exa: rate limited/);
-    assert.doesNotMatch(text, /search is unavailable/i);
+    assert.doesNotMatch(text, /no relevant public document found/i);
   });
 
   it("still counts the documents when it found some", () => {
