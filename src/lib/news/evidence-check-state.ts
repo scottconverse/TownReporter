@@ -26,21 +26,15 @@
  * thing that makes a pass), and both it and this are handed to the same
  * `CheckFacts` -- one screen, one set of facts.
  *
- * WHAT COUNTS AS "NEEDING REVIEW" is the pane's own `! Needs review` chip --
- * literally, since `claimsNeedingReview` calls `judgmentChip` rather than
- * restating its rule. The count on the blocker and the number of rows chipped
- * `! Needs review` are the same number because they are the same expression.
- * A row the check could not read (`Could not check`, no readable capture) is
- * NOT counted: there is no record to judge it against, so a "review the
- * claims" press aimed at it would be a dead end. Unit U24b is what a row the
- * record CONTRADICTS is: counted, because the editor has a real choice to make
- * about it and the story must not print on it.
+ * Open work is the pane's `! Needs review` plus `Could not check` rows. The
+ * latter remain open until the editor adds a usable record or records a
+ * decision; a missing check must not disappear from the Publish count.
  *
  * Pure -- no DOM, no database, no hooks -- so both the page and the publish
  * gate can ask it, and a test can pin it without a browser.
  */
 
-import { judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
+import { COULD_NOT_CHECK_CHIP, judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
 import { evidenceReviewToken } from "./draft-evidence.ts";
 import type { DraftGroundingRow } from "./draft-specifics.ts";
 import type {
@@ -66,8 +60,7 @@ export type EvidenceCheckState = {
   /** Did an evidence check run against this draft at all? */
   ran: boolean;
   /**
-   * Rows the Checks pane chips `! Needs review` -- claims nobody has judged,
-   * and claims the record contradicts (unit U24b).
+   * Open rows the Checks pane chips `! Needs review` or `Could not check`.
    */
   toReview: number;
   /**
@@ -123,10 +116,9 @@ type ReviewableRow = {
  * "review" means here, so the count is the pane's own list of rows that need a
  * person whatever put them there.
  *
- * A row the check could not read (`Could not check`, no readable capture) is
- * still NOT counted: there is no record to judge it against, so a "review the
- * claims" press aimed at it is a dead end. That state is what the chip's
- * "ran, not decided" wording is for (see `evidenceChip`).
+ * A row the check could not read (`Could not check`) remains open until the
+ * editor adds a usable record or records a decision. It is counted in the same
+ * publish headcount as an unreviewed or contradicted row.
  */
 export function claimsNeedingReview(
   rows: readonly FindingEvidenceRow[],
@@ -140,10 +132,12 @@ export function claimsNeedingReview(
    * same number, and this is the one place that number is computed.
    */
   groundingRows: readonly DraftGroundingRow[] = [],
+  includeCouldNotCheck = true,
 ): number {
   let count = groundingRows.length;
   for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
-    if (judgmentChip(row.judgment.value, row.captures).chip === NEEDS_REVIEW_CHIP) count += 1;
+    const chip = judgmentChip(row.judgment.value, row.captures).chip;
+    if (chip === NEEDS_REVIEW_CHIP || (includeCouldNotCheck && chip === COULD_NOT_CHECK_CHIP)) count += 1;
   }
   return count;
 }
@@ -239,6 +233,7 @@ export function reviewEvidenceCheckState(input: {
   review: ReviewLike | null;
   recorded: boolean;
   openClaims: number;
+  includeCouldNotCheck?: boolean;
 }): EvidenceCheckState {
   const review = input.review;
   return evidenceCheckState({
@@ -249,7 +244,13 @@ export function reviewEvidenceCheckState(input: {
     openClaims: input.openClaims,
     grounding: review?.groundingRows?.length ?? 0,
     toReview: review
-      ? claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows, review.groundingRows ?? [])
+      ? claimsNeedingReview(
+          review.rows,
+          review.claimRows,
+          review.manualClaimRows,
+          review.groundingRows ?? [],
+          input.includeCouldNotCheck ?? true,
+        )
       : 0,
     contradicted: review
       ? contradictedClaims(review.rows, review.claimRows, review.manualClaimRows)

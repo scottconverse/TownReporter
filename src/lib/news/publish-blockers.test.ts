@@ -69,6 +69,14 @@ describe("publishBlockers", () => {
     assert.deepEqual(only?.action, { label: "Write the story", target: { kind: "body" } });
   });
 
+  // guards: an AI-marked not-ready story could reach the Publish button as if its facts were settled.
+  it("blocks a story the AI marked not ready", () => {
+    const [only] = publishBlockers(withState({ readiness: "not-ready", readinessReason: "Four facts remain open." }));
+    assert.equal(only?.key, "readiness");
+    assert.equal(only?.sentence, "Four facts remain open.");
+    assert.deepEqual(only?.action, { label: "Review open facts", target: { kind: "evidence-review" } });
+  });
+
   /*
     Release 0.6.80 (unit CK) put a gate in `performPublish` that refuses a
     lead-bound draft with no dek. The server's own words are the sentence, so

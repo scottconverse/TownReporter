@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureReportingSchema, loadLeadReportingPackage, loadReportingRequest } from "./civic-reporting.server.ts";
-import { performReportingWork, loadMethodInstructions, normalizeClaims, normalizeScore, readJsonBlock, seedUrlsOf, loadScopedObservations, gatherIndependentSources, furtherResearchPass, resolveModel } from "./civic-reporting-run.server.ts";
+import { performReportingWork, fileRunLeads, loadMethodInstructions, normalizeClaims, normalizeScore, readJsonBlock, seedUrlsOf, loadScopedObservations, gatherIndependentSources, furtherResearchPass, resolveModel } from "./civic-reporting-run.server.ts";
 import {
   FIXTURE_VIDEO,
   coldReplyColdOnly, ingestDouble, passChat,
@@ -18,10 +18,16 @@ import {
   reconcileLedgers, canonicalVote, fallbackOpenQuestions, documentDigest, contraryPass, scoringPass, bindClaimsToEvidence,
   type DocumentRead,
   writingPass, writerLengthProblems, financialRelationshipProblems, reassessContraryAfterResearch, bindStoryClaimsToEvidence, loadMethodInstructions as loadMethodForPrompt,
-  retainedRecordingNote, validatePacketSources, canonicalModelReceipt,
+  retainedRecordingNote, validatePacketSources, canonicalModelReceipt, writerDecisionWindowEvidence,
+  reviewOpenStoryClaims,
 } from "./civic-reporting-run.server.ts";
 import type { CoverageAction } from "./civic-reporting.ts";
-import { mkdtempSync, rmSync } from "node:fs";
+import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
+import { evidenceCheckRows } from "./evidence-check-list.ts";
+import { firstSentenceForDek } from "./dek-fallback.ts";
+import { publishBlockers } from "./publish-blockers.ts";
+import type { Sql } from "../db.ts";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
 import { JobCancelledError } from "./jobs.ts";
@@ -234,6 +240,7 @@ describe("performReportingWork: the run", () => {
   });
 
   it("runs the full method offline: real files, whole tape, a saved package", { skip: !haveMethod }, async () => {
+    // guards: a newly filed draft could lose its readiness state before the editor opens it.
     // A REAL scoped meeting. The lead names artifact 39 / video zMglXtVlIMA, so
     // the run resolves the meeting from the LEAD ARTIFACT -- the first seed is a
     // budget PDF and must not be treated as the recording.
@@ -302,6 +309,18 @@ describe("performReportingWork: the run", () => {
       // A claim the tape supports under its own item survives the code binding.
       assert.equal(pkg.stories[0]!.claims[0]!.status, "VERIFIED", pkg.stories[0]!.claims[0]!.nextCheck);
       assert.equal(readBack!.draftId !== null, true, "the copy is saved as a new draft");
+      const [draftRow] = await sql<{ research_json: unknown; dek: string }>`
+        select research_json, dek from drafts where id = ${readBack!.draftId}
+      `;
+      const research = typeof draftRow!.research_json === "string"
+        ? JSON.parse(draftRow!.research_json)
+        : draftRow!.research_json as Record<string, unknown>;
+      const readiness = (research as Record<string, unknown>).storyReadiness as Record<string, unknown>;
+      assert.equal(readiness?.version, 1);
+      assert.equal(readiness?.state, "verified");
+      assert.equal(readiness?.openCount, 0);
+      // guards: a filed story could show the writer's 114-word brief as its reader-facing dek.
+      assert.equal(draftRow!.dek, pkg.stories[0]!.dek);
       assert.equal(pkg.receipt.requestedRuntime, "auto", "the package keeps the enqueued runtime");
       assert.equal(pkg.receipt.requestedEffort, "none", "the package keeps the requested effort");
       assert.equal(pkg.receipt.actualRuntime, "local-model", "the package keeps the answering runtime");
@@ -330,6 +349,97 @@ describe("performReportingWork: the run", () => {
       `;
       const total = observations.reduce((sum, row) => sum + Number(row.n), 0);
       assert.ok(total >= 2, "a source observation and a disposition observation were saved");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("files the readable budget draft when a later claim check returns no result", { skip: !haveMethod }, async () => {
+    // guards: the editor could lose a readable budget draft when a later writer check fails.
+    const sql = await getSql();
+    const artifactId = await seedMeetingFixture(sql);
+    const leadId = await seedScopedLead(sql, artifactId);
+    const requestId = await newRequest({ lead_id: leadId, seed_urls: ["https://youtu.be/" + FIXTURE_VIDEO] });
+    const job = await claimedJobFor(requestId);
+    const workspaceRoot = mkdtempSync(pathJoin(tmpdir(), "ds-later-writer-failure-"));
+    const headline = "Longmont’s proposed budget trims energy work as transit funding needs emerge";
+    const openReason = "The raw passage establishes an announced 6–1 result. The missing continuous interval prevents establishing that the adopted airport-fee motion retained the earlier wording and schedule.";
+    const run6Draft = readFileSync(new URL("./fixtures/civic-reporting-run6-budget-story.md", import.meta.url), "utf8")
+      .replace(/^#[^\r\n]*\r?\n+/, "")
+      .trim();
+    const story = {
+      id: "LONGMONT-20261006-BUDGET",
+      headline,
+      dek: "City staff proposed reducing energy-project funding while Longmont considers transit needs, leaving final budget action open for further council review.",
+      draft: run6Draft,
+      plainBrief: "The proposed energy allocation remains subject to final budget action.",
+      cannotSay: "The final budget action and the effect on residents.",
+      readinessTier: 3,
+      claims: [{ id: "energy-allocation", text: "The proposed energy allocation would leave $916,000.", status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the adopted budget." }],
+      sources: [],
+    };
+    const writer = { stories: [story], held: [{ storyId: story.id, headline: "Airport-fee motion and its announced 6–1 result", reason: openReason, nextCheck: "Review the continuous motion and result passage.", unverified: true }] };
+    const routedChat = passChat({ writer: () => ({ ok: true, text: JSON.stringify(writer) }) });
+    const chat = async (system: string, prompt: string) => {
+      if (prompt.includes("Check this one unresolved story claim")) throw new Error(openReason);
+      return routedChat(system, prompt);
+    };
+    try {
+      await performReportingWork(job, {
+        ...methodDeps(),
+        workspaceRoot,
+        ingest: ingestDouble(),
+        runResearch: researchWithCaptureVersionIds(),
+        chat: chat as never,
+        probe: async () => ({ ok: true, label: "Fake model", choice: "auto" }) as never,
+      });
+      const [filed] = await sql<{ package: { stories: { headline: string; draft: string }[]; held: { headline: string; reason: string }[]; runStatus: string }; draft_id: number | null }>`
+        select package, draft_id from reporting_packages where request_id = ${requestId}
+      `;
+      assert.ok(filed, "the first readable draft reached the editor's package row");
+      assert.equal(filed.package.stories.length, 1);
+      assert.match(filed.package.stories[0]!.headline, /Longmont’s proposed budget/);
+      assert.equal(filed.package.stories[0]!.draft.trim().split(/\s+/).length, 657);
+      assert.equal(filed.package.runStatus, "PARTIAL");
+      assert.ok(filed.package.held.some((item) => /6–1/.test(item.headline) && /continuous interval/.test(item.reason)));
+      const [draft] = await sql<{ headline: string; dek: string; body: string; research_json: unknown }>`
+        select headline, dek, body, research_json from drafts where id = ${filed.draft_id}
+      `;
+      const research = typeof draft!.research_json === "string" ? JSON.parse(draft!.research_json) : draft!.research_json as Record<string, unknown>;
+      const readiness = (research as Record<string, unknown>).storyReadiness as Record<string, unknown>;
+      assert.equal(readiness.state, "not-ready");
+      assert.equal(readiness.reason, openReason);
+      const blockers = publishBlockers({
+        headline: draft!.headline, dek: draft!.dek, body: draft!.body, sectionReady: true,
+        readiness: "not-ready", readinessReason: String(readiness.reason), openClaims: 0,
+        unreviewedClaims: 0, unreviewedAccepted: false, namedOutlets: [], evidenceStale: false,
+        reviewingEvidence: false, reconcileActive: false, publishing: false,
+      });
+      assert.ok(blockers.some((blocker) => blocker.key === "readiness"), "the existing Publish gate remains closed");
+    } finally {
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("does not leave a story file when the package transaction rolls back", { skip: !haveMethod }, async () => {
+    // guards: an editor could mistake an unfiled story file for a saved draft.
+    const sql = await getSql();
+    const requestId = await newRequest({ seed_urls: ["https://youtu.be/" + FIXTURE_VIDEO] });
+    const workspaceRoot = mkdtempSync(pathJoin(tmpdir(), "ds-file-rollback-"));
+    try {
+      await assert.rejects(performReportingWork(await claimedJobFor(requestId), {
+        ...methodDeps(),
+        workspaceRoot,
+        ingest: ingestDouble(),
+        runResearch: researchWithCaptureVersionIds(),
+        chat: passChat() as never,
+        probe: async () => ({ ok: true, label: "Fake model", choice: "auto" }) as never,
+        savePackage: (async () => { throw new Error("fixture package save failure"); }) as never,
+      }), /fixture package save failure/);
+      const [count] = await sql<{ n: number }>`select count(*)::int as n from reporting_packages where request_id = ${requestId}`;
+      assert.equal(Number(count!.n), 0);
+      const files = readdirSync(pathJoin(workspaceRoot, "request-" + requestId));
+      assert.deepEqual(files.filter((name) => name === "package.json" || /^story-.*\.md$/.test(name)), []);
     } finally {
       rmSync(workspaceRoot, { recursive: true, force: true });
     }
@@ -1119,23 +1229,31 @@ describe("the writer's method prompt states the status policy", () => {
    * a chat double that records the prompt it was handed. This asserts on the
    * prompt the method really builds, not on a copy of the text.
    */
-  async function callWritingPass(documents: DocumentRead[] = []): Promise<{ prompt: string }> {
+  async function callWritingPass(
+    documents: DocumentRead[] = [],
+    record: unknown = { windows: [], segments: [], votes: [], gaps: [] },
+    actions: CoverageAction[] = [],
+    assignment = "Report the Sept. 29 meeting",
+    reply: () => ReturnType<typeof writerReply> = writerReply,
+  ): Promise<{ prompt: string; system: string; result: Awaited<ReturnType<typeof writingPass>> }> {
     let captured = "";
-    const chat = (async (_system: string, prompt: string) => {
+    let system = "";
+    const chat = (async (systemPrompt: string, prompt: string) => {
+      system = systemPrompt;
       captured = prompt;
-      return writerReply();
+      return reply();
     }) as never;
-    await writingPass({
-      record: { windows: [], segments: [], votes: [], gaps: [] } as never,
+    const result = await writingPass({
+      record: record as never,
       documents,
       further: { findings: "", documents, gaps: [] },
       gather: { findings: "", observations: [] } as never,
       warm: { actions: [], windows: [], gaps: [] } as never,
       cold: { actions: [], roster: [], votes: [], gaps: [] } as never,
-      reconcile: { actions: [], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
+      reconcile: { actions, contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
       contrary: { contrary: [], unknowns: [], gaps: [], raw: { ok: true, error: "", text: "", chars: 0, truncated: false } },
       scoring: { score: null, readiness: 0, why: "", gaps: [] },
-      assignment: "Report the Sept. 29 meeting",
+      assignment,
       action: "Develop this lead",
       city: "Longmont",
       method: method as never,
@@ -1144,7 +1262,7 @@ describe("the writer's method prompt states the status policy", () => {
       workspaceDir: "",
       throwIfCancelled: async () => {},
     });
-    return { prompt: captured };
+    return { prompt: captured, system, result };
   }
   async function writingUserPrompt(): Promise<string> {
     return (
@@ -1157,6 +1275,143 @@ describe("the writer's method prompt states the status policy", () => {
     assert.match(status, /A proposal[\s\S]{0,400}NOT an adopted decision/i, "a proposal is not an adopted decision");
     assert.match(status, /condition any resident effect on[\s\S]{0,80}adoption/i, "resident effects are conditioned on adoption");
     assert.match(status, /damaged caption|adapter/i, "a cut quote may not be presented as an exact quotation");
+  });
+  // guards: a malformed dek could be filed as a long notebook summary instead of a reader-facing summary.
+  it("rewrites an invalid dek once and falls back to the first sentence if it stays invalid", async () => {
+    const body = "The city council proposed a $3 million airport-noise plan for neighbors near the runway and will hold a public hearing before adopting any changes. The story continues with background for residents.";
+    const validDek = "The city council proposed a $3 million airport-noise plan for neighbors near the runway, with a public hearing scheduled before any change is adopted.";
+    const invalidDek = "The supplied record passage gives a tiered action account.";
+    async function run(secondDek: string) {
+      let calls = 0;
+      const opts = { modelChoice: "pinned", effort: "high" };
+      const result = await writingPass({
+        record: { windows: [], segments: [], votes: [], gaps: [], identity: {} } as never,
+        documents: [], further: { findings: "", documents: [], gaps: [] },
+        gather: { findings: "", observations: [] } as never,
+        warm: { actions: [], windows: [], gaps: [] } as never,
+        cold: { actions: [], roster: [], votes: [], gaps: [] } as never,
+        reconcile: { actions: [], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
+        contrary: { contrary: [], unknowns: [], gaps: [], raw: { ok: true, error: "", text: "", chars: 0, truncated: false } },
+        scoring: { score: null, readiness: 0, why: "", gaps: [] },
+        assignment: "Develop this lead", action: "Develop this lead", city: "Longmont", method: method as never,
+        chatOpts: opts, workspaceDir: "", throwIfCancelled: async () => {},
+        chat: (async (_system: string, prompt: string, _tokens: number, receivedOpts: unknown) => {
+          calls += 1;
+          assert.equal(receivedOpts, opts);
+          if (calls === 1) {
+            assert.match(prompt, /one or two sentences, 20 to 40 words/);
+            return { ok: true as const, text: JSON.stringify({
+              stories: [{ id: "dek", headline: "Council considers airport-noise plan", dek: invalidDek,
+                draft: body, plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [],
+            }) };
+          }
+          assert.match(prompt, /DEK REWRITE — one bounded attempt/);
+          return { ok: true as const, text: JSON.stringify({ dek: secondDek }) };
+        }) as never,
+      });
+      assert.equal(calls, 2, "one writer call plus one dek rewrite");
+      return result.stories[0]!.dek;
+    }
+    assert.equal(await run(validDek), validDek);
+    assert.equal(await run(invalidDek), firstSentenceForDek(body));
+  });
+  // guards: the writer can omit a vote announced after the first 6,000 transcript characters.
+  it("passes a reconciled vote's announcement from its transcript window to the writer", async () => {
+    const resultTexts = ["The motion was approved 5-2.", "The item is approved.", "It passes.", "It fails.", "Motion carries unanimously.", "If this is approved, the clerk will post notice."];
+    const segments = resultTexts.map((text, index) => ({ index, seconds: 100 + index * 30, item: "12A", itemTitle: "Budget direction", text }));
+    const windows = segments.map((segment, windowIndex) => ({ windowIndex, startClock: "0:00", endClock: "0:00", items: [{ item: "12A", title: "Budget direction" }], segments: [segment] }));
+    const action = { timestamp: "4:16:37", agendaItem: "12A", motionOrAction: "Final council direction on the proposed budget", outcome: "carries unanimously", vote: "unanimously" } as CoverageAction;
+    const record = { windows, segments, votes: [], gaps: [], identity: { videoId: "meeting" } };
+    const evidence = writerDecisionWindowEvidence(record as never);
+    await callWritingPass([], record, [action]);
+    for (const result of resultTexts.slice(0, 5)) assert.ok(evidence.includes(result), result);
+    assert.ok(!evidence.includes(resultTexts[5]!));
+  });
+  // guards: the editor could lose readable stories when their already stated meeting results use natural wording.
+  it("keeps the minutes and Dry Creek stories when they state unanimous results", async () => {
+    const stories = [
+      { id: "minutes", headline: "Council minutes in regular session", dek: "The chair announced unanimous approval of the October 6 minutes, one of several procedural decisions recorded during Longmont City Council's regular session.", draft: "The chair announced unanimous approval of the October 6 minutes.", plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] },
+      { id: "dry-creek", headline: "Dry Creek annexation", dek: "The Dry Creek annexation had unanimous results for its amendments and main motion, while the complete motion wording and final condition text remain unavailable to readers.", draft: "The Dry Creek annexation had unanimous results for its amendments and main motion, but the complete motion wording and final condition text remain missing.\n\nReceipts: retained recording S1kSaew-UUY, window 9, ordinance 2026-62, 2:19:30–2:19:54; window 16, item 12A, 4:14:42–4:16:37.", plainBrief: "In the separate Dry Creek case, council passed and adopted amended ordinance 2026-62 unanimously as announced.", cannotSay: "", readinessTier: 1, claims: [], sources: [] },
+    ];
+    const record = { identity: { videoId: "S1kSaew-UUY" }, agenda: [{ item: "4", title: "Approval of minutes" }, { item: "9", title: "CONSENT AGENDA AND INTRODUCTION AND READING BY TITLE OF FIRST READING ORDINANCES" }], votes: [], gaps: [], windows: [], segments: [
+      { index: 154, seconds: 623, item: "4", itemTitle: "Approval of minutes", text: "Approval of the minutes." }, { index: 158, seconds: 635, item: "4", itemTitle: "Approval of minutes", text: "The motion was made by council." }, { index: 163, seconds: 649, item: "4", itemTitle: "Approval of minutes", text: "That carries unanimously." },
+      { index: 3428, seconds: 8370, item: "9", itemTitle: "Dry Creek annexation ordinance 2026-62", text: "I move ordinance 2026-62." }, { index: 3437, seconds: 8394, item: "9", itemTitle: "Dry Creek annexation ordinance 2026-62", text: "That item carries unanimously." },
+    ] };
+    const initial = stories.map((story, index) => ({ ...story, plainBrief: "", dek: index ? "The council considered the Dry Creek annexation as an action with unresolved wording and conditions for further review by the city." : "The council considered the October 6 minutes during its regular session as part of the meeting's recorded business.", draft: index ? "The council considered Dry Creek ordinance 2026-62 during its meeting." : "The chair discussed the October 6 minutes during the meeting." }));
+    let calls = 0;
+    const { result } = await callWritingPass([], record, [{ agendaItem: "4", timestamp: "00:10:49", motionOrAction: "Approve the minutes" } as CoverageAction, { agendaItem: "9; specific subitem unresolved", timestamp: "02:19:54", motionOrAction: "Amend the ordinance to incorporate the applicant's four requests" } as CoverageAction], "Report the meeting", () => { calls++; return { ok: true, text: JSON.stringify({ stories: calls === 1 ? initial : stories, held: [] }) }; });
+    assert.equal(calls, 2);
+    assert.deepEqual(result.gaps, []);
+    assert.equal(result.stories.length, 2);
+  });
+  // guards: the editor could receive a story that mentions an agenda item but omits its announced result.
+  it("revises a story once to add an omitted result for an item it mentions", async () => {
+    const videoId = "zMglXtVlIMA";
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const initialDraft = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting.";
+    const revisedDraft = `${initialDraft} Council approved the measure unanimously.`;
+    const headline = "Council considers Dry Creek ordinance";
+    const dek = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand how the measure may affect the neighborhood.";
+    const writerPackage = (draft: string) => ({ ok: true as const, text: JSON.stringify({
+      stories: [{ id: "dry-creek", headline, dek, draft, plainBrief: "The council considered Dry Creek ordinance 2026-62.",
+        cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [],
+    }) });
+    const segments = [
+      { index: 1, seconds: 110, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "I move to approve Dry Creek ordinance 2026-62 as amended." },
+      { index: 2, seconds: 120, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "That motion carries unanimously." },
+    ];
+    const action = { actionId: "dry-creek-vote", timestamp: "00:02:00", agendaItem: "9A",
+      motionOrAction: "Approve Dry Creek ordinance 2026-62 as amended", outcome: "carries unanimously",
+      vote: "unanimously", policyStage: "final", evidence: "tape 00:02:00, item 9A", disposition: "Lead" } as CoverageAction;
+    let calls = 0;
+    const { prompt, result } = await callWritingPass([], {
+      identity: { videoId, videoUrl }, segments, votes: [], gaps: [],
+      agenda: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }],
+      windows: [{ windowIndex: 0, startClock: "0:00", endClock: "0:02", items: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }], segments }],
+    }, [action], "Develop this lead", () => ++calls === 1 ? writerPackage(initialDraft) : writerPackage(revisedDraft));
+    assert.equal(calls, 2);
+    assert.match(prompt, /missing announced final result/i);
+    assert.ok(result.stories[0]?.draft.includes("approved the measure unanimously"));
+  });
+  // guards: the editor could lose a readable draft and its known vote gap before the Publish gate sees it.
+  it("files a result gap as not ready and blocks Publish", async () => {
+    const headline = "Council considers Dry Creek ordinance";
+    const draft = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting.";
+    const packageText = JSON.stringify({ stories: [{ id: "dry-creek", headline, dek: "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand the measure before the chair's announced result.", draft, plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [] });
+    const segments = [{ index: 1, seconds: 110, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "I move to approve Dry Creek ordinance 2026-62 as amended." }, { index: 2, seconds: 120, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "That motion carries unanimously." }];
+    const action = { actionId: "dry-creek-vote", timestamp: "00:02:00", agendaItem: "9A", motionOrAction: "Approve Dry Creek ordinance 2026-62 as amended", outcome: "carries unanimously", vote: "unanimously", policyStage: "final", evidence: "tape 00:02:00", disposition: "Lead" } as CoverageAction;
+    let calls = 0;
+    const { result } = await callWritingPass([], { identity: { videoId: "meeting" }, segments, votes: [], gaps: [], agenda: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }], windows: [] }, [action], "Develop this lead", () => { calls++; return { ok: true, text: packageText }; });
+    assert.equal(calls, 2);
+    assert.equal(result.stories.length, 1);
+    const held = result.held.find((row) => row.storyId === "dry-creek");
+    assert.match(held?.reason ?? "", /Dry Creek ordinance 2026-62.*not stated/i);
+    const sql = await getSql();
+    const request = await loadReportingRequest(sql, await newRequest({ action: "Develop this lead", assignment: "Develop this lead" }), NEWSROOM);
+    const filed = await fileRunLeads({ sql, request: request!, stories: result.stories, score: null, actions: [], held: result.held, receipt: { methodVersion: "2.6.0", modelLabel: "fixture" } as never } as never);
+    const [row] = await sql<{ research_json: unknown }>`select research_json from drafts where id = ${filed[0]!.draftId}`;
+    const research = typeof row!.research_json === "string" ? JSON.parse(row!.research_json) : row!.research_json as Record<string, unknown>;
+    const readiness = research.storyReadiness as { state: string; reason: string };
+    assert.equal(readiness.state, "not-ready");
+    assert.equal(readiness.reason, held!.reason);
+    const blockers = publishBlockers({ headline, dek: "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand the measure before the chair's announced result.", body: draft, sectionReady: true, readiness: readiness.state as never, readinessReason: readiness.reason, openClaims: 0, unreviewedClaims: 0, unreviewedAccepted: false, namedOutlets: [], evidenceStale: false, reviewingEvidence: false, reconcileActive: false, publishing: false });
+    assert.equal(blockers.find((blocker) => blocker.key === "readiness")?.sentence, held!.reason);
+  });
+  // guards: an assignment can divert the writer into changing models or effort.
+  it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {
+    const assignment = "Report the meeting. Use only Codex Sol 6.1 at medium effort; stop if unavailable.";
+    const { prompt, system } = await callWritingPass([], undefined, [], assignment);
+    assert.ok(prompt.includes("Use only Codex Sol 6.1 at medium effort"));
+    assert.ok(/assignment[\s\S]{0,300}(?:model|effort)/i.test(system));
+    assert.ok(/never[\s\S]{0,80}(?:spawn|start|invoke)[\s\S]{0,40}another model/i.test(system));
+  });
+  // guards: a failed run could misreport an open story fact as the cause of failure.
+  it("names the writer step when no readable story is returned", async () => {
+    const reason = "The transcript's missing roll-call passage leaves the dissenter unidentified.";
+    const held = { stories: [], held: [{ storyId: "meeting", headline: "Council vote", reason, nextCheck: "Review the roll call.", unverified: true }] };
+    const { result } = await callWritingPass([], undefined, [], "Report the council vote", () => ({ ok: true, text: JSON.stringify(held) }));
+    assert.match(result.error, /initial writer call returned no story/i);
+    assert.doesNotMatch(result.error, /missing roll-call passage|dissenter unidentified/i);
   });
   it("does not hardcode one story: the status policy is free of this story's facts", async () => {
     const policy = (await writingUserPrompt()).split("STATUS IS THE LEDE")[1]!.split("EDITOR'S ASSIGNMENT")[0]!;
@@ -1321,6 +1576,19 @@ describe("the retained recording identity is enforced, not assumed", () => {
     assert.equal(out.sources[0]!.url, "https://youtu.be/" + RETAINED + "?t=45", "the retained source is untouched");
     assert.equal(out.claims[0]!.status, "VERIFIED", "a correctly-bound claim stays verified");
     assert.equal(out.claims[0]!.nextCheck, "", "nothing owed");
+  });
+  // guards: a timestamp on an editor-supplied summary could be mislabeled as a retained recording cite.
+  it("keeps a time-coded action account separate from the retained video", () => {
+    const story = {
+      id: "s1", headline: "h", draft: "d", plainBrief: "", cannotSay: "", readinessTier: 2,
+      claims: [{ id: "C1", text: "The amendment passed.", status: "VERIFIED" as const, sourceIds: ["S1"], nextCheck: "" }],
+      sources: [{ id: "S1", title: "Editor-supplied reconciled action account", tier: "B" as const,
+        url: "", locator: "3:08:35–3:21:00", offlineReference: "Derivative action account supplied with this assignment." }],
+    };
+    const out = validatePacketSources(story as never, record());
+    assert.equal(out.claims[0]!.status, "VERIFIED");
+    assert.doesNotMatch(out.claims[0]!.nextCheck, /recording identity is not established/i);
+    assert.equal(out.sources[0]!.offlineReference, "Derivative action account supplied with this assignment.");
   });
 });
 
@@ -1517,7 +1785,8 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     assert.equal(result.observationProvenance?.[0]?.id, 182);
   });
 
-  it("revises an overlength writer packet once and refuses a second overlength result", async () => {
+  // guards: the editor could be shown a different idea's hold reason for a rejected draft.
+  it("files an overlength revision with its assignment gap", async () => {
     async function run(revisedWords: number) {
       let calls = 0;
       const result = await writingPass({
@@ -1538,7 +1807,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
             assert.match(prompt, /substantial editorial cut/);
             assert.match(prompt, /Human Service Agency funding/);
           }
-          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: [] }) };
+          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", dek: `${Array(25).fill("word").join(" ")}.`, draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: count > 800 ? [{ storyId: "other-idea", headline: "Library parking", reason: "The library parking idea still needs its parcel count.", nextCheck: "Check parcel count", unverified: true }] : [] }) };
         }) as never,
       });
       assert.equal(calls, 2, "exactly one revision, never an unbounded retry loop");
@@ -1548,15 +1817,18 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     assert.equal(revised.stories[0]!.draft.split(/\s+/).length, 700);
     assert.equal(revised.stories[0]!.cannotSay, "Pending ordinance");
     const refused = await run(860);
-    assert.equal(refused.stories.length, 0, "do not file an output that still violates the assignment");
-    assert.match(refused.error, /requested word range after one revision/);
+    assert.equal(refused.stories.length, 1, "keep the readable revision for the editor");
+    assert.equal(refused.error, "");
+    assert.match(refused.gaps.join(" "), /requested word range after one revision/);
+    assert.ok(refused.held.some((entry) => entry.storyId === "s1" && /requested word range/.test(entry.reason)));
+    assert.doesNotMatch(refused.error, /library parking idea/);
   });
 
   it("removes only a false final hold, while keeping unavailable support and genuine disagreement", async () => {
     async function runWriter(documents: DocumentRead[], reason: string, malformedReplies = 0) {
       let calls = 0;
       const reply = {
-        stories: [{ id: "story-1", headline: "Budget proposal", draft: "A short proposed-budget draft.", plainBrief: "", cannotSay: "", readinessTier: 2, claims: [], sources: [] }],
+        stories: [{ id: "story-1", headline: "Budget proposal", dek: "The council proposed a new airport-noise plan for neighbors living near the runway and will hold a public hearing before it adopts any changes.", draft: "The city council proposed a new airport-noise plan for neighbors near the runway and will hold a public hearing before adopting any changes. It remains open for comment.", plainBrief: "", cannotSay: "", readinessTier: 2, claims: [], sources: [] }],
         held: [{ storyId: "story-1", headline: "Budget proposal", reason, nextCheck: reason, unverified: true }],
       };
       return writingPass({
@@ -1651,6 +1923,36 @@ describe("document-only claims bind to their own cited PDF section", () => {
     const claims = bindClaimsToEvidence(story as never, noActions, record, [memoDocument]);
     assert.equal(claims[0]!.status, "VERIFIED", claims[0]!.nextCheck);
     assert.equal(claims[0]!.nextCheck, "", "document evidence supports proposed figures without claiming a meeting vote");
+  });
+
+  // guards: cited figures and dates from the meeting record are falsely marked absent when their ledger item cannot resolve.
+  it("binds cited transcript figures and dates to their spoken windows", () => {
+    const video = "S1kSaew-UUY";
+    const record = { identity: { videoId: video, videoUrl: "https://www.youtube.com/watch?v=" + video }, segments: [
+      { index: 1, seconds: 14235, item: "12A", itemTitle: "Budget", text: "Funding for this project would be 916,000 for 2027." },
+      { index: 2, seconds: 11328, item: "11", itemTitle: "Ordinance 2026-69", text: "The hazardous vegetation work must be completed by May 1, 2027." },
+      { index: 3, seconds: 11369, item: "11", itemTitle: "Ordinance 2026-69", text: "May 1, 2027 is the deadline for the mitigation." },
+    ] };
+    const story = {
+      id: "run-3", headline: "Budget and ordinance", draft: "", plainBrief: "", cannotSay: "", readinessTier: 2,
+      claims: [
+        { id: "C02", item: "12A", text: "Staff said the proposed project 103 allocation would be $916,000 for 2027.", status: "VERIFIED" as const, sourceIds: ["S02"], nextCheck: "" },
+        { id: "C04", item: "11; ordinance 2026-69", text: "A seconded amendment to ordinance 2026-69 proposed mitigation by May 1, 2027.", status: "VERIFIED" as const, sourceIds: ["S04"], nextCheck: "" },
+        { id: "C06", item: "12A", text: "The proposed project 103 allocation would be $916,000 for 2027.", status: "VERIFIED" as const, sourceIds: ["S06"], nextCheck: "" },
+      ],
+      sources: [
+        { id: "S02", title: "Supplied transcript, Window 15", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 12A; remaining proposed project allocation; 3:57:13–3:57:20", offlineReference: "" },
+        { id: "S04", title: "Supplied transcript, Window 12", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 11; ordinance 2026-69; fire-condition motion; 3:08:35–3:09:48", offlineReference: "" },
+        { id: "S06", title: "Supplied transcript, Window 12", tier: "A" as const, url: "https://www.youtube.com/watch?v=" + video, locator: "Item 12A; unrelated passage; 3:08:35–3:09:48", offlineReference: "" },
+      ],
+    };
+    const unrelatedAction = {
+      actionId: "allocation", timestamp: "3:57:13", agendaItem: "12A", motionOrAction: "Remaining project allocation", outcome: "discussed",
+      vote: "unverified", policyStage: "discussion", evidence: "transcript", disposition: "",
+    } as CoverageAction;
+    const reconcile = { actions: [unrelatedAction], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 };
+    const claims = bindClaimsToEvidence(story as never, reconcile as never, record as never, []);
+    assert.deepEqual(claims.map((claim) => [claim.id, claim.status]), [["C02", "VERIFIED"], ["C04", "VERIFIED"], ["C06", "VERIFIED"]]);
   });
 
   it("binds request 7 claims C1-C5, C8-C9, and C16 to precise sections in their combined locators", () => {
@@ -1876,4 +2178,306 @@ describe("finishing preserves the canonical model pin", () => {
     assert.notEqual(receipt.label, "LLM", "the generic label is replaced");
     assert.match(String(receipt.label), /DeepSeek/i, "the label names the model the editor should see");
   });
+});
+
+// guards: irrelevant discussion can overflow the writer input and displace announced votes.
+it("keeps whole announced-result passages within the writer budget in time order", () => {
+  const segments = Array.from({ length: 30 }, (_, index) => ({ index, seconds: index * 300,
+    item: "12A", itemTitle: "", text: index === 0 ? "Please approve a bus pass." :
+      `The motion carries unanimously. Result ${index}. ` + "context ".repeat(500) }));
+  const windows = [...segments].reverse().map((segment) => ({ windowIndex: segment.index,
+    startClock: "0:00", endClock: "0:00", segments: [segment], items: [] }));
+  const block = writerDecisionWindowEvidence({ windows } as never);
+  assert.ok(block.length <= 20_000, `writer received ${block.length} characters`);
+  assert.ok(!block.includes(segments[0]!.text));
+  assert.deepEqual(block.match(/Result \d+\./g), ["Result 1.", "Result 2.", "Result 3.", "Result 4."]);
+  for (const segment of segments.slice(1, 5)) assert.ok(block.includes(segment.text));
+});
+
+// guards: an imprecise transcript citation can erase a claim's already verified ledger evidence.
+it("keeps ledger verification when a transcript citation misses the item's passages", () => {
+  const video = "S1kSaew-UUY";
+  const record = { identity: { videoId: video }, segments: [
+    { index: 1, seconds: 60, item: "12A", itemTitle: "Budget", text: "The allocation is $916,000." } ] };
+  const action = { agendaItem: "12A", timestamp: "1:00", motionOrAction: "Allocation", vote: "unverified" };
+  const claim = { id: "allocation", item: "12A", text: "The allocation is $916,000.", status: "VERIFIED", sourceIds: ["tape"], nextCheck: "" };
+  const sources = [{ id: "tape", title: "Supplied transcript", tier: "A", url: "https://youtu.be/" + video,
+    locator: "Item 12A; 2:00:00–2:01:00", offlineReference: "" }];
+  const checked = bindClaimsToEvidence({ claims: [claim], sources } as never,
+    { actions: [action] } as never, record as never, []);
+  assert.equal(checked[0]!.status, "VERIFIED", checked[0]!.nextCheck);
+});
+
+// guards: an unresolved claim could be filed without searching the full retained record and read packet.
+it("checks an unresolved claim against the full transcript and already-read documents once", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "The council approved $45,000 for creek repairs.";
+  const chatOpts = { choice: "pinned-model", reasoningEffort: "high" };
+  let calls = 0;
+  const chat = async (_system: string, prompt: string, tokens: number, opts: unknown) => {
+    calls += 1;
+    assert.equal(tokens, 3_000);
+    assert.equal(opts, chatOpts);
+    assert.match(prompt, /MEETING IDENTITY:.*City Council regular session/s);
+    assert.match(prompt, /NEXT CHECK NOTE: Find the amount in the record\./);
+    assert.match(prompt, /ALREADY-READ DOCUMENTS:.*Budget packet/s);
+    assert.match(prompt, new RegExp(claim.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    return { ok: true, text: JSON.stringify({
+      verdict: "VERIFIED", quote: claim, sourceKind: "transcript", sourceUrl: videoUrl,
+      replacement: "", cut: false, reason: "The full meeting transcript says the same amount.",
+    }) };
+  };
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "repairs", headline: "Council takes up creek work", draft: claim, plainBrief: "", cannotSay: "",
+      readinessTier: 1,
+      claims: [{ id: "C1", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Find the amount in the record.", item: "5" }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId, videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "5", itemTitle: "Old item", text: "Unrelated opening comments." },
+        { index: 2, seconds: 12_345, item: "11", itemTitle: "Creek repairs", text: claim },
+      ],
+    } as never,
+    documents: [{ url: "https://city.test/budget.pdf", title: "Budget packet", ok: true, text: "The packet was read.", reason: "" }],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: chat as never,
+    chatOpts,
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.claims[0]?.status, "VERIFIED");
+  assert.deepEqual(result.claims[0]?.transcriptEvidence, { quote: claim, startSeconds: 12_345, videoUrl });
+  assert.equal(result.claims[0]?.item, "11");
+});
+
+// guards: an announced vote could stay unchecked when its motion appears earlier in the transcript.
+it("checks a vote against the passage from its motion through the result", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "motion uh to amend carries 5 to 2 with";
+  const quote = "motion uh to amend carries 5 to 2 with";
+  let prompt = "";
+  let stagePrompt = "";
+  let calls = 0;
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "fire-vote", headline: "Council amends fire ordinance", draft: claim, plainBrief: "", cannotSay: "",
+      readinessTier: 1,
+      claims: [
+        { id: "fire-vote", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the motion and result." },
+        { id: "reading-stage", text: "The account places ordinance 2026-69 among first-reading items.", status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the ordinance and reading stage." },
+      ],
+      sources: [],
+    },
+    record: {
+      identity: { videoId, videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "9E", itemTitle: "Fire ordinance", text: "I move to amend ordinance 2026-69 to add fire protections." },
+        { index: 2, seconds: 160, item: "9E", itemTitle: "Fire ordinance", text: "motion uh to amend carries 5 to 2 with" },
+        { index: 3, seconds: 1_000, item: "11", itemTitle: "Fire ordinance", text: "Item E is ordinance 2026-69 on the agenda." },
+        { index: 4, seconds: 1_258, item: "11", itemTitle: "Fire ordinance", text: "At the September 22 meeting, this item was approved on first reading with four additional conditions." },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async (_system: string, sent: string) => {
+      calls++;
+      if (calls === 1) prompt = sent;
+      else stagePrompt = sent;
+      return { ok: true, text: JSON.stringify({
+        verdict: calls === 1 ? "VERIFIED" : "OPEN", quote: calls === 1 ? quote : "", sourceKind: "transcript", sourceUrl: videoUrl,
+        replacement: "", cut: false, reason: "The retained transcript supplies the closest context.",
+      }) };
+    }) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.match(prompt, /I move to amend ordinance 2026-69[\s\S]*motion uh to amend carries 5 to 2 with/);
+  const stageLine = stagePrompt.split(/\r?\n/).find((line) => line.startsWith("CLOSEST FULL-TRANSCRIPT PASSAGES: "));
+  const stagePassages = JSON.parse(stageLine!.slice("CLOSEST FULL-TRANSCRIPT PASSAGES: ".length)) as Array<{ quote: string }>;
+  assert.ok(stagePassages.some((passage) => passage.quote.includes("ordinance 2026-69") && passage.quote.includes("approved on first reading")));
+  assert.equal(calls, 2);
+  assert.equal(result.claims[0]?.status, "VERIFIED", result.claims[0]?.nextCheck);
+});
+
+// guards: a statement contradicted by the retained record could remain in the filed story.
+it("rewrites a contradicted sentence to match the retained transcript", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const unsupported = "The council approved $45,000 for creek repairs.";
+  const corrected = "Staff proposed $45,000 for creek repairs.";
+  const chat = async () => ({ ok: true, text: JSON.stringify({
+    verdict: "CONTRADICTED", quote: corrected, sourceKind: "transcript", sourceUrl: videoUrl,
+    replacement: corrected, cut: false, reason: "The transcript describes a proposal, not an approval.",
+  }) });
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "repairs", headline: "Council takes up creek work",
+      draft: `${unsupported} The report continues.`, plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "C1", text: unsupported, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the vote." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [{ index: 1, seconds: 900, item: "11", itemTitle: "Creek work", text: corrected }],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: chat as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(result.claims[0]?.status, "VERIFIED");
+  assert.equal(result.claims[0]?.text, corrected);
+  assert.equal(result.draft, `${corrected} The report continues.`);
+});
+
+// guards: a fact true in the record could stay unchecked because captions cannot prove a speaker's role.
+it("narrows an open claim to the result the transcript can prove", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const unsupported = "The chair announced that the fire amendment carried 5–2.";
+  const narrowed = "The fire ordinance amendment carried 5 to 2.";
+  const quote = "We are considering the fire ordinance. I move to amend ordinance 2026-69. The motion to amend carries 5 to 2.";
+  let prompt = "";
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "fire-vote", headline: "Council amends a fire ordinance", draft: unsupported,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "fire-vote", text: unsupported, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check who announced the result." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "9E", itemTitle: "Fire ordinance", text: "We are considering the fire ordinance. I move to amend ordinance 2026-69." },
+        { index: 2, seconds: 160, item: "9E", itemTitle: "Fire ordinance", text: "The motion to amend carries 5 to 2." },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async (_system: string, sent: string) => {
+      prompt = sent;
+      return { ok: true, text: JSON.stringify({
+        verdict: "NARROWED", quote, sourceKind: "transcript", sourceUrl: videoUrl,
+        replacement: narrowed, cut: false, reason: "The transcript identifies the result, but has no speaker labels.",
+      }) };
+    }) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.match(prompt, /no speaker labels/i);
+  assert.equal(result.claims[0]?.status, "VERIFIED", result.claims[0]?.nextCheck);
+  assert.equal(result.claims[0]?.text, narrowed);
+  assert.equal(result.draft, narrowed);
+});
+
+// guards: an open fact could show the editor a quote and timestamp from the wrong passage.
+it("keeps an open fact's closest evidence on the passage used for its re-check", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const claim = "The chair announced that the Copper Peak approval motion carried 5 to 2.";
+  const usedPassage = "The motion was to approve the Copper Peak development plan. The motion carries 5 to 2.";
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "copper-peak", headline: "Council considers Copper Peak", draft: claim,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "copper-peak-vote", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Confirm who announced the vote." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 500, item: "9I", itemTitle: "Copper Peak", text: "The motion was to approve the Copper Peak development plan." },
+        { index: 2, seconds: 520, item: "9I", itemTitle: "Copper Peak", text: "The motion carries 5 to 2." },
+        { index: 3, seconds: 900, item: "12A", itemTitle: "Other item", text: claim },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async () => ({ ok: true, text: JSON.stringify({
+      verdict: "OPEN", quote: usedPassage, sourceKind: "transcript", sourceUrl: videoUrl,
+      replacement: "", cut: false, reason: "The passage does not identify the speaker.",
+    }) })) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(result.claims[0]?.status, "UNVERIFIED");
+  assert.equal(result.claims[0]?.closestQuote, usedPassage);
+  assert.equal(result.claims[0]?.closestEvidence?.quote, usedPassage);
+  assert.equal(result.claims[0]?.closestEvidence?.startSeconds, 500);
+});
+
+// guards: a transcript-supported claim could be filed as unchecked with no place to play it.
+it("carries a retained transcript quote into the editor's supported row", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const quote = "The requirement should be subject to the availability and willingness of an operator.";
+  const quoteParts = ["The requirement should be subject to the", "availability and willingness of an", "operator."];
+  const story = {
+    id: "bike-share", headline: "Dry Creek bike-share condition", draft: quote, plainBrief: "", cannotSay: "",
+    readinessTier: 1,
+    claims: [{ id: "bike-share-condition", text: quote, status: "UNVERIFIED" as const, sourceIds: ["tape"], nextCheck: "Confirm the amendment in the recording.", item: "Dry Creek; proposed amendment two" }],
+    sources: [{ id: "tape", title: "Retained transcript", tier: "A" as const, url: videoUrl,
+      locator: "Dry Creek; amendment two; operator availability; 1:25:17–1:25:48", offlineReference: "" }],
+  };
+  const record = { identity: { videoId, videoUrl }, segments: quoteParts.map((text, index) => ({
+    index: index + 1, seconds: 5123 + index, item: "9", itemTitle: "Consent agenda", text,
+  })) };
+  const checked = bindClaimsToEvidence(story as never, {
+    actions: [],
+  } as never, record as never, []);
+  assert.equal(checked[0]?.status, "VERIFIED");
+  assert.deepEqual(checked[0]?.transcriptEvidence, { quote, startSeconds: 5123, videoUrl });
+
+  const sql = { query: async <T>() => [] as T[] } as unknown as Sql;
+  const review = await reportingStoryReviewClaims(sql, 1, { ...story, claims: checked } as never);
+  const list = evidenceCheckRows({
+    rows: [],
+    claimRows: [{ key: "budget-vote", claim: review.rows[0]!, captures: [],
+      judgment: { value: "unreviewed", reason: "", contraryVersionId: null } }],
+    manualClaimRows: [], openClaims: [], nameCheck: null, styleFindings: [],
+  });
+  assert.equal(list[0]?.chip, "✓ Supported");
+  assert.equal(list[0]?.note, quote);
+  assert.deepEqual(list[0]?.action, {
+    kind: "open-record", label: "Play at 1:25:23", href: `${videoUrl}&t=5123s`,
+  });
+});
+
+// guards: a reconciled vote could be downgraded when its transcript citation replaces the ledger item.
+it("keeps the reconciled vote on a cited transcript claim", () => {
+  const videoId = "S1kSaew-UUY", videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const checked = bindClaimsToEvidence({ claims: [{ id: "vote", item: "9A", text: "The Dry Creek motion carries 5-2.", status: "UNVERIFIED", sourceIds: ["tape"], nextCheck: "" }], sources: [{ id: "tape", title: "Retained transcript", tier: "A", url: videoUrl, locator: "Item 9A; 1:40-1:42" }] } as never,
+    { actions: [{ agendaItem: "9A", timestamp: "1:40", motionOrAction: "Dry Creek ordinance vote", outcome: "carries", vote: "5-2" }] } as never,
+    { identity: { videoId, videoUrl }, segments: [{ index: 1, seconds: 100, item: "9A", text: "The motion was approved." }] } as never, []);
+  assert.equal(checked[0]?.status, "VERIFIED");
+});
+
+// guards: an amount mentioned only between cited transcript passages could be falsely treated as supported.
+it("does not use transcript figures between disjoint citations", () => {
+  const videoId = "S1kSaew-UUY", videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const checked = bindClaimsToEvidence({ claims: [{ id: "amount", item: "9A", text: "The Dry Creek plan costs $42,000.", status: "UNVERIFIED", sourceIds: ["start", "end"], nextCheck: "" }], sources: ["1:40-1:42", "10:00-10:02"].map((locator, index) => ({ id: index ? "end" : "start", title: "Retained transcript", tier: "A", url: videoUrl, locator: `Item 9A; ${locator}` })) } as never,
+    { actions: [{ agendaItem: "9A", timestamp: "1:40", motionOrAction: "Dry Creek plan", outcome: "approved", vote: "unverified" }] } as never,
+    { identity: { videoId, videoUrl }, segments: [{ index: 1, seconds: 100, item: "9A", text: "The Dry Creek plan is on the agenda." }, { index: 2, seconds: 300, item: "9A", text: "The plan costs $42,000." }, { index: 3, seconds: 600, item: "9A", text: "The plan moves to a final vote." }] } as never, []);
+  assert.notEqual(checked[0]?.status, "VERIFIED");
+});
+
+// guards: a timestamped supported row could show a transcript quote about a different amount.
+it("saves the transcript line that states the checked amount", () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "The project 103 budget fell by $1.18 million.";
+  const story = {
+    claims: [{ id: "project-cut", item: "12A", text: claim, status: "VERIFIED", sourceIds: ["tape"], nextCheck: "" }],
+    sources: [{ id: "tape", title: "Retained transcript", tier: "A", url: videoUrl,
+      locator: "Item 12A; project 103 reduction; 3:56:54–3:57:13" }],
+  };
+  const record = { identity: { videoId, videoUrl }, segments: [
+    { index: 1, seconds: 14_218, item: "12A", text: "The proposed budget included almost $2.1 million for CAP project 103." },
+    { index: 2, seconds: 14_233, item: "12A", text: "We are reducing this budget by $1.18 million." },
+  ] };
+  const checked = bindClaimsToEvidence(story as never, { actions: [] } as never, record as never, []);
+  assert.match(checked[0]?.transcriptEvidence?.quote ?? "", /\$1\.18 million/);
 });

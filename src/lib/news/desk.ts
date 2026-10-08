@@ -5289,6 +5289,7 @@ export type UnreviewedClaimDeps = {
     claimRows: readonly ClaimEvidenceRow[];
     manualClaimRows: readonly ManualClaimEvidenceRow[];
     groundingRows?: readonly DraftGroundingRow[];
+    civicReporting?: boolean;
     evidenceToken: string;
   }>;
 };
@@ -5348,6 +5349,7 @@ export async function unreviewedClaimsGate(
       review.claimRows,
       review.manualClaimRows,
       review.groundingRows ?? [],
+      review.civicReporting ?? false,
     ),
     evidenceToken: review.evidenceToken,
   };
