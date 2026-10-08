@@ -1,7 +1,7 @@
 import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
@@ -215,11 +215,11 @@ function DarkPage() {
     dialog's own press now and reports its refusals inside itself, so the only
     notices left are the file's, and there is one place to put them.
   */
-  function showNotice(text: string | null, ok = false, investigationId = openId) {
+  const showNotice = useCallback((text: string | null, ok = false, investigationId = openId) => {
     setNotice(text);
     setNoticeOk(ok);
     setNoticeFor(investigationId);
-  }
+  }, [openId]);
 
   function rememberOpen(id: number) {
     setFileFocusRequest(null);
@@ -373,7 +373,7 @@ function DarkPage() {
         : `No brief: ${editorError(bj.error ?? "") || "the job did not finish."}`,
       bj.status === "completed",
     );
-  }, [detail.data?.briefJob, briefWaiting]);
+  }, [detail.data?.briefJob, briefWaiting, showNotice]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
