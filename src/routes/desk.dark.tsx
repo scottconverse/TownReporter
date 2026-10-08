@@ -2053,7 +2053,12 @@ function InvestigationWorkspace({
           <div className="astra-case-h">
             <p className="astra-label">Activity</p>
           </div>
-          {activityRows.length === 0 ? (
+          {activityQuery.isError ? (
+            <div className="astra-note" role="alert">
+              <p>Could not load the activity</p>
+              <InkButton tone="quiet" onClick={() => void activityQuery.refetch()}>Try again</InkButton>
+            </div>
+          ) : activityRows.length === 0 ? (
             <p className="astra-note">
               {activityQuery.isPending ? "Loading activity…" : "No activity recorded yet."}
             </p>

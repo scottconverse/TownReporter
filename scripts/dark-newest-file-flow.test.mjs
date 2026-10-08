@@ -1,7 +1,7 @@
 // guards: a newer investigation must not be stranded behind an older file
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { React, createRoot, h, window, file, Route } from "./dark-file-model-flow.harness.mjs";
+import { React, createRoot, h, window, file, detail, Route } from "./dark-file-model-flow.harness.mjs";
 
 function fileDetail(row) {
   return {
@@ -75,4 +75,27 @@ test("the file area explains loading and offers a safe retry after a failed list
     assert.equal(globalThis.__darkFlow.calls.refetch, 1);
     assert.doesNotMatch(failed.textContent, /\["investigations"\]|Internal Server Error/);
   } finally { await React.act(async () => failedRoot.unmount()); failed.remove(); }
+});
+
+// guards: a failed activity read could be mistaken for a genuinely empty log
+test("an activity read failure names the problem and can be retried", async () => {
+  globalThis.__darkFlow.calls.refetch = 0;
+  const fixtures = globalThis.__darkFlow.fixtures;
+  fixtures.investigations = [file];
+  fixtures.detail = detail;
+  fixtures.details = { [file.id]: detail };
+  fixtures.pending = {};
+  fixtures.errors = { "investigation-activity": new Error("Internal Server Error 503") };
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  await React.act(async () => root.render(h(Route.component)));
+  try {
+    const activity = container.querySelector(".astra-pair > div");
+    assert.match(activity?.textContent ?? "", /Could not load the activity/);
+    assert.doesNotMatch(activity?.textContent ?? "", /No activity recorded yet/);
+    const retry = [...(activity?.querySelectorAll("button") ?? [])].find((button) => button.textContent === "Try again");
+    assert.ok(retry);
+    await React.act(async () => retry.dispatchEvent(new window.Event("click", { bubbles: true })));
+    assert.equal(globalThis.__darkFlow.calls.refetch, 1);
+  } finally { await React.act(async () => root.unmount()); container.remove(); }
 });
