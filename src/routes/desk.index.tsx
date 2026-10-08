@@ -1336,7 +1336,8 @@ function DeskHome() {
                 <DeskJobCard
                   key={job.id}
                   job={job}
-                  compact
+                  compact={job.kind !== "dark"}
+                  cancelLabel={job.kind === "dark" ? "Stop" : "Cancel"}
                   viewLabel={open?.label}
                   onNavigate={open ? open.go : undefined}
                 />
@@ -1352,7 +1353,7 @@ function DeskHome() {
           <div className="today-running">
             <DeskJobCard
               job={readyDarkJob}
-              compact
+              cancelLabel="Stop"
               onNavigate={(job) => openJob(job, navigate)?.go()}
             />
           </div>

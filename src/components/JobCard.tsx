@@ -148,6 +148,7 @@ export function JobCard({
             <b className="job-card-title">{title ?? job.title}</b>
             <span className="job-card-model">
               {job.model}
+              {job.modelEffort ? ` · ${job.modelEffort}` : ""}
               {job.pct != null && running ? ` · ${job.pct}%` : ""}
             </span>
           </span>
@@ -282,6 +283,7 @@ export function DeskJobCard({
   failoverNote,
   onNavigate,
   viewLabel,
+  cancelLabel = "Cancel",
 }: {
   job: JobProgressView;
   compact?: boolean;
@@ -290,6 +292,7 @@ export function DeskJobCard({
   failoverNote?: boolean;
   onNavigate?: (job: JobProgressView) => void;
   viewLabel?: string;
+  cancelLabel?: string;
 }) {
   const qc = useQueryClient();
   const refresh = () => qc.invalidateQueries({ queryKey: ["desk-jobs"] });
@@ -319,6 +322,7 @@ export function DeskJobCard({
         title={title}
         failoverNote={failoverNote}
         viewLabel={viewLabel}
+        cancelLabel={cancelLabel}
         onView={go}
         onOpen={go}
         onCancel={busy ? undefined : () => cancel.mutate()}

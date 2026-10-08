@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import type { ModelEffort } from "./provider-registry.ts";
 import {
   jobStages,
   requestJobCancel,
@@ -71,6 +72,8 @@ export type JobProgressView = {
   headline: string | null;
   /** Resolved provider label ("Codex Sol", "Local model"), never "auto". */
   model: string;
+  /** Saved reasoning effort for a Dark Desk research run, when present. */
+  modelEffort: ModelEffort | null;
   stages: string[] | null;
   stageIndex: number | null;
   pct: number | null;
@@ -213,6 +216,20 @@ type ProgressShape = Omit<
   | "canRetry"
 >;
 
+const SAVED_MODEL_EFFORTS = new Set<ModelEffort>(["none", "low", "medium", "high", "xhigh", "max"]);
+
+function darkJobEffort(row: Pick<DeskJob, "kind" | "result_json">): ModelEffort | null {
+  if (row.kind !== "dark" || !row.result_json) return null;
+  try {
+    const value = (JSON.parse(row.result_json) as { modelEffort?: unknown }).modelEffort;
+    return typeof value === "string" && SAVED_MODEL_EFFORTS.has(value as ModelEffort)
+      ? value as ModelEffort
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function progressShape(row: DeskJob, model: string): ProgressShape {
   return {
     id: row.id,
@@ -220,6 +237,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
     subjectId: row.subject_id,
     status: row.status,
     model,
+    modelEffort: darkJobEffort(row),
     stages: jobStages(row),
     stageIndex: row.stage_index ?? null,
     pct: row.pct ?? null,

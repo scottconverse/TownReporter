@@ -1,3 +1,4 @@
+// guards: Today could hide the effort used by a Dark Desk job
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -41,6 +42,20 @@ describe("reporting result navigation", () => {
   });
   it("keeps the worker's explicit result link", () => {
     assert.equal(jobProgressView({ ...requestJob, result_href: "/desk/story/415" }, 326, null).resultHref, "/desk/story/415");
+  });
+});
+
+describe("Dark Desk job effort", () => {
+  it("keeps the saved effort on the card view", () => {
+    const darkJob = {
+      id: 712,
+      kind: "dark",
+      subject_id: 41,
+      status: "completed",
+      model_choice: "codex-balanced",
+      result_json: JSON.stringify({ modelEffort: "medium" }),
+    } as DeskJob;
+    assert.equal(jobProgressView(darkJob, 0, null).modelEffort, "medium");
   });
 });
 
