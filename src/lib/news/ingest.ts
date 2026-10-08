@@ -9,6 +9,7 @@ import { ingestPrimeGov, PrimeGovPortalError } from "./primegov.ts";
 import { FetchResponseRefusal, limitFor, readBodyCapped } from "./body-limit.ts";
 import { mustNotRetryImmediately, retryAfterFromHeaders } from "./fetch-politeness.ts";
 import type { FetchSchedule } from "./host-gate.ts";
+import { characterLength, pdfTextPreview } from "./pdf-read.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
 export const ARCHIVE_TEXT_CAP = 2_000_000;
@@ -135,6 +136,8 @@ export type PdfPage = {
 };
 export type PdfExtract = {
   text: string;
+  /** Full extracted text length before the archive storage cap. */
+  totalCharacters: number;
   method: "unpdf" | "tj-regex" | "ocr" | "none";
   needsOcr: boolean;
   pages: PdfPage[];
@@ -278,7 +281,7 @@ export async function extractPdfBetter(
       .join("\n\n")
       .trim();
     if (text.length >= 40) {
-      return { text: text.slice(0, ARCHIVE_TEXT_CAP), method: "unpdf", needsOcr: false, pages };
+      return { text: text.slice(0, ARCHIVE_TEXT_CAP), totalCharacters: characterLength(text), method: "unpdf", needsOcr: false, pages };
     }
   } catch {
     /* fall through to regex */
@@ -287,6 +290,7 @@ export async function extractPdfBetter(
   if (fallback.length >= 40) {
     return {
       text: fallback.slice(0, ARCHIVE_TEXT_CAP),
+      totalCharacters: characterLength(fallback),
       method: "tj-regex",
       needsOcr: false,
       pages: [{ page: null, text: fallback.slice(0, ARCHIVE_TEXT_CAP) }],
@@ -298,6 +302,7 @@ export async function extractPdfBetter(
       if (ocrResult.text.trim().length >= 40) {
         return {
           text: ocrResult.text.slice(0, ARCHIVE_TEXT_CAP),
+          totalCharacters: characterLength(ocrResult.text),
           method: "ocr",
           needsOcr: false,
           pages: ocrResult.pages.length
@@ -311,6 +316,7 @@ export async function extractPdfBetter(
       }
       return {
         text: fallback,
+        totalCharacters: characterLength(fallback),
         method: "none",
         needsOcr: true,
         pages: [],
@@ -320,7 +326,7 @@ export async function extractPdfBetter(
       /* OCR failed — still report needs-ocr */
     }
   }
-  return { text: fallback, method: "none", needsOcr: true, pages: [] };
+  return { text: fallback, totalCharacters: characterLength(fallback), method: "none", needsOcr: true, pages: [] };
 }
 
 /**
@@ -598,6 +604,9 @@ export type IngestResult = {
   extras: string[];
   /** Site furniture retained separately, never treated as article body. */
   notices?: string[];
+  /** Present when a PDF preview ends before the extracted text does. */
+  totalCharacters?: number;
+  truncationMarker?: string;
 };
 
 export type IngestDocument = {
@@ -1019,10 +1028,13 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
   if (ctype.includes("pdf") || path.endsWith(".pdf")) {
     const pdf = await extractPdfBetter(buf);
     if (pdf.needsOcr || pdf.text.length < 40) throw new Error("PDF had no extractable text");
+    const preview = pdfTextPreview(pdf.text, pdf.totalCharacters);
     return {
-      text: `PDF ${url.toString()}\n\n${pdf.text.slice(0, 40000)}`,
+      text: `PDF ${url.toString()}\n\n${preview.text}`,
       titleHint: url.pathname.split("/").pop() ?? "pdf",
       extras: [],
+      totalCharacters: preview.totalCharacters,
+      ...(preview.truncationMarker ? { truncationMarker: preview.truncationMarker } : {}),
     };
   }
 

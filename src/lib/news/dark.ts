@@ -71,6 +71,7 @@ import {
 } from "./dark-specific-grounding.ts";
 import { readableCapture } from "./html-text.ts";
 import { chunksFromEvidence } from "./ingest.ts";
+import { PDF_READ_CHUNK_CHARACTERS, PDF_READ_MAX_OFFSET } from "./pdf-read.ts";
 import { OCR_TOTAL_BUDGET_MS, pdfPageCount, productionOcr } from "./ocr.ts";
 import {
   pageListSummary,
@@ -1122,11 +1123,14 @@ export const getInvestigation = createServerFn({ method: "GET" })
       created_at: string;
       excerpt: string;
       extraction_method: string | null;
+      retained_pdf: boolean;
     }>`
       select id, url, title, classification, fetch_status, fetch_outcome, version_id,
         created_at,
         case when url like 'editor://%' then full_text else left(full_text, 2500) end as excerpt,
-        extraction_method
+        extraction_method,
+        exists(select 1 from artifact_blobs b where b.version_id=artifacts.version_id
+          and b.newsroom_id=artifacts.newsroom_id and b.mime ilike '%pdf%' and b.body_b64<>'') as retained_pdf
       from artifacts
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
       order by id desc limit 60
@@ -1369,8 +1373,15 @@ export const getInvestigation = createServerFn({ method: "GET" })
 
 export const getArtifact = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .validator((id: unknown) => rowId.parse(id))
-  .handler(async ({ context, data: id }) => {
+  .validator((raw: unknown) => {
+    const input = typeof raw === "number" ? { id: raw, offset: 0 } : raw as { id?: unknown; offset?: unknown };
+    const id = rowId.parse(input?.id);
+    const offset = input?.offset ?? 0;
+    if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > PDF_READ_MAX_OFFSET)
+      throw new Error("Invalid character offset");
+    return { id, offset };
+  })
+  .handler(async ({ context, data: { id, offset } }) => {
     await ensureDarkSchema();
     const sql = await getSql();
     const rows = await sql<{
@@ -1382,13 +1393,36 @@ export const getArtifact = createServerFn({ method: "GET" })
       fetch_status: number | null;
       created_at: string;
       retained_pdf: boolean;
+      total_characters: number;
     }>`
-      select id, url, title, left(full_text, 120000) as full_text, fetch_outcome, fetch_status, created_at,
-        exists(select 1 from artifact_blobs b where b.version_id=artifacts.version_id
-          and b.newsroom_id=artifacts.newsroom_id and b.mime ilike '%pdf%' and b.body_b64<>'') as retained_pdf
-      from artifacts
-      where id = ${id} and newsroom_id = ${owned(context)}
-      limit 1
+      with capture as (
+        select artifacts.id, url, title,
+          case when artifacts.extraction_method like 'ocr-pages%' and coalesce(ocr.text, '') <> ''
+            then concat_ws(E'\n\n', nullif(artifacts.full_text, ''), ocr.text)
+            else artifacts.full_text end as full_text,
+          fetch_outcome, fetch_status, created_at,
+          exists(select 1 from artifact_blobs b where b.version_id=artifacts.version_id
+            and b.newsroom_id=artifacts.newsroom_id and b.mime ilike '%pdf%' and b.body_b64<>'') as retained_pdf
+        from artifacts
+        left join lateral (
+          select string_agg(page_text, E'\n\n' order by page_number) as text
+          from (
+            select page_number, 'Page ' || page_number || E'\n' || string_agg(excerpt, E'\n\n' order by chunk_index) as page_text
+            from artifact_chunks
+            where version_id = artifacts.version_id and newsroom_id = artifacts.newsroom_id
+              and section = 'editor-requested OCR' and page_number is not null
+            group by page_number
+          ) pages
+        ) ocr on true
+        where id = ${id} and newsroom_id = ${owned(context)}
+        limit 1
+      )
+      select id, url, title,
+        case when retained_pdf or lower(url) like '%.pdf%'
+          then substring(full_text from ${offset + 1} for ${PDF_READ_CHUNK_CHARACTERS})
+          else left(full_text, 120000) end as full_text,
+        char_length(full_text)::int as total_characters, fetch_outcome, fetch_status, created_at, retained_pdf
+      from capture
     `;
     return rows[0] ?? null;
   });
