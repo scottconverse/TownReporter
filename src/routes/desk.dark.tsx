@@ -35,8 +35,6 @@ import {
   blockedDigBannerText,
   editorError,
   editorKindLabel,
-  editorPauseReason,
-  editorStatus,
   elapsedLabel,
   excerptForEditor,
   headlineFromUrl,
@@ -44,7 +42,6 @@ import {
   investigationRoundLabel,
   darkJobActive,
   observedDarkJobFinished,
-  looksLikeInternalSummary,
   organizationFromUrl,
   editorTitle,
   investigationPileFor,
@@ -70,12 +67,12 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
-import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
+import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
+import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { searchOutcomeWords } from "@/lib/news/search-trail-words";
-import { captureCounterLine } from "@/lib/news/dark-counters";
 import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -1717,7 +1714,6 @@ function InvestigationWorkspace({
     disagree by one (the editor's pasted tip) and, on a long file, by more.
   */
   const captureCounts = detail?.captureCounts ?? { captures: 0, readable: 0, unreadable: 0 };
-  const readableLabel = captureCounterLine(captureCounts);
   const readableCountBadge =
     captureCounts.captures === 0
       ? 0
@@ -1735,7 +1731,6 @@ function InvestigationWorkspace({
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
   const run = detail?.run ?? null;
-  const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
   /*
     FB7, item 5 (A2c X3). Five rounds that each recorded the same sentence left
     five `claims` rows -- `investigate.ts` inserts one per planned claim per
@@ -1803,18 +1798,7 @@ function InvestigationWorkspace({
   })();
   const leftover = nextDeduped.length;
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
-  const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
   const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
-  const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
-  const statusBit = !inv
-    ? "Opening…"
-    : inv.status === "paused"
-      ? leftover > 0
-        ? "Stopped — more to read"
-        : editorStatus(inv.status)
-      : editorStatus(inv.status);
-  const round = inv?.hops ?? 0;
-  const budget = inv?.budget ?? 5;
 
   /*
     Activity, from the run's own call record. The drawing's left column is a
@@ -1849,24 +1833,31 @@ function InvestigationWorkspace({
   }
   const activityRows = activityAll.slice(-14);
 
-  /*
-    How hard the desk is set to dig, for the boundaries strip. Same query key as
-    the settings panel below, so this reads that panel's cache instead of asking
-    the server a second time.
-  */
+  // The saved scope is file-specific; the newsroom place supplies only its
+  // human-readable jurisdiction names.
   const dialsQ = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
-  const dials = dialsQ.data?.dials;
-  const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[dials?.scope ?? "city"] : null;
-  const roundMinutes = dials ? estimateMinutes(dials) : null;
-  const statusLine = [
-    statusBit,
-    readableLabel,
-    totalOpen > 0 ? `${totalOpen} unresolved follow-up entries` : null,
-    investigationRoundLabel(round, budget),
-    inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const savedScope = (() => {
+    try {
+      const scope = (JSON.parse(inv?.scope_json || "{}") as { scope?: unknown }).scope;
+      return ["city", "county", "region", "adjacent"].includes(String(scope))
+        ? (scope as DarkScope)
+        : "city";
+    } catch {
+      return "city";
+    }
+  })();
+  const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[savedScope] : "City scope";
+  const limit = DARK_LIMITS.find((row) => row.key === inv?.limit_key) ?? DARK_LIMITS[1];
+  const limitMinutes = Number(inv?.limit_minutes ?? limit.minutes);
+  const limitDollars = inv?.limit_dollars == null ? limit.dollars : Number(inv.limit_dollars);
+  const limitTimeLabel = limitMinutes % 60 === 0
+    ? `${limitMinutes / 60} hour${limitMinutes === 60 ? "" : "s"}`
+    : `${limitMinutes} minutes`;
+  const limitSpendLabel = limitDollars == null
+    ? "no spending cap"
+    : `$${Number(limitDollars).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  const explanation = inv?.ordinary_explanation?.trim();
+  const aiExplanation = !explanation && Boolean(brief?.benign?.trim());
 
   return (
     <section
@@ -1882,17 +1873,18 @@ function InvestigationWorkspace({
       <div>
         <p className="astra-label">The question</p>
         <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
-        <p className="astra-note">{statusLine}</p>
       </div>
-
-      {/*
-        The drawing puts "the ordinary explanation to rule out first" here. The
-        investigations table has no such column (migrations/0006_investigate.sql:
-        id, title, status, summary, hops, budget), so the honest line in that
-        slot is where the file actually started -- the pasted tip, or the file's
-        own saved summary. Nothing is invented to fill the drawn sentence.
-      */}
-      {started ? <p className="astra-serif">{started}</p> : null}
+      <div>
+        <p className="astra-label">Ordinary explanation to rule out</p>
+        {explanation || brief?.benign?.trim() ? (
+          <>
+            {aiExplanation ? <p className="astra-note">AI-suggested</p> : null}
+            <p className="astra-serif">{explanation || brief?.benign?.trim()}</p>
+          </>
+        ) : (
+          <p className="astra-note">No ordinary explanation has been added yet.</p>
+        )}
+      </div>
 
       {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
       <div className="astra-notices">
@@ -1915,7 +1907,6 @@ function InvestigationWorkspace({
             {stopControl.line}
           </p>
         ) : null}
-        {run ? <DarkRunMeter run={run} active={digging} /> : null}
         {/* The same live region as the one above the file pane -- see the note
             there. This is the copy of the notice line the editor sees while a
             file is open, which is when most of these presses happen. */}
@@ -1958,19 +1949,11 @@ function InvestigationWorkspace({
             </Notice>
           ) : null
         }
-        {signals.length > 0 && queuedLead == null ? (
-          <p className="of-stop" role="status">
-            <b>Lead status:</b>{" "}
-            {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
-          </p>
-        ) : null}
         {pending ? <p className="meta">Getting this ready…</p> : null}
-        {inv?.status === "paused" && pauseText && !digging ? (
-          <p className="of-stop">
-            <b>Why it stopped:</b> {pauseText}
-            {looksLikeProviderAuthFailure(inv?.pause_reason) ? (
-              <ProviderSignInButton detail={inv?.pause_reason} />
-            ) : null}
+        {inv?.status === "paused" && inv.pause_reason && !digging ? (
+          <p className="of-stop" role="status">
+            Could not finish — retry.
+            {looksLikeProviderAuthFailure(inv.pause_reason) ? <ProviderSignInButton detail={inv.pause_reason} /> : null}
           </p>
         ) : null}
         {showBlockedBanner ? (
@@ -1980,14 +1963,7 @@ function InvestigationWorkspace({
         ) : null}
       </div>
 
-      {/*
-        The boundaries strip, as drawn. Every cell is a real stored value:
-        Scope is the saved map scope, Depth is this file's round against its
-        budget, Limit is where a round stops at the saved dig settings. The
-        dials come from the same ["dark-dials"] query the settings panel below
-        reads, so the strip and the panel cannot disagree and nothing is
-        fetched twice.
-      */}
+      {/* Each boundary is the value saved on this file when it was opened. */}
       <div className="astra-bounds">
         <div className="astra-bound">
           <p className="astra-bound-k">Scope</p>
@@ -1995,16 +1971,11 @@ function InvestigationWorkspace({
         </div>
         <div className="astra-bound">
           <p className="astra-bound-k">Depth</p>
-          <p className="astra-bound-v">{investigationRoundLabel(round, budget)}</p>
+          <p className="astra-bound-v">{limit.label.split(",")[0]}</p>
         </div>
         <div className="astra-bound">
           <p className="astra-bound-k">Limit</p>
-          <p className="astra-bound-v">
-            Stops at the time, search and model-call limits
-            {roundMinutes != null
-              ? ` · about ${roundMinutes} minute${roundMinutes === 1 ? "" : "s"} a round`
-              : ""}
-          </p>
+          <p className="astra-bound-v">{limitTimeLabel} · {limitSpendLabel}</p>
         </div>
       </div>
 
@@ -2713,21 +2684,6 @@ function OpenedRecords({
       ) : null}
     </div>
   );
-}
-
-function startedLine(title: string, paste: string, summary: string): string {
-  const text = paste.trim();
-  if (/^followed from the/i.test(text)) {
-    return text.split("\n")[0]!.slice(0, 280);
-  }
-  if (text) {
-    const first = text.split("\n")[0]!.replace(/\s+/g, " ").trim();
-    if (first && !looksLikeInternalSummary(first)) return first.slice(0, 220);
-  }
-  if (summary && !looksLikeInternalSummary(summary)) {
-    return plainEditorText(summary).slice(0, 220);
-  }
-  return `Opened as “${title}.”`;
 }
 
 function openQuestionsFrom(
