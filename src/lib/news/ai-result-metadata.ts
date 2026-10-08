@@ -20,8 +20,6 @@ export type ChatResultMetadata = {
   outputTokens?: number;
   /** Exact provider-reported total-token counter, when present. */
   totalTokens?: number;
-  /** Provider-reported dollar cost; absent when spend is not measured. */
-  costDollars?: number;
 };
 
 export type ChatResult =

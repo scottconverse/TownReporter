@@ -1,3 +1,4 @@
+// guards: the file picker could promise a model spending limit the product does not enforce
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
@@ -57,8 +58,9 @@ describe("Start a Dark Desk file dialog", () => {
       // The copy the design draws: records and hours, not hops.
       assert.match(html, new RegExp(l.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
-    assert.match(selectedCard(html), /Standard · up to 30 records, 2 hours or \$3/);
-    assert.match(selectedCard(render({ limit: "deep" })), /Deep · up to 100 records, 8 hours or \$15/);
+    assert.match(selectedCard(html), /Standard · up to 30 records, 2 hours/);
+    assert.match(selectedCard(render({ limit: "deep" })), /Deep · up to 100 records, 8 hours/);
+    assert.doesNotMatch(html, /\$3|\$15|Spend not measured/);
   });
 
   it("draws the model row's Effort select too, the way the reference draws that block", () => {

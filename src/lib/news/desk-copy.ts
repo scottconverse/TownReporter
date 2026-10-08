@@ -60,7 +60,6 @@ export type InvestigationActivityInput = {
   failed?: boolean;
   failureReason?: string | null;
   stopReason?: string | null;
-  limitDollars?: number | null;
   removed?: boolean;
   changed?: boolean;
   found?: boolean;
@@ -140,7 +139,6 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
     return { text: body ? `AI follow-up watching: ${body}` : "AI follow-up is watching for a response", tone: "plain" };
   }
   if (event.kind === "watch") return { text: event.removed ? `Watched page removed: ${subject}` : `Watched page changed: ${subject}`, tone: event.removed ? "plain" : "finding" };
-  if (event.stopReason === "dollar-limit") return { text: `Stopped: this file reached its ${event.limitDollars == null ? "spending" : `$${event.limitDollars}`} limit`, tone: "plain" };
   if (event.failed) {
     const mapped = event.failureReason && /cancel(?:led|ed)? by the editor/i.test(event.failureReason)
       ? "Stopped at the editor's request. What was found remains saved."
@@ -2851,9 +2849,3 @@ export function chipLabel(status: string): string {
   src/components/follow-up-item.tsx, deleted with them; an agent has
   `next_run_at` and says when it runs next, not when something is overdue.
 */
-
-/** A configured dollar limit is enforceable only with measured call costs. */
-export function darkSpendLabel(limit: number | null, totals?: { costDollars?: number | null }): string {
-  if (totals?.costDollars == null) return "Spend not measured for this model";
-  return limit == null ? "no spending cap" : `$${limit.toLocaleString("en-US", { maximumFractionDigits: 2 })} limit`;
-}

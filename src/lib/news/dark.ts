@@ -1569,15 +1569,14 @@ export const investigationActivity = createServerFn({ method: "GET" })
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
         order by created_at desc limit 60
       `.catch(() => [] as { id: number; at: string; hypothesis: string }[]),
-      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null; limitDollars: number | null }>`
+      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }>`
         select id, coalesce(finished_at, started_at)::text as at, stop_reason as "stopReason",
-          (error is not null) as failed, error,
-          (usage_totals_json::jsonb ->> 'limitDollars')::numeric as "limitDollars"
+          (error is not null) as failed, error
         from dark_runs
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
           and (finished_at is not null or error is not null or stop_reason is not null)
         order by started_at desc limit 30
-      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null; limitDollars: number | null }[]),
+      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }[]),
       performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
       sql<{ id: number; at: string; title: string; url: string; state: string }>`
         select c.id, c.created_at::text as at, m.title, m.url, c.state
@@ -1593,7 +1592,7 @@ export const investigationActivity = createServerFn({ method: "GET" })
       ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson })),
       ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
       ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
-      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, limitDollars: row.limitDollars, failed: row.failed, failureReason: row.error })),
+      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed, failureReason: row.error })),
       ...watchedPages.map((row) => ({
         id: `watch-${row.id}`,
         at: row.at,
@@ -1906,7 +1905,7 @@ export async function synthesizeSignals(
     model: choice ?? "provider-default",
   });
   if (runBudget && !call) {
-    return { stored: 0, summary: "", error: runBudget.stopMessage };
+    return { stored: 0, summary: "", error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
   const callMs = providerBudget(choice, overrides).callMs;
@@ -1942,7 +1941,6 @@ export async function synthesizeSignals(
       inputTokens: ai?.meta?.inputTokens,
       outputTokens: ai?.meta?.outputTokens,
       totalTokens: ai?.meta?.totalTokens,
-      costDollars: ai?.meta?.costDollars,
     });
     await onUsage?.(runBudget!.snapshot());
   }
@@ -4693,7 +4691,6 @@ export async function buildBrief(
       inputTokens: meta?.inputTokens,
       outputTokens: meta?.outputTokens,
       totalTokens: meta?.totalTokens,
-      costDollars: meta?.costDollars,
     });
     await run?.onUsage?.(run.budget.snapshot());
   }

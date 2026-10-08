@@ -454,8 +454,10 @@ export async function verifyRunSignals(opts: {
           noTools: true,
           reasoningEffort: opts.reasoningEffort,
         });
+        if (!ai?.ok) throw new Error(ai && "error" in ai ? ai.error : "empty model response");
+        text = ai.text;
         modelCall?.finish({
-          result: ai?.ok ? "ok" : "error",
+          result: "ok",
           durationMs: ai?.meta?.durationMs,
           timedOut: ai?.meta?.timedOut ?? false,
           provider: ai?.meta?.provider,
@@ -463,10 +465,7 @@ export async function verifyRunSignals(opts: {
           inputTokens: ai?.meta?.inputTokens,
           outputTokens: ai?.meta?.outputTokens,
           totalTokens: ai?.meta?.totalTokens,
-          costDollars: ai?.meta?.costDollars,
         });
-        if (!ai?.ok) throw new Error(ai && "error" in ai ? ai.error : "empty model response");
-        text = ai.text;
       }
     } catch (error) {
       modelCall?.finish({ result: "error" });

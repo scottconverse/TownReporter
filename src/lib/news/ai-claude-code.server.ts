@@ -54,7 +54,6 @@ type CliEnvelope = {
   subtype?: string;
   api_error_status?: unknown;
   duration_ms?: unknown;
-  total_cost_usd?: unknown;
   model?: unknown;
   modelUsage?: unknown;
   usage?: unknown;
@@ -77,7 +76,6 @@ function cliMetadata(envelope: CliEnvelope, fallback: CliResultContext): ChatRes
       : undefined;
   return {
     ...fallback,
-    ...(reportedCount(envelope.total_cost_usd) !== undefined ? { costDollars: reportedCount(envelope.total_cost_usd) } : {}),
     model: reportedModel ?? fallback.model,
     durationMs: reportedCount(envelope.duration_ms) ?? fallback.durationMs,
     ...(reportedCount(usage?.input_tokens) !== undefined ? { inputTokens: reportedCount(usage?.input_tokens) } : {}),

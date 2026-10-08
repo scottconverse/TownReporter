@@ -38,7 +38,6 @@ import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
-  darkSpendLabel,
   editorError,
   editorKindLabel,
   elapsedLabel,
@@ -1924,11 +1923,9 @@ function InvestigationWorkspace({
   const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[savedScope] : "City scope";
   const limit = DARK_LIMITS.find((row) => row.key === inv?.limit_key) ?? DARK_LIMITS[1];
   const limitMinutes = Number(inv?.limit_minutes ?? limit.minutes);
-  const limitDollars = inv?.limit_dollars == null ? limit.dollars : Number(inv.limit_dollars);
   const limitTimeLabel = limitMinutes % 60 === 0
     ? `${limitMinutes / 60} hour${limitMinutes === 60 ? "" : "s"}`
     : `${limitMinutes} minutes`;
-  const limitSpendLabel = darkSpendLabel(limitDollars, detail?.run?.usage.totals);
   const explanation = inv?.ordinary_explanation?.trim();
   const aiExplanation = !explanation && Boolean(brief?.benign?.trim());
   const sourceByCapture = new Map(sourceCaptures.map((capture) => [capture.id, capture]));
@@ -2103,7 +2100,7 @@ function InvestigationWorkspace({
         </div>
         <div className="astra-bound">
           <p className="astra-bound-k">Limit</p>
-          <p className="astra-bound-v">{limitTimeLabel} · {limitSpendLabel}</p>
+          <p className="astra-bound-v">{limitTimeLabel}</p>
         </div>
       </div>
 
