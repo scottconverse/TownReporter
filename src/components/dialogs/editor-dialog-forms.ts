@@ -585,7 +585,7 @@ export function sourcesRequest(state: AddSourcesState): SourcesRequest {
       otherwise. `addSourceInput` is `{url,title,kind,tier}` -- `title` and
       `kind` are REQUIRED strings, which is why the name is sent even when it is
       empty and `kind`/`tier` go as "" for the server to fill from the URL (see
-      `desk.ts`'s addSource: `kindFromSourceUrl`, tier "A"). The reference draws
+      `desk.ts`'s addSource: `kindFromSourceUrl`, `tierFromKind`). The reference draws
       a "What to watch for" line beside them and there is no column for it: the
       `sources` table is (id, user_id, url, title, kind, tier, status, last_hash,
       last_fetched_at, last_error, created_at), `upsertSource` takes exactly the

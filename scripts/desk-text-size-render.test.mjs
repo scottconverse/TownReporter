@@ -276,6 +276,15 @@ const { DeskShell } = await import(
         "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
       ),
       "@/lib/appearance-context": appearanceContextStub,
+      "./shortcut-sheet": moduleUrl(
+        await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),
+        "shortcut-sheet.tsx",
+        {
+          "../lib/save-shortcut-label.ts": import.meta.resolve("../src/lib/save-shortcut-label.ts"),
+          "./dialog": dialogStub,
+          "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+        },
+      ),
       "@/components/dialog": dialogStub,
       "@/components/dialogs": newStoryStub,
       react: import.meta.resolve("react"),

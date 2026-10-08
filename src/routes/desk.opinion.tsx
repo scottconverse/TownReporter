@@ -1,3 +1,4 @@
+import { editorialCitationNotice } from "@/lib/news/editorial-citations";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -551,6 +552,7 @@ function OpinionPage() {
                 placeholder="Headline on the first line, then the piece. CLAIMS AND SOURCES, EDITOR'S FACT SHEET and the image prompt are picked up if they are there."
               />
             </label>
+            {editorialCitationNotice(written) ? <p role="status">{editorialCitationNotice(written)}</p> : null}
             <div className="astra-panel-acts">
               <InkButton
                 tone="solid"

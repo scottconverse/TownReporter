@@ -181,7 +181,7 @@ export const OPS_CARDS: readonly OpsCardDef[] = [
     panelTitle: "Daily scan",
     sub: "A scheduled reporter pass for leads only. It does not draft or publish anything.",
     ownerOnly: true,
-    rows: ["Runs", "Files up to"],
+    rows: ["Runs", "Sources selected", "Fetch cap", "Sources actually read", "Leads filed"],
     doors: [{ label: "Scan settings", tone: "plain", card: "daily-scan" }],
     editorNote:
       "Only the owner can change when the daily scan runs and how much it may read. It runs for the whole paper, once.",

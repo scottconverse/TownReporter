@@ -52,8 +52,13 @@ export function sourceKindLabel(row: ParsedSourceLine): string {
       return "News page";
     case "community":
       return "Community page";
-    default:
+    case "official":
       return "Official page";
+    case "social":
+      return "Social post";
+    case "unclassified":
+    default:
+      return "Unclassified page";
   }
 }
 

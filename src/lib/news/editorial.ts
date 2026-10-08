@@ -8,6 +8,7 @@
  * read-only by contract.
  */
 
+import { stripEditorialCitations } from "./editorial-citations.ts";
 import {
   capSuppliedMaterial,
   SUPPLIED_MATERIAL_CAP,
@@ -74,7 +75,7 @@ function cut(text: string, re: RegExp): [string, string] {
  * acceptable is silently losing the body.
  */
 export function parseEditorial(raw: string): Editorial {
-  const text = String(raw ?? "")
+  const text = stripEditorialCitations(String(raw ?? ""))
     .replace(/\r\n/g, "\n")
     .trim();
   if (!text) return { headline: "", body: "", appendix: "", factSheet: "", imagePrompt: "" };

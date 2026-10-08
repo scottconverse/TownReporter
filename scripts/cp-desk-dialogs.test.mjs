@@ -285,9 +285,6 @@ assert.ok(Dialog, "the real Dialog must load: every test below mounts it");
 
 /* The real source chain. Leaves first, in the order they are imported. */
 const urlGuardUrl = await load("src/lib/news/url-guard.ts");
-const sourceLinesUrl = await load("src/lib/news/source-lines.ts", {
-  "./url-guard.ts": urlGuardUrl,
-});
 const killReasonsUrl = await load("src/lib/news/kill-reasons.ts");
 const providerRegistryUrl = await load("src/lib/news/provider-registry.ts");
 const paperUrl = await load("src/lib/paper.ts");
@@ -300,16 +297,20 @@ const preflightUrl = await load("src/lib/news/preflight.ts", {
 const leadMatchUrl = await load("src/lib/news/lead-match.ts", {
   "./preflight.ts": preflightUrl,
 });
+const deskCopyUrl = await load("src/lib/news/desk-copy.ts", {
+  "./preflight.ts": preflightUrl,
+  "./lead-match.ts": leadMatchUrl,
+  "../paper.ts": paperUrl,
+});
+const sourceLinesUrl = await load("src/lib/news/source-lines.ts", {
+  "./url-guard.ts": urlGuardUrl,
+  "./desk-copy.ts": deskCopyUrl,
+});
 const logicUrl = await load("src/lib/news/editor-dialog-logic.ts", {
   "./source-lines.ts": sourceLinesUrl,
   "./url-guard.ts": urlGuardUrl,
   "./kill-reasons.ts": killReasonsUrl,
   "zod": import.meta.resolve("zod"),
-});
-const deskCopyUrl = await load("src/lib/news/desk-copy.ts", {
-  "./preflight.ts": preflightUrl,
-  "./lead-match.ts": leadMatchUrl,
-  "../paper.ts": paperUrl,
 });
 const importStoriesUrl = await load("src/lib/news/import-stories.ts", {
   "./desk-copy.ts": deskCopyUrl,
@@ -369,6 +370,7 @@ assert.equal(
 
 const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx", {
   "@tanstack/react-query": import.meta.resolve("@tanstack/react-query"),
+  "@/lib/news/desk-copy": deskCopyUrl,
   "@/components/dialog": dialogUrl,
   "@/components/model-picker": modelPickerStub,
   /* UI1a3: the Hold dialog hands the foot its pending word through this module,

@@ -1,3 +1,4 @@
+import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 /*
   CITY-SETUP slice A: a database-backed paper configuration, with today's
   hard-coded constants as the fallback. No UI, no route, no behaviour change
@@ -812,8 +813,8 @@ export function cleanSetupInput(raw: unknown): FirstRunSetupInput {
         .map((s) => ({
           url: s.url.trim(),
           title: (s.title ?? "").trim() || s.url.trim(),
-          kind: s.kind ?? "official",
-          tier: s.tier ?? "A",
+          kind: s.kind ?? kindFromSourceUrl(s.url),
+          tier: s.tier ?? tierFromKind(s.kind ?? kindFromSourceUrl(s.url)),
         }))
         .filter((s) => s.url.length > 0 && s.url.length <= LIMITS.url)
         .slice(0, LIMITS.watchlistEntries)

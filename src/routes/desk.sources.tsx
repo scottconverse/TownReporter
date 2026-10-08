@@ -1,3 +1,4 @@
+import { dailyScanCounts } from "@/lib/desk/daily-scan-counts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useMemo, useState } from "react";
@@ -463,17 +464,6 @@ function SourcesPage() {
       ),
     [sources, leadsForKills.data],
   );
-  /*
-    How many pages the scanner is allowed to read. This is the "files up to"
-    the design puts in the Daily scan panel, and it is the same number the Scan
-    screen computes for its own run. Paused rows are deliberately not in it.
-
-    It comes from the server's whole-list count, not from the rows on screen:
-    the panel is answering "how many files can the scanner reach", which does
-    not change when the editor turns a page.
-  */
-  const watch = counts?.watching ?? 0;
-
   return (
     <DeskShell title="Sources" kicker="What the desk watches, and whether it could check" hideTitle>
       {/*
@@ -785,12 +775,14 @@ function SourcesPage() {
               <dt>Runs</dt>
               <dd>{dailyScheduleLabel(scanPolicy)}</dd>
             </dl>
-            <dl className="astra-kv ruled">
-              <dt>Files up to</dt>
-              <dd>
-                {watch} lead{watch === 1 ? "" : "s"}
-              </dd>
-            </dl>
+            {dailyScanCounts(scanPolicy).map((row) => (
+              <dl className="astra-kv ruled" key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </dl>
+            ))}
+            <p className="astra-note">Read and filed counts are from the latest scan.</p>
+
             <dl className="astra-kv ruled">
               <dt>Model</dt>
               <dd>{scanPolicy ? modelChoiceLabel(scanPolicy.runtime, "scan") : "Automatic"}</dd>
@@ -1275,6 +1267,7 @@ function SuggestedSources({
                   </td>
                   <td className="td-hl" data-label="Suggested source">
                     <span className="src-t">{s.title}</span>
+                    <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
                     <span className="meta-inline block">
                       <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                         {s.url}
@@ -1563,8 +1556,9 @@ function WatchRows({
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
                     {hostLabel(s.url)} ↗
                   </a>
-                  {s.kind ? ` · ${s.kind}` : ""}
+                  {` · Kind: ${s.kind || "unclassified"} · Tier: ${s.tier || "unclassified"}`}
                 </p>
+                <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>
                 ) : null}
@@ -1976,6 +1970,7 @@ function SourceTable({
           >
             <td className="td-hl" data-label="Source">
               <span className="src-t">{s.title}</span>
+              <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
               <span className="meta-inline block">
                 {/^https?:/i.test(s.url) ? (
                   <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
