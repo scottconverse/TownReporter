@@ -352,7 +352,7 @@ describe("editor copy", () => {
     const msg = editorError("Cannot read properties of undefined (reading 'ok')");
     assert.ok(msg);
     assert.doesNotMatch(msg!, /Cannot read properties/i);
-    assert.match(msg!, /Keep digging/i);
+    assert.match(msg!, /Keep investigating/i);
   });
 
   it("does not dump Research failed as the editor message", () => {
@@ -360,7 +360,7 @@ describe("editor copy", () => {
     assert.ok(msg);
     assert.doesNotMatch(msg!, /^Research failed$/i);
     assert.match(msg!, /still on the file/i);
-    assert.match(msg!, /Keep digging/i);
+    assert.match(msg!, /Keep investigating/i);
   });
 
   it("labels investigation status in English", () => {
@@ -1402,7 +1402,7 @@ describe("blockedDigBannerText (Dark Desk F6)", () => {
     assert.match(text, /8 of 10/);
     assert.match(text, /rate-limited \(429/i);
     assert.match(text, /not evidence there is nothing here/i);
-    assert.match(text, /Keep digging/);
+    assert.match(text, /Keep investigating/);
   });
 
   it("names an app-shell page when empty captures dominate", () => {
@@ -1909,7 +1909,7 @@ describe("a validation dump never reaches the editor", () => {
     assert.ok(saidTitle, "a dump must produce a sentence, not null");
     assert.doesNotMatch(saidTitle, /too_big|"path"|"code"|[{}[\]]|maximum/);
     // The provider sentences are unaffected by the new guard.
-    assert.match(editorError("xAI API error 403") ?? "", /Keep digging/i);
+    assert.match(editorError("xAI API error 403") ?? "", /Keep investigating/i);
   });
 
   it("turns a bare server failure into something the editor can act on", () => {

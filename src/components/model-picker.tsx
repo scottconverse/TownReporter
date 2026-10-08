@@ -370,7 +370,6 @@ export function ModelPicker(props: Props) {
   const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();
-  const flagId = useId();
   const selectId = useId();
   /*
     Which providers are actually usable ON THIS SERVER, not just offered for
@@ -410,14 +409,7 @@ export function ModelPicker(props: Props) {
         : null,
     });
   }
-  const unavailable = options.filter(
-    (option) => option.value !== "auto" && !isAvailable(option.value),
-  );
   const selectedUnavailable = !isAvailable(shownValue);
-  // The one un-set-up option gets flagged even when it is not the current
-  // selection, so an editor sees "not set up" before picking it rather than
-  // after a failed draft.
-  const flagged = !selectedUnavailable && unavailable.length === 1 ? unavailable[0] : null;
   const help = noFallback
     ? "No fallback model is set for this rank."
     : retiredNote
@@ -449,7 +441,7 @@ export function ModelPicker(props: Props) {
         id={selectId}
         value={shownValue}
         disabled={props.disabled}
-        aria-describedby={flagged ? `${helpId} ${flagId}` : helpId}
+        aria-describedby={helpId}
         /*
           The closed control shows the selected option's SHORT line (see
           pickerOptionText), so the full sentence goes here as a title: a
@@ -502,11 +494,6 @@ export function ModelPicker(props: Props) {
               : "This exact model does not declare safe per-run effort levels through its configured transport, so TownReporter uses the provider default."}
           </span>
         </div>
-      ) : null}
-      {flagged ? (
-        <span id={flagId} className="model-picker-help">
-          {notSetUpHelp(flagged)}
-        </span>
       ) : null}
       {props.value === "local-model" ? (
         <LocalModelSelect scope={props.scope ?? "story"} />

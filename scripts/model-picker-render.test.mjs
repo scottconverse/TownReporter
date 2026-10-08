@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ModelPicker, availabilityStub } from "./model-picker-render.harness.mjs";
+import { ModelPicker, availabilityStub, registry, choiceModule } from "./model-picker-render.harness.mjs";
 
 function render(props = {}) {
   // Undefined (the default) means "the query hasn't answered yet" --
@@ -149,9 +149,9 @@ test("an unavailable provider renders as a disabled option labelled 'not set up'
   // Unit P item 7: the option shows the registry's short half-line, not the
   // 56-character clause that was clipped to "...or anot" in a 191px box.
   assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — on this computer — not set up<\/option>/);
-  // Not selected, but the only unavailable option -- still surfaced.
-  assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
-  assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
+  // The option remains marked; provider help belongs to the selected model.
+  assert.doesNotMatch(html, /TownReporter cannot reach a local model\. Start LM Studio/);
+  assert.doesNotMatch(html, /then click Refresh\. See docs\/local-models\.md\./);
 });
 
 /*

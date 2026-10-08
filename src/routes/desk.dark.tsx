@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText } from "@/lib/news/dark-screen-copy";
 import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
@@ -1878,13 +1879,16 @@ function InvestigationWorkspace({
   };
   const renderCompactCaseText = (value: string, key: string) => {
     const full = plainEditorText(value).replace(/\s+/g, " ").trim();
-    const preview = full.length > 132 ? `${full.slice(0, 132).trimEnd()}…` : full;
-    return (
-      <div key={key} className="astra-case-compact">
-        <p className="side-item astra-case-v">{preview}</p>
-        {preview !== full ? <details className="of-trail"><summary>More</summary><p className="side-item astra-case-v">{full}</p></details> : null}
-      </div>
-    );
+    return <p key={key} className="side-item astra-case-v">{full}</p>;
+  };
+  const renderCaseList = <T,>(items: T[], text: (item: T) => string, render: (item: T, key: string) => ReactNode, empty: string, key: string) => {
+    if (!items.length) return <p className="side-item">{empty}</p>;
+    const full = plainEditorText(text(items[0]!)).replace(/\s+/g, " ").trim();
+    const preview = full.length > 64 ? full.slice(0, 64).trimEnd() + "…" : full;
+    return <details className="of-trail astra-case-compact">
+      <summary><span className="side-item astra-case-v">{preview}</span><span className="meta">More</span></summary>
+      <div className="astra-case-list">{items.map((item, i) => render(item, key + "-" + i))}</div>
+    </details>;
   };
   const renderFinding = (finding: (typeof sourcedFindings)[number], key: string) => (
     <div key={key} className="astra-case">
@@ -2108,27 +2112,19 @@ function InvestigationWorkspace({
           ) : null}
           <div className="of-block">
             <p className="side-label">Findings</p>
-            {sourcedFindings.length ? renderFinding(sourcedFindings[0]!, "finding-0") : <p className="side-item">No sourced findings yet.</p>}
-            {sourcedFindings.length > 1 ? (
-              <details className="of-trail"><summary>More</summary>{sourcedFindings.slice(1).map((finding, i) => renderFinding(finding, `finding-more-${i}`))}</details>
-            ) : null}
+            {renderCaseList(sourcedFindings, (finding) => finding.text, renderFinding, "No sourced findings yet.", "finding")}
           </div>
           <div className="of-block">
             <p className="side-label">Contradictions</p>
-            {contradictions.length ? renderContradiction(contradictions[0]!, "contradiction-0") : <p className="side-item">No captured records disagree yet.</p>}
-            {contradictions.length > 1 ? (
-              <details className="of-trail"><summary>More</summary>{contradictions.slice(1).map((pair, i) => renderContradiction(pair, `contradiction-more-${i}`))}</details>
-            ) : null}
+            {renderCaseList(contradictions, (pair) => `${pair.first.text}; another record says ${pair.second.text}`, renderContradiction, "No captured records disagree yet.", "contradiction")}
           </div>
           <div className="of-block">
             <p className="side-label">Unanswered</p>
-            {unanswered.length ? renderQuestion(unanswered[0]!, "question-0") : <p className="side-item">No unanswered questions listed yet.</p>}
-            {unanswered.length > 1 ? <details className="of-trail"><summary>More</summary>{unanswered.slice(1).map((question, i) => renderQuestion(question, `question-more-${i}`))}</details> : null}
+            {renderCaseList(unanswered, (question) => question, renderQuestion, "No unanswered questions listed yet.", "question")}
           </div>
           <div className="of-block">
             <p className="side-label">AI follow-ups running</p>
-            {linkedFollowUps.length ? renderFollowUp(linkedFollowUps[0]!, `follow-up-${linkedFollowUps[0]!.id}`) : <p className="side-item">No AI follow-ups are running.</p>}
-            {linkedFollowUps.length > 1 ? <details className="of-trail"><summary>More</summary>{linkedFollowUps.slice(1).map((followUp) => renderFollowUp(followUp, `follow-up-more-${followUp.id}`))}</details> : null}
+            {renderCaseList(linkedFollowUps, (followUp) => followUp.what, renderFollowUp, "No AI follow-ups are running.", "follow-up")}
           </div>
           <div className="astra-panel-acts">
             <InkButton tone="ghost" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
@@ -2690,7 +2686,7 @@ function OpenedRecords({
 
   return (
     <div className="reader">
-      <div className="reader-index" role="list">
+      <div className="reader-index" role="group" aria-label="Saved records">
         {ordered.map((a, i) => {
           const preview = previewOf(a);
           const rowTitle =
@@ -2707,7 +2703,6 @@ function OpenedRecords({
             <button
               key={a.id}
               type="button"
-              role="listitem"
               className={
                 "reader-row" +
                 (a.id === selected?.id ? " on" : "") +

@@ -142,4 +142,4 @@ const { ModelPicker } = await import(
   )
 );
 
-export { ModelPicker, availabilityStub };
+export { ModelPicker, availabilityStub, registry, choiceModule };

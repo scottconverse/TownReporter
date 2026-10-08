@@ -2752,7 +2752,7 @@ export function plainSystemCopy(text: string): string {
         ? translated[0]!.toUpperCase() + translated.slice(1)
         : translated;
     })
-    .replace(/Click Keep investigating/gi, "Click Keep investigating");
+    .replace(/Click Keep digging/gi, "Click Keep investigating");
 }
 
 /*

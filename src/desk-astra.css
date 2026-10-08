@@ -7001,7 +7001,7 @@
 /* Evidence grows independently of the editor's decision controls. Each
    column remains readable, including expanded saved prose, in its own box. */
 .desk-ltr.astra[data-desk-page="dark"] .astra-pair > div {
-  max-height: 280px;
+  max-height: 320px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   min-width: 0;
@@ -8535,3 +8535,25 @@
   border-bottom: 0;
   padding-bottom: 4px;
 }
+
+/* Collapse long case entries themselves, keeping all four labels and the
+   Challenge action in the initial view. Expansion scrolls in its own box. */
+.desk-ltr.astra .astra-case-compact > summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  min-height: 44px;
+  font-weight: 400;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+}
+.desk-ltr.astra .astra-case-compact > summary .side-item { margin: 0; }
+.desk-ltr.astra .astra-case-compact > summary .meta { margin-left: auto; flex-shrink: 0; text-decoration: underline; }
+.desk-ltr.astra .astra-case-list { max-height: 200px; overflow-y: auto; }
+
+.desk-ltr.astra .astra-pair .of-block { margin-top: 4px; padding-top: 2px; }
+.desk-ltr.astra .astra-pair .of-block > .side-label { margin: 0 0 2px; }
+.desk-ltr.astra .astra-pair .of-block > .side-item { margin: 0; }
+.desk-ltr.astra .astra-pair .of-block > .of-trail { margin-top: 0; }

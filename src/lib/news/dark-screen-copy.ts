@@ -9,6 +9,7 @@ export function darkScreenText(text: string): string {
 
 /** Clone display data, preserving identifiers, links, state and saved JSON. */
 export function darkScreenData<T>(value: T): T {
+  if (value instanceof Date) return value;
   if (typeof value === "string") return darkScreenText(value) as T;
   if (Array.isArray(value)) return value.map((item) => darkScreenData(item)) as T;
   if (!value || typeof value !== "object") return value;

@@ -17,7 +17,7 @@ export async function fileScreen({ width = 1440, large = false, storedCopy = fal
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node);
   await React.act(async () => root.render(h(Route.component)));
-  node.querySelector(".model-picker-stub").outerHTML = renderToStaticMarkup(h(RealPicker, { scope: "dark", layout: "stacked", compact: true, value: "codex", onChange() {}, onEffortChange() {}, effort: "medium" }));
+  node.querySelector(".model-picker-stub").outerHTML = renderToStaticMarkup(h(RealPicker, { scope: "dark", layout: "stacked", compact: true, value: "codex-frontier", onChange() {}, onEffortChange() {}, effort: "medium" }));
   const markup = node.innerHTML;
   await React.act(async () => root.unmount()); node.remove();
   const browser = await chromium.launch({ channel: "chrome" });
