@@ -124,10 +124,10 @@ export function finalPullText(input: {
   }
   const failed = failureSummary(input.failures ?? []);
   if (failed && !input.answered) {
-    return `Finished · search is unavailable — ${failed}. Trying again right now will probably repeat it.`;
+    return `Failed · search is unavailable — ${failed}. Trying again right now will probably repeat it.`;
   }
   if (failed) {
-    return `Finished · no relevant public document found. Some searches failed: ${failed}.`;
+    return `Failed · some searches could not be completed: ${failed}.`;
   }
   return "Finished · no relevant public document found";
 }
@@ -143,12 +143,19 @@ export function pullTodoReason(input: {
   status: string;
   failures: ProviderFailureNote[];
   answered: boolean;
+  failureReason?: string;
 }): string {
   if (input.status === "deadline") return "the two-minute limit was reached before a document was found";
   if (input.status === "stopped") return "stopped before a document was found";
   const failed = failureSummary(input.failures ?? []);
+  if (input.status === "failed") {
+    if (input.failureReason) return input.failureReason;
+    if (failed && !input.answered) return `search unavailable (${failed})`;
+    if (failed) return `some searches could not be completed (${failed})`;
+    return "Pull failed; open the story to check why";
+  }
   if (failed && !input.answered) return `search unavailable (${failed})`;
-  if (failed) return `no relevant document found; some searches failed (${failed})`;
+  if (failed) return `some searches failed (${failed})`;
   return "no relevant document found";
 }
 
@@ -173,6 +180,11 @@ export function isPullTodoReason(text: string): boolean {
     s === "no relevant document found" ||
     s.startsWith("no relevant document found; some searches failed (") ||
     s.startsWith("search unavailable (") ||
+    s.startsWith("some searches could not be completed (") ||
+    s.startsWith("Could not open ") ||
+    s.startsWith("Could not save the Pull result ") ||
+    s.startsWith("The desk could not confirm that the Pull result was saved.") ||
+    s.startsWith("Pull failed;") ||
     s === "the two-minute limit was reached before a document was found" ||
     s === "stopped before a document was found"
   );

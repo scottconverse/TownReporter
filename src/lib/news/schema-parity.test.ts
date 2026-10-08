@@ -212,6 +212,7 @@ if (dbProbe.ok) {
     const routineNoticePolicy = await import("./routine-notice-policy.ts");
     const routineNoticeChecks = await import("./routine-notice-checks.server.ts");
     const routineNoticeAutomation = await import("./routine-notice-automation.ts");
+    const scanCoverage = await import("./scan-source-coverage.server.ts");
     const db = await import("../db.ts");
     closePoolForTests = db.closePoolForTests;
 
@@ -221,6 +222,7 @@ if (dbProbe.ok) {
     for (const file of CORE_DEPENDENCY_MIGRATIONS) {
       await sectionSql.query(await readFile(new URL(`../../../migrations/${file}`, import.meta.url), "utf8"));
     }
+    await scanCoverage.ensureScanSourceCoverageSchema(sectionSql);
 
     // desk_rate / audit_events FIRST, and through the runtime calls that
     // create them (`ops.assertRate`, `ops.audit` -- no `ensure*Schema` name,
@@ -544,6 +546,22 @@ describe("every runtime ensure* schema agrees with migrations/*.sql (ENG-03 caps
       const allTables = new Set([...migrationsShapes.keys(), ...ensureShapes.keys()]);
       const mismatches: string[] = [];
       const usedExceptions = new Set<string>();
+
+      const migrationCoverage = migrationsShapes.get("scan_runs")?.columns.get("source_coverage");
+      const ensuredCoverage = ensureShapes.get("scan_runs")?.columns.get("source_coverage");
+      if (!migrationCoverage || !ensuredCoverage) {
+        mismatches.push(
+          `scan_runs.source_coverage must exist in migrations and the runtime ensure schema`,
+        );
+      } else if (
+        migrationCoverage.type !== ensuredCoverage.type ||
+        migrationCoverage.notNull !== ensuredCoverage.notNull ||
+        migrationCoverage.default !== ensuredCoverage.default
+      ) {
+        mismatches.push(
+          `scan_runs.source_coverage differs between migrations and the runtime ensure schema`,
+        );
+      }
 
       for (const table of allTables) {
         if (INTERNAL_TABLES.has(table)) continue;

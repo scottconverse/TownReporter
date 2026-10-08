@@ -91,6 +91,28 @@ describe("durable Pull pipeline", () => {
     assert.ok(documentSave >= 0 && completionSave > documentSave, events.join("\n"));
   });
 
+  // guards: continuation skips unread public records after a timed-out read
+  it("marks timed-out reads as failed and retries them on continuation", async () => {
+    for (const index of [false, true]) {
+      const run = receipt(index ? { indexPages: ["https://longmontcolorado.gov/documents"], rankedPrepared: false, rankedUrls: [] } : {});
+      const calls: string[] = []; let failing = true;
+      const deps: PullPipelineDeps = {
+        search: async () => assert.fail("the saved search checkpoint must not run again"),
+        ingest: async (url) => { calls.push(url); if (failing) throw new Error("Request timed out"); return { ...document(url), extras: ["https://longmontcolorado.gov/record.pdf"] }; },
+        stopRequested: async () => false, saveDocument: async () => {}, saveReceipt: async () => {},
+      };
+      const result = await runPullPipeline(run, deps);
+      assert.equal(result.status, "failed");
+      assert.match(result.stage, /timeout/i);
+      assert.doesNotMatch(result.stage, /no relevant public document found/i);
+      failing = false; run.status = "queued";
+      const resumed = await runPullPipeline(run, deps);
+      assert.equal(resumed.status, "completed");
+      assert.equal(calls.filter((url) => url === calls[0]).length, 2);
+      assert.equal(resumed.counters.documentsSaved, 1);
+    }
+  });
+
   it("stops at the next durable boundary and keeps the reporting item unresolved", async () => {
     let networkCalls = 0;
     const result = await runPullPipeline(receipt(), {
@@ -328,7 +350,7 @@ describe("durable Pull pipeline", () => {
         saveReceipt: async () => undefined,
       },
     );
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.equal(result.counters.providersAttempted, 1);
     assert.equal(result.counters.failures, 1);
     assert.match(result.errors[0] ?? "", /Exa: provider unavailable/);
@@ -385,7 +407,7 @@ describe("what a Pull says when it comes back with nothing", () => {
       },
     });
     const final = stages.at(-1) ?? "";
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.match(final, /search is unavailable/i);
     assert.match(final, /Exa: rate limited/);
     assert.match(final, /DuckDuckGo: blocked this computer/);
@@ -437,7 +459,8 @@ describe("what a Pull says when it comes back with nothing", () => {
       },
     });
     const final = stages.at(-1) ?? "";
-    assert.match(final, /no relevant public document found/);
+    assert.match(final, /failed · some searches could not be completed/i);
+    assert.doesNotMatch(final, /no relevant public document found/i);
     assert.match(final, /Exa: rate limited/);
   });
 
@@ -536,7 +559,7 @@ describe("what a Pull says when it comes back with nothing", () => {
         },
       },
     );
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.match(stages.at(-1) ?? "", /search is unavailable/i);
     assert.ok(
       stages.some((stage) => /skipped, blocked 2 minutes ago/.test(stage)),

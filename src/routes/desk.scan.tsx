@@ -3,9 +3,11 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
+import { ScanSourceCoverageList } from "@/components/scan-source-coverage";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
 import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, scanRowLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
+import { parseScanSourceCoverage } from "@/lib/news/scan-source-coverage";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskAction } from "@/components/desk-action";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -435,26 +437,37 @@ function ScanPage() {
             ) : (
               <div className="scan-hist">
                 <div className="r2-scan-head" aria-hidden="true"><span>Time</span><span>Fetched</span><span>Leads filed</span><span>Status</span><span>Details</span></div>
-                {history.slice(0, showAllHistory ? undefined : 5).map((s) => (
+                {history.slice(0, showAllHistory ? undefined : 5).map((s) => {
+                  const cancelledReceipt = s.error?.trim() === "Cancelled by the editor" && s.summary?.startsWith("Cancelled after ") ? s.summary : null;
+                  return (
                   <div key={s.id} className="scan-row r2-scan-row">
                     <time dateTime={s.started_at}><span className="r2-scan-label">Time</span>{formatListDateTime(s.started_at)}</time>
                     <span><span className="r2-scan-label">Fetched</span>{s.sources_fetched}</span>
                     <span><span className="r2-scan-label">Leads filed</span>{s.leads_created}</span>
-                    <div><span className="r2-scan-label">Status</span><span className={`astra-chip ${s.error ? "fail" : s.stalled ? "warn" : !s.finished_at ? "run" : ""}`}>{s.error ? "Failed" : s.stalled ? "Stalled" : !s.finished_at ? "Running" : "Complete"}</span></div>
-                    <details className="r2-scan-details">
-                      <summary className="btn quiet" aria-label={`Open scan from ${formatListDateTime(s.started_at)}`}>Open</summary>
-                      <div className="r2-scan-report">
+                    <div><span className="r2-scan-label">Status</span><span className={`astra-chip ${cancelledReceipt ? "" : s.error ? "fail" : s.stalled ? "warn" : !s.finished_at ? "run" : ""}`}>{cancelledReceipt ?? (s.error ? "Failed" : s.stalled ? "Stalled" : !s.finished_at ? "Running" : "Complete")}</span></div>
+                    <div className="r2-scan-details">
+                      <ScanSourceCoverageList
+                        entries={parseScanSourceCoverage(s.source_coverage)}
+                        asOf={s.started_at}
+                        listId={`scan-coverage-${s.id}`}
+                        formatListDateTime={formatListDateTime}
+                      />
+                      <details className="mt-2">
+                        <summary className="btn quiet" aria-label={`Open scan from ${formatListDateTime(s.started_at)}`}>Open</summary>
+                        <div className="r2-scan-report">
                         {s.execution_origin ? <p>{s.execution_origin === "scheduled" ? "Scheduled daily scan" : "Manual scan"}</p> : null}
-                        <p className="scan-line">{scanRowLine(s)}</p>
-                        {s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
+                        <p className="scan-line">{cancelledReceipt ?? scanRowLine(s)}</p>
+                        {!cancelledReceipt && s.leads_created > 0 && s.summary ? <p className="wire-sum">{s.summary}</p> : null}
                         {s.finished_at || s.error ? <>
                           {failedSourcesLine(parseFailedSources(s.failed_sources)) ? <p className="wire-warn">{failedSourcesLine(parseFailedSources(s.failed_sources))}</p> : null}
-                          {s.stalled ? <p className="wire-warn">{stalledRunCopy("scan")}</p> : s.leads_created === 0 ? <p className="wire-sum">{scanZeroWhy(s)}</p> : s.error ? <p className="wire-warn">{editorScanError(s.error)}</p> : null}
+                          {cancelledReceipt ? <p className="wire-warn">{editorScanError(s.error)}</p> : s.stalled ? <p className="wire-warn">{stalledRunCopy("scan")}</p> : s.leads_created === 0 ? <p className="wire-sum">{scanZeroWhy(s)}</p> : s.error ? <p className="wire-warn">{editorScanError(s.error)}</p> : null}
                         </> : null}
-                      </div>
-                    </details>
+                        </div>
+                      </details>
+                    </div>
                   </div>
-                ))}
+                  );
+                })}
                 {!showAllHistory && totalScans > 5 ? <InkButton tone="quiet" onClick={() => setShowAllHistory(true)}>Show all {totalScans}</InkButton> : null}
                 {showAllHistory && !exhausted ? scans.isError ? (
                   <ScreenError message="Could not load older scans." onRetry={() => void scans.refetch()} retrying={scans.isRefetching} />

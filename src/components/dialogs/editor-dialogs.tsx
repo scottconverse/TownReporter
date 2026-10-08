@@ -331,6 +331,7 @@ type FileLeadStepIn = {
   origin?: "import";
 };
 type SaveDraftStepIn = {
+  sourceAttachmentNote?: string;
   headline: string;
   dek: string;
   body: string;

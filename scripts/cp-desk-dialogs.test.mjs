@@ -347,6 +347,8 @@ const pasteOneStoryUrl = await load("src/lib/news/paste-one-story.ts", {
   "./import-review.ts": importReviewUrl,
 });
 const formsUrl = await load("src/components/dialogs/editor-dialog-forms.ts", {
+  "../../lib/news/url-guard.ts": urlGuardUrl,
+  "../../lib/news/desk-copy.ts": deskCopyUrl,
   "../../lib/news/model-choice.ts": modelChoiceUrl,
   "../../lib/news/editor-dialog-logic.ts": logicUrl,
   "../../lib/news/kill-reasons.ts": killReasonsUrl,

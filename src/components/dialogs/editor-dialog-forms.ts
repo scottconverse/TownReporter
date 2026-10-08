@@ -26,6 +26,8 @@ import {
   bodyFromPaste,
 } from "../../lib/news/paste-one-story.ts";
 import { extractLinks } from "../../lib/news/import-stories.ts";
+import { assertHttpUrl } from "../../lib/news/url-guard.ts";
+import { sourceAttachmentNote } from "../../lib/news/desk-copy.ts";
 import { LIMITS } from "../../lib/news/request-input.ts";
 
 /* ------------------------------------------------------------ model rows -- */
@@ -365,10 +367,33 @@ export function newStoryRequest(
     length-checked against the wire's own limits so one over-long link cannot
     turn the whole save into a parse error.
   */
-  const cited = extractLinks(state.pastedStory)
-    .map((l) => l.url)
-    .filter((u) => u.length <= LIMITS.url)
-    .slice(0, LIMITS.importLinks);
+  // Read Source lines before extractLinks de-dupes or skips invalid schemes.
+  const sourceLines = [...state.pastedStory.matchAll(/^\s*source\s*:\s*([^\r\n]*)/gim)]
+    .map(match => match[1]!.trim().replace(/[.,;:!?]+$/, ""));
+  const otherLinks = extractLinks(state.pastedStory.replace(/^\s*source\s*:[^\r\n]*/gim, ""))
+    .map(entry => entry.url);
+  const cited: string[] = [];
+  const seen = new Set<string>();
+  const dropped: Parameters<typeof sourceAttachmentNote>[0] = {};
+  const attach = (raw: string, report: boolean) => {
+    let reason: keyof typeof dropped | undefined;
+    try {
+      const url = assertHttpUrl(raw).toString();
+      if (seen.has(url)) reason = "duplicate";
+      else if (url.length > LIMITS.url) reason = "malformed";
+      else if (cited.length >= LIMITS.importLinks) reason = "limit";
+      else { seen.add(url); cited.push(url); }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      reason = message === "That host is not fetchable" ? "local"
+        : message === "Only http(s) URLs are allowed" ? "protocol" : "malformed";
+    }
+    if (reason && report) dropped[reason] = (dropped[reason] ?? 0) + 1;
+  };
+  if (link) { attach(link, false); cited.pop(); }
+  for (const url of sourceLines) attach(url, true);
+  for (const url of otherLinks) attach(url, false);
+  const attachmentNote = sourceAttachmentNote(dropped);
   const steps: NewStoryStep[] = [
     {
       call: "fileLead",
@@ -417,6 +442,7 @@ export function newStoryRequest(
         dek: state.creditLine.trim() || link,
         body: pastedBody(state.pastedStory),
         topic,
+        ...(attachmentNote ? { sourceAttachmentNote: attachmentNote } : {}),
       },
     },
   ];
@@ -436,10 +462,12 @@ export function newStoryRequest(
   if (state.pasteMode === "check") steps.push({ call: "checkEvidence" });
   return {
     steps,
-    done:
+    done: [
       state.pasteMode === "check"
         ? "Saved as your draft, and the evidence check is running. Watch it under Running now."
         : "Saved as your draft. The credit line and link stay on the published page.",
+      attachmentNote,
+    ].filter(Boolean).join(" "),
   };
 }
 
