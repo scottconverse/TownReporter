@@ -2157,9 +2157,8 @@ function readableWriterStories(reply: Record<string, unknown>): PackageStory[] {
   });
 }
 
-function shortWriterFailureReason(error: string, held: PackageHeld[]): string {
-  const reason = held.find((entry) => entry.reason.trim())?.reason || error;
-  const compact = reason.replace(/\s+/g, " ").trim();
+function shortWriterFailureReason(error: string): string {
+  const compact = error.replace(/\s+/g, " ").trim();
   if (!compact) return "";
   const sentence = compact.split(/(?<=[.!?])\s+/)[0] || compact;
   return sentence.length > 240 ? sentence.slice(0, 237).trimEnd() + "..." : sentence;
@@ -2506,15 +2505,31 @@ export async function writingPass(input: {
   ].join("\n");
   // A useful draft plus claim-specific references can exceed 8k output tokens.
   // Preserve the evidence packet rather than truncating it halfway through claims.
-  const reply = await input.chat(methodSystemPrompt(input.method), prompt, 18_000, input.chatOpts as never);
+  let reply: Awaited<ReturnType<typeof input.chat>>;
+  try {
+    reply = await input.chat(methodSystemPrompt(input.method), prompt, 18_000, input.chatOpts as never);
+  } catch (error) {
+    if (error instanceof JobCancelledError) throw error;
+    const failure = "The initial writer call returned no story.";
+    const detail = shortWriterFailureReason(writerErrorText(error));
+    gaps.push(failure);
+    return { stories: [], held: [], error: detail ? failure + " The writer said: " + detail : failure, gaps };
+  }
   if (!reply.ok) {
-    return { stories: [], held: [], error: shortWriterFailureReason(reply.error, []), gaps };
+    const failure = "The initial writer call returned no story.";
+    const detail = shortWriterFailureReason(reply.error);
+    gaps.push(failure);
+    return { stories: [], held: [], error: detail ? failure + " The writer said: " + detail : failure, gaps };
   }
   writeWorkspace(input.workspaceDir, "writer-raw.txt", reply.text);
   let parsed = readJsonBlock<Record<string, unknown>>(reply.text);
+  let noDraftFailure = "The initial writer call returned no story.";
   if (!parsed) {
+    noDraftFailure = "The writer format repair returned no story.";
     await input.throwIfCancelled();
-    const repair = await input.chat(methodSystemPrompt(input.method), [
+    let repair: Awaited<ReturnType<typeof input.chat>>;
+    try {
+      repair = await input.chat(methodSystemPrompt(input.method), [
       prompt,
       "BOUNDED WRITER RECOVERY — the previous package did not parse:",
       "If only JSON punctuation is broken, repair it faithfully. If the package was truncated, write a NEW complete focused package from the read primary records above. Do not pretend to recover missing source IDs or invent the truncated text.",
@@ -2524,14 +2539,24 @@ export async function writingPass(input: {
       "BEGIN PREVIOUS WRITER EXCERPT (at most 12000 characters)",
       reply.text.slice(0, 12_000),
       "END PREVIOUS WRITER EXCERPT",
-    ].join("\n"), 18_000, input.chatOpts as never);
+      ].join("\n"), 18_000, input.chatOpts as never);
+    } catch (error) {
+      if (error instanceof JobCancelledError) throw error;
+      repair = { ok: false, error: writerErrorText(error) };
+    }
     writeWorkspace(input.workspaceDir, "writer-format-repair.txt", repair.ok ? repair.text : repair.error);
     if (repair.ok) parsed = readJsonBlock<Record<string, unknown>>(repair.text);
+    if (!parsed) {
+      const failure = "The writer format repair returned no story.";
+      const detail = repair.ok ? "The repaired reply did not parse as JSON." : shortWriterFailureReason(repair.error);
+      gaps.push(failure);
+      return { stories: [], held: [], error: detail ? failure + " " + detail : failure, gaps };
+    }
   }
   if (!parsed) {
-    const error = "The writer's reply did not parse as JSON.";
+    const error = "The writer format repair returned no story.";
     gaps.push(error);
-    return { stories: [], held: [], error: shortWriterFailureReason(error, []), gaps };
+    return { stories: [], held: [], error, gaps };
   }
   const lengthProblems = writerLengthProblems(parsed, input.assignment);
   const relationshipProblems = financialRelationshipProblems(parsed, input.documents);
@@ -2590,14 +2615,11 @@ export async function writingPass(input: {
     const selectedStories = revisedStories.length ? revisedStories : readableWriterStories(parsed);
     const selectedPackage: Record<string, unknown> = { ...selected, stories: selectedStories };
     if (!selectedStories.length) {
-      const fallback = lengthProblems.length
-        ? "The writer did not deliver a readable story within the editor's requested word range after one revision."
-        : voteResultProblems.length
-          ? "The writer did not deliver a readable story with its announced result after one revision."
-          : "The writer did not deliver a readable story after one citation revision.";
+      const failure = "The citation revision returned no story.";
       const held = normalizeHeld(selectedPackage.held);
-      const error = shortWriterFailureReason(fallback, []);
-      gaps.push(fallback);
+      const detail = revision.ok ? "The revision contained no readable story." : shortWriterFailureReason(revision.error);
+      gaps.push(failure);
+      const error = detail ? failure + " " + detail : failure;
       return { stories: [], held, error, gaps };
     }
     const held = normalizeHeld(selectedPackage.held);
@@ -2696,9 +2718,9 @@ export async function writingPass(input: {
     input.documents,
   );
   if (!stories.length) {
-    const fallback = "The writer returned no readable draft.";
+    const fallback = noDraftFailure;
     gaps.push(fallback);
-    return { stories, held, error: shortWriterFailureReason(fallback, held), gaps };
+    return { stories, held, error: fallback, gaps };
   }
   return { stories, held, error: "", gaps };
 }

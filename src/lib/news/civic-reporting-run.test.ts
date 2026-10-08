@@ -1381,12 +1381,13 @@ describe("the writer's method prompt states the status policy", () => {
     assert.ok(/assignment[\s\S]{0,300}(?:model|effort)/i.test(system));
     assert.ok(/never[\s\S]{0,80}(?:spawn|start|invoke)[\s\S]{0,40}another model/i.test(system));
   });
-  // guards: a held writer result is saved as the meaningless failure reason "no-draft".
-  it("preserves the writer's own short hold reason when it returns no story", async () => {
+  // guards: a failed run could misreport an open story fact as the cause of failure.
+  it("names the writer step when no readable story is returned", async () => {
     const reason = "The transcript's missing roll-call passage leaves the dissenter unidentified.";
     const held = { stories: [], held: [{ storyId: "meeting", headline: "Council vote", reason, nextCheck: "Review the roll call.", unverified: true }] };
     const { result } = await callWritingPass([], undefined, [], "Report the council vote", () => ({ ok: true, text: JSON.stringify(held) }));
-    assert.equal(result.error, reason);
+    assert.match(result.error, /initial writer call returned no story/i);
+    assert.doesNotMatch(result.error, /missing roll-call passage|dissenter unidentified/i);
   });
   it("does not hardcode one story: the status policy is free of this story's facts", async () => {
     const policy = (await writingUserPrompt()).split("STATUS IS THE LEDE")[1]!.split("EDITOR'S ASSIGNMENT")[0]!;
