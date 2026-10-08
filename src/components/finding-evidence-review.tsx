@@ -1002,6 +1002,7 @@ export function FindingEvidenceReviewPanel({
     review,
     recorded: list.evidenceRecorded,
     openClaims: list.openClaims.length,
+    includeCouldNotCheck: review?.civicReporting ?? false,
   });
   const reportEvidenceState = list.onEvidenceState;
   /*

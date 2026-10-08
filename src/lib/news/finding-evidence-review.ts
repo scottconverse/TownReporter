@@ -99,6 +99,7 @@ export type ManualClaimCaptureOption = {
 export type FindingEvidenceReview = {
   leadId: number;
   draftId: number;
+  civicReporting: boolean;
   evidenceToken: string;
   contentToken: string;
   canonicalDraft: { headline: string; dek: string; body: string; topic: string };
@@ -965,6 +966,7 @@ export async function loadFindingEvidenceReview(
   return {
     leadId,
     draftId: draft.id,
+    civicReporting: reporting.civicReporting === true,
     evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings, claims, manualClaims),
     contentToken: findingEvidenceContentToken(draft),
     canonicalDraft: {

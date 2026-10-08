@@ -132,11 +132,12 @@ export function claimsNeedingReview(
    * same number, and this is the one place that number is computed.
    */
   groundingRows: readonly DraftGroundingRow[] = [],
+  includeCouldNotCheck = true,
 ): number {
   let count = groundingRows.length;
   for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
     const chip = judgmentChip(row.judgment.value, row.captures).chip;
-    if (chip === NEEDS_REVIEW_CHIP || chip === COULD_NOT_CHECK_CHIP) count += 1;
+    if (chip === NEEDS_REVIEW_CHIP || (includeCouldNotCheck && chip === COULD_NOT_CHECK_CHIP)) count += 1;
   }
   return count;
 }
@@ -232,6 +233,7 @@ export function reviewEvidenceCheckState(input: {
   review: ReviewLike | null;
   recorded: boolean;
   openClaims: number;
+  includeCouldNotCheck?: boolean;
 }): EvidenceCheckState {
   const review = input.review;
   return evidenceCheckState({
@@ -242,7 +244,13 @@ export function reviewEvidenceCheckState(input: {
     openClaims: input.openClaims,
     grounding: review?.groundingRows?.length ?? 0,
     toReview: review
-      ? claimsNeedingReview(review.rows, review.claimRows, review.manualClaimRows, review.groundingRows ?? [])
+      ? claimsNeedingReview(
+          review.rows,
+          review.claimRows,
+          review.manualClaimRows,
+          review.groundingRows ?? [],
+          input.includeCouldNotCheck ?? true,
+        )
       : 0,
     contradicted: review
       ? contradictedClaims(review.rows, review.claimRows, review.manualClaimRows)
