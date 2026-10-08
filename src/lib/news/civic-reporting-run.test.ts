@@ -238,6 +238,7 @@ describe("performReportingWork: the run", () => {
   });
 
   it("runs the full method offline: real files, whole tape, a saved package", { skip: !haveMethod }, async () => {
+    // guards: a newly filed draft could lose its readiness state before the editor opens it.
     // A REAL scoped meeting. The lead names artifact 39 / video zMglXtVlIMA, so
     // the run resolves the meeting from the LEAD ARTIFACT -- the first seed is a
     // budget PDF and must not be treated as the recording.
@@ -306,6 +307,16 @@ describe("performReportingWork: the run", () => {
       // A claim the tape supports under its own item survives the code binding.
       assert.equal(pkg.stories[0]!.claims[0]!.status, "VERIFIED", pkg.stories[0]!.claims[0]!.nextCheck);
       assert.equal(readBack!.draftId !== null, true, "the copy is saved as a new draft");
+      const [draftRow] = await sql<{ research_json: unknown }>`
+        select research_json from drafts where id = ${readBack!.draftId}
+      `;
+      const research = typeof draftRow!.research_json === "string"
+        ? JSON.parse(draftRow!.research_json)
+        : draftRow!.research_json as Record<string, unknown>;
+      const readiness = (research as Record<string, unknown>).storyReadiness as Record<string, unknown>;
+      assert.equal(readiness?.version, 1);
+      assert.equal(readiness?.state, "verified");
+      assert.equal(readiness?.openCount, 0);
       assert.equal(pkg.receipt.requestedRuntime, "auto", "the package keeps the enqueued runtime");
       assert.equal(pkg.receipt.requestedEffort, "none", "the package keeps the requested effort");
       assert.equal(pkg.receipt.actualRuntime, "local-model", "the package keeps the answering runtime");

@@ -93,6 +93,7 @@ import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from ".
 import { grokChat, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import { KIND_BUDGETS, modelEffort, PROVIDER_REGISTRY, providerEntry, type ModelEffort } from "./provider-registry.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
+import { storyReadiness } from "./story-readiness.ts";
 
 // Whole-meeting writing asks for 18,000 tokens, rather than a short pass reply.
 // Reuse the registry long-call allowance; the 913-second rehearsal failed with
@@ -1190,6 +1191,7 @@ export async function fileRunLeads(input: {
     let draftId: number | null = null;
     if (leadId && story.draft.trim()) {
       const urls = story.sources.filter((s) => s.url).map((s) => s.url);
+      const readiness = storyReadiness({ headline: story.headline, body: story.draft, claims: story.claims });
       const [draft] = await input.sql<{ id: number }>`
         insert into drafts (
           user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
@@ -1201,6 +1203,7 @@ export async function fileRunLeads(input: {
           ${"Reported with the civic-scanner method; verify the claims ledger before publication."},
           ${JSON.stringify({ civicReporting: true, requestId: input.request.id, storyId: story.id,
             reportedActions: input.actions ?? [],
+            storyReadiness: { version: 1, ...readiness },
             reportedClaims: await reportingStoryReviewClaims(input.sql, input.request.newsroom_id, story) })}
         ) returning id
       `;
