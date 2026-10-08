@@ -34,7 +34,7 @@ const fmt = (total: number) => {
 };
 
 export function JobCard({
-  job,
+  job: storedJob,
   compact,
   title,
   failoverNote = true,
@@ -91,6 +91,22 @@ export function JobCard({
   onRetryNext?: () => void;
   onKeepWaiting?: () => void;
 }) {
+  // Stored jobs retain their worker vocabulary. Present the same case stages
+  // on Today, the sidebar and the full job card, including older saved runs.
+  const legacyDark = storedJob.kind === "dark" && storedJob.stages?.some((stage) => /Researching the file|Synthesizing signals|Testing explanations|Writing editor brief/.test(stage));
+  const job = storedJob.kind === "dark" ? {
+    ...storedJob,
+    stages: ["Question", "Gather", "Case file", "Challenge"],
+    stageIndex: storedJob.status === "queued" ? 0 : legacyDark ? [1, 2, 3, 2][storedJob.stageIndex ?? 0] : storedJob.stageIndex,
+    step: storedJob.step
+      .replace(/^Researching the file$/i, "Gathering public records")
+      .replace(/^Researching hop (\d+)\/(\d+)$/i, "Gathering records · step $1 of $2")
+      .replace(/^Searching (\d+)\/(\d+) on hop \d+$/i, "Gathering records · search $1 of $2")
+      .replace(/^Synthesizing signals/i, "Writing the case file")
+      .replace(/^Testing explanations/i, "Challenging the case")
+      .replace(/^Writing editor brief$/i, "Writing the case file"),
+  } : storedJob;
+  if (job.kind === "dark") cancelLabel = "Stop";
   const state = jobCardState(job);
   const running = state === "running";
   const [, tick] = useState(0);
