@@ -48,11 +48,17 @@ import {
   isQuiet,
   hostOf,
 } from "./source-inventory.ts";
+import type { SourcePurpose } from "./source-inventory.ts";
+
+export type SourceCadence = "daily" | "weekly" | "monthly" | "as-needed";
 
 /** What the editor asked for, if anything, for one source. The screen stores
  *  this; a desk that stores nothing passes none of it and gets rule 3 onward. */
 export type SourcePreference = {
   sourceId: number;
+  purpose?: SourcePurpose | null;
+  cadence?: SourceCadence | null;
+  deadline?: string | null;
   /** The editor's explicit selection: read before anything else. */
   selected?: boolean;
   /** The editor marked this as high priority (deadline, or a beat they watch). */
@@ -77,6 +83,8 @@ export type RotationDecision = {
     | "editor-selected"
     | "high-priority"
     | "due-now"
+    | "cadence-due"
+    | "deadline-soon"
     | "longest-waiting"
     | "never-checked"
     | "trial";
@@ -186,7 +194,7 @@ export function selectRotation(input: RotationInput): Rotation {
  * does not invent deadlines from a row's shape or silence.
  */
 function isDue(
-  _source: SourceHealthFacts,
+  source: SourceHealthFacts,
   pref: SourcePreference | undefined,
   nowMs: number,
 ): boolean {
@@ -194,6 +202,20 @@ function isDue(
   if (typeof urgency === "string" && urgency) {
     const at = Date.parse(urgency);
     if (Number.isFinite(at) && at <= nowMs) return true;
+  }
+  if (pref?.deadline) {
+    const rawDeadline = pref.deadline;
+    const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(rawDeadline)
+      ? Date.parse(`${rawDeadline}T23:59:59.999Z`)
+      : Date.parse(rawDeadline);
+    if (Number.isFinite(deadlineAt) && deadlineAt >= nowMs && deadlineAt <= nowMs + 7 * 86_400_000)
+      return true;
+  }
+  const cadenceDays =
+    pref?.cadence === "daily" ? 1 : pref?.cadence === "weekly" ? 7 : pref?.cadence === "monthly" ? 30 : null;
+  if (cadenceDays != null) {
+    const lastRead = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+    if (!Number.isFinite(lastRead) || nowMs - lastRead >= cadenceDays * 86_400_000) return true;
   }
   return false;
 }
@@ -204,7 +226,16 @@ function reasonFor(
   nowMs: number,
 ): RotationDecision["reason"] {
   if (pref?.highPriority) return "high-priority";
-  if (isDue(source, pref, nowMs)) return "due-now";
+  if (pref?.urgency && Number.isFinite(Date.parse(pref.urgency)) && Date.parse(pref.urgency) <= nowMs)
+    return "due-now";
+  if (pref?.deadline) {
+    const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(pref.deadline)
+      ? Date.parse(`${pref.deadline}T23:59:59.999Z`)
+      : Date.parse(pref.deadline);
+    if (Number.isFinite(deadlineAt) && deadlineAt >= nowMs && deadlineAt <= nowMs + 7 * 86_400_000)
+      return "deadline-soon";
+  }
+  if (isDue(source, pref, nowMs)) return "cadence-due";
   if (!source.last_ok_at && !source.last_fetched_at) return "never-checked";
   return "longest-waiting";
 }
@@ -270,7 +301,9 @@ export function unmarkedQuietInstitutions(
   nowMs = Date.now(),
 ): number[] {
   const marked = new Set(
-    preferences.filter((p) => p.selected || p.highPriority).map((p) => p.sourceId),
+    preferences
+      .filter((p) => p.selected || p.highPriority || p.purpose || p.cadence || p.deadline)
+      .map((p) => p.sourceId),
   );
   return sources
     .filter((s) => !marked.has(s.id))

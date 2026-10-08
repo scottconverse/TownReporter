@@ -453,6 +453,22 @@ describe("daily scan rotation plan", () => {
     assert.ok(plan.deferredIds.includes(2));
   });
 
+  // guards: a deadline inside the next week must not be missed by a rotating pass.
+  it("gives a source due tomorrow a rotating slot before older coverage", () => {
+    const plan = planDailySourceRotation({
+      facts: [src(1, { last_ok_at: ago(80) }), src(2, { last_ok_at: ago(1) })],
+      selectedSourceIds: [],
+      everyDayCount: 0,
+      preferences: [
+        { sourceId: 2, purpose: "watch", cadence: "weekly", deadline: "2026-10-06" },
+      ],
+      cap: 1,
+      nowMs: NOW,
+    });
+    assert.deepEqual(plan.sourceIds, [2]);
+  });
+
+  // guards: the saved daily source picks must keep their fixed slots while the rest of the pool rotates.
   it("keeps the daily picks fixed while rotating every other selected slot", () => {
     const selectedSourceIds = Array.from({ length: 12 }, (_, index) => index + 1);
     const facts = Array.from({ length: 20 }, (_, index) =>

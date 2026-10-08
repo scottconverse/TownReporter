@@ -2,6 +2,7 @@ import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
 import { dailyScanRuntime, planDailySourceRotation, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
   resolveAutomaticForcedRuntime,
@@ -245,10 +246,16 @@ export async function tickDailyScans(
           "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
           [p.newsroom_id],
         );
+        const preferences = await loadSourceScanPreferences(tx, p.newsroom_id);
+        const preferenceById = new Map(preferences.map((preference) => [preference.sourceId, preference]));
         const rotation = planDailySourceRotation({
-          facts: pool,
+          facts: pool.map((source: any) => ({
+            ...source,
+            purpose_preference: preferenceById.get(source.id)?.purpose ?? null,
+          })),
           selectedSourceIds: p.selected_source_ids ?? [],
           everyDayCount: p.every_day_source_count ?? 8,
+          preferences,
           cap: p.source_cap,
         });
         const sources =

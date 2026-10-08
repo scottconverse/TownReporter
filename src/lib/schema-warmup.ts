@@ -3,6 +3,7 @@ import { ensureCustomAiConnectionsSchema } from "./news/custom-ai-connections.se
 import { ensureDarkSchema } from "./news/dark.ts";
 import { ensureDeskDraftMemoSchema } from "./news/desk.ts";
 import { ensureDailyScanPolicySchema } from "./news/daily-scan.ts";
+import { ensureSourceScanPreferencesSchema } from "./news/source-scan-preferences.server.ts";
 import { ensureDraftBatchSchema } from "./news/draft-batch.server.ts";
 import { ensureEditorialRequestSchema, ensureEditorialSchema } from "./news/editorial.server.ts";
 import { ensureFollowUpsSchema } from "./news/follow-ups.ts";
@@ -102,6 +103,13 @@ export const SCHEMA_WARMUP_REGISTRY: readonly SchemaWarmupEntry[] = [
     exportName: "ensureDailyScanPolicySchema",
     fn: ensureDailyScanPolicySchema,
     run: ensureDailyScanPolicySchema,
+  },
+  {
+    name: "source-scan-preferences",
+    module: "news/source-scan-preferences.server.ts",
+    exportName: "ensureSourceScanPreferencesSchema",
+    fn: ensureSourceScanPreferencesSchema,
+    run: ensureSourceScanPreferencesSchema,
   },
   {
     name: "desk-draft-memo-columns",
