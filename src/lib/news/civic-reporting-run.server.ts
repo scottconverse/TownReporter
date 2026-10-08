@@ -3514,8 +3514,9 @@ export async function reviewOpenStoryClaims(input: {
       "Check this one unresolved story claim against the supplied evidence, then return one JSON object.",
       "The retained transcript is the meeting record. Search all transcript passages shown, not only the original agenda-item span.",
       "Use only these already-read records. A model summary or source label is not evidence. If the record disagrees, return a corrected sentence supported by an exact quote, or set cut=true.",
+      "The retained transcript is caption text and has no speaker labels. If the record proves the core fact but cannot show a speaker role, reading stage, or motion name, return NARROWED with a sentence that drops only that unsupported detail and an exact quote for what remains.",
       "Never infer a vote, adoption, date, name, amount or relationship from an unrelated passage.",
-      'JSON: {"verdict":"VERIFIED|CONTRADICTED|OPEN","quote":"exact source words","sourceKind":"transcript|document","sourceUrl":"","replacement":"corrected sentence or empty","cut":false,"reason":"one-line reason"}',
+      'JSON: {"verdict":"VERIFIED|NARROWED|CONTRADICTED|OPEN","quote":"exact source words","sourceKind":"transcript|document","sourceUrl":"","replacement":"corrected or narrowed sentence or empty","cut":false,"reason":"one-line reason"}',
       "MEETING IDENTITY: " + JSON.stringify(input.record.identity),
       "CLAIM: " + claim.text,
       "NEXT CHECK NOTE: " + claim.nextCheck,
@@ -3530,8 +3531,8 @@ export async function reviewOpenStoryClaims(input: {
     const answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
     const verdict = str(answer?.verdict).toUpperCase();
     const replacement = str(answer?.replacement).trim();
-    const supportedText = verdict === "CONTRADICTED" ? replacement : claim.text;
-    const candidate = answer && (verdict === "VERIFIED" || verdict === "CONTRADICTED")
+    const supportedText = verdict === "CONTRADICTED" || verdict === "NARROWED" ? replacement : claim.text;
+    const candidate = answer && (verdict === "VERIFIED" || verdict === "NARROWED" || verdict === "CONTRADICTED")
       ? exactQuoteCandidate(candidates, answer)
       : null;
     const supported = Boolean(

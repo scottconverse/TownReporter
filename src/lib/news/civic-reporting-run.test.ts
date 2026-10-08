@@ -2168,6 +2168,45 @@ it("rewrites a contradicted sentence to match the retained transcript", async ()
   assert.equal(result.draft, `${corrected} The report continues.`);
 });
 
+// guards: a fact true in the record could stay unchecked because captions cannot prove a speaker's role.
+it("narrows an open claim to the result the transcript can prove", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const unsupported = "The chair announced that the fire amendment carried 5–2.";
+  const narrowed = "The fire ordinance amendment carried 5 to 2.";
+  const quote = "We are considering the fire ordinance. I move to amend ordinance 2026-69. The motion to amend carries 5 to 2.";
+  let prompt = "";
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "fire-vote", headline: "Council amends a fire ordinance", draft: unsupported,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "fire-vote", text: unsupported, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check who announced the result." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "9E", itemTitle: "Fire ordinance", text: "We are considering the fire ordinance. I move to amend ordinance 2026-69." },
+        { index: 2, seconds: 160, item: "9E", itemTitle: "Fire ordinance", text: "The motion to amend carries 5 to 2." },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async (_system: string, sent: string) => {
+      prompt = sent;
+      return { ok: true, text: JSON.stringify({
+        verdict: "NARROWED", quote, sourceKind: "transcript", sourceUrl: videoUrl,
+        replacement: narrowed, cut: false, reason: "The transcript identifies the result, but has no speaker labels.",
+      }) };
+    }) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.match(prompt, /no speaker labels/i);
+  assert.equal(result.claims[0]?.status, "VERIFIED", result.claims[0]?.nextCheck);
+  assert.equal(result.claims[0]?.text, narrowed);
+  assert.equal(result.draft, narrowed);
+});
+
 // guards: a transcript-supported claim could be filed as unchecked with no place to play it.
 it("carries a retained transcript quote into the editor's supported row", async () => {
   const videoId = "S1kSaew-UUY";
