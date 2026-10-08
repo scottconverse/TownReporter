@@ -47,7 +47,7 @@ export async function screenModule(path, overrides = {}, real = []) {
                 "export const looksLikeProviderAuthFailure=()=>false,providerAuthTarget=()=>null;",
               ),
               "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>null;"),
-              "../paper.ts": stubUrl("export const TOPICS=[];"),
+              "../paper.ts": await runtimeModule(new URL("../src/lib/paper.ts", import.meta.url)),
             })
           : await runtimeModule(new URL(`../${file}`, import.meta.url));
       continue;
