@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { FirstRunModelCard } from "@/components/first-run-model";
-import { deskRowChecks, evidenceChip, namesChip } from "@/lib/news/check-gates";
+import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { Busy, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -127,7 +127,6 @@ export const Route = createFileRoute("/desk/")({ component: DeskHome });
 
 const OPEN_KEY = "townreporter.dark.openId";
 
-type DraftRow = Awaited<ReturnType<typeof listDraftsDesk>>[number];
 
 /**
  * "Saturday, Sep 26" in the paper's own timezone.
@@ -800,7 +799,7 @@ function DeskHome() {
       Boolean(deskJobs.data?.some((s) => s.status === "running" || s.status === "queued")),
   );
   const draftStates: DeskDraftState[] = draftRows.map((row) =>
-    deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
+    deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
   );
   const writingNow = draftStates.filter((s) => s.running).length;
   const edition = tonightDrafts(draftRows, draftStates);
@@ -866,7 +865,7 @@ function DeskHome() {
       n: 3,
       name: "Check",
       count: readyToCheck,
-      unit: "ready to check",
+      unit: "to check",
       act: "Check draft",
       to: "/desk/drafts",
     },
@@ -874,7 +873,7 @@ function DeskHome() {
       n: 4,
       name: "Publish",
       count: readyToPrint,
-      unit: "ready to print",
+      unit: "verified",
       act: "Review edition",
       to: "/desk",
       hash: "tonight",
@@ -896,24 +895,6 @@ function DeskHome() {
     `deskRowChecks`). The section chip is this row's own -- the workbench has no
     equivalent -- so it stays here.
   */
-  const tonightChips = (row: DraftRow) => {
-    /*
-      U9b: the facts come from `deskRowChecks`, and its comment names the two
-      recorded rows where these chips deliberately print something different
-      from the inline chip that used to be written here (`required` alone).
-    */
-    const facts = deskRowChecks(row);
-    const tone = { ok: "d-ok", warn: "d-warn", quiet: "d-quiet" } as const;
-    const evidence = evidenceChip(facts);
-    const names = namesChip(facts);
-    return {
-      evidence: { text: evidence.text, tone: tone[evidence.tone] },
-      names: { text: names.text, tone: tone[names.tone] },
-      section: row.topic
-        ? { text: `✓ Section: ${sectionName(row.topic)}`, tone: "d-ok" }
-        : { text: "○ No section yet", tone: "d-quiet" },
-    };
-  };
 
   /** The stories tonight actually turns on: through their checks, or waiting
    *  on the editor. Newest work first within each group. */
@@ -1263,7 +1244,7 @@ function DeskHome() {
         THE STEP STRIP (README "1. Today"). Four equal cells with 1px gaps: the
         step's number, its name, the big count and the unit, and the one button
         that goes there. Each count is read off the data below it on this page:
-        new today off `leads`, writing off the draft rows' jobs, ready to check
+        new today off `leads`, writing off the draft rows' jobs, to check
         off the drafts waiting on the editor, ready to print off the drafts that
         have cleared both checks. The cell whose work is waiting is the yellow
         one; when nothing is waiting it is the last one, because the paper is
@@ -1393,7 +1374,6 @@ function DeskHome() {
         ) : (
           <div className="today-edition-rows">
             {tonightRows.map(({ row, state }) => {
-              const chips = tonightChips(row);
               return (
                 <div className="today-edition-row" key={row.id}>
                   <div className="today-edition-what">
@@ -1425,9 +1405,7 @@ function DeskHome() {
                     panel so two drafts' chips can be compared at a glance.
                   */}
                   <span className="today-edition-chips">
-                    <span className={"chip " + chips.evidence.tone}>{chips.evidence.text}</span>
-                    <span className={"chip " + chips.names.tone}>{chips.names.text}</span>
-                    <span className={"chip " + chips.section.tone}>{chips.section.text}</span>
+                    <StoryReadinessChip readiness={state.readiness!} />
                   </span>
                   {/*
                     The one next-action button on the row, in the draft's own

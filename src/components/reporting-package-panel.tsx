@@ -22,10 +22,8 @@ import {
   heldLine,
   methodLine,
   packageGaps,
-  readinessQuestion,
   reportingNotice,
   reportingPackageHistory,
-  reportingScoreLabel,
   reportingRunState,
 } from "@/lib/news/reporting-package-view";
 import type { PackageSource, ReportingPackage } from "@/lib/news/civic-reporting";
@@ -201,9 +199,6 @@ function PackageBody({
         <strong>{run.label}</strong>
         <p className="meta">{run.detail}</p>
       </div>
-      <p className="meta">
-        {reportingScoreLabel(report.score)} · {readinessQuestion(report.readinessTier)}
-      </p>
       {report.stories.length > 1 ? (
         <nav className="reporting-story-links" aria-label="Stories in this package">
           <p className="side-label">This run returned {report.stories.length} stories</p>
@@ -264,7 +259,6 @@ function PackageBody({
             {earlierPackages.map((entry) => (
               <li key={entry.requestId}>
                 <h3>Package from {new Date(entry.createdAt).toLocaleString()}</h3>
-                <p className="meta">{reportingScoreLabel(entry.pkg.score)} · {readinessQuestion(entry.pkg.readinessTier)}</p>
                 {entry.pkg.stories.map((story) => (
                   <div key={story.id}>
                     <h4>{story.headline || "Untitled"}</h4>
@@ -329,7 +323,6 @@ function StoryPackets({
             return (
             <li id={`reporting-story-${story.id}`} key={story.id} className="reporting-story">
               <h4>{story.headline || "Untitled"}</h4>
-              <p className="meta">{readinessQuestion(story.readinessTier)}</p>
               {story.plainBrief ? <p className="reporting-brief">{story.plainBrief}</p> : null}
               {filed ? (
                 <p>
