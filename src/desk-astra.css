@@ -2929,12 +2929,12 @@
   min-width: 0;
   max-width: 100%;
 }
-.desk-ltr.astra .model-picker-label {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-label {
   font: 700 calc(14px * var(--ts)) var(--fd);
   text-transform: none;
   letter-spacing: 0;
 }
-.desk-ltr.astra .model-picker-help {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker-help {
   font: 500 calc(14px * var(--ts))/1.6 var(--fd);
 }
 .desk-ltr.astra .astra-inspector .model-picker {
@@ -8473,30 +8473,30 @@
 .desk-ltr.astra .queue-release-message .btn { color: #111; border-color: #111; }
 
 /* Dark Desk picker layout is opt-in so the shared picker keeps its other rows. */
-.desk-ltr.astra .model-picker.stacked {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked {
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   gap: 4px;
 }
-.desk-ltr.astra .model-picker.stacked > :is(.model-picker-label, select, .model-picker-help, .model-picker-setup) {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > :is(.model-picker-label, select, .model-picker-help, .model-picker-setup) {
   grid-column: 1;
 }
-.desk-ltr.astra .model-picker.stacked > .model-picker {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 4px;
   width: 100%;
 }
-.desk-ltr.astra .model-picker.stacked > .model-picker > :is(.model-picker-label, select, .model-picker-help) {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker > :is(.model-picker-label, select, .model-picker-help) {
   grid-column: 1;
 }
-.desk-ltr.astra .model-picker.stacked > .model-picker-setup {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker-setup {
   margin: 0;
   padding: 0;
   border: 0;
   background: transparent;
 }
-.desk-ltr.astra .model-picker.stacked > .model-picker-setup > summary {
+:is(.desk-ltr.astra, .desk-ltr.astra-modal-layer) .model-picker.stacked > .model-picker-setup > summary {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
