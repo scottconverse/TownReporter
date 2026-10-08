@@ -126,6 +126,8 @@ export type LedgerItem = {
   startSeconds: number | null;
   /** The end of the item's span on the tape, when the item covers a range. */
   endSeconds?: number | null;
+  /** Exact transcript segments selected by citations, without intervening tape. */
+  evidenceSegmentIndexes?: number[];
   packetPage: number | null;
   status: LedgerStatus;
   reason: string;
@@ -2951,9 +2953,11 @@ function tapeLines(segments: MeetingSegment[]): string {
 function spanTape(item: LedgerItem | null, segments: MeetingSegment[], cap: number): string {
   const start = item?.startSeconds ?? null;
   const end = item?.endSeconds ?? null;
+  const evidenceIndexes = item?.evidenceSegmentIndexes === undefined ? null : new Set(item.evidenceSegmentIndexes);
   let used = 0;
   const lines: string[] = [];
   for (const segment of segments) {
+    if (evidenceIndexes && !evidenceIndexes.has(segment.index)) continue;
     if (start !== null && segment.seconds < start) continue;
     if (end !== null && segment.seconds > end) break;
     const line = `[${clock(segment.seconds)}] ${segment.text}`;

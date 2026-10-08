@@ -2317,6 +2317,15 @@ it("keeps the reconciled vote on a cited transcript claim", () => {
   assert.equal(checked[0]?.status, "VERIFIED");
 });
 
+// guards: an amount mentioned only between cited transcript passages could be falsely treated as supported.
+it("does not use transcript figures between disjoint citations", () => {
+  const videoId = "S1kSaew-UUY", videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const checked = bindClaimsToEvidence({ claims: [{ id: "amount", item: "9A", text: "The Dry Creek plan costs $42,000.", status: "UNVERIFIED", sourceIds: ["start", "end"], nextCheck: "" }], sources: ["1:40-1:42", "10:00-10:02"].map((locator, index) => ({ id: index ? "end" : "start", title: "Retained transcript", tier: "A", url: videoUrl, locator: `Item 9A; ${locator}` })) } as never,
+    { actions: [{ agendaItem: "9A", timestamp: "1:40", motionOrAction: "Dry Creek plan", outcome: "approved", vote: "unverified" }] } as never,
+    { identity: { videoId, videoUrl }, segments: [{ index: 1, seconds: 100, item: "9A", text: "The Dry Creek plan is on the agenda." }, { index: 2, seconds: 300, item: "9A", text: "The plan costs $42,000." }, { index: 3, seconds: 600, item: "9A", text: "The plan moves to a final vote." }] } as never, []);
+  assert.notEqual(checked[0]?.status, "VERIFIED");
+});
+
 // guards: a timestamped supported row could show a transcript quote about a different amount.
 it("saves the transcript line that states the checked amount", () => {
   const videoId = "S1kSaew-UUY";

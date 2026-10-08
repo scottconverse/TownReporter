@@ -3903,6 +3903,7 @@ function itemWithCitedTranscriptEvidence(
     status: "lead",
     reason: "",
     sourceExcerpt: excerpt,
+    evidenceSegmentIndexes: passages.map((segment) => segment.index),
     motions: base?.motions ?? [],
     evidence: [],
   };
