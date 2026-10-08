@@ -166,7 +166,10 @@ export function newPullReceipt(input: {
     attemptId: input.attemptId ?? crypto.randomUUID(),
     leadId: input.leadId,
     todoIndex: typeof input.todoIndex === "number" ? input.todoIndex : null,
-    sourceUrl: input.sourceUrl ?? null,
+    // A URL-bearing reporting line opens that page and keeps its row index.
+    sourceUrl: input.sourceUrl ?? (typeof input.todoIndex === "number"
+      ? input.query.match(/https?:\/\/[^\s<>"'`]+/i)?.[0]?.replace(/[.,;:!?\])]+$/, "") ?? null
+      : null),
     query: input.query.trim().slice(0, 240),
     status: "queued",
     stage: "Queued",
@@ -1081,7 +1084,7 @@ export async function performPullWork(job: DeskJob) {
     // claim's source, and claims live in `notes.found`), so the to-do
     // bookkeeping is skipped rather than run against a query that never
     // matched a to-do.
-    if (!final.sourceUrl) await finishPullTodo(job, final);
+    if (!final.sourceUrl || final.todoIndex !== null) await finishPullTodo(job, final);
     await audit(
       job.user_id,
       "pull",
@@ -1095,7 +1098,7 @@ export async function performPullWork(job: DeskJob) {
     receipt.finishedAt = new Date().toISOString();
     addFailure(receipt, error instanceof Error ? error.message : "Pull failed");
     await saveJobReceipt(job, receipt);
-    if (!receipt.sourceUrl) await finishPullTodo(job, receipt);
+    if (!receipt.sourceUrl || receipt.todoIndex !== null) await finishPullTodo(job, receipt);
     throw error;
   }
 }

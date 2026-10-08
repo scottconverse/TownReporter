@@ -4494,7 +4494,7 @@ function ReportingNotesPane({
           );
         })}
         <p className="note-hint">
-          Pull searches that line and drops the excerpt in the box under the story. The checkbox
+          Pull opens a URL in that line, or searches the line when it has no URL, and drops the excerpt in the box under the story. The checkbox
           just strikes it.
         </p>
         {pullMsg ? <p className="note-one">{pullMsg}</p> : null}
