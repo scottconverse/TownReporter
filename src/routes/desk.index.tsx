@@ -1,5 +1,6 @@
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
+import { TodayInProgress } from "@/components/today-in-progress";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
@@ -813,14 +814,6 @@ function DeskHome() {
     .filter((row) => row.status === "queued" || row.status === "running")
     .slice(0, 3);
   /*
-    The strip's five rows: the story work, in the list's own order. This is what
-    `listRecentStoryWork` returned -- one row per lead, newest first, five of
-    them -- read off the shared query instead of a reader of its own.
-  */
-  const inProgress = (deskJobs.data ?? [])
-    .filter((row) => row.leadId > 0 && (row.kind === "draft" || row.kind === "reconcile"))
-    .slice(0, 5);
-  /*
     THE SCAN'S OWN CARD (FB6, item 3). The open scan, if there is one, read from
     the same one job query. A scan whose row has not been written yet (the press
     has gone out and the worker has not claimed it) draws nothing -- the button's
@@ -1464,99 +1457,8 @@ function DeskHome() {
           in desk-astra.css. */}
       <div className="desk-home">
         <div className="desk-work">
-          <section className="recent-story-work in-progress" aria-label="In progress">
-            <SecHead
-              title="In progress"
-              count={inProgress.length}
-              sub="Nothing here prints until you press Publish."
-              aside={
-                <Link to="/desk/drafts" className="np-link">
-                  All drafts
-                </Link>
-              }
-            />
-            {deskJobs.isError ? (
-              <p role="alert">
-                Recent drafts could not load.{" "}
-                <button type="button" className="btn" onClick={() => void deskJobs.refetch()}>
-                  Try again
-                </button>
-              </p>
-            ) : deskJobs.isPending ? (
-              <p role="status">Loading your drafts…</p>
-            ) : !inProgress.length ? (
-              <p>No drafts started yet. Add your sources below to begin.</p>
-            ) : (
-              <div className="today-cards">
-                {inProgress.map((story) => (
-                  /*
-                  The drawn card carries the stage in its 4px top rule: yellow
-                  while the desk is writing, ink once the draft is ready to
-                  edit, line for everything else (queued, or stopped with a
-                  reason). The stage is also in words, because the rule alone
-                  is a color and the desk never says a state in color only.
-
-                  FB1: this reads the one desk-jobs query now. The rows are the
-                  same rows (one per lead, the story kinds) -- only the reader
-                  changed, so the strip and the card above it cannot disagree.
-                  The headline falls back to the card title for a job whose
-                  drafts row has not been written yet.
-                */
-                  <article
-                    className={
-                      "today-card " +
-                      (story.status === "running"
-                        ? "live"
-                        : story.status === "completed"
-                          ? "mine"
-                          : "idle")
-                    }
-                    key={story.id}
-                  >
-                    <span className="today-card-stage">
-                      {story.status === "completed"
-                        ? "Ready to edit"
-                        : story.status === "failed"
-                          ? "Needs attention"
-                          : story.status === "queued"
-                            ? "Queued"
-                            : "Writing in progress"}
-                    </span>
-                    <h3 className="today-card-hl">
-                      <Link
-                        to="/desk/story/$leadId"
-                        params={{ leadId: String(story.leadId) }}
-                        className="hl-link"
-                      >
-                        {story.headline?.trim() || story.title}
-                      </Link>
-                    </h3>
-                    <p className="meta">
-                      {story.status === "completed"
-                        ? "Draft saved. Review it before publishing."
-                        : story.status === "failed"
-                          ? "Open the story to see what stopped and resume."
-                          : story.step || "Waiting to start"}
-                    </p>
-                    {/*
-                    One press, not two: the drawn card's "next action and
-                    Open" both land on the story page, and two buttons that go
-                    to the same place make the editor choose for nothing.
-                  */}
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(story.leadId) }}
-                      className="btn"
-                    >
-                      {story.status === "running" || story.status === "queued"
-                        ? "View progress"
-                        : "Open draft"}
-                    </Link>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
+          <TodayInProgress jobs={deskJobs.data ?? []} leads={allLeads}
+            isError={deskJobs.isError} isPending={deskJobs.isPending} refetch={() => deskJobs.refetch()} />
 
           {/*
           THE COMPOSER, IN A DIALOG (defect 2).

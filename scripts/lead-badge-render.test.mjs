@@ -882,6 +882,10 @@ test("set-aside, closed, and exhausted leads each render their own labelled, sty
  * the page in plain words, and each of the three presses exists, is named, and
  * has words for what it did -- success and failure both.
  */
+const duplicateReviewUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/duplicate-review.ts", import.meta.url), "utf8"),
+  "duplicate-review.ts",
+);
 const { LeadComparePanel, KilledLeadRecord } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-lead-compare.tsx", import.meta.url), "utf8"),
@@ -892,6 +896,7 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
       "@/components/states": statesStub,
       "@/lib/paper": paperStub,
       "@/lib/news/desk-copy": deskCopy,
+      "@/lib/news/duplicate-review": duplicateReviewUrl,
       react: import.meta.resolve("react"),
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     },
