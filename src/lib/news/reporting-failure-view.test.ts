@@ -25,3 +25,9 @@ it("replaces a successful start notice when the latest request fails", () => {
   // guards: the editor keeps seeing reporting started after the request has failed.
   assert.equal(reportingNotice({ ok: true }, "FAILED"), "failed");
 });
+
+// guards: the assignment form still says "Reporting started" after a partial or complete run ends.
+it("clears the start notice when the latest reporting request has finished", () => {
+  assert.equal(reportingNotice({ ok: true }, "PARTIAL"), "none");
+  assert.equal(reportingNotice({ ok: true }, "COMPLETE"), "none");
+});

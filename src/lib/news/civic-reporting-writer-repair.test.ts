@@ -24,12 +24,15 @@ const correction = {
 };
 const reconcile = { actions: [], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 };
 const record = { windows: [], segments: [], votes: [], gaps: [], identity: { videoId: "", videoUrl: "" } };
-const withinRangeDraft = Array(500).fill("Residents").join(" ");
+const firstParagraph = "The proposed General Fund budget includes a one-time transfer to the Public Improvement Fund for 1st and Main Transit Hub costs, moved from 2027 to 2026.";
+const withinRangeDraft = `${firstParagraph} ${Array(500 - firstParagraph.split(/\s+/).length).fill("Residents").join(" ")}`;
+const validDek = "The proposed General Fund budget moves a one-time Public Improvement Fund transfer for 1st and Main Transit Hub costs from the 2027 proposal into 2026.";
 
 function writerPackage(transferLocator: string) {
   return {
     stories: [{
       id: "story-1", headline: "What the budget proposal changes", draft: withinRangeDraft,
+      dek: validDek,
       plainBrief: "The proposal remains pending.",
       cannotSay: "The memo does not establish the relationship between the transfer and project set-aside.",
       readinessTier: 2,
@@ -117,6 +120,7 @@ it("rebuilds a truncated S39 source reply from read records and stops after one 
       id: "recovered-story",
       headline: "The proposed transfer moves into 2026",
       draft: withinRangeDraft,
+      dek: validDek,
       plainBrief: "The 2027 proposal removes a one-time transfer needed in 2026.",
       cannotSay: "The memo does not establish the relationship between this transfer and the separate project set-aside.",
       readinessTier: 2,

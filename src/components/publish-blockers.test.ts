@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BeforeYouCanPublish } from "./publish-blockers.ts";
 import { publishBlockers, type PublishBlockerState } from "../lib/news/publish-blockers.ts";
+import { claimsNeedingReview } from "../lib/news/evidence-check-state.ts";
 
 /**
  * What the editor actually sees at the top of the Checks tab (unit CT).
@@ -43,6 +44,17 @@ describe("BeforeYouCanPublish", () => {
     assert.match(html, /Before you can publish/);
     assert.match(html, /Nothing is blocking Publish\./);
     assert.doesNotMatch(html, /astra-blocker-act/, "an all-clear needs no button");
+  });
+
+  // guards: open facts could be present while the editor is told nothing blocks Publish.
+  it("removes the all-clear when an unchecked claim is open", () => {
+    const openCount = claimsNeedingReview([{
+      judgment: { value: "unreviewed" }, captures: [],
+    }] as never, [], []);
+    const html = render({ unreviewedClaims: openCount });
+    assert.doesNotMatch(html, /Nothing is blocking Publish\./);
+    assert.match(html, /1 thing blocks Publish/);
+    assert.match(html, /Review the claim/);
   });
 
   it("prints one row per reason, with the sentence and its press", () => {

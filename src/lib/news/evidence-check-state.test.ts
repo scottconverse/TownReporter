@@ -8,7 +8,7 @@ import {
   reviewEvidenceCheckState,
   unreviewedClaimsFingerprint,
 } from "./evidence-check-state.ts";
-import { claimNeedsReview, judgmentChip, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
+import { claimNeedsReview, judgmentChip, COULD_NOT_CHECK_CHIP, NEEDS_REVIEW_CHIP } from "./evidence-check-list.ts";
 import type {
   ClaimEvidenceRow,
   FindingCaptureEvidence,
@@ -108,13 +108,10 @@ const CAPTURE_SETS: readonly (readonly FindingCaptureEvidence[])[] = [
 ];
 
 describe("U24/U24b: what the pane chips and what the blocker counts are one rule", () => {
-  it("counts EXACTLY the rows the pane chips '! Needs review', over the whole matrix", () => {
-    /* THE TRIPWIRE, and it is now two-way. `claimsNeedingReview` counts with
-       `judgmentChip` -- the pane's own predicate -- so every counted row chips
-       the review chip and every review chip is counted. U24 had a one-way
-       version of this with `contradicts` carved out, and the audit found what
-       that carve-out cost: a pane showing four rows chipped `! Needs review`
-       under a blocker that said three. */
+  // guards: an open row could be missing from the Publish count when its record cannot be checked.
+  it("counts every open row the pane marks for review or unable to check", () => {
+    /* The count follows the pane's own chips: both unresolved review rows and
+       rows the check could not perform are open facts for Publish. */
     for (const judgment of JUDGMENTS) {
       for (const captures of CAPTURE_SETS) {
         const chip = judgmentChip(judgment, captures).chip;
@@ -124,8 +121,8 @@ describe("U24/U24b: what the pane chips and what the blocker counts are one rule
           [manualRow(judgment, captures)],
         );
         const label = `${judgment}/${captures.length} capture(s)`;
-        if (chip === NEEDS_REVIEW_CHIP) {
-          assert.equal(count, 3, `${label}: every stack counts a review row`);
+        if (chip === NEEDS_REVIEW_CHIP || chip === COULD_NOT_CHECK_CHIP) {
+          assert.equal(count, 3, `${label}: every stack counts an open row`);
         } else {
           assert.equal(count, 0, `${label}: nothing counted`);
         }
@@ -143,16 +140,13 @@ describe("U24/U24b: what the pane chips and what the blocker counts are one rule
     );
   });
 
-  it("does not call a row review work when there is no record to judge it against", () => {
-    /* `Could not check` is a different state with a different (absent) press:
-       counting it would put "N claims need review" on the bar over rows whose
-       only control cannot review anything. `evidenceRan` is what says that
-       state was reached at all (see `evidenceChip`). */
+  // guards: a claim the AI could not check could reach Publish without its open work counted.
+  it("counts a could-not-check row as open work without calling it a review judgment", () => {
     assert.equal(claimNeedsReview("unreviewed", [unreadable]), false);
     assert.equal(claimNeedsReview("unreviewed", []), false);
     assert.equal(claimNeedsReview("unreviewed", [readable]), true);
-    assert.equal(claimsNeedingReview([row("unreviewed", [unreadable])], [], []), 0);
-    assert.equal(claimsNeedingReview([row("needs-reporting", [readable])], [], []), 0);
+    assert.equal(claimsNeedingReview([row("unreviewed", [unreadable])], [], []), 1);
+    assert.equal(claimsNeedingReview([row("needs-reporting", [readable])], [], []), 1);
   });
 
   it("does not count a pass a person recorded", () => {
@@ -240,8 +234,8 @@ describe("U24: did an evidence check run", () => {
     };
     assert.deepEqual(
       reviewEvidenceCheckState({ review, recorded: false, openClaims: 0 }),
-      { ran: true, toReview: 2, contradicted: 0 },
-      "two rows need a person; the unreadable one and the judged one do not",
+      { ran: true, toReview: 3, contradicted: 0 },
+      "the three unchecked rows remain open, including the one with unreadable evidence",
     );
   });
 
