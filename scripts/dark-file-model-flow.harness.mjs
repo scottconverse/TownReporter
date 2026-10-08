@@ -52,7 +52,7 @@ const darkStub = stub(`
 `);
 const copyStub = stub(`
   export const DIG_STOP_ACK = "Stop requested.";
-  export const blockedDigBannerText = () => ""; export const editorError = (v) => String(v ?? "");
+  export const blockedDigBannerText = () => ""; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null;
   export const editorKindLabel = () => "Record"; export const elapsedLabel = () => ""; export const excerptForEditor = (v) => String(v ?? "");
   export const headlineFromUrl = () => ""; export const humanFrontierLabel = (v) => String(v ?? "");
   export const darkJobActive = () => false; export const observedDarkJobFinished = () => false;

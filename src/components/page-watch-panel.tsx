@@ -9,6 +9,7 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useEditorSections } from "@/lib/use-sections";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
+import { editorError } from "@/lib/news/desk-copy";
 import {
   listPageWatches,
   createPageWatch,
@@ -83,10 +84,10 @@ export function PageWatchPanel({
     mutationFn: (id: number) => checkPageWatch({ data: id }),
     onSuccess: async (r) => {
       if (r.ok) setNote(WORDS[r.state] ?? r.state);
-      else setError(r.error);
+      else setError(editorError(r.error) || "Could not check that page.");
       await refresh();
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(editorError(e.message) || "Could not check that page."),
   });
   const create = useMutation({
     mutationFn: () =>
@@ -102,7 +103,7 @@ export function PageWatchPanel({
       }),
     onSuccess: async (r) => {
       if (!r.ok) {
-        setError(r.error);
+        setError(editorError(r.error) || "Could not start watching this page.");
         return;
       }
       setSelected(r.id);
@@ -123,16 +124,16 @@ export function PageWatchPanel({
       setFormOpen(false);
       check.mutate(r.id);
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(editorError(e.message) || "Could not start watching this page."),
   });
   const modelSave = useMutation({
     mutationFn: (input: { id: number; choice: string; effort: ModelEffort | null }) => setPageWatchModel({ data: input }),
     onSuccess: async (r) => {
       if (r.ok) setNote("Model saved for this page.");
-      else setError(r.error);
+      else setError(editorError(r.error) || "Could not save the model choice.");
       await refresh();
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(editorError(e.message) || "Could not save the model choice."),
   });
   async function download(checkId: number, previous = false) {
     clear();
@@ -154,7 +155,7 @@ export function PageWatchPanel({
       URL.revokeObjectURL(href);
       setNote("Captured text downloaded. This is the stored copy, not a new fetch.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Download failed.");
+      setError(editorError(e instanceof Error ? e.message : "") || "Could not download the captured text.");
     }
   }
   const state = useMutation({
@@ -162,10 +163,10 @@ export function PageWatchPanel({
       setPageWatchState({ data: input }),
     onSuccess: async (r) => {
       if (r.ok) setNote("Watch state saved. Capture history is retained.");
-      else setError(r.error);
+      else setError(editorError(r.error) || "Could not change that page's watch.");
       await refresh();
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(editorError(e.message) || "Could not change that page's watch."),
   });
   const action = useMutation({
     mutationFn: (input: { checkId: number; action: "lead" | "attach" | "dismiss" }) =>
@@ -179,7 +180,7 @@ export function PageWatchPanel({
       }),
     onSuccess: async (r) => {
       if (!r.ok) {
-        setError(r.error);
+        setError(editorError(r.error) || "Could not use that page.");
         return;
       }
       if ("leadId" in r && r.leadId) {
@@ -191,7 +192,7 @@ export function PageWatchPanel({
       } else setNote("Change dismissed. The capture remains in history.");
       await refresh();
     },
-    onError: (e) => setError(e.message),
+    onError: (e) => setError(editorError(e.message) || "Could not use that page."),
   });
   const busy =
     create.isPending ||
@@ -212,8 +213,10 @@ export function PageWatchPanel({
     keeps the last answer on `data` while a new press runs, so an ungated read
     would paint the previous refusal over this press's spinner.
   */
-  const checkRefusal = check.isPending ? null : refusedAnswer(check.data);
-  const stateRefusal = state.isPending ? null : refusedAnswer(state.data);
+  const checkRefusalRaw = check.isPending ? null : refusedAnswer(check.data);
+  const stateRefusalRaw = state.isPending ? null : refusedAnswer(state.data);
+  const checkRefusal = checkRefusalRaw ? editorError(checkRefusalRaw) || "Could not check that page." : null;
+  const stateRefusal = stateRefusalRaw ? editorError(stateRefusalRaw) || "Could not change that page's watch." : null;
   return (
     <section className="tipbox page-watch" aria-label="Watched pages">
       <h3 className="astra-settings-subhead">Watched pages</h3>
@@ -391,7 +394,7 @@ export function PageWatchPanel({
                   be retried after 30 minutes.
                 </p>
               ) : null}
-              {row.watch_last_error ? <p className="note err">{row.watch_last_error}</p> : null}
+              {row.watch_last_error ? <p className="note err">{editorError(row.watch_last_error) || "Could not read that page."}</p> : null}
               {row.watch_failover_note ? (
                 <p className="note" role="status">{row.watch_failover_note}</p>
               ) : null}
@@ -427,7 +430,7 @@ export function PageWatchPanel({
                   reason={
                     check.isError
                       ? check.error instanceof Error
-                        ? check.error.message
+                        ? editorError(check.error.message) || "Could not check that page."
                         : "Could not check that page."
                       : checkRefusal
                   }
@@ -460,7 +463,7 @@ export function PageWatchPanel({
                       state.variables?.state !== "stopped"
                         ? state.isError
                           ? state.error instanceof Error
-                            ? state.error.message
+                            ? editorError(state.error.message) || "Could not change that page's watch."
                             : "Could not change that page's watch."
                           : stateRefusal
                         : null,
@@ -485,7 +488,7 @@ export function PageWatchPanel({
                       state.variables?.state === "stopped"
                         ? state.isError
                           ? state.error instanceof Error
-                            ? state.error.message
+                            ? editorError(state.error.message) || "Could not stop watching that page."
                             : "Could not stop watching that page."
                           : /* Unit UI1a3, finding 1: the same settled-refusal
                                read as the Pause/Resume button above. */

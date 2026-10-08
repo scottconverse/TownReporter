@@ -373,6 +373,12 @@ describe("editor copy", () => {
     assert.doesNotMatch(humanFrontierLabel("frontier: next hop"), /frontier/i);
   });
 
+  // guards: a raw database failure could be printed as the file's pause reason
+  it("explains unreadable record text without printing the database error", () => {
+    const msg = editorPauseReason("invalid byte sequence for encoding UTF8: 0x00");
+    assert.equal(msg, "Could not read one record (bad text in the file)");
+  });
+
   it("explains a stop after a round without hop or frontier", () => {
     const msg = editorPauseReason(
       "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.",

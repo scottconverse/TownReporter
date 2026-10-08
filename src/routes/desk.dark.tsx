@@ -37,6 +37,7 @@ import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
   editorError,
+  editorPauseReason,
   editorKindLabel,
   elapsedLabel,
   excerptForEditor,
@@ -345,7 +346,7 @@ function DarkPage() {
     showNotice(
       bj.status === "completed"
         ? "The brief is written."
-        : `No brief: ${editorError(bj.error ?? "") || bj.error || "it did not finish."}`,
+        : `No brief: ${editorError(bj.error ?? "") || "the job did not finish."}`,
       bj.status === "completed",
     );
   }, [detail.data?.briefJob, briefWaiting]);
@@ -469,7 +470,7 @@ function DarkPage() {
           refusal; keep `editorError`'s translation for every other failure.
         */
         const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
-        const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
+        const msg = isPreflightRefusal ? raw : editorError(raw) || "This round did not finish.";
         showNotice(msg, false);
         clearPhase();
         invalidate();
@@ -519,13 +520,13 @@ function DarkPage() {
         setQueued({ leadId: res.leadId, invId: id, alreadyQueued: Boolean(res.alreadyQueued) });
         setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       } else {
-        setQueueError({ invId: id, message: res?.error ?? "Could not send to the queue." });
+        setQueueError({ invId: id, message: editorError(res?.error ?? "") || "Could not send to the queue." });
       }
     },
     onError: (err, { id }) => {
       setQueueError({
         invId: id,
-        message: err instanceof Error ? err.message : "Could not send to the queue.",
+        message: editorError(err instanceof Error ? err.message : "") || "Could not send to the queue.",
       });
     },
   });
@@ -555,27 +556,27 @@ function DarkPage() {
     mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
     onSuccess: (result) => {
       if (!result.ok) {
-        showNotice(result.error || "Could not challenge this case.");
+        showNotice(editorError(result.error ?? "") || "Could not challenge this case.");
         return;
       }
       showNotice("Challenging the case…", true);
       invalidate();
     },
-    onError: (error) => showNotice(error instanceof Error ? error.message : "Could not challenge this case."),
+    onError: (error) => showNotice(editorError(error instanceof Error ? error.message : "") || "Could not challenge this case."),
   });
 
   const closeWithoutFinding = useMutation({
     mutationFn: (input: { id: number; note: string }) => closeInvestigation({ data: input }),
     onSuccess: (result, input) => {
       if (!result.ok) {
-        showNotice(result.error || "Could not close this file.");
+        showNotice(editorError(result.error ?? "") || "Could not close this file.");
         return;
       }
       setUndoDisposition({ id: input.id, expiresAt: Date.now() + 10_000 });
       showNotice("Closed with no finding. The file stays readable.", true);
       invalidate();
     },
-    onError: (error) => showNotice(error instanceof Error ? error.message : "Could not close this file."),
+    onError: (error) => showNotice(editorError(error instanceof Error ? error.message : "") || "Could not close this file."),
   });
 
   const park = useMutation({
@@ -587,7 +588,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not set that aside.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not set that aside.");
     },
   });
 
@@ -604,7 +605,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not pull that back.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not pull that back.");
     },
   });
 
@@ -647,7 +648,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : "Reddit did not answer.";
+      const msg = editorError(err instanceof Error ? err.message : "") || "Reddit did not answer.";
       showNotice(msg);
       setRedditAnnounce(msg);
     },
@@ -690,7 +691,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not file that tip.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not file that tip.");
     },
   });
 
@@ -715,7 +716,7 @@ function DarkPage() {
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        showNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+        showNotice(res?.error ? `No brief: ${editorError(res.error) || "the request did not finish."}` : "No brief written.");
         return;
       }
       // Queued, not written: the brief is a job now, and the file view below
@@ -725,7 +726,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) =>
-      showNotice(err instanceof Error ? err.message : "Could not write the brief."),
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not write the brief."),
   });
 
   const starting = followLead.isPending;
@@ -936,7 +937,7 @@ function DarkPage() {
                 <ScreenError
                   message={
                     investigations.error instanceof Error
-                      ? investigations.error.message
+                      ? editorError(investigations.error.message) || "Could not load the desk."
                       : "Could not load the desk."
                   }
                   onRetry={() => void investigations.refetch()}
@@ -970,7 +971,7 @@ function DarkPage() {
                 <ScreenError
                   message={
                     worth.error instanceof Error
-                      ? worth.error.message
+                      ? editorError(worth.error.message) || "Could not load new material."
                       : "Could not load new material."
                   }
                   onRetry={() => void worth.refetch()}
@@ -1135,8 +1136,7 @@ function DarkPage() {
               darkJobError={
                 detail.data?.darkJob?.status === "failed"
                   ? editorError(detail.data.darkJob.error ?? "") ||
-                    detail.data.darkJob.error ||
-                    "This research run did not finish."
+                    "This round did not finish."
                   : null
               }
               phase={liveJobStage || cardPhase || liveLine}
@@ -1374,7 +1374,7 @@ function RedditResultPanel({
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
       <p className="reddit-sub">Automatic filing uses dated posts from the past 30 days. Older or undated results remain available to file by hand.</p>
       <p className="reddit-sub">
-        <strong>Full-thread reading:</strong> {result.enrichment.reason}
+        <strong>Full-thread reading:</strong> {editorError(result.enrichment.reason) || "Could not read the replies."}
       </p>
       {result.searched.length > 0 ? (
         <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
@@ -1384,7 +1384,7 @@ function RedditResultPanel({
       </p>
       {result.incomplete ? (
         <Notice kind="warn">
-          {result.reason || "The read stopped early."}
+          {editorError(result.reason ?? "") || "The read stopped early."}
         </Notice>
       ) : null}
       {result.read > 0 && result.civic === 0 ? (
@@ -1653,7 +1653,10 @@ function InvestigationWorkspace({
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
   const watchPages = artifacts
     .filter((artifact) => /^https?:\/\//i.test(artifact.url))
-    .map((artifact) => ({ id: artifact.id, title: editorTitle(artifact.title) || organizationFromUrl(artifact.url) || "Source page", url: artifact.url }));
+    .map((artifact) => {
+      const title = editorTitle(plainEditorText(artifact.title));
+      return { id: artifact.id, title: title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(artifact.url), url: artifact.url };
+    });
   const foundAnswer = detail?.investigationFollowUps?.find((followUp) => followUp.lastState === "found") ?? null;
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
@@ -1805,7 +1808,8 @@ function InvestigationWorkspace({
   const sourceLink = (captureId: number) => {
     const source = sourceByCapture.get(captureId);
     if (!source || !/^https?:\/\//i.test(source.url)) return null;
-    const label = editorTitle(plainEditorText(source.title)) || organizationFromUrl(source.url) || "Source record";
+    const title = editorTitle(plainEditorText(source.title));
+    const label = title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(source.url);
     return <a className="inline-link" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
   };
   const renderFinding = (finding: (typeof sourcedFindings)[number], key: string) => (
@@ -1930,7 +1934,7 @@ function InvestigationWorkspace({
         {pending ? <p className="meta">Getting this ready…</p> : null}
         {inv?.status === "paused" && inv.pause_reason && !digging ? (
           <p className="of-stop" role="status">
-            Could not finish — retry.
+            {editorPauseReason(inv.pause_reason, captureStats) ?? "Could not finish — retry."}
             {looksLikeProviderAuthFailure(inv.pause_reason) ? <ProviderSignInButton detail={inv.pause_reason} /> : null}
           </p>
         ) : null}
@@ -2101,9 +2105,9 @@ function InvestigationWorkspace({
           onSubmit={(input) => createFileFollowUp.mutate(input)}
           pending={createFileFollowUp.isPending}
           error={createFileFollowUp.error instanceof Error
-            ? createFileFollowUp.error.message
+            ? editorError(createFileFollowUp.error.message) || "Could not start the AI follow-up."
             : createFileFollowUp.data?.ok === false
-              ? createFileFollowUp.data.error
+              ? editorError(createFileFollowUp.data.error ?? "") || "Could not start the AI follow-up."
               : null}
         />
       ) : null}
@@ -2140,7 +2144,7 @@ function InvestigationWorkspace({
         ) : (
           <p role="status">No captured public pages are ready to watch. Keep investigating to add pages to this file.</p>
         )}
-        {createFileWatches.error instanceof Error ? <p className="fu-err" role="alert">{createFileWatches.error.message}</p> : null}
+        {createFileWatches.error instanceof Error ? <p className="fu-err" role="alert">{editorError(createFileWatches.error.message) || "Could not start watching these pages."}</p> : null}
         {createFileWatches.data?.failed.length ? <p className="fu-err" role="alert">Some pages could not be added. Retry the remaining pages or close this window.</p> : null}
       </Dialog>
 
@@ -2280,7 +2284,12 @@ function InvestigationWorkspace({
         <details className="of-trail">
           <summary>Searches this round — {searches.length}</summary>
           {searches.length ? (
-            searches.map((s, i) => <SearchTrailEntry key={`${s.hop}-${i}`} record={s} />)
+        searches.map((s, i) => (
+          <SearchTrailEntry
+            key={`${s.hop}-${i}`}
+            record={{ ...s, query: plainEditorText(s.query).replace(/https?:\/\/[^\s<>"']+/gi, (url) => headlineFromUrl(url)) }}
+          />
+        ))
           ) : (
             <p className="side-item">No searches logged yet.</p>
           )}
@@ -2354,7 +2363,7 @@ function DarkResearchCard({ job, onStop, stopDisabled }: { job: JobProgressView;
     mutationFn: (nextModel: boolean) => retryDarkRound({ data: { jobId: job.id, nextModel } }),
     onSuccess: (result) => {
       if (!result.ok) {
-        setRetryNote(result.error);
+        setRetryNote(editorError(result.error ?? "") || "Could not retry this round.");
         return;
       }
       setRetryNote(`Retry queued on ${result.model}.`);
@@ -2362,7 +2371,7 @@ function DarkResearchCard({ job, onStop, stopDisabled }: { job: JobProgressView;
       void qc.invalidateQueries({ queryKey: ["investigation", job.subjectId] });
       void qc.invalidateQueries({ queryKey: ["investigations"] });
     },
-    onError: (error) => setRetryNote(error instanceof Error ? error.message : "Could not retry this round."),
+    onError: (error) => setRetryNote(editorError(error instanceof Error ? error.message : "") || "Could not retry this round."),
   });
   const retryRound = retry.mutate;
   useEffect(() => {
@@ -2726,12 +2735,12 @@ function OpenedRecords({
               were drawn without a role -- silent to a screen reader. */}
           {requestPageRead.error ? (
             <p className="note err" role="alert">
-              {requestPageRead.error.message}
+              {editorError(requestPageRead.error.message) || "Could not read these pages."}
             </p>
           ) : null}
           {pageRead.data?.error ? (
             <p className="note err" role="alert">
-              {pageRead.data.error}
+              {editorError(pageRead.data.error) || "Could not read these pages."}
             </p>
           ) : null}
           {pageRead.data?.stage && (pageRead.data.status === "queued" || pageRead.data.status === "running") ? (
@@ -2746,12 +2755,12 @@ function OpenedRecords({
               <section className="read-full">
                 <p className="meta">
                   {result.mode === "complete"
-                    ? `Entire PDF · ${result.pagesRead ?? 0} of ${result.pagesTotal ?? "?"} pages saved${result.batchesTotal ? ` · batch ${result.batchesCompleted ?? 0} of ${result.batchesTotal}` : ""}${result.modelCalls != null ? ` · ${result.modelCalls} model calls` : ""}${result.budgetPaused ? " · paused at run budget" : ""}`
+                    ? `Entire PDF · ${result.pagesRead ?? 0} of ${result.pagesTotal ?? "?"} pages saved${result.batchesTotal ? ` · batch ${result.batchesCompleted ?? 0} of ${result.batchesTotal}` : ""}`
                     : `Requested PDF pages ${result.start}-${result.end}`}
                   {` · ${result.provider ?? modelChoiceLabel(modelChoice)}`}
                 </p>
                 {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong><br />{page.text}</p>)}
-                {result.reason ? <p className="meta">{result.reason}</p> : null}
+                {result.reason ? <p className="meta">{editorError(result.reason) || "The page read stopped early."}</p> : null}
                 {result.unreadPages?.length ? <p className="note err">Still unread: {result.unreadPages.slice(0, 16).join(", ")}{result.unreadPages.length > 16 ? `, and ${result.unreadPages.length - 16} more` : ""}. Run Read entire PDF again to retry only these pages.</p> : null}
               </section>
             );

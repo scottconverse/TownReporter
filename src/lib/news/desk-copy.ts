@@ -32,7 +32,7 @@ export function filenameFromUrl(url: string): string {
 
 export function headlineFromUrl(url: string): string {
   const raw = filenameFromUrl(url);
-  if (!raw) return organizationFromUrl(url) || url;
+  if (!raw) return organizationFromUrl(url) || "Public page";
   const parts = raw.split(/[-_.]+/).filter(Boolean);
   const drop = /^(rst|td\d+|o|pdf|docx?|final|draft|rev\d+|v\d+|pct|\d+pct)$/i;
   const kept = parts.filter((p) => !drop.test(p) && !/^\d+(\.\d+)?$/.test(p));
@@ -44,7 +44,7 @@ export function headlineFromUrl(url: string): string {
     .trim();
   const isDoc = /\.pdf($|\?)/i.test(url);
   if (title && isDoc && !/document|report|packet|minutes/i.test(title)) return `${title} document`;
-  return title || organizationFromUrl(url) || url;
+  return title || organizationFromUrl(url) || "Public page";
 }
 
 export type InvestigationActivityInput = {
@@ -83,8 +83,16 @@ function activityClock(at: string | Date): string {
   return `${parts.find((part) => part.type === "hour")?.value ?? "0"}:${parts.find((part) => part.type === "minute")?.value ?? "00"}`;
 }
 
+function replaceRawUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
+    const punctuation = match.match(/[.,;!?)]*$/)?.[0] ?? "";
+    const url = punctuation ? match.slice(0, -punctuation.length) : match;
+    return `${headlineFromUrl(url)}${punctuation}`;
+  });
+}
+
 function activitySubject(event: InvestigationActivityInput): string {
-  const title = String(event.title ?? "").replace(/\s+/g, " ").trim();
+  const title = replaceRawUrls(String(event.title ?? "").replace(/\s+/g, " ").trim());
   const url = String(event.url ?? "").trim();
   return (title || headlineFromUrl(url) || "the page").slice(0, 180);
 }
@@ -106,7 +114,7 @@ function activityResultCount(resultsJson: string | null | undefined): number | n
 
 function activityText(event: InvestigationActivityInput): { text: string; tone: InvestigationActivityLine["tone"] } {
   const subject = activitySubject(event);
-  const body = String(event.body ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+  const body = replaceRawUrls(plainEditorText(String(event.body ?? "").replace(/\s+/g, " ").trim())).slice(0, 240);
   if (event.kind === "capture") {
     if (event.removed || /^(?:removed|not-found|soft-404)$/i.test(event.outcome ?? ""))
       return { text: `Page removed: ${subject}`, tone: "plain" };
@@ -151,7 +159,7 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
   }
   if (event.stopReason === "elapsed-time-limit") return { text: "Stopped at the time limit", tone: "plain" };
   if (event.stopReason === "document-read-limit") return { text: "Stopped at the record limit", tone: "plain" };
-  if (event.stopReason === "model-call-limit") return { text: "Stopped at the spending limit", tone: "plain" };
+  if (event.stopReason === "model-call-limit") return { text: "Stopped at the run limit", tone: "plain" };
   if (event.stopReason === "cancelled") return { text: "Stopped at the editor's request", tone: "plain" };
   if (event.stopReason) return { text: "Round stopped", tone: "plain" };
   return { text: "Round finished", tone: "plain" };
@@ -177,7 +185,7 @@ export function sourceLineFromUrl(url: string): string {
     : "";
   const org = organizationFromUrl(url);
   if (pretty && org) return `${pretty} — ${org}`;
-  return pretty || org || url;
+  return pretty || org || "Public page";
 }
 
 export function extractUrl(text: string): string {
@@ -250,6 +258,9 @@ export function editorStatus(status: string): string {
 export function editorError(raw: string | null | undefined, what = "continue with that"): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (/invalid byte sequence for encoding UTF8:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(t)) {
+    return "Could not read one record (bad text in the file)";
+  }
   /*
     Every test below is about what a provider did -- a refusal, a quota, a
     login, a socket. A boundary check that throws before anything is called
@@ -291,7 +302,7 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     return "A search or page load timed out. What was already found is still here.";
   }
   if (/rate limit/i.test(t)) {
-    return "Dark Desk paused so it does not burn through the hourly allowance. Try again in a bit.";
+    return "The model is rate limited right now. Try again in a bit.";
   }
   if (
     /research failed|dark desk failed|failed to fetch|aborte?d|504|503|502|econnreset|socket hang up/i.test(
@@ -299,6 +310,13 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     )
   ) {
     return "This round stopped before it finished. The records already captured are still on the file. Click Keep digging to continue.";
+  }
+  if (
+    /^(?:[\w.]+Error|SQLSTATE)\s*:/i.test(t) ||
+    /(?:^|\n)\s+at\s+[^\n]+(?:\([^\n]*:\d+:\d+\)|:\d+:\d+)/i.test(t) ||
+    /^\s*\{[\s\S]*"(?:error|message|stack|code)"\s*:/i.test(t)
+  ) {
+    return "Could not finish this round. What was found is still on the file.";
   }
   return plainEditorText(t);
 }
@@ -333,7 +351,10 @@ export function editorPauseReason(
     }
     return `Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
   }
-  return editorError(raw);
+  const copy = editorError(raw);
+  return copy && copy !== plainEditorText(raw)
+    ? copy
+    : "Could not finish this round. What was found is still on the file.";
 }
 
 /**
@@ -2551,8 +2572,8 @@ export function recoverExpectedDraftJobId(input: {
 /** Editor-facing label for a still-unopened line. Never show engine tokens. */
 export function humanFrontierLabel(label: string): string {
   const cleaned = label.replace(/^\s*(?:frontier|hop)\s*[:#.\-–—]?\s*/i, "").trim();
-  const t = cleaned || label.trim();
-  if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || t;
+  const t = replaceRawUrls(plainEditorText(cleaned || label.trim()));
+  if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || "Public page";
   return t;
 }
 
