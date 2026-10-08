@@ -76,6 +76,7 @@ import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
+import { saveLeadTopic } from "@/lib/news/lead-topic";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
@@ -393,6 +394,7 @@ function StoryPage() {
     stored confirmation for this draft version, refuses.
   */
   const [topicTouched, setTopicTouched] = useState(false);
+  const leadTopicChoice = useRef<string | null>(null);
   /*
     Headline suggestions are held here and applied on a click, never before --
     the whole contract of the button. The note is the page's own line about
@@ -620,7 +622,7 @@ function StoryPage() {
         setHeadline(data?.articleId && data.articleHeadline ? data.articleHeadline : d.headline);
         setDek(d.dek);
         setBody(stripReporterNotebook(d.body ?? ""));
-        setTopic(d.topic);
+        setTopic(leadTopicChoice.current ?? d.topic);
         appliedFp.current = fp;
       }
       return;
@@ -640,7 +642,7 @@ function StoryPage() {
     setHeadline(d.headline);
     setDek(d.dek);
     setBody(stripReporterNotebook(d.body));
-    setTopic(d.topic);
+    setTopic(leadTopicChoice.current ?? d.topic);
     appliedFp.current = fp;
     expectedDraftJobId.current = null;
     /* Unit UI1a2: the draft this press started has arrived, so the control's
@@ -886,6 +888,20 @@ function StoryPage() {
       );
     }
   }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
+
+  const saveTopic = useMutation({
+    mutationFn: (nextTopic: string) => saveLeadTopic({ data: { leadId: id, topic: nextTopic } }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg("Saved.");
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "save your section") ??
+        "Your section did not save.",
+      );
+    },
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -1705,7 +1721,7 @@ function StoryPage() {
     reconcile.isPending ||
     reconcileStatus.data?.status === "queued" ||
     reconcileStatus.data?.status === "running";
-  const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
+  const savePending = saveTopic.isPending || save.isPending || reviewEvidence.isPending || publish.isPending;
   /*
     Unit U25, B1: the two reasons the evidence panel closes, kept apart so the
     takedown press can stay live on a published story. See
@@ -2813,6 +2829,7 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
+          {saveTopic.isPending ? <Busy label="Saving your section…" /> : null}
           {/*
             A successful action that also has something to report -- the draft
             saved but the reporting notes did not -- still reads as a success:
@@ -3455,8 +3472,13 @@ function StoryPage() {
                       setTopic(e.target.value);
                       /* A person moved it. See `topicTouched`. */
                       setTopicTouched(true);
+                      if (!data.draft) {
+                        leadTopicChoice.current = e.target.value;
+                        setMsg("");
+                        saveTopic.mutate(e.target.value);
+                      }
                     }}
-                    disabled={onPaper}
+                    disabled={onPaper || locked || saveTopic.isPending}
                   >
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
