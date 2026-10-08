@@ -47,6 +47,111 @@ export function headlineFromUrl(url: string): string {
   return title || organizationFromUrl(url) || url;
 }
 
+export type InvestigationActivityInput = {
+  id: string;
+  at: string | Date;
+  kind: "capture" | "search" | "finding" | "dead-end" | "run-stop" | "follow-up" | "watch";
+  title?: string | null;
+  url?: string | null;
+  outcome?: string | null;
+  httpStatus?: number | null;
+  resultsJson?: string | null;
+  body?: string | null;
+  failed?: boolean;
+  stopReason?: string | null;
+  removed?: boolean;
+  changed?: boolean;
+  query?: string;
+  stage?: string;
+  rawReason?: string;
+};
+
+export type InvestigationActivityLine = {
+  id: string;
+  time: string;
+  text: string;
+  tone: "plain" | "finding" | "failure";
+  occurredAt: string;
+};
+
+function activityClock(at: string | Date): string {
+  const date = at instanceof Date ? at : new Date(at);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).formatToParts(date);
+  return `${parts.find((part) => part.type === "hour")?.value ?? "0"}:${parts.find((part) => part.type === "minute")?.value ?? "00"}`;
+}
+
+function activitySubject(event: InvestigationActivityInput): string {
+  const title = String(event.title ?? "").replace(/\s+/g, " ").trim();
+  const url = String(event.url ?? "").trim();
+  return (title || headlineFromUrl(url) || "the page").slice(0, 180);
+}
+
+function activityResultCount(resultsJson: string | null | undefined): number | null {
+  try {
+    const parsed = JSON.parse(resultsJson || "[]") as unknown;
+    if (Array.isArray(parsed)) return parsed.length;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as { results?: unknown; count?: unknown };
+      if (Array.isArray(record.results)) return record.results.length;
+      if (typeof record.count === "number" && Number.isFinite(record.count)) return Math.max(0, record.count);
+    }
+  } catch {
+    /* A malformed legacy result has no reliable count. */
+  }
+  return null;
+}
+
+function activityText(event: InvestigationActivityInput): { text: string; tone: InvestigationActivityLine["tone"] } {
+  const subject = activitySubject(event);
+  const body = String(event.body ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+  if (event.kind === "capture") {
+    if (event.removed || /^(?:removed|not-found|soft-404)$/i.test(event.outcome ?? ""))
+      return { text: `Page removed: ${subject}`, tone: "plain" };
+    if (event.changed || /^(?:changed|updated)$/i.test(event.outcome ?? ""))
+      return { text: `Page changed: ${subject}`, tone: "finding" };
+    if (/^(?:captured|fetched|ok|success)$/i.test(event.outcome ?? ""))
+      return { text: `Opened ${subject}, captured`, tone: "plain" };
+    const reason = event.httpStatus === 403
+      ? "403 blocked"
+      : /timeout/i.test(event.outcome ?? "")
+        ? "timeout"
+        : /parse/i.test(event.outcome ?? "")
+          ? "could not read the page"
+          : event.httpStatus
+            ? `${event.httpStatus} response`
+            : "could not load the page";
+    return { text: `Could not open ${subject} (${reason})`, tone: "failure" };
+  }
+  if (event.kind === "search") {
+    const count = activityResultCount(event.resultsJson);
+    if (count != null) return { text: count ? `Searched public records: ${count} results` : "Searched public records: no results", tone: "plain" };
+    const outcome = String(event.outcome ?? "");
+    const text = /BLOCKED/i.test(outcome) ? "Search was blocked" : /TIMEOUT/i.test(outcome) ? "Search timed out" : /FAILED|ERROR/i.test(outcome) ? "Search could not finish" : "Search outcome not recorded";
+    return { text, tone: /could not|blocked|timed out/i.test(text) ? "failure" : "plain" };
+  }
+  if (event.kind === "finding") return { text: body ? `Found: ${body}` : "Found a new detail", tone: "finding" };
+  if (event.kind === "dead-end") return { text: body ? `Dead end: ${body}` : "This line of inquiry did not lead to a record", tone: "plain" };
+  if (event.kind === "follow-up") return { text: body ? `AI follow-up found: ${body}` : "AI follow-up is watching for a response", tone: body ? "finding" : "plain" };
+  if (event.kind === "watch") return { text: event.removed ? `Watched page removed: ${subject}` : `Watched page changed: ${subject}`, tone: event.removed ? "plain" : "finding" };
+  if (event.failed) return { text: "Could not finish — retry", tone: "failure" };
+  if (event.stopReason === "elapsed-time-limit") return { text: "Stopped at the time limit", tone: "plain" };
+  if (event.stopReason === "document-read-limit") return { text: "Stopped at the record limit", tone: "plain" };
+  if (event.stopReason === "model-call-limit") return { text: "Stopped at the spending limit", tone: "plain" };
+  if (event.stopReason === "cancelled") return { text: "Stopped at the editor's request", tone: "plain" };
+  if (event.stopReason) return { text: "Round stopped", tone: "plain" };
+  return { text: "Round finished", tone: "plain" };
+}
+
+export function buildInvestigationActivity(events: InvestigationActivityInput[]): InvestigationActivityLine[] {
+  return events
+    .map((event) => {
+      const occurredAt = event.at instanceof Date ? event.at.toISOString() : String(event.at);
+      return { id: event.id, time: activityClock(event.at), occurredAt, ...activityText(event) };
+    })
+    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
+}
+
 export function sourceLineFromUrl(url: string): string {
   const raw = filenameFromUrl(url);
   const pretty = raw

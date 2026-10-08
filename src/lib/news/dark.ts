@@ -86,7 +86,12 @@ import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
-import { titlesOverlap, topicFromText } from "./desk-copy.ts";
+import {
+  buildInvestigationActivity,
+  titlesOverlap,
+  topicFromText,
+  type InvestigationActivityInput,
+} from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -1410,6 +1415,58 @@ export const getInvestigation = createServerFn({ method: "GET" })
       searches,
       signals,
     };
+  });
+
+export const investigationActivity = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((id: unknown) => rowId.parse(id))
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    await ensureInvestigateSchema();
+    const sql = await getSql();
+    const newsroomId = owned(context);
+    const [captures, searches, findings, deadEnds, runs] = await Promise.all([
+      sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }>`
+        select ce.id, ce.observed_at::text as at, coalesce(a.title, '') as title, ce.source_url as url,
+          ce.fetch_outcome as outcome, ce.http_status as "httpStatus", ce.disappearance as removed
+        from capture_events ce
+        left join artifacts a on a.capture_event_id = ce.id and a.newsroom_id = ce.newsroom_id
+        where ce.investigation_id = ${id} and ce.newsroom_id = ${newsroomId}
+        order by ce.observed_at desc limit 120
+      `.catch(() => [] as { id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }[]),
+      sql<{ id: number; at: string; state: string | null; resultsJson: string }>`
+        select id, created_at::text as at, state, results_json as "resultsJson"
+        from search_log where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        order by created_at desc limit 120
+      `.catch(() => [] as { id: number; at: string; state: string | null; resultsJson: string }[]),
+      sql<{ id: number; at: string; body: string }>`
+        select id, created_at::text as at, body from claims
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+          and (capture_event_id is not null or source_url is not null)
+        order by created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; body: string }[]),
+      sql<{ id: number; at: string; hypothesis: string }>`
+        select id, created_at::text as at, hypothesis from dead_ends
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        order by created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; hypothesis: string }[]),
+      sql<{ id: number; at: string; stopReason: string | null; failed: boolean }>`
+        select id, coalesce(finished_at, started_at)::text as at, stop_reason as "stopReason",
+          (error is not null) as failed
+        from dark_runs
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+          and (finished_at is not null or error is not null or stop_reason is not null)
+        order by started_at desc limit 30
+      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean }[]),
+    ]);
+    const events: InvestigationActivityInput[] = [
+      ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed })),
+      ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson })),
+      ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
+      ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
+      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed })),
+    ];
+    return buildInvestigationActivity(events);
   });
 
 export const getArtifact = createServerFn({ method: "GET" })
