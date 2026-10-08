@@ -10,6 +10,7 @@ import {
   parseTextflowkitVersion,
   resolveTextflowkitConfig,
   textflowkitCaptionFile,
+  textflowkitConfigForVersion,
   transcriptionTimeoutSeconds,
   type TextflowkitConfig,
 } from "./textflowkit.ts";
@@ -27,9 +28,10 @@ export type TextflowkitProbe = {
   installed: boolean;
   version: string | null;
   cliPath: string;
+  engine: TextflowkitConfig["engine"];
   model: string;
   language: string;
-  /** Why it is not installed, when that is the answer. Never a silent false. */
+  /** Installation failure or an engine compatibility fallback, shown on the desk. */
   detail: string | null;
 };
 
@@ -116,7 +118,7 @@ export async function probeTextflowkit(
   opts: { env?: NodeJS.ProcessEnv; timeoutMs?: number } = {},
 ): Promise<TextflowkitProbe> {
   const config = resolveTextflowkitConfig(opts.env ?? process.env);
-  const base = { cliPath: config.cliPath, model: config.model, language: config.language };
+  const base = { engine: config.engine, cliPath: config.cliPath, model: config.model, language: config.language };
   const run = await runTextflowkit(config.cliPath, ["--version"], { timeoutMs: opts.timeoutMs ?? 15_000 });
   if (run.spawnError) {
     return {
@@ -135,7 +137,14 @@ export async function probeTextflowkit(
       detail: `textflowkit ${config.cliPath} --version exited ${run.code ?? "without a status"}: ${run.stderr.trim().slice(0, 200)}`,
     };
   }
-  return { ...base, installed: true, version: parseTextflowkitVersion(run.stdout), detail: null };
+  const version = parseTextflowkitVersion(run.stdout);
+  const compatible = textflowkitConfigForVersion(config, version);
+  return {
+    ...base, engine: compatible.engine, model: compatible.model, installed: true, version,
+    detail: compatible.engine !== config.engine
+      ? `textflowkit ${version} has no Whistle engine; using whisper with model ${compatible.model}; upgrade to 0.1.9+ for Whistle`
+      : null,
+  };
 }
 
 export type TextflowkitTranscribeSuccess = {
@@ -144,6 +153,7 @@ export type TextflowkitTranscribeSuccess = {
   /** Where the tool's own JSON was written; the caller stores it, then removes the temp directory. */
   jsonPath: string;
   jsonBytes: number;
+  engine: string | null;
   model: string | null;
   device: string | null;
   durationSeconds: number | null;
@@ -204,11 +214,16 @@ export async function transcribeAudioWithTextflowkit(input: {
   config?: TextflowkitConfig;
   env?: NodeJS.ProcessEnv;
 }): Promise<TextflowkitTranscribeResult> {
-  const config = input.config ?? resolveTextflowkitConfig(input.env ?? process.env);
+  let config = input.config ?? resolveTextflowkitConfig(input.env ?? process.env);
+  if (config.engine === "whistle") {
+    const probe = await probeTextflowkit({ env: { TEXTFLOWKIT_CLI_PATH: config.cliPath, TEXTFLOWKIT_ENGINE: config.engine } });
+    config = textflowkitConfigForVersion(config, probe.version);
+  }
   const timeoutSeconds = transcriptionTimeoutSeconds(input.durationSeconds, config);
   const argv = buildTextflowkitArgs({
     audioPath: resolve(input.audioPath),
     outputDir: resolve(input.outputDir),
+    engine: config.engine,
     model: config.model,
     language: config.language,
   });
@@ -275,6 +290,7 @@ export async function transcribeAudioWithTextflowkit(input: {
     parsed,
     jsonPath,
     jsonBytes: Buffer.byteLength(raw, "utf8"),
+    engine: details.engine,
     model: details.model,
     device: details.device,
     durationSeconds: details.durationSeconds,

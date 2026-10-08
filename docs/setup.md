@@ -725,11 +725,15 @@ of the service that runs the app:
 TEXTFLOWKIT_CLI_PATH=C:\path\to\textflowkit.exe
 ```
 
-or by leaving that unset and putting `textflowkit` on `PATH`. Two more
-environment variables are optional: `TEXTFLOWKIT_MODEL` (default `small`) and
-`TEXTFLOWKIT_LANGUAGE` (default `en`). A larger model is more accurate and
-takes longer; run a meeting by hand first and watch the row before you turn it
-loose on a schedule.
+or by leaving that unset and putting `textflowkit` on `PATH`. `TEXTFLOWKIT_ENGINE`
+optionally selects `whistle`, `whisper`, or `faster-whisper`; otherwise a
+`TEXTFLOWKIT_MODEL` other than `whistle` selects Whisper with that model, and
+an unset model or `whistle` selects Whistle. Whisper engines default to model
+`small`; Whistle uses its engine default (or model `whistle`). On CLIs older
+than 0.1.9, Whistle falls back to Whisper with model `small`, and the desk says
+so; upgrade to 0.1.9+ for Whistle. `TEXTFLOWKIT_LANGUAGE` defaults to `en`.
+A larger Whisper model takes longer; run a meeting by hand first and watch
+the row before you turn it loose on a schedule.
 
 To check, open **Server → Meeting capture**. One line tells you what the desk
 found: the version, the model and the language, or that it is not installed.

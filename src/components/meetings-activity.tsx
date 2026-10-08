@@ -45,7 +45,7 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
           */}
           {row.captionFormat === "textflowkit-json" && (
             <p className="mt-2 text-sm">
-              Transcript: speech-to-text (Whisper via textflowkit), not official captions
+              Transcript: speech-to-text (textflowkit; engine {row.transcriptionEngine ?? "not recorded"}; model {row.transcriptionModel ?? "not recorded"}), not official captions
             </p>
           )}
           <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
