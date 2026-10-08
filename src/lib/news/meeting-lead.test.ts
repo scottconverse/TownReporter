@@ -153,7 +153,7 @@ describe("meeting lead", () => {
 });
 
 /**
- * A capture lead is titled from what the meeting covered.
+ * A capture lead is titled from the meeting name and date.
  *
  * The inputs below are capture-shaped: `title` is the recording's own title and
  * `meetingDate` its publish date, which is exactly what `meeting-capture.ts` hands
@@ -162,15 +162,15 @@ describe("meeting lead", () => {
  * ordinance 2026-47", "Item 9 C is ordinance 2026-48", "Item 9D, resolution
  * 2026-43" -- see ./meeting-story-section5.ts).
  *
- * Before this, the headline was the recording's title and its date and nothing
- * else: "City Council Regular Session - September 22, 2026 (2026-09-23)". A real
- * dev scan filed five records of exactly that shape as leads.
+ * Capture titles can append an agenda row and raw upload timestamp to the
+ * meeting name. The desk headline keeps only the meeting name and meeting date.
  */
-describe("a capture lead is titled from what the meeting covered", () => {
-  it("titles from the decision the structured record established", () => {
+describe("a capture lead headline names the meeting and date", () => {
+  // guards: an agenda item and raw capture timestamp could obscure which meeting the editor opened.
+  it("uses the meeting name and date without an agenda item or raw timestamp", () => {
     const copy = meetingLeadCopy({
-      title: "City Council Regular Session - September 22, 2026",
-      meetingDate: "2026-09-23",
+      title: "City Council Regular Session - October 6, 2026: Item 2 ROLL CALL - PLEDGE OF ALLEGIANCE (2026-10-07T06:29:04Z)",
+      meetingDate: "2026-10-07T06:29:04Z",
       items: [
         { item: "9B2", title: "Ordinance 2026-47" },
         { item: "9C", title: "Ordinance 2026-48" },
@@ -182,13 +182,11 @@ describe("a capture lead is titled from what the meeting covered", () => {
       ],
     });
     assert.ok(copy);
-    assert.equal(
-      copy.headline,
-      "City Council Regular Session - September 22, 2026: item 9B2 Approve Ordinance O-2026-47 — Passed 6-1 (2026-09-23)",
-    );
+    assert.equal(copy.headline, "City Council regular session, Oct. 6, 2026");
+    assert.doesNotMatch(copy.headline, /item 2|ROLL CALL|06:29:04|2026-10-07T/);
   });
 
-  it("keeps the agenda id exactly as the packet prints it", () => {
+  it("keeps agenda item details out of the meeting headline", () => {
     const copy = meetingLeadCopy({
       title: "Historic Preservation Commission - October 1, 2026",
       meetingDate: "2026-10-02",
@@ -197,12 +195,11 @@ describe("a capture lead is titled from what the meeting covered", () => {
       votes: [{ item: "9C", established: false, motion: null, tally: null, result: "not established" }],
     });
     assert.ok(copy, "an item the transcript covered is enough to file");
-    assert.match(copy.headline, /item 9C Landmark Alteration at 350 Kimbark Street/, "9C must not be renumbered or lower-cased");
-    assert.match(copy.headline, /^Historic Preservation Commission - October 1, 2026/, "the desk still needs to know which session");
-    assert.match(copy.headline, /\(2026-10-02\)$/, "the capture stamp the R5 guard reads stays at the end");
+    assert.equal(copy.headline, "Historic Preservation Commission, Oct. 1, 2026");
+    assert.doesNotMatch(copy.headline, /item 9C|350 Kimbark/);
   });
 
-  it("falls back to the item when a vote was recorded without motion text", () => {
+  it("keeps the meeting headline when a vote has no motion text", () => {
     const copy = meetingLeadCopy({
       title: "City Council Regular Session - September 22, 2026",
       meetingDate: "2026-09-23",
@@ -211,8 +208,8 @@ describe("a capture lead is titled from what the meeting covered", () => {
       votes: [{ item: "9D", established: true, motion: "   ", tally: "7-0", result: "Passed" }],
     });
     assert.ok(copy);
-    assert.match(copy.headline, /item 9D Resolution 2026-43/, "a vote with no motion text names nothing to put in the title");
-    assert.doesNotMatch(copy.headline, /7-0/, "the outcome belongs to a decision that was actually named");
+    assert.equal(copy.headline, "City Council regular session, Sept. 22, 2026");
+    assert.doesNotMatch(copy.headline, /item 9D|2026-43|7-0/);
   });
 
   it("files no lead at all when the record names no item and establishes no decision", async () => {
