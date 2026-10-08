@@ -9,6 +9,7 @@ import { moduleUrl } from "./dom-harness.mjs";
 const dataModule = (code) => "data:text/javascript;base64," + Buffer.from(code).toString("base64");
 const row = { videoId: "vote", title: "Council", status: "captured", captionFormat: "textflowkit-json", transcriptionEngine: "whistle", transcriptionModel: "whistle", chunks: [], votes: [], aligned: null };
 const imports = {
+  "@/lib/paper": await moduleUrl("src/lib/paper.ts"),
   "@/lib/news/meeting-capture-retry": await moduleUrl("src/lib/news/meeting-capture-retry.ts"),
   "@/lib/news/desk-copy": dataModule("export const agendaTitle=x=>x; export const meetingAudioIntegrityNotice='The saved audio does not match its record. Capture it again.'; export const meetingYoutubeBlockedLine=()=> 'Capture blocked by YouTube (too many requests). Next try 2:10 p.m.';"),
   "@tanstack/react-query": dataModule(`export const useQuery=()=>({data:[${JSON.stringify(row)}]}); export const useMutation=()=>({isPending:false,mutate(){}}); export const useQueryClient=()=>({invalidateQueries:async()=>{}});`),

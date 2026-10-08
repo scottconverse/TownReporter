@@ -60,6 +60,7 @@ const deskCopyUrl = await moduleUrl("src/lib/news/desk-copy.ts", {
 const chromeUrl = stubUrl("export function Busy() { return null; } export function SecHead() { return null; }");
 
 const meetingsUrl = await moduleUrl("src/components/meetings-activity.tsx", {
+  "@/lib/paper": await moduleUrl("src/lib/paper.ts"),
   "@/lib/news/meeting-capture-retry": await moduleUrl("src/lib/news/meeting-capture-retry.ts"),
   "@/lib/news/desk-copy": deskCopyUrl,
   react: import.meta.resolve("react"),

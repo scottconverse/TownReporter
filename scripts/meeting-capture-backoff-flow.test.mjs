@@ -148,7 +148,8 @@ test("a blocked meeting waits longer between retries and shows its next try", as
     const queryStub = await import(queryStubUrl);
     const chromeStubUrl = transpileToUrl(`export function Busy() { return null; } export function SecHead() { return null; }`, "meeting-chrome-stub.js");
     const activityUrl = await moduleUrl("src/components/meetings-activity.tsx", {
-      "@/lib/news/meeting-capture-retry": await moduleUrl("src/lib/news/meeting-capture-retry.ts"),
+      "@/lib/paper": await moduleUrl("src/lib/paper.ts"),
+  "@/lib/news/meeting-capture-retry": await moduleUrl("src/lib/news/meeting-capture-retry.ts"),
       "@tanstack/react-query": queryStubUrl,
       "@/components/desk-chrome": chromeStubUrl,
       "@/lib/news/meeting-activity": transpileToUrl("export async function listMeetingActivity() { return []; }", "meeting-activity-stub.js"),
