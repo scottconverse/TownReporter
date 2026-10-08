@@ -1,3 +1,4 @@
+import { dailyScanCounts } from "./daily-scan-counts.ts";
 /*
   What each Server card's drawn rows SAY, given what the desk has read.
 
@@ -271,7 +272,7 @@ export function dailyScanRows(policy: DailyScanPolicy): OpsRow[] {
       : "Off";
   return [
     { label: "Runs", value: runs, tone: policy.paused ? "warn" : "plain" },
-    { label: "Files up to", value: `${policy.sourceCap} leads`, tone: "plain" },
+    ...dailyScanCounts(policy).map(row => ({ ...row, tone: "plain" as const })),
   ];
 }
 

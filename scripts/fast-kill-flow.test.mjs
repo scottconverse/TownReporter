@@ -168,6 +168,9 @@ const deskChromeUtils = await moduleUrl("src/components/desk-chrome-utils.ts", {
 const actionButtonUrl = await moduleUrl("src/components/action-button.ts", {});
 
 const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
+  "./shortcut-sheet": await moduleUrl("src/components/shortcut-sheet.tsx", {
+    "./dialog": stub(`export function Dialog() { return null; }`),
+  }),
   "@tanstack/react-router": reactRouterStub,
   "@tanstack/react-query": reactQueryStub,
   "@/lib/paper-context": paperContextStub,

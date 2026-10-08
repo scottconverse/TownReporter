@@ -1579,6 +1579,7 @@ const DARK_STOP_COPY: Record<string, string> = {
 };
 
 function DarkRunMeter({ run, active = false, history = [] }: { run: DarkRunRow; active?: boolean; history?: readonly DarkRunRow[] }) {
+  if (!active && run.usageRecorded === false) return <p className="of-stop">Not recorded for this older run</p>;
   const totals = run.usage.totals;
   const startedAt = Date.parse(run.started_at);
   const elapsedMs = active && Number.isFinite(startedAt)

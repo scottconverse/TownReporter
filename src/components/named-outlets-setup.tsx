@@ -31,7 +31,7 @@ import {
   ownListLabel,
 } from "./named-outlets-copy";
 import { applyNamedOutlets, editorNamedOutlets, namedOutletsPreview } from "@/lib/news/named-outlets";
-import { outletProblems, type OutletProblemField } from "@/lib/news/named-outlet-rules";
+import { applyOutletEdit, outletProblems, type OutletDraft, type OutletProblemField } from "@/lib/news/named-outlet-rules";
 import type { NamedOutlet } from "@/lib/news/outlet-credit";
 import type { NamedOutletChange } from "@/lib/news/named-outlet-preview";
 
@@ -61,7 +61,7 @@ import type { NamedOutletChange } from "@/lib/news/named-outlet-preview";
 */
 
 /** What the owner is editing, and whether they are asking for the shipped list. */
-type Draft = { rows: NamedOutlet[]; builtIn: boolean };
+type Draft = OutletDraft;
 
 /** A preview holds its own revision, so Apply uses what Review actually read. */
 type Preview = {
@@ -127,11 +127,7 @@ export function NamedOutletsSetup() {
     setMessage("");
   };
   const edit = (index: number, patch: Partial<NamedOutlet>) => {
-    if (!draft) return;
-    startDraft({
-      ...draft,
-      rows: draft.rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
-    });
+    startDraft(applyOutletEdit(draft, rows, index, patch));
   };
   const cancel = () => {
     setDraft(null);
