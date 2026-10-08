@@ -27,7 +27,7 @@ const routerStub = stub(`
 const chromeStub = stub(`
   import { createElement } from "react";
   export function DeskShell({ children }) { return createElement("main", null, children); }
-  export function InkButton({ children, tone, small, pending, pendingLabel, ...props }) { return createElement("button", props, pending ? pendingLabel : children); }
+  export function InkButton({ children, tone, small, pending, pendingLabel, ...props }) { return createElement("button", { ...props, "data-tone": tone }, pending ? pendingLabel : children); }
   export function Busy() { return null; } export function Score() { return null; } export function SecHead() { return null; }
 `);
 const statesStub = stub(`import { createElement } from "react"; export function ListSkeleton({ rows }) { return createElement("div", { className: "list-skeleton" }, rows + " loading rows"); } export function Notice({ children }) { return createElement("div", null, children); } export function ScreenError({ message, onRetry, retrying }) { return createElement("div", { role: "alert" }, message, createElement("button", { onClick: onRetry }, retrying ? "Trying again…" : "Try again")); }`);

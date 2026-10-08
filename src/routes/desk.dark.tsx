@@ -2127,7 +2127,7 @@ function InvestigationWorkspace({
             {linkedFollowUps.length > 1 ? <details className="of-trail"><summary>More</summary>{linkedFollowUps.slice(1).map((followUp) => renderFollowUp(followUp, `follow-up-more-${followUp.id}`))}</details> : null}
           </div>
           <div className="astra-panel-acts">
-            <InkButton tone="quiet" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
+            <InkButton tone="ghost" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
           </div>
         </div>
       </div>
@@ -2140,11 +2140,11 @@ function InvestigationWorkspace({
         </div>
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
         <div className="astra-panel-acts" aria-label="File decisions">
-          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
-            Start an AI follow-up
-          </InkButton>
           <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
             Keep investigating
+          </InkButton>
+          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
+            Start an AI follow-up
           </InkButton>
           <InkButton tone="ghost" disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
             Wait and watch

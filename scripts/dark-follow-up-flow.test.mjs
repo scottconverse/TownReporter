@@ -13,7 +13,7 @@ test("starting an AI follow-up opens it with the file question", async () => {
   await React.act(async () => loadingRoot.render(h(Route.component)));
   try {
     const loadingStart = [...loadingContainer.querySelectorAll("button")].find((button) => button.textContent.trim() === "Start an AI follow-up");
-    assert.equal(loadingStart?.disabled, true);
+    assert.ok(!loadingStart || loadingStart.disabled);
     assert.doesNotMatch(loadingContainer.textContent, /File 1/);
   } finally { await React.act(async () => loadingRoot.unmount()); loadingContainer.remove(); }
 
@@ -48,6 +48,12 @@ test("file action notices clear when the editor opens another file", async () =>
     await React.act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
   };
   try {
+    const actions = container.querySelector('[aria-label="File decisions"]');
+    assert.deepEqual([...actions.querySelectorAll("button")].map((button) => button.textContent.trim()), [
+      "Keep investigating", "Start an AI follow-up", "Wait and watch", "Send to the queue", "Close: no finding",
+    ]);
+    const challenge = [...container.querySelectorAll("button")].find((button) => button.textContent.trim() === "Challenge the case");
+    assert.equal(challenge?.dataset.tone, "ghost");
     await press("Start an AI follow-up");
     await press("Start follow-up", container.querySelector('[aria-label="New AI follow-up"]'));
     assert.match(container.textContent, /AI follow-up started/);
