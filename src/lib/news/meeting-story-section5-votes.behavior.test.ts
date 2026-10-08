@@ -7,6 +7,16 @@ import { extractStructuredVote } from "./meeting-story-section5.ts";
 import { runSection5ForArtifact } from "./meeting-story-section5-run.ts";
 import { parsePrimeGovVoteRecords } from "./primegov-vote-documents.ts";
 
+// guards: an agenda range could become a false established vote in meeting evidence.
+test("numeric ranges establish counts only beside vote context", () => {
+  const parse = (text: string) => parsePrimeGovVoteRecords(`1. Plan\nMotion approved for ages 5-12. ${text}`, "minutes", "https://city.test/minutes.pdf");
+  assert.deepEqual(parse(""), []);
+  for (const context of ["Vote: 6-1", "6-1 vote", "Ayes/nays: 6–1", "Yes/no 6 to 1", "In favor/opposed: 6—1", "6 yes, 1 no"]) {
+    assert.equal(parse(context)[0]?.tally, "6-1");
+  }
+  assert.equal(extractStructuredVote({ item: "1", structuredRecord: null, minutes: parse("")[0] ?? null, packet: null, transcript: null }).established, false);
+});
+
 test("unknown counts stay unknown and meeting minutes establish a cited item vote", async () => {
   const block = (tally: string) => `<span class="ord-num">O-2026-51</span><p>Alex moved, seconded by Blair, to approve the plan.</p>${tally}`;
   const absent = parseStructuredVotePage(block(""))[0]!;
@@ -42,12 +52,12 @@ test("unknown counts stay unknown and meeting minutes establish a cited item vot
     packetItemsForMeeting: async () => [{ itemNumber: "1", title: "Approval of the plan" }],
     voteRecordsForMeeting: async () => ({
       minutes: parsePrimeGovVoteRecords(
-        "1. Approval of the plan\nMotion by Alex, seconded by Blair, to approve city plan. Motion passed 5-2.",
+        "1. Approval of the plan\nMotion by Alex, seconded by Blair, to approve city plan. Motion passed by vote 5-2.",
         "minutes",
         "https://city.test/minutes.pdf",
       ),
       packet: parsePrimeGovVoteRecords(
-        "1. Approval of the plan\nMotion by Alex, seconded by Blair, to approve city plan. Motion passed 4-3.",
+        "1. Approval of the plan\nMotion by Alex, seconded by Blair, to approve city plan. Motion passed by vote 4-3.",
         "packet",
         "https://city.test/packet.pdf",
       ),

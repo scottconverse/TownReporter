@@ -15,7 +15,15 @@ function itemHeading(line: string): { item: string; title: string } | null {
 function voteInParagraph(item: string, paragraph: string, source: "minutes" | "packet", locator: string): VoteRecord | null {
   const text = paragraph.replace(/\s+/g, " ").trim();
   if (!text || !/\b(?:motion|moved|seconded|vote|voted|approved|passed|failed|adopted|carried|denied)\b/i.test(text)) return null;
-  const tallyMatch = text.match(/\b(\d{1,2})\s*(?:-|–|—|\bto\b)\s*(\d{1,2})\b/i)
+  // A motion can discuss ages, dates or page ranges. Only an adjacent vote
+  // label establishes that a numeric range counts votes; skip other ranges.
+  const voteLabel = String.raw`(?:ayes?\s*[/,]\s*nays?|yes\s*[/,]\s*no|in\s+favou?r\s*[/,]\s*opposed|vote|ayes?|nays?|yes|no|in\s+favou?r|opposed)`;
+  const beforeVote = new RegExp(String.raw`\b${voteLabel}\s*(?:(?:of|was|by)\s+)?[:(]?\s*$`, "i");
+  const afterVote = new RegExp(String.raw`^\s*[):,]?\s*${voteLabel}\b`, "i");
+  const range = [...text.matchAll(/\b(\d{1,2})\s*(?:-|–|—|\bto\b)\s*(\d{1,2})\b/gi)]
+    .find((match) => beforeVote.test(text.slice(0, match.index))
+      || afterVote.test(text.slice(match.index + match[0].length)));
+  const tallyMatch = range
     ?? text.match(/\b(\d{1,2})\s+(?:yes|ayes)\b.{0,40}?\b(\d{1,2})\s+(?:no|nays)\b/i);
   if (!tallyMatch || !item) return null;
   const result = /\b(?:failed|denied)\b/i.test(text)
