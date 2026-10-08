@@ -2551,7 +2551,7 @@ export async function writingPass(input: {
           ? "The writer did not deliver a readable story with its announced result after one revision."
           : "The writer did not deliver a readable story after one citation revision.";
       const held = normalizeHeld(parsed.held);
-      const error = shortWriterFailureReason(fallback, held);
+      const error = shortWriterFailureReason(fallback, []);
       gaps.push(fallback);
       return { stories: [], held, error, gaps };
     }
@@ -2559,7 +2559,7 @@ export async function writingPass(input: {
     if (remainingRelationships.length) {
       const fallback = "The writer retained an unsupported financial relationship after one revision.";
       const held = normalizeHeld(revised.held);
-      const error = shortWriterFailureReason(fallback, held);
+      const error = shortWriterFailureReason(fallback, []);
       gaps.push(fallback, ...remainingRelationships);
       return { stories: [], held, error, gaps };
     }
@@ -2572,7 +2572,7 @@ export async function writingPass(input: {
       const fallback = "The writer omitted an announced result for an agenda item already in the draft after one revision.";
       const held = normalizeHeld(revised.held);
       gaps.push(fallback, ...remainingVoteResults.map((result) => `${result.item}: ${result.result}`));
-      return { stories: [], held, error: shortWriterFailureReason(fallback, held), gaps };
+      return { stories: [], held, error: shortWriterFailureReason(fallback, []), gaps };
     }
     parsed = revised;
   }

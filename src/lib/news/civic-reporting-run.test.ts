@@ -1651,6 +1651,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     assert.equal(result.observationProvenance?.[0]?.id, 182);
   });
 
+  // guards: the editor could be shown a different idea's hold reason for a rejected draft.
   it("revises an overlength writer packet once and refuses a second overlength result", async () => {
     async function run(revisedWords: number) {
       let calls = 0;
@@ -1672,7 +1673,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
             assert.match(prompt, /substantial editorial cut/);
             assert.match(prompt, /Human Service Agency funding/);
           }
-          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", dek: `${Array(25).fill("word").join(" ")}.`, draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: [] }) };
+          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", dek: `${Array(25).fill("word").join(" ")}.`, draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: count > 800 ? [{ storyId: "other-idea", headline: "Library parking", reason: "The library parking idea still needs its parcel count.", nextCheck: "Check parcel count", unverified: true }] : [] }) };
         }) as never,
       });
       assert.equal(calls, 2, "exactly one revision, never an unbounded retry loop");
@@ -1684,6 +1685,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     const refused = await run(860);
     assert.equal(refused.stories.length, 0, "do not file an output that still violates the assignment");
     assert.match(refused.error, /requested word range after one revision/);
+    assert.doesNotMatch(refused.error, /library parking idea/);
   });
 
   it("removes only a false final hold, while keeping unavailable support and genuine disagreement", async () => {
@@ -2345,5 +2347,3 @@ it("saves the transcript line that states the checked amount", () => {
   const checked = bindClaimsToEvidence(story as never, { actions: [] } as never, record as never, []);
   assert.match(checked[0]?.transcriptEvidence?.quote ?? "", /\$1\.18 million/);
 });
-
-
