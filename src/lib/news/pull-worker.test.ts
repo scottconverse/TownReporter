@@ -91,18 +91,26 @@ describe("durable Pull pipeline", () => {
     assert.ok(documentSave >= 0 && completionSave > documentSave, events.join("\n"));
   });
 
-  // guards: a timed-out source read is mistaken for a search that found nothing
-  it("marks a timed-out source read as failed", async () => {
-    const result = await runPullPipeline(receipt(), {
-      search: async () => assert.fail("the saved search checkpoint must not run again"),
-      ingest: async () => { throw new Error("Request timed out"); },
-      stopRequested: async () => false,
-      saveDocument: async () => assert.fail("the timed-out source was not read"),
-      saveReceipt: async () => {},
-    });
-    assert.equal(result.status, "failed");
-    assert.match(result.stage, /timeout/i);
-    assert.doesNotMatch(result.stage, /no relevant public document found/i);
+  // guards: continuation skips unread public records after a timed-out read
+  it("marks timed-out reads as failed and retries them on continuation", async () => {
+    for (const index of [false, true]) {
+      const run = receipt(index ? { indexPages: ["https://longmontcolorado.gov/documents"], rankedPrepared: false, rankedUrls: [] } : {});
+      const calls: string[] = []; let failing = true;
+      const deps: PullPipelineDeps = {
+        search: async () => assert.fail("the saved search checkpoint must not run again"),
+        ingest: async (url) => { calls.push(url); if (failing) throw new Error("Request timed out"); return { ...document(url), extras: ["https://longmontcolorado.gov/record.pdf"] }; },
+        stopRequested: async () => false, saveDocument: async () => {}, saveReceipt: async () => {},
+      };
+      const result = await runPullPipeline(run, deps);
+      assert.equal(result.status, "failed");
+      assert.match(result.stage, /timeout/i);
+      assert.doesNotMatch(result.stage, /no relevant public document found/i);
+      failing = false; run.status = "queued";
+      const resumed = await runPullPipeline(run, deps);
+      assert.equal(resumed.status, "completed");
+      assert.equal(calls.filter((url) => url === calls[0]).length, 2);
+      assert.equal(resumed.counters.documentsSaved, 1);
+    }
   });
 
   it("stops at the next durable boundary and keeps the reporting item unresolved", async () => {

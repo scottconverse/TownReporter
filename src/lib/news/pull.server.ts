@@ -310,6 +310,7 @@ export async function runPullPipeline(
 ): Promise<PullReceipt> {
   const now = deps.now ?? Date.now;
   const deadlineAt = now() + (deps.deadlineMs ?? PULL_RUN_DEADLINE_MS);
+  receipt.readFailures = [];
   receipt.status = "running";
   receipt.startedAt = receipt.startedAt ?? new Date(now()).toISOString();
   let terminal = false;
@@ -735,6 +736,27 @@ export async function runPullPipeline(
     const providerNotes = providerFailureNotes(receipt.providerFailures ?? []);
     if (!receipt.checkpoint.documents.length && receipt.readFailures?.length) {
       const failed = receipt.readFailures[0]!;
+      const failedUrls = new Set(receipt.readFailures.map((failure) => failure.url));
+      const failedIndex = checkpoint.indexPages.findIndex((url) => failedUrls.has(url));
+      if (failedIndex >= 0) {
+        checkpoint.indexPageIndex = failedIndex;
+        checkpoint.indexPages.forEach((url, index) => {
+          if (failedUrls.has(url)) indexPageResults[index] = null;
+        });
+        // A retried index may discover candidates missing from the previous ranking.
+        checkpoint.rankedPrepared = false;
+        checkpoint.documentIndex = 0;
+        checkpoint.rankedUrls = [];
+        documentOutcomes.length = 0;
+      } else {
+        const failedDocument = documentOutcomes.indexOf("failed");
+        if (failedDocument >= 0) {
+          checkpoint.documentIndex = failedDocument;
+          documentOutcomes.forEach((outcome, index) => {
+            if (outcome === "failed") documentOutcomes[index] = null;
+          });
+        }
+      }
       return finish("failed", pullFailureCopy(failed.reason, failed.url));
     }
     const hasSearchFailure = providerNotes.length > 0;
