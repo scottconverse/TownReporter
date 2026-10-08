@@ -1,3 +1,4 @@
+import { darkScreenData, darkScreenText } from "@/lib/news/dark-screen-copy";
 import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -49,7 +50,7 @@ import {
   organizationFromUrl,
   editorTitle,
   investigationPileFor,
-  plainEditorText,
+  plainEditorText as storedEditorText,
   plainFinding,
   progressLine,
   DIG_STOP_ACK,
@@ -99,6 +100,8 @@ import {
   modelEffort as validatedModelEffort,
   type ModelEffort,
 } from "@/lib/news/provider-registry";
+
+const plainEditorText = (text: string) => darkScreenText(storedEditorText(text));
 
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
@@ -802,7 +805,7 @@ function DarkPage() {
     searches: detail.data?.searches.length ?? 0,
     claims: detail.data?.claims.length ?? 0,
   });
-  const allInv = investigations.data ?? [];
+  const allInv = darkScreenData(investigations.data ?? []);
   const active = allInv.filter((row) => investigationPileFor(row) === "desk");
   const waitingFiles = allInv.filter((row) => investigationPileFor(row) === "waiting");
   const parked = allInv.filter((row) => investigationPileFor(row) === "aside");
@@ -821,7 +824,7 @@ function DarkPage() {
     Cards already attached to a file or claimed for a follow-up do not appear
     in this review group. Every remaining card opens the start-a-file dialog.
   */
-  const worthRows = (worth.data ?? []).map((item) => ({
+  const worthRows = darkScreenData(worth.data ?? []).map((item) => ({
     item,
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
@@ -1185,7 +1188,7 @@ function DarkPage() {
               key={openId}
               openId={openId}
               onOpenFile={() => rememberOpen(openId)}
-              detail={detail.data ?? undefined}
+              detail={darkScreenData(detail.data ?? undefined)}
               canUndoDisposition={undoDisposition?.id === openId}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
@@ -1822,7 +1825,7 @@ function InvestigationWorkspace({
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
-  const activityAll = activityQuery.data ?? [];
+  const activityAll = darkScreenData(activityQuery.data ?? []);
   const activityRows = activityAll.slice(-5);
   const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 
@@ -2845,7 +2848,7 @@ function OpenedRecords({
               </section>
             );
           })()}
-          {selected.url.startsWith("http") ? <p className="read-url">{selected.url}</p> : null}
+          {selected.url.startsWith("http") ? <p className="read-url">{darkScreenText(selected.url)}</p> : null}
           {ocrStatusLine(selected.extraction_method) ? (
             <p className="meta">{ocrStatusLine(selected.extraction_method)}</p>
           ) : null}
@@ -2878,16 +2881,16 @@ function OpenedRecords({
           }) ? (
             <ReadMoreText
               key={selected.id}
-              text={body.data?.full_text ?? cap.body}
+              text={darkScreenText(body.data?.full_text ?? cap.body)}
               totalCharacters={body.data?.total_characters ?? Array.from(cap.body).length}
               onReadRest={async (offset) => {
                 const next = await getArtifact({ data: { id: selected.id, offset } });
                 if (!next) throw new Error("No saved document was returned");
-                return next.full_text;
+                return darkScreenText(next.full_text);
               }}
             />
           ) : cap?.body ? (
-            <div className="read-full">{cap.body}</div>
+            <div className="read-full">{darkScreenText(cap.body)}</div>
           ) : (
             <p className="read-ex">
               Opened, but no readable text was extracted. Use Open original to read the live page.

@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 import { renderToStaticMarkup } from "react-dom/server";
 import { React, createRoot, h, detail, Route, RealPicker } from "./dark-file-model-flow.harness.mjs";
 
-export async function fileScreen({ width = 1440, large = false } = {}) {
+export async function fileScreen({ width = 1440, large = false, storedCopy = false } = {}) {
   detail.investigation.title = "r/longmont: Firestone Boulevard & I-25 Frontage Road Construction Contract";
   detail.investigation.ordinary_explanation = null;
   // The recorded file has 363 attempts and 262 saved records. Deliberately
@@ -11,6 +11,7 @@ export async function fileScreen({ width = 1440, large = false } = {}) {
   detail.claims = Array.from({ length: 262 }, (_, i) => ({ kind: "FINDING", capture_event_id: i + 1, body: "The public record describes the construction contract and the Board of Trustees hearing. ".repeat(6), confidence: 0.9 }));
   detail.sourceCaptures = detail.claims.map((_, i) => ({ id: i + 1, title: "Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing", url: "https://example.test/record/" + i }));
   globalThis.__darkFlow.fixtures["investigation-activity"] = Array.from({ length: 363 }, (_, i) => ({ id: String(i), occurredAt: "2026-10-08T12:00:00Z", tone: "plain", text: "Opened Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing, captured" }));
+  if (storedCopy) { detail.claims[0].body = "An artifact records $1,200 after two hops. ".repeat(8); globalThis.__darkFlow.fixtures["investigation-activity"].forEach((a) => a.text = "Saved artifacts after 3 hops for $1,200"); }
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node);
   await React.act(async () => root.render(h(Route.component)));
