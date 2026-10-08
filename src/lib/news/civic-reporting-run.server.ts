@@ -108,6 +108,7 @@ import {
   videoIdOfSeed,
   windowBlock,
   type TapeWindow,
+  type TapeSegment,
   type WholeRecord,
 } from "./civic-reporting-meeting.server.ts";
 import {
@@ -3224,6 +3225,8 @@ type ClaimCheckCandidate = {
   url: string;
   locator: string;
   startSeconds?: number;
+  endSeconds?: number;
+  anchorSeconds?: number;
   page: number | null;
   item?: string;
   score: number;
@@ -3245,25 +3248,122 @@ function candidateScore(claim: string, quote: string): number {
   const terms = significantEvidenceWords(claim);
   const hits = terms.filter((term) => normalized.includes(term)).length;
   const numbers = claim.match(/\d[\d,]*(?:\.\d+)?%?/g) ?? [];
-  const quoteDigits = quote.replace(/\D/g, "");
+  const spokenDigits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
+  const quoteDigits = quote.toLowerCase()
+    .replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!)
+    .replace(/\D/g, "");
   const numberHits = numbers.filter((number) => quoteDigits.includes(number.replace(/\D/g, ""))).length;
-  return hits + numberHits * 4 + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+  const topicStop = new Set([
+    "about", "announced", "approval", "chair", "claim", "following", "identified", "item", "main", "member",
+    "motion", "opposing", "passage", "result", "separate", "supplied", "that", "the", "with",
+  ]);
+  const topicTerms = [...new Set(normalizeForMatch(claim).split(" ").filter((word) =>
+    word.length >= 4 && !/^\d+$/.test(word) && !topicStop.has(word),
+  ))];
+  const topicHits = topicTerms.filter((term) => normalized.includes(term)).length;
+  const budgetContextMatch = /\bbudget\b/i.test(claim) && /\b(?:budget|capital|funds?|fees?|rates and charges|appropriation)\b/i.test(quote);
+  const ordinanceIds = [...claim.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
+  const ordinanceHits = ordinanceIds.filter((id) => normalized.includes(id)).length;
+  const readingStage = claim.match(/\b(first|second)[\s-]+reading\b/i)?.[1]?.toLowerCase();
+  const readingStageMatch = Boolean(readingStage && new RegExp(`\\b${readingStage}[\\s-]+reading\\b`, "i").test(quote));
+  const claimedTally = claim.match(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/i);
+  const spoken = quote.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!);
+  const hasClaimedResult = Boolean(claimedTally && announcedResultWords.test(quote) &&
+    [...spoken.matchAll(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/gi)]
+      .some((match) => match[1] === claimedTally[1] && match[2] === claimedTally[2]));
+  return hits + numberHits * 4 + topicHits * 4 + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 24 : 0) + (hasClaimedResult ? 8 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+}
+
+const announcedResultWords = /\b(?:(?:motion|item|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:carries|passes|fails|carried|passed|failed)|carries\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+
+function sameTranscriptItem(left: TapeSegment, right: TapeSegment): boolean {
+  return !left.item || !right.item || left.item === right.item;
+}
+
+function voteClaim(claim: string): boolean {
+  return /\b(?:vote|voted|motion|carried|carries|passed|passes|failed|fails|unanim(?:ous|ously)|approval|approved|passage|result|\d+\s*(?:-|–|—|to)\s*\d+)\b/i.test(claim);
+}
+
+function motionSegment(segment: TapeSegment): boolean {
+  return /\b(?:i move|we have a motion|move that|the motion was made|the motion has been made)\b/i.test(segment.text);
+}
+
+function cappedPassage(segments: TapeSegment[]): string {
+  const text = segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+  if (text.length <= 1_200) return text;
+  return text.slice(0, 600).trimEnd() + " … " + text.slice(-596).trimStart();
+}
+
+function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl: string): ClaimCheckCandidate[] {
+  const segments = [...record.segments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
+  const isVoteClaim = voteClaim(claim);
+  const isReadingClaim = /\b(?:first|second)[\s-]+reading\b/i.test(claim);
+  const matched = segments.filter((segment) => candidateScore(claim, segment.text) > 0 || (isVoteClaim && announcedResultWords.test(segment.text)));
+  const passages = matched.map((match): ClaimCheckCandidate => {
+    let anchor = match;
+    if (isVoteClaim && !announcedResultWords.test(match.text)) {
+      anchor = segments.find((segment) =>
+        segment.seconds >= match.seconds && segment.seconds <= match.seconds + 900 &&
+        sameTranscriptItem(match, segment) && announcedResultWords.test(segment.text),
+      ) ?? match;
+    }
+    const contextWindowSeconds = isReadingClaim ? 300 : 120;
+    const lowerBound = Math.max(0, anchor.seconds - contextWindowSeconds);
+    const motion = [...segments].reverse().find((segment) =>
+      segment.seconds < anchor.seconds && anchor.seconds - segment.seconds <= 900 &&
+      sameTranscriptItem(anchor, segment) && motionSegment(segment),
+    );
+    const startSeconds = motion?.seconds ?? lowerBound;
+    const context = segments.filter((segment) =>
+      segment.seconds >= startSeconds && segment.seconds <= anchor.seconds && sameTranscriptItem(anchor, segment),
+    );
+    const first = context[0] ?? anchor;
+    const last = context[context.length - 1] ?? anchor;
+    const item = anchor.item || first.item;
+    const quote = cappedPassage(context.length ? context : [anchor]);
+    return {
+      kind: "transcript",
+      quote,
+      title: "Retained meeting transcript",
+      url: videoUrl,
+      locator: `${item ? `Item ${item}; ` : ""}${clockLabel(first.seconds)}–${clockLabel(last.seconds)}`,
+      startSeconds: first.seconds,
+      endSeconds: last.seconds,
+      anchorSeconds: match.seconds,
+      page: null,
+      item: item || undefined,
+      score: candidateScore(claim, quote),
+    };
+  }).sort((a, b) => a.anchorSeconds! - b.anchorSeconds!);
+
+  const merged: ClaimCheckCandidate[] = [];
+  for (const passage of passages) {
+    const prior = merged[merged.length - 1];
+    const sameItem = prior && (prior.item === passage.item || (isReadingClaim && passage.anchorSeconds! - prior.anchorSeconds! <= 300));
+    const sameRange = prior && prior.startSeconds === passage.startSeconds && prior.endSeconds === passage.endSeconds;
+    const overlaps = prior && passage.startSeconds! <= prior.endSeconds! && prior.startSeconds! <= passage.endSeconds!;
+    if (sameItem && sameRange) continue;
+    if (sameItem && overlaps && (isVoteClaim ? passage.anchorSeconds! - prior.anchorSeconds! <= 12 : !isReadingClaim || passage.anchorSeconds! - prior.anchorSeconds! <= 300)) {
+      const start = Math.min(prior.startSeconds!, passage.startSeconds!);
+      const end = Math.max(prior.endSeconds!, passage.endSeconds!);
+      const context = segments.filter((segment) => segment.seconds >= start && segment.seconds <= end &&
+        (!passage.item || !segment.item || segment.item === passage.item));
+      prior.quote = cappedPassage(context);
+      prior.startSeconds = context[0]?.seconds ?? start;
+      prior.endSeconds = context[context.length - 1]?.seconds ?? end;
+      prior.locator = `${prior.item ? `Item ${prior.item}; ` : ""}${clockLabel(prior.startSeconds)}–${clockLabel(prior.endSeconds)}`;
+      prior.score = candidateScore(claim, prior.quote);
+    } else {
+      merged.push({ ...passage });
+    }
+  }
+  return merged;
 }
 
 function claimCheckCandidates(claim: string, record: WholeRecord, documents: DocumentRead[]): ClaimCheckCandidate[] {
   const videoId = str(record.identity.videoId);
   const videoUrl = str(record.identity.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
-  const transcript = record.segments.map((segment): ClaimCheckCandidate => ({
-    kind: "transcript",
-    quote: segment.text.trim().slice(0, 600),
-    title: "Retained meeting transcript",
-    url: videoUrl,
-    locator: `${segment.item ? `Item ${segment.item}; ` : ""}${clockLabel(segment.seconds)}`,
-    startSeconds: segment.seconds,
-    page: null,
-    item: segment.item || undefined,
-    score: candidateScore(claim, segment.text),
-  }));
+  const transcript = transcriptClaimCandidates(claim, record, videoUrl);
   const documentCandidates = documents.filter((doc) => doc.ok).flatMap((doc) => {
     const pages = (doc.pages ?? []).filter((page) => page.text.trim());
     const units = pages.length
@@ -3294,7 +3394,7 @@ function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate,
     kind: candidate.kind === "transcript" ? "reporting" : "document-source",
     text: candidate.title,
     startSeconds: candidate.startSeconds ?? null,
-    endSeconds: candidate.startSeconds === undefined ? null : candidate.startSeconds + 45,
+    endSeconds: candidate.endSeconds ?? (candidate.startSeconds === undefined ? null : candidate.startSeconds + 45),
     packetPage: candidate.page,
     status: "lead",
     reason: "AI claim re-check against a retained record",

@@ -2087,6 +2087,56 @@ it("checks an unresolved claim against the full transcript and already-read docu
   assert.equal(result.claims[0]?.item, "11");
 });
 
+// guards: an announced vote could stay unchecked when its motion appears earlier in the transcript.
+it("checks a vote against the passage from its motion through the result", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "motion uh to amend carries 5 to 2 with";
+  const quote = "motion uh to amend carries 5 to 2 with";
+  let prompt = "";
+  let stagePrompt = "";
+  let calls = 0;
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "fire-vote", headline: "Council amends fire ordinance", draft: claim, plainBrief: "", cannotSay: "",
+      readinessTier: 1,
+      claims: [
+        { id: "fire-vote", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the motion and result." },
+        { id: "reading-stage", text: "The account places ordinance 2026-69 among first-reading items.", status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the ordinance and reading stage." },
+      ],
+      sources: [],
+    },
+    record: {
+      identity: { videoId, videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "9E", itemTitle: "Fire ordinance", text: "I move to amend ordinance 2026-69 to add fire protections." },
+        { index: 2, seconds: 160, item: "9E", itemTitle: "Fire ordinance", text: "motion uh to amend carries 5 to 2 with" },
+        { index: 3, seconds: 1_000, item: "11", itemTitle: "Fire ordinance", text: "Item E is ordinance 2026-69 on the agenda." },
+        { index: 4, seconds: 1_258, item: "11", itemTitle: "Fire ordinance", text: "At the September 22 meeting, this item was approved on first reading with four additional conditions." },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async (_system: string, sent: string) => {
+      calls++;
+      if (calls === 1) prompt = sent;
+      else stagePrompt = sent;
+      return { ok: true, text: JSON.stringify({
+        verdict: calls === 1 ? "VERIFIED" : "OPEN", quote: calls === 1 ? quote : "", sourceKind: "transcript", sourceUrl: videoUrl,
+        replacement: "", cut: false, reason: "The retained transcript supplies the closest context.",
+      }) };
+    }) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.match(prompt, /I move to amend ordinance 2026-69[\s\S]*motion uh to amend carries 5 to 2 with/);
+  const stageLine = stagePrompt.split(/\r?\n/).find((line) => line.startsWith("CLOSEST FULL-TRANSCRIPT PASSAGES: "));
+  const stagePassages = JSON.parse(stageLine!.slice("CLOSEST FULL-TRANSCRIPT PASSAGES: ".length)) as Array<{ quote: string }>;
+  assert.ok(stagePassages.some((passage) => passage.quote.includes("ordinance 2026-69") && passage.quote.includes("approved on first reading")));
+  assert.equal(calls, 2);
+  assert.equal(result.claims[0]?.status, "VERIFIED", result.claims[0]?.nextCheck);
+});
+
 // guards: a statement contradicted by the retained record could remain in the filed story.
 it("rewrites a contradicted sentence to match the retained transcript", async () => {
   const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
