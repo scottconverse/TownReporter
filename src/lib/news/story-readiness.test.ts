@@ -14,3 +14,23 @@ it("keeps the editor's readiness state within the record-check thresholds", () =
   const lead = "The council approved the budget.";
   assert.equal(read([claim("UNVERIFIED", lead)], lead, `${lead}\n\nMore story.`).state, "not-ready");
 });
+
+// guards: the editor could be told the lead is open when only later facts need checking.
+it("maps open facts to their own paragraphs before explaining not-ready", () => {
+  const texts = [
+    "Council approved the budget at the final meeting.",
+    "Council reviewed the plan after the second reading.",
+    "Council debated the proposal during public comment.",
+    "Council adopted the calendar after public comment.",
+    "Council approved the plan in the evening session.",
+    "Council reviewed the budget after a public comment.",
+  ];
+  const result = storyReadiness({
+    headline: "Council budget update",
+    body: "Council approved a budget proposal. Council reviewed the plan.\n\n" + texts.join("\n\n"),
+    claims: texts.map((text) => ({ text, status: "UNVERIFIED" as const })),
+  });
+  assert.equal(result.state, "not-ready");
+  assert.equal(result.openCount, 6);
+  assert.equal(result.reason, "6 facts need checking.");
+});

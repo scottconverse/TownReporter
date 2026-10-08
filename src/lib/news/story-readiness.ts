@@ -16,9 +16,14 @@ export function storyReadiness(input: {
   checking?: boolean;
 }): StoryReadiness {
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
-  const firstParagraph = input.body.split(/\r?\n\s*\r?\n/)[0] ?? input.body;
-  const leadText = `${input.headline} ${firstParagraph}`;
-  const openLeadCount = open.filter((claim) => claimTouchesLead(claim.text, leadText)).length;
+  const paragraphs = input.body.split(/\r?\n\s*\r?\n/).map((text) => text.trim()).filter(Boolean);
+  const leadText = `${input.headline} ${paragraphs[0] ?? input.body}`;
+  const laterParagraphs = paragraphs.slice(1);
+  const openLeadCount = open.filter((claim) => {
+    const leadScore = claimParagraphScore(claim.text, leadText);
+    const laterScore = Math.max(0, ...laterParagraphs.map((paragraph) => claimParagraphScore(claim.text, paragraph)));
+    return leadScore >= 0.55 && leadScore >= laterScore;
+  }).length;
   const openCount = open.length;
   if (input.checking) return {
     state: "checking",
@@ -37,8 +42,8 @@ export function storyReadiness(input: {
     openCount,
     totalCount: input.claims.length,
     reason: openLeadCount > 0
-      ? "A headline or first-paragraph fact is still open."
-      : `${input.claims.length - openCount} of ${input.claims.length} facts matched to the meeting record; ${openCount} remain open.`,
+      ? `${openLeadCount} headline or first-paragraph fact${openLeadCount === 1 ? "" : "s"} need checking.`
+      : `${openCount} fact${openCount === 1 ? "" : "s"} need${openCount === 1 ? "s" : ""} checking.`,
   };
   return {
     state: "to-check",
@@ -48,16 +53,12 @@ export function storyReadiness(input: {
   };
 }
 
-function claimTouchesLead(claim: string, lead: string): boolean {
-  const normalizedLead = lead.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+function claimParagraphScore(claim: string, paragraph: string): number {
+  const normalizedParagraph = paragraph.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const tokens = claim.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(/\s+/).filter(Boolean);
-  const leadTokens = new Set(normalizedLead.split(/\s+/));
+  const paragraphTokens = new Set(normalizedParagraph.split(/\s+/));
   const numbers = claim.match(/\d[\d,]*(?:\.\d+)?/g) ?? [];
-  const leadNumbers = (lead.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((value) => value.replace(/\D/g, ""));
-  if (numbers.some((value) => leadNumbers.includes(value.replace(/\D/g, "")))) return true;
-
-  const names = claim.match(/\b[A-Z][a-z]{2,}\b/g)?.slice(1) ?? [];
-  if (names.some((name) => leadTokens.has(name.toLowerCase()))) return true;
+  const paragraphNumbers = (paragraph.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map((value) => value.replace(/\D/g, ""));
 
   const ignored = new Set([
     "about", "after", "against", "also", "been", "being", "both", "could", "from", "into", "more",
@@ -65,7 +66,9 @@ function claimTouchesLead(claim: string, lead: string): boolean {
     "will", "with", "would",
   ]);
   const facts = [...new Set(tokens.filter((token) => token.length >= 4 && !ignored.has(token)))];
-  if (facts.length < 2) return facts.some((token) => leadTokens.has(token));
-  const hits = facts.filter((token) => leadTokens.has(token)).length;
-  return hits >= 2 && hits / facts.length >= 0.55;
+  const totalWeight = facts.length + numbers.length * 4;
+  if (totalWeight === 0) return 0;
+  const factHits = facts.filter((token) => paragraphTokens.has(token)).length;
+  const numberHits = numbers.filter((value) => paragraphNumbers.includes(value.replace(/\D/g, ""))).length;
+  return (factHits + numberHits * 4) / totalWeight;
 }
