@@ -12,7 +12,7 @@ const queryStub = stub(`
     const data = globalThis.__darkFlow.fixtures;
     const name = queryKey[0];
     const value = name === "investigation" ? data.details?.[queryKey[1]] ?? data.detail : data[name];
-    return { data: value, isPending: false, isError: false, isRefetching: false, refetch: async () => {} };
+    return { data: value, isPending: Boolean(data.pending?.[name]), isError: false, isRefetching: false, refetch: async () => {} };
   }
   export function useMutation(options) {
     return { isPending: false, isError: false, mutate(value) { Promise.resolve(options.mutationFn(value)).then((result) => options.onSuccess?.(result, value), (error) => options.onError?.(error, value)); } };
@@ -52,7 +52,7 @@ const darkStub = stub(`
 `);
 const copyStub = stub(`
   export const DIG_STOP_ACK = "Stop requested.";
-  export const blockedDigBannerText = () => ""; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null;
+  export const blockedDigBannerText = () => ""; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null; export const editorPauseIsPageFailure = () => false;
   export const editorKindLabel = () => "Record"; export const elapsedLabel = () => ""; export const excerptForEditor = (v) => String(v ?? "");
   export const headlineFromUrl = () => ""; export const humanFrontierLabel = (v) => String(v ?? "");
   export const darkJobActive = () => false; export const observedDarkJobFinished = () => false;
@@ -92,7 +92,7 @@ const imports = {
   "@/components/model-picker": modelPickerStub,
   "@/components/first-run-picker-default": stub(`export const useFirstRunPickerSeed = () => {}; export const useFirstRunPickerDefault = () => "claude-haiku";`),
   "@/lib/news/dark-dials": stub(`export const scopeLabelsFor = () => ({ city: "Longmont", county: "Boulder County", region: "Region", adjacent: "Nearby" });`),
-  "@/lib/news/editor-dialog-logic": stub(`export const DARK_LIMITS = [{ key: "standard", label: "Standard", minutes: 120, hops: 5 }];`),
+  "@/lib/news/editor-dialog-logic": stub(`export const DARK_LIMITS = [{ key: "quick", label: "Quick", minutes: 20, hops: 5 }, { key: "standard", label: "Standard", minutes: 120, hops: 5 }];`),
   "@/components/investigation-brief": stub(`export const InvestigationBriefCard = () => null; export const SectionTldr = () => null;`),
   "@/components/search-trail-entry": stub(`export const SearchTrailEntry = () => null;`),
   "@/lib/news/dark-fact-lines": stub(`export const dedupeFactLines = () => []; export const factLinesDropped = () => 0;`),

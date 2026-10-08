@@ -1136,7 +1136,7 @@ function DarkPage() {
               canUndoDisposition={undoDisposition?.id === openId}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
-              keepDisabled={digRunning}
+              keepDisabled={digRunning || !detail.data || detail.data.investigation.id !== openId}
               stalled={stalled}
               darkJobError={
                 detail.data?.darkJob?.status === "failed"
@@ -1654,6 +1654,7 @@ function InvestigationWorkspace({
   const briefJob = fileJob("brief", openId);
   const challengeJob = fileJob("challenge", openId);
   const inv = detail?.investigation;
+  const detailReady = inv?.id === openId;
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
   const watchPages = artifacts
@@ -1766,7 +1767,7 @@ function InvestigationWorkspace({
   })();
   const leftover = nextDeduped.length;
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
-  const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
+  const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
   const activityAll = activityQuery.data ?? [];
   const activityRows = activityAll.slice(-5);
@@ -2104,7 +2105,7 @@ function InvestigationWorkspace({
         </p>
       </div>
 
-      {followUpOpen ? (
+      {followUpOpen && detailReady ? (
         <FollowUpDialog
           leads={followUpLeads.data ?? []}
           initial={{
