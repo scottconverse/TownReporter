@@ -6,6 +6,7 @@ import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-ch
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
+  draftSignalFile,
   findSomethingToDigInto,
   fileRedditTip,
   getInvestigation,
@@ -74,7 +75,7 @@ import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { searchOutcomeWords } from "@/lib/news/search-trail-words";
-import { captureCounterLine, digRailCounterLine } from "@/lib/news/dark-counters";
+import { captureCounterLine } from "@/lib/news/dark-counters";
 import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -116,6 +117,7 @@ function DarkPage() {
   const [seedFromImport, setSeedFromImport] = useState("");
   /** The header's "+ Start a file": the drawn dialog, open or shut. */
   const [startOpen, setStartOpen] = useState(false);
+  const [startPrefill, setStartPrefill] = useState<{ question?: string; tip?: string; explanation?: string }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedPiles, setExpandedPiles] = useState<Record<string, boolean>>({});
   const togglePile = (key: string) => setExpandedPiles((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -129,11 +131,14 @@ function DarkPage() {
     alreadyQueued: boolean;
   } | null>(null);
   const [queueError, setQueueError] = useState<{ invId: number; message: string } | null>(null);
-  const [pendingCard, setPendingCard] = useState<string | null>(null);
-  const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
+  const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
+  const [dismissedSignalIds, setDismissedSignalIds] = useState<string[]>([]);
+  const [dismissedSignal, setDismissedSignal] = useState<WorthSeed | null>(null);
   const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSignalId = useRef<string | null>(null);
   const wasInvestigating = useRef(false);
   const [redditResult, setRedditResult] = useState<RedditScanResult | null>(null);
   const [redditElapsed, setRedditElapsed] = useState(0);
@@ -166,11 +171,31 @@ function DarkPage() {
     }
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
+      if (dismissTimer.current) clearTimeout(dismissTimer.current);
     };
   }, []);
 
   function claimCard(id: string) {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  }
+
+  function dismissSignal(item: WorthSeed) {
+    if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    setDismissedSignalIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
+    setDismissedSignal(item);
+    setSelectedSignalId(null);
+    dismissTimer.current = setTimeout(() => {
+      setDismissedSignal(null);
+    }, 10_000);
+  }
+
+  function undoDismissSignal() {
+    if (dismissTimer.current) clearTimeout(dismissTimer.current);
+    if (dismissedSignal) {
+      setDismissedSignalIds((prev) => prev.filter((id) => id !== dismissedSignal.id));
+      setSelectedSignalId(dismissedSignal.id);
+    }
+    setDismissedSignal(null);
   }
 
   /*
@@ -442,7 +467,6 @@ function DarkPage() {
         const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
         const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
         showNotice(msg, false);
-        setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();
         invalidate();
         return;
@@ -454,7 +478,6 @@ function DarkPage() {
       const msg =
         editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
       showNotice(msg, false);
-      setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
       clearPhase();
       invalidate();
     },
@@ -465,6 +488,7 @@ function DarkPage() {
     // before the first open-state payload can hydrate Automatic and lock the
     // new id while the async job is still being committed.
     pickedFor.current = id;
+    if (cardId && cardId !== "find") claimCard(cardId);
     rememberOpen(id);
     setNotice(null);
     beginDigPhase();
@@ -475,40 +499,11 @@ function DarkPage() {
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     advance.mutate(id);
-    if (cardId) setPendingCard(cardId);
   }
-
-  const openFromCard = useMutation({
-    mutationFn: (item: WorthSeed) =>
-      openDarkInvestigation({ data: { paste: item.seed, title: item.title } }),
-    onMutate: (item) => {
-      setPendingCard(item.id);
-      setCardError(null);
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res, item) => {
-      if (!res?.ok || !res.investigationId) {
-        setCardError({ id: item.id, message: "Could not open an investigation." });
-        setPendingCard(null);
-        clearPhase();
-        return;
-      }
-      claimCard(item.id);
-      afterOpen(res.investigationId, item.id);
-    },
-    onError: (err, item) => {
-      const msg =
-        editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
-      setCardError({ id: item.id, message: msg });
-      setPendingCard(null);
-      clearPhase();
-    },
-  });
 
   const find = useMutation({
     mutationFn: () => findSomethingToDigInto(),
     onMutate: () => {
-      setPendingCard("find");
       setCardPhase("Starting…");
     },
     onSuccess: (res) => {
@@ -560,7 +555,6 @@ function DarkPage() {
   const followLead = useMutation({
     mutationFn: (seed: { paste: string; title: string }) => openDarkInvestigation({ data: seed }),
     onMutate: () => {
-      setPendingCard("follow");
       setCardPhase("Starting…");
     },
     onSuccess: (res, seed) => {
@@ -577,6 +571,22 @@ function DarkPage() {
       );
       clearPhase();
     },
+  });
+
+  const draftSignal = useMutation({
+    mutationFn: (item: WorthSeed) => draftSignalFile({ data: { id: item.id, choice: modelChoice, effort: modelEffort } }),
+    onMutate: () => showNotice("Drafting the question and ordinary explanation…", true),
+    onSuccess: (res, item) => {
+      if (!res?.ok) {
+        showNotice(res?.error ?? "The AI could not draft this file.");
+        return;
+      }
+      showNotice(null);
+      pendingSignalId.current = item.id;
+      setStartPrefill(res.prefill);
+      setStartOpen(true);
+    },
+    onError: () => showNotice("The AI could not draft this file. Try again."),
   });
 
   const park = useMutation({
@@ -727,8 +737,7 @@ function DarkPage() {
       showNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
-  const starting =
-    openFromCard.isPending || find.isPending || followLead.isPending;
+  const starting = find.isPending || followLead.isPending || draftSignal.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -795,9 +804,23 @@ function DarkPage() {
     item,
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
-  const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
+  const inbox = worthRows
+    .filter((row) => !row.off && !dismissedSignalIds.includes(row.item.id))
+    .map((row) => row.item);
+  const selectedSignal =
+    inbox.find((item) => item.id === selectedSignalId) ?? (openId == null ? inbox[0] ?? null : null);
   const covered = worthRows.filter((row) => row.off);
-  const signalsCount = signalCounts(worthRows);
+  const signalsCount = signalCounts(worthRows.filter((row) => !dismissedSignalIds.includes(row.item.id)));
+
+  function chooseSignal(item: WorthSeed) {
+    rememberOpen(null);
+    setSelectedSignalId(item.id);
+  }
+
+  function startFileFromSignal() {
+    if (!selectedSignal) return;
+    draftSignal.mutate(selectedSignal);
+  }
 
   return (
     /*
@@ -831,7 +854,10 @@ function DarkPage() {
             type="button"
             className="btn solid"
             disabled={paperGate.blocked}
-            onClick={() => setStartOpen(true)}
+            onClick={() => {
+              setStartPrefill(undefined);
+              setStartOpen(true);
+            }}
           >
             + Start a file
           </button>
@@ -850,9 +876,12 @@ function DarkPage() {
       <DarkFileDialog
         open={startOpen}
         seed={seedFromImport || undefined}
+        prefill={startPrefill}
         onClose={() => {
           setStartOpen(false);
           setSeedFromImport("");
+          setStartPrefill(undefined);
+          pendingSignalId.current = null;
         }}
         onOpened={(id, run) => {
           // The editor's pick, for the first round: `afterOpen` issues the
@@ -871,7 +900,9 @@ function DarkPage() {
             setModelChoice(picked);
             setModelEffort(effort);
           }
-          afterOpen(id);
+          const signalId = pendingSignalId.current;
+          pendingSignalId.current = null;
+          afterOpen(id, signalId ?? undefined);
         }}
       />
       {/*
@@ -888,9 +919,6 @@ function DarkPage() {
               <span>Open files</span>
               <span>{active.length}</span>
             </div>
-            <p className="astra-note astra-pile-pad">
-              Started. A stop mid-file is normal — it means more to read, not a failure.
-            </p>
             {investigations.isError && !investigations.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
@@ -908,41 +936,25 @@ function DarkPage() {
                 <ListSkeleton rows={3} />
               </div>
             ) : active.length === 0 ? (
-              <p className="meta astra-pile-pad">
-                Empty. Paste a tip above, or start digging on a signal.
-              </p>
+              <p className="meta astra-pile-pad">No files yet.</p>
             ) : (
               (expandedPiles.open ? active : active.slice(0, 5)).map((row) => (
-                <DeskFileCard
-                  key={row.id}
-                  row={row}
-                  selected={row.id === openId}
-                  digging={digging && openId === row.id}
-                  locked={digging || busyStart}
-                  onOpen={() => rememberOpen(row.id)}
-                  onKeep={() => {
-                    if (digging || busyStart) return;
-                    setNotice(null);
-                    rememberOpen(row.id);
-                    beginDigPhase();
-                    advance.mutate(row.id);
-                  }}
-                  onPark={() => {
-                    if (digging) return;
-                    park.mutate(row.id);
-                  }}
-                />
-              ))
+              <DeskFileCard
+                key={row.id}
+                row={row}
+                selected={row.id === openId}
+                onOpen={() => rememberOpen(row.id)}
+              />
+            ))
             )}
             {active.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("open")}>{expandedPiles.open ? "Show fewer" : `Show all ${active.length}`}</InkButton> : null}
           </div>
 
           <div className="astra-pile">
             <div className="astra-pile-h">
-              <span>Signals</span>
-              <span>{signalsCount.total}</span>
+              <span>Signals to review</span>
+              <span>{inbox.length}</span>
             </div>
-            <p className="astra-note astra-pile-pad">{signalsCount.toReview} to review · {signalsCount.covered} already accounted for.</p>
             {worth.isError && !worth.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
@@ -965,13 +977,11 @@ function DarkPage() {
               </p>
             ) : (
               (expandedPiles.signals ? inbox : inbox.slice(0, 5)).map((item) => (
-                <WorthCard
+                <WorthSelector
                   key={item.id}
                   item={item}
-                  busy={busyStart || digging}
-                  phase={pendingCard === item.id ? cardPhase : ""}
-                  error={cardError?.id === item.id ? cardError.message : null}
-                  onStart={() => openFromCard.mutate(item)}
+                  selected={selectedSignal?.id === item.id}
+                  onOpen={() => chooseSignal(item)}
                 />
               ))
             )}
@@ -1063,30 +1073,22 @@ function DarkPage() {
           <div className="astra-pile">
             <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
             {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
-              <DeskFileCard key={row.id} row={row} selected={row.id === openId} digging={true} locked={digging || busyStart} onOpen={() => rememberOpen(row.id)} onKeep={() => advance.mutate(row.id)} onPark={() => park.mutate(row.id)} />
+              <DeskFileCard key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
             )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
             {waitingFiles.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("waiting")}>{expandedPiles.waiting ? "Show fewer" : `Show all ${waitingFiles.length}`}</InkButton> : null}
           </div>
 
-          <div className="astra-pile">
-            <div className="astra-pile-h">
+          {parked.length ? <details className="astra-pile astra-pile-aside">
+            <summary className="astra-pile-h">
               <span>Set aside</span>
               <span>{parked.length}</span>
-            </div>
+            </summary>
             <p className="astra-note astra-pile-pad">Parked or finished. Pull anything back.</p>
             {parked.length === 0 ? (
               <p className="meta astra-pile-pad">Nothing set aside yet.</p>
             ) : (
               (expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
-                <div key={row.id} className={"astra-file dim astra-aside-file" + (row.id === openId ? " on" : "")}>
-                  {row.id === openId ? <span className="astra-file-m">Open now</span> : null}
-                  <span className="astra-file-t" title={row.title}>{editorTitle(row.title) || `File ${row.id}`}</span>
-                  <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>Read</InkButton>
-                  <details className="row-more">
-                    <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
-                    <div className="row-more-panel"><InkButton tone="quiet" disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>{pullBack.isPending ? "Pulling back?" : "Pull back"}</InkButton></div>
-                  </details>
-                </div>
+                <DeskFileCard key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
               ))
             )}
             {parked.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("aside")}>{expandedPiles.aside ? "Show fewer" : `Show all ${parked.length}`}</InkButton> : null}
@@ -1121,7 +1123,7 @@ function DarkPage() {
                 {(runs.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => togglePile("runs")}>{expandedPiles.runs ? "Show fewer" : `Show all ${runs.data?.length}`}</InkButton> : null}
               </details>
             ) : null}
-          </div>
+          </details> : null}
 
           {/*
             The rail's foot, as drawn: the two desks-wide actions that are not
@@ -1130,13 +1132,16 @@ function DarkPage() {
           */}
           <div className="astra-piles-foot">
             <div className="astra-pile-acts">
-              <InkButton
-                tone="quiet"
-                disabled={busyStart || digging || paperGate.blocked}
-                onClick={() => find.mutate()}
-              >
-                {find.isPending ? "Starting…" : "Pick one for me"}
-              </InkButton>
+              <details className="astra-other-actions">
+                <summary>More ways to start</summary>
+                <InkButton
+                  tone="quiet"
+                  disabled={busyStart || digging || paperGate.blocked}
+                  onClick={() => find.mutate()}
+                >
+                  {find.isPending ? "Starting…" : "Pick one for me"}
+                </InkButton>
+              </details>
               <InkButton
                 tone="quiet"
                 disabled={
@@ -1169,6 +1174,12 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
+          {dismissedSignal ? (
+            <p className="note" role="status">
+              Dismissed “{editorTitle(dismissedSignal.title)}”.{" "}
+              <button type="button" className="inline-link" onClick={undoDismissSignal}>Undo</button>
+            </p>
+          ) : null}
           <section id="dark-settings" hidden={!settingsOpen} aria-label="Dark Desk settings">
           <DarkDialsPanel
             modelChoice={modelChoice}
@@ -1204,9 +1215,46 @@ function DarkPage() {
             read as a settings page rather than as a desk with no file on it.
             Both panels are still below, so nothing became unreachable.
           */}
-          {openId == null && !investigations.data?.length && !investigations.isPending ? (
+          {openId == null && selectedSignal ? (
+            <section className="astra-panel astra-signal-selected" aria-label="Selected signal">
+              <p className="astra-chip">Unverified</p>
+              <h2 className="astra-question">{editorTitle(selectedSignal.title)}</h2>
+              {selectedSignal.source_url && /^https?:\/\//i.test(selectedSignal.source_url) ? (
+                <p className="astra-signal-source">
+                  Source: <a href={selectedSignal.source_url} target="_blank" rel="noreferrer">{selectedSignal.source_url}</a>
+                </p>
+              ) : null}
+              <div className="of-block">
+                <p className="side-label">What the AI saw</p>
+                <p className="side-item">{plainEditorText(selectedSignal.happened)}</p>
+                {selectedSignal.evidence ? <p className="meta">{plainEditorText(selectedSignal.evidence)}</p> : null}
+              </div>
+              <div className="of-block">
+                <p className="side-label">Why it may matter</p>
+                <p className="side-item">{plainEditorText(selectedSignal.why)}</p>
+              </div>
+              <div className="of-block">
+                <p className="side-label">Question to investigate</p>
+                <p className="side-item">{plainEditorText(selectedSignal.question)}</p>
+              </div>
+              <div className="astra-panel-acts">
+                <InkButton
+                  disabled={paperGate.blocked || busyStart || digging}
+                  pending={draftSignal.isPending}
+                  pendingLabel="Drafting…"
+                  onClick={startFileFromSignal}
+                >
+                  Start a file from this
+                </InkButton>
+                <InkButton tone="quiet" disabled={busyStart || digging} onClick={() => dismissSignal(selectedSignal)}>
+                  Dismiss
+                </InkButton>
+              </div>
+            </section>
+          ) : null}
+          {openId == null && !selectedSignal && !investigations.data?.length && !investigations.isPending ? (
             <div className="astra-panel astra-empty">
-              <h2 className="astra-panel-h">No file open</h2>
+              <h2 className="astra-panel-h">No files yet.</h2>
               <p className="astra-note">
                 Pick a file from Open files, open a signal nobody has read yet, or start one of
                 your own with <strong>+ Start a file</strong> above.
@@ -1267,6 +1315,7 @@ function DarkPage() {
               onQueue={() => toQueue.mutate(openId)}
               onClose={() => rememberOpen(null)}
               onPark={() => park.mutate(openId)}
+              onPullBack={() => pullBack.mutate(openId)}
               onFollow={(seed) => followLead.mutate(seed)}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
@@ -1287,29 +1336,38 @@ function DarkPage() {
 function DeskFileCard({
   row,
   selected,
-  digging,
-  locked,
   onOpen,
-  onKeep,
-  onPark,
 }: {
   row: InvestigationRow;
   selected: boolean;
-  digging: boolean;
-  locked: boolean;
   onOpen: () => void;
-  onKeep: () => void;
-  onPark: () => void;
 }) {
   const { formatListDateTime } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
+  const limitRecords = row.limit_key === "quick" ? 10 : row.limit_key === "deep" ? 100 : 30;
+  const waitingCount = Number(row.still_open ?? 0);
   const waitingLine = row.waiting_follow_up
     ? `AI watching for ${row.waiting_follow_up}`
     : row.waiting_watch
       ? `Watching ${row.waiting_watch}`
       : null;
+  const stateLine = waitingLine
+    ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
+    : row.status === "closed"
+      ? row.closed_kind === "queued"
+        ? `Sent to the queue${row.close_note ? ` · ${row.close_note}` : ""}`
+        : row.closed_kind === "no-finding"
+          ? `Closed · no finding${row.close_note ? ` · ${row.close_note}` : ""}`
+          : `Closed · ${formatListDateTime(row.updated_at)}`
+      : row.status === "investigating"
+        ? `Reading · ${records} of ${limitRecords} records`
+        : row.status === "open" && waitingCount > 0
+          ? `Waiting on ${waitingCount} ${waitingCount === 1 ? "record" : "records"}`
+          : row.status === "paused"
+            ? `Stopped · ${records} of ${limitRecords} records`
+            : `Case file ready · ${records} records`;
   return (
-    <div className={"astra-file" + (selected ? " on" : "")}>
+    <div className={"astra-file astra-pile-row" + (selected ? " on" : "")}>
       {/*
         The row is the control. The drawing's rail rows are selectors -- a bold
         title and one line of metadata -- so "Open file" / "Viewing above" is no
@@ -1323,44 +1381,8 @@ function DeskFileCard({
         aria-current={selected ? "true" : undefined}
       >
         <span className="astra-file-t">{editorTitle(row.title) || `File ${row.id}`}</span>
-        <span className="astra-file-m">
-          {waitingLine
-            ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
-            : `${selected ? "Open now · " : ""}${editorStatus(row.status)} · ${digRailCounterLine(records)} · last touched ${formatListDateTime(row.updated_at)}`}
-        </span>
+        <span className="astra-file-m">{stateLine}</span>
       </button>
-      {/*
-        Keep digging and Set aside keep the behavior they had on the old card,
-        but move under More: the drawing's rail row carries one action, and the
-        rail is an index, not a workbench. Neither act is lost -- both are one
-        click away, and Keep digging is also on the open file's own Decide
-        strip.
-      */}
-      <div className="astra-file-acts">
-        <details className="row-more">
-          <summary className="btn quiet">
-            More ▾
-          </summary>
-          <div className="row-more-panel">
-            <button
-              type="button"
-              className="btn quiet"
-              disabled={digging || locked}
-              onClick={onKeep}
-            >
-              {digging ? "Reading…" : "Keep digging"}
-            </button>
-            <button
-              type="button"
-              className="btn quiet"
-              disabled={digging || locked}
-              onClick={onPark}
-            >
-              Set aside
-            </button>
-          </div>
-        </details>
-      </div>
     </div>
   );
 }
@@ -1509,57 +1531,17 @@ function RedditResultPanel({
   );
 }
 
-function WorthCard({
-  item,
-  busy,
-  phase,
-  error,
-  onStart,
-}: {
-  item: WorthSeed;
-  busy: boolean;
-  phase: string;
-  error: string | null;
-  onStart: () => void;
-}) {
+function WorthSelector({ item, selected, onOpen }: { item: WorthSeed; selected: boolean; onOpen: () => void }) {
   return (
-    <div className="astra-file">
-      <p className="astra-file-t">{editorTitle(item.title)}</p>
-      <p className="astra-file-m">
-        {item.badge || editorKindLabel(item.kind)} · {item.why}
-      </p>
-      <div className="astra-file-acts">
-        <InkButton disabled={busy} onClick={onStart}>
-          {phase.startsWith("Starting") ? "Starting…" : phase ? "Digging…" : "Start digging"}
-        </InkButton>
-        {/*
-          The two lines the card used to print in full -- what changed and the
-          first question -- are what makes a signal worth opening, so they stay
-          one click away rather than being cut. The rail's row shape is one
-          line of metadata; the why is the line that decides whether to look.
-        */}
-        <details className="row-more">
-          <summary className="btn quiet">More ▾</summary>
-          <div className="row-more-panel">
-            <p className="row-more-h">What changed</p>
-            <p>{item.happened}</p>
-            <p className="row-more-h">First question</p>
-            <p>{item.question}</p>
-            {item.source_line ? <p className="meta">{item.source_line}</p> : null}
-          </div>
-        </details>
-      </div>
-      {phase ? (
-        <p className="astra-file-m" aria-live="polite">
-          {phase}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="note err" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      className="astra-file-open astra-signal-open"
+      onClick={onOpen}
+      aria-current={selected ? "true" : undefined}
+    >
+      <span className="astra-file-t">{editorTitle(item.title)}</span>
+      <span className="astra-file-m">{item.badge || editorKindLabel(item.kind)} · Unverified</span>
+    </button>
   );
 }
 
@@ -1634,6 +1616,7 @@ function InvestigationWorkspace({
   onQueue,
   onClose,
   onPark,
+  onPullBack,
   onFollow,
   onWriteBrief,
   briefPending,
@@ -1664,6 +1647,7 @@ function InvestigationWorkspace({
   onQueue: () => void;
   onClose: () => void;
   onPark: () => void;
+  onPullBack: () => void;
   onFollow: (seed: { paste: string; title: string }) => void;
   onWriteBrief: () => void;
   briefPending: boolean;
@@ -2235,6 +2219,9 @@ function InvestigationWorkspace({
           <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
             {parkPending ? "Setting aside…" : "Set aside"}
           </InkButton>
+          {inv?.status === "closed" ? (
+            <InkButton tone="quiet" onClick={onPullBack}>Pull back</InkButton>
+          ) : null}
           {queuedLead != null ? (
             <Link
               to="/desk/story/$leadId"

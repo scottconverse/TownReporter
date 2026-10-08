@@ -897,7 +897,7 @@ export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
   /**
-   * Seeds the two fields the caller already knows, instead of making the editor
+   * Seeds the file fields the caller already knows, instead of making the editor
    * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
    * row's prefill is cleared again by the next open that has none.
    */
@@ -966,10 +966,13 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
   // beyond winning over the prefill when a caller somehow passes both.
   const prefillQuestion = prefill?.question;
   const prefillTip = prefill?.tip;
+  const prefillExplanation = prefill?.explanation;
   const factory = React.useCallback(
     () =>
-      seed ? darkFileFromSeed(seed) : darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
-    [seed, prefillQuestion, prefillTip],
+      seed
+        ? darkFileFromSeed(seed)
+        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }),
+    [seed, prefillQuestion, prefillTip, prefillExplanation],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
 

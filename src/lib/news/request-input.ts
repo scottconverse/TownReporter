@@ -1475,6 +1475,13 @@ export const darkSignalInput = z.preprocess(
   z.object({ id: rowId, asTip: z.boolean().optional() }),
 );
 
+/** `dark.ts` draftSignalFile (the signal row's Start a file action). */
+export const draftSignalFileInput = z.object({
+  id: z.string().max(240),
+  choice: modelChoiceText.default("auto"),
+  effort: modelEffortLoose.default(null),
+});
+
 /** `dark.ts:3232` fileRedditTip (`fileRedditTipFor` reads these five). */
 export const redditTipInput = z.object({
   url: z.string().max(LIMITS.url),

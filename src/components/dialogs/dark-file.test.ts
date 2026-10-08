@@ -164,6 +164,16 @@ describe("Start a Dark Desk file dialog", () => {
     assert.equal(darkFileSeed().tip, "");
   });
 
+  // guards: a signal's ordinary explanation must reach the saved investigation
+  it("carries the signal's suggested ordinary explanation into the file request", () => {
+    const seeded = darkFileSeed({
+      question: "Why did the notice change?",
+      tip: "The captured notice.",
+      explanation: "The city may have corrected a routine date.",
+    });
+    assert.equal(darkRequest(seeded).open.ordinaryExplanation, "The city may have corrected a routine date.");
+  });
+
   it("opens a handed-over hypothesis as the question and the material, keeping the dial defaults", () => {
     const seed = "Where did the money go?\n\nThe 2024 audit, page 12.";
     const seeded = darkFileFromSeed(seed);

@@ -6775,28 +6775,30 @@
 .desk-ltr.astra .astra-plain > li:last-child { border-bottom: 0; }
 
 /* --- Dark Desk: rail rows, pile chrome, and the open file ------------------
-   The drawing's rail is an index: one bold line, one line of metadata, one
-   action, and a rule between rows. The row itself is the control, so
-   .astra-file-open is a reset button that fills the row and inherits its
-   type; .astra-file keeps the padding and the selected bar. */
-/* UI1b-4: the row IS the control, so the row is what carries the edge. It had
-   none -- title, metadata and a hairline rule that was not even drawn -- so
-   every file in the Dark Desk rail measured as plain text. It wears the Quiet
-   button's 1px `--fg2` box now, inset in the rail's own 16px padding, and the
-   row's actions sit below it as they did. One box, not two: `.astra-file` is
-   the plain wrapper, this button is the press target. */
+   The rail is an index: a bold line, one line of metadata, and a rule between
+   rows. The selector itself is the 44px press target; `.astra-file` is only
+   the row wrapper. The selected row uses the ink marker for contrast. */
 .desk-ltr.astra .astra-file-open {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 8px 12px;
-  border: 1px solid var(--fg2);
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
   background: transparent;
   color: inherit;
   font: inherit;
   cursor: pointer;
 }
 .desk-ltr.astra .astra-file-open:focus-visible { outline-offset: 2px; }
+.desk-ltr.astra .astra-file-open:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-file-open[aria-current="true"] {
+  background: var(--bg);
+  box-shadow: inset 4px 0 0 var(--sel);
+}
+.desk-ltr.astra .astra-pile-row { padding: 0; gap: 0; }
+.desk-ltr.astra .astra-signal-open { display: block; }
 .desk-ltr.astra .astra-file-t,
 .desk-ltr.astra .astra-file-m { display: block; }
 .desk-ltr.astra .astra-file-acts {
@@ -6817,6 +6819,15 @@
   gap: 8px;
 }
 .desk-ltr.astra .astra-pile-acts .btn { width: 100%; }
+.desk-ltr.astra .astra-other-actions > summary {
+  min-height: 44px;
+  padding: 10px 0;
+  color: var(--fg2);
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-pile-aside > summary { list-style-position: inside; }
+.desk-ltr.astra .astra-signal-source { overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-signal-selected .astra-panel-acts { margin-top: 16px; }
 
 /*
   The rail's own paste box is the desk's top-of-rail start action, not a

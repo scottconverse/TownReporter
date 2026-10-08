@@ -26,6 +26,10 @@ export type WorthSeed = {
   source_line?: string;
 };
 
+export function signalReviewItems(items: readonly WorthSeed[]): WorthSeed[] {
+  return items.filter((item) => !item.id.startsWith("frontier:") && !item.id.startsWith("lead:"));
+}
+
 type AnomalyIn = { kind: string; summary: string; url: string | null; details: string | null; created_at?: string };
 type MonitorIn = { url: string; title: string; last_outcome: string | null };
 type LeadIn = { id: number; headline: string; why: string; evidence: string | null; newsworthiness: number | null; source_urls: string };
