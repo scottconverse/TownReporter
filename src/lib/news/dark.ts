@@ -450,7 +450,7 @@ const readDarkSettingsFor = createServerOnlyFn(async (newsroomId: number) =>
 );
 const saveDarkSettingsFor = createServerOnlyFn(async (
   newsroomId: number,
-  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences },
+  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences; defaultLimitKey?: DarkLimitKey },
 ) => (await import("./dark-preferences.server.ts")).saveDarkSettingsFor(newsroomId, input));
 const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
   (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
@@ -883,6 +883,7 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
       dig integer not null default 4,
       nerve integer not null default 5,
       scope text not null default 'city',
+      default_limit_key text not null default 'standard' check (default_limit_key in ('quick', 'standard', 'deep')),
       updated_at timestamptz not null default now()
     )`,
   `create table if not exists dark_runs (
@@ -965,6 +966,7 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table dark_runs add column if not exists stage text`,
   `alter table dark_settings add column if not exists county text`,
   `alter table dark_settings add column if not exists research_preferences text not null default '{}'`,
+  `alter table dark_settings add column if not exists default_limit_key text not null default 'standard' check (default_limit_key in ('quick', 'standard', 'deep'))`,
   `alter table dark_runs add column if not exists research_preferences_json text`,
   `alter table dark_runs add column if not exists verification_counts_json text`,
   `alter table dark_runs add column if not exists investigation_id integer`,
@@ -4349,11 +4351,12 @@ export const getDarkDials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    const {dials,preferences} = await readDarkSettingsFor(owned(context));
+    const {dials,preferences,defaultLimitKey} = await readDarkSettingsFor(owned(context));
     const {place} = await readDarkPlace(owned(context));
     return {
       dials,
       preferences,
+      defaultLimitKey,
       budget: budgetFor(dials),
       stance: stanceFor(dials),
       place,
@@ -4374,25 +4377,33 @@ export const getDarkCounty = createServerFn({ method: "GET" })
 
 export const saveDarkDials = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { dig: number; nerve: number; scope: string; preferences?: ResearchPreferences }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
+  .validator((input: { dig?: number; nerve?: number; scope?: string; preferences?: ResearchPreferences; defaultLimitKey?: string }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     // Clamped on the way in as well as on the way out: a stored 40 would be a
     // very expensive typo.
-    const d = clampDials(data as Partial<DarkDials>);
-    const saved = await saveDarkSettingsFor(owned(context), {dials:d,preferences:data.preferences});
-    await audit(
-      context.userId,
-      "dark-dials",
-      `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`,
-      owned(context),
-    );
+    const d = data.dig !== undefined || data.nerve !== undefined || data.scope !== undefined
+      ? clampDials(data as Partial<DarkDials>)
+      : null;
+    const defaultLimitKey = DARK_LIMITS.some((limit) => limit.key === data.defaultLimitKey)
+      ? data.defaultLimitKey as DarkLimitKey
+      : undefined;
+    const saved = await saveDarkSettingsFor(owned(context), {dials:d ?? undefined,preferences:data.preferences,defaultLimitKey});
+    if (d || defaultLimitKey) {
+      await audit(
+        context.userId,
+        "dark-dials",
+        d ? `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}` : `default depth ${saved.defaultLimitKey}`,
+        owned(context),
+      );
+    }
     return {
       ok: true as const,
       dials: saved.dials,
       preferences: saved.preferences,
-      description: describeDials(saved.dials, (await readDarkPlace(owned(context))).place),
-      minutes: estimateMinutes(d),
+      defaultLimitKey: saved.defaultLimitKey,
+      description: d ? describeDials(saved.dials, (await readDarkPlace(owned(context))).place) : "",
+      minutes: d ? estimateMinutes(d) : null,
     };
   });
 

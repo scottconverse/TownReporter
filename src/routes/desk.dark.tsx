@@ -229,6 +229,7 @@ function DarkPage() {
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
+  const darkSettings = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
   const noFiles = Boolean(
     investigations.data?.length === 0 && !investigations.isPending && !investigations.isError,
   );
@@ -258,11 +259,9 @@ function DarkPage() {
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
   const [fileModelChoice, setFileModelChoice] = useState<StoryModelChoice>("auto");
   const [fileModelEffort, setFileModelEffort] = useState<ModelEffort | null>(null);
-  const [ocrModelChoice, setOcrModelChoice] = useState<StoryModelChoice>("auto");
-  const [ocrModelEffort, setOcrModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const ocrModelChoice = useFirstRunPickerDefault("ocr") ?? "auto";
+  const ocrModelEffort = defaultModelEffort(ocrModelChoice);
   const darkDefaultModel = useFirstRunPickerDefault("dark");
-  /* The Dark Desk's own first-run default; retained-PDF OCR has a separate
-     picker because its automatic reader order is different. */
   const modelChoiceTouched = useRef(false);
   useFirstRunPickerSeed({
     surface: "dark",
@@ -858,6 +857,9 @@ function DarkPage() {
       */}
       <DarkFileDialog
         open={startOpen}
+        defaultLimit={darkSettings.data?.defaultLimitKey ?? "standard"}
+        defaultModel={modelChoiceTouched.current ? modelChoice : darkDefaultModel ?? modelChoice}
+        defaultEffort={modelChoiceTouched.current ? modelEffort : defaultModelEffort(darkDefaultModel ?? modelChoice)}
         seed={seedFromImport || undefined}
         prefill={startPrefill}
         onClose={() => {
@@ -902,6 +904,26 @@ function DarkPage() {
         each other when this content area reaches 900px; narrower areas stack.
       */}
       <div className="astra-deep-container">
+      <section id="dark-settings" className="astra-settings-panel" hidden={!settingsOpen} aria-labelledby="dark-settings-title">
+        <div className="astra-settings-head">
+          <h2 id="dark-settings-title">Dark Desk settings</h2>
+          <button type="button" className="btn quiet" onClick={() => setSettingsOpen(false)}>Close</button>
+        </div>
+        <div className="astra-settings-body">
+          <DarkDialsPanel
+            modelChoice={modelChoice}
+            onModelChoice={(choice) => {
+              modelChoiceTouched.current = true;
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            modelEffort={modelEffort}
+            onModelEffort={setModelEffort}
+            modelDisabled={digging || busyStart}
+          />
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} modelDefault={darkDefaultModel ?? undefined} />
+        </div>
+      </section>
       <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>
         <div className="astra-piles" hidden={noFiles}>
           <div className="astra-pile" hidden={!active.length && !investigations.isPending && !investigations.isError}>
@@ -1054,32 +1076,6 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
-          <section id="dark-settings" hidden={!settingsOpen} aria-label="Dark Desk settings">
-          <DarkDialsPanel
-            modelChoice={modelChoice}
-            onModelChoice={(choice) => {
-              modelChoiceTouched.current = true;
-              setModelChoice(choice);
-              setModelEffort(defaultModelEffort(choice));
-            }}
-            modelEffort={modelEffort}
-            onModelEffort={setModelEffort}
-            modelDisabled={digging || busyStart}
-          />
-          <div className="mt-4 max-w-xl">
-            <p className="astra-label">PDF reading model</p>
-            <ModelPicker
-              scope="ocr"
-              label="Model for reading retained PDFs"
-              value={ocrModelChoice}
-              onChange={setOcrModelChoice}
-              effort={ocrModelEffort}
-              onEffortChange={setOcrModelEffort}
-              disabled={digging || busyStart}
-            />
-          </div>
-          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
-          </section>
           {/*
             FB7, item 1. Every notice on this screen was `<p className="note">`
             with no role at all (FB0-REPORT.md Table B, Dark Desk: "no role

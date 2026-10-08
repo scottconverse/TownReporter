@@ -35,24 +35,25 @@ const WORDS: Record<string, string> = {
 export function PageWatchPanel({
   files,
   onOpenFile,
+  modelDefault,
 }: {
   files: Array<{ id: number; title: string }>;
   onOpenFile: (id: number) => void;
+  modelDefault?: StoryModelChoice;
 }) {
   const qc = useQueryClient(),
-    { formatListDateTime } = usePaperDateFormatters();
+    { formatListDateTime, formatClockTime } = usePaperDateFormatters();
   const sections = useEditorSections();
   const [sectionKey, setSectionKey] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const [expanded, setExpanded] = useState(false),
+  const [formOpen, setFormOpen] = useState(false),
     [selected, setSelected] = useState<number | null>(null),
     [offset, setOffset] = useState(0);
   const [url, setUrl] = useState(""),
     [name, setName] = useState(""),
     [reason, setReason] = useState(""),
     [file, setFile] = useState(""),
-    [model, setModel] = useState<StoryModelChoice>("auto"),
-    [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+    [modelOverride, setModelOverride] = useState<StoryModelChoice | null>(null);
   const [note, setNote] = useState(""),
     [error, setError] = useState(""),
     [leadId, setLeadId] = useState<number | null>(null),
@@ -61,14 +62,16 @@ export function PageWatchPanel({
   const watches = useQuery({
     queryKey: ["page-watches"],
     queryFn: () => listPageWatches(),
-    refetchInterval: expanded ? 15000 : false,
+    refetchInterval: selected != null || formOpen ? 15000 : false,
   });
   const detail = useQuery({
     queryKey: ["page-watch", selected, offset],
     queryFn: () => pageWatchDetail({ data: { id: selected!, offset } }),
-    enabled: selected != null && expanded,
-    refetchInterval: expanded ? 15000 : false,
+    enabled: selected != null,
+    refetchInterval: selected != null ? 15000 : false,
   });
+  const row = detail.data?.watch;
+  const model = row ? row.watch_model_choice as StoryModelChoice : modelOverride ?? modelDefault ?? "auto";
   async function refresh() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["page-watches"] }),
@@ -93,7 +96,7 @@ export function PageWatchPanel({
           name,
           reason,
           modelChoice: model,
-          modelEffort,
+          modelEffort: defaultModelEffort(model),
           investigationId: file ? Number(file) : null,
         },
       }),
@@ -109,6 +112,7 @@ export function PageWatchPanel({
           "This page is already watched. Open its existing watch below; its name, file and state were preserved.",
         );
         await refresh();
+        setFormOpen(false);
         return;
       }
       setNote("Watch saved. First check is starting; history will show the result.");
@@ -116,6 +120,7 @@ export function PageWatchPanel({
       setName("");
       setReason("");
       await refresh();
+      setFormOpen(false);
       check.mutate(r.id);
     },
     onError: (e) => setError(e.message),
@@ -123,7 +128,7 @@ export function PageWatchPanel({
   const modelSave = useMutation({
     mutationFn: (input: { id: number; choice: string; effort: ModelEffort | null }) => setPageWatchModel({ data: input }),
     onSuccess: async (r) => {
-      if (r.ok) setNote("OCR model saved for future checks.");
+      if (r.ok) setNote("Model saved for this page.");
       else setError(r.error);
       await refresh();
     },
@@ -200,7 +205,6 @@ export function PageWatchPanel({
     setLeadId(null);
     setAttached(null);
   }
-  const row = detail.data?.watch;
   /*
     Unit UI1a3, finding 1: `checkPageWatch` and `setPageWatchState` both answer
     `{ ok: false, error }` for their ordinary refusals, which React Query
@@ -212,15 +216,7 @@ export function PageWatchPanel({
   const stateRefusal = state.isPending ? null : refusedAnswer(state.data);
   return (
     <section className="tipbox page-watch" aria-label="Watched pages">
-      <div className="np-acts">
-        <h2>Watched pages · {watches.data?.length ?? 0}</h2>
-        <InkButton tone="quiet" small onClick={() => setExpanded(!expanded)}>
-          {expanded ? "Close watch form" : "Watch a page"}
-        </InkButton>
-      </div>
-      <p className="meta">
-        Daily checks keep dated captures of the public pages you watch.
-      </p>
+      <h3 className="astra-settings-subhead">Watched pages</h3>
           {watches.isError ? (
             <p role="alert">Could not load watches. Reload this page.</p>
           ) : watches.isPending ? (
@@ -230,32 +226,57 @@ export function PageWatchPanel({
           ) : (
             <div className="watch-list">
               {(showAll ? watches.data : watches.data.slice(0, 5)).map((w) => (
-                <div className="deskfile" key={w.id}>
-                  <h3>{w.title}</h3>
-                  <p className="meta">
-                    {w.watch_state} ·{" "}
-                    {w.last_check_at
-                      ? `${WORDS[w.last_outcome ?? ""] ?? w.last_outcome} · ${formatListDateTime(w.last_check_at)}`
-                      : "First capture pending — not checked yet"}
-                  </p>
-                  <InkButton
-                    small
+                <div className="astra-watch-row" key={w.id}>
+                  <button
+                    type="button"
+                    className="astra-watch-open"
+                    aria-expanded={selected === w.id}
                     onClick={() => {
                       clear();
-                      setExpanded(true);
-                      setSelected(w.id);
+                      setFormOpen(false);
+                      setSelected(selected === w.id ? null : w.id);
                       setTarget(w.investigation_id ? String(w.investigation_id) : "");
                       setOffset(0);
                     }}
                   >
-                    Open watch
-                  </InkButton>
+                    <strong>{w.url}</strong>
+                    <span>
+                      {w.last_check_at
+                        ? `Checked ${formatClockTime(w.last_check_at)} · ${w.last_outcome === "changed" ? "changed" : w.last_outcome === "unchanged" ? "no change" : WORDS[w.last_outcome ?? ""] ?? "check outcome unavailable"}`
+                        : "No completed check"}
+                    </span>
+                  </button>
+                  {w.watch_state === "active" ? (
+                    <InkButton tone="quiet" disabled={busy} onClick={() => state.mutate({ id: w.id, state: "stopped" })}>
+                      {state.isPending && state.variables?.id === w.id ? "Stopping…" : "Stop watching"}
+                    </InkButton>
+                  ) : <span className="astra-watch-stopped">Stopped</span>}
                 </div>
               ))}
             </div>
           )}
           {(watches.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${watches.data?.length}`}</InkButton> : null}
-      {expanded ? (
+      <div className="astra-watch-model">
+        <ModelPicker
+          scope="dark"
+          label="Digging model"
+          value={row ? row.watch_model_choice as StoryModelChoice : model}
+          disabled={busy}
+          onChange={(choice) => {
+            setModelOverride(choice);
+            if (row) {
+              clear();
+              modelSave.mutate({ id: row.id, choice, effort: defaultModelEffort(choice) });
+            }
+          }}
+        />
+      </div>
+      <div className="astra-settings-actions">
+        <InkButton tone="ghost" disabled={busy} onClick={() => { setFormOpen(!formOpen); setSelected(null); }}>
+          {formOpen ? "Close watch form" : "+ Watch a page"}
+        </InkButton>
+      </div>
+      {formOpen ? (
         <>
           <form
             onSubmit={(e) => {
@@ -313,13 +334,6 @@ export function PageWatchPanel({
               A chosen investigation receives readable captures automatically. You can also attach a
               capture later.
             </p>
-            <p className="meta">
-              OCR model, used only if a scanned PDF needs reading. Other pages do not need AI.
-            </p>
-            <ModelPicker scope="dark" value={model} onChange={(choice) => {
-              setModel(choice);
-              setModelEffort(defaultModelEffort(choice));
-            }} effort={modelEffort} onEffortChange={setModelEffort} disabled={busy} />
             <InkButton type="submit" disabled={busy}>
               {create.isPending ? "Saving watch…" : "Save watch and capture page"}
             </InkButton>
@@ -381,21 +395,6 @@ export function PageWatchPanel({
               {row.watch_failover_note ? (
                 <p className="note" role="status">{row.watch_failover_note}</p>
               ) : null}
-              <p className="meta">Model for the next scanned PDF check:</p>
-              <ModelPicker
-                scope="dark"
-                value={row.watch_model_choice as StoryModelChoice}
-                effort={row.watch_model_effort}
-                disabled={busy}
-                onChange={(choice) => {
-                  clear();
-                  modelSave.mutate({ id: row.id, choice, effort: defaultModelEffort(choice) });
-                }}
-                onEffortChange={(effort) => {
-                  clear();
-                  modelSave.mutate({ id: row.id, choice: row.watch_model_choice, effort });
-                }}
-              />
               <div className="np-acts">
                 {/*
                   Unit UI1a2: Check now, Pause / Resume and Stop watching are

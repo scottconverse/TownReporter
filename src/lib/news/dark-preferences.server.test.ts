@@ -28,6 +28,9 @@ test("room preferences preserve county/dials and a saved round snapshot survives
   });
   await saveDarkSettingsFor(81, { preferences: p });
   assert.deepEqual((await readDarkSettingsFor(81)).preferences, p);
+  assert.equal((await readDarkSettingsFor(81)).defaultLimitKey, "standard");
+  await saveDarkSettingsFor(81, { defaultLimitKey: "deep" });
+  assert.equal((await readDarkSettingsFor(81)).defaultLimitKey, "deep");
   assert.equal((await readDarkSettingsFor(82)).preferences.verificationLimit, 6);
   assert.equal(
     (await sql`select county from dark_settings where newsroom_id=81`)[0]!.county,
@@ -36,6 +39,7 @@ test("room preferences preserve county/dials and a saved round snapshot survives
   assert.equal((await readDarkSettingsFor(81)).dials.dig, 8);
   await saveDarkSettingsFor(81, { dials: { dig: 2, nerve: 1, scope: "city" } });
   assert.deepEqual((await readDarkSettingsFor(81)).preferences, p);
+  assert.equal((await readDarkSettingsFor(81)).defaultLimitKey, "deep");
   const [run] = await sql<{
     id: number;
   }>`insert into dark_runs(user_id,newsroom_id) values('prefs',81) returning id`;

@@ -1,5 +1,6 @@
 import { getSql } from "../db.ts";
 import { clampDials, type DarkDials } from "./dark-dials.ts";
+import { DARK_LIMITS, type DarkLimitKey } from "./editor-dialog-logic.ts";
 import {
   validateResearchPreferences,
   resolveResearchPreferences,
@@ -15,9 +16,11 @@ export async function readDarkSettingsFor(newsroomId: number) {
     nerve: number;
     scope: string;
     research_preferences: string;
-  }>`select dig,nerve,scope,research_preferences from dark_settings where newsroom_id=${newsroomId}`;
+    default_limit_key: string;
+  }>`select dig,nerve,scope,research_preferences,default_limit_key from dark_settings where newsroom_id=${newsroomId}`;
   return {
     dials: clampDials(row as Partial<DarkDials> | undefined),
+    defaultLimitKey: DARK_LIMITS.find((limit) => limit.key === row?.default_limit_key)?.key ?? "standard",
     preferences: validateResearchPreferences(
       row ? JSON.parse(row.research_preferences) : undefined,
     ),
@@ -25,12 +28,15 @@ export async function readDarkSettingsFor(newsroomId: number) {
 }
 export async function saveDarkSettingsFor(
   newsroomId: number,
-  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences },
+  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences; defaultLimitKey?: DarkLimitKey },
 ) {
   const d = input.dials ? clampDials(input.dials) : null,
-    p = input.preferences ? validateResearchPreferences(input.preferences) : null;
+    p = input.preferences ? validateResearchPreferences(input.preferences) : null,
+    defaultLimitKey = input.defaultLimitKey && DARK_LIMITS.some((limit) => limit.key === input.defaultLimitKey)
+      ? input.defaultLimitKey
+      : null;
   const sql = await getSql();
-  await sql`insert into dark_settings(newsroom_id,dig,nerve,scope,research_preferences,updated_at) values(${newsroomId},${d?.dig ?? 4},${d?.nerve ?? 5},${d?.scope ?? "city"},${JSON.stringify(p ?? {})},now()) on conflict(newsroom_id) do update set dig=case when ${d !== null} then excluded.dig else dark_settings.dig end,nerve=case when ${d !== null} then excluded.nerve else dark_settings.nerve end,scope=case when ${d !== null} then excluded.scope else dark_settings.scope end,research_preferences=case when ${p !== null} then excluded.research_preferences else dark_settings.research_preferences end,updated_at=now()`;
+  await sql`insert into dark_settings(newsroom_id,dig,nerve,scope,research_preferences,default_limit_key,updated_at) values(${newsroomId},${d?.dig ?? 4},${d?.nerve ?? 5},${d?.scope ?? "city"},${JSON.stringify(p ?? {})},${defaultLimitKey ?? "standard"},now()) on conflict(newsroom_id) do update set dig=case when ${d !== null} then excluded.dig else dark_settings.dig end,nerve=case when ${d !== null} then excluded.nerve else dark_settings.nerve end,scope=case when ${d !== null} then excluded.scope else dark_settings.scope end,research_preferences=case when ${p !== null} then excluded.research_preferences else dark_settings.research_preferences end,default_limit_key=case when ${defaultLimitKey !== null} then excluded.default_limit_key else dark_settings.default_limit_key end,updated_at=now()`;
   return readDarkSettingsFor(newsroomId);
 }
 export async function snapshotDarkSettingsFor(

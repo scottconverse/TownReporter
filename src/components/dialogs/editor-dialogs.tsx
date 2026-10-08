@@ -78,6 +78,8 @@ import { useEditorSections } from "@/lib/use-sections";
 import { sourceIdentity } from "@/lib/news/url-guard";
 import { useFirstRunPickerDefault } from "@/components/first-run-picker-default";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
+import type { ModelEffort } from "@/lib/news/provider-registry";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 import {
   AddLeadBody,
   AddSourcesBody,
@@ -898,6 +900,9 @@ export function AddToStoryDialog({
 export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
+  defaultLimit?: string;
+  defaultModel?: StoryModelChoice;
+  defaultEffort?: ModelEffort | null;
   /**
    * Seeds the file fields the caller already knows, instead of making the editor
    * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
@@ -958,10 +963,11 @@ export type DarkFileDialogProps = {
  * memoized on the two strings rather than on the object: a caller passing an
  * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride }: DarkFileDialogProps) {
   const press = usePress();
-  const defaultModel = useFirstRunPickerDefault("dark") ?? "auto";
-  const defaultEffort = defaultModelEffort(defaultModel);
+  const modelFromModels = useFirstRunPickerDefault("dark") ?? "auto";
+  const defaultModel = modelOverride ?? modelFromModels;
+  const defaultEffort = effortOverride ?? defaultModelEffort(defaultModel);
   // The factory must be stable -- `useDialogState` reseeds on every open -- so
   // it is memoized on the seed and on the prefill's two strings rather than
   // rebuilt on each render. A caller passing an inline object literal for
@@ -974,9 +980,9 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
   const factory = React.useCallback(
     () =>
       seed
-        ? darkFileFromSeed(seed, defaultModel, defaultEffort)
-        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }, defaultModel, defaultEffort),
-    [seed, prefillQuestion, prefillTip, prefillExplanation, defaultModel, defaultEffort],
+        ? darkFileFromSeed(seed, defaultModel, defaultEffort, defaultLimit)
+        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }, defaultModel, defaultEffort, defaultLimit),
+    [seed, prefillQuestion, prefillTip, prefillExplanation, defaultModel, defaultEffort, defaultLimit],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
 

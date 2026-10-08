@@ -130,9 +130,9 @@ export function previewSplit(preview: SourcePreview): string {
  * number the engine does not actually honor.
  */
 export const DARK_LIMITS = [
-  { key: "quick", label: "Quick look · up to 10 records, 20 minutes", hops: 2, minutes: 20, dollars: null },
-  { key: "standard", label: "Standard · up to 30 records, 2 hours", hops: 5, minutes: 120, dollars: 3 },
-  { key: "deep", label: "Deep · up to 100 records, 8 hours", hops: 10, minutes: 480, dollars: 15 },
+  { key: "quick", label: "Quick look · up to 10 records, 20 minutes", records: 10, hops: 2, minutes: 20, dollars: null },
+  { key: "standard", label: "Standard · up to 30 records, 2 hours", records: 30, hops: 5, minutes: 120, dollars: 3 },
+  { key: "deep", label: "Deep · up to 100 records, 8 hours", records: 100, hops: 10, minutes: 480, dollars: 15 },
 ] as const;
 
 export type DarkLimitKey = (typeof DARK_LIMITS)[number]["key"];
