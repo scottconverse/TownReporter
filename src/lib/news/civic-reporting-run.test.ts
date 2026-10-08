@@ -2274,6 +2274,8 @@ it("checks an unresolved claim against the full transcript and already-read docu
 it("finds a motion's delayed result after its cited window", async () => {
   const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
   const claim = "The Copper Peak concept plan amendment includes a 50% for-sale housing requirement; the motion dies for lack of a second.";
+  const storySentence = "The 50% for-sale Copper Peak concept-plan proposal remains unresolved.";
+  const replacement = "The Copper Peak concept-plan motion containing a 50% for-sale requirement died for lack of a second.";
   const opening = "Copper Peak concept plan amendment includes a 50% for-sale housing requirement.";
   const result = "The motion dies for lack of a second.";
   const segments = [
@@ -2285,7 +2287,7 @@ it("finds a motion's delayed result after its cited window", async () => {
   ];
   const checked = await reviewOpenStoryClaims({
     story: {
-      id: "copper-peak", headline: "Council considers Copper Peak", draft: claim,
+      id: "copper-peak", headline: "Council considers Copper Peak", draft: storySentence,
       plainBrief: "", cannotSay: "", readinessTier: 1,
       claims: [{
         id: "C18", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Recheck the cited passage at 00:01:40.",
@@ -2306,7 +2308,7 @@ it("finds a motion's delayed result after its cited window", async () => {
       const passages = JSON.parse(prompt.slice(start, end)) as Array<{ quote: string; url: string }>;
       const passage = passages.find((candidate) => candidate.quote.includes("50%") && candidate.quote.includes("dies for lack of a second"));
       return { ok: true, text: JSON.stringify(passage
-        ? { verdict: "VERIFIED", quote: passage.quote, sourceKind: "transcript", sourceUrl: videoUrl, replacement: "", cut: false, reason: "The full motion and its disposition are in the retained record." }
+        ? { verdict: "NARROWED", quote: passage.quote, sourceKind: "transcript", sourceUrl: videoUrl, replacement, cut: false, reason: "The delayed result supports the corrected sentence." }
         : { verdict: "OPEN", quote: passages[0]?.quote ?? "", sourceKind: "transcript", sourceUrl: videoUrl, replacement: "", cut: false, reason: "The cited passage has no result." }) };
     }) as never,
     chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
@@ -2314,14 +2316,80 @@ it("finds a motion's delayed result after its cited window", async () => {
   });
   assert.equal(checked.claims[0]?.status, "VERIFIED", checked.claims[0]?.nextCheck);
   assert.match(checked.claims[0]?.recordEvidence?.quote ?? "", /50%[\s\S]*dies for lack of a second/);
+  assert.equal(checked.draft, replacement);
 });
 
+// guards: the editor could be shown the cited or a weaker passage instead of the best whole-transcript match.
+it("shows the best whole-transcript match when its claim stays open", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const claims: Array<[string, string, string]> = [
+    ["C10", "12A", "The mayor closed the proposed-budget hearing after no one came forward."],
+    ["C28", "9", "Dry Creek ordinance 2026-62 adds a bike-share requirement."],
+    ["C26", "9", "The expanded bike-share proposal was narrowed to four applicant requests before the amendment result."],
+    ["C33", "9", "Resolution 2026-69 designates the 2027 Sundance Film Festival as a major regional event."],
+    ["C17", "13", "The roundabout was a discussion suggestion rather than a separately approved requirement."],
+    ["C37", "13", "Staff said priorities framework ranking would return for council review."],
+    ["C18", "11", "The concept-plan denial motion with 50% for-sale housing dies for lack of a second."],
+    ["C19", "11", "A separate Copper Peak denial motion failed, according to the supplied action account."],
+    ["C15", "11", "The chair separately announced that the underlying amended ordinance carried 6–1, with Council Member McCoy in opposition."],
+    ["C16", "9", "Ordinance 2026-69 advanced on first reading, with a future second reading referenced."],
+  ];
+  const segments = [
+    { index: 999, seconds: 50, item: "12A", text: "The proposed budget hearing remains open." },
+    { index: 1000, seconds: 100, item: "12A", text: "There was no one in the audience who wishes to speak to that, so I will close the public hearing." },
+    { index: 1, seconds: 100, item: "9", text: "The council considered a different annexation item." },
+    { index: 2, seconds: 500, item: "9", text: "Resolution 2026-69 designates Sundance for short-term rental licensing." },
+    { index: 3, seconds: 510, item: "9", text: "I move to approve Dry Creek ordinance 2026-62 as amended." },
+    { index: 4, seconds: 520, item: "9", text: "The main motion carries unanimously." },
+    { index: 2000, seconds: 600, item: "9", text: "The applicant's expanded bike-share amendment was reviewed before later changes." },
+    { index: 2001, seconds: 900, item: "9", text: "The amendment will include the four requests specified by the applicant." },
+    { index: 2002, seconds: 910, item: "9", text: "That item carries unanimously." },
+    { index: 5, seconds: 600, item: "13", text: "Residents may need a light or traffic circle near the site." },
+    { index: 6, seconds: 650, item: "13", text: "I move to approve the unrelated park plan." },
+    { index: 7, seconds: 660, item: "13", text: "That motion carries 4 to 3." },
+    { index: 8, seconds: 900, item: "13", text: "Staff put framework and ranking within categories and will bring it back for council to look at again." },
+    { index: 9, seconds: 1100, item: "11", text: "I move to deny the concept plan amendment with 50% for-sale housing." },
+    ...Array.from({ length: 40 }, (_, index) => ({ index: index + 10, seconds: 1110 + index * 10, item: "11", text: "Council discussed another development condition." })),
+    { index: 50, seconds: 1520, item: "11", text: "It dies for lack of second." },
+    { index: 51, seconds: 1600, item: "11", text: "I have a motion and would like to make a separate motion. Move to deny the Copper Peak concept plan amendment." },
+    { index: 53, seconds: 1500, item: "12", text: "The supplied public account requests investigation and disciplinary action for accountability." },
+    ...Array.from({ length: 13 }, (_, index) => ({ index: index + 52, seconds: 1610 + index * 10, item: "11", text: "Council continues the agenda discussion." })),
+    { index: 65, seconds: 1760, item: "11", text: "Fails with council members Chris in opposition." },
+    { index: 66, seconds: 1900, item: "11", text: "I move to approve a different ordinance." },
+    { index: 67, seconds: 1910, item: "11", text: "That motion carries 5 to 2." },
+    { index: 68, seconds: 2000, item: "11", itemTitle: "Items removed from consent agenda", text: "I move to amend ordinance 2026-69." },
+    { index: 69, seconds: 2025, item: "11", itemTitle: "Items removed from consent agenda", text: "Okay, and that carries 6 to1 with" },
+    { index: 70, seconds: 2027, item: "11", itemTitle: "Items removed from consent agenda", text: "Council Member McCoy in opposition." },
+    { index: 71, seconds: 2100, item: "9", itemTitle: "Consent agenda and first-reading ordinances", text: "The second reading and public hearing for ordinances on the consent agenda will be held on October 20, 2026." },
+    { index: 72, seconds: 2350, item: "9", itemTitle: "Consent agenda and first-reading ordinances", text: "9E is ordinance 2026-69." },
+    { index: 73, seconds: 2358, item: "9", itemTitle: "Consent agenda and first-reading ordinances", text: "The ordinance was included in the first reading list." },
+  ];
+  const result = await reviewOpenStoryClaims({
+    story: { id: "run-7", headline: "Council meeting", draft: claims.map(([, , text]) => text).join(" "), plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: claims.map(([id, item, text]) => ({ id, item, text, status: "UNVERIFIED" as const, sourceIds: [], nextCheck: "Check the cited passage." })), sources: [] },
+    record: { identity: { videoId: "S1kSaew-UUY", videoUrl }, segments } as never, documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async () => ({ ok: true, text: JSON.stringify({ verdict: "OPEN", quote: "The cited passage is unrelated.", sourceKind: "transcript", sourceUrl: videoUrl, replacement: "", cut: false, reason: "Check the whole transcript." }) })) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" }, throwIfCancelled: async () => {},
+  });
+  const closest = (id: string) => result.claims.find((claim) => claim.id === id)?.closestEvidence?.quote ?? "";
+  assert.match(closest("C10"), /wishes to speak[\s\S]*close the public hearing/i);
+  assert.match(closest("C28"), /ordinance 2026-62/i);
+  assert.match(closest("C26"), /four requests[\s\S]*unanimously/i);
+  assert.match(closest("C33"), /Sundance/i);
+  assert.match(closest("C17"), /traffic circle/i);
+  assert.match(closest("C37"), /framework[\s\S]*ranking/i);
+  assert.match(closest("C18"), /50%[\s\S]*dies for lack of second/i);
+  assert.match(closest("C19"), /move to deny the Copper Peak[\s\S]*fails/i);
+  assert.match(closest("C15"), /carries 6 to ?1[\s\S]*McCoy in opposition/i);
+  assert.match(closest("C16"), /2026-69[\s\S]*first reading/i);
+});
 // guards: the editor could see a Supported vote whose saved quote omits its announced tally.
 it("saves the motion through its announced vote result", async () => {
   const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
-  const claim = "Ordinance 2026-69 as amended carried 6 to 1.";
+  const claim = "The amended ordinance carried 6–1.";
   const motion = "The motion was to approve ordinance 2026-69 as amended.";
-  const result = "The motion carries 6 to 1 with Council Member McCoy in opposition.";
+  const result = "The motion carries 6 to1.";
   const checked = await reviewOpenStoryClaims({
     story: {
       id: "ordinance", headline: "Council approves an amended ordinance", draft: claim,
@@ -2334,6 +2402,7 @@ it("saves the motion through its announced vote result", async () => {
       segments: [
         { index: 1, seconds: 100, item: "9E", itemTitle: "Ordinance 2026-69", text: motion },
         { index: 2, seconds: 110, item: "9E", itemTitle: "Ordinance 2026-69", text: result },
+        { index: 3, seconds: 115, item: "9E", itemTitle: "Ordinance 2026-69", text: "Council Member McCoy was in opposition." },
       ],
     } as never,
     documents: [],
@@ -2348,7 +2417,8 @@ it("saves the motion through its announced vote result", async () => {
   const saved = checked.claims[0]?.recordEvidence?.quote ?? "";
   assert.equal(checked.claims[0]?.status, "VERIFIED");
   assert.ok(saved.includes(motion), "the saved evidence carries the motion into the result");
-  assert.match(saved, /carries 6 to 1/i);
+  assert.match(saved, /carries 6 to ?1/i);
+  assert.match(saved, /McCoy was in opposition/i);
   assert.equal(checked.claims[0]?.transcriptEvidence?.quote, saved);
 });
 

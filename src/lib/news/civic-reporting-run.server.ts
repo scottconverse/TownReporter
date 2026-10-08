@@ -593,9 +593,10 @@ function correctTranscriptGapCaveat(text: string, kinds: Set<"motion" | "result"
   }).join(" ");
 }
 
-function correctFalseTranscriptGapCaveats(held: PackageHeld[], stories: PackageStory[], record: WholeRecord): PackageHeld[] {
-  const videoId = str(record.identity.videoId);
-  const videoUrl = str(record.identity.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
+function correctFalseTranscriptGapCaveats(held: PackageHeld[], stories: PackageStory[], record?: WholeRecord): PackageHeld[] {
+  if (!record || !Array.isArray(record.segments) || record.segments.length === 0) return held;
+  const videoId = str(record.identity?.videoId);
+  const videoUrl = str(record.identity?.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
   const ignored = new Set(["about", "announced", "complete", "final", "full", "meeting", "motion", "passage", "record", "result", "the", "transcript", "unavailable", "wording"]);
   return held.map((entry) => {
     const story = stories.find((row) => row.id === entry.storyId);
@@ -3383,9 +3384,9 @@ function isTableColumnLabel(line: string): boolean {
 
 function significantEvidenceWords(text: string): string[] {
   const stop = new Set([
-    "about", "after", "before", "being", "budget", "council", "could", "decrease", "decreases", "first",
+    "about", "after", "approval", "approved", "before", "being", "budget", "council", "could", "decrease", "decreases", "discussion", "first",
     "fund", "general", "hearing", "item", "meeting", "more", "ongoing", "other", "presentation",
-    "proposed", "public", "reduce", "reduction", "adjustment", "adjustments", "should", "summary",
+    "proposed", "public", "reduce", "reduction", "requirement", "requirements", "separately", "suggestion", "adjustment", "adjustments", "should", "summary",
     "this", "that", "their", "there", "these", "those", "under", "would",
   ]);
   return [...new Set(normalizeForMatch(text).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !stop.has(word)))];
@@ -3546,36 +3547,64 @@ function splitEvidenceText(text: string): string[] {
   });
 }
 
-function candidateScore(claim: string, quote: string): number {
+function candidateScore(claim: string, quote: string, itemTitle = ""): number {
   const normalized = normalizeForMatch(quote);
   const terms = significantEvidenceWords(claim);
   const hits = terms.filter((term) => normalized.includes(term)).length;
   const keyHits = wholeTranscriptKeyScore(claim, quote);
   const numbers = claim.match(/\d[\d,]*(?:\.\d+)?%?/g) ?? [];
   const spokenDigits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
-  const quoteDigits = quote.toLowerCase()
-    .replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!)
-    .replace(/\D/g, "");
-  const numberHits = numbers.filter((number) => quoteDigits.includes(number.replace(/\D/g, ""))).length;
+  const numericQuote = quote.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!);
+  const quoteNumberTokens = [...numericQuote.matchAll(/\d[\d,]*(?:\.\d+)?%?/g)].map((match) => match[0].replace(/\D/g, ""));
+  const quoteDigits = quoteNumberTokens.join("");
+  const numberHits = numbers.filter((number) => quoteNumberTokens.includes(number.replace(/\D/g, ""))).length;
+  const numberWords = Object.keys(spokenDigits).filter((word) => new RegExp(`\\b${word}\\b`, "i").test(claim));
+  const numberWordHits = numberWords.filter((word) => normalizeForMatch(quote).includes(word) || quoteDigits.includes(spokenDigits[word]!)).length;
   const topicStop = new Set([
-    "about", "announced", "approval", "chair", "claim", "following", "identified", "item", "main", "member",
-    "motion", "opposing", "passage", "result", "separate", "supplied", "that", "the", "with",
+    "about", "announced", "approval", "approved", "chair", "claim", "discussion", "following", "identified", "item", "main", "member",
+    "motion", "opposing", "passage", "rather", "requirement", "requirements", "result", "separately", "suggestion", "supplied", "that", "the", "with",
   ]);
   const topicTerms = [...new Set(normalizeForMatch(claim).split(" ").filter((word) =>
     word.length >= 4 && !/^\d+$/.test(word) && !topicStop.has(word),
   ))];
   const topicHits = topicTerms.filter((term) => normalized.includes(term)).length;
+  const itemTitleTerms = significantEvidenceWords(claim).filter((term) => term.length >= 4 && normalizeForMatch(itemTitle).includes(term));
+  const topicAliases: Record<string, string[]> = {
+    closed: ["close the public hearing", "close the hearing"],
+    denial: ["deny", "denied"],
+    disciplinary: ["accountability within our staff", "follow protocol"],
+    failed: ["fails", "fail"],
+    forward: ["wishes to speak", "came forward"],
+    investigation: ["due process"],
+    narrowed: ["four requests", "four requests as written"],
+    requests: ["four requests as written", "four requests"],
+    ranked: ["ranking"],
+    priorities: ["priority"],
+    roundabout: ["traffic circle", "traffic circles"],
+    return: ["bring back", "bring all that back", "future agenda", "future agenda item", "discuss in depth"],
+    review: ["look at again", "look at it again"],
+  };
+  const highValueTerms = topicTerms.filter((term) =>
+    (term.length >= 7 && !["council", "developed", "established", "formally", "adopted", "presented"].includes(term)) ||
+    ["closed", "denial", "failed", "ranked", "return", "review"].includes(term),
+  );
+  const highValueTopicHits = highValueTerms.filter((term) =>
+    normalized.includes(term) || (topicAliases[term] ?? []).some((alias) => normalized.includes(alias)),
+  ).length;
+  const namedPhrases = [...claim.matchAll(/\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})+\b/g)].map((match) => normalizeForMatch(match[0]));
+  const namedPhraseHits = namedPhrases.filter((phrase) => normalized.includes(phrase)).length;
   const budgetContextMatch = /\bbudget\b/i.test(claim) && /\b(?:budget|capital|funds?|fees?|rates and charges|appropriation)\b/i.test(quote);
   const ordinanceIds = [...claim.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
   const ordinanceHits = ordinanceIds.filter((id) => normalized.includes(id)).length;
   const readingStage = claim.match(/\b(first|second)[\s-]+reading\b/i)?.[1]?.toLowerCase();
   const readingStageMatch = Boolean(readingStage && new RegExp(`\\b${readingStage}[\\s-]+reading\\b`, "i").test(quote));
-  const claimedTally = claim.match(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/i);
+  const claimWithoutIdentifiers = claim.replace(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi, "");
+  const claimedTally = claimWithoutIdentifiers.match(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/i);
   const spoken = quote.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!);
   const hasClaimedResult = Boolean(claimedTally && hasAnnouncedResult(quote) &&
     [...spoken.matchAll(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/gi)]
       .some((match) => match[1] === claimedTally[1] && match[2] === claimedTally[2]));
-  return hits + numberHits * 4 + topicHits * 4 + keyHits + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 24 : 0) + (hasClaimedResult ? 8 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+  return hits + numberHits * 4 + numberWordHits * 8 + topicHits * 4 + highValueTopicHits * 24 + namedPhraseHits * 40 + itemTitleTerms.length * 80 + keyHits + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 64 : 0) + (hasClaimedResult ? 240 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
 }
 
 function wholeTranscriptKeyScore(claim: string, quote: string): number {
@@ -3587,7 +3616,9 @@ function wholeTranscriptKeyScore(claim: string, quote: string): number {
   const idHits = ids.filter((value) => normalized.includes(normalizeForMatch(value))).length;
   const amountHits = amounts.filter((value) => normalized.includes(normalizeForMatch(value))).length;
   const percentageHits = percentages.filter((value) => quote.replace(/\s/g, "").includes(value.replace(/\s/g, "")) || normalized.includes(value.replace(/\D/g, ""))).length;
-  const numberHits = numbers.filter((value) => normalized.includes(value.replace(/\D/g, ""))).length;
+  const numericQuote = quote.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => ({ zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" })[word]!);
+  const numberTokens = [...numericQuote.matchAll(/\d[\d,]*(?:\.\d+)?%?/g)].map((match) => match[0].replace(/\D/g, ""));
+  const numberHits = numbers.filter((value) => numberTokens.includes(value.replace(/\D/g, ""))).length;
   const namedTerms = significantEvidenceWords(claim).filter((term) => term.length >= 5);
   const nameHits = namedTerms.filter((term) => normalized.includes(term)).length;
   const hasDelayedDisposition = /\b(?:died|dies|failed|fails)\b/i.test(claim) && /\b(?:second|motion|vote)\b/i.test(claim);
@@ -3595,7 +3626,7 @@ function wholeTranscriptKeyScore(claim: string, quote: string): number {
   return idHits * 24 + amountHits * 18 + percentageHits * 18 + numberHits * 5 + nameHits * 3 + dispositionHits;
 }
 
-const announcedResultWords = /\b(?:(?:(?:the\s+)?(?:motion|item)|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:(?:is|was|has\s+been)\s+)?(?:carries|passes|fails|carried|passed|failed|approved|approves)|(?:carries|carried|passes|passed|fails|failed)\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven|unanimously)|(?:the\s+)?motion\s+(?:dies|died)\s+(?:for\s+lack\s+of\s+a\s+second|without\s+a\s+second)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+const announcedResultWords = /\b(?:(?:(?:the\s+)?(?:motion|item)|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:(?:is|was|has\s+been)\s+)?(?:carries|passes|fails|carried|passed|failed|approved|approves)|(?:that|it)\s+(?:motion|item)\s+(?:(?:uh|um)\s+){0,2}(?:carries|passes|fails|carried|passed|failed)|(?:it|that)\s+(?:dies|died)\s+for\s+lack\s+of\s+(?:a\s+)?second|(?:carries|carried|passes|passed|fails|failed)\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven|unanimously)|(?:fails|failed)\s+with\s+(?:council\s+)?members\b|(?:the\s+)?motion\s+(?:dies|died)\s+(?:for\s+lack\s+of\s+(?:a\s+)?second|without\s+a\s+second)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
 
 function hasAnnouncedResult(text: string): boolean {
   return text.split(/[.!?;\r\n]+/).some((sentence) =>
@@ -3608,17 +3639,34 @@ function sameTranscriptItem(left: TapeSegment, right: TapeSegment): boolean {
 }
 
 function voteClaim(claim: string): boolean {
-  return /\b(?:vote|voted|motion|carried|carries|passed|passes|failed|fails|unanim(?:ous|ously)|approval|approved|passage|result|\d+\s*(?:-|–|—|to)\s*\d+)\b/i.test(claim);
+  const withoutIdentifiers = claim.replace(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi, "");
+  const disposition = /\b(?:vote|voted|motion|carried|carries|passed|passes|failed|fails|unanim(?:ous|ously)|passage|result|\d+\s*(?:-|–|—|to)\s*\d+)\b/i.test(withoutIdentifiers);
+  const councilApproval = /\b(?:council|motion|item|ordinance|resolution)\b[\s\S]{0,35}\bapproved\b|\bapproved\b[\s\S]{0,35}\bby (?:the )?council\b/i.test(withoutIdentifiers);
+  return disposition || councilApproval;
 }
 
 function motionSegment(segment: TapeSegment): boolean {
-  return /\b(?:i move|we have a motion|move that|the motion was made|the motion has been made)\b/i.test(segment.text);
+  return /\b(?:i move|we have a motion|i have a motion|move that|move to|make (?:to )?(?:a )?(?:separate )?motion|the motion was made|the motion has been made)\b/i.test(segment.text);
 }
 
-function cappedPassage(segments: TapeSegment[]): string {
+function cappedPassage(segments: TapeSegment[], focus: TapeSegment[] = []): string {
   const text = segments.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
-  if (text.length <= 1_200) return text;
+  if (text.length <= 1_200 || (focus.length > 0 && text.length <= 3_000)) return text;
+  if (focus.length > 0) {
+    const head = text.slice(0, 900).trimEnd();
+    const tail = text.slice(-900).trimStart();
+    const middle = focus.map((segment) => segment.text.trim()).filter((quote) => quote && !head.includes(quote) && !tail.includes(quote)).join(" ");
+    return middle ? `${head} … ${middle} … ${tail}` : `${head} … ${tail}`;
+  }
   return text.slice(0, 600).trimEnd() + " … " + text.slice(-596).trimStart();
+}
+
+function readingStageFocusSegments(claim: string, segments: TapeSegment[]): TapeSegment[] {
+  const identifiers = [...claim.matchAll(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi)].map((match) => normalizeForMatch(match[0]));
+  return segments.filter((segment) =>
+    identifiers.some((identifier) => normalizeForMatch(segment.text).includes(identifier)) ||
+    /\b(?:first|second)[\s-]+reading\b/i.test(segment.text),
+  );
 }
 
 function claimCitationStartSeconds(claim: PackageClaim): number | null {
@@ -3687,7 +3735,7 @@ function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, vid
         sameTranscriptItem(match, segment) && hasAnnouncedResult(segment.text),
       ) ?? match;
     }
-    const contextWindowSeconds = isReadingClaim ? 300 : 120;
+    const contextWindowSeconds = 120;
     const lowerBound = Math.max(0, anchor.seconds - contextWindowSeconds);
     const motion = [...segments].reverse().find((segment) =>
       segment.seconds < anchor.seconds && anchor.seconds - segment.seconds <= 900 &&
@@ -3696,14 +3744,25 @@ function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, vid
     const citedChain = citedAnchor && anchor.seconds > citedAnchor.seconds && anchor.seconds - citedAnchor.seconds <= 3_600 &&
       hasAnnouncedResult(anchor.text) && sameTranscriptItem(citedAnchor, anchor) &&
       candidateScore(claimText, citedAnchor.text) > 0;
-    const startSeconds = citedChain ? citedAnchor.seconds : motion?.seconds ?? lowerBound;
+    const motionStart = motion?.seconds ?? lowerBound;
+    const startSeconds = citedChain ? citedAnchor.seconds : isVoteClaim ? Math.min(motionStart, match.seconds) : motionStart;
+    const continuationEnd = anchor.seconds + 15;
+    const nextMotion = hasAnnouncedResult(anchor.text) ? segments.find((segment) =>
+      segment.seconds > anchor.seconds && segment.seconds <= continuationEnd &&
+      sameTranscriptItem(anchor, segment) && motionSegment(segment),
+    ) : null;
+    const endSeconds = hasAnnouncedResult(anchor.text)
+      ? Math.min(continuationEnd, nextMotion ? nextMotion.seconds - 1 : continuationEnd)
+      : anchor.seconds;
     const context = segments.filter((segment) =>
-      segment.seconds >= startSeconds && segment.seconds <= anchor.seconds && sameTranscriptItem(anchor, segment),
+      segment.seconds >= startSeconds && segment.seconds <= endSeconds && sameTranscriptItem(anchor, segment),
     );
     const first = context[0] ?? anchor;
     const last = context[context.length - 1] ?? anchor;
     const item = anchor.item || first.item;
-    const quote = cappedPassage(context.length ? context : [anchor]);
+    const contextSegments = context.length ? context : [anchor];
+    const readingFocus = isReadingClaim ? readingStageFocusSegments(claimText, contextSegments) : [];
+    const quote = cappedPassage(contextSegments, readingFocus.length ? readingFocus : [match]);
     return {
       kind: "transcript",
       quote,
@@ -3715,27 +3774,32 @@ function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, vid
       anchorSeconds: match.seconds,
       page: null,
       item: item || undefined,
-      score: candidateScore(claimText, quote),
+      score: candidateScore(claimText, quote, anchor.itemTitle || match.itemTitle || ""),
     };
   }).sort((a, b) => a.anchorSeconds! - b.anchorSeconds!);
-
   const merged: ClaimCheckCandidate[] = [];
   for (const passage of passages) {
     const prior = merged[merged.length - 1];
-    const sameItem = prior && (prior.item === passage.item || (isReadingClaim && passage.anchorSeconds! - prior.anchorSeconds! <= 300));
+    const sameItem = prior && prior.item === passage.item;
     const sameRange = prior && prior.startSeconds === passage.startSeconds && prior.endSeconds === passage.endSeconds;
     const overlaps = prior && passage.startSeconds! <= prior.endSeconds! && prior.startSeconds! <= passage.endSeconds!;
+    const readingContext = Boolean(isReadingClaim && sameItem && passage.anchorSeconds! - prior.anchorSeconds! <= 300);
     if (sameItem && sameRange) continue;
-    if (sameItem && overlaps && (isVoteClaim ? passage.anchorSeconds! - prior.anchorSeconds! <= 12 : !isReadingClaim || passage.anchorSeconds! - prior.anchorSeconds! <= 300)) {
+    if (sameItem && ((overlaps && passage.anchorSeconds! - prior.anchorSeconds! <= 12) || readingContext)) {
       const start = Math.min(prior.startSeconds!, passage.startSeconds!);
       const end = Math.max(prior.endSeconds!, passage.endSeconds!);
       const context = segments.filter((segment) => segment.seconds >= start && segment.seconds <= end &&
         (!passage.item || !segment.item || segment.item === passage.item));
-      prior.quote = cappedPassage(context);
+      const readingFocus = isReadingClaim ? readingStageFocusSegments(claimText, context) : [];
+      prior.quote = cappedPassage(context, readingFocus.length ? readingFocus : [
+        segments.find((segment) => segment.seconds === prior.anchorSeconds),
+        segments.find((segment) => segment.seconds === passage.anchorSeconds),
+      ].filter((segment): segment is TapeSegment => Boolean(segment)));
       prior.startSeconds = context[0]?.seconds ?? start;
       prior.endSeconds = context[context.length - 1]?.seconds ?? end;
       prior.locator = `${prior.item ? `Item ${prior.item}; ` : ""}${clockLabel(prior.startSeconds)}–${clockLabel(prior.endSeconds)}`;
-      prior.score = candidateScore(claimText, prior.quote);
+      const title = segments.find((segment) => segment.seconds === prior.anchorSeconds)?.itemTitle ?? "";
+      prior.score = candidateScore(claimText, prior.quote, title);
     } else {
       merged.push({ ...passage });
     }
@@ -3789,11 +3853,31 @@ function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate,
   const packetPages = candidate.kind === "document" && candidate.page !== null
     ? [{ page: candidate.page, text: candidate.quote }]
     : [];
-  return checkDraftClaims({
+  const checks = checkDraftClaims({
     units: [{ text: claim, label: claim.slice(0, 120), item }],
     packetPages,
     segments: record.segments,
-  }).every((check) => check.checkStatus === "found");
+  });
+  return checks.every((check) => check.checkStatus === "found" ||
+    (sameTally(check.claim, claim) && sameTallyIsAnnounced(check.claim, candidate.quote)));
+}
+
+function numericTallies(text: string): string[] {
+  const digits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
+  const normalized = text.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => digits[word]!);
+  return [...normalized.matchAll(/\b(\d+)\s*(?:to\s*|[-–—])\s*(\d+)\b/g)].map((match) => `${match[1]}-${match[2]}`);
+}
+
+function sameTally(check: string, claim: string): boolean {
+  const checked = numericTallies(check);
+  const claimed = numericTallies(claim);
+  return checked.length > 0 && checked.every((tally) => claimed.includes(tally));
+}
+
+function sameTallyIsAnnounced(check: string, quote: string): boolean {
+  const checked = numericTallies(check);
+  return checked.length > 0 && hasAnnouncedResult(quote) &&
+    checked.every((tally) => voteWordsIn(quote).some((result) => numericTallies(result).includes(tally)));
 }
 
 function exactQuoteCandidate(
@@ -3817,7 +3901,23 @@ function oneLineReason(value: unknown): string {
 
 function changeClaimSentence(text: string, claim: string, replacement: string | null): { text: string; changed: boolean } {
   const start = text.indexOf(claim);
-  if (start < 0) return { text, changed: false };
+  if (start < 0) {
+    if (replacement === null) return { text, changed: false };
+    const terms = significantEvidenceWords(claim);
+    const numbers = claim.match(/\b\d[\d,]*(?:\.\d+)?%?\b/g) ?? [];
+    const candidates = [...text.matchAll(/[^.!?]+[.!?]+|[^.!?]+$/g)].map((match) => {
+      const quote = match[0] ?? "";
+      const normalized = normalizeForMatch(quote);
+      const hits = terms.filter((term) => normalized.includes(term)).length;
+      const numberHits = numbers.filter((number) => normalized.includes(normalizeForMatch(number))).length;
+      return { start: match.index ?? 0, end: (match.index ?? 0) + quote.length, hits, score: hits + numberHits * 2 };
+    }).sort((left, right) => right.score - left.score);
+    const best = candidates[0];
+    const next = candidates[1];
+    const coverage = best ? best.hits / Math.max(1, terms.length) : 0;
+    if (!best || best.score < 2 || coverage < 0.25 || best.score === next?.score) return { text, changed: false };
+    return { text: text.slice(0, best.start) + replacement + text.slice(best.end), changed: true };
+  }
   if (replacement !== null) return { text: text.slice(0, start) + replacement + text.slice(start + claim.length), changed: true };
   const sentenceStart = Math.max(text.lastIndexOf(".", start), text.lastIndexOf("!", start), text.lastIndexOf("?", start)) + 1;
   const endSearch = /[.!?]\s*$/.test(claim) ? start + claim.length - 1 : start + claim.length;
@@ -3921,7 +4021,7 @@ export async function reviewOpenStoryClaims(input: {
       const textEdit = replacement && replacement !== claim.text
         ? storyTextChange(story, claim.text, replacement)
         : { story, changed: true };
-      if (textEdit.changed && textEdit.story.draft.trim()) {
+      if (textEdit.changed ? textEdit.story.draft.trim() : story.draft.trim()) {
         const source = checkSourceForCandidate(candidate, claim.id);
         const sources = textEdit.story.sources.some((row) => row.id === source.id)
           ? textEdit.story.sources
@@ -3953,7 +4053,8 @@ export async function reviewOpenStoryClaims(input: {
       }
       rejectedUnreadableEdit = textEdit.changed;
     }
-    const closest = (answer ? exactQuoteCandidate(reviewCandidates, answer) : null) ??
+    const closest = transcriptCandidates[0] ?? citedCandidate ??
+      (answer ? exactQuoteCandidate(reviewCandidates, answer) : null) ??
       [...reviewCandidates].sort((a, b) => b.score - a.score)[0];
     const reason = oneLineReason(answer?.reason || (rejectedUnreadableEdit
       ? "The later claim rewrite would remove the readable draft, so the earlier draft remains for review."
