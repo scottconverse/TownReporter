@@ -5,11 +5,14 @@ import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
 import { meetingStatusLabel } from "@/lib/news/meeting-activity-label";
 import { captureAudioAgain } from "@/lib/news/meeting-manual-run";
-import { formatListDate, formatListDateTime } from "@/lib/paper";
+import { PAPER, formatListDate, formatListDateTime } from "@/lib/paper";
 import { isYoutubeRateLimit, nextYoutube429Retry } from "@/lib/news/meeting-capture-retry";
 
 function captureTime(value: string): string {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? formatListDate(`${value}T12:00:00`) : formatListDateTime(value);
+  // A date-only publication is a calendar day, not an instant to shift between zones.
+  return /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? formatListDate(`${value}T12:00:00Z`, "UTC")
+    : formatListDateTime(value, PAPER.timezone);
 }
 
 function savedAudio(format: string, bytes: number | null): string {
