@@ -2247,7 +2247,7 @@ export async function performChallengeWork(
     order by started_at desc, id desc limit 1
   `;
   const run = runs[0] ?? null;
-  const choice = effectiveStoryModelChoice(run?.model_choice ?? job.model_choice);
+  const choice = effectiveStoryModelChoice(job.model_choice);
   const overrides = applyJobLocalModelSnapshot(
     job,
     await readProviderOverrides(job.newsroom_id, "dark").catch(() => ({})),

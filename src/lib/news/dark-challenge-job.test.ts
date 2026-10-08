@@ -84,3 +84,20 @@ it("queues a case challenge for the file the editor opened", async () => {
   `;
   assert.deepEqual(jobs, [{ kind: "challenge", subject_id: file.investigationId, status: "queued" }]);
 });
+
+// guards: challenging a case could charge the previous provider instead of the editor's chosen model
+it("challenges the prior findings with the challenge job's model", async () => {
+  const sql = await getSql();
+  const job = await enqueueJob({ userId: "challenge-model", newsroomId: 98125, kind: "challenge", subjectId: 724, modelChoice: "codex-balanced", kick: false });
+  await sql`insert into dark_runs (user_id, newsroom_id, investigation_id, model_choice)
+    values ('challenge-model', 98125, 724, 'claude-frontier')`;
+  let choice;
+  await performChallengeWork(job, {
+    readPlace: async () => ({ place: { city: "Longmont", state: "Colorado", county: null }, official: [], press: [] }),
+    verify: async (options) => {
+      choice = options.choice;
+      return { checked: 0, eligible: 0, deferred: 0, failed: 0, verified: 0, unverified: 0, searches: [], summary: "Saved" };
+    },
+  });
+  assert.equal(choice, "codex-balanced");
+});
