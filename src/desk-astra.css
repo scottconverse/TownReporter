@@ -6909,26 +6909,26 @@
   font-size: calc(1.375rem * var(--ts));
   font-weight: 800;
 }
-.desk-ltr.astra .astra-settings-body {
+.desk-ltr.astra .astra-settings-panel .astra-settings-body {
   display: flex;
   flex-direction: column;
   gap: 24px;
   min-width: 0;
 }
-.desk-ltr.astra .astra-settings-group { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.desk-ltr.astra .astra-settings-group > h3,
-.desk-ltr.astra .astra-settings-subhead {
+.desk-ltr.astra .astra-settings-panel .astra-settings-group { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.desk-ltr.astra .astra-settings-panel .astra-settings-group > h3,
+.desk-ltr.astra .astra-settings-panel .astra-settings-subhead {
   margin: 0;
   font-size: calc(1.125rem * var(--ts));
   font-weight: 800;
 }
-.desk-ltr.astra .astra-depth-options {
+.desk-ltr.astra .astra-settings-panel .astra-depth-options {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   min-width: 0;
   border: 1px solid var(--fg2);
 }
-.desk-ltr.astra .astra-depth-option {
+.desk-ltr.astra .astra-settings-panel .astra-depth-option {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -6944,15 +6944,15 @@
   border-right: 1px solid var(--fg2);
   cursor: pointer;
 }
-.desk-ltr.astra .astra-depth-option:last-child { border-right: 0; }
-.desk-ltr.astra .astra-depth-option span { font-size: calc(0.875rem * var(--ts)); line-height: 1.35; }
-.desk-ltr.astra .astra-depth-option:hover { background: var(--bg2); }
-.desk-ltr.astra .astra-depth-option.on { color: var(--bg); background: var(--sel); }
-.desk-ltr.astra .astra-depth-option.on span { color: inherit; }
-.desk-ltr.astra .astra-depth-option:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-.desk-ltr.astra .astra-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.desk-ltr.astra .tipbox.page-watch { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 0; border: 0; background: transparent; }
-.desk-ltr.astra .astra-watch-row {
+.desk-ltr.astra .astra-settings-panel .astra-depth-option:last-child { border-right: 0; }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option span { font-size: calc(0.875rem * var(--ts)); line-height: 1.35; }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option:hover { background: var(--bg2); }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option.on { color: var(--bg); background: var(--sel); }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option.on span { color: inherit; }
+.desk-ltr.astra .astra-settings-panel .astra-depth-option:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.desk-ltr.astra .astra-settings-panel .astra-settings-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.desk-ltr.astra .astra-settings-panel .tipbox.page-watch { display: flex; flex-direction: column; gap: 14px; min-width: 0; padding: 0; border: 0; background: transparent; }
+.desk-ltr.astra .astra-settings-panel .astra-watch-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -6960,7 +6960,7 @@
   padding: 10px 0;
   border-top: 1px solid var(--line);
 }
-.desk-ltr.astra .astra-watch-open {
+.desk-ltr.astra .astra-settings-panel .astra-watch-open {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -6972,18 +6972,18 @@
   border: 0;
   cursor: pointer;
 }
-.desk-ltr.astra .astra-watch-open strong { max-width: 100%; overflow-wrap: anywhere; font-weight: 800; }
-.desk-ltr.astra .astra-watch-open span { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
-.desk-ltr.astra .astra-watch-open:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
-.desk-ltr.astra .astra-watch-stopped { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
-.desk-ltr.astra .astra-watch-model { max-width: 620px; min-width: 0; }
-.desk-ltr.astra .page-watch .work-form { margin-top: 2px; }
-.desk-ltr.astra .page-watch .openfile { padding: 14px 0 0; border-top: 1px solid var(--line); }
+.desk-ltr.astra .astra-settings-panel .astra-watch-open strong { max-width: 100%; overflow-wrap: anywhere; font-weight: 800; }
+.desk-ltr.astra .astra-settings-panel .astra-watch-open span { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .astra-settings-panel .astra-watch-open:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+.desk-ltr.astra .astra-settings-panel .astra-watch-stopped { color: var(--fg2); font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .astra-settings-panel .astra-watch-model { max-width: 620px; min-width: 0; }
+.desk-ltr.astra .astra-settings-panel .page-watch .work-form { margin-top: 2px; }
+.desk-ltr.astra .astra-settings-panel .page-watch .openfile { padding: 14px 0 0; border-top: 1px solid var(--line); }
 @container (max-width: 520px) {
   .desk-ltr.astra .astra-settings-panel { padding: 14px; }
-  .desk-ltr.astra .astra-depth-option { padding: 7px 6px; }
-  .desk-ltr.astra .astra-depth-option span { overflow-wrap: anywhere; }
-  .desk-ltr.astra .astra-watch-row { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .desk-ltr.astra .astra-settings-panel .astra-depth-option { padding: 7px 6px; }
+  .desk-ltr.astra .astra-settings-panel .astra-depth-option span { overflow-wrap: anywhere; }
+  .desk-ltr.astra .astra-settings-panel .astra-watch-row { grid-template-columns: minmax(0, 1fr); align-items: start; }
 }
 
 /* --- Dark Desk: the activity log and the case file ------------------------ */
