@@ -2163,7 +2163,7 @@ type AnnouncedResultPassage = {
 function announcedResultPassages(record: WholeRecord): AnnouncedResultPassage[] {
   const storedSegments = record.segments?.length ? record.segments : record.windows?.flatMap((window) => window.segments) ?? [];
   const segments = [...storedSegments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
-  const triggers = segments.filter((segment) => announcedResultWords.test(segment.text));
+  const triggers = segments.filter((segment) => hasAnnouncedResult(segment.text));
   const groups: typeof segments[] = [];
   for (const trigger of triggers) {
     const nearby = segments.filter((segment) =>
@@ -2289,7 +2289,7 @@ export function writerDecisionWindowEvidence(record: WholeRecord): string {
   const windows = [...record.windows].sort((a, b) => (a.segments[0]?.seconds ?? 0) - (b.segments[0]?.seconds ?? 0));
   for (const window of windows) {
     const included = new Set<number>();
-    for (const result of [...window.segments].sort((a, b) => a.seconds - b.seconds).filter((segment) => announcedResultWords.test(segment.text))) {
+    for (const result of [...window.segments].sort((a, b) => a.seconds - b.seconds).filter((segment) => hasAnnouncedResult(segment.text))) {
       // Short context preserves the announcement and nearby dissent without crowding out later votes.
       const context = window.segments.filter((segment) => Math.abs(segment.seconds - result.seconds) <= 10);
       const fresh = context.filter((segment) => !included.has(segment.index));
@@ -3422,13 +3422,19 @@ function candidateScore(claim: string, quote: string): number {
   const readingStageMatch = Boolean(readingStage && new RegExp(`\\b${readingStage}[\\s-]+reading\\b`, "i").test(quote));
   const claimedTally = claim.match(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/i);
   const spoken = quote.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => spokenDigits[word]!);
-  const hasClaimedResult = Boolean(claimedTally && announcedResultWords.test(quote) &&
+  const hasClaimedResult = Boolean(claimedTally && hasAnnouncedResult(quote) &&
     [...spoken.matchAll(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/gi)]
       .some((match) => match[1] === claimedTally[1] && match[2] === claimedTally[2]));
   return hits + numberHits * 4 + topicHits * 4 + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 24 : 0) + (hasClaimedResult ? 8 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
 }
 
-const announcedResultWords = /\b(?:(?:motion|item|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:carries|passes|fails|carried|passed|failed)|carries\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+const announcedResultWords = /\b(?:(?:(?:the\s+)?(?:motion|item)|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:(?:is|was|has\s+been)\s+)?(?:carries|passes|fails|carried|passed|failed|approved|approves)|(?:carries|carried|passes|passed|fails|failed)\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven|unanimously)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+
+function hasAnnouncedResult(text: string): boolean {
+  return text.split(/[.!?;\r\n]+/).some((sentence) =>
+    !/\b(?:if|unless|whether|assuming|when)\b/i.test(sentence) && announcedResultWords.test(sentence),
+  );
+}
 
 function sameTranscriptItem(left: TapeSegment, right: TapeSegment): boolean {
   return !left.item || !right.item || left.item === right.item;
@@ -3452,13 +3458,13 @@ function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl:
   const segments = [...record.segments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
   const isVoteClaim = voteClaim(claim);
   const isReadingClaim = /\b(?:first|second)[\s-]+reading\b/i.test(claim);
-  const matched = segments.filter((segment) => candidateScore(claim, segment.text) > 0 || (isVoteClaim && announcedResultWords.test(segment.text)));
+  const matched = segments.filter((segment) => candidateScore(claim, segment.text) > 0 || (isVoteClaim && hasAnnouncedResult(segment.text)));
   const passages = matched.map((match): ClaimCheckCandidate => {
     let anchor = match;
-    if (isVoteClaim && !announcedResultWords.test(match.text)) {
+    if (isVoteClaim && !hasAnnouncedResult(match.text)) {
       anchor = segments.find((segment) =>
         segment.seconds >= match.seconds && segment.seconds <= match.seconds + 900 &&
-        sameTranscriptItem(match, segment) && announcedResultWords.test(segment.text),
+        sameTranscriptItem(match, segment) && hasAnnouncedResult(segment.text),
       ) ?? match;
     }
     const contextWindowSeconds = isReadingClaim ? 300 : 120;

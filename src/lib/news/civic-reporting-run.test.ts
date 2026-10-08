@@ -1225,13 +1225,15 @@ describe("the writer's method prompt states the status policy", () => {
   });
   // guards: the writer can omit a vote announced after the first 6,000 transcript characters.
   it("passes a reconciled vote's announcement from its transcript window to the writer", async () => {
-    const result = { index: 1, seconds: 15397, item: "12A", itemTitle: "Budget direction", text: "item carries unanimously." };
-    const window = { windowIndex: 15, startClock: "4:00:00", endClock: "4:16:37", items: [{ item: "12A", title: "Budget direction" }], segments: [
-      { index: 0, seconds: 14400, item: "12A", itemTitle: "Budget direction", text: "Opening transcript words. ".repeat(300) }, result,
-    ] };
+    const resultTexts = ["The motion was approved 5-2.", "The item is approved.", "It passes.", "It fails.", "Motion carries unanimously.", "If this is approved, the clerk will post notice."];
+    const segments = resultTexts.map((text, index) => ({ index, seconds: 100 + index * 30, item: "12A", itemTitle: "Budget direction", text }));
+    const windows = segments.map((segment, windowIndex) => ({ windowIndex, startClock: "0:00", endClock: "0:00", items: [{ item: "12A", title: "Budget direction" }], segments: [segment] }));
     const action = { timestamp: "4:16:37", agendaItem: "12A", motionOrAction: "Final council direction on the proposed budget", outcome: "carries unanimously", vote: "unanimously" } as CoverageAction;
-    const { prompt } = await callWritingPass([], { windows: [window], segments: window.segments, votes: [], gaps: [], identity: { videoId: "meeting" } }, [action]);
-    assert.ok(prompt.includes("item carries unanimously."));
+    const record = { windows, segments, votes: [], gaps: [], identity: { videoId: "meeting" } };
+    const evidence = writerDecisionWindowEvidence(record as never);
+    await callWritingPass([], record, [action]);
+    for (const result of resultTexts.slice(0, 5)) assert.ok(evidence.includes(result), result);
+    assert.ok(!evidence.includes(resultTexts[5]!));
   });
   // guards: the editor could receive a story that mentions an agenda item but omits its announced result.
   it("revises a story once to add an omitted result for an item it mentions", async () => {
