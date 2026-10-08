@@ -6999,7 +6999,7 @@
   display: grid;
   grid-template-columns: max-content minmax(0, 1fr);
   gap: 10px;
-  padding: 4px 0;
+  padding: 1px 0;
   border-bottom: 1px solid var(--line);
   font-size: calc(0.9375rem * var(--ts));
 }
@@ -7038,7 +7038,7 @@
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.desk-ltr.astra .astra-deep-file { gap: 6px; }
+.desk-ltr.astra .astra-deep-file { gap: 4px; }
 .desk-ltr.astra .astra-deep-file > .model-picker { margin: 0; }
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker-help,
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker > .model-picker-help {
