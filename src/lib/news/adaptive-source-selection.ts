@@ -48,11 +48,17 @@ import {
   isQuiet,
   hostOf,
 } from "./source-inventory.ts";
+import type { SourcePurpose } from "./source-inventory.ts";
+
+export type SourceCadence = "daily" | "weekly" | "monthly" | "as-needed";
 
 /** What the editor asked for, if anything, for one source. The screen stores
  *  this; a desk that stores nothing passes none of it and gets rule 3 onward. */
 export type SourcePreference = {
   sourceId: number;
+  purpose?: SourcePurpose | null;
+  cadence?: SourceCadence | null;
+  deadline?: string | null;
   /** The editor's explicit selection: read before anything else. */
   selected?: boolean;
   /** The editor marked this as high priority (deadline, or a beat they watch). */
@@ -77,6 +83,8 @@ export type RotationDecision = {
     | "editor-selected"
     | "high-priority"
     | "due-now"
+    | "cadence-due"
+    | "deadline-soon"
     | "longest-waiting"
     | "never-checked"
     | "trial";
@@ -113,9 +121,14 @@ export function selectRotation(input: RotationInput): Rotation {
   const parked: RotationDeferral[] = [];
   const readable: SourceHealthFacts[] = [];
   for (const source of input.sources) {
-    const observation = classifyObservation(source, nowMs);
-    if (observation === "blocked") parked.push({ sourceId: source.id, reason: "blocked" });
-    else if (observation === "asked-to-wait")
+    const retryAt = source.retry_after ? Date.parse(source.retry_after) : Number.NaN;
+    const retryPending = Number.isFinite(retryAt) && retryAt > nowMs;
+    // `blocked_at` records the first refusal and remains for the editor's
+    // history. Eligibility comes from its saved backoff: once that time passes,
+    // a failed source returns to the rotation instead of staying parked forever.
+    if (source.blocked_at && retryPending)
+      parked.push({ sourceId: source.id, reason: "blocked" });
+    else if (retryPending)
       parked.push({ sourceId: source.id, reason: "parked" });
     else readable.push(source);
   }
@@ -180,8 +193,29 @@ export function selectRotation(input: RotationInput): Rotation {
  * When the preference carries no urgency, the source is not due -- this module
  * does not invent deadlines from a row's shape or silence.
  */
+/** A missed deadline stays due until a successful read at or after it.
+ * Date-only deadlines retain the editor's existing end-of-day meaning.
+ * Future deadlines keep their seven-day lookahead priority. */
+function deadlineReason(
+  source: SourceHealthFacts,
+  pref: SourcePreference | undefined,
+  nowMs: number,
+): "due-now" | "deadline-soon" | null {
+  const deadline = pref?.deadline;
+  if (!deadline) return null;
+  const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(deadline)
+    ? Date.parse(`${deadline}T23:59:59.999Z`)
+    : Date.parse(deadline);
+  if (!Number.isFinite(deadlineAt)) return null;
+  if (deadlineAt >= nowMs) {
+    return deadlineAt <= nowMs + 7 * 86_400_000 ? "deadline-soon" : null;
+  }
+  const lastRead = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+  return !Number.isFinite(lastRead) || lastRead < deadlineAt ? "due-now" : null;
+}
+
 function isDue(
-  _source: SourceHealthFacts,
+  source: SourceHealthFacts,
   pref: SourcePreference | undefined,
   nowMs: number,
 ): boolean {
@@ -189,6 +223,13 @@ function isDue(
   if (typeof urgency === "string" && urgency) {
     const at = Date.parse(urgency);
     if (Number.isFinite(at) && at <= nowMs) return true;
+  }
+  if (deadlineReason(source, pref, nowMs)) return true;
+  const cadenceDays =
+    pref?.cadence === "daily" ? 1 : pref?.cadence === "weekly" ? 7 : pref?.cadence === "monthly" ? 30 : null;
+  if (cadenceDays != null) {
+    const lastRead = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+    if (!Number.isFinite(lastRead) || nowMs - lastRead >= cadenceDays * 86_400_000) return true;
   }
   return false;
 }
@@ -199,7 +240,11 @@ function reasonFor(
   nowMs: number,
 ): RotationDecision["reason"] {
   if (pref?.highPriority) return "high-priority";
-  if (isDue(source, pref, nowMs)) return "due-now";
+  if (pref?.urgency && Number.isFinite(Date.parse(pref.urgency)) && Date.parse(pref.urgency) <= nowMs)
+    return "due-now";
+  const deadline = deadlineReason(source, pref, nowMs);
+  if (deadline) return deadline;
+  if (isDue(source, pref, nowMs)) return "cadence-due";
   if (!source.last_ok_at && !source.last_fetched_at) return "never-checked";
   return "longest-waiting";
 }
@@ -265,7 +310,9 @@ export function unmarkedQuietInstitutions(
   nowMs = Date.now(),
 ): number[] {
   const marked = new Set(
-    preferences.filter((p) => p.selected || p.highPriority).map((p) => p.sourceId),
+    preferences
+      .filter((p) => p.selected || p.highPriority || p.purpose || p.cadence || p.deadline)
+      .map((p) => p.sourceId),
   );
   return sources
     .filter((s) => !marked.has(s.id))

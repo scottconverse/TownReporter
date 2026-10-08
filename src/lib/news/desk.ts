@@ -11,11 +11,23 @@ import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
+import {
+  cleanSourceScanPreferenceInput,
+  persistSourceScanPreference,
+} from "./source-scan-preferences.server.ts";
+import {
+  finishScanCoverage,
+  manualScanCoverage,
+  parseScanSourceCoverage,
+  updateScanCoverageEntry,
+  type ScanSourceCoverageEntry,
+} from "./scan-source-coverage.ts";
+import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
+import { ingestUrl, ingestDocument, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
   BLOCKED_TRIES_PER_HOST_PER_DAY,
@@ -194,6 +206,7 @@ import {
   tierFromKind,
   resurfacedSummarySentence,
   scanDecisionsSentence,
+  SOURCE_SCAN_PREFERENCE_COPY,
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
@@ -344,7 +357,10 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
-             proposed_section, reviewed_at, review_note,
+              proposed_section, reviewed_at, review_note,
+              scan_preference.purpose as purpose_preference,
+              scan_preference.cadence as scan_cadence,
+              scan_preference.deadline::text as scan_deadline,
              -- 0.6.72: snapshots this source produced since the newest run
              -- started -- the drawn row's "2 new items". A source that was
              -- fetched and had not changed wrote none, which is the drawing's
@@ -355,8 +371,11 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
                   and sn.created_at >= coalesce(
                     (select max(started_at) from scan_runs where newsroom_id = ${owned(context)}),
                     '-infinity'::timestamptz))::int as new_since_last_pass
-      from sources
-      where newsroom_id = ${owned(context)}
+       from sources
+       left join source_scan_preferences scan_preference
+         on scan_preference.newsroom_id = sources.newsroom_id
+        and scan_preference.source_id = sources.id
+       where sources.newsroom_id = ${owned(context)}
       order by
         -- Paused sorts after accepted: it is still on the watch list, and the
         -- editor put it there deliberately, so it belongs with the rows they
@@ -385,6 +404,18 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
 export const listSources = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => querySourceRows(context));
+
+export const saveSourceScanPreference = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => cleanSourceScanPreferenceInput(raw))
+  .handler(async ({ context, data }) => {
+    if (data.invalidError) return { ok: false as const, error: data.invalidError };
+    const sql = await getSql();
+    const saved = await persistSourceScanPreference(sql, context.newsroomId, context.userId, data);
+    if (!saved)
+      return { ok: false as const, error: SOURCE_SCAN_PREFERENCE_COPY.acceptedOnly };
+    return { ok: true as const };
+  });
 
 /** The read-only inventory screen, using the same facts and judgement as its CSV. */
 export const getSourceInventory = createServerFn({ method: "GET" })
@@ -1275,7 +1306,7 @@ export const listScans = createServerFn({ method: "GET" })
     const sql = await getSql();
     const { limit, offset } = data;
     const rows = await sql<ScanRow>`
-      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, meetings_found, meetings_captured, meetings_failed, meeting_failures, summary, error, execution_origin
+      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, source_coverage, meetings_found, meetings_captured, meetings_failed, meeting_failures, summary, error, execution_origin
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
@@ -1391,6 +1422,7 @@ export const runScan = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
+      daily: data.daily,
       sectionKey: data.sectionKey,
       customSourceIds: data.customSourceIds,
       packId: data.packId,
@@ -1629,6 +1661,7 @@ export type PerformScanWorkDeps = {
   scheduledSnapshot?: {
     model: { localModel?: { baseUrl: string; id: string } };
     sources: SourceRow[];
+    coverage?: unknown;
   };
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
@@ -1720,7 +1753,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 ) {
   let failureRunId = job.subject_id;
   let writeQueuedSourceWrites = async (_sql: Sql): Promise<void> => {};
+  let sourceCoverage: ScanSourceCoverageEntry[] = [];
   const failureReceipt = {
+    sourcesCompleted: 0,
     sourcesSelected: 0,
     sourcesAttempted: 0,
     sourcesFetched: 0,
@@ -1845,7 +1880,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 
   const [scanRun] = await sql<{
     section_snapshot: string | null;
-  }>`select section_snapshot from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
+    source_snapshot: string | null;
+    policy_snapshot: string | null;
+    source_coverage: unknown;
+  }>`select section_snapshot, source_snapshot, policy_snapshot, source_coverage from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
   const parsedSnapshot = scanRun?.section_snapshot ? JSON.parse(scanRun.section_snapshot) : null;
   const { isCustomScanSnapshot } = await import("./section-types.ts");
   // P0-1: a Custom scan carries its explicit accepted source set in the
@@ -1869,15 +1907,20 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     : sectionConfig.sections.filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key));
   const allowedTopics = filingSections.map((s) => s.key);
   const topicChoices = filingSections.map((s) => ({ key: s.key, name: s.name, brief: s.brief }));
+  // A manual daily run pins the same source plan as the schedule, while using
+  // the editor's chosen model and the normal manual claim/commit boundaries.
+  const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
+  const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
+    ? JSON.parse(scanRun.source_snapshot) : undefined;
   const allSources =
-    deps.scheduledSnapshot?.sources ??
+    deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
              -- SH-B: the wait a site asked for, and the block it put on us. Both
              -- are read here because the pass has to SKIP a parked row, which
              -- is the only thing that makes a recorded "come back at 3:40"
              -- mean anything.
-             retry_after, blocked_at, blocked_attempts
+             retry_after, retry_after_note, blocked_at, blocked_attempts, last_ok_at
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
@@ -2056,13 +2099,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         /* the touch stands whatever happens to the observation */
       }
     }
+    await saveScanSourceCoverage(writeSql, owned(context), runId, finishScanCoverage(sourceCoverage));
   };
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
-  failureReceipt.sourcesAttempted = watchSlice.length;
+  failureReceipt.sourcesAttempted = 0;
+  sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
+  if (!sourceCoverage.length && sources.length)
+    sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
 
   const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
@@ -2084,7 +2131,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   /*
     FB1, unit 1: the fetch pass is the scan's longest silence.
 
-    Up to two hundred pages, six at a time, and until this the whole pass
+    Up to two hundred pages, and until this the whole pass
     reported nothing at all -- not a stage, not a count, not a heartbeat. The
     card could only say "Working…" for as long as it took, which on a real watch
     list is minutes, and the run row in the database kept reading zero fetched
@@ -2137,7 +2184,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     await sql`
       update scan_runs
       set sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_fetched = ${fetchedCount},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${failureReceipt.sourcesAnalyzed},
@@ -2155,6 +2202,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   const noteSourceProgress = async () => {
     attemptedCount += 1;
+    failureReceipt.sourcesCompleted = attemptedCount;
     /*
       The fetch is the scan's second arrival, so its count fills 5-55 of the
       bar and not 0-100: the model batches and the filing come after it, and a
@@ -2172,9 +2220,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await writeLiveRunRow(true);
   await reportStage("Reading the sources");
   let fetchLoopError: unknown;
-  await mapLimit(watchSlice, 6, async (src) => {
-    if (fetchLoopError) return;
+  // One source at a time makes Cancel a boundary the editor can rely on:
+  // finish the current fetch, keep its observation, and never start the next.
+  // A batch of six could otherwise begin five more reads after the press.
+  for (const src of watchSlice) {
     try {
+    await throwIfJobCancelled(job.id);
     await deps.scheduledGuard?.();
     /*
       SH-B items 2 and 3, the half that makes them real: a row the site asked
@@ -2211,9 +2262,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         "asked-to-wait",
         "The desk is waiting out a request to come back later, made by this source.",
       );
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "skipped",
+        reasonCode: "waiting",
+        reason: src.retry_after_note ?? null,
+      });
       skippedThisPass += 1;
       await noteSourceProgress();
-      return;
+      continue;
     }
     /*
       The per-host allowance for the day. A newsroom can watch six pages of one
@@ -2243,27 +2299,37 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           (nothing was read). See source-observations.server.ts.
         */
         await recordScanObservation(src.id, "asked-to-wait", note);
+        sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+          status: "skipped",
+          reasonCode: "host-cap",
+          reason: note,
+        });
         skippedThisPass += 1;
         await noteSourceProgress();
-        return;
+        continue;
       }
     }
     try {
+      failureReceipt.sourcesAttempted += 1;
       const bundle = await withRetry(async () => {
+        await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         return fetchUrl(src.url);
       });
       const sourceText = postgresText(bundle.text);
       const extras: { url: string; text: string }[] = [];
       for (const extra of bundle.extras.slice(0, 4)) {
+        await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         try {
           const doc = await withRetry(async () => {
+            await throwIfJobCancelled(job.id);
             await deps.scheduledGuard?.();
             return fetchUrl(extra);
           });
           extras.push({ url: extra, text: postgresText(doc.text) });
         } catch (err) {
+          if (err instanceof JobCancelledError) throw err;
           if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err)))
             throw err;
           /* skip a bad packet */
@@ -2312,8 +2378,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         extras,
         changed,
       });
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "read",
+        readAt: new Date().toISOString(),
+      });
       await noteSourceProgress();
     } catch (err) {
+      if (err instanceof JobCancelledError) throw err;
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
       /*
@@ -2361,6 +2432,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         await recordScanObservation(src.id, verdict.kind, verdict.note);
       }
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "blocked",
+        reasonCode: "fetch-failed",
+        reason: editorFetchError(msg, src.url) ?? "The source could not be read.",
+      });
       failureReceipt.sourcesFailed = failedSources.length;
       failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
@@ -2388,10 +2464,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await noteSourceProgress();
     }
     } catch (error) {
-      // Drain in-flight fetches before settling their queued observations.
-      fetchLoopError ??= error;
+      fetchLoopError = error;
+      break;
     }
-  });
+  }
+  sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
@@ -3110,6 +3187,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     );
   } catch (error) {
     const failure = postgresText(error instanceof Error ? error.message : String(error));
+    const cancelledSummary = error instanceof JobCancelledError
+      ? `Cancelled after ${failureReceipt.sourcesCompleted} of ${failureReceipt.sourcesSelected} sources`
+      : null;
     {
       try {
         const settle = async (receiptSql: Sql) => {
@@ -3129,7 +3209,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
                 meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
                 meetings_failed = ${meetingAwareness?.failed.length ?? 0},
                 meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? [])).slice(0, 32000)},
-                summary = null,
+                summary = ${cancelledSummary},
                 error = coalesce(error, ${failure.slice(0, 800)})
             where id = ${failureRunId} and newsroom_id = ${job.newsroom_id} and finished_at is null
           `;

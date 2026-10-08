@@ -3,6 +3,94 @@
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
+import type { SourceCadence } from "./adaptive-source-selection.ts";
+import type { SourcePurpose } from "./source-inventory.ts";
+import type { ScanSourceCoverageEntry } from "./scan-source-coverage.ts";
+
+export const SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS: readonly {
+  value: SourcePurpose;
+  label: string;
+}[] = [
+  { value: "watch", label: "Watch" },
+  { value: "reference", label: "Reference" },
+  { value: "unknown", label: "Unknown" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS: readonly {
+  value: SourceCadence;
+  label: string;
+}[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "as-needed", label: "As needed" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_COPY = {
+  summary: "Scan preferences",
+  explanation: "Set when this accepted source should be read during the daily scan.",
+  purpose: "Purpose",
+  purposeBlank: "Choose a purpose",
+  cadence: "Cadence",
+  cadenceBlank: "No cadence",
+  deadline: "Deadline",
+  save: "Save preferences",
+  saving: "Saving…",
+  saved: "Scan preferences saved.",
+  saveFailed: "Could not save scan preferences.",
+  acceptedOnly: "Only accepted sources can have scan preferences.",
+  invalid: "Choose a valid purpose, cadence, and deadline.",
+};
+
+export function scanSourceCoverageLine(entries: readonly ScanSourceCoverageEntry[]): string {
+  const read = entries.filter((entry) => entry.status === "read").length;
+  const skipped = entries.filter((entry) => entry.status === "skipped").length;
+  const blocked = entries.filter((entry) => entry.status === "blocked").length;
+  return `Read ${read} of ${entries.length} · ${skipped} wait their turn · ${blocked} blocked`;
+}
+
+export function scanSourceCoverageAge(
+  lastReadAt: string | null | undefined,
+  asOfMs = Date.now(),
+): string {
+  if (!lastReadAt) return "never read";
+  const readAt = Date.parse(lastReadAt);
+  if (!Number.isFinite(readAt)) return "read date not recorded";
+  const days = Math.floor(Math.max(0, asOfMs - readAt) / 86_400_000);
+  if (days === 0) return "read today";
+  return `read ${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string {
+  switch (entry.status) {
+    case "read":
+      return "Read";
+    case "blocked":
+      return "Blocked";
+    case "pending":
+      return "Reading";
+    default:
+      return "Skipped";
+  }
+}
+
+export function scanSourceCoverageReason(entry: ScanSourceCoverageEntry): string {
+  if (entry.reason?.trim()) return entry.reason;
+  switch (entry.reasonCode) {
+    case "over-cap":
+      return "Over the scan limit.";
+    case "waiting":
+      return "Waiting for its retry time.";
+    case "host-cap":
+      return "Waiting for the host's daily limit.";
+    case "not-reached":
+      return "The scan stopped before it reached this source.";
+    case "fetch-failed":
+      return "The source could not be read.";
+    default:
+      return "The source was not read this pass.";
+  }
+}
 
 export function organizationFromUrl(url: string): string {
   try {

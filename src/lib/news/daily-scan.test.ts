@@ -1,3 +1,4 @@
+// guards: the saved daily source picks must keep their fixed slots while the rest of the pool rotates.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -111,6 +112,18 @@ describe("scheduled scan trust boundaries", () => {
 });
 
 describe("daily scan request validation", () => {
+  // guards: a saved scan must not promise more fixed daily reads than its selection or cap.
+  it("bounds fixed daily reads by selected sources and the scan cap", () => {
+    const base = { enabled: true, localTime: "06:00", runtime: "auto", sourceCap: 12,
+      selectedSourceIds: [1], expectedRevision: 0 };
+    for (const [sourceCap, selectedSourceIds, everyDaySourceCount, invalid] of [
+      [12, [1], 8, true], [12, [1], 1, false], [12, [], 1, true],
+      [12, [], 0, false], [1, [1, 2], 2, true], [2, [1, 2], 2, false],
+    ] as const) {
+      const input = cleanDailyScanPolicyInput({ ...base, sourceCap, selectedSourceIds, everyDaySourceCount });
+      assert.equal(Boolean(input.invalidError), invalid);
+    }
+  });
   it("migrates legacy runtime names without silently choosing Opus", () => {
     assert.equal(dailyScanRuntime("claude-cli"), "claude-sonnet");
     assert.equal(dailyScanRuntime("codex-terra"), "codex-balanced");
@@ -195,6 +208,7 @@ describe("daily scan policy compare-and-swap", () => {
       runtime: "local-model" as const,
       modelEffort: null,
       sourceCap: 12,
+      everyDaySourceCount: 8,
       selectedSourceIds: [7],
       expectedRevision: 0,
     };
@@ -452,6 +466,51 @@ describe("daily scan rotation plan", () => {
     assert.ok(plan.deferredIds.includes(2));
   });
 
+  // guards: a deadline inside the next week must not be missed by a rotating pass.
+  it("gives a source due tomorrow a rotating slot before older coverage", () => {
+    const plan = planDailySourceRotation({
+      facts: [src(1, { last_ok_at: ago(80) }), src(2, { last_ok_at: ago(1) })],
+      selectedSourceIds: [],
+      everyDayCount: 0,
+      preferences: [
+        { sourceId: 2, purpose: "watch", cadence: "weekly", deadline: "2026-10-06" },
+      ],
+      cap: 1,
+      nowMs: NOW,
+    });
+    assert.deepEqual(plan.sourceIds, [2]);
+  });
+
+  // guards: the saved daily source picks must keep their fixed slots while the rest of the pool rotates.
+  it("keeps the daily picks fixed while rotating every other selected slot", () => {
+    const selectedSourceIds = Array.from({ length: 12 }, (_, index) => index + 1);
+    const facts = Array.from({ length: 20 }, (_, index) =>
+      src(index + 1, { last_ok_at: ago(index + 1) }),
+    );
+    const first = planDailySourceRotation({
+      facts,
+      selectedSourceIds,
+      cap: 12,
+      everyDayCount: 8,
+      nowMs: NOW,
+    });
+    const justRead = new Set(first.sourceIds);
+    const nextFacts = facts.map((fact) =>
+      justRead.has(fact.id) ? { ...fact, last_ok_at: new Date(NOW).toISOString() } : fact,
+    );
+    const second = planDailySourceRotation({
+      facts: nextFacts,
+      selectedSourceIds,
+      cap: 12,
+      everyDayCount: 8,
+      nowMs: NOW + 86_400_000,
+    });
+
+    assert.deepEqual(first.sourceIds.slice(0, 8), selectedSourceIds.slice(0, 8));
+    assert.deepEqual(second.sourceIds.slice(0, 8), selectedSourceIds.slice(0, 8));
+    assert.notDeepEqual(first.sourceIds.slice(8), second.sourceIds.slice(8));
+  });
+
   it("states the full-pass interval truthfully rather than promising coverage", () => {
     const facts = Array.from({ length: 20 }, (_, i) => src(i + 1, { last_ok_at: ago(i) }));
     const plan = planDailySourceRotation({ facts, selectedSourceIds: [], cap: 10, nowMs: NOW });
@@ -501,7 +560,10 @@ describe("daily scan rotation plan", () => {
       facts: [
         src(1, { last_ok_at: ago(5) }),
         src(2, { retry_after: new Date(NOW + 3_600_000).toISOString() }),
-        src(3, { blocked_at: "2026-10-04T00:00:00Z" }),
+        src(3, {
+          blocked_at: "2026-10-04T00:00:00Z",
+          retry_after: new Date(NOW + 3_600_000).toISOString(),
+        }),
       ],
       selectedSourceIds: [2, 3],
       cap: 12,
@@ -568,23 +630,16 @@ describe("daily scan rotation plan", () => {
     assert.equal(plan.fullPassDays, 2);
   });
 });
-/*
-  THE WIRING PIN. `daily-scan.ts` owns the plan; `daily-scan.server.ts` has to
-  CALL it, or the schedule goes on reading the same fixed dozen. This is the
-  same source-text pin style the trust-boundary suite above uses, because the
-  server module pulls in `jobs.ts` and `@tanstack/react-start` and cannot be
-  imported by a plain `node --test` run.
-
-  THE MUTATION it defends against: reverting the pool read back to
-  `id=any($2::int[])` over the stored selection, which is exactly the old
-  behaviour the brief says not to keep.
-*/
-describe("daily scan server calls the rotation", () => {
-  const server = readFileSync(new URL("./daily-scan.server.ts", import.meta.url), "utf8");
-  it("selects the accepted pool and cuts it with planDailySourceRotation", () => {
-    assert.match(server, /planDailySourceRotation\(/);
-    assert.match(server, /selectedSourceIds: p\.selected_source_ids/);
-    assert.match(server, /cap: p\.source_cap/);
-    assert.match(server, /status='accepted' order by id/);
-  });
+// guards: daily runs must rotate the accepted pool rather than repeatedly reading only the saved picks.
+it("the saved daily plan fills rotating slots from the accepted pool", async () => {
+  const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
+  const sql = await getSql(), room = 9880;
+  await sql.query("insert into newsrooms(id,name) values($1,'Plan fixture')", [room]);
+  const pool = await sql.query<{ id: number }>("insert into sources(user_id,newsroom_id,url,title,kind,tier,status) select 'planner',$1,'https://example.test/'||n,'Source '||n,'page','A','accepted' from generate_series(1,20) n returning id", [room]);
+  const selected = pool.slice(0,12).map(s => s.id);
+  await sql.query("insert into daily_scan_policies(newsroom_id,configured_by_user_id,source_cap,every_day_source_count,selected_source_ids) values($1,'planner',12,7,$2::jsonb)", [room,JSON.stringify(selected)]);
+  const plan = await dailyScanPlan(sql, room);
+  assert.equal(plan.sources.length, 12);
+  assert.deepEqual(plan.sources.slice(0,7).map(s => s.id), selected.slice(0,7));
+  assert.equal(plan.coverage.length, 20);
 });
