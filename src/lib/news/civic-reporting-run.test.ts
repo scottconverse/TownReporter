@@ -24,6 +24,7 @@ import {
 import type { CoverageAction } from "./civic-reporting.ts";
 import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
 import { evidenceCheckRows } from "./evidence-check-list.ts";
+import { firstSentenceForDek } from "./dek-fallback.ts";
 import type { Sql } from "../db.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -307,8 +308,8 @@ describe("performReportingWork: the run", () => {
       // A claim the tape supports under its own item survives the code binding.
       assert.equal(pkg.stories[0]!.claims[0]!.status, "VERIFIED", pkg.stories[0]!.claims[0]!.nextCheck);
       assert.equal(readBack!.draftId !== null, true, "the copy is saved as a new draft");
-      const [draftRow] = await sql<{ research_json: unknown }>`
-        select research_json from drafts where id = ${readBack!.draftId}
+      const [draftRow] = await sql<{ research_json: unknown; dek: string }>`
+        select research_json, dek from drafts where id = ${readBack!.draftId}
       `;
       const research = typeof draftRow!.research_json === "string"
         ? JSON.parse(draftRow!.research_json)
@@ -317,6 +318,8 @@ describe("performReportingWork: the run", () => {
       assert.equal(readiness?.version, 1);
       assert.equal(readiness?.state, "verified");
       assert.equal(readiness?.openCount, 0);
+      // guards: a filed story could show the writer's 114-word brief as its reader-facing dek.
+      assert.equal(draftRow!.dek, pkg.stories[0]!.dek);
       assert.equal(pkg.receipt.requestedRuntime, "auto", "the package keeps the enqueued runtime");
       assert.equal(pkg.receipt.requestedEffort, "none", "the package keeps the requested effort");
       assert.equal(pkg.receipt.actualRuntime, "local-model", "the package keeps the answering runtime");
@@ -1181,6 +1184,45 @@ describe("the writer's method prompt states the status policy", () => {
     assert.match(status, /condition any resident effect on[\s\S]{0,80}adoption/i, "resident effects are conditioned on adoption");
     assert.match(status, /damaged caption|adapter/i, "a cut quote may not be presented as an exact quotation");
   });
+  // guards: a malformed dek could be filed as a long notebook summary instead of a reader-facing summary.
+  it("rewrites an invalid dek once and falls back to the first sentence if it stays invalid", async () => {
+    const body = "The city council proposed a $3 million airport-noise plan for neighbors near the runway and will hold a public hearing before adopting any changes. The story continues with background for residents.";
+    const validDek = "The city council proposed a $3 million airport-noise plan for neighbors near the runway, with a public hearing scheduled before any change is adopted.";
+    const invalidDek = "The supplied record passage gives a tiered action account.";
+    async function run(secondDek: string) {
+      let calls = 0;
+      const opts = { modelChoice: "pinned", effort: "high" };
+      const result = await writingPass({
+        record: { windows: [], segments: [], votes: [], gaps: [], identity: {} } as never,
+        documents: [], further: { findings: "", documents: [], gaps: [] },
+        gather: { findings: "", observations: [] } as never,
+        warm: { actions: [], windows: [], gaps: [] } as never,
+        cold: { actions: [], roster: [], votes: [], gaps: [] } as never,
+        reconcile: { actions: [], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 },
+        contrary: { contrary: [], unknowns: [], gaps: [], raw: { ok: true, error: "", text: "", chars: 0, truncated: false } },
+        scoring: { score: null, readiness: 0, why: "", gaps: [] },
+        assignment: "Develop this lead", action: "Develop this lead", city: "Longmont", method: method as never,
+        chatOpts: opts, workspaceDir: "", throwIfCancelled: async () => {},
+        chat: (async (_system: string, prompt: string, _tokens: number, receivedOpts: unknown) => {
+          calls += 1;
+          assert.equal(receivedOpts, opts);
+          if (calls === 1) {
+            assert.match(prompt, /one or two sentences, 20 to 40 words/);
+            return { ok: true as const, text: JSON.stringify({
+              stories: [{ id: "dek", headline: "Council considers airport-noise plan", dek: invalidDek,
+                draft: body, plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [],
+            }) };
+          }
+          assert.match(prompt, /DEK REWRITE — one bounded attempt/);
+          return { ok: true as const, text: JSON.stringify({ dek: secondDek }) };
+        }) as never,
+      });
+      assert.equal(calls, 2, "one writer call plus one dek rewrite");
+      return result.stories[0]!.dek;
+    }
+    assert.equal(await run(validDek), validDek);
+    assert.equal(await run(invalidDek), firstSentenceForDek(body));
+  });
   // guards: the writer can omit a vote announced after the first 6,000 transcript characters.
   it("passes a reconciled vote's announcement from its transcript window to the writer", async () => {
     const result = { index: 1, seconds: 15397, item: "12A", itemTitle: "Budget direction", text: "item carries unanimously." };
@@ -1370,7 +1412,6 @@ describe("the retained recording identity is enforced, not assumed", () => {
     assert.equal(out.claims[0]!.status, "VERIFIED", "a correctly-bound claim stays verified");
     assert.equal(out.claims[0]!.nextCheck, "", "nothing owed");
   });
-
   // guards: a timestamp on an editor-supplied summary could be mislabeled as a retained recording cite.
   it("keeps a time-coded action account separate from the retained video", () => {
     const story = {
@@ -1600,7 +1641,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
             assert.match(prompt, /substantial editorial cut/);
             assert.match(prompt, /Human Service Agency funding/);
           }
-          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: [] }) };
+          return { ok: true as const, text: JSON.stringify({ stories: [{ id: "s1", headline: "Proposal", dek: `${Array(25).fill("word").join(" ")}.`, draft: Array(count).fill("word").join(" "), plainBrief: "", cannotSay: "Pending ordinance", readinessTier: 2, claims: [], sources: [] }], held: [] }) };
         }) as never,
       });
       assert.equal(calls, 2, "exactly one revision, never an unbounded retry loop");
@@ -1618,7 +1659,7 @@ describe("scoped correction provenance survives contrary, scoring, and writing",
     async function runWriter(documents: DocumentRead[], reason: string, malformedReplies = 0) {
       let calls = 0;
       const reply = {
-        stories: [{ id: "story-1", headline: "Budget proposal", draft: "A short proposed-budget draft.", plainBrief: "", cannotSay: "", readinessTier: 2, claims: [], sources: [] }],
+        stories: [{ id: "story-1", headline: "Budget proposal", dek: "The council proposed a new airport-noise plan for neighbors living near the runway and will hold a public hearing before it adopts any changes.", draft: "The city council proposed a new airport-noise plan for neighbors near the runway and will hold a public hearing before adopting any changes. It remains open for comment.", plainBrief: "", cannotSay: "", readinessTier: 2, claims: [], sources: [] }],
         held: [{ storyId: "story-1", headline: "Budget proposal", reason, nextCheck: reason, unverified: true }],
       };
       return writingPass({

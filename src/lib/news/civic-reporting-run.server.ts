@@ -93,6 +93,7 @@ import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from ".
 import { grokChat, probeProvider, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import { KIND_BUDGETS, modelEffort, PROVIDER_REGISTRY, providerEntry, type ModelEffort } from "./provider-registry.ts";
 import { readProviderOverrides } from "./provider-settings.ts";
+import { dekRuleProblems, firstSentenceForDek } from "./dek-fallback.ts";
 import { storyReadiness } from "./story-readiness.ts";
 
 // Whole-meeting writing asks for 18,000 tokens, rather than a short pass reply.
@@ -550,6 +551,7 @@ export function buildStoryFromReply(
     id: str(record.id) || slugId("story-", index + 1, headline),
     headline,
     draft: str(record.draft),
+    dek: str(record.dek),
     plainBrief: str(record.plainBrief),
     cannotSay: str(record.cannotSay),
     readinessTier,
@@ -746,6 +748,8 @@ export function jobResearchScope(job: DeskJob | null | undefined): "public" | "s
 
 const JSON_CONTRACT = [
   "Return ONE fenced json block and nothing outside it.",
+  "Each story dek is a reader-facing summary: one or two sentences, 20 to 40 words and never over 45.",
+  "Cover who, what, the key number and stage; agree with paragraph one, add to the headline and omit supplied, passage, record, establish, action account and tier.",
   "{",
   '  "actions": [ { "actionId": "", "timestamp": "", "agendaItem": "", "motionOrAction": "",',
   '      "outcome": "", "vote": "", "policyStage": "", "evidence": "", "disposition": "" } ],',
@@ -753,7 +757,7 @@ const JSON_CONTRACT = [
   '  "meetingCoverage": [ { "status": "COMPLETE|PARTIAL", "body": "", "date": "",',
   '      "coverageStatus": "complete|partial|unavailable", "recordingUrl": "", "gaps": "" } ],',
   '  "score": { "immediacy": 1, "impact": 1, "conflict": 1, "novelty": 1, "whyItMatters": "" },',
-  '  "stories": [ { "id": "", "headline": "", "draft": "", "plainBrief": "",',
+  '  "stories": [ { "id": "", "headline": "", "dek": "", "draft": "", "plainBrief": "",',
   '      "cannotSay": "", "readinessTier": 0,',
   '      "claims": [ { "id": "", "text": "", "status": "VERIFIED|CONTESTED|UNVERIFIED",',
   '          "sourceIds": [], "nextCheck": "" } ],',
@@ -1198,7 +1202,7 @@ export async function fileRunLeads(input: {
           provenance_json, disclosure_text, research_json
         ) values (
           ${input.request.user_id}, ${input.request.newsroom_id}, ${leadId},
-          ${story.headline.slice(0, 240)}, ${story.plainBrief.slice(0, 4000)}, ${story.draft},
+          ${story.headline.slice(0, 240)}, ${story.dek?.trim() || firstSentenceForDek(story.draft)}, ${story.draft},
           ${"council"}, ${JSON.stringify(urls)}, ${JSON.stringify(urls.map((url) => ({ url })))},
           ${"Reported with the civic-scanner method; verify the claims ledger before publication."},
           ${JSON.stringify({ civicReporting: true, requestId: input.request.id, storyId: story.id,
@@ -2228,6 +2232,10 @@ export async function writingPass(input: {
     "You are the WRITER of the substantial reporting package for " + input.city + ".",
     "Write for readers: what this meeting did, what it means for residents, and what they can still influence.",
     "Do NOT write a scan summary. Write the story, with the residents' impact foregrounded.",
+    "Write a real dek under the headline: one or two sentences, 20 to 40 words, with a hard cap of 45 words.",
+    "The dek covers only this lead story: who, what, the key number and its stage (proposed, approved or denied). If room, say what it means for residents.",
+    "Make the dek agree with the first paragraph and add to the headline rather than repeat it. Leave out process words: supplied, passage, record, establish, action account and tier.",
+    "Every factual detail in the dek must also be checked as a body fact and appear in the claim ledger.",
     "Honor the editor's requested story length and focus. The draft is publication copy, not a dump of every fact researched.",
     writerLengthTarget(input.assignment),
     "The claim ledger must cover consequential assertions in that copy and brief; do not add unrelated document facts merely to expand the ledger.",
@@ -2319,7 +2327,7 @@ export async function writingPass(input: {
     "carry the retained video id and its canonical recording URL above -- never a different upload's URL.",
     "",
     "Return ONE fenced json block:",
-    "{ \"stories\": [ { \"id\": \"\", \"headline\": \"\", \"draft\": \"\", \"plainBrief\": \"\", \"cannotSay\": \"\",",
+    "{ \"stories\": [ { \"id\": \"\", \"headline\": \"\", \"dek\": \"\", \"draft\": \"\", \"plainBrief\": \"\", \"cannotSay\": \"\",",
     "    \"readinessTier\": 0,",
     "    \"claims\": [ { \"id\": \"\", \"text\": \"\", \"status\": \"VERIFIED|CONTESTED|UNVERIFIED\", \"item\": \"\",",
     "        \"sourceIds\": [], \"nextCheck\": \"\" } ],",
@@ -2411,13 +2419,37 @@ export async function writingPass(input: {
   }
   const stories: PackageStory[] = [];
   if (Array.isArray(parsed.stories)) {
-    parsed.stories.forEach((raw, index) => {
-      if (!raw || typeof raw !== "object") return;
+    for (let index = 0; index < parsed.stories.length; index += 1) {
+      const raw = parsed.stories[index];
+      if (!raw || typeof raw !== "object") continue;
       const row = raw as Record<string, unknown>;
       const draft = strOf(row.draft);
-      if (!draft) return;
-      stories.push(buildStoryFromReply(row, index, strOf(row.headline)));
-    });
+      if (!draft) continue;
+      let story = buildStoryFromReply(row, index, strOf(row.headline));
+      const problems = dekRuleProblems(story.dek ?? "", story.headline, story.draft);
+      if (problems.length) {
+        await input.throwIfCancelled();
+        const rewrite = await input.chat(methodSystemPrompt(input.method), [
+          "DEK REWRITE — one bounded attempt. Rewrite only the dek; keep the headline, story and reporter's voice unchanged.",
+          "Rules: one or two sentences; 20 to 40 words, hard cap 45; who, what, key number and stage; agree with paragraph one and add to, not repeat, the headline.",
+          "Do not use process words: supplied, passage, record, establish, action account or tier. Every fact must match paragraph one and the claim ledger.",
+          "Problems to fix: " + problems.join(" "),
+          "HEADLINE: " + story.headline,
+          "FIRST PARAGRAPH: " + story.draft.split(/\r?\n\s*\r?\n/)[0],
+          "CURRENT DEK: " + story.dek,
+          'Return one JSON object: {"dek":"..."}',
+        ].join("\n\n"), 1_200, input.chatOpts as never);
+        const candidate = rewrite.ok ? readJsonBlock<Record<string, unknown>>(rewrite.text) : null;
+        const revisedDek = strOf(candidate?.dek).trim();
+        story = {
+          ...story,
+          dek: dekRuleProblems(revisedDek, story.headline, story.draft).length
+            ? firstSentenceForDek(story.draft)
+            : revisedDek,
+        };
+      }
+      stories.push(story.dek?.trim() ? story : { ...story, dek: firstSentenceForDek(story.draft) });
+    }
   }
   const held = guardCorrectionHolds(
     normalizeHeld(parsed.held),

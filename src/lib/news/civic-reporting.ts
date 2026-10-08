@@ -119,6 +119,8 @@ export type PackageStory = {
   headline: string;
   /** The draft body. Substantial; never a rewritten scan excerpt. */
   draft: string;
+  /** The reader-facing one- or two-sentence summary beneath the headline. */
+  dek?: string;
   /** The reporter's plain-language brief, or "". */
   plainBrief: string;
   /** What this story specifically cannot yet say. */
@@ -377,6 +379,7 @@ export function parseStory(raw: unknown): PackageStory | null {
     id: str(o.id) || headline.slice(0, 40),
     headline,
     draft,
+    ...(str(o.dek) ? { dek: str(o.dek) } : {}),
     plainBrief: str(o.plainBrief ?? o.plainLanguage),
     cannotSay: str(o.cannotSay ?? o.whatCannotSay),
     readinessTier: parseReadinessTier(o.readinessTier ?? o.editorialTier ?? o.readiness),
