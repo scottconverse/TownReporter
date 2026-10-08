@@ -57,7 +57,7 @@ function fakeSql(plan: Plan, queries: Query[], chatCalls: { n: number }) {
     const text = strings.join(" ? ").replace(/\s+/g, " ").trim();
     if (/^update /i.test(text)) {
       queries.push({ text, values, write: true });
-      return Promise.resolve([]);
+      return Promise.resolve(/returning id/i.test(text) ? plan.leads ?? [] : []);
     }
     queries.push({ text, values, write: false });
     if (/from drafts/i.test(text)) return Promise.resolve(plan.drafts ?? []);
@@ -335,14 +335,14 @@ describe("hold", () => {
     const write = writes()[0]!;
     assert.match(write.text, /^update leads set status/);
     assert.equal(write.values[0], "held");
-    const notes = JSON.parse(String(write.values[1])) as { hold: { key: string; reason: string; note: string; at: string } };
+    const notes = JSON.parse(String(write.values[2])) as { hold: { key: string; reason: string; note: string; at: string } };
     assert.deepEqual(notes.hold, {
       key: "record-or-date",
       reason: "Waiting on a record or date",
       note: "Waiting on the minutes",
       at: "2026-09-26T14:05:00.000Z",
     });
-    assert.deepEqual(write.values.slice(2), [5, 81]);
+    assert.deepEqual(write.values.slice(3, 5), [5, 81]);
   });
 
   it("keeps what the lead already noted, and records no-reason as its own fact", async () => {
@@ -352,7 +352,7 @@ describe("hold", () => {
     const { deps, writes } = makeDeps({ leads: [{ ...lead, notes_json: JSON.stringify({ news: "Keep this" }) }] });
     const result = await performHoldLead(context, { id: 5, choice: "none" }, deps);
     assert.equal(result.ok && result.key, "none");
-    const notes = JSON.parse(String(writes()[0]!.values[1])) as { news: string; hold: { key: string; reason: string } };
+    const notes = JSON.parse(String(writes()[0]!.values[2])) as { news: string; hold: { key: string; reason: string } };
     assert.equal(notes.news, "Keep this");
     assert.equal(notes.hold.key, "none");
     assert.equal(notes.hold.reason, "");

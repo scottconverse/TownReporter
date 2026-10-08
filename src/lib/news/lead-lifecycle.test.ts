@@ -15,10 +15,10 @@ function makeSql(db: PGlite): SqlTag {
 test("drafted and published leads refuse backward status changes and duplicate reopen", async () => {
   const db = new PGlite();
   try {
-    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, killed_at timestamptz, kill_reason text, kill_reason_url text);
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
       create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default 'Saved prose', research_json text default '{}');
       create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
-      insert into leads values (1,7,'drafted',null,null,null,null),(2,7,'published',null,null,null,null),(3,7,'held',1,null,null,null),(4,7,'held',2,null,null,null);
+      insert into leads(id,newsroom_id,status,possible_duplicate_of,killed_at,kill_reason,kill_reason_url) values (1,7,'drafted',null,null,null,null),(2,7,'published',null,null,null,null),(3,7,'held',1,null,null,null),(4,7,'held',2,null,null,null);
       insert into drafts(id,lead_id,newsroom_id) values (1,1,7);
       insert into articles values (1,2,7,'published');`);
     const sql = makeSql(db);
@@ -44,10 +44,10 @@ test("drafted and published leads refuse backward status changes and duplicate r
 test("empty placeholder drafts allow hold and duplicate reopen while prose and imports stay protected", async () => {
   const db = new PGlite();
   try {
-    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer);
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, notes_json text);
       create table drafts(lead_id integer, newsroom_id integer, body text, research_json text);
       create table articles(lead_id integer, newsroom_id integer, status text);
-      insert into leads values (1,7,'new',null),(2,7,'killed',null),(3,7,'held',2),(4,7,'new',null),(5,7,'killed',null),(6,7,'held',5),(7,7,'new',null);
+      insert into leads(id,newsroom_id,status,possible_duplicate_of) values (1,7,'new',null),(2,7,'killed',null),(3,7,'held',2),(4,7,'new',null),(5,7,'killed',null),(6,7,'held',5),(7,7,'new',null);
       insert into drafts values (1,7,'','{}'),(2,7,E' \t\n','{}'),(4,7,'Saved prose','{}'),(5,7,'','{"importedText":true}'),(7,7,'','{}');
       insert into articles values (7,7,'published');`);
     const sql = makeSql(db);

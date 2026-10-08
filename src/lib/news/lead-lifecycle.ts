@@ -16,6 +16,7 @@ export async function setLeadStatusForEditor(
   sql: SqlTag,
   newsroomId: number,
   data: LeadStatusRequest,
+  notesJson?: string,
 ) {
   const reason = data.killReason?.trim();
   if (data.status === "killed") {
@@ -28,7 +29,8 @@ export async function setLeadStatusForEditor(
     return { ok: true as const };
   }
   const changed = await sql<{ id: number }>`
-    update leads set status = ${data.status}
+    update leads set status = ${data.status},
+      notes_json = case when ${notesJson !== undefined} then ${notesJson ?? null} else notes_json end
     where id = ${data.id} and newsroom_id = ${newsroomId}
       and status not in ('drafted', 'published')
       and not exists (
@@ -56,10 +58,10 @@ export async function setLeadStatusForEditor(
     `;
     if (!lead) return { ok: false as const, error: "That lead is no longer on the desk." };
     if (lead.status === "published" || lead.has_published) {
-      return { ok: false as const, error: "That lead has a published story and cannot move back to New or Held." };
+      return { ok: false as const, error: "This story is already published. Unpublish it first." };
     }
     if (lead.status === "drafted" || lead.has_draft) {
-      return { ok: false as const, error: "That lead has a saved draft and cannot move back to New or Held." };
+      return { ok: false as const, error: "This lead has a written draft. Kill or finish the draft instead." };
     }
     return { ok: false as const, error: "That lead's status changed. Refresh the desk and try again." };
   }

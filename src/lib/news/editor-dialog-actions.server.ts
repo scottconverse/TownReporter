@@ -47,6 +47,7 @@ import { parseSourceLines } from "./source-lines.ts";
 import { sourceIdentity } from "./url-guard.ts";
 import { headlineFromUrl, looksLikeUrl } from "./desk-copy.ts";
 import { holdChoice, isBadSourceReason } from "./kill-reasons.ts";
+import { setLeadStatusForEditor } from "./lead-lifecycle.ts";
 import {
   appendPastedText,
   findSourcesPrompt,
@@ -360,10 +361,8 @@ export async function performHoldLead(
     note: (data.note ?? "").trim().slice(0, 1000),
     at: deps.now().toISOString(),
   };
-  await sql`
-    update leads set status = ${"held"}, notes_json = ${packNotes(notes)}
-    where id = ${data.id} and newsroom_id = ${context.newsroomId}
-  `;
+  const held = await setLeadStatusForEditor(sql, context.newsroomId, { id: data.id, status: "held" }, packNotes(notes));
+  if (!held.ok) return held;
   const notice =
     chosen?.key === "follow-up"
       ? "Recorded. Nothing will chase this on its own yet — AI follow-ups are not built, so the reason is on the lead for a person to pick up."
