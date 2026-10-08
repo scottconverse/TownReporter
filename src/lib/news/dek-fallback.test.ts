@@ -55,6 +55,13 @@ it("firstSentenceForDek cuts a long single sentence at a word boundary at 240 ch
   assert.ok(long.startsWith(withoutEllipsis), "the cut text is a verbatim prefix of the source");
 });
 
+// guards: a fallback dek could exceed the writer's 45-word hard limit.
+it("caps a fallback sentence at 45 words even when it is under 240 characters", () => {
+  const result = firstSentenceForDek(Array.from({ length: 60 }, () => "a").join(" ") + ".");
+  assert.equal(result.replace(/…$/, "").split(/\s+/).length, 45);
+  assert.ok(result.endsWith("…"));
+});
+
 it("firstSentenceForDek returns empty for empty, null or undefined body", () => {
   assert.equal(firstSentenceForDek(""), "");
   assert.equal(firstSentenceForDek(null), "");

@@ -87,6 +87,12 @@ export type PackageClaim = {
    * overlap -- never to a different item.
    */
   item?: string;
+  /** Verbatim retained transcript support bound by the checker, not the writer. */
+  transcriptEvidence?: { quote: string; startSeconds: number; videoUrl: string };
+  recordEvidence?: { kind: "transcript" | "document"; quote: string; url: string; locator: string; startSeconds?: number };
+  closestEvidence?: NonNullable<PackageClaim["recordEvidence"]>;
+  checkReason?: string;
+  closestQuote?: string;
 };
 
 /**
@@ -113,6 +119,8 @@ export type PackageStory = {
   headline: string;
   /** The draft body. Substantial; never a rewritten scan excerpt. */
   draft: string;
+  /** The reader-facing one- or two-sentence summary beneath the headline. */
+  dek?: string;
   /** The reporter's plain-language brief, or "". */
   plainBrief: string;
   /** What this story specifically cannot yet say. */
@@ -312,6 +320,28 @@ export function parseClaim(raw: unknown): PackageClaim | null {
   if (!text) return null;
   const id = str(o.id) || `C${text.length}`;
   const item = str(o.item ?? o.agendaItem);
+  const evidence = o.transcriptEvidence && typeof o.transcriptEvidence === "object" && !Array.isArray(o.transcriptEvidence)
+    ? o.transcriptEvidence as Record<string, unknown>
+    : null;
+  const quote = str(evidence?.quote);
+  const startSeconds = Number(evidence?.startSeconds);
+  const videoUrl = str(evidence?.videoUrl);
+  const record = o.recordEvidence && typeof o.recordEvidence === "object" && !Array.isArray(o.recordEvidence)
+    ? o.recordEvidence as Record<string, unknown>
+    : null;
+  const recordQuote = str(record?.quote);
+  const recordUrl = str(record?.url);
+  const recordLocator = str(record?.locator);
+  const recordKind = record?.kind === "transcript" || record?.kind === "document" ? record.kind : null;
+  const recordSeconds = Number(record?.startSeconds);
+  const closest = o.closestEvidence && typeof o.closestEvidence === "object" && !Array.isArray(o.closestEvidence)
+    ? o.closestEvidence as Record<string, unknown>
+    : null;
+  const closestKind = closest?.kind === "transcript" || closest?.kind === "document" ? closest.kind : null;
+  const closestQuote = str(closest?.quote);
+  const closestUrl = str(closest?.url);
+  const closestLocator = str(closest?.locator);
+  const closestSeconds = Number(closest?.startSeconds);
   return {
     id,
     text,
@@ -319,6 +349,23 @@ export function parseClaim(raw: unknown): PackageClaim | null {
     sourceIds: arr(o.sourceIds ?? o.sources).map(str).filter(Boolean),
     nextCheck: str(o.nextCheck ?? o.next ?? o.receipt),
     ...(item ? { item } : {}),
+    ...(quote && Number.isFinite(startSeconds) && startSeconds >= 0 && videoUrl
+      ? { transcriptEvidence: { quote, startSeconds, videoUrl } }
+      : {}),
+    ...(recordKind && recordQuote && recordUrl && recordLocator
+      ? { recordEvidence: {
+          kind: recordKind, quote: recordQuote, url: recordUrl, locator: recordLocator,
+          ...(Number.isFinite(recordSeconds) && recordSeconds >= 0 ? { startSeconds: recordSeconds } : {}),
+        } }
+      : {}),
+    ...(closestKind && closestQuote && closestUrl && closestLocator
+      ? { closestEvidence: {
+          kind: closestKind, quote: closestQuote, url: closestUrl, locator: closestLocator,
+          ...(Number.isFinite(closestSeconds) && closestSeconds >= 0 ? { startSeconds: closestSeconds } : {}),
+        } }
+      : {}),
+    ...(str(o.checkReason) ? { checkReason: str(o.checkReason) } : {}),
+    ...(str(o.closestQuote) ? { closestQuote: str(o.closestQuote) } : {}),
   };
 }
 
@@ -332,6 +379,7 @@ export function parseStory(raw: unknown): PackageStory | null {
     id: str(o.id) || headline.slice(0, 40),
     headline,
     draft,
+    ...(str(o.dek) ? { dek: str(o.dek) } : {}),
     plainBrief: str(o.plainBrief ?? o.plainLanguage),
     cannotSay: str(o.cannotSay ?? o.whatCannotSay),
     readinessTier: parseReadinessTier(o.readinessTier ?? o.editorialTier ?? o.readiness),

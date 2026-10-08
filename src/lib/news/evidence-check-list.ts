@@ -140,6 +140,7 @@ export function captureIsReadable(capture: FindingCaptureEvidence): boolean {
  * the bar and the pane back to disagreeing, which is the thing U24 exists for.
  */
 export const NEEDS_REVIEW_CHIP = "! Needs review";
+export const COULD_NOT_CHECK_CHIP = "Could not check";
 
 /**
  * Is this row one the pane chips `! Needs review`?
@@ -179,13 +180,13 @@ export function judgmentChip(
       */
       return { chip: "Checked · not found", tone: "ink" };
     case "needs-reporting":
-      return { chip: "Could not check", tone: "fail" };
+      return { chip: COULD_NOT_CHECK_CHIP, tone: "fail" };
     case "contradicts":
       return { chip: NEEDS_REVIEW_CHIP, tone: "warn" };
     default:
       return claimNeedsReview(judgment, captures)
         ? { chip: NEEDS_REVIEW_CHIP, tone: "warn" }
-        : { chip: "Could not check", tone: "fail" };
+        : { chip: COULD_NOT_CHECK_CHIP, tone: "fail" };
   }
 }
 
@@ -348,17 +349,49 @@ export function evidenceCheckRows(input: {
   }
 
   for (const row of input.claimRows) {
-    const { chip, tone } = judgmentChip(row.judgment.value, row.captures);
+    const transcript = row.claim.reporting?.transcriptEvidence;
+    const record = row.claim.reporting?.recordEvidence;
+    const closest = row.claim.reporting?.closestEvidence;
+    const verifiedQuote = transcript?.quote.trim() || record?.quote.trim() || "";
+    const verifiedUrl = transcript?.videoUrl || record?.url || "";
+    const verifiedSeconds = transcript?.startSeconds ?? record?.startSeconds;
+    const savedQuote = transcript?.quote.trim() || record?.quote.trim() || closest?.quote.trim() || "";
+    const recordUrl = transcript?.videoUrl || record?.url || closest?.url || "";
+    const recordSeconds = transcript?.startSeconds ?? record?.startSeconds ?? closest?.startSeconds;
+    const transcriptSupported = row.claim.reporting?.status === "VERIFIED" && Boolean(
+      verifiedQuote && verifiedUrl && (verifiedSeconds === undefined || (Number.isFinite(verifiedSeconds) && verifiedSeconds >= 0)),
+    );
+    const judged = transcriptSupported
+      ? { chip: "✓ Supported", tone: "ok" as const }
+      : judgmentChip(row.judgment.value, row.captures);
+    const transcriptSeconds = recordSeconds !== undefined && Number.isFinite(recordSeconds)
+      ? Math.floor(recordSeconds)
+      : null;
+    const transcriptClock = transcriptSeconds === null ? "" :
+      `${Math.floor(transcriptSeconds / 3600)}:${String(Math.floor((transcriptSeconds % 3600) / 60)).padStart(2, "0")}:${String(transcriptSeconds % 60).padStart(2, "0")}`;
+    const transcriptAction = recordUrl && transcriptSeconds !== null && transcriptClock
+      ? {
+          kind: "open-record" as const,
+          label: `Play at ${transcriptClock}`,
+          href: `${recordUrl}${recordUrl.includes("?") ? "&" : "?"}t=${transcriptSeconds}s`,
+        }
+      : recordUrl
+        ? { kind: "open-record" as const, label: "Open record", href: recordUrl }
+      : null;
     list.push({
       key: `claim:${row.key}`,
-      chip,
-      tone,
+      chip: judged.chip,
+      tone: judged.tone,
       what: row.claim.fact.trim() || "A claim recorded for this draft.",
-      note:
-        row.captures.length === 0
+      note: row.claim.reporting?.checkReason
+        ? [row.claim.reporting.checkReason, row.claim.reporting.closestQuote || savedQuote]
+            .filter(Boolean).join(" “") + (row.claim.reporting.closestQuote || savedQuote ? "”" : "")
+        : savedQuote
+          ? savedQuote
+        : row.captures.length === 0
           ? "No captured record was cited for this claim."
           : (row.captures[0]?.title ?? row.claim.url ?? "Cited record"),
-      action: openRecordAction(row.captures),
+      action: transcriptAction ?? openRecordAction(row.captures),
       ref: { kind: "claim", id: row.key },
     });
   }

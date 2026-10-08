@@ -172,6 +172,22 @@ import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
 
+function savedStoryReadiness(raw: string | null | undefined): { state: "checking" | "verified" | "to-check" | "not-ready"; reason: string } | null {
+  try {
+    const memo = JSON.parse(raw ?? "{}") as Record<string, unknown>;
+    const value = memo.storyReadiness;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const readiness = value as Record<string, unknown>;
+    if (readiness.version !== 1 || !["checking", "verified", "to-check", "not-ready"].includes(String(readiness.state))) return null;
+    return {
+      state: readiness.state as "checking" | "verified" | "to-check" | "not-ready",
+      reason: typeof readiness.reason === "string" ? readiness.reason : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
 });
@@ -1839,6 +1855,7 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
+  const draftReadiness = savedStoryReadiness(data.draft?.research_json);
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1868,6 +1885,8 @@ function StoryPage() {
     headline,
     dek,
     body,
+    readiness: draftReadiness?.state,
+    readinessReason: draftReadiness?.reason,
     sectionReady,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,

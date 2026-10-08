@@ -88,15 +88,12 @@ export type PublishBlockerState = {
   body: string;
   /** A person has chosen, or confirmed, the section this files under. */
   sectionReady: boolean;
+  /** The AI's last saved readiness result for a civic-reporting draft. */
+  readiness?: "checking" | "verified" | "to-check" | "not-ready";
+  readinessReason?: string;
   /** Claims of absence not yet ticked by a person (`uncheckedGateTodos`). */
   openClaims: number;
-  /**
-   * Claims the evidence check raised that no person has judged yet, with a
-   * readable record to judge them against (unit U24). This is
-   * `claimsNeedingReview` over the resolved review -- the same number the
-   * Checks pane counts off its `! Needs review` chips and the same one the
-   * evidence chip on the publish bar prints.
-   */
+  /** Claims needing a person: both `! Needs review` and `Could not check` rows. */
   unreviewedClaims: number;
   /**
    * How many of `unreviewedClaims` the captured record CONTRADICTS (M5).
@@ -204,6 +201,16 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       sentence:
         'The dek is empty. The desk refuses a story with no dek: "Add a dek, the one-line summary under the headline, before you publish."',
       action: { label: "Write a dek", target: { kind: "dek" } },
+    });
+  }
+
+  if (state.readiness === "checking" || state.readiness === "not-ready") {
+    blockers.push({
+      key: "readiness",
+      sentence: state.readinessReason || (state.readiness === "checking"
+        ? "The AI is still checking this story against the meeting record."
+        : "This story is not ready to publish."),
+      action: { label: "Review open facts", target: { kind: "evidence-review" } },
     });
   }
 
