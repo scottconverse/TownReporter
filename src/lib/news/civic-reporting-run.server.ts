@@ -2220,19 +2220,21 @@ function statedVoteTallies(text: string): string[] {
 }
 
 function resultOutcome(text: string): "pass" | "fail" | null {
-  const verbs = [...text.matchAll(/\b(?:fail(?:s|ed)?|carri(?:es|ed)|pass(?:es|ed)?|approv(?:e|es|ed)|unanimously|all in favor)\b/gi)];
-  const last = verbs[verbs.length - 1]?.[0]?.toLowerCase();
+  const outcomes = [...text.matchAll(/\b(?:fail(?:s|ed)?|carri(?:es|ed)|pass(?:es|ed)?|approv(?:e|es|ed)|adopt(?:s|ed)?|approval|unanim(?:ous|ously)|all in favor)\b/gi)]
+    .filter((match) => !/\b(?:not|never|no)\s+(?:(?:yet|been)\s+)?$/i.test(text.slice(0, match.index ?? 0)));
+  const last = outcomes[outcomes.length - 1]?.[0]?.toLowerCase();
   if (!last) return null;
   return last.startsWith("fail") ? "fail" : "pass";
 }
 
-function agendaActionMentioned(paragraph: string, item: string, title: string, action: CoverageAction | undefined): boolean {
+function agendaActionMentioned(paragraph: string, item: string, title: string, action: CoverageAction | undefined, passage: string): boolean {
   const normalized = normalizeForMatch(paragraph);
   const identity = [title, action?.motionOrAction ?? ""].join(" ");
-  const identifiers = [...identity.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
+  const identifiers = [...`${identity} ${passage}`.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
   if (identifiers.some((identifier) => normalized.includes(identifier))) return true;
   const code = normalizeForMatch(item);
-  if (code && normalized.split(" ").some((token, index, tokens) => token === code && (tokens[index - 1] === "item" || /^[0-9]/.test(code)))) return true;
+  const tokens = normalized.split(" ");
+  if (code && tokens.some((token, index) => token === code && (tokens[index - 1] === "item" || !/^\d+$/.test(code)))) return true;
   const ignored = new Set(["about", "adopt", "amend", "amended", "approve", "approved", "approval", "bill", "carries", "carried", "city", "council", "final", "first", "for", "motion", "of", "ordinance", "passed", "plan", "second", "the", "this", "vote"]);
   const terms = [...new Set(normalizeForMatch(identity).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
   const titleTerms = [...new Set(normalizeForMatch(title).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
@@ -2243,7 +2245,8 @@ function agendaActionMentioned(paragraph: string, item: string, title: string, a
 
 function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord): { item: string; action: string; result: string; passage: string }[] {
   const paragraphs = [story.headline, story.dek ?? "", story.plainBrief, story.draft]
-    .flatMap((text) => text.split(/\r?\n\s*\r?\n/)).map((text) => text.trim()).filter(Boolean);
+    .flatMap((text) => text.split(/\r?\n\s*\r?\n/)).map((text) => text.trim())
+    .filter((text) => Boolean(text) && !/^receipts?\s*:/i.test(text));
   const finalResultsByItem = new Map<string, AnnouncedResultPassage>();
   for (const result of announcedResultPassages(record)) finalResultsByItem.set(result.item, result);
   const results = [...finalResultsByItem.values()];
@@ -2256,7 +2259,7 @@ function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[],
         return Math.abs((leftTime ?? result.endSeconds) - result.endSeconds) - Math.abs((rightTime ?? result.endSeconds) - result.endSeconds);
       })[0];
     const title = record.agenda?.find((entry) => entry.item === result.item)?.title ?? "";
-    const related = paragraphs.filter((paragraph) => agendaActionMentioned(paragraph, result.item, title, action));
+    const related = paragraphs.filter((paragraph) => agendaActionMentioned(paragraph, result.item, title, action, result.passage));
     if (!related.length) continue;
     const rawTallies = voteWordsIn(result.resultText);
     const expectedTally = tallyKey(rawTallies[rawTallies.length - 1] ?? (/\bunanimously\b|\ball in favor\b/i.test(result.resultText) ? "unanimously" : ""));
@@ -2267,12 +2270,16 @@ function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[],
         (expectedTally === "unanimous" && /\bunanimously\b|\ball in favor\b/i.test(paragraph));
       return actualTally && resultOutcome(paragraph) === expectedOutcome;
     });
-    if (!stated) missing.push({
+    if (!stated) {
+      const passageIdentifier = result.passage.match(/\b(ordinance|resolution)\s+(\d{4}\s*[-–]\s*\d+)\b/i);
+      const actionLabel = action?.motionOrAction ?? (passageIdentifier ? `${passageIdentifier[1]} ${normalizeForMatch(passageIdentifier[2])}` : title);
+      missing.push({
       item: result.item,
-      action: action?.motionOrAction ?? title,
+      action: actionLabel,
       result: `${expectedOutcome === "pass" ? "passed" : "failed"} ${expectedTally === "unanimous" ? "unanimously" : expectedTally}`,
       passage: result.passage,
-    });
+      });
+    }
   }
   return missing;
 }

@@ -1235,6 +1235,23 @@ describe("the writer's method prompt states the status policy", () => {
     for (const result of resultTexts.slice(0, 5)) assert.ok(evidence.includes(result), result);
     assert.ok(!evidence.includes(resultTexts[5]!));
   });
+  // guards: the editor could lose readable stories when their already stated meeting results use natural wording.
+  it("keeps the minutes and Dry Creek stories when they state unanimous results", async () => {
+    const stories = [
+      { id: "minutes", headline: "Council minutes in regular session", dek: "The chair announced unanimous approval of the October 6 minutes, one of several procedural decisions recorded during Longmont City Council's regular session.", draft: "The chair announced unanimous approval of the October 6 minutes.", plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] },
+      { id: "dry-creek", headline: "Dry Creek annexation", dek: "The Dry Creek annexation had unanimous results for its amendments and main motion, while the complete motion wording and final condition text remain unavailable to readers.", draft: "The Dry Creek annexation had unanimous results for its amendments and main motion, but the complete motion wording and final condition text remain missing.\n\nReceipts: retained recording S1kSaew-UUY, window 9, ordinance 2026-62, 2:19:30–2:19:54; window 16, item 12A, 4:14:42–4:16:37.", plainBrief: "In the separate Dry Creek case, council passed and adopted amended ordinance 2026-62 unanimously as announced.", cannotSay: "", readinessTier: 1, claims: [], sources: [] },
+    ];
+    const record = { identity: { videoId: "S1kSaew-UUY" }, agenda: [{ item: "4", title: "Approval of minutes" }, { item: "9", title: "CONSENT AGENDA AND INTRODUCTION AND READING BY TITLE OF FIRST READING ORDINANCES" }], votes: [], gaps: [], windows: [], segments: [
+      { index: 154, seconds: 623, item: "4", itemTitle: "Approval of minutes", text: "Approval of the minutes." }, { index: 158, seconds: 635, item: "4", itemTitle: "Approval of minutes", text: "The motion was made by council." }, { index: 163, seconds: 649, item: "4", itemTitle: "Approval of minutes", text: "That carries unanimously." },
+      { index: 3428, seconds: 8370, item: "9", itemTitle: "Dry Creek annexation ordinance 2026-62", text: "I move ordinance 2026-62." }, { index: 3437, seconds: 8394, item: "9", itemTitle: "Dry Creek annexation ordinance 2026-62", text: "That item carries unanimously." },
+    ] };
+    const initial = stories.map((story, index) => ({ ...story, plainBrief: "", dek: index ? "The council considered the Dry Creek annexation as an action with unresolved wording and conditions for further review by the city." : "The council considered the October 6 minutes during its regular session as part of the meeting's recorded business.", draft: index ? "The council considered Dry Creek ordinance 2026-62 during its meeting." : "The chair discussed the October 6 minutes during the meeting." }));
+    let calls = 0;
+    const { result } = await callWritingPass([], record, [{ agendaItem: "4", timestamp: "00:10:49", motionOrAction: "Approve the minutes" } as CoverageAction, { agendaItem: "9; specific subitem unresolved", timestamp: "02:19:54", motionOrAction: "Amend the ordinance to incorporate the applicant's four requests" } as CoverageAction], "Report the meeting", () => { calls++; return { ok: true, text: JSON.stringify({ stories: calls === 1 ? initial : stories, held: [] }) }; });
+    assert.equal(calls, 2);
+    assert.deepEqual(result.gaps, []);
+    assert.equal(result.stories.length, 2);
+  });
   // guards: the editor could receive a story that mentions an agenda item but omits its announced result.
   it("revises a story once to add an omitted result for an item it mentions", async () => {
     const videoId = "zMglXtVlIMA";
