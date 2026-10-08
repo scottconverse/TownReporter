@@ -793,11 +793,32 @@ async function resolveClaim(
         !readableVersionIds.has(resolved.judgment.contraryVersionId)))
       ? { value: "unreviewed" as const, reason: "", contraryVersionId: null }
       : resolved.judgment;
+  const transcript = claim.reporting?.transcriptEvidence;
+  const hasTranscriptSupport = claim.reporting?.status === "VERIFIED" && Boolean(
+    transcript?.quote.trim() && transcript.videoUrl && Number.isFinite(transcript.startSeconds) && transcript.startSeconds >= 0,
+  );
+  if (hasTranscriptSupport && transcript) {
+    const seconds = Math.floor(transcript.startSeconds);
+    const joiner = transcript.videoUrl.includes("?") ? "&" : "?";
+    captures.push({
+      versionId: null,
+      captureEventId: null,
+      url: transcript.videoUrl,
+      title: transcript.quote,
+      capturedAt: null,
+      available: true,
+      readable: true,
+      takenDown: false,
+      excerptState: "found",
+      newerCapture: null,
+      viewHref: `${transcript.videoUrl}${joiner}t=${seconds}s`,
+    });
+  }
   return {
     key,
     claim,
     captures,
-    judgment,
+    judgment: hasTranscriptSupport ? { value: "supports", reason: "", contraryVersionId: null } : judgment,
   };
 }
 

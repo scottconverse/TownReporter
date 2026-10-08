@@ -21,6 +21,9 @@ import {
   retainedRecordingNote, validatePacketSources, canonicalModelReceipt, writerDecisionWindowEvidence,
 } from "./civic-reporting-run.server.ts";
 import type { CoverageAction } from "./civic-reporting.ts";
+import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
+import { evidenceCheckRows } from "./evidence-check-list.ts";
+import type { Sql } from "../db.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as pathJoin } from "node:path";
@@ -1968,3 +1971,59 @@ it("keeps ledger verification when a transcript citation misses the item's passa
     { actions: [action] } as never, record as never, []);
   assert.equal(checked[0]!.status, "VERIFIED", checked[0]!.nextCheck);
 });
+
+// guards: a transcript-supported claim could be filed as unchecked with no place to play it.
+it("carries a retained transcript quote into the editor's supported row", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const quote = "The requirement should be subject to the availability and willingness of an operator.";
+  const quoteParts = ["The requirement should be subject to the", "availability and willingness of an", "operator."];
+  const story = {
+    id: "bike-share", headline: "Dry Creek bike-share condition", draft: quote, plainBrief: "", cannotSay: "",
+    readinessTier: 1,
+    claims: [{ id: "bike-share-condition", text: quote, status: "UNVERIFIED" as const, sourceIds: ["tape"], nextCheck: "Confirm the amendment in the recording.", item: "Dry Creek; proposed amendment two" }],
+    sources: [{ id: "tape", title: "Retained transcript", tier: "A" as const, url: videoUrl,
+      locator: "Dry Creek; amendment two; operator availability; 1:25:17–1:25:48", offlineReference: "" }],
+  };
+  const record = { identity: { videoId, videoUrl }, segments: quoteParts.map((text, index) => ({
+    index: index + 1, seconds: 5123 + index, item: "9", itemTitle: "Consent agenda", text,
+  })) };
+  const checked = bindClaimsToEvidence(story as never, {
+    actions: [],
+  } as never, record as never, []);
+  assert.equal(checked[0]?.status, "VERIFIED");
+  assert.deepEqual(checked[0]?.transcriptEvidence, { quote, startSeconds: 5123, videoUrl });
+
+  const sql = { query: async <T>() => [] as T[] } as unknown as Sql;
+  const review = await reportingStoryReviewClaims(sql, 1, { ...story, claims: checked } as never);
+  const list = evidenceCheckRows({
+    rows: [],
+    claimRows: [{ key: "budget-vote", claim: review.rows[0]!, captures: [],
+      judgment: { value: "unreviewed", reason: "", contraryVersionId: null } }],
+    manualClaimRows: [], openClaims: [], nameCheck: null, styleFindings: [],
+  });
+  assert.equal(list[0]?.chip, "✓ Supported");
+  assert.equal(list[0]?.note, quote);
+  assert.deepEqual(list[0]?.action, {
+    kind: "open-record", label: "Play at 1:25:23", href: `${videoUrl}&t=5123s`,
+  });
+});
+
+// guards: a timestamped supported row could show a transcript quote about a different amount.
+it("saves the transcript line that states the checked amount", () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "The project 103 budget fell by $1.18 million.";
+  const story = {
+    claims: [{ id: "project-cut", item: "12A", text: claim, status: "VERIFIED", sourceIds: ["tape"], nextCheck: "" }],
+    sources: [{ id: "tape", title: "Retained transcript", tier: "A", url: videoUrl,
+      locator: "Item 12A; project 103 reduction; 3:56:54–3:57:13" }],
+  };
+  const record = { identity: { videoId, videoUrl }, segments: [
+    { index: 1, seconds: 14_218, item: "12A", text: "The proposed budget included almost $2.1 million for CAP project 103." },
+    { index: 2, seconds: 14_233, item: "12A", text: "We are reducing this budget by $1.18 million." },
+  ] };
+  const checked = bindClaimsToEvidence(story as never, { actions: [] } as never, record as never, []);
+  assert.match(checked[0]?.transcriptEvidence?.quote ?? "", /\$1\.18 million/);
+});
+

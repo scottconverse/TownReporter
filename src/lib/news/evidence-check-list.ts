@@ -348,17 +348,36 @@ export function evidenceCheckRows(input: {
   }
 
   for (const row of input.claimRows) {
-    const { chip, tone } = judgmentChip(row.judgment.value, row.captures);
+    const transcript = row.claim.reporting?.transcriptEvidence;
+    const transcriptSupported = row.claim.reporting?.status === "VERIFIED" && Boolean(
+      transcript?.quote.trim() && transcript.videoUrl && Number.isFinite(transcript.startSeconds) && transcript.startSeconds >= 0,
+    );
+    const judged = transcriptSupported
+      ? { chip: "✓ Supported", tone: "ok" as const }
+      : judgmentChip(row.judgment.value, row.captures);
+    const transcriptSeconds = transcript && Number.isFinite(transcript.startSeconds)
+      ? Math.floor(transcript.startSeconds)
+      : null;
+    const transcriptClock = transcriptSeconds === null ? "" :
+      `${Math.floor(transcriptSeconds / 3600)}:${String(Math.floor((transcriptSeconds % 3600) / 60)).padStart(2, "0")}:${String(transcriptSeconds % 60).padStart(2, "0")}`;
+    const transcriptAction = transcript && transcriptClock
+      ? {
+          kind: "open-record" as const,
+          label: `Play at ${transcriptClock}`,
+          href: `${transcript.videoUrl}${transcript.videoUrl.includes("?") ? "&" : "?"}t=${transcriptSeconds}s`,
+        }
+      : null;
     list.push({
       key: `claim:${row.key}`,
-      chip,
-      tone,
+      chip: judged.chip,
+      tone: judged.tone,
       what: row.claim.fact.trim() || "A claim recorded for this draft.",
-      note:
-        row.captures.length === 0
+      note: transcript?.quote.trim()
+        ? transcript.quote.trim()
+        : row.captures.length === 0
           ? "No captured record was cited for this claim."
           : (row.captures[0]?.title ?? row.claim.url ?? "Cited record"),
-      action: openRecordAction(row.captures),
+      action: transcriptAction ?? openRecordAction(row.captures),
       ref: { kind: "claim", id: row.key },
     });
   }

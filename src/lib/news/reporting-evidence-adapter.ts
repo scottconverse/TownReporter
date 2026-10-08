@@ -11,6 +11,7 @@ export type ReportingReviewClaim = StoryClaim & {
     item: string;
     missingSourceIds: string[];
     references: Array<PackageSource & { versionId: number | null }>;
+    transcriptEvidence?: { quote: string; startSeconds: number; videoUrl: string };
   };
 };
 
@@ -43,6 +44,7 @@ export async function reportingStoryReviewClaims(
         item: claim.item ?? "",
         missingSourceIds: claim.sourceIds.filter((id) => !references.has(id)),
         references: claim.sourceIds.flatMap((id) => references.has(id) ? [references.get(id)!] : []),
+        ...(claim.transcriptEvidence ? { transcriptEvidence: claim.transcriptEvidence } : {}),
       },
     })),
   };

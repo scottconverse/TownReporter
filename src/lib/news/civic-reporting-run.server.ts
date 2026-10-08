@@ -2511,6 +2511,13 @@ export function bindClaimsToEvidence(
       ? documentEvidence.flatMap(({ page, text }) => page === null ? [] : [{ page, text }])
       : packetPages;
     const checks = checkDraftClaims({ units: [unit], packetPages: claimPages, segments });
+    const transcriptChecks = transcriptItem
+      ? checkDraftClaims({ units: [{ text: claim.text, label: claim.text.slice(0, 120), item: transcriptItem }], packetPages: [], segments })
+      : [];
+    const transcriptSupported = Boolean(
+      transcriptItem?.text === "Cited transcript passage" &&
+      !transcriptChecks.some((check) => check.checkStatus === "flagged"),
+    );
     const unrelatedFigureNote = documentEvidence
       ? unrelatedDocumentFigureNote(claim, documentEvidence)
       : "";
@@ -2525,7 +2532,21 @@ export function bindClaimsToEvidence(
       });
     }
     if (!failed.length) {
-      out.push(claim);
+      out.push(transcriptSupported && transcriptItem
+        ? {
+            ...claim,
+            status: "VERIFIED",
+            transcriptEvidence: closestTranscriptEvidence(claim.text, record, transcriptItem),
+          }
+        : claim);
+      continue;
+    }
+    if (transcriptSupported && transcriptItem) {
+      out.push({
+        ...claim,
+        status: "VERIFIED",
+        transcriptEvidence: closestTranscriptEvidence(claim.text, record, transcriptItem),
+      });
       continue;
     }
     const named = str((claim as { item?: string }).item);
@@ -2550,6 +2571,38 @@ export function bindClaimsToEvidence(
     });
   }
   return out;
+}
+
+function closestTranscriptEvidence(
+  claim: string,
+  record: WholeRecord,
+  bound: LedgerItem,
+): NonNullable<PackageClaim["transcriptEvidence"]> {
+  const segments = record.segments.filter((segment) =>
+    segment.seconds >= (bound.startSeconds ?? 0) &&
+    segment.seconds <= (bound.endSeconds ?? Number.MAX_SAFE_INTEGER),
+  );
+  const terms = significantEvidenceWords(claim);
+  const figures = (claim.match(/\$?\s*\d[\d,]*(?:\.\d+)?(?:\s+(?:thousand|million|billion))?/gi) ?? [])
+    .map((value) => ({ text: normalizeForMatch(value), weight: /[$]|thousand|million|billion/i.test(value) ? 100 : 10 }))
+    .filter((figure) => figure.text);
+  const best = [...segments].sort((left, right) => {
+    const score = (text: string) => {
+      const normalized = normalizeForMatch(text);
+      return terms.reduce((count, term) => count + (normalized.includes(term) ? 1 : 0), 0) +
+        figures.reduce((count, figure) => count + (normalized.includes(figure.text) ? figure.weight : 0), 0);
+    };
+    return score(right.text) - score(left.text);
+  })[0] ?? segments[0];
+  const quoteSegments = best
+    ? segments.filter((segment) => Math.abs(segment.seconds - best.seconds) <= 8).sort((left, right) => left.seconds - right.seconds)
+    : [];
+  const videoId = str(record.identity.videoId);
+  return {
+    quote: (quoteSegments.length ? quoteSegments.map((segment) => segment.text.trim()).join(" ") : String(bound.sourceExcerpt)).trim().slice(0, 600),
+    startSeconds: quoteSegments[0]?.seconds ?? best?.seconds ?? bound.startSeconds ?? 0,
+    videoUrl: str(record.identity.videoUrl) || (videoId ? "https://www.youtube.com/watch?v=" + videoId : ""),
+  };
 }
 
 type CitedDocumentSection = { page: number | null; section: string; text: string; source: PackageSource; fundParent?: string };
@@ -3199,8 +3252,10 @@ function itemWithCitedTranscriptEvidence(
   const cited = new Map<number, MeetingSegment>();
   const videoId = record.identity?.videoId;
   if (!videoId) return base;
-  const agendaItemId = (value: string): string =>
-    value.match(/^\s*(?:item\s*)?([a-z]?\d+[a-z]?)(?=$|[\s;:,.])/i)?.[1]?.toLowerCase() ?? "";
+  const agendaItemId = (value: string): string => {
+    const labelled = value.match(/\bitem\s*([a-z]?\d+[a-z]?)\b/i)?.[1];
+    return (labelled ?? value.match(/^\s*([a-z]?\d+[a-z]?)(?=$|[\s;:,.])/i)?.[1] ?? "").toLowerCase();
+  };
   const clockRanges = (locator: string): [number, number][] => {
     const ranges: [number, number][] = [];
     const pattern = /\b(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–—]\s*(\d{1,2}:\d{2}(?::\d{2})?)\b/g;
@@ -3224,18 +3279,19 @@ function itemWithCitedTranscriptEvidence(
     const wantedItemId = agendaItemId(String(claim.item || ""));
     const sourceItemId = agendaItemId(source.locator || "");
     const ranges = clockRanges(source.locator || "");
+    const sourceWords = new Set(sourceItem.split(" ").filter((word) => word.length > 2 && !["the", "and", "for", "from", "with", "proposed", "requested", "item", "section", "ordinance"].includes(word)));
+    const claimWords = wantedItem.split(" ").filter((word) => word.length > 2 && !["the", "and", "for", "from", "with", "proposed", "requested", "item", "section", "ordinance"].includes(word));
+    const sharedWords = claimWords.filter((word) => sourceWords.has(word)).length;
+    const descriptiveItemMatch = claimWords.length > 0 && sharedWords >= Math.min(2, claimWords.length) && sharedWords / claimWords.length >= 0.6;
     for (const segment of record.segments) {
       if (!ranges.some(([start, end]) => segment.seconds >= start - 2 && segment.seconds <= end + 2)) continue;
       const segmentItem = normalizeForMatch(segment.item || "");
       const segmentItemId = agendaItemId(segment.item || "");
-      const segmentMatchesClaim = !wantedItem || !segmentItem || Boolean(
-        wantedItem === segmentItem || wantedItem.startsWith(segmentItem + " ") || segmentItem.startsWith(wantedItem + " ") ||
-        (wantedItemId && segmentItemId === wantedItemId),
-      );
+      const segmentMatchesClaim = !wantedItem || !wantedItemId || !segmentItemId || segmentItemId === wantedItemId;
       const sourceMatchesClaim = !wantedItem || (
         wantedItemId && sourceItemId
           ? wantedItemId === sourceItemId
-          : sourceItem.includes(wantedItem) || Boolean(segmentItem && segmentMatchesClaim)
+          : sourceItem.includes(wantedItem) || wantedItem.includes(sourceItem) || descriptiveItemMatch || Boolean(segmentItem && segmentMatchesClaim)
       );
       const segmentMatchesSource = !sourceItemId || !segmentItemId || sourceItemId === segmentItemId;
       const itemMatches = sourceMatchesClaim && segmentMatchesClaim && segmentMatchesSource;

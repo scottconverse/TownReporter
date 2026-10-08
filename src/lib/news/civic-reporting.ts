@@ -87,6 +87,8 @@ export type PackageClaim = {
    * overlap -- never to a different item.
    */
   item?: string;
+  /** Verbatim retained transcript support bound by the checker, not the writer. */
+  transcriptEvidence?: { quote: string; startSeconds: number; videoUrl: string };
 };
 
 /**
@@ -312,6 +314,12 @@ export function parseClaim(raw: unknown): PackageClaim | null {
   if (!text) return null;
   const id = str(o.id) || `C${text.length}`;
   const item = str(o.item ?? o.agendaItem);
+  const evidence = o.transcriptEvidence && typeof o.transcriptEvidence === "object" && !Array.isArray(o.transcriptEvidence)
+    ? o.transcriptEvidence as Record<string, unknown>
+    : null;
+  const quote = str(evidence?.quote);
+  const startSeconds = Number(evidence?.startSeconds);
+  const videoUrl = str(evidence?.videoUrl);
   return {
     id,
     text,
@@ -319,6 +327,9 @@ export function parseClaim(raw: unknown): PackageClaim | null {
     sourceIds: arr(o.sourceIds ?? o.sources).map(str).filter(Boolean),
     nextCheck: str(o.nextCheck ?? o.next ?? o.receipt),
     ...(item ? { item } : {}),
+    ...(quote && Number.isFinite(startSeconds) && startSeconds >= 0 && videoUrl
+      ? { transcriptEvidence: { quote, startSeconds, videoUrl } }
+      : {}),
   };
 }
 
