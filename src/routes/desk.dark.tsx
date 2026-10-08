@@ -1870,7 +1870,7 @@ function InvestigationWorkspace({
     if (!source || !/^https?:\/\//i.test(source.url)) return null;
     const title = editorTitle(plainEditorText(source.title));
     const label = title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(source.url);
-    return <a className="inline-link" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
+    return <a className="inline-link astra-citation" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
   };
   const renderCompactCaseText = (value: string, key: string) => {
     const full = plainEditorText(value).replace(/\s+/g, " ").trim();
