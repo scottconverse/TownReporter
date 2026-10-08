@@ -6245,6 +6245,7 @@
 /* Dark Desk: piles rail | the open file. */
 .desk-ltr.astra .astra-deep-container {
   container-type: inline-size;
+  container-name: dark-desk;
   min-width: 0;
   width: 100%;
 }
@@ -6707,9 +6708,14 @@
 }
 .desk-ltr.astra .astra-split-deep.astra-empty-desk { display: block; }
 .desk-ltr.astra .astra-split-deep.astra-empty-desk > .astra-piles { display: none; }
-@container (min-width: 900px) {
+@container dark-desk (min-width: 900px) {
   .desk-ltr.astra .astra-split-deep { grid-template-columns: 320px minmax(0, 1fr); }
   .desk-ltr.astra .astra-piles { border-right: 1px solid var(--line); border-bottom: 0; }
+}
+@container dark-desk (max-width: 519px) {
+  .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
+  .desk-ltr.astra .astra-deep-file { padding: 18px; }
+  .desk-ltr.astra .astra-deep-file .model-picker { grid-template-columns: minmax(0, 1fr); width: 100%; }
 }
 .desk-ltr.astra .astra-pile {
   display: flex;
@@ -6856,7 +6862,7 @@
   cursor: pointer;
 }
 .desk-ltr.astra .astra-depth-option:last-child { border-right: 0; }
-.desk-ltr.astra .astra-depth-option span { font-size: calc(0.8125rem * var(--ts)); line-height: 1.35; }
+.desk-ltr.astra .astra-depth-option span { font-size: calc(0.875rem * var(--ts)); line-height: 1.35; }
 .desk-ltr.astra .astra-depth-option:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-depth-option.on { color: var(--bg); background: var(--sel); }
 .desk-ltr.astra .astra-depth-option.on span { color: inherit; }
@@ -6902,6 +6908,9 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
+}
+@container dark-desk (max-width: 759px) {
+  .desk-ltr.astra .astra-pair { grid-template-columns: minmax(0, 1fr); }
 }
 .desk-ltr.astra .astra-log {
   display: grid;
@@ -7260,10 +7269,8 @@
 /* --- one column below 980px: nothing scrolls sideways at 390px ------------- */
 @media (max-width: 980px) {
   .desk-ltr.astra .astra-2col,
-  .desk-ltr.astra .astra-split,
-  .desk-ltr.astra .astra-pair { grid-template-columns: minmax(0, 1fr); }
+  .desk-ltr.astra .astra-split { grid-template-columns: minmax(0, 1fr); }
   .desk-ltr.astra .astra-2col.span2 > :first-child { grid-row: auto; }
-  .desk-ltr.astra .astra-bounds { grid-template-columns: minmax(0, 1fr); }
   .desk-ltr.astra .astra-plain > li.astra-row.opinion,
   .desk-ltr.astra .astra-row.opinion,
   .desk-ltr.astra .astra-row.pub,
