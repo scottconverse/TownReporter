@@ -2300,6 +2300,42 @@ it("finds a motion's delayed result after its cited window", async () => {
   assert.match(checked.claims[0]?.recordEvidence?.quote ?? "", /50%[\s\S]*dies for lack of a second/);
 });
 
+// guards: the editor could see a Supported vote whose saved quote omits its announced tally.
+it("saves the motion through its announced vote result", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const claim = "Ordinance 2026-69 as amended carried 6 to 1.";
+  const motion = "The motion was to approve ordinance 2026-69 as amended.";
+  const result = "The motion carries 6 to 1 with Council Member McCoy in opposition.";
+  const checked = await reviewOpenStoryClaims({
+    story: {
+      id: "ordinance", headline: "Council approves an amended ordinance", draft: claim,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "C15", item: "9E", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the motion and its announced tally." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "9E", itemTitle: "Ordinance 2026-69", text: motion },
+        { index: 2, seconds: 110, item: "9E", itemTitle: "Ordinance 2026-69", text: result },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async () => ({ ok: true, text: JSON.stringify({
+      verdict: "VERIFIED", quote: result, sourceKind: "transcript", sourceUrl: videoUrl,
+      replacement: "", cut: false, reason: "The vote and ordinance are in the retained transcript.",
+    }) })) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  const saved = checked.claims[0]?.recordEvidence?.quote ?? "";
+  assert.equal(checked.claims[0]?.status, "VERIFIED");
+  assert.ok(saved.includes(motion), "the saved evidence carries the motion into the result");
+  assert.match(saved, /carries 6 to 1/i);
+  assert.equal(checked.claims[0]?.transcriptEvidence?.quote, saved);
+});
+
 // guards: an announced vote could stay unchecked when its motion appears earlier in the transcript.
 it("checks a vote against the passage from its motion through the result", async () => {
   const videoId = "S1kSaew-UUY";

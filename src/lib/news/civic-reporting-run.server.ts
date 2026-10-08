@@ -3869,6 +3869,7 @@ export async function reviewOpenStoryClaims(input: {
       rejectedUnreadableEdit = edit.changed;
     }
     if (supported && candidate) {
+      const savedQuote = candidate.kind === "transcript" ? candidate.quote : str(answer?.quote);
       const textEdit = replacement && replacement !== claim.text
         ? storyTextChange(story, claim.text, replacement)
         : { story, changed: true };
@@ -3888,13 +3889,13 @@ export async function reviewOpenStoryClaims(input: {
             item: candidate.kind === "transcript" ? candidate.item ?? "" : row.item,
             recordEvidence: {
               kind: candidate.kind,
-              quote: str(answer?.quote),
+              quote: savedQuote,
               url: candidate.url,
               locator: candidate.locator,
               ...(candidate.startSeconds === undefined ? {} : { startSeconds: candidate.startSeconds }),
             },
             ...(candidate.kind === "transcript" && candidate.startSeconds !== undefined
-              ? { transcriptEvidence: { quote: str(answer?.quote), startSeconds: candidate.startSeconds, videoUrl: candidate.url } }
+              ? { transcriptEvidence: { quote: savedQuote, startSeconds: candidate.startSeconds, videoUrl: candidate.url } }
               : {}),
             checkReason: "",
             closestQuote: "",
