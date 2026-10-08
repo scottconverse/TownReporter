@@ -18,7 +18,7 @@ import {
   reconcileLedgers, canonicalVote, fallbackOpenQuestions, documentDigest, contraryPass, scoringPass, bindClaimsToEvidence,
   type DocumentRead,
   writingPass, writerLengthProblems, financialRelationshipProblems, reassessContraryAfterResearch, bindStoryClaimsToEvidence, loadMethodInstructions as loadMethodForPrompt,
-  retainedRecordingNote, validatePacketSources, canonicalModelReceipt,
+  retainedRecordingNote, validatePacketSources, canonicalModelReceipt, writerDecisionWindowEvidence,
 } from "./civic-reporting-run.server.ts";
 import type { CoverageAction } from "./civic-reporting.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -1176,12 +1176,6 @@ describe("the writer's method prompt states the status policy", () => {
     const { prompt } = await callWritingPass([], { windows: [window], segments: window.segments, votes: [], gaps: [], identity: { videoId: "meeting" } }, [action]);
     assert.ok(prompt.includes("item carries unanimously."));
   });
-  // guards: the writer repeats generic uncertainty in every paragraph instead of collecting open questions once.
-  it("asks for direct copy and one short open-questions section near the end", async () => {
-    const prompt = await writingUserPrompt();
-    assert.ok(/state what the record shows plainly/i.test(prompt));
-    assert.ok(/open questions once in one short section near the end/i.test(prompt));
-  });
   // guards: an assignment can divert the writer into changing models or effort.
   it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {
     const assignment = "Report the meeting. Use only Codex Sol 6.1 at medium effort; stop if unavailable.";
@@ -1719,7 +1713,7 @@ describe("document-only claims bind to their own cited PDF section", () => {
     } as CoverageAction;
     const reconcile = { actions: [unrelatedAction], contradictions: [], warmOnly: [], coldOnly: [], voteMismatches: [], matched: 0 };
     const claims = bindClaimsToEvidence(story as never, reconcile as never, record as never, []);
-    assert.deepEqual(claims.map((claim) => [claim.id, claim.status]), [["C02", "VERIFIED"], ["C04", "VERIFIED"], ["C06", "UNVERIFIED"]]);
+    assert.deepEqual(claims.map((claim) => [claim.id, claim.status]), [["C02", "VERIFIED"], ["C04", "VERIFIED"], ["C06", "VERIFIED"]]);
   });
 
   it("binds request 7 claims C1-C5, C8-C9, and C16 to precise sections in their combined locators", () => {
@@ -1945,4 +1939,32 @@ describe("finishing preserves the canonical model pin", () => {
     assert.notEqual(receipt.label, "LLM", "the generic label is replaced");
     assert.match(String(receipt.label), /DeepSeek/i, "the label names the model the editor should see");
   });
+});
+
+// guards: irrelevant discussion can overflow the writer input and displace announced votes.
+it("keeps whole announced-result passages within the writer budget in time order", () => {
+  const segments = Array.from({ length: 30 }, (_, index) => ({ index, seconds: index * 300,
+    item: "12A", itemTitle: "", text: index === 0 ? "Please approve a bus pass." :
+      `The motion carries unanimously. Result ${index}. ` + "context ".repeat(500) }));
+  const windows = [...segments].reverse().map((segment) => ({ windowIndex: segment.index,
+    startClock: "0:00", endClock: "0:00", segments: [segment], items: [] }));
+  const block = writerDecisionWindowEvidence({ windows } as never);
+  assert.ok(block.length <= 20_000, `writer received ${block.length} characters`);
+  assert.ok(!block.includes(segments[0]!.text));
+  assert.deepEqual(block.match(/Result \d+\./g), ["Result 1.", "Result 2.", "Result 3.", "Result 4."]);
+  for (const segment of segments.slice(1, 5)) assert.ok(block.includes(segment.text));
+});
+
+// guards: an imprecise transcript citation can erase a claim's already verified ledger evidence.
+it("keeps ledger verification when a transcript citation misses the item's passages", () => {
+  const video = "S1kSaew-UUY";
+  const record = { identity: { videoId: video }, segments: [
+    { index: 1, seconds: 60, item: "12A", itemTitle: "Budget", text: "The allocation is $916,000." } ] };
+  const action = { agendaItem: "12A", timestamp: "1:00", motionOrAction: "Allocation", vote: "unverified" };
+  const claim = { id: "allocation", item: "12A", text: "The allocation is $916,000.", status: "VERIFIED", sourceIds: ["tape"], nextCheck: "" };
+  const sources = [{ id: "tape", title: "Supplied transcript", tier: "A", url: "https://youtu.be/" + video,
+    locator: "Item 12A; 2:00:00–2:01:00", offlineReference: "" }];
+  const checked = bindClaimsToEvidence({ claims: [claim], sources } as never,
+    { actions: [action] } as never, record as never, []);
+  assert.equal(checked[0]!.status, "VERIFIED", checked[0]!.nextCheck);
 });

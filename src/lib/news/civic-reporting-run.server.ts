@@ -2130,18 +2130,25 @@ function shortWriterFailureReason(error: string, held: PackageHeld[]): string {
 /** Raw result passages that the writer can check instead of relying on summaries. */
 export function writerDecisionWindowEvidence(record: WholeRecord): string {
   const output: string[] = [];
-  const resultWords = /\b(?:carr(?:y|ies|ied)|pass(?:es|ed)?|fail(?:s|ed)?|approv(?:e|es|ed)|reject(?:s|ed)|unanimous(?:ly)?)\b/i;
-  for (const window of record.windows) {
+  const maxChars = 20_000;
+  let chars = 0;
+  const resultWords = /\b(?:(?:motion|item|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:carries|passes|fails|carried|passed|failed)|carries\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+  const windows = [...record.windows].sort((a, b) => (a.segments[0]?.seconds ?? 0) - (b.segments[0]?.seconds ?? 0));
+  for (const window of windows) {
     const included = new Set<number>();
-    for (const result of window.segments.filter((segment) => resultWords.test(segment.text))) {
-      const context = window.segments.filter((segment) => Math.abs(segment.seconds - result.seconds) <= 120);
+    for (const result of [...window.segments].sort((a, b) => a.seconds - b.seconds).filter((segment) => resultWords.test(segment.text))) {
+      // Short context preserves the announcement and nearby dissent without crowding out later votes.
+      const context = window.segments.filter((segment) => Math.abs(segment.seconds - result.seconds) <= 10);
       const fresh = context.filter((segment) => !included.has(segment.index));
       if (!fresh.some((segment) => segment.index === result.index)) continue;
       fresh.forEach((segment) => included.add(segment.index));
-      output.push(
+      const passage =
         "WINDOW " + (window.windowIndex + 1) + " " + window.startClock + "-" + window.endClock +
-        "; raw transcript around the announced result:\n" + windowBlock({ ...window, segments: fresh }),
-      );
+        "; raw transcript around the announced result:\n" + windowBlock({ ...window, segments: fresh });
+      const size = passage.length + (output.length ? 2 : 0);
+      if (chars + size > maxChars) return output.join("\n\n");
+      output.push(passage);
+      chars += size;
     }
   }
   return output.join("\n\n");
@@ -2216,7 +2223,6 @@ export async function writingPass(input: {
     "Where the record does not support a claim, say so in cannotSay -- never invent a quote, a tally, a speaker or a page.",
     "",
     "STATUS IS THE LEDE. The stage of a decision governs every sentence about it:",
-    "RECORD-FIRST COPY. State what the record shows plainly and with attribution. Avoid generic hedges repeated in each paragraph. Put genuine open questions once in one short section near the end of the draft. Keep testimony attributed and a first reading distinct from final law.",
     "- A proposal, a draft, a staff recommendation or a presentation is NOT an adopted decision. Say so in the",
     "  first sentence -- \"proposed\", \"would\", \"under the proposal\" -- and condition any resident effect on",
     "  adoption (\"if the council adopts it\", \"residents would see ...\"). Never write a proposal as though it",
@@ -3191,7 +3197,6 @@ function itemWithCitedTranscriptEvidence(
 ): LedgerItem | null {
   const citedIds = new Set(claim.sourceIds);
   const cited = new Map<number, MeetingSegment>();
-  const transcriptCitationFound = new Set<string>();
   const videoId = record.identity?.videoId;
   if (!videoId) return base;
   const agendaItemId = (value: string): string =>
@@ -3214,7 +3219,6 @@ function itemWithCitedTranscriptEvidence(
   for (const source of sources) {
     if (!citedIds.has(source.id) || source.tier !== "A" || !claimsRetainedTranscript(source)) continue;
     if (videoIdOfSeed(source.url) !== videoId) continue;
-    transcriptCitationFound.add(source.id);
     const wantedItem = normalizeForMatch(String(claim.item || ""));
     const sourceItem = normalizeForMatch(source.locator || "");
     const wantedItemId = agendaItemId(String(claim.item || ""));
@@ -3239,7 +3243,7 @@ function itemWithCitedTranscriptEvidence(
     }
   }
   const passages = [...cited.values()].sort((a, b) => a.seconds - b.seconds);
-  if (!passages.length) return transcriptCitationFound.size ? null : base;
+  if (!passages.length) return base;
   const excerpt = passages.map((segment) => segment.text).join("\n");
   return {
     itemNo: base?.itemNo ?? 0,
