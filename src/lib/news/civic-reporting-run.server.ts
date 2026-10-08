@@ -3510,12 +3510,14 @@ export async function reviewOpenStoryClaims(input: {
     const candidates = claimCheckCandidates(claim.text, input.record, input.documents);
     const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript").sort((a, b) => b.score - a.score).slice(0, 8);
     const documentCandidates = candidates.filter((candidate) => candidate.kind === "document").sort((a, b) => b.score - a.score).slice(0, 12);
+    const reviewCandidates = [...transcriptCandidates, ...documentCandidates];
     const prompt = [
       "Check this one unresolved story claim against the supplied evidence, then return one JSON object.",
       "The retained transcript is the meeting record. Search all transcript passages shown, not only the original agenda-item span.",
       "Use only these already-read records. A model summary or source label is not evidence. If the record disagrees, return a corrected sentence supported by an exact quote, or set cut=true.",
       "The retained transcript is caption text and has no speaker labels. If the record proves the core fact but cannot show a speaker role, reading stage, or motion name, return NARROWED with a sentence that drops only that unsupported detail and an exact quote for what remains.",
       "Never infer a vote, adoption, date, name, amount or relationship from an unrelated passage.",
+      "If the verdict is OPEN, return the exact closest passage you used, with its source kind and URL, so its quote and time can be shown to the editor.",
       'JSON: {"verdict":"VERIFIED|NARROWED|CONTRADICTED|OPEN","quote":"exact source words","sourceKind":"transcript|document","sourceUrl":"","replacement":"corrected or narrowed sentence or empty","cut":false,"reason":"one-line reason"}',
       "MEETING IDENTITY: " + JSON.stringify(input.record.identity),
       "CLAIM: " + claim.text,
@@ -3533,7 +3535,7 @@ export async function reviewOpenStoryClaims(input: {
     const replacement = str(answer?.replacement).trim();
     const supportedText = verdict === "CONTRADICTED" || verdict === "NARROWED" ? replacement : claim.text;
     const candidate = answer && (verdict === "VERIFIED" || verdict === "NARROWED" || verdict === "CONTRADICTED")
-      ? exactQuoteCandidate(candidates, answer)
+      ? exactQuoteCandidate(reviewCandidates, answer)
       : null;
     const supported = Boolean(
       supportedText && candidate && claimEvidenceCheckPasses(supportedText, { ...candidate, quote: str(answer?.quote) }, input.record),
@@ -3580,7 +3582,8 @@ export async function reviewOpenStoryClaims(input: {
         continue;
       }
     }
-    const closest = candidates.sort((a, b) => b.score - a.score)[0];
+    const closest = (answer ? exactQuoteCandidate(reviewCandidates, answer) : null) ??
+      [...reviewCandidates].sort((a, b) => b.score - a.score)[0];
     const reason = oneLineReason(answer?.reason || (response.ok ? "The cited words did not verify this statement." : response.error));
     story = {
       ...story,

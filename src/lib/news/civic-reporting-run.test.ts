@@ -2207,6 +2207,41 @@ it("narrows an open claim to the result the transcript can prove", async () => {
   assert.equal(result.draft, narrowed);
 });
 
+// guards: an open fact could show the editor a quote and timestamp from the wrong passage.
+it("keeps an open fact's closest evidence on the passage used for its re-check", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const claim = "The chair announced that the Copper Peak approval motion carried 5 to 2.";
+  const usedPassage = "The motion was to approve the Copper Peak development plan. The motion carries 5 to 2.";
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "copper-peak", headline: "Council considers Copper Peak", draft: claim,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "copper-peak-vote", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Confirm who announced the vote." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 500, item: "9I", itemTitle: "Copper Peak", text: "The motion was to approve the Copper Peak development plan." },
+        { index: 2, seconds: 520, item: "9I", itemTitle: "Copper Peak", text: "The motion carries 5 to 2." },
+        { index: 3, seconds: 900, item: "12A", itemTitle: "Other item", text: claim },
+      ],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async () => ({ ok: true, text: JSON.stringify({
+      verdict: "OPEN", quote: usedPassage, sourceKind: "transcript", sourceUrl: videoUrl,
+      replacement: "", cut: false, reason: "The passage does not identify the speaker.",
+    }) })) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(result.claims[0]?.status, "UNVERIFIED");
+  assert.equal(result.claims[0]?.closestQuote, usedPassage);
+  assert.equal(result.claims[0]?.closestEvidence?.quote, usedPassage);
+  assert.equal(result.claims[0]?.closestEvidence?.startSeconds, 500);
+});
+
 // guards: a transcript-supported claim could be filed as unchecked with no place to play it.
 it("carries a retained transcript quote into the editor's supported row", async () => {
   const videoId = "S1kSaew-UUY";
