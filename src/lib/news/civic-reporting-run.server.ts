@@ -3301,11 +3301,18 @@ function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate,
   const packetPages = candidate.kind === "document" && candidate.page !== null
     ? [{ page: candidate.page, text: candidate.quote }]
     : [];
-  return checkDraftClaims({
+  const checks = checkDraftClaims({
     units: [{ text: claim, label: claim.slice(0, 120), item }],
     packetPages,
     segments: record.segments,
-  }).every((check) => check.checkStatus === "found");
+  });
+  // Empty structured checks need topical support: two words and half the
+  // significant claim words, or candidateScore's exact full-claim match.
+  if (!checks.length) {
+    const terms = significantEvidenceWords(claim);
+    return terms.length > 0 && candidateScore(claim, candidate.quote) >= Math.max(2, Math.ceil(terms.length / 2));
+  }
+  return checks.every((check) => check.checkStatus === "found");
 }
 
 function exactQuoteCandidate(
@@ -3403,7 +3410,7 @@ export async function reviewOpenStoryClaims(input: {
       ? exactQuoteCandidate(candidates, answer)
       : null;
     const supported = Boolean(
-      supportedText && candidate && claimEvidenceCheckPasses(supportedText, candidate, input.record),
+      supportedText && candidate && claimEvidenceCheckPasses(supportedText, { ...candidate, quote: str(answer?.quote) }, input.record),
     );
     if (verdict === "CONTRADICTED" && answer?.cut === true) {
       const edit = storyTextChange(story, claim.text, null);
