@@ -1,4 +1,4 @@
-import { installDom, transpileToUrl } from "./dom-harness.mjs";
+import { installDom, moduleUrl, transpileToUrl } from "./dom-harness.mjs";
 const window = installDom();
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -90,6 +90,9 @@ const imports = {
   "@/lib/paper-context-state": stub(`export const usePaperDateFormatters = () => ({ formatListDateTime: () => "Sept. 26", formatShortDate: () => "Sept. 26", formatClockTime: () => "7:02 a.m." });`),
   "@/components/dark-dials-panel": nullComponents,
   "@/components/model-picker": modelPickerStub,
+  "@/components/read-more-text": await moduleUrl("src/components/read-more-text.tsx", {
+    "@/lib/news/pdf-read": await moduleUrl("src/lib/news/pdf-read.ts"),
+  }),
   "@/components/first-run-picker-default": stub(`export const useFirstRunPickerSeed = () => {}; export const useFirstRunPickerDefault = () => "claude-haiku";`),
   "@/lib/news/dark-dials": stub(`export const scopeLabelsFor = () => ({ city: "Longmont", county: "Boulder County", region: "Region", adjacent: "Nearby" });`),
   "@/lib/news/editor-dialog-logic": stub(`export const DARK_LIMITS = [{ key: "quick", label: "Quick", minutes: 20, hops: 5 }, { key: "standard", label: "Standard", minutes: 120, hops: 5 }];`),

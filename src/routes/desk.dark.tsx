@@ -70,7 +70,7 @@ import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
-import { estimateMinutes, scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
+import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
 import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
