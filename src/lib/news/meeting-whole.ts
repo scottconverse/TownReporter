@@ -126,6 +126,8 @@ export type LedgerItem = {
   startSeconds: number | null;
   /** The end of the item's span on the tape, when the item covers a range. */
   endSeconds?: number | null;
+  /** Exact transcript segments selected by citations, without intervening tape. */
+  evidenceSegmentIndexes?: number[];
   packetPage: number | null;
   status: LedgerStatus;
   reason: string;
@@ -1829,6 +1831,26 @@ const DATE =
   /\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}\b|\b\d{4}-\d{2}-\d{2}\b|\b(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2},\s*\d{4}\b/gi;
 const QUOTED = /"([^"]{3,})"/g;
 
+function normalizedMoneyAmount(value: string): string {
+  const amount = value.replace(/[$,\s]/g, "");
+  return amount.includes(".") ? amount.replace(/0+$/, "").replace(/\.$/, "") : amount;
+}
+
+function sourceContainsMoneyAmount(source: string, claimAmount: string): boolean {
+  const wanted = normalizedMoneyAmount(claimAmount);
+  const candidates = /\$\s*(\d[\d,]*(?:\.\d+)?)|\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b|\b(\d+\.\d+)\b/g;
+  const financialContext = /\b(?:allocat\w*|budget\w*|fund(?:s|ing)|costs?|dollars?|revenue|expense\w*|appropriat\w*|tax(?:es)?|payment|spend(?:ing)?|grant|balance|amount)\b/i;
+  return [...source.matchAll(candidates)].some((match) => {
+    const amount = match[1] ?? match[2] ?? match[3] ?? "";
+    if (normalizedMoneyAmount(amount) !== wanted) return false;
+    if (match[1]) return true;
+    const start = source.lastIndexOf("\n", match.index) + 1;
+    const lineEnd = source.indexOf("\n", match.index + match[0].length);
+    const context = source.slice(start, lineEnd < 0 ? source.length : lineEnd);
+    return financialContext.test(context);
+  });
+}
+
 /** A tally the draft states as a figure: "5 to 2", "5-2", "6–1". */
 const TALLY_FIGURE = /\b\d{1,2}\s*(?:to|-|–|—)\s*\d{1,2}\b/gi;
 /** The verbs that make a nearby tally a vote rather than a measurement. */
@@ -1998,9 +2020,10 @@ export function checkDraftClaims(input: {
     // The item's own span of tape is part of its record -- but only ITS span.
     // The whole tape is where the wrong-item match lived, so it is never used.
     const ownTape = spanTape(item, segments, COLD_LEAD_CHARS);
-    const figureSource = normalizeForMatch(item.kind === "document-source"
+    const figureRecord = item.kind === "document-source"
       ? documentMoneyText(`${own.text}\n${ownTape}`)
-      : `${own.text}\n${ownTape}`);
+      : `${own.text}\n${ownTape}`;
+    const figureSource = normalizeForMatch(figureRecord);
     const locator = own.locator;
     const page = item.packetPage;
     const packetPageText = page === null
@@ -2018,7 +2041,10 @@ export function checkDraftClaims(input: {
         motion.result,
       ])
       .filter(Boolean);
-    const voteSource = normalizeForMatch(motionWords.join(" "));
+    const voteSource = normalizeForMatch([
+      ...motionWords,
+      ...(item.kind === "reporting" ? [own.text, ownTape] : []),
+    ].join(" "));
     const proceduralWords = normalizeForMatch(
       (item.motions ?? [])
         .filter((motion) => motion.kind === "procedural")
@@ -2033,7 +2059,8 @@ export function checkDraftClaims(input: {
         .join(" "),
     );
     for (const match of unit.text.match(DOLLAR) ?? []) {
-      const found = figureSource.includes(normalizeForMatch(item.kind === "document-source" ? documentMoneyText(match) : match));
+      const found = figureSource.includes(normalizeForMatch(item.kind === "document-source" ? documentMoneyText(match) : match)) ||
+        sourceContainsMoneyAmount(figureRecord, match);
       push(
         match,
         `${label} (${locator})`,
@@ -2082,11 +2109,16 @@ export function checkDraftClaims(input: {
       const inPacketPage = packetPageText
         ? normalizeForMatch(packetPageText).includes(normalizeForMatch(quote))
         : false;
+      const inRetainedTranscript = item.kind === "reporting" &&
+        normalizeForMatch(`${own.text}\n${ownTape}`).includes(normalizeForMatch(quote));
+      const found = inPacketPage || inRetainedTranscript;
       push(
         quote,
-        inPacketPage ? page === null ? `${label} (cited document section)` : `${label} (packet p${page})` : `${label} (unverified)`,
-        inPacketPage,
         inPacketPage
+          ? page === null ? `${label} (cited document section)` : `${label} (packet p${page})`
+          : inRetainedTranscript ? `${label} (retained transcript)` : `${label} (unverified)`,
+        found,
+        found
           ? page === null ? "Quotation matched this claim's cited document section." : `Quotation matched this item's own packet page (p${page}).`
           : "Quotation unverified: not in this item's packet page. A match against the auto-captioned tape alone is not a verified recording; check the recording, the approved minutes, or attribute the words to the packet.",
       );
@@ -2921,9 +2953,11 @@ function tapeLines(segments: MeetingSegment[]): string {
 function spanTape(item: LedgerItem | null, segments: MeetingSegment[], cap: number): string {
   const start = item?.startSeconds ?? null;
   const end = item?.endSeconds ?? null;
+  const evidenceIndexes = item?.evidenceSegmentIndexes === undefined ? null : new Set(item.evidenceSegmentIndexes);
   let used = 0;
   const lines: string[] = [];
   for (const segment of segments) {
+    if (evidenceIndexes && !evidenceIndexes.has(segment.index)) continue;
     if (start !== null && segment.seconds < start) continue;
     if (end !== null && segment.seconds > end) break;
     const line = `[${clock(segment.seconds)}] ${segment.text}`;

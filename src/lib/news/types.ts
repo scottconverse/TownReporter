@@ -55,6 +55,9 @@ export type SourceRow = {
   retry_after_note?: string | null;
   blocked_at?: string | null;
   blocked_attempts?: number | null;
+  purpose_preference?: "watch" | "reference" | "unknown" | null;
+  scan_cadence?: "daily" | "weekly" | "monthly" | "as-needed" | null;
+  scan_deadline?: string | null;
 };
 
 export type LeadRow = {
@@ -228,6 +231,7 @@ export type ScanRow = {
   model_batches_used?: number;
   model_batches_failed?: number;
   failed_sources?: string | null;
+  source_coverage?: import("./scan-source-coverage.ts").ScanSourceCoverageEntry[] | string | null;
   meetings_found?: number;
   meetings_captured?: number;
   meetings_failed?: number;

@@ -260,6 +260,7 @@ const deskCopy = moduleUrl(
     react: import.meta.resolve("react"),
   },
 );
+const deskCopyModule = await import(deskCopy);
 
 /*
   Unit UI1a2: `desk-leads.tsx` draws its Delete through the shared piece now.
@@ -277,7 +278,7 @@ const actionButtonUrl = moduleUrl(
   },
 );
 
-const { LeadRowView } = await import(
+const { LeadRowView, LeadSourceEvidenceCount } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
     "desk-leads.tsx",
@@ -347,6 +348,24 @@ test("a lead with resurfaced_count > 0 shows the came-back badge with its count 
     metaIdx >= 0 && metaIdx < flagsIdx,
     "meta line should render before the lead-flags rail",
   );
+});
+
+// guards: Today and Queue could call attached sources opened before anyone reads them
+test("Today and Queue label unread source links as attached", () => {
+  const row = (notes_json) => renderToStaticMarkup(createElement(LeadRowView, { lead: baseLead({
+    status: "new", source_urls: JSON.stringify(["https://city.test/one", "https://city.test/two"]), notes_json,
+  }) }));
+  const unread = row(null);
+  assert.match(unread, />2 attached</);
+  assert.doesNotMatch(unread, />2 opened</);
+  assert.match(renderToStaticMarkup(createElement(LeadSourceEvidenceCount, {
+    sourceUrls: JSON.stringify(["https://city.test/one", "https://city.test/two"]), notesJson: null,
+  })), />2 attached</);
+  assert.match(row(JSON.stringify({ opened: [{ url: "https://city.test/one" }] })), />1 opened · 1 attached</);
+  assert.equal(deskCopyModule.pullFailureCopy("Permission was withdrawn", "https://longmontcolorado.gov/story"),
+    "Could not save the Pull result because access to this story changed. Reload the story to check.");
+  assert.equal(deskCopyModule.pullFailureCopy("The desk could not confirm the saved request", "https://longmontcolorado.gov/story"),
+    "The desk could not confirm that the Pull result was saved. Reload the story to check before trying again.");
 });
 
 test("a lead with resurfaced_count of 0 shows no came-back badge", () => {

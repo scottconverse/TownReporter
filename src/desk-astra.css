@@ -6410,6 +6410,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.desk-ltr.astra .astra-row.src .src-name .source-coverage-age {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
 .desk-ltr.astra .astra-row.src .src-state {
   grid-column: 1;
   grid-row: 2;

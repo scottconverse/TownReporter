@@ -34,7 +34,8 @@ import { fileURLToPath } from "node:url";
  * paper-settings.ts, mirrored by migrations/0118): 348. Group 6a added one (investigate.ts re-validates
  * its NOT VALID foreign keys once the data allows it): 349. WR1 fixes round 1
  * added one (paper_settings.elected_officials, in paper-settings.ts, mirrored
- * by migrations/0122): 350.
+ * by migrations/0122): 350. Slice 6 adds three migration-backed scan ensures
+ * (daily scan capacity, source preferences, and scan coverage): 353.
  *
  * What counts as a hit: the DDL verbs in `DDL_VERB`, in a non-test `.ts`/
  * `.tsx` file under `src/` or `server/`, on a line that is really code.
@@ -133,6 +134,12 @@ const ALLOWLIST: Record<string, { statements: number; reason: string }> = {
   "src/lib/news/routine-notice-automation.ts": { statements: 6, reason: "runtime DDL, redundant with migrations; removed in U18a-9" },
   "src/lib/news/routine-notice-checks.server.ts": { statements: 6, reason: "runtime DDL, redundant with migrations; removed in U18a-9" },
   "src/lib/news/routine-notice-policy.ts": { statements: 4, reason: "runtime DDL, redundant with migrations; removed in U18a-9" },
+
+  // Slice 6 -- saved scan policy, source preferences and per-run coverage;
+  // each ensure mirrors its additive migration and is called by warm-up.
+  "src/lib/news/daily-scan.ts": { statements: 1, reason: "daily scan capacity ensure mirrored by migrations/0130" },
+  "src/lib/news/source-scan-preferences.server.ts": { statements: 1, reason: "source preference ensure mirrored by migrations/0131" },
+  "src/lib/news/scan-source-coverage.server.ts": { statements: 1, reason: "scan coverage ensure mirrored by migrations/0132" },
 };
 
 describe("no runtime DDL outside migrations/", () => {
@@ -193,15 +200,15 @@ describe("no runtime DDL outside migrations/", () => {
 
   it("counts the whole surface, so the docstring's numbers are checkable", () => {
     /*
-      The header says "30 files, 350 statements", and this is what makes that
+      The header says "33 files, 353 statements", and this is what makes that
       sentence fail when it stops being true -- the count is the progress meter
       and a stale meter is worse than none.
     */
     const measured = measuredDdlCounts();
     const files = Object.keys(ALLOWLIST).length;
     const statements = Object.values(measured).reduce((sum, n) => sum + n, 0);
-    assert.equal(files, 30, "the allowlist header says 30 files");
-    assert.equal(statements, 350, "the allowlist header says 350 statements");
+    assert.equal(files, 33, "the allowlist header says 33 files");
+    assert.equal(statements, 353, "the allowlist header says 353 statements");
   });
 });
 

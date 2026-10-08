@@ -20,6 +20,9 @@ export const noMeetingTranscriptToChoose = "This lead has no meeting transcript 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
+import type { SourceCadence } from "./adaptive-source-selection.ts";
+import type { SourcePurpose } from "./source-inventory.ts";
+import type { ScanSourceCoverageEntry } from "./scan-source-coverage.ts";
 
 export function meetingYoutubeBlockedLine(retryAt: string | Date, now: Date = new Date()): string {
   const next = retryAt instanceof Date ? retryAt : new Date(retryAt);
@@ -36,6 +39,91 @@ export function meetingYoutubeBlockedLine(retryAt: string | Date, now: Date = ne
         ? `tomorrow ${formatClockTime(next, PAPER.timezone)}`
         : `${nextDate} at ${formatClockTime(next, PAPER.timezone)}`;
   return `Capture blocked by YouTube (too many requests). Next try ${nextTry}`;
+}
+
+export const SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS: readonly {
+  value: SourcePurpose;
+  label: string;
+}[] = [
+  { value: "watch", label: "Watch" },
+  { value: "reference", label: "Reference" },
+  { value: "unknown", label: "Unknown" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS: readonly {
+  value: SourceCadence;
+  label: string;
+}[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "as-needed", label: "As needed" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_COPY = {
+  summary: "Scan preferences",
+  explanation: "Set when this accepted source should be read during the daily scan.",
+  purpose: "Purpose",
+  purposeBlank: "Choose a purpose",
+  cadence: "Cadence",
+  cadenceBlank: "No cadence",
+  deadline: "Deadline",
+  save: "Save preferences",
+  saving: "Saving…",
+  saved: "Scan preferences saved.",
+  saveFailed: "Could not save scan preferences.",
+  acceptedOnly: "Only accepted sources can have scan preferences.",
+  invalid: "Choose a valid purpose, cadence, and deadline.",
+};
+
+export function scanSourceCoverageLine(entries: readonly ScanSourceCoverageEntry[]): string {
+  const read = entries.filter((entry) => entry.status === "read").length;
+  const skipped = entries.filter((entry) => entry.status === "skipped").length;
+  const blocked = entries.filter((entry) => entry.status === "blocked").length;
+  return `Read ${read} of ${entries.length} · ${skipped} wait their turn · ${blocked} blocked`;
+}
+
+export function scanSourceCoverageAge(
+  lastReadAt: string | null | undefined,
+  asOfMs = Date.now(),
+): string {
+  if (!lastReadAt) return "never read";
+  const readAt = Date.parse(lastReadAt);
+  if (!Number.isFinite(readAt)) return "read date not recorded";
+  const days = Math.floor(Math.max(0, asOfMs - readAt) / 86_400_000);
+  if (days === 0) return "read today";
+  return `read ${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string {
+  switch (entry.status) {
+    case "read":
+      return "Read";
+    case "blocked":
+      return "Blocked";
+    case "pending":
+      return "Reading";
+    default:
+      return "Skipped";
+  }
+}
+
+export function scanSourceCoverageReason(entry: ScanSourceCoverageEntry): string {
+  if (entry.reason?.trim()) return entry.reason;
+  switch (entry.reasonCode) {
+    case "over-cap":
+      return "Over the scan limit.";
+    case "waiting":
+      return "Waiting for its retry time.";
+    case "host-cap":
+      return "Waiting for the host's daily limit.";
+    case "not-reached":
+      return "The scan stopped before it reached this source.";
+    case "fetch-failed":
+      return "The source could not be read.";
+    default:
+      return "The source was not read this pass.";
+  }
 }
 
 export function organizationFromUrl(url: string): string {
@@ -1011,6 +1099,56 @@ export function editorFetchError(raw: string | null | undefined, url?: string | 
   if (/400/i.test(t)) return "The site rejected the request.";
   if (/Fetch failed/i.test(t)) return "Could not fetch that page.";
   return plainEditorText(t);
+}
+
+/** Plain failure copy for a Pull that could not finish reading or save a source. */
+export function pullFailureCopy(raw: string | null | undefined, url?: string | null): string {
+  const t = String(raw ?? "").trim();
+  if (/permission (?:was )?withdrawn|access .* changed|not authorized/i.test(t))
+    return "Could not save the Pull result because access to this story changed. Reload the story to check.";
+  if (/unknown.*save|could not confirm.*sav|save.*could not be confirmed|lease was lost|missing its saved request/i.test(t))
+    return "The desk could not confirm that the Pull result was saved. Reload the story to check before trying again.";
+  const site = organizationFromUrl(url ?? extractUrl(t)) || "the site";
+  const reason = /timeout|timed out|abort/i.test(t)
+    ? "timeout"
+    : /\b429\b|rate.?limit/i.test(t)
+      ? "rate limited"
+      : /\b401\b|login|unauthorized/i.test(t)
+        ? "login required"
+        : /\b403\b|blocked|forbidden|refused/i.test(t)
+          ? "blocked"
+          : /needs-ocr|scanned pdf|image-only/i.test(t)
+            ? "PDF needs OCR"
+            : /network|fetch.failed|socket|dns|econn/i.test(t)
+              ? "network error"
+              : /parse|could not read|no usable text/i.test(t)
+                ? "could not read the page"
+                : "read failed";
+  return `Could not open ${site} (${reason}).`;
+}
+
+/** Count attached source links as opened only when the editor's notes record a read. */
+export function leadSourceEvidenceLabel(
+  sourceUrls: readonly string[],
+  notesJson: string | null | undefined,
+): string {
+  let opened = new Set<string>();
+  try {
+    const value: unknown = JSON.parse(notesJson || "{}");
+    if (value && typeof value === "object" && Array.isArray((value as { opened?: unknown }).opened)) {
+      opened = new Set(
+        (value as { opened: unknown[] }).opened
+          .map((row) => (row && typeof row === "object" ? String((row as { url?: unknown }).url ?? "").trim() : ""))
+          .filter(Boolean),
+      );
+    }
+  } catch {
+    // Malformed notes do not prove that a source was read.
+  }
+  const openedCount = sourceUrls.filter((url) => opened.has(url)).length;
+  const attachedCount = sourceUrls.length - openedCount;
+  if (openedCount && attachedCount) return `${openedCount} opened · ${attachedCount} attached`;
+  return openedCount ? `${openedCount} opened` : `${attachedCount} attached`;
 }
 
 /**
@@ -2755,3 +2893,17 @@ export function chipLabel(status: string): string {
   src/components/follow-up-item.tsx, deleted with them; an agent has
   `next_run_at` and says when it runs next, not when something is overdue.
 */
+/** One sentence per reason, shared by the paste receipt and saved source note. */
+export function sourceAttachmentNote(counts: Partial<Record<"local" | "protocol" | "malformed" | "duplicate" | "limit", number>>): string {
+  const reasons = {
+    local: "local addresses are not allowed",
+    protocol: "only http(s) addresses are allowed",
+    malformed: "the addresses are malformed",
+    duplicate: "the links are duplicates",
+    limit: "the source link limit was reached",
+  };
+  return (Object.keys(reasons) as (keyof typeof reasons)[]).flatMap(reason => {
+    const count = counts[reason] ?? 0;
+    return count ? [`${count} source link${count === 1 ? " was" : "s were"} not attached: ${reasons[reason]}.`] : [];
+  }).join(" ");
+}

@@ -99,6 +99,7 @@ export type ManualClaimCaptureOption = {
 export type FindingEvidenceReview = {
   leadId: number;
   draftId: number;
+  civicReporting: boolean;
   evidenceToken: string;
   contentToken: string;
   canonicalDraft: { headline: string; dek: string; body: string; topic: string };
@@ -793,11 +794,53 @@ async function resolveClaim(
         !readableVersionIds.has(resolved.judgment.contraryVersionId)))
       ? { value: "unreviewed" as const, reason: "", contraryVersionId: null }
       : resolved.judgment;
+  const transcript = claim.reporting?.transcriptEvidence;
+  const record = claim.reporting?.recordEvidence;
+  const closest = claim.reporting?.closestEvidence;
+  const recordQuote = transcript?.quote.trim() || record?.quote.trim() || "";
+  const recordUrl = transcript?.videoUrl || record?.url || "";
+  const recordSeconds = transcript?.startSeconds ?? record?.startSeconds;
+  const hasTranscriptSupport = claim.reporting?.status === "VERIFIED" && Boolean(
+    recordQuote && recordUrl && (recordSeconds === undefined || (Number.isFinite(recordSeconds) && recordSeconds >= 0)),
+  );
+  if (hasTranscriptSupport && recordQuote) {
+    const seconds = recordSeconds === undefined ? null : Math.floor(recordSeconds);
+    const joiner = recordUrl.includes("?") ? "&" : "?";
+    captures.push({
+      versionId: null,
+      captureEventId: null,
+      url: recordUrl,
+      title: recordQuote,
+      capturedAt: null,
+      available: true,
+      readable: true,
+      takenDown: false,
+      excerptState: "found",
+      newerCapture: null,
+      viewHref: seconds === null ? recordUrl : `${recordUrl}${joiner}t=${seconds}s`,
+    });
+  }
+  if (claim.reporting?.status !== "VERIFIED" && closest) {
+    const seconds = closest.startSeconds === undefined ? null : Math.floor(closest.startSeconds);
+    captures.push({
+      versionId: null,
+      captureEventId: null,
+      url: closest.url,
+      title: closest.quote,
+      capturedAt: null,
+      available: true,
+      readable: true,
+      takenDown: false,
+      excerptState: "found",
+      newerCapture: null,
+      viewHref: seconds === null ? closest.url : `${closest.url}${closest.url.includes("?") ? "&" : "?"}t=${seconds}s`,
+    });
+  }
   return {
     key,
     claim,
     captures,
-    judgment,
+    judgment: hasTranscriptSupport ? { value: "supports", reason: "", contraryVersionId: null } : judgment,
   };
 }
 
@@ -923,6 +966,7 @@ export async function loadFindingEvidenceReview(
   return {
     leadId,
     draftId: draft.id,
+    civicReporting: reporting.civicReporting === true,
     evidenceToken: await fullReviewToken(sql, newsroomId, draft, findings, claims, manualClaims),
     contentToken: findingEvidenceContentToken(draft),
     canonicalDraft: {
