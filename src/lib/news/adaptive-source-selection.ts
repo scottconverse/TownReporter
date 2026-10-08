@@ -193,6 +193,27 @@ export function selectRotation(input: RotationInput): Rotation {
  * When the preference carries no urgency, the source is not due -- this module
  * does not invent deadlines from a row's shape or silence.
  */
+/** A missed deadline stays due until a successful read at or after it.
+ * Date-only deadlines retain the editor's existing end-of-day meaning.
+ * Future deadlines keep their seven-day lookahead priority. */
+function deadlineReason(
+  source: SourceHealthFacts,
+  pref: SourcePreference | undefined,
+  nowMs: number,
+): "due-now" | "deadline-soon" | null {
+  const deadline = pref?.deadline;
+  if (!deadline) return null;
+  const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(deadline)
+    ? Date.parse(`${deadline}T23:59:59.999Z`)
+    : Date.parse(deadline);
+  if (!Number.isFinite(deadlineAt)) return null;
+  if (deadlineAt >= nowMs) {
+    return deadlineAt <= nowMs + 7 * 86_400_000 ? "deadline-soon" : null;
+  }
+  const lastRead = source.last_ok_at ? Date.parse(source.last_ok_at) : Number.NaN;
+  return !Number.isFinite(lastRead) || lastRead < deadlineAt ? "due-now" : null;
+}
+
 function isDue(
   source: SourceHealthFacts,
   pref: SourcePreference | undefined,
@@ -203,14 +224,7 @@ function isDue(
     const at = Date.parse(urgency);
     if (Number.isFinite(at) && at <= nowMs) return true;
   }
-  if (pref?.deadline) {
-    const rawDeadline = pref.deadline;
-    const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(rawDeadline)
-      ? Date.parse(`${rawDeadline}T23:59:59.999Z`)
-      : Date.parse(rawDeadline);
-    if (Number.isFinite(deadlineAt) && deadlineAt >= nowMs && deadlineAt <= nowMs + 7 * 86_400_000)
-      return true;
-  }
+  if (deadlineReason(source, pref, nowMs)) return true;
   const cadenceDays =
     pref?.cadence === "daily" ? 1 : pref?.cadence === "weekly" ? 7 : pref?.cadence === "monthly" ? 30 : null;
   if (cadenceDays != null) {
@@ -228,13 +242,8 @@ function reasonFor(
   if (pref?.highPriority) return "high-priority";
   if (pref?.urgency && Number.isFinite(Date.parse(pref.urgency)) && Date.parse(pref.urgency) <= nowMs)
     return "due-now";
-  if (pref?.deadline) {
-    const deadlineAt = /^\d{4}-\d{2}-\d{2}$/.test(pref.deadline)
-      ? Date.parse(`${pref.deadline}T23:59:59.999Z`)
-      : Date.parse(pref.deadline);
-    if (Number.isFinite(deadlineAt) && deadlineAt >= nowMs && deadlineAt <= nowMs + 7 * 86_400_000)
-      return "deadline-soon";
-  }
+  const deadline = deadlineReason(source, pref, nowMs);
+  if (deadline) return deadline;
   if (isDue(source, pref, nowMs)) return "cadence-due";
   if (!source.last_ok_at && !source.last_fetched_at) return "never-checked";
   return "longest-waiting";

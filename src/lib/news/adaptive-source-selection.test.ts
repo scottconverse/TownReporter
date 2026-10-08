@@ -40,6 +40,18 @@ function ago(days: number): string {
   return new Date(NOW - days * DAY).toISOString();
 }
 
+// guards: missed packet deadlines must not lose a scan slot before a successful read.
+it("keeps overdue deadlines ahead of older watches until read", () => {
+  for (const deadline of ["2026-10-04", "2026-10-04T12:00:00Z"]) {
+    const preferences = [{ sourceId: 2, deadline, cadence: "as-needed" as const }];
+    const sources = [src({ id: 1, last_ok_at: ago(60) }), src({ id: 2, last_ok_at: ago(2) })];
+    const unread = selectRotation({ sources, preferences, budget: 1, nowMs: NOW });
+    assert.deepEqual(unread.read, [{ sourceId: 2, reason: "due-now" }]);
+    sources[1].last_ok_at = deadline.length === 10 ? `${deadline}T23:59:59.999Z` : deadline;
+    assert.equal(selectRotation({ sources, preferences, budget: 1, nowMs: NOW }).read[0].sourceId, 1);
+  }
+});
+
 describe("adaptive rotation: editor control comes first", () => {
   it("reads the editor's selected sources before anything else, in their order", () => {
     const rotation = selectRotation({
