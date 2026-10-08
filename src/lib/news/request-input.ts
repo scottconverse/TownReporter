@@ -1442,6 +1442,8 @@ export const darkRunInput = z.object({
 export const darkOpenInput = z.object({
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
+  ordinaryExplanation: z.string().max(1600).optional(),
+  limitKey: z.enum(["quick", "standard", "deep"]).optional(),
   /*
     Unit BK: the dark-file dialog draws three Limits, and the dial is stored as
     `investigations.budget` in hops. Absent = the 5 the open path has always

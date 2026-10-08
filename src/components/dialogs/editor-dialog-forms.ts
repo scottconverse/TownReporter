@@ -698,6 +698,8 @@ export function darkRequest(state: DarkFileState) {
         .join("\n\n"),
       title: state.question.trim(),
       budget: hopsForLimit(limit.key),
+      ordinaryExplanation: explanation,
+      limitKey: limit.key,
     },
     /*
       Unit CY item 9: the dialog draws an Effort select beside the model, so

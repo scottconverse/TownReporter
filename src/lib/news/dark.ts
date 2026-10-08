@@ -85,6 +85,7 @@ import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
+import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
 import { titlesOverlap, topicFromText } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings.ts";
@@ -105,6 +106,7 @@ import {
   describeDials,
   estimateMinutes,
   stanceFor,
+  type DarkScope,
   type DarkDials,
 } from "./dark-dials.ts";
 import {
@@ -125,7 +127,7 @@ import {
   type DeskJob,
 } from "./jobs.ts";
 import {
-  createDarkRunBudget,
+  createDarkRunBudgetForFile,
   type DarkRunBudget,
   type DarkRunStopReason,
   type DarkRunUsageSnapshot,
@@ -137,19 +139,55 @@ const DARK_ARTIFACT_CAP = 12_000;
 const DARK_ARTIFACT_COUNT = 8;
 const SECTION_BUDGET_MARKER = "\n[section budget reached]";
 
+type DarkFileRunLimits = { key: DarkLimitKey; minutes: number; dollars: number | null; scope: DarkScope };
+
+async function darkFileRunLimits(investigationId: number, newsroomId: number): Promise<DarkFileRunLimits> {
+  const sql = await getSql();
+  const rows = await sql<{
+    limit_key: string;
+    limit_minutes: number;
+    limit_dollars: number | string | null;
+    scope_json: string;
+  }>`
+    select limit_key, limit_minutes, limit_dollars, scope_json
+    from investigations where id = ${investigationId} and newsroom_id = ${newsroomId} limit 1
+  `;
+  const saved = rows[0];
+  const limit = DARK_LIMITS.find((row) => row.key === saved?.limit_key) ?? DARK_LIMITS[1];
+  let scope: DarkScope = "city";
+  try {
+    const parsed = JSON.parse(saved?.scope_json || "{}") as { scope?: unknown };
+    if (["city", "county", "region", "adjacent"].includes(String(parsed.scope))) scope = parsed.scope as DarkScope;
+  } catch {
+    /* Old or malformed rows keep the city default. */
+  }
+  const minutes = Number(saved?.limit_minutes);
+  const dollars = saved?.limit_dollars == null ? limit.dollars : Number(saved.limit_dollars);
+  return {
+    key: limit.key,
+    minutes: Number.isFinite(minutes) && minutes > 0 ? minutes : limit.minutes,
+    dollars: dollars != null && Number.isFinite(dollars) ? dollars : null,
+    scope,
+  };
+}
+
 function darkRunBudget(
   dials: DarkDials,
   choice: EffectiveProviderChoice,
   overrides: ProviderOverrides | null,
   verificationLimit: number,
+  fileLimits: DarkFileRunLimits,
 ): DarkRunBudget {
-  const hopLimit = budgetFor(dials).hops;
-  return createDarkRunBudget({
-    elapsedMs: providerBudget(choice, overrides).wallMs,
-    modelCalls: hopLimit * 2 + Math.max(0, verificationLimit) + 3,
-    searches: hopLimit * 3 + Math.max(0, verificationLimit) * 4,
-    documentReads: hopLimit * 4,
-  });
+  const hopLimit = hopsForLimit(fileLimits.key);
+  return createDarkRunBudgetForFile(
+    {
+      elapsedMs: providerBudget(choice, overrides).wallMs,
+      modelCalls: hopLimit * 2 + Math.max(0, verificationLimit) + 3,
+      searches: hopLimit * 3 + Math.max(0, verificationLimit) * 4,
+      documentReads: hopLimit * 4,
+    },
+    { minutes: fileLimits.minutes, dollars: fileLimits.dollars },
+  );
 }
 
 /**
@@ -610,6 +648,11 @@ export type DarkPromiseRow = {
 export type InvestigationRow = {
   id: number;
   title: string;
+  ordinary_explanation: string;
+  scope_json: string;
+  limit_key: string;
+  limit_minutes: number;
+  limit_dollars: number | string | null;
   status: string;
   summary: string;
   hops: number;
@@ -972,7 +1015,8 @@ export const listInvestigations = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const rows = await sql<InvestigationRow>`
-      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+      select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
+        i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
         i.created_at, i.updated_at,
         coalesce((
           -- Unit DD1, item 6: captures, and only captures. The editor's own
@@ -1083,7 +1127,8 @@ export const getInvestigation = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+      select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
+             i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
              i.created_at, i.updated_at, i.last_model_choice,
              coalesce((
                select count(*)::int from frontier_items f
@@ -1499,8 +1544,8 @@ export async function buildDarkSynthesisPack(
   packCap: number = DARK_SYNTHESIS_PACK_CAP,
 ): Promise<string> {
   const sql = await getSql();
-  const investigation = await sql<{ title: string }>`
-    select title from investigations
+  const investigation = await sql<{ title: string; ordinary_explanation: string }>`
+    select title, ordinary_explanation from investigations
     where id = ${investigationId} and newsroom_id = ${newsroomId}
     limit 1
   `;
@@ -1553,6 +1598,9 @@ export async function buildDarkSynthesisPack(
   const { place } = await readDarkPlace(newsroomId);
   const context = [
     `INVESTIGATION QUESTION:\n${capText(investigation[0]?.title ?? "(unknown)", 600)}${paste ? `\nEDITOR PASTE:\n${capText(paste, 4_000)}` : ""}`,
+    ...(investigation[0]?.ordinary_explanation?.trim()
+      ? [`ORDINARY EXPLANATION TO RULE OUT FIRST:\n${capText(investigation[0].ordinary_explanation, 1_600)}`]
+      : []),
     `CITY: ${place.city}, ${place.state}. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
     `WATCH LIST:\n${sources.slice(0, 30).map((s) => `${s.tier} ${s.status} ${capText(s.title, 180)} ${capText(s.url, 300)}`).join("\n") || "(empty)"}`,
     `SEARCHES RUN:\n${searches.map((s) => capText(s.query, 360)).join("\n") || "(none)"}`,
@@ -2060,9 +2108,10 @@ async function executeDarkRun(
 
     // Same setting as a continued round: an editor who turned the desk up
     // expects the file they open next to dig that hard too.
-    const dials = snapshot.dials;
-    const budget = budgetFor(dials);
-    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const fileLimits = await darkFileRunLimits(investigationId, newsroomId);
+    const dials = { ...snapshot.dials, scope: fileLimits.scope };
+    const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
+    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
@@ -2923,9 +2972,10 @@ export async function performDarkRound(job: DeskJob) {
       and whatever the editor wanted. The machinery underneath could always
       chase a trail; nothing could ask it to.
     */
-    const dials = snapshot.dials;
-    const budget = budgetFor(dials);
-    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const fileLimits = await darkFileRunLimits(id, owned(context));
+    const dials = { ...snapshot.dials, scope: fileLimits.scope };
+    const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
+    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
