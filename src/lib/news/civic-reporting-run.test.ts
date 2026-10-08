@@ -2049,7 +2049,9 @@ it("checks an unresolved claim against the full transcript and already-read docu
   const chat = async (_system: string, prompt: string, tokens: number, opts: unknown) => {
     calls += 1;
     assert.equal(tokens, 3_000);
-    assert.equal(opts, chatOpts);
+    const { timeoutMs, ...route } = opts as typeof chatOpts & { timeoutMs: number };
+    assert.deepEqual(route, chatOpts);
+    assert.ok(timeoutMs > 0 && timeoutMs <= 45_000);
     assert.match(prompt, /MEETING IDENTITY:.*City Council regular session/s);
     assert.match(prompt, /NEXT CHECK NOTE: Find the amount in the record\./);
     assert.match(prompt, /ALREADY-READ DOCUMENTS:.*Budget packet/s);
