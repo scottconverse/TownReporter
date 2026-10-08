@@ -167,7 +167,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
       typeof value.everyDaySourceCount === "number"
         ? value.everyDaySourceCount
         : typeof value.sourceCap === "number"
-          ? Math.max(0, Math.min(8, Math.floor(value.sourceCap)))
+          ? Math.max(0, Math.min(8, sourceIds.length, Math.floor(value.sourceCap)))
           : 8,
     selectedSourceIds: sourceIds.filter((id): id is number => typeof id === "number"),
     expectedRevision:
@@ -190,6 +190,18 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     input.expectedRevision < 0
   )
     input.invalidError = "The daily scan settings were malformed. Refresh and try again.";
+  // The fixed set is a prefix of the saved selection. A larger count would
+  // promise daily reads that the scheduled scan cannot actually perform.
+  // Apply the same bound to disabled drafts, so enabling one later is safe.
+  if (
+    !input.invalidError &&
+    (!Number.isInteger(input.everyDaySourceCount) ||
+      input.everyDaySourceCount < 0 ||
+      input.everyDaySourceCount > Math.min(input.sourceCap, input.selectedSourceIds.length))
+  ) {
+    input.invalidError =
+      "The daily source count must be between 0 and the smaller of the selected source count and daily limit.";
+  }
   return input;
 }
 

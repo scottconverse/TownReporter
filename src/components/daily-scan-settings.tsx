@@ -117,6 +117,8 @@ export function DailyScanSettings() {
     [sources.data],
   );
   const selected = draft?.selectedSourceIds ?? [];
+  const everyDaySourceLimit = Math.min(selected.length, draft?.sourceCap ?? 0);
+  const tooManyEveryDaySources = (draft?.everyDaySourceCount ?? 0) > everyDaySourceLimit;
   const tooManySelected = selected.length > (draft?.sourceCap ?? 0);
   const unavailableSelected = selected.filter((id) => !accepted.some((source) => source.id === id));
 
@@ -376,13 +378,13 @@ export function DailyScanSettings() {
         </Field>
         <Field
           label="Read every day"
-          hint={`Read these selected sources in saved order. Rotate: ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} of ${draft.sourceCap}.`}
+          hint={`Choose 0 to ${everyDaySourceLimit} daily sources, bounded by ${selected.length} selected and a daily limit of ${draft.sourceCap}. Read them in saved order. Rotate: ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} of ${draft.sourceCap}.`}
         >
           <input
             className={`${inputClass} mt-1 w-32`}
             type="number"
             min={0}
-            max={draft.sourceCap}
+            max={everyDaySourceLimit}
             step={1}
             value={draft.everyDaySourceCount}
             onChange={(event) =>
@@ -461,6 +463,12 @@ export function DailyScanSettings() {
             Increase the limit or deselect sources; nothing will be silently skipped.
           </p>
         ) : null}
+        {tooManyEveryDaySources ? (
+          <p className="text-sm text-rust" role="alert">
+            The daily source count exceeds the current maximum of {everyDaySourceLimit}.
+            Reduce it or select more sources within the daily limit.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <InkButton
             disabled={
@@ -474,7 +482,7 @@ export function DailyScanSettings() {
               draft.sourceCap < 1 ||
               !Number.isInteger(draft.everyDaySourceCount) ||
               draft.everyDaySourceCount < 0 ||
-              draft.everyDaySourceCount > draft.sourceCap
+              tooManyEveryDaySources
             }
             onClick={() => save.mutate()}
           >

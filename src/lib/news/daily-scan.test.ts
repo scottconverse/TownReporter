@@ -112,6 +112,18 @@ describe("scheduled scan trust boundaries", () => {
 });
 
 describe("daily scan request validation", () => {
+  // guards: a saved scan must not promise more fixed daily reads than its selection or cap.
+  it("bounds fixed daily reads by selected sources and the scan cap", () => {
+    const base = { enabled: true, localTime: "06:00", runtime: "auto", sourceCap: 12,
+      selectedSourceIds: [1], expectedRevision: 0 };
+    for (const [sourceCap, selectedSourceIds, everyDaySourceCount, invalid] of [
+      [12, [1], 8, true], [12, [1], 1, false], [12, [], 1, true],
+      [12, [], 0, false], [1, [1, 2], 2, true], [2, [1, 2], 2, false],
+    ] as const) {
+      const input = cleanDailyScanPolicyInput({ ...base, sourceCap, selectedSourceIds, everyDaySourceCount });
+      assert.equal(Boolean(input.invalidError), invalid);
+    }
+  });
   it("migrates legacy runtime names without silently choosing Opus", () => {
     assert.equal(dailyScanRuntime("claude-cli"), "claude-sonnet");
     assert.equal(dailyScanRuntime("codex-terra"), "codex-balanced");
