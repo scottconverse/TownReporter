@@ -51,6 +51,7 @@ import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
+  evidenceAppearsInText,
   groundingCorpus,
   matchDeadEnds,
   researchLoop,
@@ -4145,6 +4146,23 @@ export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus):
   const prepared = typeof corpus === "string" ? prepareCorpus(corpus) : corpus;
   const text = (value: string) => markUngroundedSpecifics(value, prepared);
   const list = (values: string[]) => values.map(text);
+  const captureText = new Map(
+    (typeof corpus === "string" ? [] : (corpus.captures ?? [])).map((capture) => [
+      capture.captureEventId,
+      capture.text,
+    ]),
+  );
+  const contradictions = brief.contradictions.filter((pair) => {
+    const first = captureText.get(pair.first.captureId);
+    const second = captureText.get(pair.second.captureId);
+    return Boolean(
+      pair.first.captureId > 0 &&
+      pair.second.captureId > 0 &&
+      first && second &&
+      evidenceAppearsInText(pair.first.text, first) &&
+      evidenceAppearsInText(pair.second.text, second),
+    );
+  });
   return {
     ...brief,
     headline: text(brief.headline),
@@ -4152,6 +4170,7 @@ export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus):
     why_verdict: text(brief.why_verdict),
     hypothesis: text(brief.hypothesis),
     supports: list(brief.supports),
+    contradictions,
     benign: text(brief.benign),
     kills_it: text(brief.kills_it),
     /*
