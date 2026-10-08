@@ -8,7 +8,6 @@ import {
   darkRetryInput,
   darkSignalInput,
   darkStepInput,
-  draftSignalFileInput,
   redditTipInput,
   rowId,
 } from "./request-input.ts";
@@ -1155,47 +1154,6 @@ export const listWorthALook = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     await ensureDarkSchema();
     return gatherWorthALook(owned(context));
-  });
-
-export async function draftSignalFileFor(
-  item: WorthSeed,
-  newsroomId: number,
-  choice: string,
-  effort: ModelEffort | null,
-  chat: typeof grokChat = grokChat,
-) {
-  const ai = await chat(
-    "Draft one investigative question and one ordinary explanation that could also fit the signal. Return JSON with question and ordinary_explanation. Do not claim the signal is true. Do not add people, dates, counts, events, or sources absent from the supplied material. Keep both fields concise and suitable for an editor to revise.",
-    JSON.stringify({ title: item.title, whatWasSeen: item.happened, source: item.source_url, evidence: item.evidence }),
-    700,
-    {
-      choice: effectiveStoryModelChoice(choice),
-      newsroomId,
-      reasoningEffort: validatedModelEffort(choice, effort),
-      noTools: true,
-    },
-  );
-  if (!ai.ok) return { ok: false as const, error: "The AI could not draft the question and ordinary explanation." };
-  const drafted = parseJsonBlock<{ question?: unknown; ordinary_explanation?: unknown }>(ai.text);
-  const question = String(drafted?.question ?? "").replace(/\s+/g, " ").trim().slice(0, 800);
-  const explanation = String(drafted?.ordinary_explanation ?? "").replace(/\s+/g, " ").trim().slice(0, 1000);
-  if (question.length < 8 || explanation.length < 8) {
-    return { ok: false as const, error: "The AI draft was incomplete. Try again or start a file without it." };
-  }
-  return {
-    ok: true as const,
-    prefill: { question, tip: item.seed, explanation },
-  };
-}
-
-export const draftSignalFile = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => draftSignalFileInput.parse(input))
-  .handler(async ({ context, data }) => {
-    await ensureDarkSchema();
-    const item = (await gatherWorthALook(owned(context))).find((row) => row.id === data.id);
-    if (!item) return { ok: false as const, error: "That signal is no longer available." };
-    return draftSignalFileFor(item, owned(context), data.choice, data.effort);
   });
 
 export const getInvestigation = createServerFn({ method: "GET" })

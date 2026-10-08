@@ -7,7 +7,6 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
   challengeInvestigation,
-  draftSignalFile,
   findSomethingToDigInto,
   fileRedditTip,
   getInvestigation,
@@ -136,11 +135,7 @@ function DarkPage() {
   const [undoDisposition, setUndoDisposition] = useState<{ id: number; expiresAt: number } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
-  const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
-  const [dismissedSignalIds, setDismissedSignalIds] = useState<string[]>([]);
-  const [dismissedSignal, setDismissedSignal] = useState<WorthSeed | null>(null);
   const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSignalId = useRef<string | null>(null);
   const wasInvestigating = useRef(false);
   const [redditResult, setRedditResult] = useState<RedditScanResult | null>(null);
@@ -174,7 +169,6 @@ function DarkPage() {
     }
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (dismissTimer.current) clearTimeout(dismissTimer.current);
     };
   }, []);
 
@@ -187,25 +181,6 @@ function DarkPage() {
 
   function claimCard(id: string) {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
-  }
-
-  function dismissSignal(item: WorthSeed) {
-    if (dismissTimer.current) clearTimeout(dismissTimer.current);
-    setDismissedSignalIds((prev) => (prev.includes(item.id) ? prev : [...prev, item.id]));
-    setDismissedSignal(item);
-    setSelectedSignalId(null);
-    dismissTimer.current = setTimeout(() => {
-      setDismissedSignal(null);
-    }, 10_000);
-  }
-
-  function undoDismissSignal() {
-    if (dismissTimer.current) clearTimeout(dismissTimer.current);
-    if (dismissedSignal) {
-      setDismissedSignalIds((prev) => prev.filter((id) => id !== dismissedSignal.id));
-      setSelectedSignalId(dismissedSignal.id);
-    }
-    setDismissedSignal(null);
   }
 
   /*
@@ -623,22 +598,6 @@ function DarkPage() {
     onError: (error) => showNotice(error instanceof Error ? error.message : "Could not close this file."),
   });
 
-  const draftSignal = useMutation({
-    mutationFn: (item: WorthSeed) => draftSignalFile({ data: { id: item.id, choice: modelChoice, effort: modelEffort } }),
-    onMutate: () => showNotice("Drafting the question and ordinary explanation…", true),
-    onSuccess: (res, item) => {
-      if (!res?.ok) {
-        showNotice(res?.error ?? "The AI could not draft this file.");
-        return;
-      }
-      showNotice(null);
-      pendingSignalId.current = item.id;
-      setStartPrefill(res.prefill);
-      setStartOpen(true);
-    },
-    onError: () => showNotice("The AI could not draft this file. Try again."),
-  });
-
   const park = useMutation({
     mutationFn: (id: number) => parkInvestigation({ data: id }),
     onSuccess: (_result, id) => {
@@ -789,7 +748,7 @@ function DarkPage() {
       showNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
-  const starting = find.isPending || followLead.isPending || draftSignal.isPending;
+  const starting = find.isPending || followLead.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -856,22 +815,15 @@ function DarkPage() {
     item,
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
-  const inbox = worthRows
-    .filter((row) => !row.off && !dismissedSignalIds.includes(row.item.id))
-    .map((row) => row.item);
-  const selectedSignal =
-    inbox.find((item) => item.id === selectedSignalId) ?? (openId == null ? inbox[0] ?? null : null);
+  const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
   const covered = worthRows.filter((row) => row.off);
-  const signalsCount = signalCounts(worthRows.filter((row) => !dismissedSignalIds.includes(row.item.id)));
+  const signalsCount = signalCounts(worthRows);
 
   function chooseSignal(item: WorthSeed) {
     rememberOpen(null);
-    setSelectedSignalId(item.id);
-  }
-
-  function startFileFromSignal() {
-    if (!selectedSignal) return;
-    draftSignal.mutate(selectedSignal);
+    pendingSignalId.current = item.id;
+    setStartPrefill({ tip: item.seed });
+    setStartOpen(true);
   }
 
   return (
@@ -1039,7 +991,6 @@ function DarkPage() {
                 <WorthSelector
                   key={item.id}
                   item={item}
-                  selected={selectedSignal?.id === item.id}
                   onOpen={() => chooseSignal(item)}
                 />
               ))
@@ -1202,12 +1153,6 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
-          {dismissedSignal ? (
-            <p className="note" role="status">
-              Dismissed “{editorTitle(dismissedSignal.title)}”.{" "}
-              <button type="button" className="inline-link" onClick={undoDismissSignal}>Undo</button>
-            </p>
-          ) : null}
           <section id="dark-settings" hidden={!settingsOpen} aria-label="Dark Desk settings">
           <DarkDialsPanel
             modelChoice={modelChoice}
@@ -1255,44 +1200,7 @@ function DarkPage() {
             read as a settings page rather than as a desk with no file on it.
             Both panels are still below, so nothing became unreachable.
           */}
-          {openId == null && selectedSignal ? (
-            <section className="astra-panel astra-signal-selected" aria-label="Selected signal">
-              <p className="astra-chip">Unverified</p>
-              <h2 className="astra-question">{editorTitle(selectedSignal.title)}</h2>
-              {selectedSignal.source_url && /^https?:\/\//i.test(selectedSignal.source_url) ? (
-                <p className="astra-signal-source">
-                  Source: <a href={selectedSignal.source_url} target="_blank" rel="noreferrer">{selectedSignal.source_url}</a>
-                </p>
-              ) : null}
-              <div className="of-block">
-                <p className="side-label">What the AI saw</p>
-                <p className="side-item">{plainEditorText(selectedSignal.happened)}</p>
-                {selectedSignal.evidence ? <p className="meta">{plainEditorText(selectedSignal.evidence)}</p> : null}
-              </div>
-              <div className="of-block">
-                <p className="side-label">Why it may matter</p>
-                <p className="side-item">{plainEditorText(selectedSignal.why)}</p>
-              </div>
-              <div className="of-block">
-                <p className="side-label">Question to investigate</p>
-                <p className="side-item">{plainEditorText(selectedSignal.question)}</p>
-              </div>
-              <div className="astra-panel-acts">
-                <InkButton
-                  disabled={paperGate.blocked || busyStart || digging}
-                  pending={draftSignal.isPending}
-                  pendingLabel="Drafting…"
-                  onClick={startFileFromSignal}
-                >
-                  Start a file from this
-                </InkButton>
-                <InkButton tone="quiet" disabled={busyStart || digging} onClick={() => dismissSignal(selectedSignal)}>
-                  Dismiss
-                </InkButton>
-              </div>
-            </section>
-          ) : null}
-          {openId == null && !selectedSignal && !investigations.data?.length && !investigations.isPending ? (
+          {openId == null && !investigations.data?.length && !investigations.isPending ? (
             <div className="astra-panel astra-empty">
               <h2 className="astra-panel-h">No files yet.</h2>
               <p className="astra-note">
@@ -1589,13 +1497,12 @@ function RedditResultPanel({
   );
 }
 
-function WorthSelector({ item, selected, onOpen }: { item: WorthSeed; selected: boolean; onOpen: () => void }) {
+function WorthSelector({ item, onOpen }: { item: WorthSeed; onOpen: () => void }) {
   return (
     <button
       type="button"
       className="astra-file-open astra-signal-open"
       onClick={onOpen}
-      aria-current={selected ? "true" : undefined}
     >
       <span className="astra-file-t">{editorTitle(item.title)}</span>
       <span className="astra-file-m">{item.badge || editorKindLabel(item.kind)} · Unverified</span>
@@ -1824,17 +1731,6 @@ function InvestigationWorkspace({
         : /keep|continue|investigat|research/.test(nextStep)
           ? "continue"
           : "follow-up";
-  const flowStep = inv?.status === "closed" || queuedLead != null || fileWaiting
-    ? "Decided"
-    : digging
-      ? "Investigating"
-      : foundAnswer
-        ? "Case file"
-        : detail?.latestChallenge
-          ? "Challenged"
-          : detail?.run
-            ? "Case file"
-            : "Investigating";
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
   // identical to a working one (Dark Desk F6).
@@ -1963,7 +1859,6 @@ function InvestigationWorkspace({
     ? `${limitMinutes / 60} hour${limitMinutes === 60 ? "" : "s"}`
     : `${limitMinutes} minutes`;
   const explanation = inv?.ordinary_explanation?.trim();
-  const aiExplanation = !explanation && Boolean(brief?.benign?.trim());
   const sourceByCapture = new Map(sourceCaptures.map((capture) => [capture.id, capture]));
   const normalizedSupport = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const sourcedFindings = claims
@@ -2016,27 +1911,13 @@ function InvestigationWorkspace({
       <div>
         <p className="astra-label">The question</p>
         <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
-        <p className="astra-flow" aria-label={`Flow: Question complete, ${flowStep}`}>
-          <span>Question ✓</span><span aria-hidden="true"> · </span>
-          {["Investigating", "Case file", "Challenged", "Decided"].map((step, index) => (
-            <span key={step}>
-              <span className={flowStep === step ? "astra-flow-current" : undefined} aria-current={flowStep === step ? "step" : undefined}>{step}</span>
-              {index < 3 ? <span aria-hidden="true"> · </span> : null}
-            </span>
-          ))}
-        </p>
       </div>
-      <div>
-        <p className="astra-label">Ordinary explanation to rule out</p>
-        {explanation || brief?.benign?.trim() ? (
-          <>
-            {aiExplanation ? <p className="astra-note">AI-suggested</p> : null}
-            <p className="astra-serif">{explanation || brief?.benign?.trim()}</p>
-          </>
-        ) : (
-          <p className="astra-note">No ordinary explanation has been added yet.</p>
-        )}
-      </div>
+      {explanation ? (
+        <div>
+          <p className="astra-label">Ordinary explanation to rule out</p>
+          <p className="astra-serif">{explanation}</p>
+        </div>
+      ) : null}
 
       <ModelPicker
         scope="dark"

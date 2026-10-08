@@ -1475,13 +1475,6 @@ export const darkSignalInput = z.preprocess(
   z.object({ id: rowId, asTip: z.boolean().optional() }),
 );
 
-/** `dark.ts` draftSignalFile (the signal row's Start a file action). */
-export const draftSignalFileInput = z.object({
-  id: z.string().max(240),
-  choice: modelChoiceText.default("auto"),
-  effort: modelEffortLoose.default(null),
-});
-
 /** `dark.ts` retryDarkRound (retry only the failed round's owned job). */
 export const darkRetryInput = z.object({
   jobId: rowId,
