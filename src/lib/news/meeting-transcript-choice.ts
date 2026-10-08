@@ -12,15 +12,10 @@ export function transcriptKind(sourceMethod: string): MeetingTranscriptChoice["k
 export function meetingTranscriptChoices(
   rows: readonly { id: number; source_method: string }[],
 ): MeetingTranscriptChoice[] {
-  const latest = new Map<MeetingTranscriptChoice["kind"], MeetingTranscriptChoice>();
-  for (const row of rows) {
+  return rows.flatMap((row) => {
     const kind = transcriptKind(row.source_method);
-    if (kind && !latest.has(kind)) latest.set(kind, { artifactId: Number(row.id), kind });
-  }
-  return (["whisper", "captions"] as const).flatMap((kind) => {
-    const choice = latest.get(kind);
-    return choice ? [choice] : [];
-  });
+    return kind ? [{ artifactId: Number(row.id), kind }] : [];
+  }).sort((a, b) => Number(b.kind === "whisper") - Number(a.kind === "whisper"));
 }
 
 export function defaultMeetingTranscriptArtifactId(

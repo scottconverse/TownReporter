@@ -1,3 +1,4 @@
+import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import { ensureSchemaOnce, getSql } from "../db.ts";
 import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
@@ -28,7 +29,6 @@ import {
 } from "./desk-copy.ts";
 import {
   defaultMeetingTranscriptArtifactId,
-  meetingTranscriptChoices as buildMeetingTranscriptChoices,
 } from "./meeting-transcript-choice.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
@@ -158,13 +158,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
 
   let meetingArtifactId: number | null = null;
   if (leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id) {
-    const rows = await sql<{ id: number; source_method: string }>`
-      select id,source_method from meeting_transcript_artifacts
-      where newsroom_id=${input.context.newsroomId} and video_id=${leads[0].meeting_video_id}
-        and artifact_type='transcript' and source_method in ('textflowkit-json','yt-dlp-captions')
-      order by captured_at desc,id desc
-    `;
-    const choices = buildMeetingTranscriptChoices(rows);
+    const choices = await loadMeetingTranscriptChoices(sql, input.context.newsroomId, leads[0].meeting_video_id);
     const requestedArtifactId = input.meetingArtifactId ?? defaultMeetingTranscriptArtifactId(choices)
       ?? (leads[0].meeting_artifact_id == null ? null : Number(leads[0].meeting_artifact_id));
     if (requestedArtifactId != null && !choices.some((choice) => choice.artifactId === requestedArtifactId)) {

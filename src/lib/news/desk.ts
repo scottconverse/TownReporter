@@ -1,3 +1,4 @@
+import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
   insertProposedNewsroomSource,
@@ -233,7 +234,6 @@ import { DEFAULT_NEWSROOM_ID } from "./membership";
 import {
   defaultMeetingTranscriptArtifactId,
   meetingArtifactIdFromDraftReceipt,
-  meetingTranscriptChoices as buildMeetingTranscriptChoices,
 } from "./meeting-transcript-choice.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
@@ -1045,12 +1045,7 @@ export const getLead = createServerFn({ method: "GET" })
     const lead = leads[0];
     if (!lead) return null;
     const meetingTranscriptChoices = lead.meeting_video_id && lead.meeting_lead_purpose === "transcript-story"
-      ? buildMeetingTranscriptChoices(await sql<{ id: number; source_method: string }>`
-          select id,source_method from meeting_transcript_artifacts
-          where newsroom_id=${owned(context)} and video_id=${lead.meeting_video_id}
-            and artifact_type='transcript' and source_method in ('textflowkit-json','yt-dlp-captions')
-          order by captured_at desc,id desc
-        `)
+      ? await loadMeetingTranscriptChoices(sql, owned(context), lead.meeting_video_id)
       : [];
     const drafts = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
@@ -3797,12 +3792,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         userId: context.userId,
         leadId,
         artifactId: selectedMeetingArtifactId ?? Number(lead.meeting_artifact_id),
-        videoId: lead.meeting_video_id ?? "",
+        videoId: meetingMaterial?.meeting.videoId ?? lead.meeting_video_id ?? "",
         fallbackTitle: lead.headline,
         // The draft files under the lead's own section, so the sections trigger
         // resolves to a section this newsroom actually has.
         topic: lead.topic ?? "",
-        videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
+        videoUrl: meetingMaterial?.videoUrl ?? urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
         modelChoice: effectiveStoryModelChoice(job.model_choice),
         chat:
           reportDeps.chat ??
