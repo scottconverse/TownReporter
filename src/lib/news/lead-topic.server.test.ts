@@ -2,25 +2,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { saveLeadTopicForEditor } from "./lead-topic.server.ts";
+
+await applyMigrationsToTestPglite();
 
 test("saves the selected section on a lead without creating a draft", async () => {
   const sql = await getSql();
-  await sql.query(`create table leads (id integer primary key, newsroom_id integer, status text,
-    topic text, topic_unchosen boolean default true, edited_at timestamptz, edited_by text)`);
-  await sql.query(
-    "create table drafts (id integer primary key, lead_id integer, newsroom_id integer)",
+  await sql.query("insert into newsrooms (id, name) values (435, 'Lead section test')");
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads (newsroom_id, user_id, headline, why, topic, topic_unchosen) values (435, 'editor', 'Budget hearing', 'Fixture', 'budget', true) returning id",
   );
   await sql.query(
-    "insert into leads (id, newsroom_id, status, topic) values (435, 1, 'new', 'budget')",
+    "insert into newsroom_sections (newsroom_id, key, name, position) values (435, 'community', 'Community', 11)",
   );
   await saveLeadTopicForEditor(
-    { userId: "editor", newsroomId: 1 },
-    { leadId: 435, topic: "community" },
+    { userId: "editor", newsroomId: 435 },
+    { leadId: lead.id, topic: "community" },
   );
   const [saved] = await sql.query(
-    "select topic, topic_unchosen, edited_by from leads where id = 435",
+    "select topic, topic_unchosen, edited_by from leads where id = $1", [lead.id],
   );
   assert.deepEqual(saved, { topic: "community", topic_unchosen: false, edited_by: "editor" });
-  assert.equal((await sql.query("select * from drafts")).length, 0);
+  assert.equal((await sql.query("select id from drafts where lead_id = $1", [lead.id])).length, 0);
 });
