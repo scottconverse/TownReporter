@@ -115,6 +115,7 @@ import {
   checkDraftClaims,
   normalizeForMatch,
   documentMoneyText,
+  voteWordsIn,
   type ClaimUnit,
   type LedgerItem,
   type MeetingSegment,
@@ -2151,16 +2152,144 @@ function shortWriterFailureReason(error: string, held: PackageHeld[]): string {
   return sentence.length > 240 ? sentence.slice(0, 237).trimEnd() + "..." : sentence;
 }
 
+type AnnouncedResultPassage = {
+  item: string;
+  startSeconds: number;
+  endSeconds: number;
+  passage: string;
+  resultText: string;
+};
+
+function announcedResultPassages(record: WholeRecord): AnnouncedResultPassage[] {
+  const storedSegments = record.segments?.length ? record.segments : record.windows?.flatMap((window) => window.segments) ?? [];
+  const segments = [...storedSegments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
+  const triggers = segments.filter((segment) => announcedResultWords.test(segment.text));
+  const groups: typeof segments[] = [];
+  for (const trigger of triggers) {
+    const nearby = segments.filter((segment) =>
+      segment.seconds >= trigger.seconds - 5 && segment.seconds <= trigger.seconds + 12 && sameTranscriptItem(trigger, segment),
+    );
+    const last = groups[groups.length - 1];
+    if (last && sameTranscriptItem(last[last.length - 1]!, trigger) && trigger.seconds - last[last.length - 1]!.seconds <= 12) {
+      const seen = new Set(last.map((segment) => segment.index));
+      for (const segment of nearby) if (!seen.has(segment.index)) last.push(segment);
+      last.sort((a, b) => a.seconds - b.seconds || a.index - b.index);
+    } else {
+      groups.push(nearby);
+    }
+  }
+  return groups.map((group) => {
+    const firstResult = group[0]!;
+    const lastResult = group[group.length - 1]!;
+    const resultText = group.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+    const motion = [...segments].reverse().find((segment) =>
+      segment.seconds < firstResult.seconds && firstResult.seconds - segment.seconds <= 900 &&
+      sameTranscriptItem(firstResult, segment) && motionSegment(segment),
+    );
+    const startSeconds = motion?.seconds ?? Math.max(0, firstResult.seconds - 10);
+    const context = segments.filter((segment) =>
+      segment.seconds >= startSeconds && segment.seconds <= lastResult.seconds && sameTranscriptItem(firstResult, segment),
+    );
+    return {
+      item: firstResult.item || lastResult.item,
+      startSeconds: context[0]?.seconds ?? startSeconds,
+      endSeconds: context[context.length - 1]?.seconds ?? lastResult.seconds,
+      passage: cappedPassage(context.length ? context : group),
+      resultText,
+    };
+  }).filter((result) => Boolean(result.item) && (voteWordsIn(result.resultText).length > 0 || /\bunanimously\b|\ball in favor\b/i.test(result.resultText)));
+}
+
+function tallyKey(tally: string): string {
+  if (/unanimous|all in favor/i.test(tally)) return "unanimous";
+  const numberWords: Record<string, string> = {
+    zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10",
+  };
+  const parts = tally.toLowerCase().match(/\d+|zero|one|two|three|four|five|six|seven|eight|nine|ten/g) ?? [];
+  return parts.filter((part) => part !== "to").slice(0, 2).map((part) => numberWords[part] ?? part).join("-");
+}
+
+function statedVoteTallies(text: string): string[] {
+  const numberWords: Record<string, string> = {
+    zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10",
+  };
+  const spelled: string[] = [];
+  for (const sentence of text.split(/[.!?;:\n]+/)) {
+    if (!/\b(?:vote|voted|votes|carry|carries|carried|pass|passes|passed|fail|fails|failed|approve|approves|approved|adopt|adopts|adopted)\b/i.test(sentence)) continue;
+    for (const match of sentence.matchAll(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+to\s+(zero|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/gi)) {
+      spelled.push(`${numberWords[match[1]!.toLowerCase()] ?? match[1]}-${numberWords[match[2]!.toLowerCase()] ?? match[2]}`);
+    }
+  }
+  return [...voteWordsIn(text), ...spelled];
+}
+
+function resultOutcome(text: string): "pass" | "fail" | null {
+  const verbs = [...text.matchAll(/\b(?:fail(?:s|ed)?|carri(?:es|ed)|pass(?:es|ed)?|approv(?:e|es|ed)|unanimously|all in favor)\b/gi)];
+  const last = verbs[verbs.length - 1]?.[0]?.toLowerCase();
+  if (!last) return null;
+  return last.startsWith("fail") ? "fail" : "pass";
+}
+
+function agendaActionMentioned(paragraph: string, item: string, title: string, action: CoverageAction | undefined): boolean {
+  const normalized = normalizeForMatch(paragraph);
+  const identity = [title, action?.motionOrAction ?? ""].join(" ");
+  const identifiers = [...identity.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
+  if (identifiers.some((identifier) => normalized.includes(identifier))) return true;
+  const code = normalizeForMatch(item);
+  if (code && normalized.split(" ").some((token, index, tokens) => token === code && (tokens[index - 1] === "item" || /^[0-9]/.test(code)))) return true;
+  const ignored = new Set(["about", "adopt", "amend", "amended", "approve", "approved", "approval", "bill", "carries", "carried", "city", "council", "final", "first", "for", "motion", "of", "ordinance", "passed", "plan", "second", "the", "this", "vote"]);
+  const terms = [...new Set(normalizeForMatch(identity).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
+  const titleTerms = [...new Set(normalizeForMatch(title).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
+  const basis = titleTerms.length ? titleTerms : terms;
+  const hits = basis.filter((word) => normalized.split(" ").includes(word)).length;
+  return basis.length > 0 && hits >= Math.min(3, basis.length);
+}
+
+function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord): { item: string; action: string; result: string; passage: string }[] {
+  const paragraphs = [story.headline, story.dek ?? "", story.plainBrief, story.draft]
+    .flatMap((text) => text.split(/\r?\n\s*\r?\n/)).map((text) => text.trim()).filter(Boolean);
+  const finalResultsByItem = new Map<string, AnnouncedResultPassage>();
+  for (const result of announcedResultPassages(record)) finalResultsByItem.set(result.item, result);
+  const results = [...finalResultsByItem.values()];
+  const missing: { item: string; action: string; result: string; passage: string }[] = [];
+  for (const result of results) {
+    const action = actions
+      .filter((candidate) => !result.item || !candidate.agendaItem || candidate.agendaItem === result.item)
+      .sort((left, right) => {
+        const leftTime = clockSeconds(left.timestamp), rightTime = clockSeconds(right.timestamp);
+        return Math.abs((leftTime ?? result.endSeconds) - result.endSeconds) - Math.abs((rightTime ?? result.endSeconds) - result.endSeconds);
+      })[0];
+    const title = record.agenda?.find((entry) => entry.item === result.item)?.title ?? "";
+    const related = paragraphs.filter((paragraph) => agendaActionMentioned(paragraph, result.item, title, action));
+    if (!related.length) continue;
+    const rawTallies = voteWordsIn(result.resultText);
+    const expectedTally = tallyKey(rawTallies[rawTallies.length - 1] ?? (/\bunanimously\b|\ball in favor\b/i.test(result.resultText) ? "unanimously" : ""));
+    const expectedOutcome = resultOutcome(result.resultText);
+    if (!expectedTally || !expectedOutcome) continue;
+    const stated = related.some((paragraph) => {
+      const actualTally = statedVoteTallies(paragraph).some((tally) => tallyKey(tally) === expectedTally) ||
+        (expectedTally === "unanimous" && /\bunanimously\b|\ball in favor\b/i.test(paragraph));
+      return actualTally && resultOutcome(paragraph) === expectedOutcome;
+    });
+    if (!stated) missing.push({
+      item: result.item,
+      action: action?.motionOrAction ?? title,
+      result: `${expectedOutcome === "pass" ? "passed" : "failed"} ${expectedTally === "unanimous" ? "unanimously" : expectedTally}`,
+      passage: result.passage,
+    });
+  }
+  return missing;
+}
+
 /** Raw result passages that the writer can check instead of relying on summaries. */
 export function writerDecisionWindowEvidence(record: WholeRecord): string {
   const output: string[] = [];
   const maxChars = 20_000;
   let chars = 0;
-  const resultWords = /\b(?:(?:motion|item|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:carries|passes|fails|carried|passed|failed)|carries\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
   const windows = [...record.windows].sort((a, b) => (a.segments[0]?.seconds ?? 0) - (b.segments[0]?.seconds ?? 0));
   for (const window of windows) {
     const included = new Set<number>();
-    for (const result of [...window.segments].sort((a, b) => a.seconds - b.seconds).filter((segment) => resultWords.test(segment.text))) {
+    for (const result of [...window.segments].sort((a, b) => a.seconds - b.seconds).filter((segment) => announcedResultWords.test(segment.text))) {
       // Short context preserves the announcement and nearby dissent without crowding out later votes.
       const context = window.segments.filter((segment) => Math.abs(segment.seconds - result.seconds) <= 10);
       const fresh = context.filter((segment) => !included.has(segment.index));
@@ -2379,7 +2508,12 @@ export async function writingPass(input: {
       .filter((claim) => claim.status === "UNVERIFIED" && story.claims.some((original) => original.id === claim.id && original.status === "VERIFIED"))
       .map((claim) => ({ claimId: claim.id, text: claim.text, issue: claim.nextCheck }));
   }) : [];
-  if (lengthProblems.length || citationProblems.length || relationshipProblems.length) {
+  const voteResultProblems = Array.isArray(parsed.stories) ? parsed.stories.flatMap((raw, index) => {
+    if (!raw || typeof raw !== "object") return [];
+    const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
+    return missingAnnouncedResults(story, input.reconcile.actions, input.record).map((result) => ({ story: story.headline, ...result }));
+  }) : [];
+  if (lengthProblems.length || citationProblems.length || relationshipProblems.length || voteResultProblems.length) {
     await input.throwIfCancelled();
     const revision = await input.chat(methodSystemPrompt(input.method), [
       prompt,
@@ -2387,12 +2521,17 @@ export async function writingPass(input: {
       ...lengthProblems,
       writerLengthTarget(input.assignment),
       lengthProblems.length ? "Rewrite the publication draft to the editor's requested word range. Make a substantial editorial cut toward the target, rather than a small trim toward the upper limit. Count the draft words before returning the package. Do not mechanically truncate sentences or remove necessary qualifications." : "Retain the assignment's length and focus while repairing the cited support.",
+      voteResultProblems.length
+        ? "Add each omitted announced result only for an agenda item the story already mentions. Use the raw transcript passage below, keep the existing copy and the writer's tone, and make no unrelated coverage or style changes."
+        : "Do not change the writer's tone or make unrelated coverage changes.",
       "Retain useful evidence references and genuine unresolved findings. Keep background research out of publication copy unless it serves the assignment.",
       "Rebuild the claim list to match the revised draft and plain brief. Remove redundant or out-of-scope claim entries whose assertions are absent from both; retain all consequential assertions that remain in the copy and their exact support. The full research and action ledger remain saved separately.",
       "Recheck each asserted evidence gap against the complete cited documents. A numerical equality is not proof of accounting meaning; named fund headings are not unnamed funds.",
       "Check each reused source id against this claim's actual page and heading. A source for one section cannot be reused for another section without a new precise source entry. Cite all operands when comparing proposals.",
       "CITATION CHECKS ON THE PREVIOUS PACKAGE (repair exact references from read records, split compound claims, or keep them held; never invent support to clear a check):",
       JSON.stringify(citationProblems),
+      "MISSING ANNOUNCED FINAL RESULTS FOR AGENDA ITEMS ALREADY IN THE DRAFT:",
+      JSON.stringify(voteResultProblems),
       "UNSUPPORTED FINANCIAL RELATIONSHIP ASSERTIONS IN THE COPY:",
       ...relationshipProblems,
       "Replace each unsupported relationship assertion with the documented line roles and an explicit statement that the relationship remains unresolved. A balanced fund table does not establish appropriation overlap or separate spending. If a record explicitly establishes the relationship, use its direct words and cite that precise section in the claim ledger.",
@@ -2401,12 +2540,16 @@ export async function writingPass(input: {
       "PREVIOUS WRITER PACKAGE:",
       JSON.stringify(parsed),
     ].join("\n"), 18_000, input.chatOpts as never);
-    writeWorkspace(input.workspaceDir, lengthProblems.length ? "writer-length-revision.txt" : "writer-citation-revision.txt", revision.ok ? revision.text : revision.error);
+    const revisionFile = lengthProblems.length ? "writer-length-revision.txt" : citationProblems.length || relationshipProblems.length
+      ? "writer-citation-revision.txt" : "writer-result-revision.txt";
+    writeWorkspace(input.workspaceDir, revisionFile, revision.ok ? revision.text : revision.error);
     const revised = revision.ok ? readJsonBlock<Record<string, unknown>>(revision.text) : null;
     if (!revised || writerLengthProblems(revised, input.assignment).length || !Array.isArray(revised.stories) || !revised.stories.length) {
       const fallback = lengthProblems.length
         ? "The writer did not deliver a readable story within the editor's requested word range after one revision."
-        : "The writer did not deliver a readable story after one citation revision.";
+        : voteResultProblems.length
+          ? "The writer did not deliver a readable story with its announced result after one revision."
+          : "The writer did not deliver a readable story after one citation revision.";
       const held = normalizeHeld(parsed.held);
       const error = shortWriterFailureReason(fallback, held);
       gaps.push(fallback);
@@ -2419,6 +2562,17 @@ export async function writingPass(input: {
       const error = shortWriterFailureReason(fallback, held);
       gaps.push(fallback, ...remainingRelationships);
       return { stories: [], held, error, gaps };
+    }
+    const remainingVoteResults = revised.stories.flatMap((raw, index) => {
+      if (!raw || typeof raw !== "object") return [];
+      const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
+      return missingAnnouncedResults(story, input.reconcile.actions, input.record);
+    });
+    if (remainingVoteResults.length) {
+      const fallback = "The writer omitted an announced result for an agenda item already in the draft after one revision.";
+      const held = normalizeHeld(revised.held);
+      gaps.push(fallback, ...remainingVoteResults.map((result) => `${result.item}: ${result.result}`));
+      return { stories: [], held, error: shortWriterFailureReason(fallback, held), gaps };
     }
     parsed = revised;
   }

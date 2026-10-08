@@ -1233,6 +1233,35 @@ describe("the writer's method prompt states the status policy", () => {
     const { prompt } = await callWritingPass([], { windows: [window], segments: window.segments, votes: [], gaps: [], identity: { videoId: "meeting" } }, [action]);
     assert.ok(prompt.includes("item carries unanimously."));
   });
+  // guards: the editor could receive a story that mentions an agenda item but omits its announced result.
+  it("revises a story once to add an omitted result for an item it mentions", async () => {
+    const videoId = "zMglXtVlIMA";
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    const initialDraft = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting.";
+    const revisedDraft = `${initialDraft} Council approved the measure unanimously.`;
+    const headline = "Council considers Dry Creek ordinance";
+    const dek = "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand how the measure may affect the neighborhood.";
+    const writerPackage = (draft: string) => ({ ok: true as const, text: JSON.stringify({
+      stories: [{ id: "dry-creek", headline, dek, draft, plainBrief: "The council considered Dry Creek ordinance 2026-62.",
+        cannotSay: "", readinessTier: 1, claims: [], sources: [] }], held: [],
+    }) });
+    const segments = [
+      { index: 1, seconds: 110, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "I move to approve Dry Creek ordinance 2026-62 as amended." },
+      { index: 2, seconds: 120, item: "9A", itemTitle: "Dry Creek ordinance 2026-62", text: "That motion carries unanimously." },
+    ];
+    const action = { actionId: "dry-creek-vote", timestamp: "00:02:00", agendaItem: "9A",
+      motionOrAction: "Approve Dry Creek ordinance 2026-62 as amended", outcome: "carries unanimously",
+      vote: "unanimously", policyStage: "final", evidence: "tape 00:02:00, item 9A", disposition: "Lead" } as CoverageAction;
+    let calls = 0;
+    const { prompt, result } = await callWritingPass([], {
+      identity: { videoId, videoUrl }, segments, votes: [], gaps: [],
+      agenda: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }],
+      windows: [{ windowIndex: 0, startClock: "0:00", endClock: "0:02", items: [{ item: "9A", title: "Dry Creek ordinance 2026-62" }], segments }],
+    }, [action], "Develop this lead", () => ++calls === 1 ? writerPackage(initialDraft) : writerPackage(revisedDraft));
+    assert.equal(calls, 2);
+    assert.match(prompt, /missing announced final result/i);
+    assert.ok(result.stories[0]?.draft.includes("approved the measure unanimously"));
+  });
   // guards: an assignment can divert the writer into changing models or effort.
   it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {
     const assignment = "Report the meeting. Use only Codex Sol 6.1 at medium effort; stop if unavailable.";
