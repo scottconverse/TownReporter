@@ -7038,7 +7038,7 @@
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-.desk-ltr.astra .astra-deep-file { gap: 8px; }
+.desk-ltr.astra .astra-deep-file { gap: 6px; }
 .desk-ltr.astra .astra-deep-file > .model-picker { margin: 0; }
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker-help,
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker > .model-picker-help {
