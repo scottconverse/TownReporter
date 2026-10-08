@@ -3903,7 +3903,7 @@ function itemWithCitedTranscriptEvidence(
     status: "lead",
     reason: "",
     sourceExcerpt: excerpt,
-    motions: [],
+    motions: base?.motions ?? [],
     evidence: [],
   };
 }

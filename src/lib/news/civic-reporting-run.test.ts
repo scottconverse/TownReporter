@@ -2308,6 +2308,15 @@ it("carries a retained transcript quote into the editor's supported row", async 
   });
 });
 
+// guards: a reconciled vote could be downgraded when its transcript citation replaces the ledger item.
+it("keeps the reconciled vote on a cited transcript claim", () => {
+  const videoId = "S1kSaew-UUY", videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const checked = bindClaimsToEvidence({ claims: [{ id: "vote", item: "9A", text: "The Dry Creek motion carries 5-2.", status: "UNVERIFIED", sourceIds: ["tape"], nextCheck: "" }], sources: [{ id: "tape", title: "Retained transcript", tier: "A", url: videoUrl, locator: "Item 9A; 1:40-1:42" }] } as never,
+    { actions: [{ agendaItem: "9A", timestamp: "1:40", motionOrAction: "Dry Creek ordinance vote", outcome: "carries", vote: "5-2" }] } as never,
+    { identity: { videoId, videoUrl }, segments: [{ index: 1, seconds: 100, item: "9A", text: "The motion was approved." }] } as never, []);
+  assert.equal(checked[0]?.status, "VERIFIED");
+});
+
 // guards: a timestamped supported row could show a transcript quote about a different amount.
 it("saves the transcript line that states the checked amount", () => {
   const videoId = "S1kSaew-UUY";
