@@ -645,3 +645,100 @@ test("nonowners cannot activate and a removed approval cascades the automation s
   );
   await assert.rejects(readRoutineNoticeAutomationFor("routine-beta-editor", room), /only.*owner/i);
 });
+
+// guards: a sixth eligible public notice is dropped instead of saved for editors
+test("six eligible notices save the overflow and put it first in the next plan", async () => {
+  const source = await activateFixture();
+  const sql = await getSql();
+  await tickRoutineNoticeEditions(runNow);
+  const [firstJob] = await sql.query<any>(
+    "update desk_jobs set status='running',claim_token='overflow-first' where newsroom_id=$1 and kind='routine-notice' returning *",
+    [room],
+  );
+  const makeNotice = (id: number, title: string) => ({
+    id,
+    externalIdHash: `event-${id}`,
+    formatKey: "community-arts-event-logistics" as const,
+    variant: "event",
+    fields: {
+      issuer: { value: "Arts Council", locator: "issuer" },
+      title: { value: title, locator: "title" },
+      start: { value: "2026-09-08T18:00:00-06:00", locator: "start" },
+      venue: { value: "Park", locator: "venue" },
+    },
+    conflict: false,
+  });
+  const check = (candidates: ReturnType<typeof makeNotice>[]) => async () => ({
+    ok: true as const,
+    check: {
+      checkId: 44,
+      source: { id: source.id, title: "Events", url: source.url, sourceHref: "/desk/sources" },
+      formatKey: "community-arts-event-logistics" as const,
+      checkedAt: runNow.toISOString(),
+      capture: {
+        captureEventId: 88,
+        artifactVersionId: 99,
+        observedAt: runNow.toISOString(),
+        evidenceHref: null,
+        textAvailable: true,
+      },
+      state: "parsed" as const,
+      counts: { parsed: candidates.length, refused: 0, conflicts: 0 },
+      refusals: [],
+      candidates,
+      newerCaptureAvailable: false,
+      policy: { revision: 1, paused: false, approvalValid: true },
+      canCheck: true,
+    },
+  });
+  const first = [1, 2, 3, 4, 5]
+    .map((id) => makeNotice(id, `A Concert ${id}`))
+    .concat(makeNotice(6, "Z Deferred Concert"));
+  await performRoutineNoticeWorkWith(firstJob as DeskJob, {
+    now: runNow,
+    check: check(first) as any,
+    verifyCheck: async () => {},
+  });
+  const [firstRun] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [firstJob!.subject_id]);
+  const saved = JSON.parse(firstRun!.summary_json);
+  const deferred = saved.notices.find((notice: any) => notice.line.includes("Z Deferred Concert"));
+  assert.equal(saved.notices.length, 6);
+  assert.equal(saved.notices.filter((notice: any) => notice.status === "published").length, 5);
+  assert.ok(saved.notices.every((notice: any) =>
+    notice.source.sourceId === source.id &&
+    notice.binding.captureEventId === 88 &&
+    notice.binding.artifactVersionId === 99));
+  assert.equal(deferred.status, "deferred");
+  assert.deepEqual(deferred.source, {
+    sourceId: source.id,
+    publicSourceUrl: "https://events.example/calendar",
+    formatKey: "community-arts-event-logistics",
+  });
+  assert.equal(deferred.binding.captureEventId, 88);
+  assert.equal(deferred.binding.artifactVersionId, 99);
+  const listed = (await readRoutineNoticeAutomationFor(owner, room)).recentRuns[0]!.notices;
+  assert.equal(
+    listed.find((notice) => notice.binding.externalId === deferred.binding.externalId)?.status,
+    "deferred",
+  );
+
+  const [revision] = await sql.query<{ revision: number }>("update routine_notice_automations set revision=revision+1 where newsroom_id=$1 returning revision", [room]);
+  const [nextRun] = await sql.query<{ id: number }>(
+    "insert into routine_notice_runs(newsroom_id,local_date,automation_revision,policy_revision,status,actor) values($1,'2026-09-08',$2,1,'running',$3) returning id",
+    [room, revision!.revision, owner],
+  );
+  const [nextJob] = await sql.query<any>(
+    "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,claim_token) values($1,$2,'routine-notice',$3,'deterministic','scheduled','supplied','default','running','Working','overflow-next') returning *",
+    [room, owner, nextRun!.id],
+  );
+  const second = [7, 8, 9, 10, 11]
+    .map((id) => makeNotice(id, `A New Notice ${id}`))
+    .concat(makeNotice(6, "Z Deferred Concert"));
+  await performRoutineNoticeWorkWith(nextJob as DeskJob, {
+    now: runNow,
+    check: check(second) as any,
+    verifyCheck: async () => {},
+  });
+  const [publication] = await sql.query<{ candidate_keys_json: string }>("select candidate_keys_json from routine_notice_publications where newsroom_id=$1 and channel='today'", [room]);
+  assert.ok(JSON.parse(publication!.candidate_keys_json).includes(deferred.binding.externalId));
+});

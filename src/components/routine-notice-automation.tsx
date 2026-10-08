@@ -10,6 +10,11 @@ import {
   type RoutineAutomationSource,
 } from "@/lib/news/routine-notice-automation";
 import type { RoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
+
+function formatName(key: string) {
+  return key.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNoticePolicy }) {
   const query = useQuery({
     queryKey: ["routine-notice-automation"],
@@ -234,7 +239,7 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
             <li key={run.id}>
               {run.localDate} · {run.status} · {run.summary.eligible} eligible ·{" "}
               {run.summary.published} published · {run.summary.corrected} corrected ·{" "}
-              {run.summary.needsReview} need review
+              {run.summary.needsReview} need review · {run.summary.deferred} deferred
               {run.summary.error ? ` · ${run.summary.error}` : null}
               {run.summary.needsReview ? (
                 <>
@@ -246,6 +251,38 @@ export function RoutineNoticeAutomationPanel({ policy }: { policy: RoutineNotice
                   {" "}· <a href={article.href}>{article.headline}</a>
                 </span>
               ))}
+              {run.notices.length ? (
+                <ul className="mt-2 list-disc pl-5" aria-label="Eligible notice outcomes">
+                  {run.notices.map((notice) => (
+                    <li key={`${notice.channel}:${notice.binding.externalId}`} className="py-1">
+                      <p>
+                        <b>
+                          {notice.status === "in-review"
+                            ? "In review"
+                            : notice.status === "deferred"
+                              ? "Deferred"
+                              : "Published"}
+                        </b>{" "}
+                        · {notice.channel} · {notice.occurrenceDate} · {notice.line}
+                      </p>
+                      <p className="text-muted">
+                        Source {notice.source.sourceId} · {formatName(notice.source.formatKey)} ·{" "}
+                        <a
+                          className="btn quiet"
+                          href={notice.source.publicSourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Open approved source
+                        </a>{" "}
+                        · newsroom {notice.binding.newsroomId} · approval revision {notice.binding.policyRevision} ·
+                        {" "}capture event {notice.binding.captureEventId} · source version {notice.binding.artifactVersionId} ·
+                        {" "}content hash {notice.binding.contentHash} · notice ID {notice.binding.externalId}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
             </li>
           ))}
         </ul>

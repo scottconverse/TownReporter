@@ -14,10 +14,43 @@ import {
   assertRoutineNoticeCheckStillBound,
   checkRoutineNoticeSourceForOwner,
 } from "./routine-notice-checks.server.ts";
-import { eligibleRoutineNotices, planRoutineEditions } from "./routine-notice-editions.ts";
+import {
+  eligibleRoutineNotices,
+  planRoutineEditions,
+  type EligibleRoutineNotice,
+} from "./routine-notice-editions.ts";
 import type { RoutineNoticeCheckGroup } from "./routine-notice-checks.ts";
 import type { StructurallyValidRoutineNotice } from "./routine-notice-types.ts";
 import { sha256 } from "./fetch-url.ts";
+
+type RoutineNoticeOutcomeStatus = "deferred" | "in-review" | "published";
+
+function routineNoticeOutcomeKey(item: EligibleRoutineNotice) {
+  return `${item.channel}:${item.notice.provenance.externalId ?? item.notice.fingerprintMaterial}`;
+}
+
+function routineNoticeOutcome(item: EligibleRoutineNotice, status: RoutineNoticeOutcomeStatus) {
+  const binding = item.notice.provenance;
+  return {
+    status,
+    channel: item.channel,
+    line: item.line,
+    occurrenceDate: item.occurrenceDate,
+    source: {
+      sourceId: binding.sourceId,
+      publicSourceUrl: item.sourceUrl,
+      formatKey: item.notice.formatKey,
+    },
+    binding: {
+      newsroomId: binding.newsroomId,
+      policyRevision: binding.policyRevision,
+      captureEventId: binding.captureEventId,
+      artifactVersionId: binding.artifactVersionId,
+      contentHash: binding.contentHash,
+      externalId: binding.externalId,
+    },
+  };
+}
 
 function localStamp(now: Date, timezone: string) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -145,6 +178,18 @@ export async function performRoutineNoticeWork(
     await performRoutineNoticeWorkWith(job, deps);
   } catch (error) {
     const sql = await getSql();
+    const [prior] = await sql.query<{ summary_json: string }>(
+      "select summary_json from routine_notice_runs where id=$1 and newsroom_id=$2",
+      [job.subject_id, job.newsroom_id],
+    );
+    let summary: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(prior?.summary_json || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        summary = parsed as Record<string, unknown>;
+    } catch {
+      // A failed run still gets a readable error even if an older receipt was malformed.
+    }
     await sql.query(
       `update routine_notice_runs r set status='failed',finished_at=now(),summary_json=$3
         from desk_jobs j
@@ -153,7 +198,10 @@ export async function performRoutineNoticeWork(
       [
         job.subject_id,
         job.newsroom_id,
-        JSON.stringify({ error: error instanceof Error ? error.message : "Routine edition failed." }),
+        JSON.stringify({
+          ...summary,
+          error: error instanceof Error ? error.message : "Routine edition failed.",
+        }),
         job.id,
         job.claim_token,
       ],
@@ -323,17 +371,99 @@ export async function performRoutineNoticeWorkWith(
   }
   if (malformedDeadlineReceipt)
     throw new Error("A prior deadline publication receipt is malformed; editor review is required.");
-  planned.eligible = planned.eligible
-    .filter(
-      (item) =>
-        item.channel !== "deadlines" ||
-        !earlierDeadlineKeys.has(item.notice.provenance.externalId ?? ""),
-    )
-    .sort((a, b) => a.occurrenceDate.localeCompare(b.occurrenceDate) || a.line.localeCompare(b.line))
-    .slice(0, 5);
-  let plans = planRoutineEditions(planned.eligible, localDate);
+  const allEligible = planned.eligible.slice();
+  const alreadyPublished = new Set<string>();
+  const schedulable = allEligible.filter((item) => {
+    const externalId = item.notice.provenance.externalId ?? "";
+    if (item.channel === "deadlines" && earlierDeadlineKeys.has(externalId)) {
+      alreadyPublished.add(routineNoticeOutcomeKey(item));
+      return false;
+    }
+    return true;
+  });
+  const priorRuns = await sql.query<{ summary_json: string }>(
+    "select summary_json from routine_notice_runs where newsroom_id=$1 order by local_date,id",
+    [run.newsroom_id],
+  );
+  const latestPriorOutcome = new Map<string, { status: string; order: number }>();
+  let priorOrder = 0;
+  for (const row of priorRuns) {
+    try {
+      const summary = JSON.parse(row.summary_json || "{}");
+      if (!Array.isArray(summary.notices)) continue;
+      for (const notice of summary.notices) {
+        const externalId = notice?.binding?.externalId;
+        if (typeof notice?.channel !== "string" || typeof externalId !== "string") continue;
+        latestPriorOutcome.set(`${notice.channel}:${externalId}`, {
+          status: String(notice.status ?? ""),
+          order: priorOrder++,
+        });
+      }
+    } catch {
+      // An older malformed summary cannot be used as a planning receipt.
+    }
+  }
+  const deferredPriority = new Map(
+    [...latestPriorOutcome]
+      .filter(([, outcome]) => outcome.status === "deferred")
+      .map(([key, outcome]) => [key, outcome.order]),
+  );
+  const orderedEligible = schedulable.slice().sort((a, b) => {
+    const aOrder = deferredPriority.get(routineNoticeOutcomeKey(a));
+    const bOrder = deferredPriority.get(routineNoticeOutcomeKey(b));
+    if (aOrder !== undefined || bOrder !== undefined) {
+      if (aOrder === undefined) return 1;
+      if (bOrder === undefined) return -1;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+    }
+    return (
+      a.occurrenceDate.localeCompare(b.occurrenceDate) ||
+      a.line.localeCompare(b.line) ||
+      a.channel.localeCompare(b.channel)
+    );
+  });
+  const selectedEligible = orderedEligible.slice(0, 5);
+  const overflow = orderedEligible.slice(5);
+  let plans = planRoutineEditions(selectedEligible, localDate);
   if (new Date(`${localDate}T12:00:00Z`).getUTCDay() !== 5)
     plans = plans.filter((p) => p.channel !== "weekend");
+  const noticeStatuses = new Map<string, RoutineNoticeOutcomeStatus>();
+  for (const item of allEligible)
+    noticeStatuses.set(
+      routineNoticeOutcomeKey(item),
+      alreadyPublished.has(routineNoticeOutcomeKey(item)) ? "published" : "in-review",
+    );
+  for (const item of overflow) noticeStatuses.set(routineNoticeOutcomeKey(item), "deferred");
+  const plannedChannels = new Set(plans.map((plan) => plan.channel));
+  for (const item of selectedEligible)
+    if (!plannedChannels.has(item.channel)) noticeStatuses.set(routineNoticeOutcomeKey(item), "deferred");
+  const noticeRows = () =>
+    allEligible.map((item) =>
+      routineNoticeOutcome(item, noticeStatuses.get(routineNoticeOutcomeKey(item)) ?? "in-review"),
+    );
+  let needsReview =
+    planned.review.length +
+    groups.reduce(
+      (total, group) =>
+        total +
+        group.counts.refused +
+        group.counts.conflicts +
+        (group.state === "capture-failed" || group.state === "evidence-unavailable" ||
+        (group.state === "refused" && group.counts.refused === 0) ? 1 : 0),
+      0,
+    );
+  const summary = (published: number, corrected: number) => ({
+    published,
+    corrected,
+    needsReview,
+    eligible: allEligible.length,
+    deferred: [...noticeStatuses.values()].filter((status) => status === "deferred").length,
+    notices: noticeRows(),
+  });
+  await sql.query(
+    "update routine_notice_runs set summary_json=$2 where id=$1 and newsroom_id=$3 and status='running'",
+    [run.id, JSON.stringify(summary(0, 0)), run.newsroom_id],
+  );
   await report("Filing the notices", 90);
   await withTransaction(async (tx) => {
     const [claim] = await tx.query<{ claim_token: string | null; status: string }>(
@@ -385,18 +515,7 @@ export async function performRoutineNoticeWorkWith(
       deadlines: current.deadlines_section,
     };
     let published = 0,
-      corrected = 0,
-      needsReview =
-        planned.review.length +
-        groups.reduce(
-          (total, group) =>
-            total +
-            group.counts.refused +
-            group.counts.conflicts +
-            (group.state === "capture-failed" || group.state === "evidence-unavailable" ||
-            (group.state === "refused" && group.counts.refused === 0) ? 1 : 0),
-          0,
-        );
+      corrected = 0;
     const existingByChannel = new Map(
       (
         await tx.query<any>(
@@ -409,16 +528,27 @@ export async function performRoutineNoticeWorkWith(
       if (existingByChannel.has(channel) && !plans.some((plan) => plan.channel === channel))
         needsReview += 1;
     }
+    const markChannel = (channel: string, status: RoutineNoticeOutcomeStatus) => {
+      for (const item of selectedEligible)
+        if (item.channel === channel) noticeStatuses.set(routineNoticeOutcomeKey(item), status);
+    };
     for (const plan of plans) {
       const [section] = await tx.query<any>(
         "select visible from newsroom_sections where newsroom_id=$1 and key=$2 for update",
         [run.newsroom_id, sections[plan.channel]],
       );
-      if (!section?.visible) throw new Error("A routine edition section is no longer available.");
+      if (!section?.visible) {
+        needsReview += 1;
+        markChannel(plan.channel, "in-review");
+        continue;
+      }
       const fingerprint = await sha256(plan.body);
       const existing = existingByChannel.get(plan.channel);
       if (existing) {
-        if (existing.content_fingerprint === fingerprint) continue;
+        if (existing.content_fingerprint === fingerprint) {
+          markChannel(plan.channel, "published");
+          continue;
+        }
         const [article] = existing.article_id
           ? await tx.query<{ body: string; status: string }>(
               "select body,status from articles where id=$1 and newsroom_id=$2 for update",
@@ -449,13 +579,14 @@ export async function performRoutineNoticeWorkWith(
             run.id,
             fingerprint,
             JSON.stringify(
-              planned.eligible
+              selectedEligible
                 .filter((entry) => entry.channel === plan.channel)
                 .map((entry) => entry.notice.provenance.externalId),
             ),
           ],
         );
         corrected += 1;
+        markChannel(plan.channel, "published");
         continue;
       }
       const slug = `routine-${plan.channel}-${localDate}-${run.newsroom_id}`;
@@ -482,7 +613,7 @@ export async function performRoutineNoticeWorkWith(
           article!.id,
           fingerprint,
           JSON.stringify(
-            planned.eligible
+            selectedEligible
               .filter((e) => e.channel === plan.channel)
               .map((e) => e.notice.provenance.externalId),
           ),
@@ -490,12 +621,13 @@ export async function performRoutineNoticeWorkWith(
         ],
       );
       published += 1;
+      markChannel(plan.channel, "published");
     }
     await tx.query(
       "update routine_notice_runs set status='completed',summary_json=$2,finished_at=now() where id=$1",
       [
         run.id,
-        JSON.stringify({ published, corrected, needsReview, eligible: planned.eligible.length }),
+        JSON.stringify(summary(published, corrected)),
       ],
     );
     await tx.query(

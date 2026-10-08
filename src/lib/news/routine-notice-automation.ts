@@ -14,6 +14,21 @@ export type RoutineAutomationSource = {
   locality: string;
   collectionArea: string | null;
 };
+export type RoutineNoticeRunOutcome = {
+  status: "deferred" | "in-review" | "published";
+  channel: RoutineEditionChannel;
+  line: string;
+  occurrenceDate: string;
+  source: { sourceId: number; publicSourceUrl: string; formatKey: RoutineNoticeFormatKey };
+  binding: {
+    newsroomId: number;
+    policyRevision: number;
+    captureEventId: number;
+    artifactVersionId: number;
+    contentHash: string;
+    externalId: string;
+  };
+};
 export type RoutineNoticeAutomation = {
   enabled: boolean;
   revision: number;
@@ -30,11 +45,13 @@ export type RoutineNoticeAutomation = {
       published: number;
       corrected: number;
       needsReview: number;
+      deferred: number;
       eligible: number;
       error: string | null;
     };
     createdAt: string;
     articles: Array<{ channel: RoutineEditionChannel; headline: string; href: string }>;
+    notices: RoutineNoticeRunOutcome[];
   }>;
 };
 export type SaveRoutineNoticeAutomationInput = Omit<
@@ -67,6 +84,46 @@ class InputError extends Error {
 }
 const text = (v: unknown, max: number) =>
   typeof v === "string" && v.trim() && v.length <= max ? v.trim() : null;
+function routineRunOutcomes(value: unknown): RoutineNoticeRunOutcome[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((raw): RoutineNoticeRunOutcome[] => {
+    if (!raw || typeof raw !== "object") return [];
+    const row = raw as any;
+    const source = row.source as Record<string, unknown> | undefined;
+    const binding = row.binding as Record<string, unknown> | undefined;
+    const publicSourceUrl = source ? publicUrl(source.publicSourceUrl) : null;
+    if (
+      !["deferred", "in-review", "published"].includes(row.status) ||
+      !["today", "weekend", "deadlines"].includes(row.channel) ||
+      typeof row.line !== "string" || typeof row.occurrenceDate !== "string" ||
+      !source || !binding || !Number.isSafeInteger(source.sourceId) ||
+      !publicSourceUrl ||
+      !formatKeys.has(source.formatKey as RoutineNoticeFormatKey) ||
+      !Number.isSafeInteger(binding.newsroomId) || !Number.isSafeInteger(binding.policyRevision) ||
+      !Number.isSafeInteger(binding.captureEventId) || !Number.isSafeInteger(binding.artifactVersionId) ||
+      typeof binding.contentHash !== "string" || typeof binding.externalId !== "string"
+    ) return [];
+    return [{
+      status: row.status,
+      channel: row.channel,
+      line: row.line,
+      occurrenceDate: row.occurrenceDate,
+      source: {
+        sourceId: source.sourceId as number,
+        publicSourceUrl,
+        formatKey: source.formatKey as RoutineNoticeFormatKey,
+      },
+      binding: {
+        newsroomId: binding.newsroomId as number,
+        policyRevision: binding.policyRevision as number,
+        captureEventId: binding.captureEventId as number,
+        artifactVersionId: binding.artifactVersionId as number,
+        contentHash: binding.contentHash,
+        externalId: binding.externalId,
+      },
+    }];
+  });
+}
 function publicUrl(value: unknown) {
   const raw = text(value, 4000);
   if (!raw) return null;
@@ -227,7 +284,13 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
     : [];
   const defaultSection = visibleSections[0]?.key ?? "news";
   const recentRuns = runs.map((row) => {
-    const summary = JSON.parse(row.summary_json || "{}");
+    let summary: any = {};
+    try {
+      const parsed: unknown = JSON.parse(row.summary_json || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) summary = parsed;
+    } catch {
+      summary = {};
+    }
     return {
       id: row.id,
       localDate: String(row.local_date).slice(0, 10),
@@ -236,10 +299,12 @@ async function read(sql: Sql, room: number): Promise<RoutineNoticeAutomation> {
         published: Number(summary.published) || 0,
         corrected: Number(summary.corrected) || 0,
         needsReview: Number(summary.needsReview) || 0,
+        deferred: Number(summary.deferred) || 0,
         eligible: Number(summary.eligible) || 0,
         error: typeof summary.error === "string" ? summary.error : null,
       },
       createdAt: String(row.created_at),
+      notices: routineRunOutcomes(summary.notices),
       articles: publications
         .filter((publication) => publication.run_id === row.id)
         .map((publication) => ({
