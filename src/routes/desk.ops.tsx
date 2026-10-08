@@ -63,6 +63,7 @@ import { getProviderStatuses } from "@/lib/news/provider-login";
 import { localModelCatalog } from "@/lib/news/provider-availability";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
+import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -525,6 +526,7 @@ function OpsPage() {
   const known = me.isSuccess;
   const isOwner = me.data?.role === "owner";
   const bodies = useCardBodies(isOwner);
+  const darkRuns = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
 
   useEffect(() => {
     const key = signin ? "writing-models" : cardForHash(hash);
@@ -586,6 +588,40 @@ function OpsPage() {
           ))}
         </div>
       </div>
+      <DarkRunHistory runs={darkRuns.data ?? []} loading={darkRuns.isPending} error={darkRuns.error} />
     </DeskShell>
+  );
+}
+
+function DarkRunHistory({ runs, loading, error }: { runs: readonly DarkRunRow[]; loading: boolean; error: unknown }) {
+  return (
+    <section className="mt-8" aria-label="Dark Desk run history">
+      <details className="astra-panel">
+        <summary className="astra-panel-h">Dark Desk run history · {runs.length} recent runs</summary>
+        {loading ? <p className="meta">Loading run history…</p> : null}
+        {error ? <p className="note err" role="alert">Could not load Dark Desk run history.</p> : null}
+        {!loading && !error && !runs.length ? <p className="meta">No Dark Desk runs yet.</p> : null}
+        {runs.map((run) => {
+          const totals = run.usage.totals;
+          const started = new Date(run.started_at);
+          return (
+            <article key={run.id} className="side-item">
+              <p><b>{Number.isFinite(started.getTime()) ? started.toLocaleString() : run.started_at}</b>{run.investigation_id == null ? "" : ` · File ${run.investigation_id}`}{run.model_choice ? ` · ${run.model_choice}` : ""}</p>
+              {run.summary ? <p>{run.summary}</p> : null}
+              {run.error ? <p className="note err">Stopped: {run.error}</p> : null}
+              {run.stopReason ? <p className="meta">Stop reason: {run.stopReason}</p> : null}
+              {run.usageRecorded === false ? <p className="meta">Usage not recorded for this older run.</p> : (
+                <details>
+                  <summary>Run usage · {totals.modelCalls} model calls · {totals.searches} searches · {totals.documentReads} records · {Math.ceil(totals.elapsedMs / 1000)} seconds · {totals.totalTokens ?? "tokens not reported"} tokens</summary>
+                  {run.usage.calls.map((call, index) => (
+                    <p key={`${call.stage}-${index}`} className="meta">{call.stage} · {call.provider} · {call.model} · {Math.ceil(call.durationMs / 1000)} seconds · {call.result}{call.totalTokens == null ? "" : ` · ${call.totalTokens} tokens`}</p>
+                  ))}
+                </details>
+              )}
+            </article>
+          );
+        })}
+      </details>
+    </section>
   );
 }

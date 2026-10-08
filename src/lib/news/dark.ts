@@ -1428,6 +1428,24 @@ export const getInvestigation = createServerFn({ method: "GET" })
       // below are the real content; this only ever helps.
       brief = null;
     }
+    const sourceCaptureIds = [...new Set([
+      ...claims.map((claim) => claim.capture_event_id).filter((captureId): captureId is number => captureId != null),
+      ...(brief?.contradictions ?? []).flatMap((pair) => [pair.first.captureId, pair.second.captureId]),
+    ])];
+    const sourceCaptures = sourceCaptureIds.length
+      ? await sql<{ id: number; title: string; url: string }>`
+          select ce.id, coalesce(a.title, '') as title, ce.source_url as url
+          from capture_events ce
+          left join artifacts a on a.capture_event_id = ce.id and a.newsroom_id = ce.newsroom_id
+          where ce.id = any(${sourceCaptureIds}) and ce.investigation_id = ${id}
+            and ce.newsroom_id = ${owned(context)}
+        `.catch(() => [] as { id: number; title: string; url: string }[])
+      : [];
+    const challengeRows = await sql<{ summary: string; createdAt: string }>`
+      select summary, created_at::text as "createdAt" from investigation_challenges
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
+      order by id desc limit 1
+    `.catch(() => [] as { summary: string; createdAt: string }[]);
 
     /*
       "investigating" is the only status the page polls on -- see
@@ -1457,6 +1475,11 @@ export const getInvestigation = createServerFn({ method: "GET" })
       kind: "brief",
       subjectId: id,
     });
+    const challenge_job = await latestJob({
+      newsroomId: owned(context),
+      kind: "challenge",
+      subjectId: id,
+    });
     const investigationFollowUps = (await performListFollowUps(
       { userId: context.userId, newsroomId: owned(context) },
       { limit: 200 },
@@ -1483,6 +1506,11 @@ export const getInvestigation = createServerFn({ method: "GET" })
       briefJob: brief_job
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
+      challengeJob: challenge_job
+        ? { id: challenge_job.id, status: challenge_job.status, stage: challenge_job.stage, error: challenge_job.error }
+        : null,
+      latestChallenge: challengeRows[0] ?? null,
+      sourceCaptures,
       brief,
       investigationFollowUps,
       captureCounts,
@@ -1506,9 +1534,10 @@ export const investigationActivity = createServerFn({ method: "GET" })
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     await ensureInvestigateSchema();
+    await ensurePageWatchSchema();
     const sql = await getSql();
     const newsroomId = owned(context);
-    const [captures, searches, findings, deadEnds, runs, followUps] = await Promise.all([
+    const [captures, searches, findings, deadEnds, runs, followUps, watchedPages] = await Promise.all([
       sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }>`
         select ce.id, ce.observed_at::text as at, coalesce(a.title, '') as title, ce.source_url as url,
           ce.fetch_outcome as outcome, ce.http_status as "httpStatus", ce.disappearance as removed
@@ -1542,6 +1571,14 @@ export const investigationActivity = createServerFn({ method: "GET" })
         order by started_at desc limit 30
       `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean }[]),
       performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
+      sql<{ id: number; at: string; title: string; url: string; state: string }>`
+        select c.id, c.created_at::text as at, m.title, m.url, c.state
+        from manual_watch_checks c
+        join source_monitors m on m.id = c.monitor_id and m.newsroom_id = c.newsroom_id
+        where m.investigation_id = ${id} and m.newsroom_id = ${newsroomId}
+          and m.manual_watch = true and c.state in ('changed', 'unavailable')
+        order by c.created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; title: string; url: string; state: string }[]),
     ]);
     const events: InvestigationActivityInput[] = [
       ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed })),
@@ -1549,6 +1586,15 @@ export const investigationActivity = createServerFn({ method: "GET" })
       ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
       ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
       ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed })),
+      ...watchedPages.map((row) => ({
+        id: `watch-${row.id}`,
+        at: row.at,
+        kind: "watch" as const,
+        title: row.title,
+        url: row.url,
+        changed: row.state === "changed",
+        removed: row.state === "unavailable",
+      })),
       ...followUps
         .filter((row) => row.investigation_id === id && ["active", "paused"].includes(row.status))
         .map((row) => {
@@ -2730,6 +2776,58 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       ? startDarkRound(context, data)
       : startDarkRound(context, data.id, data.modelChoice, data.modelEffort);
   });
+
+export async function queueInvestigationChallengeFor(
+  context: { userId: string; newsroomId?: number },
+  id: number,
+  modelChoice = "auto",
+  effortValue?: unknown,
+  kick = true,
+) {
+  await ensureDarkSchema();
+  const newsroomId = owned(context);
+  const sql = await getSql();
+  const file = await sql<{ id: number }>`
+    select id from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!file[0]) return { ok: false as const, error: "Investigation not found" };
+  const priorRun = await sql<{ id: number }>`
+    select id from dark_runs where investigation_id = ${id} and newsroom_id = ${newsroomId}
+    order by started_at desc, id desc limit 1
+  `;
+  if (!priorRun[0]) return { ok: false as const, error: "Finish a research round before challenging the case." };
+  const asked = storyModelChoice(modelChoice);
+  const modelEffort = validatedModelEffort(asked, effortValue);
+  const open = await findOpenJob({ newsroomId, kind: "challenge", subjectId: id });
+  if (open) return { ok: true as const, pending: true as const, jobId: open.id };
+  await assertRate(context.userId, "dark", newsroomId);
+  const job = await enqueueJob({
+    userId: context.userId,
+    newsroomId,
+    kind: "challenge",
+    subjectId: id,
+    modelChoice: asked,
+    modelChoiceSource: asked === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify({ modelEffort }),
+    kick,
+  });
+  return { ok: true as const, pending: true as const, jobId: job.id };
+}
+
+export const challengeInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => {
+    const input = raw as { id?: unknown; modelChoice?: unknown; modelEffort?: unknown };
+    const modelChoice = storyModelChoice(input?.modelChoice);
+    return {
+      id: rowId.parse(input?.id),
+      modelChoice,
+      modelEffort: validatedModelEffort(modelChoice, input?.modelEffort),
+    };
+  })
+  .handler(async ({ context, data }) =>
+    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort),
+  );
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
  * `PerformDraftWorkDeps` uses in desk-model-run.ts. */

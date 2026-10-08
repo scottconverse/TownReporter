@@ -6,13 +6,13 @@ import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-ch
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
+  challengeInvestigation,
   draftSignalFile,
   findSomethingToDigInto,
   fileRedditTip,
   getInvestigation,
   getArtifact,
   getArtifactOcrJob,
-  listDarkRuns,
   listInvestigations,
   listWorthALook,
   openDarkInvestigation,
@@ -23,7 +23,7 @@ import {
   reopenParkedInvestigation,
   scanTipSubreddit,
   getTipSubreddit,
-  type DarkRunRow,
+  investigationActivity,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
@@ -39,7 +39,6 @@ import {
   excerptForEditor,
   headlineFromUrl,
   humanFrontierLabel,
-  investigationRoundLabel,
   darkJobActive,
   observedDarkJobFinished,
   organizationFromUrl,
@@ -56,7 +55,6 @@ import {
   redditPostStateLabel,
   redditResultHeadline,
   sentenceCase,
-  shouldShowDarkRunStopNote,
   stalledRunCopy,
   worthItemOnDeskLine,
   worthItemOnDeskReason,
@@ -72,7 +70,6 @@ import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
-import { searchOutcomeWords } from "@/lib/news/search-trail-words";
 import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -101,7 +98,6 @@ export const Route = createFileRoute("/desk/dark")({
 const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
-  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     A hand-over the editor asked for on another screen -- an import's review
@@ -238,7 +234,6 @@ function DarkPage() {
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
-  const runs = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
   // Open the most recently touched file once, when the list first arrives. Not on every
   // openId change: "Close file" sets openId to null, and that choice must stick.
   const autoOpened = useRef(false);
@@ -289,6 +284,8 @@ function DarkPage() {
       // The brief is its own job (0.6.2); poll while one is in flight.
       const bj = q.state.data?.briefJob;
       if (bj && (bj.status === "queued" || bj.status === "running")) return 2000;
+      const cj = q.state.data?.challengeJob;
+      if (cj && (cj.status === "queued" || cj.status === "running")) return 2000;
       return false;
     },
   });
@@ -568,6 +565,19 @@ function DarkPage() {
       );
       clearPhase();
     },
+  });
+
+  const challengeCase = useMutation({
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice, modelEffort } }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        showNotice(result.error || "Could not challenge this case.");
+        return;
+      }
+      showNotice("Challenging the case…", true);
+      invalidate();
+    },
+    onError: (error) => showNotice(error instanceof Error ? error.message : "Could not challenge this case."),
   });
 
   const draftSignal = useMutation({
@@ -1089,37 +1099,6 @@ function DarkPage() {
               ))
             )}
             {parked.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("aside")}>{expandedPiles.aside ? "Show fewer" : `Show all ${parked.length}`}</InkButton> : null}
-            {(runs.data ?? []).length > 0 ? (
-              <details className="of-trail runs astra-pile-pad">
-                <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
-                {(expandedPiles.runs ? runs.data ?? [] : (runs.data ?? []).slice(0, 5)).map((r) => (
-                  <div key={r.id} className="run-row">
-                    <p className="meta">
-                      {formatListDateTime(r.started_at)}
-                      {/*
-                        Which model dug this round. A round that dug badly and a
-                        round that dug on a different model are different facts
-                        about the same file, and the history could not tell them
-                        apart before 0.6.2. Rounds dug before the picker existed
-                        have no answer, and say nothing rather than guessing.
-                      */}
-                      {r.model_choice ? ` · ${modelChoiceLabel(r.model_choice)}` : ""}
-                    </p>
-                    {r.error ? (
-                      <p className="side-item">
-                        {editorError(r.error)}
-                        {looksLikeProviderAuthFailure(r.error) ? (
-                          <ProviderSignInButton detail={r.error} />
-                        ) : null}
-                      </p>
-                    ) : null}
-                    {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
-                    <DarkRunMeter run={r} history={runs.data ?? []} />
-                  </div>
-                ))}
-                {(runs.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => togglePile("runs")}>{expandedPiles.runs ? "Show fewer" : `Show all ${runs.data?.length}`}</InkButton> : null}
-              </details>
-            ) : null}
           </details> : null}
 
           {/*
@@ -1189,6 +1168,18 @@ function DarkPage() {
             onModelEffort={setModelEffort}
             modelDisabled={digging || busyStart}
           />
+          <div className="mt-4 max-w-xl">
+            <p className="astra-label">PDF reading model</p>
+            <ModelPicker
+              scope="ocr"
+              label="Model for reading retained PDFs"
+              value={ocrModelChoice}
+              onChange={setOcrModelChoice}
+              effort={ocrModelEffort}
+              onEffortChange={setOcrModelEffort}
+              disabled={digging || busyStart}
+            />
+          </div>
           <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
           </section>
           {/*
@@ -1314,12 +1305,12 @@ function DarkPage() {
               onPark={() => park.mutate(openId)}
               onPullBack={() => pullBack.mutate(openId)}
               onFollow={(seed) => followLead.mutate(seed)}
+              onChallenge={() => challengeCase.mutate(openId)}
+              challengePending={challengeCase.isPending}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
               ocrModelChoice={ocrModelChoice}
-              onOcrModelChoiceChange={setOcrModelChoice}
               ocrModelEffort={ocrModelEffort}
-              onOcrModelEffortChange={setOcrModelEffort}
             />
           ) : null}
 
@@ -1542,54 +1533,6 @@ function WorthSelector({ item, selected, onOpen }: { item: WorthSeed; selected: 
   );
 }
 
-const DARK_STOP_COPY: Record<string, string> = {
-  "elapsed-time-limit": "Stopped at the total time limit",
-  "model-call-limit": "Stopped at the model-call limit",
-  "search-limit": "Stopped at the search limit",
-  "document-read-limit": "Stopped at the document-read limit",
-  "evidence-sufficient": "This run paused after the planner judged the current evidence sufficient; unresolved trails remain saved",
-  "diminishing-returns": "This run paused after diminishing returns; it did not reject the remaining leads",
-  "repeated-sources": "This run paused after sources began repeating; it did not resolve the hypothesis",
-  "no-materially-new-finding": "This run paused after two rounds without a material new finding; unresolved trails remain saved",
-  "frontier-exhausted": "This run ended because no productive unresolved lead remained in the active frontier",
-  "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
-  "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
-  "provider-failed": "Stopped because the provider failed; completed work remains saved",
-  // Unit U25, B4: the editor's own Stop, so the run history says what happened
-  // rather than falling through to the raw enum word.
-  cancelled: "Stopped by the editor; everything found before the stop is saved",
-  completed: "Completed within the run limits",
-};
-
-function DarkRunMeter({ run, active = false, history = [] }: { run: DarkRunRow; active?: boolean; history?: readonly DarkRunRow[] }) {
-  if (!active && run.usageRecorded === false) return <p className="of-stop">Not recorded for this older run</p>;
-  const totals = run.usage.totals;
-  const startedAt = Date.parse(run.started_at);
-  const elapsedMs = active && Number.isFinite(startedAt)
-    ? Math.max(totals.elapsedMs, Date.now() - startedAt)
-    : totals.elapsedMs;
-  const tokens = totals.totalTokens == null ? "tokens not reported for every call" : `${totals.totalTokens.toLocaleString()} tokens`;
-  return (
-    <div className="of-stop" role={active ? "status" : undefined} aria-live={active ? "polite" : undefined}>
-      <p>
-        <b>{active ? "Live run:" : "Run usage:"}</b>{" "}
-        {totals.modelCalls} model call{totals.modelCalls === 1 ? "" : "s"} · {totals.searches} search{totals.searches === 1 ? "" : "es"} · {totals.documentReads} document read{totals.documentReads === 1 ? "" : "s"} · {elapsedLabel(Math.ceil(elapsedMs / 1000))} · {tokens}
-      </p>
-      {!active && shouldShowDarkRunStopNote(run, history) ? <p className="meta">{DARK_STOP_COPY[run.stopReason!] ?? run.stopReason}</p> : null}
-      {run.usage.calls.length ? (
-        <details className="of-trail">
-          <summary>Model calls — {run.usage.calls.length}</summary>
-          {run.usage.calls.map((call, index) => (
-            <p className="side-item" key={`${call.stage}-${index}`}>
-              <b>{call.stage}</b> · {call.provider} · {call.model} · {elapsedLabel(Math.ceil(call.durationMs / 1000))} · {call.result}{call.totalTokens == null ? "" : ` · ${call.totalTokens.toLocaleString()} tokens`}
-            </p>
-          ))}
-        </details>
-      ) : null}
-    </div>
-  );
-}
-
 function InvestigationWorkspace({
   openId,
   detail,
@@ -1615,12 +1558,12 @@ function InvestigationWorkspace({
   onPark,
   onPullBack,
   onFollow,
+  onChallenge,
+  challengePending,
   onWriteBrief,
   briefPending,
   ocrModelChoice,
-  onOcrModelChoiceChange,
   ocrModelEffort,
-  onOcrModelEffortChange,
 }: {
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
@@ -1646,14 +1589,14 @@ function InvestigationWorkspace({
   onPark: () => void;
   onPullBack: () => void;
   onFollow: (seed: { paste: string; title: string }) => void;
+  onChallenge: () => void;
+  challengePending: boolean;
   onWriteBrief: () => void;
   briefPending: boolean;
   ocrModelChoice: StoryModelChoice;
-  onOcrModelChoiceChange: (choice: StoryModelChoice) => void;
   ocrModelEffort: ModelEffort | null;
-  onOcrModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
-  const { formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime } = usePaperDateFormatters();
   const [frN, setFrN] = useState(6);
   useEffect(() => {
     setFrN(6);
@@ -1681,7 +1624,12 @@ function InvestigationWorkspace({
     keeps).
   */
   const jobs = useDeskJobs();
-  const fileJob = (kind: "dark" | "brief" | "artifact-ocr", subjectId: number | null) =>
+  const activityQuery = useQuery({
+    queryKey: ["investigation-activity", openId],
+    queryFn: () => investigationActivity({ data: openId }),
+    refetchInterval: digging ? 2000 : false,
+  });
+  const fileJob = (kind: "dark" | "brief" | "artifact-ocr" | "challenge", subjectId: number | null) =>
     subjectId == null
       ? null
       : ((jobs.data ?? []).find(
@@ -1692,6 +1640,7 @@ function InvestigationWorkspace({
         ) ?? null);
   const digJob = fileJob("dark", openId);
   const briefJob = fileJob("brief", openId);
+  const challengeJob = fileJob("challenge", openId);
   const inv = detail?.investigation;
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
@@ -1730,7 +1679,7 @@ function InvestigationWorkspace({
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
-  const run = detail?.run ?? null;
+  const sourceCaptures = detail?.sourceCaptures ?? [];
   /*
     FB7, item 5 (A2c X3). Five rounds that each recorded the same sentence left
     five `claims` rows -- `investigate.ts` inserts one per planned claim per
@@ -1800,38 +1749,8 @@ function InvestigationWorkspace({
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
 
-  /*
-    Activity, from the run's own call record. The drawing's left column is a
-    clock time; a call has a duration but no timestamp of its own, so the
-    column is the elapsed time into the round -- the same fact from the other
-    end, and it cannot be wrong. With no run record yet, this round's searches
-    carry the log instead.
-  */
-  const callLog = run?.usage.calls ?? [];
-  const activityAll: { when: string; what: string; tone: "find" | "fail" | "plain" }[] = [];
-  if (callLog.length) {
-    let ms = 0;
-    for (const call of callLog) {
-      ms += call.durationMs;
-      const failed = /fail|error|blocked|refus|timeout|unavailable/i.test(call.result);
-      const found = /found|new |result|captur/i.test(call.result);
-      activityAll.push({
-        when: elapsedLabel(Math.ceil(ms / 1000)),
-        what: `${call.stage} — ${call.result}`,
-        tone: failed ? "fail" : found ? "find" : "plain",
-      });
-    }
-  } else {
-    for (const s of searches.slice(-14)) {
-      const outcome = String(s.state ?? "");
-      activityAll.push({
-        when: `Round ${Math.max(1, Number(s.hop ?? 0) + 1)}`,
-        what: `Search — ${searchOutcomeWords(s)}`,
-        tone: /FAIL|BLOCKED|TIMEOUT/.test(outcome) ? "fail" : "plain",
-      });
-    }
-  }
-  const activityRows = activityAll.slice(-14);
+  const activityAll = activityQuery.data ?? [];
+  const activityRows = activityAll.slice(-4);
 
   // The saved scope is file-specific; the newsroom place supplies only its
   // human-readable jurisdiction names.
@@ -1858,6 +1777,43 @@ function InvestigationWorkspace({
     : `$${Number(limitDollars).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
   const explanation = inv?.ordinary_explanation?.trim();
   const aiExplanation = !explanation && Boolean(brief?.benign?.trim());
+  const sourceByCapture = new Map(sourceCaptures.map((capture) => [capture.id, capture]));
+  const normalizedSupport = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const sourcedFindings = claims
+    .filter((claim) => claim.capture_event_id != null && /FINDING|PATTERN|FACT|OBSERVATION/i.test(claim.kind))
+    .map((claim) => {
+      const source = sourceByCapture.get(claim.capture_event_id!);
+      const text = plainEditorText(claim.body);
+      const normalized = normalizedSupport(text);
+      const rank = (brief?.supports ?? []).findIndex((support) => {
+        const supportText = normalizedSupport(support);
+        return supportText && (normalized.includes(supportText) || supportText.includes(normalized));
+      });
+      return { text, source, confidence: Number(claim.confidence ?? 0), rank };
+    })
+    .filter((finding) => finding.text && finding.source && /^https?:\/\//i.test(finding.source.url))
+    .sort((a, b) => (a.rank < 0 ? Number.MAX_SAFE_INTEGER : a.rank) - (b.rank < 0 ? Number.MAX_SAFE_INTEGER : b.rank) || b.confidence - a.confidence);
+  const contradictions = brief?.contradictions ?? [];
+  const unanswered = questions.map((question) => plainEditorText(question)).filter(Boolean);
+  const linkedFollowUps = (detail?.investigationFollowUps ?? []).filter((followUp) => ["active", "paused"].includes(followUp.status));
+  const sourceLink = (captureId: number) => {
+    const source = sourceByCapture.get(captureId);
+    if (!source || !/^https?:\/\//i.test(source.url)) return null;
+    const label = editorTitle(plainEditorText(source.title)) || organizationFromUrl(source.url) || "Source record";
+    return <a className="inline-link" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
+  };
+  const renderFinding = (finding: (typeof sourcedFindings)[number], key: string) => (
+    <p key={key} className="side-item astra-case-v">
+      {finding.text} <span className="meta">— {sourceLink(finding.source!.id)}</span>
+    </p>
+  );
+  const renderQuestion = (question: string, key: string) => <p key={key} className="side-item astra-case-v">{question}</p>;
+  const renderContradiction = (pair: (typeof contradictions)[number], key: string) => (
+    <p key={key} className="side-item astra-case-v">
+      {plainEditorText(pair.first.text)}; another record says {plainEditorText(pair.second.text)}
+      <span className="meta"> — {sourceLink(pair.first.captureId)}; {sourceLink(pair.second.captureId)}</span>
+    </p>
+  );
 
   return (
     <section
@@ -1996,140 +1952,84 @@ function InvestigationWorkspace({
           </div>
           {activityRows.length === 0 ? (
             <p className="astra-note">
-              No activity recorded yet. Keep digging starts the first round.
+              {activityQuery.isPending ? "Loading activity…" : "No activity recorded yet."}
             </p>
           ) : (
-            activityRows.map((a, i) => (
-              <div key={i} className="astra-log">
-                <span className="astra-log-t">{a.when}</span>
+            activityRows.map((a) => (
+              <div key={a.id} className="astra-log">
+                <span className="astra-log-t">{a.time}</span>
                 <span
                   className={
-                    "astra-log-e" + (a.tone === "fail" ? " fail" : a.tone === "find" ? " find" : "")
+                    "astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")
                   }
                 >
-                  {a.what}
+                  {a.text}
                 </span>
               </div>
             ))
           )}
+          {activityAll.length > activityRows.length ? (
+            <details className="of-trail">
+              <summary>Show all activity</summary>
+              {activityAll.slice(0, -activityRows.length).map((a) => (
+                <div key={a.id} className="astra-log">
+                  <span className="astra-log-t">{a.time}</span>
+                  <span className={"astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")}>{a.text}</span>
+                </div>
+              ))}
+            </details>
+          ) : null}
         </div>
         <div>
           <div className="astra-case-h">
             <p className="astra-label">Case file</p>
-            <p className="astra-note">
-              What is established, what is being tested, and what is still unanswered.
-            </p>
+            <p className="astra-note">Findings, contradictions, unanswered questions and AI follow-ups.</p>
           </div>
-          {/*
-            Above the four lists, because the question an editor opens a file
-            with -- is there something here, is it worth an hour -- is the one
-            thing the lists cannot answer.
-          */}
-          <InvestigationBriefCard
-            brief={brief}
-            onRefresh={onWriteBrief}
-            refreshing={briefPending}
-          />
-          {/*
-            FB7, item 2. The brief's card, directly under the brief it is
-            rewriting -- the same "the card is where the press was" rule the
-            scan follows. A model call that
-            writes a whole brief with no stage, no clock and no Cancel was
-            Table B's "LAZY BAR" on Write/Rewrite the brief.
-          */}
-          {briefJob ? (
-            <div className="dark-job-card">
-              <DeskJobCard job={briefJob} />
-            </div>
+          <details className="of-trail">
+            <summary>Read the AI brief ▸</summary>
+            <InvestigationBriefCard brief={brief} onRefresh={onWriteBrief} refreshing={briefPending} />
+            {briefJob ? <div className="dark-job-card"><DeskJobCard job={briefJob} /></div> : null}
+          </details>
+          {challengeJob ? <div className="dark-job-card"><DeskJobCard job={challengeJob} /></div> : null}
+          {detail?.latestChallenge ? (
+            <p className="meta">
+              Challenged {formatListDateTime(detail.latestChallenge.createdAt)}: {plainEditorText(detail.latestChallenge.summary).slice(0, 360)}
+            </p>
           ) : null}
-          {findings.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">On the record</p>
-              <SectionTldr text={brief?.sections?.record ?? ""} />
-              {findings.slice(0, 8).map((f, i) => (
-                <p key={i} className="side-item">
-                  {f.text}
-                  {f.sourceNote ? (
-                    <span className="meta"> — {f.sourceNote}</span>
-                  ) : (
-                    <span className="meta evidence-weak">
-                      {" "}
-                      — pattern-level, not tied to one source
-                    </span>
-                  )}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {tests.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">Being tested</p>
-              <SectionTldr text={brief?.sections?.tested ?? ""} />
-              {tests.slice(0, 6).map((n, i) => (
-                <p key={i} className="side-item">
-                  {n}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {questions.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">Still open</p>
-              <SectionTldr text={brief?.sections?.open ?? ""} />
-              {questions.slice(0, 8).map((n, i) => (
-                <p key={i} className="side-item">
-                  {n}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {(detail?.investigationFollowUps?.length ?? 0) > 0 ? (
-            <div className="of-block">
-              <p className="side-label">AI follow-ups running</p>
-              {(detail?.investigationFollowUps ?? []).map((followUp) => (
-                <p key={followUp.id} className="side-item">
-                  <span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>
-                  {followUp.what}{" "}
-                  <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link>
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {facts.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">What we know</p>
-              <SectionTldr text={brief?.sections?.known ?? ""} />
-              {facts.map((c, i) => (
-                <p key={i} className="side-item">
-                  {plainEditorText(c.body)}
-                  {c.evidence ? (
-                    <span className="meta"> — {plainEditorText(c.evidence).slice(0, 160)}</span>
-                  ) : null}
-                </p>
-              ))}
-              {/*
-                The folded echoes are COUNTED, not just dropped. The editor
-                read five lines here yesterday; a section that silently shows
-                one is the same "nothing may vanish without a reason" rule this
-                unit is about, one level down.
-              */}
-              {factsFolded > 0 ? (
-                <p className="meta">
-                  {factsFolded} repeated {factsFolded === 1 ? "record" : "records"} folded into the{" "}
-                  {facts.length === 1 ? "line" : "lines"} above — {factsFolded === 1 ? "it was" : "they were"}{" "}
-                  recorded again by later rounds, word for word.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {/*
-            The drawing ends this column with "Challenge the case". There is no
-            challenge action on this base -- the adversarial work is a round,
-            i.e. Keep digging, which already stands in the Decide strip below,
-            and the brief card's own refresh rewrites the brief rather than
-            challenging it. No button is drawn here that would only re-run
-            something under a name that means something else.
-          */}
+          <div className="of-block">
+            <p className="side-label">Findings</p>
+            {sourcedFindings.length ? sourcedFindings.slice(0, 3).map((finding, i) => renderFinding(finding, `finding-${i}`)) : <p className="side-item">No sourced findings yet.</p>}
+            {sourcedFindings.length > 3 ? (
+              <details className="of-trail"><summary>Show all findings</summary>{sourcedFindings.slice(3).map((finding, i) => renderFinding(finding, `finding-more-${i}`))}</details>
+            ) : null}
+          </div>
+          <div className="of-block">
+            <p className="side-label">Contradictions</p>
+            {contradictions.length ? contradictions.slice(0, 3).map((pair, i) => renderContradiction(pair, `contradiction-${i}`)) : <p className="side-item">No captured records disagree yet.</p>}
+            {contradictions.length > 3 ? (
+              <details className="of-trail"><summary>Show all contradictions</summary>{contradictions.slice(3).map((pair, i) => renderContradiction(pair, `contradiction-more-${i}`))}</details>
+            ) : null}
+          </div>
+          <div className="of-block">
+            <p className="side-label">Unanswered</p>
+            {unanswered.length ? unanswered.slice(0, 3).map((question, i) => renderQuestion(question, `question-${i}`)) : <p className="side-item">No unanswered questions listed yet.</p>}
+            {unanswered.length > 3 ? <details className="of-trail"><summary>Show all unanswered</summary>{unanswered.slice(3).map((question, i) => renderQuestion(question, `question-more-${i}`))}</details> : null}
+          </div>
+          <div className="of-block">
+            <p className="side-label">AI follow-ups running</p>
+            {linkedFollowUps.length ? linkedFollowUps.slice(0, 3).map((followUp) => (
+              <p key={followUp.id} className="side-item astra-case-v">
+                <span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what}{" "}
+                <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link>
+              </p>
+            )) : <p className="side-item">No AI follow-ups running.</p>}
+            {linkedFollowUps.length > 3 ? <details className="of-trail"><summary>Show all AI follow-ups</summary>{linkedFollowUps.slice(3).map((followUp) => (
+              <p key={`more-${followUp.id}`} className="side-item astra-case-v"><span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what} <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link></p>
+            ))}</details> : null}
+          </div>
+          <div className="astra-panel-acts">
+            <InkButton tone="quiet" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !detail?.run} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
+          </div>
         </div>
       </div>
 
@@ -2215,12 +2115,9 @@ function InvestigationWorkspace({
         </p>
       </div>
 
-      {/*
-        The file's own captures and its unresolved trails. The drawing shows a
-        file that is already dug; these are the records it was dug from, and
-        they stay on the page -- clicking a title opens the captured page, and
-        that page is the file.
-      */}
+      <details className="of-trail astra-records">
+        <summary>The file's records ▸</summary>
+        <p className="astra-note">Run history is on the <Link to="/desk/ops" className="inline-link">Server</Link>.</p>
       <div>
         <SecHead
           title="What to read"
@@ -2231,9 +2128,7 @@ function InvestigationWorkspace({
           <OpenedRecords
             artifacts={artifacts}
             modelChoice={ocrModelChoice}
-            onModelChoiceChange={onOcrModelChoiceChange}
             modelEffort={ocrModelEffort}
-            onModelEffortChange={onOcrModelEffortChange}
           />
         ) : digging ? (
           <p className="meta">Opening pages now. They land on the file as they are read…</p>
@@ -2324,17 +2219,42 @@ function InvestigationWorkspace({
             <p className="side-item">No searches logged yet.</p>
           )}
         </details>
-        {deadEnds.length > 0 ? (
-          <details className="of-trail">
-            <summary>Dead ends — {deadEnds.length}</summary>
+      {deadEnds.length > 0 ? (
+        <details className="of-trail">
+          <summary>Dead ends — {deadEnds.length}</summary>
             {deadEnds.map((d, i) => (
               <p key={i} className="side-item">
                 <b>{d.hypothesis}</b> — {plainEditorText(d.dismissed_because)}
               </p>
-            ))}
-          </details>
-        ) : null}
+          ))}
+        </details>
+      ) : null}
+      {tests.length > 0 ? (
+        <details className="of-trail">
+          <summary>Questions the AI tested — {tests.length}</summary>
+          {tests.map((question, i) => <p key={i} className="side-item">{question}</p>)}
+        </details>
+      ) : null}
+      {findings.length > 0 ? (
+        <details className="of-trail">
+          <summary>Other research notes — {findings.length}</summary>
+          {findings.map((finding, i) => (
+            <p key={i} className="side-item">{finding.text}{finding.sourceNote ? <span className="meta"> — {finding.sourceNote}</span> : <span className="meta evidence-weak"> — pattern-level, not tied to one source</span>}</p>
+          ))}
+        </details>
+      ) : null}
       </div>
+      {facts.length > 0 ? (
+        <div className="of-block">
+          <p className="side-label">What we know</p>
+          <SectionTldr text={brief?.sections?.known ?? ""} />
+          {facts.map((claim, i) => (
+            <p key={i} className="side-item">{plainEditorText(claim.body)}{claim.evidence ? <span className="meta"> — {plainEditorText(claim.evidence).slice(0, 160)}</span> : null}</p>
+          ))}
+          {factsFolded > 0 ? <p className="meta">{factsFolded} repeated records folded into the lines above.</p> : null}
+        </div>
+      ) : null}
+      </details>
     </section>
   );
 }
@@ -2355,9 +2275,7 @@ function ocrStatusLine(method: string | null | undefined): string | null {
 function OpenedRecords({
   artifacts,
   modelChoice,
-  onModelChoiceChange,
   modelEffort,
-  onModelEffortChange,
 }: {
   artifacts: {
     id: number;
@@ -2372,9 +2290,7 @@ function OpenedRecords({
     extraction_method?: string | null;
   }[];
   modelChoice: StoryModelChoice;
-  onModelChoiceChange: (choice: StoryModelChoice) => void;
   modelEffort: ModelEffort | null;
-  onModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
   const qc = useQueryClient();
   const { formatShortDate } = usePaperDateFormatters();
@@ -2570,16 +2486,6 @@ function OpenedRecords({
             </button>
           </p>
           {body.data?.retained_pdf ? <>
-          <div className="mb-3 max-w-xl">
-            <ModelPicker
-              scope="ocr"
-              label="Model for reading this PDF"
-              value={modelChoice}
-              onChange={onModelChoiceChange}
-              effort={modelEffort}
-              onEffortChange={onModelEffortChange}
-            />
-          </div>
           <form
             className="read-acts"
             onSubmit={(event) => {

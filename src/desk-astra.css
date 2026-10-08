@@ -6750,7 +6750,7 @@
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
 }
-.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; }
+.desk-ltr.astra .astra-log-e { line-height: 1.4; min-width: 0; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-log-e.find { font-weight: 700; }
 .desk-ltr.astra .astra-log-e.fail { color: var(--danger); font-weight: 700; }
 .desk-ltr.astra .astra-case {
@@ -6760,7 +6760,9 @@
   padding: 9px 0;
   border-bottom: 1px solid var(--line);
 }
-.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .astra-case-v { font-size: calc(0.9375rem * var(--ts)); line-height: 1.4; overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-deep-file .side-item { overflow-wrap: anywhere; }
+.desk-ltr.astra .astra-records > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
