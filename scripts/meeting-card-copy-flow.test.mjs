@@ -5,6 +5,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { installDom, moduleUrl, stubUrl } from "./dom-harness.mjs";
+import { chromium } from "playwright";
+import { existsSync } from "node:fs";
 installDom();
 const copy = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": stubUrl("export const looksLikeProviderAuthFailure=()=>false; export const providerAuthTarget=()=>null;"),
@@ -27,7 +29,7 @@ const url = await moduleUrl("src/components/meetings-activity.tsx", {
   "@/lib/news/meeting-manual-run": stubUrl("export const captureAudioAgain=()=>({ok:true});"),
 });
 const { MeetingsActivity } = await import(url);
-test("captured meeting cards show paper times and plain failures with recording details tucked away", () => {
+test("captured meeting cards show paper times and plain failures with recording details tucked away", async () => {
   const { document } = parseHTML(renderToStaticMarkup(React.createElement(MeetingsActivity)));
   const cards = [...document.querySelectorAll("article")];
   assert.equal(cards.length, rows.length);
@@ -55,6 +57,20 @@ test("captured meeting cards show paper times and plain failures with recording 
   assert.equal(details.hasAttribute("open"), false, "recording metadata starts collapsed");
   assert.ok(details.querySelector("summary")?.textContent.trim(), "the disclosure has a usable label");
   assert.match(details.textContent, /hidden-hash/);
+  const browser = await chromium.launch({ headless: true, ...(existsSync(chromium.executablePath()) ? {} : { channel: "msedge" }) });
+  try {
+    const page = await browser.newPage();
+    await page.route("**/*", (route) => route.abort());
+    await page.setContent(renderToStaticMarkup(React.createElement(MeetingsActivity)));
+    const card = page.locator("article").nth(1);
+    const audio = card.locator("p").filter({ hasText: /MP4.*412\s*MB/i });
+    assert.equal(await audio.isVisible(), false, "audio format and size stay hidden while Details is closed");
+    await card.locator("summary").click();
+    assert.equal(await audio.isVisible(), true, "opening Details reveals the saved audio metadata");
+    assert.equal(await card.getByText("hidden-hash", { exact: true }).isVisible(), true);
+    await card.locator("summary").click();
+    assert.equal(await audio.isVisible(), false);
+  } finally { await browser.close(); }
   // linkedom has no native disclosure default action. Verify its rendered structure,
   // then exclude the collapsed contents when checking the card's visible copy.
   for (const child of [...details.children]) if (child.tagName !== "SUMMARY") child.remove();

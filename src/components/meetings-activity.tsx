@@ -114,12 +114,12 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
               Saved transcript: speech-to-text, not official captions
             </p>
           )}
-          {row.audioFormat ? <p className="mt-2 text-sm">{savedAudio(row.audioFormat, row.audioBytes)}</p>
-            : row.artifactFormat && /^(mp4|m4a|opus|mp3|webm|wav)$/i.test(row.artifactFormat)
-              ? <p className="mt-2 text-sm">{savedAudio(row.artifactFormat, row.artifactBytes)}</p> : null}
           {row.captionFormat && row.captionFormat !== "textflowkit-json" ? <p className="mt-2 text-sm">Saved transcript: YouTube captions</p> : null}
           <details className="mt-2 text-sm">
             <summary className="cursor-pointer">Details</summary>
+            {row.audioFormat ? <p className="mt-2 text-sm">{savedAudio(row.audioFormat, row.audioBytes)}</p>
+              : row.artifactFormat && /^(mp4|m4a|opus|mp3|webm|wav)$/i.test(row.artifactFormat)
+                ? <p className="mt-2 text-sm">{savedAudio(row.artifactFormat, row.artifactBytes)}</p> : null}
             {row.captionFormat === "textflowkit-json" ? <p>Speech-to-text engine {row.transcriptionEngine ?? "not recorded"}; model {row.transcriptionModel ?? "not recorded"}</p> : null}
             <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
               <div><dt className="meta">Transcript format</dt><dd>{row.captionFormat ?? "—"}</dd></div>
