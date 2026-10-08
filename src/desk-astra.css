@@ -2588,13 +2588,6 @@
     margin-top: -14px;
     margin-bottom: 5px;
   }
-  .desk-ltr.astra[data-desk-page="dark"] .astra-scrim {
-    position: fixed;
-    inset: 0;
-    background: #172c385a;
-    border: 0;
-    z-index: 35;
-  }
   .desk-ltr.astra[data-desk-page="dark"] .astra-topbar {
     display: flex;
     align-items: center;
