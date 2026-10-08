@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import pg from "pg";
 import { resolveProofTarget } from "./nightly-proof-config.mjs";
+import { dailyScan } from "./nightly-proof-scan.mjs";
 import { storyDraftButton } from "./nightly-proof-actions.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -55,39 +56,7 @@ async function signIn(page) {
 
 async function runScan(page, pool) {
   try {
-    await page.goto(`${base}/desk/scan`, { waitUntil: "networkidle" });
-    await page.getByRole("button", { name: /^Run scan$/ }).click();
-    say("scan started, waiting up to 6 minutes");
-
-    const deadline = Date.now() + 6 * 60_000;
-    let landed = false;
-    while (Date.now() < deadline) {
-      if (await page.getByText("The desk cannot scan yet.").count()) {
-        const detail = await page
-          .locator(".notice, [class*='notice']")
-          .first()
-          .innerText()
-          .catch(() => "refused before starting");
-        throw new Error(`scan refused: ${detail.slice(0, 400)}`);
-      }
-      const stillRunning = await page.getByRole("button", { name: /^Scanning sources…$/ }).count();
-      const idle = await page.getByRole("button", { name: /^Run scan$/ }).count();
-      if (!stillRunning && idle) {
-        landed = true;
-        break;
-      }
-      await page.waitForTimeout(3_000);
-    }
-    if (!landed) throw new Error("scan did not finish within 6 minutes");
-
-    const { rows } = await pool.query(
-      `select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed,
-              summary, error
-       from scan_runs order by started_at desc limit 1`,
-    );
-    const row = rows[0];
-    if (!row) throw new Error("scan appeared to finish but no scan_runs row exists");
-    if (row.error) throw new Error(`scan_runs recorded an error: ${row.error}`);
+    const row = await dailyScan(page, pool, base);
 
     const jobRows = await pool.query(
       `select model_choice from desk_jobs where kind = 'scan' and subject_id = $1
@@ -105,7 +74,8 @@ async function runScan(page, pool) {
 
     say(
       `scan done: ${row.leads_created} lead(s), ${row.sources_fetched} source(s) fetched, ` +
-        `${seconds}s, provider ${labelFor(jobRows.rows[0]?.model_choice)}`,
+        `${seconds}s, ${row.sources_attempted} attempted, ${row.sources_failed} blocked, ` +
+        `${row.model_batches_used} model batch(es), provider ${labelFor(jobRows.rows[0]?.model_choice)}`,
     );
     return {
       ok: true,
@@ -113,6 +83,11 @@ async function runScan(page, pool) {
       seconds,
       leads: row.leads_created,
       resurfaced: resurfacedRows.rows[0]?.n ?? 0,
+      scanRunId: row.id,
+      attempted: row.sources_attempted,
+      read: row.sources_fetched,
+      blocked: row.sources_failed,
+      modelBatches: row.model_batches_used,
       sourcesFetched: row.sources_fetched,
       summary: row.summary,
     };
