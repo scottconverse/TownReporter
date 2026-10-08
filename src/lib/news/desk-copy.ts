@@ -355,7 +355,7 @@ export function editorError(raw: string | null | undefined, what = "continue wit
   if (looksLikeValidationDump(t)) return editorActionError(t, what);
   // Login first: a mid-round 401 also matches the "writing model did not
   // finish" branch below (it contains "Claude Code" and "API Error"), which
-  // used to send the editor back into "Click Keep digging to continue" — the
+  // used to send the editor back into "Click Keep investigating to continue" — the
   // exact retry loop that cannot succeed until the login is renewed.
   if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
     return providerSignInCopy(t, "click Keep digging");
@@ -364,10 +364,10 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     return "Sign-in hiccup on that click — you are still signed in. Click Start digging again.";
   }
   if (/cannot read propert/i.test(t) || /undefined \(reading/i.test(t) || /is not a function/i.test(t)) {
-    return "Something broke after the records were already saved. Nothing was thrown away. Click Keep digging to continue.";
+    return "Something broke after the records were already saved. Nothing was thrown away. Click Keep investigating to continue.";
   }
   if (/403/.test(t) || /forbidden/i.test(t)) {
-    return "The writing model was unavailable. Searches and captures already ran are kept. Click Keep digging to retry.";
+    return "The writing model was unavailable. Searches and captures already ran are kept. Click Keep investigating to retry.";
   }
   if (
     /xai api error/i.test(t) ||
@@ -377,7 +377,7 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     (/claude code/i.test(t) && !/timed out/i.test(t)) ||
     /AI is not available/i.test(t)
   ) {
-    return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep digging to continue.";
+    return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep investigating to continue.";
   }
   if (/timeout|timed out|network/i.test(t)) {
     return "A search or page load timed out. What was already found is still here.";
@@ -390,7 +390,7 @@ export function editorError(raw: string | null | undefined, what = "continue wit
       t,
     )
   ) {
-    return "This round stopped before it finished. The records already captured are still on the file. Click Keep digging to continue.";
+    return "This round stopped before it finished. The records already captured are still on the file. Click Keep investigating to continue.";
   }
   if (
     /^(?:[\w.]+Error|SQLSTATE)\s*:/i.test(t) ||
@@ -430,9 +430,9 @@ export function editorPauseReason(
     const n = budget[1];
     if (isMostlyBlocked(captureStats)) {
       const blocked = captureStats!.total - captureStats!.ok;
-      return plainSystemCopy(`Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep digging and it will try different pages.`);
+      return plainSystemCopy(`Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep investigating and it will try different pages.`);
     }
-    return plainSystemCopy(`Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`);
+    return plainSystemCopy(`Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep investigating to read the next batch.`);
   }
   const copy = editorError(raw);
   const displayCopy = copy ? plainSystemCopy(copy) : null;
@@ -490,7 +490,7 @@ export function blockedDigBannerText(stats: {
     other: "not readable",
   };
   const why = reasonText[stats.dominantReason ?? "other"] ?? reasonText.other;
-  return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep digging to try different pages, or open a record directly to check by hand.`;
+  return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep investigating to try different pages, or open a record directly to check by hand.`;
 }
 
 export function looksLikeInternalSummary(text: string): boolean {
@@ -2752,7 +2752,7 @@ export function plainSystemCopy(text: string): string {
         ? translated[0]!.toUpperCase() + translated.slice(1)
         : translated;
     })
-    .replace(/Click Keep digging/gi, "Click Keep investigating");
+    .replace(/Click Keep investigating/gi, "Click Keep investigating");
 }
 
 /*

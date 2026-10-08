@@ -52,7 +52,7 @@ const darkStub = stub(`
 `);
 const copyStub = stub(`
   export const DIG_STOP_ACK = "Stop requested.";
-  export const blockedDigBannerText = () => ""; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null; export const editorPauseIsPageFailure = () => false;
+  export { blockedDigBannerText } from ${JSON.stringify(new URL("../src/lib/news/desk-copy.ts", import.meta.url).href)}; export const editorError = (v) => /invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v ?? "")) ? "Could not read one record (bad text in the file)" : String(v ?? ""); export const editorPauseReason = (v) => v ? (/invalid byte sequence for encoding UTF8:\\s*0x00/i.test(String(v)) ? "Could not read one record (bad text in the file)" : String(v)) : null; export const editorPauseIsPageFailure = () => false;
   export const editorKindLabel = () => "Record"; export const elapsedLabel = () => ""; export const excerptForEditor = (v) => String(v ?? "");
   export const headlineFromUrl = () => ""; export const humanFrontierLabel = (v) => String(v ?? "");
   export const darkJobActive = () => false; export const observedDarkJobFinished = () => false;
@@ -101,7 +101,7 @@ const imports = {
   "@/components/investigation-brief": stub(`export const InvestigationBriefCard = () => null; export const SectionTldr = () => null;`),
   "@/components/search-trail-entry": stub(`export const SearchTrailEntry = () => null;`),
   "@/lib/news/dark-fact-lines": stub(`export const dedupeFactLines = () => []; export const factLinesDropped = () => 0;`),
-  "@/lib/news/html-text": stub(`export const captureBatchStats = () => ({ total: 0, blockedRatio: 0 }); export const readableCapture = () => ""; export const captureRefusalLabel = () => "";`),
+  "@/lib/news/html-text": stub(`export const captureBatchStats = () => globalThis.__darkFlow.fixtures.captureStats ?? ({ total: 0, blockedRatio: 0 }); export const readableCapture = () => ""; export const captureRefusalLabel = () => "";`),
   "@/lib/news/extraction-label": stub(`export const describeExtractionMethod = () => "";`),
   "@/lib/news/dark-seed": stub(`
     export const DARK_OPEN_KEY = "townreporter.dark.openId";

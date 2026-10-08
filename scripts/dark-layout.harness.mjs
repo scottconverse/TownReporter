@@ -3,7 +3,7 @@ import { chromium } from "playwright";
 import { renderToStaticMarkup } from "react-dom/server";
 import { React, createRoot, h, detail, Route, RealPicker } from "./dark-file-model-flow.harness.mjs";
 
-export async function fileScreen({ width = 1440, large = false, storedCopy = false, aside = false } = {}) {
+export async function fileScreen({ width = 1440, large = false, storedCopy = false, aside = false, blocked = false } = {}) {
   detail.investigation.title = "r/longmont: Firestone Boulevard & I-25 Frontage Road Construction Contract";
   detail.investigation.ordinary_explanation = null;
   // The recorded file has 363 attempts and 262 saved records. Deliberately
@@ -13,6 +13,7 @@ export async function fileScreen({ width = 1440, large = false, storedCopy = fal
   globalThis.__darkFlow.fixtures["investigation-activity"] = Array.from({ length: 363 }, (_, i) => ({ id: String(i), occurredAt: "2026-10-08T12:00:00Z", tone: "plain", text: "Opened Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing, captured" }));
   if (storedCopy) { detail.claims[0].body = "An artifact records $1,200 after two hops. ".repeat(8); globalThis.__darkFlow.fixtures["investigation-activity"].forEach((a) => a.text = "Saved artifacts after 3 hops for $1,200"); }
   globalThis.__darkFlow.fixtures.investigations[0].status = aside ? "closed" : "open";
+  globalThis.__darkFlow.fixtures.captureStats = blocked ? { total: 10, blocked: 9, empty: 0, ok: 1, blockedRatio: 0.9, dominantReason: "blocked" } : null;
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node);
   await React.act(async () => root.render(h(Route.component)));
