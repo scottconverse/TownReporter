@@ -239,14 +239,14 @@ export function collectDupPairs(input: {
     const why = String(candidate.why ?? "").trim();
     const urls = candidate.source_urls ?? [];
 
-    const matchId = findMatchingLead({ headline, source_urls: urls }, existing, input.place);
+    const matchId = findMatchingLead({ headline, source_urls: urls, topic: candidate.topic }, existing, input.place);
     if (matchId != null) {
       const matched = existing.find((lead) => lead.id === matchId);
       if (
         matched &&
         matchStrength(
-          { headline, source_urls: urls },
-          { headline: matched.headline, source_urls: matched.source_urls ?? [] },
+          { headline, source_urls: urls, topic: candidate.topic },
+          { headline: matched.headline, source_urls: matched.source_urls ?? [], topic: matched.topic },
           input.place,
         ) === "possible"
       ) {
