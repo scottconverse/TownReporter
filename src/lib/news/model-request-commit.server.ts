@@ -20,7 +20,16 @@ import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey } from "./sections.server.ts";
-import type { TopicSection } from "./desk-copy.ts";
+import {
+  meetingTranscriptRunConflict,
+  meetingTranscriptSelectionRefused,
+  noMeetingTranscriptToChoose,
+  type TopicSection,
+} from "./desk-copy.ts";
+import {
+  defaultMeetingTranscriptArtifactId,
+  meetingTranscriptChoices as buildMeetingTranscriptChoices,
+} from "./meeting-transcript-choice.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
 
@@ -119,6 +128,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
+    meetingArtifactId?: number;
     /**
      * Rewrite from ledger: the queued draft job reuses the ledger already stored
      * for this lead instead of reading the tape again. Carried in the job's
@@ -132,14 +142,37 @@ export async function commitStoryDraftForAuthenticatedEditor(
   const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
   if (refusal) return refusal;
   const sql = await (deps.getSql ?? getSql)();
-  const leads = await sql<{ id: number; status: string; notes_json?: string }>`
-    select id, status, to_jsonb(leads)->>'notes_json' as notes_json from leads
+  const leads = await sql<{
+    id: number; status: string; notes_json?: string; meeting_video_id: string | null;
+    meeting_artifact_id: number | null; meeting_lead_purpose: string | null;
+  }>`
+    select id, status, to_jsonb(leads)->>'notes_json' as notes_json,
+           meeting_video_id,meeting_artifact_id,meeting_lead_purpose from leads
     where id = ${input.leadId} and newsroom_id = ${input.context.newsroomId}
     limit 1
   `;
   if (!leads[0]) return { ok: false as const, error: "Lead not found" };
   if (leads[0].status === "killed") {
     return { ok: false as const, error: "Restore this lead before drafting." };
+  }
+
+  let meetingArtifactId: number | null = null;
+  if (leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id) {
+    const rows = await sql<{ id: number; source_method: string }>`
+      select id,source_method from meeting_transcript_artifacts
+      where newsroom_id=${input.context.newsroomId} and video_id=${leads[0].meeting_video_id}
+        and artifact_type='transcript' and source_method in ('textflowkit-json','yt-dlp-captions')
+      order by captured_at desc,id desc
+    `;
+    const choices = buildMeetingTranscriptChoices(rows);
+    const requestedArtifactId = input.meetingArtifactId ?? defaultMeetingTranscriptArtifactId(choices)
+      ?? (leads[0].meeting_artifact_id == null ? null : Number(leads[0].meeting_artifact_id));
+    if (requestedArtifactId != null && !choices.some((choice) => choice.artifactId === requestedArtifactId)) {
+      return { ok: false as const, error: meetingTranscriptSelectionRefused };
+    }
+    meetingArtifactId = requestedArtifactId;
+  } else if (input.meetingArtifactId != null) {
+    return { ok: false as const, error: noMeetingTranscriptToChoose };
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
@@ -184,6 +217,16 @@ export async function commitStoryDraftForAuthenticatedEditor(
         jobId: open.id,
       };
     }
+    if (meetingArtifactId != null) {
+      let openArtifactId: number | null = null;
+      try {
+        const receipt = JSON.parse(open.result_json || "{}") as { meetingArtifactId?: unknown };
+        if (Number.isInteger(receipt.meetingArtifactId)) openArtifactId = Number(receipt.meetingArtifactId);
+      } catch { /* an older run has no transcript selection */ }
+      if (openArtifactId !== meetingArtifactId) {
+        return { ok: false as const, error: meetingTranscriptRunConflict };
+      }
+    }
     return {
       ok: true as const,
       pending: true as const,
@@ -211,6 +254,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
         preflightFailover: preflight.switchReceipt,
       }),
       ...(input.reuseLedger ? { reuseLedger: true } : {}),
+      ...(meetingArtifactId != null ? { meetingArtifactId } : {}),
     }),
   });
   if (preflight.switchReceipt) {

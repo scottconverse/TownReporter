@@ -995,6 +995,7 @@ export const draftLeadInput = z.union([
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     researchScope: researchScopeValue.optional(),
+    meetingArtifactId: rowId.optional(),
   }),
 ]);
 
@@ -1133,6 +1134,7 @@ export const rewriteFromLedgerInput = z.object({
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
+  meetingArtifactId: rowId.optional(),
 });
 
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */

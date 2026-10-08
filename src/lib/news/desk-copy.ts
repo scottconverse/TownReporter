@@ -2,6 +2,21 @@
 
 export const meetingAudioIntegrityNotice = "The saved audio does not match its record. Capture it again.";
 
+export function meetingTranscriptChoiceLabel(kind: "whisper" | "captions"): string {
+  return kind === "whisper" ? "Whisper transcript" : "YouTube captions";
+}
+
+export function meetingTranscriptReadLine(kind: "whisper" | "captions"): string {
+  return kind === "whisper"
+    ? "The reporter will read the Whisper transcript."
+    : "The reporter will read the YouTube captions.";
+}
+
+export const meetingTranscriptRunConflict =
+  "A draft is already using a different transcript. Open that draft before choosing another one.";
+export const meetingTranscriptSelectionRefused = "Choose a transcript saved for this meeting.";
+export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
+
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
