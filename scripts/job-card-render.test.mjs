@@ -71,6 +71,7 @@ const jobCardStateModule = moduleUrl(
   await readFile(new URL("../src/components/job-card-state.ts", import.meta.url), "utf8"),
   "job-card-state.ts",
   {
+    "../lib/desk/scan-policy-refresh.ts": new URL("../src/lib/desk/scan-policy-refresh.ts", import.meta.url).href,
     "@/lib/news/job-progress": jobProgressStub,
     "@tanstack/react-query": reactQueryStub,
   },

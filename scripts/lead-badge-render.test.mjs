@@ -771,6 +771,15 @@ const { Chip } = await import(
         "export function useDeskJobs() { return { data: [], isPending: false, isError: false, refetch() {} }; } export function invalidateDeskJobs() {}",
       ),
       "@/lib/appearance-context": appearanceContextStub,
+      "./shortcut-sheet": moduleUrl(
+        await readFile(new URL("../src/components/shortcut-sheet.tsx", import.meta.url), "utf8"),
+        "shortcut-sheet.tsx",
+        {
+          "../lib/save-shortcut-label.ts": import.meta.resolve("../src/lib/save-shortcut-label.ts"),
+          "./dialog": inlineModule("export function Dialog() { return null; }"),
+          "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+        },
+      ),
       /*
         Redesign phase 2a: the shell's shortcut sheet ("?") is the phase 0
         Dialog (src/components/dialog.tsx) -- the only dialog the desk uses.

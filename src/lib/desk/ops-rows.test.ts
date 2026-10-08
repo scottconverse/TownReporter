@@ -321,7 +321,7 @@ describe("Server card rows (CX2)", () => {
   it("Daily scan: the stored time in the drawing's words", () => {
     const base = { localTime: "06:00", sourceCap: 12, paused: false, enabled: true };
     assert.equal(value(dailyScanRows(base as never), "Runs"), "6:00 a.m. daily");
-    assert.equal(value(dailyScanRows(base as never), "Files up to"), "12 leads");
+    assert.equal(value(dailyScanRows(base as never), "Fetch cap"), "12");
     assert.equal(value(dailyScanRows({ ...base, localTime: "18:05" } as never), "Runs"), "6:05 p.m. daily");
     assert.equal(value(dailyScanRows({ ...base, localTime: "00:30" } as never), "Runs"), "12:30 a.m. daily");
     assert.equal(value(dailyScanRows({ ...base, enabled: false } as never), "Runs"), "Off");

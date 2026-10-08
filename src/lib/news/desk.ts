@@ -191,6 +191,7 @@ import {
   composeZeroLeadSummary,
   editorFetchError,
   kindFromSourceUrl,
+  tierFromKind,
   resurfacedSummarySentence,
   scanDecisionsSentence,
 } from "./desk-copy";
@@ -469,7 +470,7 @@ export const addSource = createServerFn({ method: "POST" })
       parsed.url,
       data.title,
       kind,
-      data.tier || "A",
+      data.tier || tierFromKind(kind),
       owned(context),
     );
     if (!source) return { ok: false as const, error: "Could not save that source." };

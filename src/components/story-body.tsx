@@ -1,3 +1,4 @@
+import { stripEditorialCitations } from "../lib/news/editorial-citations.ts";
 import type { ReactNode } from "react";
 function Inline({ text, publicReading = false }: { text: string; publicReading?: boolean }) {
   const nodes: ReactNode[] = [];
@@ -78,7 +79,7 @@ export function StoryBody({
   body: string;
   publicReading?: boolean;
 }) {
-  const blocks = body
+  const blocks = stripEditorialCitations(body)
     .replace(/\r\n/g, "\n")
     .split(/\n{2,}/)
     .map((b) => b.trim())

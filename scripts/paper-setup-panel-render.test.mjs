@@ -138,6 +138,15 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/form-error": formErrorStub,
       "@/components/desk-chrome-utils": utilsStub,
       "@/lib/news/paper-settings": paperSettingsStub,
+      "@/lib/news/desk-copy": moduleUrl(
+        await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),
+        "desk-copy.ts",
+        {
+          "./preflight.ts": import.meta.resolve("../src/lib/news/preflight.ts"),
+          "./lead-match.ts": import.meta.resolve("../src/lib/news/lead-match.ts"),
+          "../paper.ts": import.meta.resolve("../src/lib/paper.ts"),
+        },
+      ),
       "@/lib/timezone": timezoneStub,
     },
   );
