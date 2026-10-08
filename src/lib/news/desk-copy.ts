@@ -58,6 +58,7 @@ export type InvestigationActivityInput = {
   resultsJson?: string | null;
   body?: string | null;
   failed?: boolean;
+  failureReason?: string | null;
   stopReason?: string | null;
   removed?: boolean;
   changed?: boolean;
@@ -138,7 +139,16 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
     return { text: body ? `AI follow-up watching: ${body}` : "AI follow-up is watching for a response", tone: "plain" };
   }
   if (event.kind === "watch") return { text: event.removed ? `Watched page removed: ${subject}` : `Watched page changed: ${subject}`, tone: event.removed ? "plain" : "finding" };
-  if (event.failed) return { text: "Could not finish — retry", tone: "failure" };
+  if (event.failed) {
+    const mapped = event.failureReason && /cancel(?:led|ed)? by the editor/i.test(event.failureReason)
+      ? "Stopped at the editor's request. What was found remains saved."
+      : event.failureReason ? editorError(event.failureReason) : null;
+    const safeReason = mapped && event.failureReason && mapped !== plainEditorText(event.failureReason)
+      && !/\bhop\b|synthesis|— ok|frontier|entries|model call/i.test(mapped)
+      ? mapped.replace(/Click Keep digging/gi, "choose Keep investigating")
+      : null;
+    return { text: safeReason ? `Could not finish: ${safeReason}` : "Could not finish — retry", tone: "failure" };
+  }
   if (event.stopReason === "elapsed-time-limit") return { text: "Stopped at the time limit", tone: "plain" };
   if (event.stopReason === "document-read-limit") return { text: "Stopped at the record limit", tone: "plain" };
   if (event.stopReason === "model-call-limit") return { text: "Stopped at the spending limit", tone: "plain" };

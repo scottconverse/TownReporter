@@ -6765,6 +6765,14 @@
 .desk-ltr.astra .astra-records > summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
 .desk-ltr.astra .astra-flow { margin: 8px 0 0; color: var(--fg2); font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
 .desk-ltr.astra .astra-flow-current { color: var(--fg); font-weight: 700; }
+.desk-ltr.astra .dark-round-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; }
+.desk-ltr.astra .dark-round-head { display: flex; justify-content: space-between; gap: 12px; font-size: calc(0.9375rem * var(--ts)); }
+.desk-ltr.astra .dark-round-steps { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0; font-size: calc(0.875rem * var(--ts)); }
+.desk-ltr.astra .dark-round-steps .done { color: var(--fg2); }
+.desk-ltr.astra .dark-round-steps .current { color: var(--fg); font-weight: 700; border-bottom: 2px solid var(--sel); }
+.desk-ltr.astra .dark-round-message { margin: 8px 0; font-size: calc(0.875rem * var(--ts)); line-height: 1.4; }
+.desk-ltr.astra .dark-round-stall { border-left: 4px solid var(--warn); background: var(--panel2); padding: 12px; }
+.desk-ltr.astra .dark-round-stall > p { margin: 0 0 10px; font-weight: 700; }
 
 /* --- the right-hand column of a split, and a plain list inside a panel ---- */
 .desk-ltr.astra .astra-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }

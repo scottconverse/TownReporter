@@ -90,3 +90,23 @@ it("keeps linked files waiting and saves a readable no-finding decision and queu
   assert.equal(packet?.whatWouldDisproveIt.includes("A later notice confirms the original date."), true);
   assert.equal(packet?.publicationNotice, "Publication remains an editorial decision.");
 });
+
+it("returns a file to Open when its follow-up finds an answer", async () => {
+  const sql = await getSql();
+  const userId = `dark-found-${Date.now()}`;
+  const newsroomId = 98232;
+  const file = await openInvestigationForEditor(userId, { paste: "Check a notice.", title: "Did the notice change?" }, newsroomId);
+  const follow = await performCreateAiFollowUp({ userId, newsroomId }, {
+    what: "Find the next public notice",
+    agentKind: "search",
+    schedule: "daily",
+    investigationId: file.investigationId,
+  });
+  assert.equal(follow.ok, true);
+  if (!follow.ok) return;
+  await sql`update follow_ups set last_state = 'found' where id = ${follow.id}`;
+  const row = (await listInvestigationsFor(newsroomId)).find((item) => item.id === file.investigationId)!;
+  assert.equal(investigationPileFor(row), "desk");
+  assert.equal(row.waiting_follow_up, null);
+  assert.equal(row.found_follow_up, "Find the next public notice");
+});

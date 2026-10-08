@@ -1482,6 +1482,12 @@ export const draftSignalFileInput = z.object({
   effort: modelEffortLoose.default(null),
 });
 
+/** `dark.ts` retryDarkRound (retry only the failed round's owned job). */
+export const darkRetryInput = z.object({
+  jobId: rowId,
+  nextModel: z.boolean().optional().default(false),
+});
+
 /** `dark.ts:3232` fileRedditTip (`fileRedditTipFor` reads these five). */
 export const redditTipInput = z.object({
   url: z.string().max(LIMITS.url),

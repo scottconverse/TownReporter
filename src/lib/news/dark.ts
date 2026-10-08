@@ -5,6 +5,7 @@ import {
   darkCountyInput,
   darkOpenInput,
   darkRunInput,
+  darkRetryInput,
   darkSignalInput,
   darkStepInput,
   draftSignalFileInput,
@@ -120,6 +121,7 @@ import {
 } from "./dark-dials.ts";
 import {
   enqueueJob,
+  ensureJobsSchema,
   findOpenJob,
   latestJob,
   pctFor,
@@ -672,6 +674,7 @@ export type InvestigationRow = {
   records?: number;
   still_open?: number;
   waiting_follow_up?: string | null;
+  found_follow_up?: string | null;
   waiting_watch?: string | null;
   waiting_since?: string | null;
   closed_kind?: string | null;
@@ -1034,12 +1037,16 @@ export async function listInvestigationsFor(newsroomId: number) {
         i.created_at, i.updated_at, i.closed_kind, i.close_note,
         (select f.what from follow_ups f
          where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
-           and f.status = 'active' and f.agent_kind is not null
+           and f.status = 'active' and f.agent_kind is not null and f.last_state is distinct from 'found'
          order by f.id desc limit 1) as waiting_follow_up,
         (select f.created_at::text from follow_ups f
          where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
-           and f.status = 'active' and f.agent_kind is not null
+           and f.status = 'active' and f.agent_kind is not null and f.last_state is distinct from 'found'
          order by f.id desc limit 1) as waiting_since,
+        (select f.what from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.agent_kind is not null and f.last_state = 'found'
+         order by f.id desc limit 1) as found_follow_up,
         (select coalesce(nullif(m.watch_reason, ''), m.title) from source_monitors m
          where m.investigation_id = i.id and m.newsroom_id = i.newsroom_id
            and m.manual_watch = true and m.watch_state = 'active' and m.enabled = true
@@ -1562,14 +1569,14 @@ export const investigationActivity = createServerFn({ method: "GET" })
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
         order by created_at desc limit 60
       `.catch(() => [] as { id: number; at: string; hypothesis: string }[]),
-      sql<{ id: number; at: string; stopReason: string | null; failed: boolean }>`
+      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }>`
         select id, coalesce(finished_at, started_at)::text as at, stop_reason as "stopReason",
-          (error is not null) as failed
+          (error is not null) as failed, error
         from dark_runs
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
           and (finished_at is not null or error is not null or stop_reason is not null)
         order by started_at desc limit 30
-      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean }[]),
+      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }[]),
       performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
       sql<{ id: number; at: string; title: string; url: string; state: string }>`
         select c.id, c.created_at::text as at, m.title, m.url, c.state
@@ -1585,7 +1592,7 @@ export const investigationActivity = createServerFn({ method: "GET" })
       ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson })),
       ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
       ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
-      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed })),
+      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed, failureReason: row.error })),
       ...watchedPages.map((row) => ({
         id: `watch-${row.id}`,
         at: row.at,
@@ -1596,7 +1603,7 @@ export const investigationActivity = createServerFn({ method: "GET" })
         removed: row.state === "unavailable",
       })),
       ...followUps
-        .filter((row) => row.investigation_id === id && ["active", "paused"].includes(row.status))
+        .filter((row) => row.investigation_id === id && (["active", "paused"].includes(row.status) || row.last_state === "found"))
         .map((row) => {
           const finding = parseFinding(row.finding_json);
           const found = row.last_state === "found";
@@ -2775,6 +2782,62 @@ export const continueInvestigation = createServerFn({ method: "POST" })
     return typeof data === "number"
       ? startDarkRound(context, data)
       : startDarkRound(context, data.id, data.modelChoice, data.modelEffort);
+  });
+
+export type DarkRoundRetryDeps = {
+  nextModel?: (job: DeskJob, failure: string) => Promise<EffectiveProviderChoice | null>;
+  start?: typeof startDarkRound;
+};
+
+export async function retryDarkRoundFor(
+  context: { userId: string; newsroomId?: number },
+  jobId: number,
+  nextModel = false,
+  deps: DarkRoundRetryDeps = {},
+) {
+  await ensureDarkSchema();
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const rows = await sql<DeskJob>`
+    select * from desk_jobs
+    where id = ${jobId} and newsroom_id = ${owned(context)} and kind = 'dark'
+    limit 1
+  `;
+  const job = rows[0];
+  if (!job) return { ok: false as const, error: "Research round not found." };
+  if (job.status !== "failed") return { ok: false as const, error: "Only a stopped round can be retried." };
+  const file = await sql<{ status: string }>`
+    select status from investigations where id = ${job.subject_id} and newsroom_id = ${owned(context)} limit 1
+  `;
+  if (!file[0]) return { ok: false as const, error: "Investigation not found." };
+  if (file[0].status === "closed") return { ok: false as const, error: "Pull the file back before retrying." };
+
+  let choice = effectiveStoryModelChoice(job.model_choice);
+  if (nextModel) {
+    const failure = job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
+      ? job.error
+      : "the previous model did not answer";
+    const planned = deps.nextModel
+      ? await deps.nextModel(job, failure)
+      : (await planDarkRoundFailover(job, failure, {
+          setModelChoice: async () => undefined,
+          setStage: async () => undefined,
+        }))?.next ?? null;
+    if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." };
+    choice = planned;
+  }
+  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job));
+  if (!result.ok) return { ok: false as const, error: result.error || "Could not restart this round." };
+  return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
+}
+
+export const retryDarkRound = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => darkRetryInput.parse(raw))
+  .handler(async ({ context, data }) => {
+    const notSetUp = await paperSetUpRefusal(owned(context), "retry this research round");
+    if (notSetUp) return { ok: false as const, error: notSetUp };
+    return retryDarkRoundFor(context, data.jobId, data.nextModel);
   });
 
 export async function queueInvestigationChallengeFor(

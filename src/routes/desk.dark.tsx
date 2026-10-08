@@ -23,6 +23,7 @@ import {
   queueArtifactOcr,
   refreshBrief,
   reopenParkedInvestigation,
+  retryDarkRound,
   scanTipSubreddit,
   getTipSubreddit,
   investigationActivity,
@@ -30,6 +31,7 @@ import {
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
+import type { JobProgressView } from "@/lib/news/job-progress";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
@@ -131,6 +133,7 @@ function DarkPage() {
     alreadyQueued: boolean;
   } | null>(null);
   const [queueError, setQueueError] = useState<{ invId: number; message: string } | null>(null);
+  const [undoDisposition, setUndoDisposition] = useState<{ id: number; expiresAt: number } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
@@ -174,6 +177,13 @@ function DarkPage() {
       if (dismissTimer.current) clearTimeout(dismissTimer.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!undoDisposition) return;
+    const delay = Math.max(0, undoDisposition.expiresAt - Date.now());
+    const timer = setTimeout(() => setUndoDisposition(null), delay);
+    return () => clearTimeout(timer);
+  }, [undoDisposition]);
 
   function claimCard(id: string) {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -541,6 +551,7 @@ function DarkPage() {
       if (res?.ok) {
         setQueueError(null);
         setQueued({ leadId: res.leadId, invId: id, alreadyQueued: Boolean(res.alreadyQueued) });
+        setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       } else {
         setQueueError({ invId: id, message: res?.error ?? "Could not send to the queue." });
       }
@@ -589,11 +600,12 @@ function DarkPage() {
 
   const closeWithoutFinding = useMutation({
     mutationFn: (input: { id: number; note: string }) => closeInvestigation({ data: input }),
-    onSuccess: (result) => {
+    onSuccess: (result, input) => {
       if (!result.ok) {
         showNotice(result.error || "Could not close this file.");
         return;
       }
+      setUndoDisposition({ id: input.id, expiresAt: Date.now() + 10_000 });
       showNotice("Closed with no finding. The file stays readable.", true);
       invalidate();
     },
@@ -618,8 +630,9 @@ function DarkPage() {
 
   const park = useMutation({
     mutationFn: (id: number) => parkInvestigation({ data: id }),
-    onSuccess: () => {
+    onSuccess: (_result, id) => {
       rememberOpen(null);
+      setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       showNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
@@ -633,6 +646,7 @@ function DarkPage() {
     onSuccess: (res) => {
       if (res?.ok && res.investigationId) {
         rememberOpen(res.investigationId);
+        setUndoDisposition(null);
         setNotice(null);
       } else {
         showNotice("Could not pull that back.");
@@ -1212,7 +1226,7 @@ function DarkPage() {
           */}
           {notice && openId == null && !redditResult ? (
             <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
-              {notice}
+              {notice}{undoDisposition ? <InkButton small tone="quiet" onClick={() => pullBack.mutate(undoDisposition.id)}>Undo</InkButton> : null}
             </p>
           ) : null}
 
@@ -1275,6 +1289,7 @@ function DarkPage() {
               openId={openId}
               detail={detail.data ?? undefined}
               fileWaiting={Boolean(investigations.data?.find((row) => row.id === openId)?.waiting_follow_up || investigations.data?.find((row) => row.id === openId)?.waiting_watch)}
+              canUndoDisposition={undoDisposition?.id === openId}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
               keepDisabled={digRunning}
@@ -1362,15 +1377,17 @@ function DeskFileCard({
     : row.waiting_watch
       ? `Watching ${row.waiting_watch}`
       : null;
-  const stateLine = waitingLine
-    ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
-    : row.status === "closed"
-      ? row.closed_kind === "queued"
-        ? `Sent to the queue${row.close_note ? ` · ${row.close_note}` : ""}`
-        : row.closed_kind === "no-finding"
-          ? `Closed · no finding${row.close_note ? ` · ${row.close_note}` : ""}`
-          : `Closed · ${formatListDateTime(row.updated_at)}`
-      : row.status === "investigating"
+  const stateLine = row.status === "closed"
+    ? row.closed_kind === "queued"
+      ? `Sent to the queue${row.close_note ? ` · ${row.close_note}` : ""}`
+      : row.closed_kind === "no-finding"
+        ? `Closed · no finding${row.close_note ? ` · ${row.close_note}` : ""}`
+        : `Closed · ${formatListDateTime(row.updated_at)}`
+    : waitingLine
+      ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
+      : row.found_follow_up
+        ? "Found an answer"
+        : row.status === "investigating"
         ? `Reading · ${records} of ${limitRecords} records`
         : row.status === "open" && waitingCount > 0
           ? `Waiting on ${waitingCount} ${waitingCount === 1 ? "record" : "records"}`
@@ -1560,6 +1577,7 @@ function InvestigationWorkspace({
   openId,
   detail,
   fileWaiting,
+  canUndoDisposition,
   pending,
   digging,
   keepDisabled,
@@ -1594,6 +1612,7 @@ function InvestigationWorkspace({
   openId: number;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
   fileWaiting: boolean;
+  canUndoDisposition: boolean;
   pending: boolean;
   digging: boolean;
   keepDisabled: boolean;
@@ -1744,7 +1763,9 @@ function InvestigationWorkspace({
             row.subjectId === subjectId &&
             (row.status === "queued" || row.status === "running"),
         ) ?? null);
-  const digJob = fileJob("dark", openId);
+  const darkResearchJob = (jobs.data ?? []).find((row) => row.kind === "dark" && row.subjectId === openId) ?? null;
+  const digJob = darkResearchJob && (darkResearchJob.status === "queued" || darkResearchJob.status === "running") ? darkResearchJob : null;
+  const failedDarkJob = darkResearchJob?.status === "failed" ? darkResearchJob : null;
   const briefJob = fileJob("brief", openId);
   const challengeJob = fileJob("challenge", openId);
   const inv = detail?.investigation;
@@ -1753,8 +1774,10 @@ function InvestigationWorkspace({
   const watchPages = artifacts
     .filter((artifact) => /^https?:\/\//i.test(artifact.url))
     .map((artifact) => ({ id: artifact.id, title: editorTitle(artifact.title) || organizationFromUrl(artifact.url) || "Source page", url: artifact.url }));
+  const foundAnswer = detail?.investigationFollowUps?.find((followUp) => followUp.lastState === "found") ?? null;
   const nextStep = String(detail?.brief?.next ?? "").toLowerCase();
-  const recommendedDecision = /queue|draft (?:the )?story|send to/.test(nextStep)
+  const recommendedDecision = foundAnswer ? "review"
+    : /queue|draft (?:the )?story|send to/.test(nextStep)
     ? "queue"
     : /wait|watch|monitor|check again/.test(nextStep)
       ? "watch"
@@ -1767,11 +1790,13 @@ function InvestigationWorkspace({
     ? "Decided"
     : digging
       ? "Investigating"
-      : detail?.latestChallenge
-        ? "Challenged"
-        : detail?.run
-          ? "Case file"
-          : "Investigating";
+      : foundAnswer
+        ? "Case file"
+        : detail?.latestChallenge
+          ? "Challenged"
+          : detail?.run
+            ? "Case file"
+            : "Investigating";
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
   // identical to a working one (Dark Desk F6).
@@ -1923,7 +1948,7 @@ function InvestigationWorkspace({
     .sort((a, b) => (a.rank < 0 ? Number.MAX_SAFE_INTEGER : a.rank) - (b.rank < 0 ? Number.MAX_SAFE_INTEGER : b.rank) || b.confidence - a.confidence);
   const contradictions = brief?.contradictions ?? [];
   const unanswered = questions.map((question) => plainEditorText(question)).filter(Boolean);
-  const linkedFollowUps = (detail?.investigationFollowUps ?? []).filter((followUp) => ["active", "paused"].includes(followUp.status));
+  const linkedFollowUps = (detail?.investigationFollowUps ?? []).filter((followUp) => ["active", "paused"].includes(followUp.status) || followUp.lastState === "found");
   const sourceLink = (captureId: number) => {
     const source = sourceByCapture.get(captureId);
     if (!source || !/^https?:\/\//i.test(source.url)) return null;
@@ -1979,15 +2004,23 @@ function InvestigationWorkspace({
         )}
       </div>
 
+      {digJob || failedDarkJob ? (
+        <DarkResearchCard
+          job={digJob ?? failedDarkJob!}
+          onStop={onStopDig}
+          stopDisabled={stopControl.disabled}
+        />
+      ) : null}
+
       {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
       <div className="astra-notices">
-        {stalled ? (
+        {stalled && !digJob ? (
           <p className="note err" role="status">
             {stalledRunCopy("dark")}
           </p>
         ) : null}
-        {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
-        {digging ? <Busy label={phase || "Searching records…"} /> : null}
+        {darkJobError && !failedDarkJob ? <p className="note err" role="alert">{darkJobError}</p> : null}
+        {digging && !digJob ? <Busy label={phase || "Searching records…"} /> : null}
         {/*
           Unit DD1, item 3. The acknowledgement belongs here, above the notice
           line, and NOT inside it: the notice line is suppressed while a run is
@@ -1995,7 +2028,7 @@ function InvestigationWorkspace({
           walkthrough measured 102 seconds of a desk that had accepted the stop
           and said nothing about it.
         */}
-        {stopControl.line ? (
+        {stopControl.line && !digJob ? (
           <p className="note" role="status">
             {stopControl.line}
           </p>
@@ -2005,7 +2038,7 @@ function InvestigationWorkspace({
             file is open, which is when most of these presses happen. */}
         {notice && !digging && stopControl.line == null ? (
           <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
-            {notice}
+            {notice}{canUndoDisposition ? <InkButton small tone="quiet" onClick={onPullBack}>Undo</InkButton> : null}
           </p>
         ) : null}
         {
@@ -2039,6 +2072,7 @@ function InvestigationWorkspace({
               <Link to="/desk/queue" className="inline-link">
                 Open the queue
               </Link>
+              {canUndoDisposition ? <InkButton small tone="quiet" onClick={onPullBack}>Undo</InkButton> : null}
             </Notice>
           ) : null
         }
@@ -2153,15 +2187,15 @@ function InvestigationWorkspace({
             {unanswered.length > 3 ? <details className="of-trail"><summary>Show all unanswered</summary>{unanswered.slice(3).map((question, i) => renderQuestion(question, `question-more-${i}`))}</details> : null}
           </div>
           <div className="of-block">
-            <p className="side-label">AI follow-ups running</p>
+            <p className="side-label">{foundAnswer ? "AI follow-up result" : "AI follow-ups running"}</p>
             {linkedFollowUps.length ? linkedFollowUps.slice(0, 3).map((followUp) => (
               <p key={followUp.id} className="side-item astra-case-v">
-                <span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what}{" "}
-                <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link>
+                <span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what}{" "}
+                <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link>
               </p>
             )) : <p className="side-item">No AI follow-ups running.</p>}
             {linkedFollowUps.length > 3 ? <details className="of-trail"><summary>Show all AI follow-ups</summary>{linkedFollowUps.slice(3).map((followUp) => (
-              <p key={`more-${followUp.id}`} className="side-item astra-case-v"><span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what} <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link></p>
+              <p key={`more-${followUp.id}`} className="side-item astra-case-v"><span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"} · </span>{followUp.what} <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link></p>
             ))}</details> : null}
           </div>
           <div className="astra-panel-acts">
@@ -2176,24 +2210,18 @@ function InvestigationWorkspace({
           <p className="astra-label">Decide</p>
           <p className="astra-note">It digs; it never prints.</p>
         </div>
-        {digJob ? (
-          <div className="dark-job-card">
-            <DeskJobCard job={digJob} />
-          </div>
-        ) : null}
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
-        {stopControl.visible ? (
-          <InkButton tone="quiet-danger" disabled={stopControl.disabled} onClick={onStopDig}>
-            {stopControl.label}
-          </InkButton>
-        ) : null}
         <div className="astra-panel-acts" aria-label="File decisions">
           <InkButton tone={recommendedDecision === "continue" ? "solid" : "quiet"} disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
             Keep investigating
           </InkButton>
-          <InkButton tone={recommendedDecision === "follow-up" ? "solid" : "quiet"} disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
-            Start an AI follow-up
-          </InkButton>
+          {foundAnswer ? (
+            <Link className="btn solid" to="/desk/follow-ups">Review finding</Link>
+          ) : (
+            <InkButton tone={recommendedDecision === "follow-up" ? "solid" : "quiet"} disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
+              Start an AI follow-up
+            </InkButton>
+          )}
           <InkButton tone={recommendedDecision === "watch" ? "solid" : "quiet"} disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
             Wait and watch
           </InkButton>
@@ -2214,6 +2242,7 @@ function InvestigationWorkspace({
           <div className="astra-panel-acts">
             <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
             {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
+            {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
             <InkButton tone="quiet" onClick={onClose}>Close view</InkButton>
           </div>
         </details>
@@ -2469,6 +2498,91 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   const raw = (method ?? "").trim();
   if (!/^(?:ocr(?:-pages(?:-partial)?)?|needs-ocr):/.test(raw)) return null;
   return describeExtractionMethod(raw);
+}
+
+function DarkResearchCard({ job, onStop, stopDisabled }: { job: JobProgressView; onStop: () => void; stopDisabled: boolean }) {
+  const qc = useQueryClient();
+  const [now, setNow] = useState(Date.now());
+  const [waited, setWaited] = useState(0);
+  const [retryNote, setRetryNote] = useState("");
+  const [retryAfterStop, setRetryAfterStop] = useState(false);
+  useEffect(() => {
+    if (job.status !== "queued" && job.status !== "running") return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [job.status]);
+  useEffect(() => setWaited(0), [job.id, job.beatAt]);
+  const retry = useMutation({
+    mutationFn: (nextModel: boolean) => retryDarkRound({ data: { jobId: job.id, nextModel } }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setRetryNote(result.error);
+        return;
+      }
+      setRetryNote(`Retry queued on ${result.model}.`);
+      invalidateDeskJobs(qc);
+      void qc.invalidateQueries({ queryKey: ["investigation", job.subjectId] });
+      void qc.invalidateQueries({ queryKey: ["investigations"] });
+    },
+    onError: (error) => setRetryNote(error instanceof Error ? error.message : "Could not retry this round."),
+  });
+  const retryRound = retry.mutate;
+  useEffect(() => {
+    if (!retryAfterStop || job.status !== "failed") return;
+    setRetryAfterStop(false);
+    retryRound(true);
+  }, [retryAfterStop, job.status, job.id, retryRound]);
+  const started = job.startedAt ?? now;
+  const elapsed = Math.max(0, Math.floor(((job.endedAt ?? now) - started) / 1000));
+  const elapsedText = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  const quiet = job.beatAt == null ? 0 : Math.max(0, Math.floor((now - job.beatAt) / 1000));
+  const stalled = job.status === "running" && job.beatAt != null && quiet >= 60 * (1 + waited);
+  const activeIndex = job.stageIndex == null ? 1 : ([1, 2, 3, 2][job.stageIndex] ?? 1);
+  const steps = ["Question", "Gather", "Case file", "Challenge"];
+  const stageCopy = ["Gathering public records", "Organizing the case file", "Checking the case", "Finishing the case file"];
+  const failed = job.status === "failed";
+  const mappedReason = failed && job.error && /cancel(?:led|ed)? by the editor/i.test(job.error)
+    ? "Stopped at the editor's request. What was found remains saved."
+    : failed ? editorError(job.error ?? "") : null;
+  const reason = mappedReason && job.error && mappedReason !== plainEditorText(job.error) ? mappedReason : "Could not finish — retry.";
+  const quietText = `${Math.floor(quiet / 60)}:${String(quiet % 60).padStart(2, "0")}`;
+  return (
+    <section className="dark-round-card" aria-label="Research round">
+      <div className="dark-round-head">
+        <b>{failed ? `Stopped ${elapsedText}` : job.status === "queued" ? "Waiting to start" : `Investigating · ${elapsedText}`}</b>
+      </div>
+      <div className="dark-round-steps" aria-label="Question, gather, case file, challenge">
+        {steps.map((step, index) => (
+          <span key={step} className={index < activeIndex || failed && index < activeIndex ? "done" : index === activeIndex && !failed ? "current" : ""}>
+            {index === 0 || index < activeIndex ? "✓ " : ""}{step}
+          </span>
+        ))}
+      </div>
+      {failed ? (
+        <p className="dark-round-message" role="alert">Could not finish: {reason.replace(/Click Keep digging/gi, "choose Keep investigating")}</p>
+      ) : stalled ? (
+        <div className="dark-round-stall" role="status">
+          <p>No activity for {quietText}. The research may be slow or stalled.</p>
+          <div className="astra-panel-acts">
+            <InkButton tone="quiet" onClick={() => setWaited((value) => value + 1)}>Keep waiting</InkButton>
+            <InkButton tone="quiet" pending={retry.isPending || retryAfterStop} pendingLabel="Stopping before retry…" onClick={() => { setRetryAfterStop(true); setRetryNote("Stopping this round before retrying on another model."); onStop(); }}>Retry on next model</InkButton>
+          </div>
+        </div>
+      ) : (
+        <p className="dark-round-message" role="status">{job.status === "queued" ? "Your next research round is queued." : `Now: ${stageCopy[job.stageIndex ?? 0] ?? "Gathering public records"}`}</p>
+      )}
+      {job.status === "running" && !stalled ? (
+        <div className="astra-panel-acts"><InkButton tone="quiet-danger" disabled={stopDisabled} onClick={onStop}>Stop</InkButton></div>
+      ) : null}
+      {failed ? (
+        <div className="astra-panel-acts">
+          <InkButton pending={retry.isPending || retryAfterStop} pendingLabel="Retrying…" onClick={() => retry.mutate(false)}>Retry</InkButton>
+          <InkButton tone="quiet" pending={retry.isPending || retryAfterStop} pendingLabel="Retrying…" onClick={() => retry.mutate(true)}>Retry on next model</InkButton>
+        </div>
+      ) : null}
+      {retryNote ? <p className="meta" role="status">{retryNote}</p> : null}
+    </section>
+  );
 }
 
 function QueuePacketPreview({ packet }: { packet: InvestigationQueuePacket }) {
