@@ -231,6 +231,7 @@ export type ScanRow = {
   model_batches_used?: number;
   model_batches_failed?: number;
   failed_sources?: string | null;
+  source_coverage?: import("./scan-source-coverage.ts").ScanSourceCoverageEntry[] | string | null;
   meetings_found?: number;
   meetings_captured?: number;
   meetings_failed?: number;

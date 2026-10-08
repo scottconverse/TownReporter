@@ -15,6 +15,14 @@ import {
   cleanSourceScanPreferenceInput,
   persistSourceScanPreference,
 } from "./source-scan-preferences.server.ts";
+import {
+  finishScanCoverage,
+  manualScanCoverage,
+  parseScanSourceCoverage,
+  updateScanCoverageEntry,
+  type ScanSourceCoverageEntry,
+} from "./scan-source-coverage.ts";
+import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
@@ -1298,7 +1306,7 @@ export const listScans = createServerFn({ method: "GET" })
     const sql = await getSql();
     const { limit, offset } = data;
     const rows = await sql<ScanRow>`
-      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, meetings_found, meetings_captured, meetings_failed, meeting_failures, summary, error, execution_origin
+      select id, started_at, finished_at, sources_fetched, leads_created, sources_proposed, sources_selected, sources_attempted, sources_failed, sources_analyzed, model_batches_used, model_batches_failed, failed_sources, source_coverage, meetings_found, meetings_captured, meetings_failed, meeting_failures, summary, error, execution_origin
       from scan_runs
       where newsroom_id = ${owned(context)}
       order by started_at desc
@@ -1652,6 +1660,7 @@ export type PerformScanWorkDeps = {
   scheduledSnapshot?: {
     model: { localModel?: { baseUrl: string; id: string } };
     sources: SourceRow[];
+    coverage?: unknown;
   };
   beforeScheduledCommit?: () => Promise<void>;
   scheduledCommit?: <T>(write: (sql: Sql) => Promise<T>) => Promise<T>;
@@ -1743,6 +1752,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
 ) {
   let failureRunId = job.subject_id;
   let writeQueuedSourceWrites = async (_sql: Sql): Promise<void> => {};
+  let sourceCoverage: ScanSourceCoverageEntry[] = [];
   const failureReceipt = {
     sourcesSelected: 0,
     sourcesAttempted: 0,
@@ -1900,7 +1910,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
              -- are read here because the pass has to SKIP a parked row, which
              -- is the only thing that makes a recorded "come back at 3:40"
              -- mean anything.
-             retry_after, blocked_at, blocked_attempts
+             retry_after, retry_after_note, blocked_at, blocked_attempts, last_ok_at
       from sources
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
@@ -2079,6 +2089,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         /* the touch stands whatever happens to the observation */
       }
     }
+    await saveScanSourceCoverage(writeSql, owned(context), runId, finishScanCoverage(sourceCoverage));
   };
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
@@ -2086,6 +2097,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
   failureReceipt.sourcesAttempted = watchSlice.length;
+  sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage);
+  if (!sourceCoverage.length && sources.length)
+    sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
 
   const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
@@ -2234,6 +2248,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         "asked-to-wait",
         "The desk is waiting out a request to come back later, made by this source.",
       );
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "skipped",
+        reasonCode: "waiting",
+        reason: src.retry_after_note ?? null,
+      });
       skippedThisPass += 1;
       await noteSourceProgress();
       return;
@@ -2266,6 +2285,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           (nothing was read). See source-observations.server.ts.
         */
         await recordScanObservation(src.id, "asked-to-wait", note);
+        sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+          status: "skipped",
+          reasonCode: "host-cap",
+          reason: note,
+        });
         skippedThisPass += 1;
         await noteSourceProgress();
         return;
@@ -2335,6 +2359,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         extras,
         changed,
       });
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "read",
+        readAt: new Date().toISOString(),
+      });
       await noteSourceProgress();
     } catch (err) {
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
@@ -2384,6 +2412,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         await recordScanObservation(src.id, verdict.kind, verdict.note);
       }
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
+      sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
+        status: "blocked",
+        reasonCode: "fetch-failed",
+        reason: editorFetchError(msg, src.url) ?? "The source could not be read.",
+      });
       failureReceipt.sourcesFailed = failedSources.length;
       failureReceipt.failedSources = postgresText(JSON.stringify(failedSources)).slice(0, 32000);
       if (src.last_hash && /404|410|not found|had almost no/i.test(msg)) {
@@ -2415,6 +2448,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       fetchLoopError ??= error;
     }
   });
+  sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.

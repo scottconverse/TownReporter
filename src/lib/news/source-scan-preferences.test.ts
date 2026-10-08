@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { planDailySourceRotation } from "./daily-scan.ts";
 import {
   loadSourceScanPreferences,
@@ -9,6 +10,7 @@ import {
 } from "./source-scan-preferences.server.ts";
 
 it("saves a source preference that the scheduled selector reads", async () => {
+  await applyMigrationsToTestPglite();
   const sql = await getSql();
   const newsroomId = 907301;
   const userId = "scan-preference-editor";

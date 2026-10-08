@@ -196,6 +196,7 @@ describe("daily scan policy compare-and-swap", () => {
       runtime: "local-model" as const,
       modelEffort: null,
       sourceCap: 12,
+      everyDaySourceCount: 8,
       selectedSourceIds: [7],
       expectedRevision: 0,
     };

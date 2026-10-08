@@ -33,6 +33,7 @@ import {
   keepsFailingNote,
   scanRowLine,
   suggestedOriginLine,
+  scanSourceCoverageAge,
   SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS,
   SOURCE_SCAN_PREFERENCE_COPY,
   SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS,
@@ -1563,6 +1564,13 @@ function WatchRows({
                   </a>
                   {` · Kind: ${s.kind || "unclassified"} · Tier: ${s.tier || "unclassified"}`}
                 </p>
+                {s.status === "accepted" ? (
+                  <p className="astra-row-meta source-coverage-age">
+                    {s.last_ok_at
+                      ? `Last read ${formatListDateTime(s.last_ok_at)} · ${scanSourceCoverageAge(s.last_ok_at)}`
+                      : "Never read"}
+                  </p>
+                ) : null}
                 <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>

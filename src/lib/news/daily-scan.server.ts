@@ -3,6 +3,8 @@ import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
 import { dailyScanRuntime, planDailySourceRotation, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
 import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
+import { scheduledScanCoverage } from "./scan-source-coverage.ts";
+import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
   resolveAutomaticForcedRuntime,
@@ -243,7 +245,7 @@ export async function tickDailyScans(
           see what is due; it is still one indexed read of a 201-row table.
         */
         const pool = await tx.query<any>(
-          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
+          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,retry_after_note,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
           [p.newsroom_id],
         );
         const preferences = await loadSourceScanPreferences(tx, p.newsroom_id);
@@ -299,6 +301,12 @@ export async function tickDailyScans(
             r.id,
           ],
         );
+        await saveScanSourceCoverage(
+          tx,
+          p.newsroom_id,
+          run.id,
+          scheduledScanCoverage(pool, rotation.sourceIds, rotation.deferrals),
+        );
         const [job] = await tx.query<{ id: number }>(
           "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,failover_note,result_json) values($1,$2,'scan',$3,$4,'scheduled','default','queued',$5,$6,$7) returning id",
           [
@@ -337,7 +345,7 @@ export async function tickDailyScans(
 export async function assertDailyScanCanContinue(job: DeskJob) {
   const sql = await getSql();
   const [r] = await sql.query<any>(
-    "select p.enabled,p.paused,p.revision,r.policy_revision,r.model_snapshot,r.source_snapshot from daily_scan_reservations r join daily_scan_policies p on p.newsroom_id=r.newsroom_id join desk_jobs j on j.id=r.desk_job_id where r.scan_run_id=$1 and r.newsroom_id=$2 and j.status='running' and j.claim_token=$3",
+    "select p.enabled,p.paused,p.revision,r.policy_revision,r.model_snapshot,r.source_snapshot,sr.source_coverage from daily_scan_reservations r join scan_runs sr on sr.id=r.scan_run_id join daily_scan_policies p on p.newsroom_id=r.newsroom_id join desk_jobs j on j.id=r.desk_job_id where r.scan_run_id=$1 and r.newsroom_id=$2 and j.status='running' and j.claim_token=$3",
     [job.subject_id, job.newsroom_id, job.claim_token],
   );
   const owner = await sql.query(
@@ -625,7 +633,7 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
       ...deps.scanDeps,
       grokChat: forcedChat as any,
       scheduledGuard: () => assertDailyScanCanContinue(job),
-      scheduledSnapshot: { model, sources: state.source_snapshot },
+      scheduledSnapshot: { model, sources: state.source_snapshot, coverage: state.source_coverage },
       onModelSwitch: async (receipt: {
         previousChoice: string;
         nextChoice: string;
