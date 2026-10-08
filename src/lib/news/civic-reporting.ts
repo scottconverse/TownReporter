@@ -89,6 +89,10 @@ export type PackageClaim = {
   item?: string;
   /** Verbatim retained transcript support bound by the checker, not the writer. */
   transcriptEvidence?: { quote: string; startSeconds: number; videoUrl: string };
+  recordEvidence?: { kind: "transcript" | "document"; quote: string; url: string; locator: string; startSeconds?: number };
+  closestEvidence?: NonNullable<PackageClaim["recordEvidence"]>;
+  checkReason?: string;
+  closestQuote?: string;
 };
 
 /**
@@ -320,6 +324,22 @@ export function parseClaim(raw: unknown): PackageClaim | null {
   const quote = str(evidence?.quote);
   const startSeconds = Number(evidence?.startSeconds);
   const videoUrl = str(evidence?.videoUrl);
+  const record = o.recordEvidence && typeof o.recordEvidence === "object" && !Array.isArray(o.recordEvidence)
+    ? o.recordEvidence as Record<string, unknown>
+    : null;
+  const recordQuote = str(record?.quote);
+  const recordUrl = str(record?.url);
+  const recordLocator = str(record?.locator);
+  const recordKind = record?.kind === "transcript" || record?.kind === "document" ? record.kind : null;
+  const recordSeconds = Number(record?.startSeconds);
+  const closest = o.closestEvidence && typeof o.closestEvidence === "object" && !Array.isArray(o.closestEvidence)
+    ? o.closestEvidence as Record<string, unknown>
+    : null;
+  const closestKind = closest?.kind === "transcript" || closest?.kind === "document" ? closest.kind : null;
+  const closestQuote = str(closest?.quote);
+  const closestUrl = str(closest?.url);
+  const closestLocator = str(closest?.locator);
+  const closestSeconds = Number(closest?.startSeconds);
   return {
     id,
     text,
@@ -330,6 +350,20 @@ export function parseClaim(raw: unknown): PackageClaim | null {
     ...(quote && Number.isFinite(startSeconds) && startSeconds >= 0 && videoUrl
       ? { transcriptEvidence: { quote, startSeconds, videoUrl } }
       : {}),
+    ...(recordKind && recordQuote && recordUrl && recordLocator
+      ? { recordEvidence: {
+          kind: recordKind, quote: recordQuote, url: recordUrl, locator: recordLocator,
+          ...(Number.isFinite(recordSeconds) && recordSeconds >= 0 ? { startSeconds: recordSeconds } : {}),
+        } }
+      : {}),
+    ...(closestKind && closestQuote && closestUrl && closestLocator
+      ? { closestEvidence: {
+          kind: closestKind, quote: closestQuote, url: closestUrl, locator: closestLocator,
+          ...(Number.isFinite(closestSeconds) && closestSeconds >= 0 ? { startSeconds: closestSeconds } : {}),
+        } }
+      : {}),
+    ...(str(o.checkReason) ? { checkReason: str(o.checkReason) } : {}),
+    ...(str(o.closestQuote) ? { closestQuote: str(o.closestQuote) } : {}),
   };
 }
 

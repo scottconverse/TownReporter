@@ -349,31 +349,44 @@ export function evidenceCheckRows(input: {
 
   for (const row of input.claimRows) {
     const transcript = row.claim.reporting?.transcriptEvidence;
+    const record = row.claim.reporting?.recordEvidence;
+    const closest = row.claim.reporting?.closestEvidence;
+    const verifiedQuote = transcript?.quote.trim() || record?.quote.trim() || "";
+    const verifiedUrl = transcript?.videoUrl || record?.url || "";
+    const verifiedSeconds = transcript?.startSeconds ?? record?.startSeconds;
+    const savedQuote = transcript?.quote.trim() || record?.quote.trim() || closest?.quote.trim() || "";
+    const recordUrl = transcript?.videoUrl || record?.url || closest?.url || "";
+    const recordSeconds = transcript?.startSeconds ?? record?.startSeconds ?? closest?.startSeconds;
     const transcriptSupported = row.claim.reporting?.status === "VERIFIED" && Boolean(
-      transcript?.quote.trim() && transcript.videoUrl && Number.isFinite(transcript.startSeconds) && transcript.startSeconds >= 0,
+      verifiedQuote && verifiedUrl && (verifiedSeconds === undefined || (Number.isFinite(verifiedSeconds) && verifiedSeconds >= 0)),
     );
     const judged = transcriptSupported
       ? { chip: "✓ Supported", tone: "ok" as const }
       : judgmentChip(row.judgment.value, row.captures);
-    const transcriptSeconds = transcript && Number.isFinite(transcript.startSeconds)
-      ? Math.floor(transcript.startSeconds)
+    const transcriptSeconds = recordSeconds !== undefined && Number.isFinite(recordSeconds)
+      ? Math.floor(recordSeconds)
       : null;
     const transcriptClock = transcriptSeconds === null ? "" :
       `${Math.floor(transcriptSeconds / 3600)}:${String(Math.floor((transcriptSeconds % 3600) / 60)).padStart(2, "0")}:${String(transcriptSeconds % 60).padStart(2, "0")}`;
-    const transcriptAction = transcript && transcriptClock
+    const transcriptAction = recordUrl && transcriptSeconds !== null && transcriptClock
       ? {
           kind: "open-record" as const,
           label: `Play at ${transcriptClock}`,
-          href: `${transcript.videoUrl}${transcript.videoUrl.includes("?") ? "&" : "?"}t=${transcriptSeconds}s`,
+          href: `${recordUrl}${recordUrl.includes("?") ? "&" : "?"}t=${transcriptSeconds}s`,
         }
+      : recordUrl
+        ? { kind: "open-record" as const, label: "Open record", href: recordUrl }
       : null;
     list.push({
       key: `claim:${row.key}`,
       chip: judged.chip,
       tone: judged.tone,
       what: row.claim.fact.trim() || "A claim recorded for this draft.",
-      note: transcript?.quote.trim()
-        ? transcript.quote.trim()
+      note: row.claim.reporting?.checkReason
+        ? [row.claim.reporting.checkReason, row.claim.reporting.closestQuote || savedQuote]
+            .filter(Boolean).join(" “") + (row.claim.reporting.closestQuote || savedQuote ? "”" : "")
+        : savedQuote
+          ? savedQuote
         : row.captures.length === 0
           ? "No captured record was cited for this claim."
           : (row.captures[0]?.title ?? row.claim.url ?? "Cited record"),

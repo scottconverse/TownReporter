@@ -1,5 +1,5 @@
 import type { Sql } from "../db.ts";
-import type { PackageStory, PackageSource, PackageClaimStatus } from "./civic-reporting.ts";
+import type { PackageStory, PackageSource, PackageClaimStatus, PackageClaim } from "./civic-reporting.ts";
 import type { StoryClaim } from "./report.ts";
 
 /** WR1 claim review, with the complete reporting ledger and pinned captures. */
@@ -12,6 +12,10 @@ export type ReportingReviewClaim = StoryClaim & {
     missingSourceIds: string[];
     references: Array<PackageSource & { versionId: number | null }>;
     transcriptEvidence?: { quote: string; startSeconds: number; videoUrl: string };
+    recordEvidence?: NonNullable<PackageClaim["recordEvidence"]>;
+    closestEvidence?: NonNullable<PackageClaim["closestEvidence"]>;
+    checkReason?: string;
+    closestQuote?: string;
   };
 };
 
@@ -45,6 +49,10 @@ export async function reportingStoryReviewClaims(
         missingSourceIds: claim.sourceIds.filter((id) => !references.has(id)),
         references: claim.sourceIds.flatMap((id) => references.has(id) ? [references.get(id)!] : []),
         ...(claim.transcriptEvidence ? { transcriptEvidence: claim.transcriptEvidence } : {}),
+        ...(claim.recordEvidence ? { recordEvidence: claim.recordEvidence } : {}),
+        ...(claim.closestEvidence ? { closestEvidence: claim.closestEvidence } : {}),
+        ...(claim.checkReason ? { checkReason: claim.checkReason } : {}),
+        ...(claim.closestQuote ? { closestQuote: claim.closestQuote } : {}),
       },
     })),
   };

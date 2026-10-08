@@ -1837,7 +1837,7 @@ function normalizedMoneyAmount(value: string): string {
 function sourceContainsMoneyAmount(source: string, claimAmount: string): boolean {
   const wanted = normalizedMoneyAmount(claimAmount);
   const candidates = /\$\s*(\d[\d,]*(?:\.\d+)?)|\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?)\b|\b(\d+\.\d+)\b/g;
-  const financialContext = /\b(?:allocat\w*|budget\w*|costs?|dollars?|revenue|expense\w*|appropriat\w*|tax(?:es)?|payment|spend(?:ing)?|grant|balance|amount)\b/i;
+  const financialContext = /\b(?:allocat\w*|budget\w*|fund(?:s|ing)|costs?|dollars?|revenue|expense\w*|appropriat\w*|tax(?:es)?|payment|spend(?:ing)?|grant|balance|amount)\b/i;
   return [...source.matchAll(candidates)].some((match) => {
     const amount = match[1] ?? match[2] ?? match[3] ?? "";
     if (normalizedMoneyAmount(amount) !== wanted) return false;
@@ -2039,7 +2039,10 @@ export function checkDraftClaims(input: {
         motion.result,
       ])
       .filter(Boolean);
-    const voteSource = normalizeForMatch(motionWords.join(" "));
+    const voteSource = normalizeForMatch([
+      ...motionWords,
+      ...(item.kind === "reporting" ? [own.text, ownTape] : []),
+    ].join(" "));
     const proceduralWords = normalizeForMatch(
       (item.motions ?? [])
         .filter((motion) => motion.kind === "procedural")
@@ -2104,11 +2107,16 @@ export function checkDraftClaims(input: {
       const inPacketPage = packetPageText
         ? normalizeForMatch(packetPageText).includes(normalizeForMatch(quote))
         : false;
+      const inRetainedTranscript = item.kind === "reporting" &&
+        normalizeForMatch(`${own.text}\n${ownTape}`).includes(normalizeForMatch(quote));
+      const found = inPacketPage || inRetainedTranscript;
       push(
         quote,
-        inPacketPage ? page === null ? `${label} (cited document section)` : `${label} (packet p${page})` : `${label} (unverified)`,
-        inPacketPage,
         inPacketPage
+          ? page === null ? `${label} (cited document section)` : `${label} (packet p${page})`
+          : inRetainedTranscript ? `${label} (retained transcript)` : `${label} (unverified)`,
+        found,
+        found
           ? page === null ? "Quotation matched this claim's cited document section." : `Quotation matched this item's own packet page (p${page}).`
           : "Quotation unverified: not in this item's packet page. A match against the auto-captioned tape alone is not a verified recording; check the recording, the approved minutes, or attribute the words to the packet.",
       );

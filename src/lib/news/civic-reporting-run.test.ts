@@ -19,6 +19,7 @@ import {
   type DocumentRead,
   writingPass, writerLengthProblems, financialRelationshipProblems, reassessContraryAfterResearch, bindStoryClaimsToEvidence, loadMethodInstructions as loadMethodForPrompt,
   retainedRecordingNote, validatePacketSources, canonicalModelReceipt, writerDecisionWindowEvidence,
+  reviewOpenStoryClaims,
 } from "./civic-reporting-run.server.ts";
 import type { CoverageAction } from "./civic-reporting.ts";
 import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
@@ -1358,6 +1359,20 @@ describe("the retained recording identity is enforced, not assumed", () => {
     assert.equal(out.claims[0]!.status, "VERIFIED", "a correctly-bound claim stays verified");
     assert.equal(out.claims[0]!.nextCheck, "", "nothing owed");
   });
+
+  // guards: a timestamp on an editor-supplied summary could be mislabeled as a retained recording cite.
+  it("keeps a time-coded action account separate from the retained video", () => {
+    const story = {
+      id: "s1", headline: "h", draft: "d", plainBrief: "", cannotSay: "", readinessTier: 2,
+      claims: [{ id: "C1", text: "The amendment passed.", status: "VERIFIED" as const, sourceIds: ["S1"], nextCheck: "" }],
+      sources: [{ id: "S1", title: "Editor-supplied reconciled action account", tier: "B" as const,
+        url: "", locator: "3:08:35–3:21:00", offlineReference: "Derivative action account supplied with this assignment." }],
+    };
+    const out = validatePacketSources(story as never, record());
+    assert.equal(out.claims[0]!.status, "VERIFIED");
+    assert.doesNotMatch(out.claims[0]!.nextCheck, /recording identity is not established/i);
+    assert.equal(out.sources[0]!.offlineReference, "Derivative action account supplied with this assignment.");
+  });
 });
 
 const ACTUAL_MEMO_PAGE_THREE = [
@@ -1693,7 +1708,7 @@ describe("document-only claims bind to their own cited PDF section", () => {
   it("binds cited transcript figures and dates to their spoken windows", () => {
     const video = "S1kSaew-UUY";
     const record = { identity: { videoId: video, videoUrl: "https://www.youtube.com/watch?v=" + video }, segments: [
-      { index: 1, seconds: 14235, item: "12A", itemTitle: "Budget", text: "The remaining allocation would be 916,000 for 2027." },
+      { index: 1, seconds: 14235, item: "12A", itemTitle: "Budget", text: "Funding for this project would be 916,000 for 2027." },
       { index: 2, seconds: 11328, item: "11", itemTitle: "Ordinance 2026-69", text: "The hazardous vegetation work must be completed by May 1, 2027." },
       { index: 3, seconds: 11369, item: "11", itemTitle: "Ordinance 2026-69", text: "May 1, 2027 is the deadline for the mitigation." },
     ] };
@@ -1972,6 +1987,83 @@ it("keeps ledger verification when a transcript citation misses the item's passa
   assert.equal(checked[0]!.status, "VERIFIED", checked[0]!.nextCheck);
 });
 
+// guards: an unresolved claim could be filed without searching the full retained record and read packet.
+it("checks an unresolved claim against the full transcript and already-read documents once", async () => {
+  const videoId = "S1kSaew-UUY";
+  const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+  const claim = "The council approved $45,000 for creek repairs.";
+  const chatOpts = { choice: "pinned-model", reasoningEffort: "high" };
+  let calls = 0;
+  const chat = async (_system: string, prompt: string, tokens: number, opts: unknown) => {
+    calls += 1;
+    assert.equal(tokens, 3_000);
+    assert.equal(opts, chatOpts);
+    assert.match(prompt, /MEETING IDENTITY:.*City Council regular session/s);
+    assert.match(prompt, /NEXT CHECK NOTE: Find the amount in the record\./);
+    assert.match(prompt, /ALREADY-READ DOCUMENTS:.*Budget packet/s);
+    assert.match(prompt, new RegExp(claim.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    return { ok: true, text: JSON.stringify({
+      verdict: "VERIFIED", quote: claim, sourceKind: "transcript", sourceUrl: videoUrl,
+      replacement: "", cut: false, reason: "The full meeting transcript says the same amount.",
+    }) };
+  };
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "repairs", headline: "Council takes up creek work", draft: claim, plainBrief: "", cannotSay: "",
+      readinessTier: 1,
+      claims: [{ id: "C1", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Find the amount in the record.", item: "5" }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId, videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [
+        { index: 1, seconds: 100, item: "5", itemTitle: "Old item", text: "Unrelated opening comments." },
+        { index: 2, seconds: 12_345, item: "11", itemTitle: "Creek repairs", text: claim },
+      ],
+    } as never,
+    documents: [{ url: "https://city.test/budget.pdf", title: "Budget packet", ok: true, text: "The packet was read.", reason: "" }],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: chat as never,
+    chatOpts,
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.claims[0]?.status, "VERIFIED");
+  assert.deepEqual(result.claims[0]?.transcriptEvidence, { quote: claim, startSeconds: 12_345, videoUrl });
+  assert.equal(result.claims[0]?.item, "11");
+});
+
+// guards: a statement contradicted by the retained record could remain in the filed story.
+it("rewrites a contradicted sentence to match the retained transcript", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const unsupported = "The council approved $45,000 for creek repairs.";
+  const corrected = "Staff proposed $45,000 for creek repairs.";
+  const chat = async () => ({ ok: true, text: JSON.stringify({
+    verdict: "CONTRADICTED", quote: corrected, sourceKind: "transcript", sourceUrl: videoUrl,
+    replacement: corrected, cut: false, reason: "The transcript describes a proposal, not an approval.",
+  }) });
+  const result = await reviewOpenStoryClaims({
+    story: {
+      id: "repairs", headline: "Council takes up creek work",
+      draft: `${unsupported} The report continues.`, plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{ id: "C1", text: unsupported, status: "UNVERIFIED", sourceIds: [], nextCheck: "Check the vote." }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments: [{ index: 1, seconds: 900, item: "11", itemTitle: "Creek work", text: corrected }],
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: chat as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(result.claims[0]?.status, "VERIFIED");
+  assert.equal(result.claims[0]?.text, corrected);
+  assert.equal(result.draft, `${corrected} The report continues.`);
+});
+
 // guards: a transcript-supported claim could be filed as unchecked with no place to play it.
 it("carries a retained transcript quote into the editor's supported row", async () => {
   const videoId = "S1kSaew-UUY";
@@ -2026,4 +2118,5 @@ it("saves the transcript line that states the checked amount", () => {
   const checked = bindClaimsToEvidence(story as never, { actions: [] } as never, record as never, []);
   assert.match(checked[0]?.transcriptEvidence?.quote ?? "", /\$1\.18 million/);
 });
+
 

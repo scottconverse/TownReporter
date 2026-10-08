@@ -1921,7 +1921,8 @@ export async function performReportingWork(
     throwIfCancelled: () => throwIfCancelled(job.id),
   });
   gaps.push(...writing.gaps);
-  const stories = writing.stories.map((story) => {
+  const stories: PackageStory[] = [];
+  for (const story of writing.stories) {
     /*
       BIND CLAIMS AGAINST EVERY DOCUMENT THE RUN READ, not only the editor's
       seeds. A fact first retrieved by the further-research pass -- a budget
@@ -1938,8 +1939,19 @@ export async function performReportingWork(
       downgrades any claim that leaned on it. It runs on the bound story so the
       claim list it edits is the one that files.
     */
-    return validatePacketSources(bound, record);
-  });
+    const identityChecked = validatePacketSources(bound, record);
+    const researched = await reviewOpenStoryClaims({
+      story: identityChecked,
+      record,
+      documents: allDocuments,
+      method,
+      chat,
+      chatOpts,
+      throwIfCancelled: () => throwIfCancelled(job.id),
+    });
+    const rechecked = bindStoryClaimsToEvidence(researched, reconcile, record, allDocuments);
+    stories.push(validatePacketSources(rechecked, record));
+  }
   const held = guardCorrectionHolds(writing.held, gather.observations, allDocuments);
   for (const story of stories) {
     writeWorkspace(workspaceDir, "story-" + story.id + ".md", "# " + story.headline + "\n\n" + story.draft);
@@ -3162,10 +3174,265 @@ function isModelEffort(value: unknown): value is ModelEffort {
  */
 function claimsRetainedTranscript(source: PackageSource): boolean {
   const clock = /\b\d{1,2}:\d{2}(?::\d{2})?\b/.test(source.locator || "");
-  const words = /transcript|recording|tape|video|caption/i.test(
-    [source.title, source.offlineReference, source.locator].filter(Boolean).join(" "),
-  );
-  return clock || words;
+  const words = /\b(?:transcript|recording|tape|captions?)\b|\bmeeting\s+video\b/i.test(source.title);
+  return words || (clock && Boolean(videoIdOfSeed(source.url)));
+}
+
+type ClaimCheckCandidate = {
+  kind: "transcript" | "document";
+  quote: string;
+  title: string;
+  url: string;
+  locator: string;
+  startSeconds?: number;
+  page: number | null;
+  item?: string;
+  score: number;
+};
+
+function splitEvidenceText(text: string): string[] {
+  return text.split(/(?<=[.!?])\s+|\r?\n+/).flatMap((part) => {
+    const clean = part.trim();
+    if (!clean) return [];
+    if (clean.length <= 600) return [clean];
+    const out: string[] = [];
+    for (let start = 0; start < clean.length; start += 500) out.push(clean.slice(start, start + 600).trim());
+    return out;
+  });
+}
+
+function candidateScore(claim: string, quote: string): number {
+  const normalized = normalizeForMatch(quote);
+  const terms = significantEvidenceWords(claim);
+  const hits = terms.filter((term) => normalized.includes(term)).length;
+  const numbers = claim.match(/\d[\d,]*(?:\.\d+)?%?/g) ?? [];
+  const quoteDigits = quote.replace(/\D/g, "");
+  const numberHits = numbers.filter((number) => quoteDigits.includes(number.replace(/\D/g, ""))).length;
+  return hits + numberHits * 4 + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+}
+
+function claimCheckCandidates(claim: string, record: WholeRecord, documents: DocumentRead[]): ClaimCheckCandidate[] {
+  const videoId = str(record.identity.videoId);
+  const videoUrl = str(record.identity.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
+  const transcript = record.segments.map((segment): ClaimCheckCandidate => ({
+    kind: "transcript",
+    quote: segment.text.trim().slice(0, 600),
+    title: "Retained meeting transcript",
+    url: videoUrl,
+    locator: `${segment.item ? `Item ${segment.item}; ` : ""}${clockLabel(segment.seconds)}`,
+    startSeconds: segment.seconds,
+    page: null,
+    item: segment.item || undefined,
+    score: candidateScore(claim, segment.text),
+  }));
+  const documentCandidates = documents.filter((doc) => doc.ok).flatMap((doc) => {
+    const pages = (doc.pages ?? []).filter((page) => page.text.trim());
+    const units = pages.length
+      ? pages.map((page) => ({ page: page.page, text: page.layoutText?.trim() || page.text }))
+      : [{ page: null, text: doc.text }];
+    return units.flatMap((unit) => splitEvidenceText(unit.text).map((quote): ClaimCheckCandidate => ({
+      kind: "document",
+      quote,
+      title: doc.title || doc.url,
+      url: doc.url,
+      locator: unit.page === null ? "Read document text" : `p. ${unit.page}`,
+      page: unit.page,
+      score: candidateScore(claim, quote),
+    })));
+  });
+  return [...transcript, ...documentCandidates];
+}
+
+function clockLabel(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 3600)}:${String(Math.floor((whole % 3600) / 60)).padStart(2, "0")}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate, record: WholeRecord): boolean {
+  if (claim.length === 0 || candidate.quote.trim().length < 8) return false;
+  const item: LedgerItem = {
+    itemNo: 0,
+    kind: candidate.kind === "transcript" ? "reporting" : "document-source",
+    text: candidate.title,
+    startSeconds: candidate.startSeconds ?? null,
+    endSeconds: candidate.startSeconds === undefined ? null : candidate.startSeconds + 45,
+    packetPage: candidate.page,
+    status: "lead",
+    reason: "AI claim re-check against a retained record",
+    sourceExcerpt: candidate.quote,
+    evidence: [],
+    motions: [],
+  };
+  const packetPages = candidate.kind === "document" && candidate.page !== null
+    ? [{ page: candidate.page, text: candidate.quote }]
+    : [];
+  return checkDraftClaims({
+    units: [{ text: claim, label: claim.slice(0, 120), item }],
+    packetPages,
+    segments: record.segments,
+  }).every((check) => check.checkStatus === "found");
+}
+
+function exactQuoteCandidate(
+  candidates: ClaimCheckCandidate[],
+  answer: Record<string, unknown>,
+): ClaimCheckCandidate | null {
+  const quote = str(answer.quote);
+  if (!quote) return null;
+  const kind = answer.sourceKind === "transcript" || answer.sourceKind === "document" ? answer.sourceKind : null;
+  const url = str(answer.sourceUrl);
+  return candidates.find((candidate) =>
+    (!kind || candidate.kind === kind) && (!url || candidate.url === url) &&
+    normalizeForMatch(candidate.quote).includes(normalizeForMatch(quote)) && candidate.url,
+  ) ?? null;
+}
+
+function oneLineReason(value: unknown): string {
+  return str(value).replace(/\s+/g, " ").replace(/[.\s]+$/, ".").slice(0, 240) ||
+    "The retained meeting record and read documents did not settle this fact.";
+}
+
+function changeClaimSentence(text: string, claim: string, replacement: string | null): { text: string; changed: boolean } {
+  const start = text.indexOf(claim);
+  if (start < 0) return { text, changed: false };
+  if (replacement !== null) return { text: text.slice(0, start) + replacement + text.slice(start + claim.length), changed: true };
+  const sentenceStart = Math.max(text.lastIndexOf(".", start), text.lastIndexOf("!", start), text.lastIndexOf("?", start)) + 1;
+  const endSearch = /[.!?]\s*$/.test(claim) ? start + claim.length - 1 : start + claim.length;
+  const nextEnds = [".", "!", "?"].map((mark) => text.indexOf(mark, endSearch)).filter((index) => index >= 0);
+  const sentenceEnd = nextEnds.length ? Math.min(...nextEnds) + 1 : text.length;
+  return { text: (text.slice(0, sentenceStart) + " " + text.slice(sentenceEnd)).replace(/\s{2,}/g, " ").trim(), changed: true };
+}
+
+function storyTextChange(story: PackageStory, claim: string, replacement: string | null): { story: PackageStory; changed: boolean } {
+  let changed = false;
+  const fields = ["headline", "plainBrief", "draft"] as const;
+  const next = { ...story };
+  for (const field of fields) {
+    const edit = changeClaimSentence(next[field], claim, replacement);
+    next[field] = edit.text;
+    changed ||= edit.changed;
+  }
+  return { story: next, changed };
+}
+
+function checkSourceForCandidate(candidate: ClaimCheckCandidate, claimId: string): PackageSource {
+  const id = `AI-CHECK-${claimId.replace(/[^A-Za-z0-9_-]+/g, "-")}`;
+  return {
+    id,
+    title: candidate.title,
+    tier: "A",
+    url: candidate.url,
+    locator: candidate.locator,
+    offlineReference: candidate.url ? "" : candidate.title,
+  };
+}
+
+/** One targeted, pinned-model check for every claim the first evidence pass left open. */
+export async function reviewOpenStoryClaims(input: {
+  story: PackageStory;
+  record: WholeRecord;
+  documents: DocumentRead[];
+  method: ReturnType<typeof loadMethodInstructions>;
+  chat: typeof grokChat;
+  chatOpts: Record<string, unknown>;
+  throwIfCancelled: () => Promise<void>;
+}): Promise<PackageStory> {
+  let story = input.story;
+  const openIds = story.claims.filter((claim) => claim.status !== "VERIFIED").map((claim) => claim.id);
+  for (const id of openIds) {
+    await input.throwIfCancelled();
+    const claim = story.claims.find((row) => row.id === id);
+    if (!claim || claim.status === "VERIFIED") continue;
+    const candidates = claimCheckCandidates(claim.text, input.record, input.documents);
+    const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript").sort((a, b) => b.score - a.score).slice(0, 8);
+    const documentCandidates = candidates.filter((candidate) => candidate.kind === "document").sort((a, b) => b.score - a.score).slice(0, 12);
+    const prompt = [
+      "Check this one unresolved story claim against the supplied evidence, then return one JSON object.",
+      "The retained transcript is the meeting record. Search all transcript passages shown, not only the original agenda-item span.",
+      "Use only these already-read records. A model summary or source label is not evidence. If the record disagrees, return a corrected sentence supported by an exact quote, or set cut=true.",
+      "Never infer a vote, adoption, date, name, amount or relationship from an unrelated passage.",
+      'JSON: {"verdict":"VERIFIED|CONTRADICTED|OPEN","quote":"exact source words","sourceKind":"transcript|document","sourceUrl":"","replacement":"corrected sentence or empty","cut":false,"reason":"one-line reason"}',
+      "MEETING IDENTITY: " + JSON.stringify(input.record.identity),
+      "CLAIM: " + claim.text,
+      "NEXT CHECK NOTE: " + claim.nextCheck,
+      "ALREADY-READ DOCUMENTS: " + JSON.stringify(input.documents.map((doc) => ({ title: doc.title, url: doc.url, ok: doc.ok }))),
+      "CLOSEST FULL-TRANSCRIPT PASSAGES: " + JSON.stringify(transcriptCandidates.map(({ quote, locator, url }) => ({ quote, locator, url }))),
+      "CLOSEST ALREADY-READ DOCUMENT PASSAGES: " + JSON.stringify(documentCandidates.map(({ quote, title, locator, url }) => ({ quote, title, locator, url }))),
+    ].join("\n\n");
+    const response = await input.chat(methodSystemPrompt(input.method), prompt, 3_000, input.chatOpts as never);
+    const answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
+    const verdict = str(answer?.verdict).toUpperCase();
+    const replacement = str(answer?.replacement).trim();
+    const supportedText = verdict === "CONTRADICTED" ? replacement : claim.text;
+    const candidate = answer && (verdict === "VERIFIED" || verdict === "CONTRADICTED")
+      ? exactQuoteCandidate(candidates, answer)
+      : null;
+    const supported = Boolean(
+      supportedText && candidate && claimEvidenceCheckPasses(supportedText, candidate, input.record),
+    );
+    if (verdict === "CONTRADICTED" && answer?.cut === true) {
+      const edit = storyTextChange(story, claim.text, null);
+      if (edit.changed) {
+        story = { ...edit.story, claims: edit.story.claims.filter((row) => row.id !== claim.id) };
+        continue;
+      }
+    }
+    if (supported && candidate) {
+      const textEdit = replacement && replacement !== claim.text
+        ? storyTextChange(story, claim.text, replacement)
+        : { story, changed: true };
+      if (textEdit.changed) {
+        const source = checkSourceForCandidate(candidate, claim.id);
+        const sources = textEdit.story.sources.some((row) => row.id === source.id)
+          ? textEdit.story.sources
+          : [...textEdit.story.sources, source];
+        story = {
+          ...textEdit.story,
+          sources,
+          claims: textEdit.story.claims.map((row) => row.id !== claim.id ? row : {
+            ...row,
+            text: supportedText,
+            status: "VERIFIED",
+            sourceIds: [...new Set([...row.sourceIds, source.id])],
+            item: candidate.kind === "transcript" ? candidate.item ?? "" : row.item,
+            recordEvidence: {
+              kind: candidate.kind,
+              quote: str(answer?.quote),
+              url: candidate.url,
+              locator: candidate.locator,
+              ...(candidate.startSeconds === undefined ? {} : { startSeconds: candidate.startSeconds }),
+            },
+            ...(candidate.kind === "transcript" && candidate.startSeconds !== undefined
+              ? { transcriptEvidence: { quote: str(answer?.quote), startSeconds: candidate.startSeconds, videoUrl: candidate.url } }
+              : {}),
+            checkReason: "",
+            closestQuote: "",
+          }),
+        };
+        continue;
+      }
+    }
+    const closest = candidates.sort((a, b) => b.score - a.score)[0];
+    const reason = oneLineReason(answer?.reason || (response.ok ? "The cited words did not verify this statement." : response.error));
+    story = {
+      ...story,
+      claims: story.claims.map((row) => row.id !== claim.id ? row : {
+        ...row,
+        status: "UNVERIFIED",
+        nextCheck: reason,
+        checkReason: reason,
+        closestQuote: closest?.quote ?? "",
+        ...(closest ? { closestEvidence: {
+          kind: closest.kind,
+          quote: closest.quote,
+          url: closest.url,
+          locator: closest.locator,
+          ...(closest.startSeconds === undefined ? {} : { startSeconds: closest.startSeconds }),
+        } } : {}),
+      }),
+    };
+  }
+  return story;
 }
 
 /**
