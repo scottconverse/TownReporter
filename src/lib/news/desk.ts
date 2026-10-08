@@ -11,6 +11,10 @@ import { performReviewSuggestedSources } from "./suggested-sources.server.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
+import {
+  cleanSourceScanPreferenceInput,
+  persistSourceScanPreference,
+} from "./source-scan-preferences.server.ts";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
@@ -194,6 +198,7 @@ import {
   tierFromKind,
   resurfacedSummarySentence,
   scanDecisionsSentence,
+  SOURCE_SCAN_PREFERENCE_COPY,
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
@@ -344,7 +349,10 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
              -- 0097: why it was suggested, who suggested it, and where it came
              -- from. Null on every row that predates 0.6.70 = "not recorded".
              proposed_reason, proposed_by, proposed_scan_run_id, proposed_lead_id,
-             proposed_section, reviewed_at, review_note,
+              proposed_section, reviewed_at, review_note,
+              scan_preference.purpose as purpose_preference,
+              scan_preference.cadence as scan_cadence,
+              scan_preference.deadline::text as scan_deadline,
              -- 0.6.72: snapshots this source produced since the newest run
              -- started -- the drawn row's "2 new items". A source that was
              -- fetched and had not changed wrote none, which is the drawing's
@@ -355,8 +363,11 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
                   and sn.created_at >= coalesce(
                     (select max(started_at) from scan_runs where newsroom_id = ${owned(context)}),
                     '-infinity'::timestamptz))::int as new_since_last_pass
-      from sources
-      where newsroom_id = ${owned(context)}
+       from sources
+       left join source_scan_preferences scan_preference
+         on scan_preference.newsroom_id = sources.newsroom_id
+        and scan_preference.source_id = sources.id
+       where sources.newsroom_id = ${owned(context)}
       order by
         -- Paused sorts after accepted: it is still on the watch list, and the
         -- editor put it there deliberately, so it belongs with the rows they
@@ -385,6 +396,18 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
 export const listSources = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => querySourceRows(context));
+
+export const saveSourceScanPreference = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => cleanSourceScanPreferenceInput(raw))
+  .handler(async ({ context, data }) => {
+    if (data.invalidError) return { ok: false as const, error: data.invalidError };
+    const sql = await getSql();
+    const saved = await persistSourceScanPreference(sql, context.newsroomId, context.userId, data);
+    if (!saved)
+      return { ok: false as const, error: SOURCE_SCAN_PREFERENCE_COPY.acceptedOnly };
+    return { ok: true as const };
+  });
 
 /** The read-only inventory screen, using the same facts and judgement as its CSV. */
 export const getSourceInventory = createServerFn({ method: "GET" })

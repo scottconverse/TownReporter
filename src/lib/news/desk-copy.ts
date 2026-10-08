@@ -3,6 +3,43 @@
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
+import type { SourceCadence } from "./adaptive-source-selection.ts";
+import type { SourcePurpose } from "./source-inventory.ts";
+
+export const SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS: readonly {
+  value: SourcePurpose;
+  label: string;
+}[] = [
+  { value: "watch", label: "Watch" },
+  { value: "reference", label: "Reference" },
+  { value: "unknown", label: "Unknown" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_CADENCE_OPTIONS: readonly {
+  value: SourceCadence;
+  label: string;
+}[] = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "as-needed", label: "As needed" },
+];
+
+export const SOURCE_SCAN_PREFERENCE_COPY = {
+  summary: "Scan preferences",
+  explanation: "Set when this accepted source should be read during the daily scan.",
+  purpose: "Purpose",
+  purposeBlank: "Choose a purpose",
+  cadence: "Cadence",
+  cadenceBlank: "No cadence",
+  deadline: "Deadline",
+  save: "Save preferences",
+  saving: "Saving…",
+  saved: "Scan preferences saved.",
+  saveFailed: "Could not save scan preferences.",
+  acceptedOnly: "Only accepted sources can have scan preferences.",
+  invalid: "Choose a valid purpose, cadence, and deadline.",
+};
 
 export function organizationFromUrl(url: string): string {
   try {

@@ -55,6 +55,9 @@ export type SourceRow = {
   retry_after_note?: string | null;
   blocked_at?: string | null;
   blocked_attempts?: number | null;
+  purpose_preference?: "watch" | "reference" | "unknown" | null;
+  scan_cadence?: "daily" | "weekly" | "monthly" | "as-needed" | null;
+  scan_deadline?: string | null;
 };
 
 export type LeadRow = {
