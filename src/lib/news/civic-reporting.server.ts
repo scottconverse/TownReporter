@@ -164,6 +164,27 @@ export async function loadLeadReportingPackage(
   return null;
 }
 
+export type EarlierReportingPackage = { requestId: number; createdAt: string; pkg: ReportingPackage };
+
+export async function loadEarlierLeadReportingPackages(
+  sql: Sql,
+  leadId: number,
+  newsroomId: number,
+  currentRequestId: number,
+): Promise<EarlierReportingPackage[]> {
+  const rows = await sql<{ request_id: number; created_at: Date | string; package: unknown }>`
+    select request_id, created_at, package from reporting_packages
+    where newsroom_id = ${newsroomId} and lead_id = ${leadId} and request_id <> ${currentRequestId}
+    order by created_at desc, id desc
+  `;
+  return rows.flatMap((row) => {
+    const pkg = parseReportingPackage(row.package);
+    return pkg
+      ? [{ requestId: Number(row.request_id), createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at), pkg }]
+      : [];
+  });
+}
+
 function reportingDraftReference(value: unknown): { requestId: number; storyId: string } | null {
   let parsed: unknown = value;
   if (typeof value === "string") {

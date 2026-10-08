@@ -2660,6 +2660,33 @@ export function editorTitle(text: string): string {
   return title === title.toUpperCase() ? agendaTitle(title) : title;
 }
 
+export function leadScoreLabel(score: number | null): string {
+  return `Lead score ${score ?? 0}/20`;
+}
+
+export function initialStoryTopic(leadTopic: string | null | undefined): string {
+  return leadTopic?.trim() || "council";
+}
+
+type DarkRunNote = {
+  investigation_id: number | null;
+  stopReason: string | null;
+  started_at: string;
+  usage: { totals: { documentReads: number } };
+};
+
+export function shouldShowDarkRunStopNote(run: DarkRunNote, history: readonly DarkRunNote[]): boolean {
+  if (!run.stopReason) return false;
+  if (run.stopReason !== "document-read-limit") return true;
+  const startedAt = Date.parse(run.started_at);
+  return !history.some((later) =>
+    run.investigation_id != null && later.investigation_id === run.investigation_id &&
+    Date.parse(later.started_at) > startedAt &&
+    later.stopReason === "completed" &&
+    later.usage.totals.documentReads > 0,
+  );
+}
+
 export function agendaTitle(text: string): string {
   if (text !== text.toUpperCase()) return sentenceCase(text);
   // Agenda identifiers are names, even in an otherwise all-caps heading.

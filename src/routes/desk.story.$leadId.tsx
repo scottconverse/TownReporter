@@ -76,10 +76,12 @@ import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
 import { useEditorSections } from "@/lib/use-sections";
+import { saveLeadTopic } from "@/lib/news/lead-topic";
 import { useAreaLabels, usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import {
   applyTodoPatch,
   clipTodoText,
+  earlierReportingNotes,
   mergeDraftEvidenceIntoNotes,
   notesHaveMemo,
   parseNotes,
@@ -91,6 +93,8 @@ import {
   editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
+  initialStoryTopic,
+  leadScoreLabel,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
@@ -275,7 +279,6 @@ function StoryPage() {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, [body, headline, dek]);
-  const [topic, setTopic] = useState("council");
   /*
     The geography the paper's pills filter on (0.6.71). One more field on the
     existing publish step, not a new step: the editor sets it here and the
@@ -391,6 +394,7 @@ function StoryPage() {
     stored confirmation for this draft version, refuses.
   */
   const [topicTouched, setTopicTouched] = useState(false);
+  const leadTopicChoice = useRef<string | null>(null);
   /*
     Headline suggestions are held here and applied on a click, never before --
     the whole contract of the button. The note is the page's own line about
@@ -476,6 +480,8 @@ function StoryPage() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
+
+  const [topic, setTopic] = useState(() => initialStoryTopic(data?.lead.topic));
 
   currentDraftFields.current = { headline, dek, body, topic };
   /*
@@ -600,7 +606,10 @@ function StoryPage() {
   useEffect(() => {
     if (data?.articleSlug) setPublishedSlug(data.articleSlug);
     const d = data?.draft;
-    if (!d) return;
+    if (!d) {
+      if (data?.lead && !topicTouched) setTopic(initialStoryTopic(data.lead.topic));
+      return;
+    }
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
     if (!waitingSince) {
       if (appliedFp.current === "") {
@@ -613,7 +622,7 @@ function StoryPage() {
         setHeadline(data?.articleId && data.articleHeadline ? data.articleHeadline : d.headline);
         setDek(d.dek);
         setBody(stripReporterNotebook(d.body ?? ""));
-        setTopic(d.topic);
+        setTopic(leadTopicChoice.current ?? d.topic);
         appliedFp.current = fp;
       }
       return;
@@ -633,7 +642,7 @@ function StoryPage() {
     setHeadline(d.headline);
     setDek(d.dek);
     setBody(stripReporterNotebook(d.body));
-    setTopic(d.topic);
+    setTopic(leadTopicChoice.current ?? d.topic);
     appliedFp.current = fp;
     expectedDraftJobId.current = null;
     /* Unit UI1a2: the draft this press started has arrived, so the control's
@@ -649,7 +658,7 @@ function StoryPage() {
     setMsg(completion?.quality.reviewRequired
       ? "Draft saved. Review the source and name-check warnings before publication."
       : "Draft saved.");
-  }, [awaitingDraftJobAck, data, waitingSince]);
+  }, [topicTouched, awaitingDraftJobAck, data, waitingSince]);
 
   useEffect(() => {
     if (!waitingSince) return;
@@ -879,6 +888,20 @@ function StoryPage() {
       );
     }
   }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
+
+  const saveTopic = useMutation({
+    mutationFn: (nextTopic: string) => saveLeadTopic({ data: { leadId: id, topic: nextTopic } }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg("Saved.");
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "save your section") ??
+        "Your section did not save.",
+      );
+    },
+  });
 
   const save = useMutation({
     mutationFn: async () => {
@@ -1698,7 +1721,7 @@ function StoryPage() {
     reconcile.isPending ||
     reconcileStatus.data?.status === "queued" ||
     reconcileStatus.data?.status === "running";
-  const savePending = save.isPending || reviewEvidence.isPending || publish.isPending;
+  const savePending = saveTopic.isPending || save.isPending || reviewEvidence.isPending || publish.isPending;
   /*
     Unit U25, B1: the two reasons the evidence panel closes, kept apart so the
     takedown press can stay live on a published story. See
@@ -2256,7 +2279,7 @@ function StoryPage() {
       */}
       <div className="astra-wb-context">
         <span>
-          Story from lead · {sectionNameNow} · score {score}
+          Story from lead · {sectionNameNow} · {leadScoreLabel(score)}
         </span>
         <Chip s={data.lead.status} />
         {/*
@@ -2567,7 +2590,7 @@ function StoryPage() {
             <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
-              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · scored {score}/20
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · {leadScoreLabel(score)}
               · {leadOrigin(data.lead)}
               {data.lead.investigation_id ? (
                 <>
@@ -2806,6 +2829,7 @@ function StoryPage() {
             />
           ) : null}
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
+          {saveTopic.isPending ? <Busy label="Saving your section…" /> : null}
           {/*
             A successful action that also has something to report -- the draft
             saved but the reporting notes did not -- still reads as a success:
@@ -3448,8 +3472,13 @@ function StoryPage() {
                       setTopic(e.target.value);
                       /* A person moved it. See `topicTouched`. */
                       setTopicTouched(true);
+                      if (!data.draft) {
+                        leadTopicChoice.current = e.target.value;
+                        setMsg("");
+                        saveTopic.mutate(e.target.value);
+                      }
                     }}
-                    disabled={onPaper}
+                    disabled={onPaper || locked || saveTopic.isPending}
                   >
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
@@ -4211,6 +4240,7 @@ function ReportingNotesPane({
   const [startingPullKey, setStartingPullKey] = useState<string | null>(null);
   const [pullMsg, setPullMsg] = useState("");
   const small = usePhoneNotes();
+  const earlierNotes = earlierReportingNotes(notes);
   const filled =
     notesHaveMemo(notes) ||
     notes.opened.length > 0 ||
@@ -4457,14 +4487,16 @@ function ReportingNotesPane({
         </div>
       ) : null}
       {meetingSourceBlock}
-      {notes.importedReport ? (
-        <section className="note-sec" aria-label="Imported reporting evidence">
-          <p className="side-label">Reporting package: claims, sources and gaps</p>
-          <p className="note-hint">These are the reporter's qualifications. Editing your assignment keeps this evidence attached.</p>
-          <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-            {notes.importedReport}
-          </div>
-        </section>
+      {earlierNotes.length ? (
+        <details className="note-sec">
+          <summary className="side-label">Earlier</summary>
+          {earlierNotes.map((entry) => (
+            <section key={entry.label}>
+              <p className="side-label">{entry.label}</p>
+              <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.text}</div>
+            </section>
+          ))}
+        </details>
       ) : null}
       {/*
         WR1 phase 2: the whole-meeting run's ledger, beside the transcript block
@@ -4507,12 +4539,6 @@ function ReportingNotesPane({
             <div className="note-sec">
               <p className="side-label">Why it matters</p>
               <p className="note-one">{notes.why}</p>
-            </div>
-          ) : null}
-          {notes.angle ? (
-            <div className="note-sec">
-              <p className="side-label">Angle</p>
-              <p className="note-one">{notes.angle}</p>
             </div>
           ) : null}
           {absenceBlock}
