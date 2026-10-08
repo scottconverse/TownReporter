@@ -52,56 +52,9 @@ function storedNotes(raw: string | null): Record<string, unknown> {
  */
 const HEADLINE_MAX = 180;
 
-const AP_MONTHS = [
-  "Jan.", "Feb.", "March", "April", "May", "June", "July", "Aug.", "Sept.", "Oct.", "Nov.", "Dec.",
-];
-const MONTH_INDEX: Record<string, number> = {
-  jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3,
-  may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8,
-  september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11,
-};
-
-function apDate(year: string, month: string, day: string): string {
-  const index = MONTH_INDEX[month.replace(/\.$/, "").toLowerCase()];
-  return index === undefined ? "" : `${AP_MONTHS[index]} ${Number(day)}, ${year}`;
-}
-
-function meetingDateLabel(value: string | null): string {
-  if (!value) return "";
-  const iso = /\b(20\d{2})-(\d{2})-(\d{2})\b/.exec(value);
-  if (iso) {
-    const month = Number(iso[2]) - 1;
-    return month >= 0 && month < AP_MONTHS.length ? `${AP_MONTHS[month]} ${Number(iso[3])}, ${iso[1]}` : "";
-  }
-  const month = /\b([A-Za-z]+\.?)\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(20\d{2})\b/.exec(value);
-  return month ? apDate(month[3]!, month[1]!, month[2]!) : value.trim();
-}
-
-function meetingNameAndDate(title: string, fallbackDate: string | null): { name: string; date: string } {
-  const naturalDate = /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+20\d{2}\b/i.exec(
-    title,
-  );
-  const isoDate = naturalDate ? null : /\b20\d{2}-\d{2}-\d{2}\b/.exec(title);
-  const sourceDate = naturalDate ?? isoDate;
-  const date = naturalDate
-    ? meetingDateLabel(naturalDate[0])
-    : isoDate
-      ? meetingDateLabel(isoDate[0])
-      : meetingDateLabel(fallbackDate);
-  let name = sourceDate ? title.slice(0, sourceDate.index) : title;
-  name = name
-    .replace(/\s*\(?20\d{2}-\d{2}-\d{2}T[^\s)]*\)?/gi, " ")
-    .replace(/[\s:–—-]+(?:agenda\s+)?item\s+\S+[\s\S]*$/i, "")
-    .replace(/[\s,:–—-]+$/, "")
-    .trim()
-    .replace(/\b(regular|special|study)\s+session\b/gi, (_match, kind: string) => `${kind.toLowerCase()} session`);
-  return { name: name || "Council meeting", date };
-}
-
 /**
- * What the lead is titled from: the meeting name and its date. The item and
- * decision still determine whether a lead is worth filing, but never replace
- * the meeting identity in the headline.
+ * What the lead is titled from: the decision the record established, or the
+ * agenda item the transcript covered.
  *
  * The capture path used to title a lead from the recording's own title, which
  * for a routine meeting is the body's name and a date -- "City Council Regular
@@ -157,12 +110,12 @@ export function meetingLeadSubject(input: {
 }
 
 /**
- * The headline stays on the meeting name and date. Its accompanying reason
- * describes the coverage and decisions the transcript established.
+ * The lead headline and why, derived only from what the transcript established.
  *
- * Deliberately plain: a meeting lead is an assignment to look at the meeting,
- * not a story. Its reason names the covered items and how many votes the
- * structured record established, including when it established none.
+ * Deliberately plain: a meeting lead is an assignment to look at the meeting, not
+ * a story. It names the items that were actually covered and how many votes the
+ * structured record established, and it says so when that number is zero rather
+ * than implying a vote the record does not support.
  *
  * Null when the record names no item and establishes no decision. A lead titled
  * "Council meeting, date" is the record the desk keeps filing and cannot use, so
@@ -178,11 +131,16 @@ export function meetingLeadCopy(input: {
 }): { headline: string; why: string } | null {
   const subject = meetingLeadSubject(input);
   if (!subject) return null;
-  const meeting = meetingNameAndDate(input.title, input.meetingDate);
-  const dateSuffix = meeting.date ? `, ${meeting.date}` : "";
-  const room = Math.max(1, HEADLINE_MAX - dateSuffix.length);
-  const name = meeting.name.length > room ? `${meeting.name.slice(0, room - 1).trimEnd()}…` : meeting.name;
-  const headline = name + dateSuffix;
+  const when = input.meetingDate ? ` (${input.meetingDate})` : "";
+  /*
+    The meeting itself stays in the headline in front of the item: the desk needs
+    to know which session this is before it needs to know which item. The
+    parenthesized capture stamp stays at the end, where the standing-page rule R5
+    reads it (./lead-newsworthiness.ts `CAPTURE_STAMP`).
+  */
+  const stem = `${input.title}: ${subject.text}`;
+  const room = HEADLINE_MAX - when.length;
+  const headline = (stem.length > room ? `${stem.slice(0, Math.max(0, room - 1)).trimEnd()}…` : stem) + when;
   const named = input.items
     .slice(0, 8)
     .map((i) => `item ${i.item}${i.title ? ` ${i.title}` : ""}`)
