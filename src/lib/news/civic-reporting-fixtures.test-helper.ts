@@ -326,6 +326,7 @@ export function writerReply(over: { draft?: string; claimText?: string; claimIte
       {
         id: "s1",
         headline: "Council approves $733,170 airport-noise contract",
+        dek: "City Council voted seven to zero to approve a $733,170 airport-noise contract that will change quiet hours for residents under the approach path.",
         draft,
         plainBrief: "A contract that changes nighttime noise rules for residents under the flight path.",
         cannotSay: "The exact annual noise-mitigation spend.",
