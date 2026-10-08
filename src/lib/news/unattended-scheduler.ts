@@ -5,6 +5,7 @@ import { tickRoutineNoticeEditions } from "./routine-notice-worker.server.ts";
 import { tickStatsReports } from "./stats-reports.server.ts";
 import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
+import { tickYoutubeCaptureRetries } from "./meeting-capture.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -48,6 +49,7 @@ export function startUnattendedScheduler(): void {
     if (ticking) return;
     ticking = true;
     try {
+      await tickYoutubeCaptureRetries();
       await tickAllDueMonitors();
       await tickDailyScans();
       await tickRoutineNoticeEditions();
@@ -142,6 +144,9 @@ export function startUnattendedScheduler(): void {
   */
   void reattachDurableJobsOnStartup().catch((err) => {
     console.error("[townreporter] startup job reattachment failed:", err);
+  });
+  void tickYoutubeCaptureRetries().catch((err) => {
+    console.error("[townreporter] startup meeting retries failed:", err);
   });
 
   const intervalMs = 5 * 60 * 1000;

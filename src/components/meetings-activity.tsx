@@ -5,6 +5,7 @@ import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
 import { meetingStatusLabel } from "@/lib/news/meeting-activity-label";
 import { captureAudioAgain } from "@/lib/news/meeting-manual-run";
+import { isYoutubeRateLimit, nextYoutube429Retry } from "@/lib/news/meeting-capture-retry";
 
 function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -64,13 +65,13 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
         </div>
       ) : null}
 
-      {row.status === "failed" && row.youtubeRetryAt ? (
+      {row.status === "failed" && isYoutubeRateLimit(row.failureReason ?? "") ? (
         <p role="status" className="mt-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {meetingYoutubeBlockedLine(row.youtubeRetryAt)}
+          {meetingYoutubeBlockedLine(row.youtubeRetryAt ?? nextYoutube429Retry({}, new Date()).at)}
         </p>
       ) : null}
 
-      {row.status === "failed" && !row.youtubeRetryAt && (
+      {row.status === "failed" && !isYoutubeRateLimit(row.failureReason ?? "") && (
         <p role="alert" className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
           {row.failureReason ?? "Capture failed with no reason recorded."}
         </p>

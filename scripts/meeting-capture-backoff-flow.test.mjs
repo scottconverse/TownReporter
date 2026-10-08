@@ -19,7 +19,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       server: { middlewareMode: true, hmr: { port: 0 } },
       resolve: { alias: { "@": join(process.cwd(), "src") } },
     });
-    const { runMeetingAwareness } = await vite.ssrLoadModule("/src/lib/news/meeting-capture.ts");
+    const { runMeetingAwareness, restoreYoutubeCaptureRetries } = await vite.ssrLoadModule("/src/lib/news/meeting-capture.ts");
     const video = {
       id: "AbCdEfGhI12",
       url: "https://www.youtube.com/watch?v=AbCdEfGhI12",
@@ -39,7 +39,15 @@ test("a blocked meeting waits longer between retries and shows its next try", as
         if (/select enabled from meeting_capture_settings/i.test(query)) return [{ enabled: true }];
         if (/select duration_cap_seconds,size_cap_bytes/i.test(query)) return [{ duration_cap_seconds: 28800, size_cap_bytes: 524288000 }];
         if (/select channel_url,position from meeting_channel_priority/i.test(query)) return [{ channel_url: "https://www.youtube.com/@city" }];
-        if (/select video_id,channel_url,title,published,status,failure_reason/i.test(query)) return [...rows.values()];
+        if (/select r.newsroom_id,r.video_id|select video_id,channel_url,title,published,status,failure_reason/i.test(query)) return [...rows.values()];
+        if (/update meeting_capture_records set youtube_retry_day/i.test(query)) {
+          Object.assign(rows.get(params[1]), {
+            youtube_retry_day: params[2],
+            youtube_retry_count: params[3],
+            youtube_retry_at: params[4],
+          });
+          return [{ youtube_retry_at: params[4] }];
+        }
         if (/insert into meeting_capture_records/i.test(query)) {
           const [newsroomId, videoId, channelUrl, title, published] = params;
           const row = rows.get(videoId) ?? { newsroom_id: newsroomId, video_id: videoId };
@@ -76,6 +84,26 @@ test("a blocked meeting waits longer between retries and shows its next try", as
         }
       },
     };
+
+    rows.set(video.id, {
+      newsroom_id: 9,
+      video_id: video.id,
+      channel_url: "https://www.youtube.com/@city",
+      title: video.title,
+      published: video.published,
+      status: "failed",
+      failure_reason: "WARNING: yt-dlp HTTP Error 429: Too Many Requests",
+      youtube_retry_count: 0,
+      youtube_retry_at: null,
+    });
+    await runMeetingAwareness(sql, 9, { ...deps, listChannelVideos: async () => [] });
+    assert.ok(
+      rows.get(video.id).youtube_retry_at,
+      "a legacy blocked meeting must receive a retry time even outside the current feed",
+    );
+    await restoreYoutubeCaptureRetries(sql, now, deps.scheduleYoutubeRetry, 9);
+    rows.clear();
+    scheduled.length = 0;
 
     await Promise.all([
       runMeetingAwareness(sql, 9, deps),
@@ -120,6 +148,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
     const queryStub = await import(queryStubUrl);
     const chromeStubUrl = transpileToUrl(`export function Busy() { return null; } export function SecHead() { return null; }`, "meeting-chrome-stub.js");
     const activityUrl = await moduleUrl("src/components/meetings-activity.tsx", {
+      "@/lib/news/meeting-capture-retry": await moduleUrl("src/lib/news/meeting-capture-retry.ts"),
       "@tanstack/react-query": queryStubUrl,
       "@/components/desk-chrome": chromeStubUrl,
       "@/lib/news/meeting-activity": transpileToUrl("export async function listMeetingActivity() { return []; }", "meeting-activity-stub.js"),
@@ -137,7 +166,7 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       channelUrl: "https://www.youtube.com/@city",
       status: "failed",
       failureReason: "yt-dlp rate limited (HTTP 429)",
-      youtubeRetryAt: thirdRetry.toISOString(),
+      youtubeRetryAt: null,
       audioIntegrityStatus: null,
       canCaptureAgain: false,
       captureDisposition: null,

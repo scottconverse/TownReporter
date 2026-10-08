@@ -27,9 +27,14 @@ export function meetingYoutubeBlockedLine(retryAt: string | Date, now: Date = ne
   const currentListDate = formatListDateTime(now, PAPER.timezone);
   const nextDate = nextListDate.slice(0, nextListDate.lastIndexOf(", "));
   const currentDate = currentListDate.slice(0, currentListDate.lastIndexOf(", "));
-  const nextTry = nextDate === currentDate
-    ? formatClockTime(next, PAPER.timezone)
-    : `${nextDate} at ${formatClockTime(next, PAPER.timezone)}`;
+  const tomorrow = formatListDateTime(new Date(now.getTime() + 86_400_000), PAPER.timezone);
+  const tomorrowDate = tomorrow.slice(0, tomorrow.lastIndexOf(", "));
+  const nextTry =
+    nextDate === currentDate
+      ? formatClockTime(next, PAPER.timezone)
+      : nextDate === tomorrowDate
+        ? `tomorrow ${formatClockTime(next, PAPER.timezone)}`
+        : `${nextDate} at ${formatClockTime(next, PAPER.timezone)}`;
   return `Capture blocked by YouTube (too many requests). Next try ${nextTry}`;
 }
 

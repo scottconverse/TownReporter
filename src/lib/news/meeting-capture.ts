@@ -82,6 +82,51 @@ function scheduleYoutubeRetryPass(newsroomId: number, retryAt: Date): void {
   timers.set(newsroomId, { at, timer });
 }
 
+// Reattach saved timers after a restart; legacy failures need their first wait.
+export async function restoreYoutubeCaptureRetries(
+  sql: Sql,
+  now = new Date(),
+  schedule = scheduleYoutubeRetryPass,
+  newsroomId?: number,
+): Promise<void> {
+  const rows = await sql.query<{
+    newsroom_id: number;
+    video_id: string;
+    failure_reason: string;
+    youtube_retry_day: string | null;
+    youtube_retry_count: number | null;
+    youtube_retry_at: string | null;
+  }>(
+    `select r.newsroom_id,r.video_id,r.failure_reason,r.youtube_retry_day,r.youtube_retry_count,r.youtube_retry_at
+      from meeting_capture_records r left join meeting_capture_settings s on s.newsroom_id=r.newsroom_id
+      where r.status='failed' and coalesce(s.enabled,true) and ($1::integer is null or r.newsroom_id=$1)`,
+    [newsroomId ?? null],
+  );
+  for (const row of rows) {
+    if (!isYoutubeRateLimit(row.failure_reason ?? "")) continue;
+    await withMeetingCapturePassLock(Number(row.newsroom_id), async () => {
+      let at = row.youtube_retry_at ? new Date(row.youtube_retry_at) : null;
+      if (!at) {
+        const retry = nextYoutube429Retry(
+          { retryDay: row.youtube_retry_day, retryCount: row.youtube_retry_count },
+          now,
+        );
+        const updated = await sql.query<{ youtube_retry_at: string }>(
+          `update meeting_capture_records set youtube_retry_day=$3,youtube_retry_count=$4,youtube_retry_at=$5,updated_at=now()
+           where newsroom_id=$1 and video_id=$2 and status='failed' and youtube_retry_at is null returning youtube_retry_at`,
+          [row.newsroom_id, row.video_id, retry.day, retry.count, retry.at.toISOString()],
+        );
+        at = updated[0] ? new Date(updated[0].youtube_retry_at) : null;
+      }
+      if (at) schedule(Number(row.newsroom_id), at);
+    });
+  }
+}
+
+export async function tickYoutubeCaptureRetries(): Promise<void> {
+  await restoreYoutubeCaptureRetries(await getSql());
+}
+
 const EMPTY_RESULT: MeetingAwarenessResult = {
   configured: false, found: [], uncaptured: [], captured: [], failed: [],
   coverageLine: "", failures: [], archivePath: null,
@@ -386,6 +431,23 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
     durationSeconds: r.duration_seconds, captionRevisionTimestamp: r.caption_revision_timestamp,
     revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false, lastRevisionAt: r.last_revision_at,
   }));
+  for (const record of captured) {
+    if (record.status !== "failed" || !isYoutubeRateLimit(record.failureReason ?? "")) continue;
+    if (!record.youtubeRetryAt) {
+      const retry = nextYoutube429Retry({ retryDay: record.youtubeRetryDay, retryCount: record.youtubeRetryCount }, now);
+      await sql.query(
+        `update meeting_capture_records set youtube_retry_day=$3,youtube_retry_count=$4,youtube_retry_at=$5,updated_at=now()
+         where newsroom_id=$1 and video_id=$2 and youtube_retry_at is null`,
+        [newsroomId, record.videoId, retry.day, retry.count, retry.at.toISOString()],
+      );
+      record.youtubeRetryDay = retry.day;
+      record.youtubeRetryCount = retry.count;
+      record.youtubeRetryAt = retry.at.toISOString();
+    }
+    scheduleYoutubeRetry(newsroomId, new Date(record.youtubeRetryAt));
+    if (!foundById.has(record.videoId)) found.push({ id: record.videoId, url: `https://www.youtube.com/watch?v=${record.videoId}`,
+      channelUrl: record.channelUrl, title: record.title, published: record.published, duration: 0, tab: "rss" });
+  }
   // The database is the capture source of truth. Reconcile the yt-dlp cache
   // BEFORE asking yt-dlp to capture anything; doing this only after the pass
   // lets a stale file suppress a meeting the database says is uncaptured.
