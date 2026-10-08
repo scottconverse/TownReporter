@@ -1143,7 +1143,6 @@ function DarkPage() {
               notice={notice}
               noticeOk={noticeOk}
               queuedLead={queued?.invId === openId ? queued.leadId : null}
-              queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
               queuePending={toQueue.isPending}
               queueError={queueError?.invId === openId ? queueError.message : null}
               followPending={followLead.isPending}
@@ -1464,7 +1463,6 @@ function InvestigationWorkspace({
   notice,
   noticeOk,
   queuedLead,
-  queuedAlready,
   queuePending,
   queueError,
   followPending,
@@ -1502,7 +1500,6 @@ function InvestigationWorkspace({
   notice: string | null;
   noticeOk: boolean;
   queuedLead: number | null;
-  queuedAlready: boolean;
   queuePending: boolean;
   queueError: string | null;
   followPending: boolean;
@@ -1658,17 +1655,6 @@ function InvestigationWorkspace({
     .filter((artifact) => /^https?:\/\//i.test(artifact.url))
     .map((artifact) => ({ id: artifact.id, title: editorTitle(artifact.title) || organizationFromUrl(artifact.url) || "Source page", url: artifact.url }));
   const foundAnswer = detail?.investigationFollowUps?.find((followUp) => followUp.lastState === "found") ?? null;
-  const nextStep = String(detail?.brief?.next ?? "").toLowerCase();
-  const recommendedDecision = foundAnswer ? "review"
-    : /queue|draft (?:the )?story|send to/.test(nextStep)
-    ? "queue"
-    : /wait|watch|monitor|check again/.test(nextStep)
-      ? "watch"
-      : /close|no finding/.test(nextStep)
-        ? "close"
-        : /keep|continue|investigat|research/.test(nextStep)
-          ? "continue"
-          : "follow-up";
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
   // identical to a working one (Dark Desk F6).
@@ -1929,20 +1915,13 @@ function InvestigationWorkspace({
             </Notice>
           ) : queuedLead != null ? (
             <Notice kind="ok">
-              {queuedAlready
-                ? "Already on the working queue as a story lead."
-                : "On the working queue as a story lead."}{" "}
-              Dark Desk did not publish.{" "}
+              Filed to the Queue ·{" "}
               <Link
                 to="/desk/story/$leadId"
                 params={{ leadId: String(queuedLead) }}
                 className="inline-link"
               >
                 Open the lead →
-              </Link>
-              {" · "}
-              <Link to="/desk/queue" className="inline-link">
-                Open the queue
               </Link>
               {canUndoDisposition ? <InkButton small tone="quiet" onClick={onPullBack}>Undo</InkButton> : null}
             </Notice>
@@ -2084,30 +2063,26 @@ function InvestigationWorkspace({
         </div>
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
         <div className="astra-panel-acts" aria-label="File decisions">
-          <InkButton tone={recommendedDecision === "continue" ? "solid" : "quiet"} disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
+          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
+            Start an AI follow-up
+          </InkButton>
+          <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
             Keep investigating
           </InkButton>
-          {foundAnswer ? (
-            <Link className="btn solid" to="/desk/follow-ups">Review finding</Link>
-          ) : (
-            <InkButton tone={recommendedDecision === "follow-up" ? "solid" : "quiet"} disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
-              Start an AI follow-up
-            </InkButton>
-          )}
-          <InkButton tone={recommendedDecision === "watch" ? "solid" : "quiet"} disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
+          <InkButton tone="ghost" disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
             Wait and watch
           </InkButton>
-          <InkButton tone={recommendedDecision === "queue" ? "solid" : "quiet"} disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
+          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
             {queuePending ? "Sending…" : "Send to the queue"}
           </InkButton>
-          <InkButton tone={recommendedDecision === "close" ? "solid" : "quiet"} disabled={keepDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
+          <InkButton tone="quiet" disabled={keepDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
             Close: no finding
           </InkButton>
         </div>
         {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}
         {watchNotice ? <p className="note" role="status">{watchNotice}</p> : null}
         <p className="astra-note">
-          Publication remains an editorial decision.
+          Nothing here prints. "Send to the queue" files a lead for you to review.
         </p>
       </div>
 
@@ -2115,7 +2090,7 @@ function InvestigationWorkspace({
         <FollowUpDialog
           leads={followUpLeads.data ?? []}
           initial={{
-            what: unanswered[0] ?? "",
+            what: parentTitle,
             agentKind: watchPages.length ? "recheck" : "search",
             targets: watchPages.slice(0, 3).map((page) => page.url).join("\n"),
             leadId: null,
