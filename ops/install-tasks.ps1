@@ -68,8 +68,7 @@ function HiddenAction($script) {
 
 $atLogon    = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $everyFive  = New-ScheduledTaskTrigger -Once -At (Get-Date).Date `
-                -RepetitionInterval (New-TimeSpan -Minutes 5) `
-                -RepetitionDuration ([TimeSpan]::MaxValue)
+                -RepetitionInterval (New-TimeSpan -Minutes 5)
 
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
