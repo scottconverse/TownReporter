@@ -307,7 +307,7 @@ export async function fileScanLeads(
     }
 
     const sibling = insertedThisRun.find((prior) =>
-      sameStoryForMerge({ headline, source_urls: candidateUrls }, prior, place),
+      sameStoryForMerge({ headline, source_urls: candidateUrls, topic }, prior, place),
     );
     if (sibling) {
       const merged = mergeSourceUrls(sibling.source_urls, candidateUrls);
@@ -322,7 +322,7 @@ export async function fileScanLeads(
       continue;
     }
 
-    const matchId = findMatchingLead({ headline, source_urls: candidateUrls }, existing, place);
+    const matchId = findMatchingLead({ headline, source_urls: candidateUrls, topic }, existing, place);
 
     let possibleDuplicateOf: number | null = null;
     let initialStatus = "new";
@@ -334,8 +334,8 @@ export async function fileScanLeads(
       const matched = existing.find((l) => l.id === matchId)!;
       matchedHeadline = matched.headline;
       const strength = matchStrength(
-        { headline, source_urls: candidateUrls },
-        { headline: matched.headline, source_urls: matched.source_urls },
+        { headline, source_urls: candidateUrls, topic },
+        { headline: matched.headline, source_urls: matched.source_urls, topic: matched.topic },
         place,
       );
       if (strength === "strong") {
@@ -506,6 +506,7 @@ export async function fileScanLeads(
       id: inserted[0]!.id,
       status: inserted[0]!.status,
       headline: inserted[0]!.headline,
+      topic,
       source_urls: candidateUrls,
       created_at: new Date().toISOString(),
       // `== null` rather than the sanitized "" on purpose: a model that wrote
