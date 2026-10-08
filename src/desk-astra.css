@@ -7056,10 +7056,8 @@
 .desk-ltr.astra .astra-deep-file > .model-picker { margin: 0; }
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker-help,
 .desk-ltr.astra .astra-deep-file > .model-picker > .model-picker > .model-picker-help {
-  max-height: 1.35em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .desk-ltr.astra .astra-deep-file .astra-bound { padding-top: 8px; padding-bottom: 8px; }
 .desk-ltr.astra .astra-plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
