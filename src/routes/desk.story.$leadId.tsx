@@ -25,6 +25,7 @@ import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/stor
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
+import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -283,6 +284,7 @@ function StoryPage() {
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
   const [manualDraft, setManualDraft] = useState<"write" | "paste" | null>(null);
+  const [selectedMeetingTranscriptArtifactId, setSelectedMeetingTranscriptArtifactId] = useState<number | null>(null);
   useEffect(() => {
     const resize = () => {
       for (const el of document.querySelectorAll<HTMLTextAreaElement>(
@@ -497,6 +499,18 @@ function StoryPage() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   });
+
+  const meetingTranscriptChoices = data?.meetingTranscriptChoices ?? [];
+  const selectedMeetingArtifactId = selectedMeetingTranscriptArtifactId
+    ?? data?.defaultMeetingTranscriptArtifactId
+    ?? null;
+  useEffect(() => {
+    setSelectedMeetingTranscriptArtifactId((current) =>
+      data?.meetingTranscriptChoices?.some((choice) => choice.artifactId === current)
+        ? current
+        : data?.defaultMeetingTranscriptArtifactId ?? null,
+    );
+  }, [data?.meetingTranscriptChoices, data?.defaultMeetingTranscriptArtifactId]);
 
   const [topic, setTopic] = useState(() => initialStoryTopic(data?.lead.topic));
 
@@ -771,9 +785,10 @@ function StoryPage() {
       await saveReportingNotes({
         data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
+      const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
       if (fromLedger)
-        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope } });
-      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope } });
+        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
     },
     onMutate: (input) => {
       setMsg("");
@@ -3148,7 +3163,7 @@ function StoryPage() {
               edit, then publish.
             </p>
           )}
-<div className="work-bar astra-story-actions">
+      <div className="work-bar astra-story-actions">
         {/*
           THE DRAWN ACTION ROW (unit CW).
 
@@ -3222,6 +3237,14 @@ function StoryPage() {
           with that last condition: its row is drawn inside a draft that
           already has a body.
         */}
+        {!locked && !onPaper && meetingTranscriptChoices.length ? (
+          <MeetingTranscriptChooser
+            choices={meetingTranscriptChoices}
+            selectedArtifactId={selectedMeetingArtifactId}
+            onSelect={setSelectedMeetingTranscriptArtifactId}
+            disabled={waiting || data.job?.status === "queued" || data.job?.status === "running"}
+          />
+        ) : null}
         {!locked && !onPaper ? (
           <>
             <div className={data.draft?.body ? "story-redraft-inline" : ""}>

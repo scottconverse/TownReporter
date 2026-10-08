@@ -19,7 +19,7 @@ export const usePaperDateFormatters=()=>({formatListDateTime:()=> 'Oct. 8'}), us
 const copy = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": stubUrl("export const looksLikeProviderAuthFailure=()=>false, providerAuthTarget=()=>'';"),
   "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>({subjects:0,names:0});"),
-  "../paper.ts": stubUrl("export const TOPICS=[];"),
+  "../paper.ts": stubUrl("export const TOPICS = [], PAPER = { timezone: \"America/Denver\" }; export const formatClockTime = () => \"\", formatListDateTime = () => \"\";"),
 });
 const imports = Object.fromEntries(["@tanstack/react-router", "@tanstack/react-query", "@/components/desk-chrome", "@/components/meetings-activity", "@/components/scan-source-coverage", "@/components/states", "@/lib/news/desk", "@/lib/paper-context-state", "@/components/desk-action", "@/components/job-card-state", "@/components/JobCard", "@/components/provider-signin-button", "@/components/model-picker", "@/components/first-run-picker-default", "@/components/first-run-model", "@/components/paper-setup-gate", "@/components/PaperSetupGateNote", "@/lib/news/provider-registry", "@/lib/use-sections"].map(name => [name, stub]));
 imports["@/lib/news/desk-copy"] = copy;

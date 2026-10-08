@@ -1,11 +1,45 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
+export const meetingAudioIntegrityNotice = "The saved audio does not match its record. Capture it again.";
+
+export function meetingTranscriptChoiceLabel(kind: "whisper" | "captions"): string {
+  return kind === "whisper" ? "Whisper transcript" : "YouTube captions";
+}
+
+export function meetingTranscriptReadLine(kind: "whisper" | "captions"): string {
+  return kind === "whisper"
+    ? "The reporter will read the Whisper transcript."
+    : "The reporter will read the YouTube captions.";
+}
+
+export const meetingTranscriptRunConflict =
+  "A draft is already using a different transcript. Open that draft before choosing another one.";
+export const meetingTranscriptSelectionRefused = "Choose a transcript saved for this meeting.";
+export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
+
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
-import { TOPICS } from "../paper.ts";
+import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
 import type { SourceCadence } from "./adaptive-source-selection.ts";
 import type { SourcePurpose } from "./source-inventory.ts";
 import type { ScanSourceCoverageEntry } from "./scan-source-coverage.ts";
+
+export function meetingYoutubeBlockedLine(retryAt: string | Date, now: Date = new Date()): string {
+  const next = retryAt instanceof Date ? retryAt : new Date(retryAt);
+  const nextListDate = formatListDateTime(next, PAPER.timezone);
+  const currentListDate = formatListDateTime(now, PAPER.timezone);
+  const nextDate = nextListDate.slice(0, nextListDate.lastIndexOf(", "));
+  const currentDate = currentListDate.slice(0, currentListDate.lastIndexOf(", "));
+  const tomorrow = formatListDateTime(new Date(now.getTime() + 86_400_000), PAPER.timezone);
+  const tomorrowDate = tomorrow.slice(0, tomorrow.lastIndexOf(", "));
+  const nextTry =
+    nextDate === currentDate
+      ? formatClockTime(next, PAPER.timezone)
+      : nextDate === tomorrowDate
+        ? `tomorrow ${formatClockTime(next, PAPER.timezone)}`
+        : `${nextDate} at ${formatClockTime(next, PAPER.timezone)}`;
+  return `Capture blocked by YouTube (too many requests). Next try ${nextTry}`;
+}
 
 export const SOURCE_SCAN_PREFERENCE_PURPOSE_OPTIONS: readonly {
   value: SourcePurpose;

@@ -97,7 +97,7 @@ export async function seedMeetingFixture(sql: Sql): Promise<number> {
       (newsroom_id, video_id, artifact_type, storage_path, format, sha256, source_method, retention_mode)
     values (${FIXTURE_NEWSROOM}, ${FIXTURE_VIDEO}, 'transcript',
             '/fixtures/meeting-39.jsonl', 'jsonl', 'fixture-sha-39', 'fixture', 'transcript-only')
-    on conflict (newsroom_id, video_id, artifact_type, sha256) do nothing
+    on conflict do nothing
   `;
   const [artifact] = await sql<{ id: number }>`
     select id from meeting_transcript_artifacts

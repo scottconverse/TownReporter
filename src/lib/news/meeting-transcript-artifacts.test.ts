@@ -190,7 +190,7 @@ describe("meeting transcript artifacts Slice 3", () => {
         if (/select storage_root/i.test(query)) return [{ storage_root: root }] as T[];
         if (/select retention_mode/i.test(query)) return [{ retention_mode: "transcript-only" }] as T[];
         if (/insert into meeting_transcript_artifacts/i.test(query)) { artifactInsertAttempts += 1; throw new Error("the interrupted writer must not reach artifact insert"); }
-        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/from meeting_transcript_artifacts/i.test(query) && /^\s*select/i.test(query)) return [] as T[];
         if (/insert into meeting_artifact_storage_findings/i.test(query)) {
           findings.push({ kind: String(params[2]), originalPath: String(params[3]), quarantinePath: params[4] == null ? null : String(params[4]) });
           return [] as T[];
@@ -251,7 +251,7 @@ describe("meeting transcript artifacts Slice 3", () => {
           attemptedArtifactPaths.push(String(params[2]));
           throw new Error("simulated process/database failure after atomic file publication");
         }
-        if (/select id,storage_path,sha256,info_path,info_sha256,info_missing_reason/i.test(query)) return [] as T[];
+        if (/from meeting_transcript_artifacts/i.test(query) && /^\s*select/i.test(query)) return [] as T[];
         if (/insert into meeting_artifact_storage_findings/i.test(query)) {
           findings.push({ newsroom_id: Number(params[0]), finding_kind: String(params[2]), original_path: String(params[3]), quarantine_path: params[4] == null ? null : String(params[4]) });
           return [] as T[];

@@ -168,6 +168,8 @@ export function voteSourceLabel(source: string | null | undefined): string | nul
       return "structured vote record";
     case "minutes":
       return "official minutes";
+    case "packet":
+      return "PrimeGov packet";
     default:
       return source;
   }
@@ -180,6 +182,7 @@ export type VoteRecord = {
   tally: string;
   result: string;
   source: VoteSource;
+  locator?: string | null;
 };
 
 export type StructuredVote = {
@@ -214,7 +217,9 @@ export function extractStructuredVote(input: {
   if (input.structuredRecord) candidates.push(input.structuredRecord);
   if (input.minutes) candidates.push(input.minutes);
   if (input.packet) candidates.push(input.packet);
-  const authoritative = candidates.filter((c) => c.tally && c.tally.trim());
+  const authoritative = candidates.filter(
+    (candidate) => candidate.tally.trim() && candidate.motion.trim() && candidate.motion.trim() !== input.item,
+  );
   const disagreements: string[] = [];
   for (let i = 0; i < authoritative.length; i += 1) {
     for (let j = i + 1; j < authoritative.length; j += 1) {
@@ -246,7 +251,7 @@ export function extractStructuredVote(input: {
       disagreements,
     };
   }
-  const provenance = [{ source: chosen.source, locator: null as string | null }];
+  const provenance = [{ source: chosen.source, locator: chosen.locator ?? null }];
   if (input.transcript) provenance.push({ source: input.transcript.source, locator: input.transcript.excerpt.slice(0, 160) });
   return {
     item: input.item,
