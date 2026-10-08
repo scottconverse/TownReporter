@@ -200,6 +200,31 @@ after(async () => {
   rmSync(storageRoot, { recursive: true, force: true });
 });
 
+// guards: a newer audio capture could break transcript revision storage or point a review at unrelated evidence.
+test("caption revisions retain the prior transcript after replacement audio", async () => {
+  const sql = await getSql();
+  const seed = await seedCapturedMeeting(sql, 97109, { videoId: "caption-after-audio", audio: Buffer.from("original audio"), durationSeconds: 15 });
+  const sourcePath = join(seed.root, "captions.vtt");
+  const apply = async (text: string) => {
+    writeFileSync(sourcePath, text);
+    return applyCapturedMeetingTranscript(sql, {
+      newsroomId: seed.room, userId: seed.user,
+      video: { id: seed.videoId, channelUrl: "https://www.youtube.com/@city", title: "Council", published: "2026-10-08" },
+      result: { ok: true, parsed: { text, format: "vtt", sha256: createHash("sha256").update(text).digest("hex"), sourcePath }, infoPath: "", info: { durationSeconds: 15, videoTimestamp: null, captionRevisionTimestamp: null }, argv: [], stdout: "", stderr: "" },
+    }, { runSection5: async () => ({ aligned: false, alignmentReason: null, chunkCount: 0, voteCount: 0, unalignedLead: null, structuredVoteReason: "fixture", citations: [], items: [], votes: [] }) });
+  };
+  const prior = await apply("Council approved the plan.");
+  const audioPath = join(seed.root, "replacement.opus");
+  writeFileSync(audioPath, "replacement audio");
+  const audio = await storeMeetingAudioArtifact(sql, { newsroomId: seed.room, videoId: seed.videoId, audioSourcePath: audioPath, format: "opus", triggerReason: "replacement" });
+  assert.notEqual(audio.id, prior.artifactId);
+  await sql.query("update meeting_audio_captures set captured_at=now()+interval '1 minute' where id=$1", [audio.id]);
+  const current = await apply("Council delayed the plan.");
+  assert.equal(current.revised, true);
+  const revisions = await sql.query("select artifact_id,prior_artifact_id from meeting_transcript_revisions where newsroom_id=$1 and video_id=$2", [seed.room, seed.videoId]);
+  assert.deepEqual(revisions, [{ artifact_id: current.artifactId, prior_artifact_id: prior.artifactId }]);
+});
+
 test("textflowkit absent: the meeting stays audio-only and nothing is queued or recorded as a failure", async () => {
   const sql = await getSql();
   const audio = Buffer.from("opus-bytes-for-the-not-installed-case");

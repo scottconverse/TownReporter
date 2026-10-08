@@ -731,13 +731,9 @@ export async function applyCapturedMeetingTranscript(
           revisionRecorded: false,
         };
     const priorArtifacts = await tx.query<{ id: number }>(
-      `select id from (
-         select id,captured_at from meeting_transcript_artifacts
-          where newsroom_id=$1 and video_id=$2 and artifact_type='transcript'
-         union all
-         select id,captured_at from meeting_audio_artifact_inventory
-          where newsroom_id=$1 and video_id=$2
-       ) prior order by captured_at desc,id desc limit 1`,
+      `select id from meeting_transcript_artifacts
+        where newsroom_id=$1 and video_id=$2 and artifact_type='transcript'
+        order by captured_at desc,id desc limit 1`,
       [input.newsroomId, input.video.id],
     );
     const priorArtifactId = priorArtifacts[0]?.id ?? null;
