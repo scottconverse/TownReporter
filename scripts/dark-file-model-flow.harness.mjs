@@ -74,6 +74,7 @@ const darkRailStub = stub(`
   export const fullFileQuestion = (title) => title; export const signalCounts = () => ({ total: 0, covered: 0, toReview: 0 });
 `);
 const nullComponents = stub(`import { createElement } from "react"; export const DarkDialsPanel = () => null; export const PageWatchPanel = () => null; export function DarkFileDialog({ open, prefill }) { return open ? createElement("div", { role: "dialog", "data-question": prefill?.question ?? "", "data-tip": prefill?.tip ?? "", "data-explanation": prefill?.explanation ?? "" }) : null; } export function Dialog({ open, children, primaryLabel, onPrimary }) { return open ? createElement("div", { role: "dialog" }, children, createElement("button", { onClick: onPrimary }, primaryLabel)) : null; } export function FollowUpDialog({ initial, onSubmit }) { return createElement("div", { role: "dialog", "aria-label": "New AI follow-up" }, initial.what, createElement("button", { onClick: () => onSubmit({ ...initial, schedule: "daily" }) }, "Start follow-up")); } export const InvestigationBriefCard = () => null; export const SectionTldr = () => null; export const SearchTrailEntry = () => null; export const ProviderSignInButton = () => null; export const PaperSetupGateNote = () => null;`);
+const { ModelPicker: RealPicker } = await import("./model-picker-render.harness.mjs");
 const imports = {
   "@/lib/news/dark-rail": darkRailStub,
   "@tanstack/react-router": routerStub,
@@ -136,4 +137,4 @@ const detail = {
 detail.investigation.ordinary_explanation = "A routine delay";
 globalThis.__darkFlow.fixtures = { investigations: [file], "worth-a-look": [], "tip-subreddit": { subreddit: "longmont" }, "dark-dials": { place: { city: "Longmont", county: "Boulder County" } }, "investigation-activity": [], "follow-up-story-options": [], detail };
 
-export { window, React, createRoot, h, calls, file, detail, Route };
+export { window, React, createRoot, h, calls, file, detail, Route, RealPicker };

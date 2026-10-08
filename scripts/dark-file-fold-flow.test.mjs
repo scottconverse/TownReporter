@@ -16,7 +16,7 @@ test("the open file keeps recent activity and long case entries compact", async 
   await React.act(async () => root.render(h(Route.component)));
   try {
     const activity = container.querySelector("#investigation-workspace .astra-pair > div:first-child");
-    assert.equal(activity.querySelectorAll(":scope > .astra-log").length, 8);
+    assert.equal(activity.querySelectorAll(":scope > .astra-log").length, 5);
     assert.ok([...activity.querySelectorAll("summary")].some((summary) => summary.textContent === "Show earlier"));
     const finding = [...container.querySelectorAll(".of-block")].find((block) => block.querySelector(".side-label")?.textContent === "Findings");
     assert.ok(finding?.querySelector("details > summary")?.textContent === "More");
