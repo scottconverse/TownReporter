@@ -1931,8 +1931,6 @@ export async function performReportingWork(
   });
   gaps.push(...writing.gaps);
   const stories: PackageStory[] = [];
-  // Re-checking gets one provider pass budget shared across all stories.
-  const checkDeadline = (deps.now?.() ?? Date.now()) + callMs;
   for (const story of writing.stories) {
     /*
       BIND CLAIMS AGAINST EVERY DOCUMENT THE RUN READ, not only the editor's
@@ -1953,8 +1951,6 @@ export async function performReportingWork(
     const identityChecked = validatePacketSources(bound, record);
     const researched = await reviewOpenStoryClaims({
       story: identityChecked,
-      checkDeadline,
-      now: deps.now,
       record,
       documents: allDocuments,
       method,
@@ -3626,7 +3622,7 @@ function checkSourceForCandidate(candidate: ClaimCheckCandidate, claimId: string
   };
 }
 
-/** Bounded, pinned-model checks for claims the first evidence pass left open. */
+/** One targeted, pinned-model check for every claim the first evidence pass left open. */
 export async function reviewOpenStoryClaims(input: {
   story: PackageStory;
   record: WholeRecord;
@@ -3635,31 +3631,13 @@ export async function reviewOpenStoryClaims(input: {
   chat: typeof grokChat;
   chatOpts: Record<string, unknown>;
   throwIfCancelled: () => Promise<void>;
-  checkDeadline?: number;
-  now?: () => number;
 }): Promise<PackageStory> {
   let story = input.story;
-  const now = input.now ?? Date.now;
-  const passMs = Math.max(45_000, Number(input.chatOpts.timeoutMs) || 45_000);
-  const deadline = input.checkDeadline ?? now() + passMs;
-  // Keep 10% of the existing pass budget (at most its 45-second minimum)
-  // for finishing the pass rather than starting another model call.
-  const reserveMs = Math.min(45_000, passMs / 10);
-  const firstParagraph = story.draft.split(/\n\s*\n/)[0] ?? "";
-  const priority = (text: string) => story.headline.includes(text) ? 0 : firstParagraph.includes(text) ? 1 : 2;
-  const openIds = story.claims.filter((claim) => claim.status !== "VERIFIED")
-    .sort((a, b) => priority(a.text) - priority(b.text)).map((claim) => claim.id);
-  let calls = 0;
+  const openIds = story.claims.filter((claim) => claim.status !== "VERIFIED").map((claim) => claim.id);
   for (const id of openIds) {
     await input.throwIfCancelled();
     const claim = story.claims.find((row) => row.id === id);
     if (!claim || claim.status === "VERIFIED") continue;
-    if (calls >= 8 || deadline - now() <= reserveMs) {
-      const reason = "Not re-checked: the run reached its check limit.";
-      story = { ...story, claims: story.claims.map((row) => row.id === id
-        ? { ...row, status: "UNVERIFIED", nextCheck: reason, checkReason: reason } : row) };
-      continue;
-    }
     const candidates = claimCheckCandidates(claim.text, input.record, input.documents);
     const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript").sort((a, b) => b.score - a.score).slice(0, 8);
     const documentCandidates = candidates.filter((candidate) => candidate.kind === "document").sort((a, b) => b.score - a.score).slice(0, 12);
@@ -3679,10 +3657,7 @@ export async function reviewOpenStoryClaims(input: {
       "CLOSEST FULL-TRANSCRIPT PASSAGES: " + JSON.stringify(transcriptCandidates.map(({ quote, locator, url }) => ({ quote, locator, url }))),
       "CLOSEST ALREADY-READ DOCUMENT PASSAGES: " + JSON.stringify(documentCandidates.map(({ quote, title, locator, url }) => ({ quote, title, locator, url }))),
     ].join("\n\n");
-    calls++;
-    const response = await input.chat(methodSystemPrompt(input.method), prompt, 3_000, {
-      ...input.chatOpts, timeoutMs: Math.min(passMs, deadline - now()),
-    } as never);
+    const response = await input.chat(methodSystemPrompt(input.method), prompt, 3_000, input.chatOpts as never);
     const answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
     const verdict = str(answer?.verdict).toUpperCase();
     const replacement = str(answer?.replacement).trim();
