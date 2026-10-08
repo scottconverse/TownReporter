@@ -27,7 +27,7 @@ import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, mapLimit, withRetry, IngestFetchError } from "./ingest";
+import { ingestUrl, ingestDocument, withRetry, IngestFetchError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
   BLOCKED_TRIES_PER_HOST_PER_DAY,
@@ -1755,6 +1755,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   let writeQueuedSourceWrites = async (_sql: Sql): Promise<void> => {};
   let sourceCoverage: ScanSourceCoverageEntry[] = [];
   const failureReceipt = {
+    sourcesCompleted: 0,
     sourcesSelected: 0,
     sourcesAttempted: 0,
     sourcesFetched: 0,
@@ -2105,7 +2106,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   let fetchedCount = 0;
   const SCAN_WATCH_CAP = 200;
   const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
-  failureReceipt.sourcesAttempted = watchSlice.length;
+  failureReceipt.sourcesAttempted = 0;
   sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
   if (!sourceCoverage.length && sources.length)
     sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
@@ -2130,7 +2131,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   /*
     FB1, unit 1: the fetch pass is the scan's longest silence.
 
-    Up to two hundred pages, six at a time, and until this the whole pass
+    Up to two hundred pages, and until this the whole pass
     reported nothing at all -- not a stage, not a count, not a heartbeat. The
     card could only say "Working…" for as long as it took, which on a real watch
     list is minutes, and the run row in the database kept reading zero fetched
@@ -2183,7 +2184,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     await sql`
       update scan_runs
       set sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_fetched = ${fetchedCount},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${failureReceipt.sourcesAnalyzed},
@@ -2201,6 +2202,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   const noteSourceProgress = async () => {
     attemptedCount += 1;
+    failureReceipt.sourcesCompleted = attemptedCount;
     /*
       The fetch is the scan's second arrival, so its count fills 5-55 of the
       bar and not 0-100: the model batches and the filing come after it, and a
@@ -2218,9 +2220,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   await writeLiveRunRow(true);
   await reportStage("Reading the sources");
   let fetchLoopError: unknown;
-  await mapLimit(watchSlice, 6, async (src) => {
-    if (fetchLoopError) return;
+  // One source at a time makes Cancel a boundary the editor can rely on:
+  // finish the current fetch, keep its observation, and never start the next.
+  // A batch of six could otherwise begin five more reads after the press.
+  for (const src of watchSlice) {
     try {
+    await throwIfJobCancelled(job.id);
     await deps.scheduledGuard?.();
     /*
       SH-B items 2 and 3, the half that makes them real: a row the site asked
@@ -2264,7 +2269,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       });
       skippedThisPass += 1;
       await noteSourceProgress();
-      return;
+      continue;
     }
     /*
       The per-host allowance for the day. A newsroom can watch six pages of one
@@ -2301,25 +2306,30 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         });
         skippedThisPass += 1;
         await noteSourceProgress();
-        return;
+        continue;
       }
     }
     try {
+      failureReceipt.sourcesAttempted += 1;
       const bundle = await withRetry(async () => {
+        await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         return fetchUrl(src.url);
       });
       const sourceText = postgresText(bundle.text);
       const extras: { url: string; text: string }[] = [];
       for (const extra of bundle.extras.slice(0, 4)) {
+        await throwIfJobCancelled(job.id);
         await deps.scheduledGuard?.();
         try {
           const doc = await withRetry(async () => {
+            await throwIfJobCancelled(job.id);
             await deps.scheduledGuard?.();
             return fetchUrl(extra);
           });
           extras.push({ url: extra, text: postgresText(doc.text) });
         } catch (err) {
+          if (err instanceof JobCancelledError) throw err;
           if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(String(err)))
             throw err;
           /* skip a bad packet */
@@ -2374,6 +2384,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       });
       await noteSourceProgress();
     } catch (err) {
+      if (err instanceof JobCancelledError) throw err;
       const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
       if (deps.scheduledGuard && /Scheduled scan permission was withdrawn/.test(msg)) throw err;
       /*
@@ -2453,10 +2464,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       await noteSourceProgress();
     }
     } catch (error) {
-      // Drain in-flight fetches before settling their queued observations.
-      fetchLoopError ??= error;
+      fetchLoopError = error;
+      break;
     }
-  });
+  }
   sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
   /*
@@ -3176,6 +3187,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     );
   } catch (error) {
     const failure = postgresText(error instanceof Error ? error.message : String(error));
+    const cancelledSummary = error instanceof JobCancelledError
+      ? `Cancelled after ${failureReceipt.sourcesCompleted} of ${failureReceipt.sourcesSelected} sources`
+      : null;
     {
       try {
         const settle = async (receiptSql: Sql) => {
@@ -3195,7 +3209,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
                 meetings_captured = ${meetingAwareness?.captured.filter((r) => r.status === "captured").length ?? 0},
                 meetings_failed = ${meetingAwareness?.failed.length ?? 0},
                 meeting_failures = ${postgresText(JSON.stringify(meetingAwareness?.failures ?? [])).slice(0, 32000)},
-                summary = null,
+                summary = ${cancelledSummary},
                 error = coalesce(error, ${failure.slice(0, 800)})
             where id = ${failureRunId} and newsroom_id = ${job.newsroom_id} and finished_at is null
           `;
