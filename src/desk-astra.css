@@ -8525,9 +8525,14 @@
 .desk-ltr.astra[data-desk-page="dark"] .astra-pair .astra-case-h {
   border-bottom: 2px solid var(--fg);
 }
-.desk-ltr.astra[data-desk-page="dark"] .astra-pair .astra-case-h > .astra-label {
+.desk-ltr.astra[data-desk-page="dark"] .astra-pair .astra-case-h > .astra-label,
+.desk-ltr.astra[data-desk-page="dark"] .decide .astra-case-h > .astra-label {
   font: 800 calc(19px * var(--ts))/1.25 var(--fd);
   color: var(--fg);
   letter-spacing: 0;
   text-transform: none;
+}
+.desk-ltr.astra[data-desk-page="dark"] .decide .astra-case-h {
+  border-bottom: 0;
+  padding-bottom: 4px;
 }

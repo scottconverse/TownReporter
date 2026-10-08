@@ -20,7 +20,7 @@ export async function fileScreen({ width = 1440, large = false } = {}) {
   const browser = await chromium.launch({ channel: "chrome" });
   const page = await browser.newPage({ viewport: { width, height: 1100 } });
   await page.route("**/*", (route) => route.abort());
-  let css = await readFile(new URL("../src/desk-astra.css", import.meta.url), "utf8");
+  let css = (await readFile(new URL("../src/styles.css", import.meta.url), "utf8")).replace(/^@import[^;]+;/gm, "") + await readFile(new URL("../src/desk-astra.css", import.meta.url), "utf8");
   for (const weight of [500, 700, 800]) { const font = await readFile(`public/fonts/bricolage-grotesque-${weight}-normal-latin.woff2`); css += `@font-face{font-family:"Bricolage Grotesque";font-weight:${weight};src:url(data:font/woff2;base64,${font.toString("base64")})}`; }
   await page.setContent(`<style>body{margin:0}h1,h2,h3,p{margin:0}button,select{font:inherit}${css}</style><div class="desk-ltr astra ${large ? "large" : ""}" data-desk-page="dark" ><aside></aside><div class="astra-workspace"><main class="deskmain">${markup}</main></div></div>`);
   await page.evaluate((large) => { document.documentElement.dataset.deskSize = large ? "large" : "normal"; return document.fonts.ready; }, large);

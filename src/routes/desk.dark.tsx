@@ -2137,7 +2137,6 @@ function InvestigationWorkspace({
       <div className="astra-panel decide">
         <div className="astra-case-h">
           <p className="astra-label">Decide</p>
-          <p className="astra-note">It digs; it never prints.</p>
         </div>
         {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
         <div className="astra-panel-acts" aria-label="File decisions">
