@@ -569,6 +569,9 @@ export function containsVerbatim(input: string, paragraph: string): boolean {
 const BARE_URL_RE =
   /(?:^|[\s([|,])((?:[a-z0-9-]+\.)+(?:com|org|net|gov|edu|io|ai|us|co|info|biz|dev)(?:\/[^\s)\]"'<>]*)?)/gi;
 
+/** A source citation written as a plain `Source: https://…` line. */
+const SOURCE_LINE_URL_RE = /^\s*source\s*:\s*(https?:\/\/[^\s<>"'`]+)/gim;
+
 /** The markdown links and the bare domains in a stretch of text. */
 export function extractLinks(text: string): ImportLink[] {
   const body = String(text ?? "");
@@ -579,6 +582,12 @@ export function extractLinks(text: string): ImportLink[] {
     if (seen.has(url)) continue;
     seen.add(url);
     found.push({ text: (match[1] || url).trim(), url });
+  }
+  for (const match of body.matchAll(SOURCE_LINE_URL_RE)) {
+    const url = match[1]!.replace(/[.,;:!?]+$/, "");
+    if (seen.has(url)) continue;
+    seen.add(url);
+    found.push({ text: url, url });
   }
   for (const match of body.matchAll(BARE_URL_RE)) {
     const host = match[1]!.replace(/[.,;:]+$/, "");
