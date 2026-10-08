@@ -1005,6 +1005,30 @@ export function pullFailureCopy(raw: string | null | undefined, url?: string | n
   return `Could not open ${site} (${reason}).`;
 }
 
+/** Count attached source links as opened only when the editor's notes record a read. */
+export function leadSourceEvidenceLabel(
+  sourceUrls: readonly string[],
+  notesJson: string | null | undefined,
+): string {
+  let opened = new Set<string>();
+  try {
+    const value: unknown = JSON.parse(notesJson || "{}");
+    if (value && typeof value === "object" && Array.isArray((value as { opened?: unknown }).opened)) {
+      opened = new Set(
+        (value as { opened: unknown[] }).opened
+          .map((row) => (row && typeof row === "object" ? String((row as { url?: unknown }).url ?? "").trim() : ""))
+          .filter(Boolean),
+      );
+    }
+  } catch {
+    // Malformed notes do not prove that a source was read.
+  }
+  const openedCount = sourceUrls.filter((url) => opened.has(url)).length;
+  const attachedCount = sourceUrls.length - openedCount;
+  if (openedCount && attachedCount) return `${openedCount} opened · ${attachedCount} attached`;
+  return openedCount ? `${openedCount} opened` : `${attachedCount} attached`;
+}
+
 /**
  * THE "KEEPS FAILING" SENTENCE, in the editor's words (SH0-2).
  *

@@ -12,6 +12,7 @@ import {
   killedAsDuplicateNote,
   killRecordLine,
   printedDuplicateLine,
+  leadSourceEvidenceLabel,
   type PrintedDup,
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
@@ -233,6 +234,7 @@ export function LeadRowView({
     nothing failed.
   */
   const sources = parseUrlList(lead.source_urls).length;
+  const sourceEvidenceLabel = leadSourceEvidenceLabel(parseUrlList(lead.source_urls), lead.notes_json);
   /*
     One "More ▾" per row, holding every action this row used to print inline.
     The drawing's actions cell is Start story + More ▾ and nothing else (README
@@ -632,7 +634,7 @@ export function LeadRowView({
             <i key={i} />
           ))}
         </span>
-        <b>{sources} opened</b>
+        <b>{sourceEvidenceLabel}</b>
       </span>
       <span className="queue-filed">{formatAge(lead.created_at)}</span>
       <div className="lead-actions row-acts queue-acts">
