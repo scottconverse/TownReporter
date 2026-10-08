@@ -1,6 +1,6 @@
-import { mkdirSync, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { constants, mkdirSync, copyFileSync, existsSync, readFileSync, statSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { join } from "node:path";
 import type { Sql } from "../db.ts";
 import type { MeetingRetentionMode } from "./meeting-transcript-artifacts.ts";
 import { isAbsolutePathAnyPlatform, normalizeAbsolutePath } from "./absolute-path.ts";
@@ -58,11 +58,9 @@ export async function storeMeetingAudioArtifact(
   const targetDir = join(storageRoot, `newsroom-${input.newsroomId}`, input.videoId);
   mkdirSync(targetDir, { recursive: true });
   const extension = input.format === "opus" ? ".opus" : `.${input.format}`;
-  const targetPath = join(targetDir, `${input.videoId}${extension}`);
-  if (resolve(input.audioSourcePath) !== resolve(targetPath)) {
-    if (!existsSync(input.audioSourcePath)) throw new Error(`Captured audio file is missing: ${input.audioSourcePath}`);
-    copyFileSync(input.audioSourcePath, targetPath);
-  }
+  const targetPath = join(targetDir, `${input.videoId}-${randomUUID()}${extension}`);
+  if (!existsSync(input.audioSourcePath)) throw new Error(`Captured audio file is missing: ${input.audioSourcePath}`);
+  copyFileSync(input.audioSourcePath, targetPath, constants.COPYFILE_EXCL);
   const bytes = readFileSync(targetPath);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const byteSize = statSync(targetPath).size;
@@ -70,9 +68,6 @@ export async function storeMeetingAudioArtifact(
     `insert into meeting_transcript_artifacts
        (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size)
      values ($1,$2,'audio',$3,$4,$5,now(),$6,$7,$8)
-     on conflict (newsroom_id,video_id,artifact_type,sha256)
-     do update set storage_path=excluded.storage_path,format=excluded.format,source_method=excluded.source_method,
-       retention_mode=excluded.retention_mode,byte_size=excluded.byte_size,updated_at=now()
      returning id,captured_at::text as captured_at`,
     [input.newsroomId, input.videoId, targetPath, input.format, sha256, input.sourceMethod ?? "yt-dlp-audio-opus", retentionMode, byteSize],
   );
