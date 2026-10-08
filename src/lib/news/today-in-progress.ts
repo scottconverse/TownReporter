@@ -5,18 +5,18 @@ export type TodayWorkRow = {
 
 export function todayInProgressJobs<T extends TodayWorkRow>(
   rows: T[],
-  publishedLeadIds: ReadonlySet<number>,
+  closedLeadIds: ReadonlySet<number>,
 ): T[] {
   return rows.filter(
     (row) =>
       row.leadId > 0 &&
       (row.kind === "draft" || row.kind === "reconcile") &&
-      !publishedLeadIds.has(row.leadId),
+      !closedLeadIds.has(row.leadId),
   );
 }
 
-export function todayPublishedLeadIds(
+export function todayClosedLeadIds(
   leads: { id: number; status: string; article_slug?: string | null }[],
 ): Set<number> {
-  return new Set(leads.filter(lead => lead.status === "published" || lead.article_slug != null).map(lead => lead.id));
+  return new Set(leads.filter(lead => lead.status === "killed" || lead.status === "published" || lead.article_slug != null).map(lead => lead.id));
 }

@@ -1,7 +1,7 @@
 // guards: a published story could be presented as unfinished work on Today.
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { todayInProgressJobs, todayPublishedLeadIds } from "./today-in-progress.ts";
+import { todayInProgressJobs, todayClosedLeadIds } from "./today-in-progress.ts";
 
 it("leaves published stories out of Today’s unfinished story list", () => {
   const rows = [
@@ -24,5 +24,5 @@ it("Today excludes published articles even when lead status is stale", () => {
     { id: 3, status: "drafted", article_slug: null },
   ];
   assert.deepEqual(todayInProgressJobs(leads.map(lead => ({ leadId: lead.id, kind: "draft" })),
-    todayPublishedLeadIds(leads)).map(row => row.leadId), [3]);
+    todayClosedLeadIds(leads)).map(row => row.leadId), [3]);
 });
