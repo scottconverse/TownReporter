@@ -275,7 +275,7 @@ const actionButtonUrl = moduleUrl(
   },
 );
 
-const { LeadRowView } = await import(
+const { LeadRowView, LeadSourceEvidenceCount } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
     "desk-leads.tsx",
@@ -347,14 +347,17 @@ test("a lead with resurfaced_count > 0 shows the came-back badge with its count 
   );
 });
 
-// guards: an attached source is mistaken for one the editor has read
-test("lead sources show attached until the editor has read them", () => {
+// guards: Today and Queue could call attached sources opened before anyone reads them
+test("Today and Queue label unread source links as attached", () => {
   const row = (notes_json) => renderToStaticMarkup(createElement(LeadRowView, { lead: baseLead({
     status: "new", source_urls: JSON.stringify(["https://city.test/one", "https://city.test/two"]), notes_json,
   }) }));
   const unread = row(null);
   assert.match(unread, />2 attached</);
   assert.doesNotMatch(unread, />2 opened</);
+  assert.match(renderToStaticMarkup(createElement(LeadSourceEvidenceCount, {
+    sourceUrls: JSON.stringify(["https://city.test/one", "https://city.test/two"]), notesJson: null,
+  })), />2 attached</);
   assert.match(row(JSON.stringify({ opened: [{ url: "https://city.test/one" }] })), />1 opened · 1 attached</);
   assert.equal(deskCopyModule.pullFailureCopy("Permission was withdrawn", "https://longmontcolorado.gov/story"),
     "Could not save the Pull result because access to this story changed. Reload the story to check.");
