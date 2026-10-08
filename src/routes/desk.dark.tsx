@@ -46,7 +46,7 @@ import {
   looksLikeInternalSummary,
   organizationFromUrl,
   editorTitle,
-  pileForStatus,
+  investigationPileFor,
   plainEditorText,
   plainFinding,
   progressLine,
@@ -774,9 +774,9 @@ function DarkPage() {
     claims: detail.data?.claims.length ?? 0,
   });
   const allInv = investigations.data ?? [];
-  const active = allInv.filter((row) => pileForStatus(row.status) === "desk" && row.status !== "investigating");
-  const waitingFiles = allInv.filter((row) => row.status === "investigating");
-  const parked = allInv.filter((row) => pileForStatus(row.status) === "aside");
+  const active = allInv.filter((row) => investigationPileFor(row) === "desk");
+  const waitingFiles = allInv.filter((row) => investigationPileFor(row) === "waiting");
+  const parked = allInv.filter((row) => investigationPileFor(row) === "aside");
   /*
     FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened
     ... with 'SET ASIDE 0' throughout."
@@ -1303,7 +1303,11 @@ function DeskFileCard({
 }) {
   const { formatListDateTime } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
-  const still = Number(row.still_open ?? 0);
+  const waitingLine = row.waiting_follow_up
+    ? `AI watching for ${row.waiting_follow_up}`
+    : row.waiting_watch
+      ? `Watching ${row.waiting_watch}`
+      : null;
   return (
     <div className={"astra-file" + (selected ? " on" : "")}>
       {/*
@@ -1320,9 +1324,9 @@ function DeskFileCard({
       >
         <span className="astra-file-t">{editorTitle(row.title) || `File ${row.id}`}</span>
         <span className="astra-file-m">
-          {selected ? "Open now · " : ""}{editorStatus(row.status)} · {digRailCounterLine(records)}
-          {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
-          {formatListDateTime(row.updated_at)}
+          {waitingLine
+            ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
+            : `${selected ? "Open now · " : ""}${editorStatus(row.status)} · ${digRailCounterLine(records)} · last touched ${formatListDateTime(row.updated_at)}`}
         </span>
       </button>
       {/*

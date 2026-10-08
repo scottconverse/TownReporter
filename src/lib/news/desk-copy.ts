@@ -594,6 +594,15 @@ export function pileForStatus(status: string): "desk" | "aside" {
   return "aside";
 }
 
+export function investigationPileFor(row: {
+  status: string;
+  waiting_follow_up?: string | null;
+  waiting_watch?: string | null;
+}): "desk" | "waiting" | "aside" {
+  if (row.status !== "closed" && (row.waiting_follow_up || row.waiting_watch)) return "waiting";
+  return pileForStatus(row.status) === "aside" ? "aside" : "desk";
+}
+
 export function recordKindFromUrl(url: string): string {
   if (/\.pdf($|\?)/i.test(url)) return "PDF";
   if (/youtube\.com|youtu\.be/i.test(url)) return "Video page";

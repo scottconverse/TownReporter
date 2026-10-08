@@ -86,7 +86,8 @@ import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
-import { parseFinding, performListFollowUps } from "./follow-ups.ts";
+import { ensureFollowUpsSchema, parseFinding, performListFollowUps } from "./follow-ups.ts";
+import { ensurePageWatchSchema } from "./page-watch.ts";
 import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
 import {
   buildInvestigationActivity,
@@ -669,6 +670,11 @@ export type InvestigationRow = {
   updated_at: string;
   records?: number;
   still_open?: number;
+  waiting_follow_up?: string | null;
+  waiting_watch?: string | null;
+  waiting_since?: string | null;
+  closed_kind?: string | null;
+  close_note?: string | null;
   /**
    * The model that last dug this file (0.6.2). Null on every investigation
    * opened before Dark Desk had a picker; the page falls back to Automatic.
@@ -1016,15 +1022,27 @@ export const listDarkPromises = createServerFn({ method: "GET" })
     `;
   });
 
-export const listInvestigations = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    await ensureDarkSchema();
-    const sql = await getSql();
-    const rows = await sql<InvestigationRow>`
+export async function listInvestigationsFor(newsroomId: number) {
+  await ensureDarkSchema();
+  await ensureFollowUpsSchema();
+  await ensurePageWatchSchema();
+  const sql = await getSql();
+  const rows = await sql<InvestigationRow>`
       select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
         i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
-        i.created_at, i.updated_at,
+        i.created_at, i.updated_at, i.closed_kind, i.close_note,
+        (select f.what from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.status = 'active' and f.agent_kind is not null
+         order by f.id desc limit 1) as waiting_follow_up,
+        (select f.created_at::text from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.status = 'active' and f.agent_kind is not null
+         order by f.id desc limit 1) as waiting_since,
+        (select coalesce(nullif(m.watch_reason, ''), m.title) from source_monitors m
+         where m.investigation_id = i.id and m.newsroom_id = i.newsroom_id
+           and m.manual_watch = true and m.watch_state = 'active' and m.enabled = true
+         order by m.id desc limit 1) as waiting_watch,
         coalesce((
           -- Unit DD1, item 6: captures, and only captures. The editor's own
           -- pasted tip is an editor:// row, and counting it here is what put
@@ -1038,15 +1056,19 @@ export const listInvestigations = createServerFn({ method: "GET" })
             and f.status in ('open', 'investigating', 'reopened', 'deferred')
         ), 0) as still_open
       from investigations i
-      where i.newsroom_id = ${owned(context)}
+      where i.newsroom_id = ${newsroomId}
       order by i.updated_at desc
     `;
-    return rows.map((r) => ({
-      ...r,
-      records: Number(r.records ?? 0),
-      still_open: Number(r.still_open ?? 0),
-    }));
-  });
+  return rows.map((r) => ({
+    ...r,
+    records: Number(r.records ?? 0),
+    still_open: Number(r.still_open ?? 0),
+  }));
+}
+
+export const listInvestigations = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => listInvestigationsFor(owned(context)));
 
 async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
   const sql = await getSql();
@@ -1136,6 +1158,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
     const inv = await sql<InvestigationRow>`
       select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
              i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+             i.closed_kind, i.close_note,
              i.created_at, i.updated_at, i.last_model_choice,
              coalesce((
                select count(*)::int from frontier_items f
@@ -3564,6 +3587,118 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
     }),
   );
 
+export type InvestigationQueuePacket = {
+  investigationId: number;
+  title: string;
+  suggestedHeadline: string;
+  evidence: { text: string; source: string | null }[];
+  uncertainties: string[];
+  contradictions: InvestigationBrief["contradictions"];
+  whatWouldDisproveIt: string[];
+  publicationNotice: "Publication remains an editorial decision.";
+};
+
+export async function queuePacketFor(newsroomId: number, id: number) {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const files = await sql<{ id: number; title: string; ordinary_explanation: string }>`
+    select id, title, ordinary_explanation from investigations
+    where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!files[0]) return null;
+  const [claims, signalRows, briefRows] = await Promise.all([
+    sql<{ body: string; source_url: string | null }>`
+      select body, source_url from claims
+      where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        and (capture_event_id is not null or source_url is not null)
+      order by id desc limit 8
+    `.catch(() => [] as { body: string; source_url: string | null }[]),
+    sql<{ name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }>`
+      select name, verification_status, gate_missing_context, what_would_kill
+      from dark_signals where investigation_id = ${id} and newsroom_id = ${newsroomId}
+      order by id desc limit 5
+    `.catch(() => [] as { name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }[]),
+    sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
+    `.catch(() => [] as { brief_json: string }[]),
+  ]);
+  let brief: InvestigationBrief | null = null;
+  try {
+    brief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+  } catch {
+    brief = null;
+  }
+  const clean = (value: unknown) => stripUngroundedNotes(String(value ?? "")).replace(/\s+/g, " ").trim();
+  const unique = (values: string[]) => [...new Set(values.map(clean).filter(Boolean))];
+  const uncertainties = unique([
+    files[0].ordinary_explanation,
+    brief?.benign ?? "",
+    brief?.kills_it ?? "",
+    ...signalRows
+      .filter((signal) => signal.verification_status !== "verified")
+      .map((signal) => `${signal.name}: ${signal.gate_missing_context || "This signal has not completed verification."}`),
+  ]);
+  return {
+    investigationId: id,
+    title: clean(files[0].title),
+    suggestedHeadline: clean(brief?.headline || files[0].title),
+    evidence: claims.map((claim) => ({ text: clean(claim.body), source: claim.source_url })),
+    uncertainties,
+    contradictions: brief?.contradictions ?? [],
+    whatWouldDisproveIt: unique([
+      brief?.kills_it ?? "",
+      ...signalRows.map((signal) => signal.what_would_kill),
+    ]),
+    publicationNotice: "Publication remains an editorial decision." as const,
+  };
+}
+
+export const queuePacket = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((id: unknown) => rowId.parse(id))
+  .handler(async ({ context, data: id }) => queuePacketFor(owned(context), id));
+
+async function markInvestigationDisposition(
+  newsroomId: number,
+  id: number,
+  kind: "set-aside" | "no-finding" | "queued",
+  note: string | null,
+) {
+  const sql = await getSql();
+  const rows = await sql<{ id: number }>`
+    update investigations
+    set status = 'closed', closed_kind = ${kind}, close_note = ${note},
+        pause_reason = ${kind === "queued" ? "Sent to the reporting queue." : null},
+        updated_at = now()
+    where id = ${id} and newsroom_id = ${newsroomId}
+    returning id
+  `;
+  return rows[0]?.id != null;
+}
+
+export async function closeInvestigationFor(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  note?: string | null,
+) {
+  await ensureDarkSchema();
+  const cleanNote = String(note ?? "").replace(/\s+/g, " ").trim().slice(0, 500) || null;
+  const closed = await markInvestigationDisposition(newsroomId, id, "no-finding", cleanNote);
+  if (!closed) return { ok: false as const, error: "Investigation not found" };
+  await audit(userId, "dark", `closed inv ${id} without a finding`, newsroomId);
+  return { ok: true as const, investigationId: id };
+}
+
+export const closeInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => {
+    const value = input as { id?: unknown; note?: unknown };
+    return { id: rowId.parse(value?.id), note: typeof value?.note === "string" ? value.note : null };
+  })
+  .handler(async ({ context, data }) => closeInvestigationFor(context.userId, owned(context), data.id, data.note));
+
 /**
  * Create-or-find the story lead for an investigation. Research completeness
  * is preserved in the notes and never blocks this editor-controlled handoff.
@@ -3607,6 +3742,7 @@ export async function queueInvestigationFor(
     order by id asc limit 1
   `;
   if (already[0]) {
+    await markInvestigationDisposition(newsroomId, id, "queued", `Lead ${already[0].id}`);
     await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
     return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
   }
@@ -3786,6 +3922,7 @@ export async function queueInvestigationFor(
       reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
     })),
   });
+  await markInvestigationDisposition(newsroomId, id, "queued", `Lead ${created[0]!.id}`);
   return { ok: true as const, leadId: created[0]!.id, alreadyQueued: false as const };
 }
 
@@ -3807,14 +3944,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
   .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
-    const sql = await getSql();
-    await sql`
-      update investigations
-      set status = ${"closed"},
-          pause_reason = ${"Editor set this aside."},
-          updated_at = now()
-      where id = ${id} and newsroom_id = ${owned(context)}
-    `;
+    await markInvestigationDisposition(owned(context), id, "set-aside", null);
     await audit(context.userId, "dark", `set aside inv ${id}`, owned(context));
     return { ok: true as const, investigationId: id };
   });
@@ -3834,6 +3964,8 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
     await sql`
       update investigations
       set status = ${still > 0 ? "paused" : "open"},
+          closed_kind = null,
+          close_note = null,
           pause_reason = ${still > 0 ? `Hop budget resumed with ${still} frontier item(s) still open.` : null},
           updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)}
