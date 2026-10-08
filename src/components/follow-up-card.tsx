@@ -146,6 +146,9 @@ export function FollowUpCard({
           </span>
         </div>
         <span className="fu-q">{row.what}</span>
+        {row.investigation_title ? (
+          <span className="fu-meta">Dark Desk file: {row.investigation_title}</span>
+        ) : null}
         {resultText ? <span className="fu-result">{resultText}</span> : null}
         {notice ? (
           <span className="fu-watch-notice">

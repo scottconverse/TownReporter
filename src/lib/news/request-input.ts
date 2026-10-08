@@ -1320,6 +1320,7 @@ export const followUpsInput = z.preprocess(
 export const aiFollowUpInput = z.object({
   leadId: nullableId.optional(),
   articleId: nullableId.optional(),
+  investigationId: rowId.optional(),
   what: z.string().trim().min(1).max(LIMITS.followUpWhat),
   agentKind: z.enum(["recheck", "search", "agenda"]),
   schedule: z.enum(["2h", "6h", "12h", "daily", "weekly", "posting-days"]),
@@ -1329,7 +1330,7 @@ export const aiFollowUpInput = z.object({
 });
 
 /** `desk.ts:2796` updateAiFollowUp. */
-export const aiFollowUpUpdateInput = aiFollowUpInput.extend({ id: rowId });
+export const aiFollowUpUpdateInput = aiFollowUpInput.omit({ investigationId: true }).extend({ id: rowId });
 
 /** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
 export const followUpActionInput = z.object({

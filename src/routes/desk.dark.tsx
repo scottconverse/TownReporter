@@ -2124,6 +2124,18 @@ function InvestigationWorkspace({
               ))}
             </div>
           ) : null}
+          {(detail?.investigationFollowUps?.length ?? 0) > 0 ? (
+            <div className="of-block">
+              <p className="side-label">AI follow-ups running</p>
+              {(detail?.investigationFollowUps ?? []).map((followUp) => (
+                <p key={followUp.id} className="side-item">
+                  <span className="meta">{followUp.status === "paused" ? "Paused" : "Watching"} · </span>
+                  {followUp.what}{" "}
+                  <Link to="/desk/follow-ups" className="inline-link">Open follow-up</Link>
+                </p>
+              ))}
+            </div>
+          ) : null}
           {facts.length > 0 ? (
             <div className="of-block">
               <p className="side-label">What we know</p>

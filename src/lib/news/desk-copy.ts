@@ -61,6 +61,7 @@ export type InvestigationActivityInput = {
   stopReason?: string | null;
   removed?: boolean;
   changed?: boolean;
+  found?: boolean;
   query?: string;
   stage?: string;
   rawReason?: string;
@@ -132,7 +133,10 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
   }
   if (event.kind === "finding") return { text: body ? `Found: ${body}` : "Found a new detail", tone: "finding" };
   if (event.kind === "dead-end") return { text: body ? `Dead end: ${body}` : "This line of inquiry did not lead to a record", tone: "plain" };
-  if (event.kind === "follow-up") return { text: body ? `AI follow-up found: ${body}` : "AI follow-up is watching for a response", tone: body ? "finding" : "plain" };
+  if (event.kind === "follow-up") {
+    if (event.found) return { text: body ? `AI follow-up found: ${body}` : "AI follow-up found an answer", tone: "finding" };
+    return { text: body ? `AI follow-up watching: ${body}` : "AI follow-up is watching for a response", tone: "plain" };
+  }
   if (event.kind === "watch") return { text: event.removed ? `Watched page removed: ${subject}` : `Watched page changed: ${subject}`, tone: event.removed ? "plain" : "finding" };
   if (event.failed) return { text: "Could not finish — retry", tone: "failure" };
   if (event.stopReason === "elapsed-time-limit") return { text: "Stopped at the time limit", tone: "plain" };

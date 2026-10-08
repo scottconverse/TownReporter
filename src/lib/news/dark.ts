@@ -85,6 +85,7 @@ import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
+import { parseFinding, performListFollowUps } from "./follow-ups.ts";
 import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
 import {
   buildInvestigationActivity,
@@ -1390,6 +1391,21 @@ export const getInvestigation = createServerFn({ method: "GET" })
       kind: "brief",
       subjectId: id,
     });
+    const investigationFollowUps = (await performListFollowUps(
+      { userId: context.userId, newsroomId: owned(context) },
+      { limit: 200 },
+    ))
+      .filter((row) => row.investigation_id === id)
+      .map((row) => ({
+        id: row.id,
+        what: row.what,
+        agentKind: row.agent_kind,
+        status: row.status,
+        lastState: row.last_state,
+        findingJson: row.finding_json,
+        targetsJson: row.targets_json,
+        createdAt: row.created_at,
+      }));
 
     return {
       investigation: inv[0],
@@ -1402,6 +1418,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
       brief,
+      investigationFollowUps,
       captureCounts,
       frontier,
       artifacts,
@@ -1425,7 +1442,7 @@ export const investigationActivity = createServerFn({ method: "GET" })
     await ensureInvestigateSchema();
     const sql = await getSql();
     const newsroomId = owned(context);
-    const [captures, searches, findings, deadEnds, runs] = await Promise.all([
+    const [captures, searches, findings, deadEnds, runs, followUps] = await Promise.all([
       sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }>`
         select ce.id, ce.observed_at::text as at, coalesce(a.title, '') as title, ce.source_url as url,
           ce.fetch_outcome as outcome, ce.http_status as "httpStatus", ce.disappearance as removed
@@ -1458,6 +1475,7 @@ export const investigationActivity = createServerFn({ method: "GET" })
           and (finished_at is not null or error is not null or stop_reason is not null)
         order by started_at desc limit 30
       `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean }[]),
+      performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
     ]);
     const events: InvestigationActivityInput[] = [
       ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed })),
@@ -1465,6 +1483,19 @@ export const investigationActivity = createServerFn({ method: "GET" })
       ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
       ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
       ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed })),
+      ...followUps
+        .filter((row) => row.investigation_id === id && ["active", "paused"].includes(row.status))
+        .map((row) => {
+          const finding = parseFinding(row.finding_json);
+          const found = row.last_state === "found";
+          return {
+            id: `follow-up-${row.id}`,
+            at: row.last_run_at ?? row.created_at,
+            kind: "follow-up" as const,
+            body: found ? finding.summary || finding.title || row.what : row.what,
+            found,
+          };
+        }),
     ];
     return buildInvestigationActivity(events);
   });
