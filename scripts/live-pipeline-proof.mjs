@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import pg from "pg";
 import { resolveProofTarget } from "./nightly-proof-config.mjs";
+import { afterScan, waitForDraft } from "./nightly-proof-draft.mjs";
 import { dailyScan } from "./nightly-proof-scan.mjs";
 import { storyDraftButton } from "./nightly-proof-actions.mjs";
 
@@ -122,32 +123,11 @@ async function runDraft(page, pool) {
     // Generous, same reason as the /login heading wait in signIn(): a cold
     // Vite route compile under load can run well past 30s.
     await draftButton.waitFor({ timeout: 90_000 });
+    const { rows: before } = await pool.query("select coalesce(max(id), 0) as id from desk_jobs");
     await draftButton.click();
-    say(`draft started on lead ${lead.id} ("${lead.headline}"), waiting up to 8 minutes`);
+    say(`draft requested on lead ${lead.id} ("${lead.headline}"), waiting up to 2 minutes queued, then 8 minutes running`);
 
-    const deadline = Date.now() + 8 * 60_000;
-    let landed = false;
-    while (Date.now() < deadline) {
-      // UI1a3: "Redrafting…" when the story already has a draft body,
-      // "Drafting…" when it does not -- accept either.
-      const stillDrafting = await page.getByRole("button", { name: /^(Re)?drafting…$/i }).count();
-      const done = await page.getByRole("button", { name: /^Redraft$/ }).count();
-      if (!stillDrafting && done) {
-        landed = true;
-        break;
-      }
-      await page.waitForTimeout(3_000);
-    }
-    if (!landed) throw new Error("draft did not land within 8 minutes");
-
-    const { rows: jobRows } = await pool.query(
-      `select model_choice, started_at, finished_at, error from desk_jobs
-       where kind = 'draft' and subject_id = $1 order by id desc limit 1`,
-      [lead.id],
-    );
-    const job = jobRows[0];
-    if (!job) throw new Error("draft appeared to land but no desk_jobs row exists");
-    if (job.error) throw new Error(`desk_jobs recorded an error: ${job.error}`);
+    const job = await waitForDraft(page, pool, lead.id, before[0].id);
 
     const { rows: draftRows } = await pool.query(
       `select length(body) as chars from drafts where lead_id = $1 order by updated_at desc limit 1`,
@@ -199,7 +179,7 @@ async function main() {
 
     await signIn(page);
     const scan = await runScan(page, pool);
-    const draft = await runDraft(page, pool);
+    const draft = await afterScan(scan, () => runDraft(page, pool));
 
     const artifact = { ranAt: new Date().toISOString(), version, scan, draft, errors };
 
