@@ -6838,8 +6838,9 @@
 }
 .desk-ltr.astra .astra-set-aside-row {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
   width: 100%;
   min-width: 0;
   padding: 10px 16px;
