@@ -31,7 +31,7 @@ import {
 import { cancelStoryJob } from "@/lib/news/job-progress";
 import type { JobProgressView } from "@/lib/news/job-progress";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
-import { DeskJobCard } from "@/components/JobCard";
+import { DeskJobCard, JobCard } from "@/components/JobCard";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
@@ -1126,6 +1126,7 @@ function DarkPage() {
           {openId != null && !noFiles ? (
             <InvestigationWorkspace
               openId={openId}
+              onOpenFile={() => rememberOpen(openId)}
               detail={detail.data ?? undefined}
               fileWaiting={Boolean(investigations.data?.find((row) => row.id === openId)?.waiting_follow_up || investigations.data?.find((row) => row.id === openId)?.waiting_watch)}
               canUndoDisposition={undoDisposition?.id === openId}
@@ -1451,6 +1452,7 @@ function WorthSelector({ item, onOpen }: { item: WorthSeed; onOpen: () => void }
 
 function InvestigationWorkspace({
   openId,
+  onOpenFile,
   detail,
   fileWaiting,
   canUndoDisposition,
@@ -1488,6 +1490,7 @@ function InvestigationWorkspace({
   ocrModelEffort,
 }: {
   openId: number;
+  onOpenFile: () => void;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
   fileWaiting: boolean;
   canUndoDisposition: boolean;
@@ -1889,6 +1892,7 @@ function InvestigationWorkspace({
         <DarkResearchCard
           job={digJob ?? failedDarkJob!}
           onStop={onStopDig}
+          onOpen={onOpenFile}
           stopDisabled={stopControl.disabled}
         />
       ) : null}
@@ -2353,18 +2357,24 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   return describeExtractionMethod(raw);
 }
 
-function DarkResearchCard({ job, onStop, stopDisabled }: { job: JobProgressView; onStop: () => void; stopDisabled: boolean }) {
+function darkJobStepLine(step: string): string {
+  const value = step.trim();
+  const pass = value.match(/^Researching hop (\d+)\/(\d+)$/i);
+  if (pass) return `Reading public records · pass ${pass[1]} of up to ${pass[2]}`;
+  const search = value.match(/^Searching (\d+)\/(\d+) on hop (\d+)$/i);
+  if (search) return `Checking public pages · search ${search[1]} of ${search[2]}`;
+  if (/^Researching the file$/i.test(value)) return "Starting to read public records";
+  if (/^Synthesizing signals/i.test(value)) return "Putting the case file together";
+  if (/^Testing explanations$/i.test(value)) return "Checking ordinary explanations";
+  if (/^Writing editor brief$/i.test(value)) return "Finishing the case file";
+  if (/^Switched to /i.test(value)) return "Changing models to keep the work moving";
+  return "Working on the case file";
+}
+
+function DarkResearchCard({ job, onStop, onOpen, stopDisabled }: { job: JobProgressView; onStop: () => void; onOpen: () => void; stopDisabled: boolean }) {
   const qc = useQueryClient();
-  const [now, setNow] = useState(Date.now());
-  const [waited, setWaited] = useState(0);
   const [retryNote, setRetryNote] = useState("");
   const [retryAfterStop, setRetryAfterStop] = useState(false);
-  useEffect(() => {
-    if (job.status !== "queued" && job.status !== "running") return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [job.status]);
-  useEffect(() => setWaited(0), [job.id, job.beatAt]);
   const retry = useMutation({
     mutationFn: (nextModel: boolean) => retryDarkRound({ data: { jobId: job.id, nextModel } }),
     onSuccess: (result) => {
@@ -2385,56 +2395,45 @@ function DarkResearchCard({ job, onStop, stopDisabled }: { job: JobProgressView;
     setRetryAfterStop(false);
     retryRound(true);
   }, [retryAfterStop, job.status, job.id, retryRound]);
-  const started = job.startedAt ?? now;
-  const elapsed = Math.max(0, Math.floor(((job.endedAt ?? now) - started) / 1000));
-  const elapsedText = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
-  const quiet = job.beatAt == null ? 0 : Math.max(0, Math.floor((now - job.beatAt) / 1000));
-  const stalled = job.status === "running" && job.beatAt != null && quiet >= 60 * (1 + waited);
-  const activeIndex = job.stageIndex == null ? 1 : ([1, 2, 3, 2][job.stageIndex] ?? 1);
-  const steps = ["Question", "Gather", "Case file", "Challenge"];
-  const stageCopy = ["Gathering public records", "Organizing the case file", "Checking the case", "Finishing the case file"];
-  const failed = job.status === "failed";
-  const mappedReason = failed && job.error && /cancel(?:led|ed)? by the editor/i.test(job.error)
-    ? "Stopped at the editor's request. What was found remains saved."
-    : failed ? editorError(job.error ?? "") : null;
-  const reason = mappedReason && job.error && mappedReason !== plainEditorText(job.error) ? mappedReason : "Could not finish — retry.";
-  const quietText = `${Math.floor(quiet / 60)}:${String(quiet % 60).padStart(2, "0")}`;
+  const displayJob: JobProgressView = {
+    ...job,
+    stages: ["Question", "Gather", "Case file", "Challenge"],
+    stageIndex: job.status === "queued" ? 0 : Math.min(3, Math.max(1, (job.stageIndex ?? 0) + 1)),
+    step: darkJobStepLine(job.step),
+    doneText: "Case file ready for your decision",
+    openLabel: "Open file",
+    error: job.status === "failed"
+      ? /cancel(?:led|ed)? by the editor/i.test(job.error ?? "")
+        ? "Stopped at the editor's request. What was found remains saved."
+        : editorError(job.error ?? "") || "Could not finish — retry."
+      : job.error,
+    cancelRequested: job.cancelRequested || stopDisabled,
+    canRetry: false,
+  };
+  const retryOnNextModel = () => {
+    if (stopDisabled || retryAfterStop) return;
+    setRetryAfterStop(true);
+    setRetryNote("Stopping this run before retrying on another model.");
+    onStop();
+  };
   return (
-    <section className="dark-round-card" aria-label="Research round">
-      <div className="dark-round-head">
-        <b>{failed ? `Stopped ${elapsedText}` : job.status === "queued" ? "Waiting to start" : `Investigating · ${elapsedText}`}</b>
-      </div>
-      <div className="dark-round-steps" aria-label="Question, gather, case file, challenge">
-        {steps.map((step, index) => (
-          <span key={step} className={index < activeIndex || failed && index < activeIndex ? "done" : index === activeIndex && !failed ? "current" : ""}>
-            {index === 0 || index < activeIndex ? "✓ " : ""}{step}
-          </span>
-        ))}
-      </div>
-      {failed ? (
-        <p className="dark-round-message" role="alert">Could not finish: {reason.replace(/Click Keep digging/gi, "choose Keep investigating")}</p>
-      ) : stalled ? (
-        <div className="dark-round-stall" role="status">
-          <p>No activity for {quietText}. The research may be slow or stalled.</p>
-          <div className="astra-panel-acts">
-            <InkButton tone="quiet" onClick={() => setWaited((value) => value + 1)}>Keep waiting</InkButton>
-            <InkButton tone="quiet" pending={retry.isPending || retryAfterStop} pendingLabel="Stopping before retry…" onClick={() => { setRetryAfterStop(true); setRetryNote("Stopping this round before retrying on another model."); onStop(); }}>Retry on next model</InkButton>
-          </div>
-        </div>
-      ) : (
-        <p className="dark-round-message" role="status">{job.status === "queued" ? "Your next research round is queued." : `Now: ${stageCopy[job.stageIndex ?? 0] ?? "Gathering public records"}`}</p>
-      )}
-      {job.status === "running" && !stalled ? (
-        <div className="astra-panel-acts"><InkButton tone="quiet-danger" disabled={stopDisabled} onClick={onStop}>Stop</InkButton></div>
-      ) : null}
-      {failed ? (
+    <div>
+      <JobCard
+        job={displayJob}
+        cancelLabel="Stop"
+        failoverNote={false}
+        onCancel={onStop}
+        onOpen={onOpen}
+        onRetryNext={job.status === "running" ? retryOnNextModel : undefined}
+      />
+      {job.status === "failed" ? (
         <div className="astra-panel-acts">
-          <InkButton pending={retry.isPending || retryAfterStop} pendingLabel="Retrying…" onClick={() => retry.mutate(false)}>Retry</InkButton>
-          <InkButton tone="quiet" pending={retry.isPending || retryAfterStop} pendingLabel="Retrying…" onClick={() => retry.mutate(true)}>Retry on next model</InkButton>
+          <InkButton pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(false)}>Retry</InkButton>
+          <InkButton tone="quiet" pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(true)}>Retry on next model</InkButton>
         </div>
       ) : null}
       {retryNote ? <p className="meta" role="status">{retryNote}</p> : null}
-    </section>
+    </div>
   );
 }
 

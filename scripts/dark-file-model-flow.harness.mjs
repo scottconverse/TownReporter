@@ -83,7 +83,7 @@ const imports = {
   "@/lib/news/dark": darkStub,
   "@/lib/news/job-progress": stub(`export const cancelStoryJob = async () => ({ ok: true });`),
   "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: [], isPending: false, isError: false });`),
-  "@/components/JobCard": stub(`export const DeskJobCard = () => null;`),
+  "@/components/JobCard": stub(`export const DeskJobCard = () => null; export function JobCard() { return null; }`),
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
   "@/components/PaperSetupGateNote": nullComponents,
   "@/lib/news/desk-copy": copyStub,

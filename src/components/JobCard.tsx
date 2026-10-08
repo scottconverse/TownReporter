@@ -44,6 +44,7 @@ export function JobCard({
   onOpen,
   onView,
   viewLabel,
+  cancelLabel = "Cancel",
   onRetry,
   onRetryNext,
   onKeepWaiting,
@@ -85,6 +86,7 @@ export function JobCard({
   onOpen?: () => void;
   onView?: () => void;
   viewLabel?: string;
+  cancelLabel?: string;
   onRetry?: () => void;
   onRetryNext?: () => void;
   onKeepWaiting?: () => void;
@@ -232,7 +234,7 @@ export function JobCard({
         ) : null}
         {running && !job.cancelRequested && onCancel ? (
           <button type="button" className="btn danger" onClick={onCancel}>
-            Cancel
+            {cancelLabel}
           </button>
         ) : null}
         {state === "done" && onOpen ? (
