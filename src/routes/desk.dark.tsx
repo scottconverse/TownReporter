@@ -1,4 +1,4 @@
-import { newestOpenFile, fullFileQuestion, signalCounts } from "@/lib/news/dark-rail";
+import { newestTouchedFile, fullFileQuestion, signalCounts } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -125,6 +125,7 @@ function DarkPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
+  const requestedOpenId = useRef<number | null>(null);
   const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
   const [queued, setQueued] = useState<{
     leadId: number;
@@ -147,7 +148,11 @@ function DarkPage() {
     const timerRef = phaseTimer;
     try {
       const raw = sessionStorage.getItem(OPEN_KEY);
-      if (raw) setOpenId(Number(raw));
+      const requested = raw ? Number(raw) : null;
+      if (requested != null && Number.isInteger(requested) && requested > 0) {
+        requestedOpenId.current = requested;
+        setOpenId(requested);
+      }
       sessionStorage.removeItem(OPEN_KEY);
       // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
       // copy, so this holds the lead for the dialog and the next visit to the
@@ -195,7 +200,7 @@ function DarkPage() {
     setNoticeOk(ok);
   }
 
-  function rememberOpen(id: number | null) {
+  function rememberOpen(id: number) {
     setFileFocusRequest(null);
     setOpenId(id);
     try {
@@ -226,15 +231,20 @@ function DarkPage() {
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
-  // Open the most recently touched file once, when the list first arrives. Not on every
-  // openId change: "Close file" sets openId to null, and that choice must stick.
+  const noFiles = Boolean(
+    investigations.data?.length === 0 && !investigations.isPending && !investigations.isError,
+  );
+  // Open the most recently touched file once, when the list first arrives.
   const autoOpened = useRef(false);
   useEffect(() => {
     const rows = investigations.data;
     if (autoOpened.current || !rows?.length) return;
     autoOpened.current = true;
-    setOpenId((current) => current ??
-      newestOpenFile(rows)?.id ?? null);
+    setOpenId((current) => {
+      if (current != null && rows.some((row) => row.id === current)) return current;
+      const handedOff = rows.find((row) => row.id === requestedOpenId.current);
+      return handedOff?.id ?? newestTouchedFile(rows)?.id ?? null;
+    });
   }, [investigations.data]);
 
   /*
@@ -601,7 +611,7 @@ function DarkPage() {
   const park = useMutation({
     mutationFn: (id: number) => parkInvestigation({ data: id }),
     onSuccess: (_result, id) => {
-      rememberOpen(null);
+      rememberOpen(id);
       setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       showNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
@@ -820,7 +830,6 @@ function DarkPage() {
   const signalsCount = signalCounts(worthRows);
 
   function chooseSignal(item: WorthSeed) {
-    rememberOpen(null);
     pendingSignalId.current = item.id;
     setStartPrefill({ tip: item.seed });
     setStartOpen(true);
@@ -923,8 +932,8 @@ function DarkPage() {
         each other when this content area reaches 900px; narrower areas stack.
       */}
       <div className="astra-deep-container">
-      <div className="astra-split-deep">
-        <div className="astra-piles">
+      <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>
+        <div className="astra-piles" hidden={noFiles}>
           <div className="astra-pile">
             <div className="astra-pile-h">
               <span>Open files</span>
@@ -1193,24 +1202,39 @@ function DarkPage() {
             </p>
           ) : null}
 
-          {/*
-            No file open: the drawing's right side is a short empty state, not
-            the settings that used to fill it. Before 0.6.72 an empty desk
-            showed Watched pages and How hard to dig and nothing else, which
-            read as a settings page rather than as a desk with no file on it.
-            Both panels are still below, so nothing became unreachable.
-          */}
-          {openId == null && !investigations.data?.length && !investigations.isPending ? (
-            <div className="astra-panel astra-empty">
-              <h2 className="astra-panel-h">No files yet.</h2>
-              <p className="astra-note">
-                Pick a file from Open files, open a signal nobody has read yet, or start one of
-                your own with <strong>+ Start a file</strong> above.
-              </p>
-            </div>
+          {/* The no-files state follows the state table and hides the rail. */}
+          {noFiles ? (
+            <section className="astra-panel astra-empty" aria-label="No investigations">
+              <h2 className="astra-panel-h">No investigations yet</h2>
+              <p className="astra-note">Start a file with a question, or check a public page for signals.</p>
+              <div className="astra-panel-acts">
+                <button
+                  type="button"
+                  className="btn solid"
+                  disabled={paperGate.blocked}
+                  onClick={() => {
+                    setStartPrefill(undefined);
+                    setStartOpen(true);
+                  }}
+                >
+                  + Start a file
+                </button>
+                <InkButton
+                  tone="quiet"
+                  disabled={reddit.isPending || !tipSubreddit.data?.subreddit}
+                  onClick={() => reddit.mutate()}
+                >
+                  {reddit.isPending
+                    ? `Reading ${redditLabel}…`
+                    : tipSubreddit.data?.subreddit
+                      ? `Check ${redditLabel} for signals`
+                      : "Reddit unavailable"}
+                </InkButton>
+              </div>
+            </section>
           ) : null}
 
-          {openId != null ? (
+          {openId != null && !noFiles ? (
             <InvestigationWorkspace
               openId={openId}
               detail={detail.data ?? undefined}
@@ -1263,7 +1287,6 @@ function DarkPage() {
                 advance.mutate(openId);
               }}
               onQueue={(preview) => toQueue.mutate({ id: openId, preview })}
-              onClose={() => rememberOpen(null)}
               onPark={() => park.mutate(openId)}
               onPullBack={() => pullBack.mutate(openId)}
               onCloseWithoutFinding={(note) => closeWithoutFinding.mutate({ id: openId, note })}
@@ -1533,7 +1556,6 @@ function InvestigationWorkspace({
   onStopDig,
   onKeepDigging,
   onQueue,
-  onClose,
   onCloseWithoutFinding,
   closePending,
   onPark,
@@ -1572,7 +1594,6 @@ function InvestigationWorkspace({
   onStopDig: () => void;
   onKeepDigging: () => void;
   onQueue: (preview: InvestigationQueuePacket) => void;
-  onClose: () => void;
   onCloseWithoutFinding: (note: string) => void;
   closePending: boolean;
   onPark: () => void;
@@ -2167,7 +2188,6 @@ function InvestigationWorkspace({
             <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
             {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
             {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
-            <InkButton tone="quiet" onClick={onClose}>Close view</InkButton>
           </div>
         </details>
       </div>

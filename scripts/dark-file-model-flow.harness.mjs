@@ -11,7 +11,8 @@ const queryStub = stub(`
   export function useQuery({ queryKey }) {
     const data = globalThis.__darkFlow.fixtures;
     const name = queryKey[0];
-    return { data: name === "investigation" ? data.detail : data[name], isPending: false, isError: false, isRefetching: false, refetch: async () => {} };
+    const value = name === "investigation" ? data.details?.[queryKey[1]] ?? data.detail : data[name];
+    return { data: value, isPending: false, isError: false, isRefetching: false, refetch: async () => {} };
   }
   export function useMutation(options) {
     return { isPending: false, isError: false, mutate(value) { Promise.resolve(options.mutationFn(value)).then((result) => options.onSuccess?.(result, value), (error) => options.onError?.(error, value)); } };
@@ -69,7 +70,7 @@ const modelPickerStub = stub(`
   export function ModelPicker(props) { return createElement("div", { className: "model-picker-stub", "data-value": props.value, "data-scope": props.scope, "data-effort": String(Boolean(props.onEffortChange)) }, createElement("span", null, props.label ?? "Digging model"), createElement("button", { type: "button", onClick: () => props.onChange("claude-sonnet") }, "Choose Claude Sonnet")); }
 `);
 const darkRailStub = stub(`
-  export const newestOpenFile = (rows) => rows.filter((row) => row.status !== "closed").sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
+  export const newestTouchedFile = (rows) => rows.slice().sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
   export const fullFileQuestion = (title) => title; export const signalCounts = () => ({ total: 0, covered: 0, toReview: 0 });
 `);
 const nullComponents = stub(`import { createElement } from "react"; export const DarkDialsPanel = () => null; export const PageWatchPanel = () => null; export function DarkFileDialog({ open, prefill }) { return open ? createElement("div", { role: "dialog", "data-question": prefill?.question ?? "", "data-tip": prefill?.tip ?? "", "data-explanation": prefill?.explanation ?? "" }) : null; } export const Dialog = () => null; export const FollowUpDialog = () => null; export const InvestigationBriefCard = () => null; export const SectionTldr = () => null; export const SearchTrailEntry = () => null; export const ProviderSignInButton = () => null; export const PaperSetupGateNote = () => null;`);

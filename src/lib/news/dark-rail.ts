@@ -1,10 +1,7 @@
-import { pileForStatus } from "./desk-copy.ts";
-
-export function newestOpenFile<T extends { id: number; status: string; updated_at: string }>(
+export function newestTouchedFile<T extends { id: number; updated_at: string }>(
   rows: readonly T[],
 ): T | undefined {
-  return rows
-    .filter((row) => pileForStatus(row.status) === "desk" && row.status !== "investigating")
+  return [...rows]
     .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
 }
 

@@ -6705,6 +6705,8 @@
   border-bottom: 1px solid var(--line);
   min-width: 0;
 }
+.desk-ltr.astra .astra-split-deep.astra-empty-desk { display: block; }
+.desk-ltr.astra .astra-split-deep.astra-empty-desk > .astra-piles { display: none; }
 @container (min-width: 900px) {
   .desk-ltr.astra .astra-split-deep { grid-template-columns: 320px minmax(0, 1fr); }
   .desk-ltr.astra .astra-piles { border-right: 1px solid var(--line); border-bottom: 0; }
