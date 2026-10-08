@@ -310,8 +310,8 @@ export const captureAudioAgain = createServerFn({ method: "POST" })
     ))[0];
     if (!meeting) return { ok: false, error: "This meeting is no longer on the capture list." };
     const currentAudio = (await sql.query<{ id: number; integrity_status: string }>(
-      `select id,integrity_status from meeting_transcript_artifacts
-        where newsroom_id=$1 and video_id=$2 and artifact_type='audio'
+      `select id,integrity_status from meeting_audio_artifact_inventory
+        where newsroom_id=$1 and video_id=$2
         order by captured_at desc,id desc limit 1`,
       [newsroomId, data.videoId],
     ))[0];

@@ -237,7 +237,7 @@ test("a saved recording with a failed hash check is not queued again", async () 
   assert.equal(failedJobs.length, 1);
   assert.equal(failedJobs[0]!.status, "failed");
   const artifact = (await sql.query<{ integrity_status: string }>(
-    "select integrity_status from meeting_transcript_artifacts where id=$1",
+    "select integrity_status from meeting_audio_captures where id=$1",
     [seed.audioArtifactId],
   ))[0]!;
   assert.equal(artifact.integrity_status, "hash-mismatch", "the worker should record the failed hash check on the audio row");

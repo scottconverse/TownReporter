@@ -55,12 +55,14 @@ export async function captureAudioAgain({ data }) {
 const deskCopyUrl = await moduleUrl("src/lib/news/desk-copy.ts", {
   "./preflight.ts": stubUrl("export const looksLikeProviderAuthFailure = () => false; export const providerAuthTarget = () => null;"),
   "./lead-match.ts": stubUrl("export const distinguishingOverlap = () => false;"),
-  "../paper.ts": stubUrl("export const TOPICS = [];"),
+  "../paper.ts": stubUrl(`export const PAPER = { timezone: "America/Denver" }; export const TOPICS = []; export const formatClockTime = () => "2:10 p.m."; export const formatListDateTime = () => "Oct. 8, 2:10 p.m.";`),
 });
 const chromeUrl = stubUrl("export function Busy() { return null; } export function SecHead() { return null; }");
 
 const meetingsUrl = await moduleUrl("src/components/meetings-activity.tsx", {
   "@/lib/news/desk-copy": deskCopyUrl,
+  react: import.meta.resolve("react"),
+  "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
   "@tanstack/react-query": queryUrl,
   "@/components/desk-chrome": chromeUrl,
   "@/lib/news/meeting-activity": stubUrl("export async function listMeetingActivity() { return globalThis.__meetingRows; }"),

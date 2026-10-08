@@ -148,7 +148,10 @@ const leadMatchStubForCopy = inlineModule(`
   export function distinguishingOverlap() { return { subjects: 0, names: 0 }; }
 `);
 const paperModuleStub = inlineModule(`
+  export const PAPER = { timezone: "America/Denver" };
   export const TOPICS = [];
+  export const formatClockTime = () => "2:10 p.m.";
+  export const formatListDateTime = () => "Oct. 8, 2:10 p.m.";
 `);
 const deskCopyUrl = moduleUrl(
   await readFile(new URL("../src/lib/news/desk-copy.ts", import.meta.url), "utf8"),

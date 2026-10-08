@@ -65,9 +65,9 @@ export async function storeMeetingAudioArtifact(
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   const byteSize = statSync(targetPath).size;
   const rows = await sql.query<{ id: number; captured_at: string }>(
-    `insert into meeting_transcript_artifacts
-       (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size)
-     values ($1,$2,'audio',$3,$4,$5,now(),$6,$7,$8)
+    `insert into meeting_audio_captures
+       (newsroom_id,video_id,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size)
+     values ($1,$2,$3,$4,$5,now(),$6,$7,$8)
      returning id,captured_at::text as captured_at`,
     [input.newsroomId, input.videoId, targetPath, input.format, sha256, input.sourceMethod ?? "yt-dlp-audio-opus", retentionMode, byteSize],
   );

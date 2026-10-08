@@ -490,7 +490,7 @@ function StoryPage() {
     ?? null;
   useEffect(() => {
     setSelectedMeetingTranscriptArtifactId((current) =>
-      meetingTranscriptChoices.some((choice) => choice.artifactId === current)
+      data?.meetingTranscriptChoices?.some((choice) => choice.artifactId === current)
         ? current
         : data?.defaultMeetingTranscriptArtifactId ?? null,
     );

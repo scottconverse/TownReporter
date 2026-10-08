@@ -76,9 +76,15 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
     );
 
     const artifacts = await sql.query<{
-      video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null; provenance_json: string | null; integrity_status: string;
+      id: number; captured_at: string; video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null; provenance_json: string | null; integrity_status: string;
     }>(
-      "select video_id,artifact_type,storage_path,format,sha256,byte_size,provenance_json,integrity_status from meeting_transcript_artifacts where newsroom_id=$1 order by captured_at desc, id desc",
+      `select id,captured_at,video_id,artifact_type,storage_path,format,sha256,byte_size,provenance_json,integrity_status
+         from meeting_transcript_artifacts where newsroom_id=$1 and artifact_type='transcript'
+       union all
+       select id,captured_at,video_id,'audio' as artifact_type,storage_path,format,sha256,byte_size,
+              null::text as provenance_json,integrity_status
+         from meeting_audio_artifact_inventory where newsroom_id=$1
+        order by captured_at desc,id desc`,
       [newsroomId],
     );
     // Bind provenance to the capture's current transcript hash, never to an audio artifact.

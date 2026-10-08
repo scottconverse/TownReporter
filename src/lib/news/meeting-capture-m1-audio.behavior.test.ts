@@ -63,10 +63,12 @@ function statefulSql(): {
       }
       return [];
     }
-    if (/insert into meeting_transcript_artifacts/i.test(text)) {
-      audioRows.push({ params });
-      return [{ id: 9, captured_at: "2026-01-01T00:00:00Z" }];
+    if (/insert into meeting_audio_captures/i.test(text)) {
+      const row = { id: audioRows.length + 9, storage_path: String(params[2]), params };
+      audioRows.push(row);
+      return [{ id: row.id, captured_at: "2026-01-01T00:00:00Z" }];
     }
+    if (/from meeting_audio_captures/i.test(text)) return audioRows;
     return null;
   };
   const makeSql = (): Sql => {
@@ -168,7 +170,7 @@ describe("meeting capture M-1 audio fallback in the real pipeline", () => {
         newsroomId, videoId, audioSourcePath: secondSource, format: "opus", triggerReason: "captions unavailable",
       });
       const rows = await sql.query<{ id: number; storage_path: string }>(
-        "select id,storage_path from meeting_transcript_artifacts where newsroom_id=$1 and video_id=$2 and artifact_type='audio' order by id",
+        "select id,storage_path from meeting_audio_captures where newsroom_id=$1 and video_id=$2 order by id",
         [newsroomId, videoId],
       );
       assert.notEqual(first.id, second.id, "each capture must have a new record id");
