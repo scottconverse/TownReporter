@@ -2212,6 +2212,18 @@ export async function performChallengeWork(
     order by started_at desc, id desc limit 1
   `;
   const run = runs[0] ?? null;
+  let caseBrief: InvestigationBrief | null = null;
+  if (!run) {
+    const briefRows = await sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${investigationId} and newsroom_id = ${job.newsroom_id} limit 1
+    `;
+    try {
+      caseBrief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+    } catch {
+      caseBrief = null;
+    }
+  }
   const choice = effectiveStoryModelChoice(job.model_choice);
   const overrides = applyJobLocalModelSnapshot(
     job,
@@ -2236,9 +2248,11 @@ export async function performChallengeWork(
     verified: 0,
     unverified: 0,
     searches: [],
-    summary: "No prior research round to challenge.",
+    summary: caseBrief
+      ? "The saved case brief was challenged."
+      : "No saved case brief or research round to challenge.",
   };
-  if (run) {
+  if (run || caseBrief) {
     const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
     const verify = deps.verify ?? verifyRunSignals;
     result = await waitForModel({
@@ -2247,8 +2261,9 @@ export async function performChallengeWork(
       run: () => verify({
         userId: job.user_id,
         newsroomId: job.newsroom_id,
-        runId: run.id,
+        runId: run?.id ?? null,
         investigationId,
+        caseBrief,
         place: place.place,
         officialDomains: place.official,
         pressDomains: place.press,
@@ -2823,7 +2838,20 @@ export async function queueInvestigationChallengeFor(
     select id from dark_runs where investigation_id = ${id} and newsroom_id = ${newsroomId}
     order by started_at desc, id desc limit 1
   `;
-  if (!priorRun[0]) return { ok: false as const, error: "Finish a research round before challenging the case." };
+  if (!priorRun[0]) {
+    const briefRows = await sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
+    `;
+    let brief: InvestigationBrief | null = null;
+    try {
+      brief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+    } catch {
+      brief = null;
+    }
+    if (!brief || (!brief.supports.length && !brief.contradictions.length))
+      return { ok: false as const, error: "Save a brief with findings before challenging the case." };
+  }
   const asked = storyModelChoice(modelChoice);
   const modelEffort = validatedModelEffort(asked, effortValue);
   const open = await findOpenJob({ newsroomId, kind: "challenge", subjectId: id });

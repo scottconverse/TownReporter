@@ -1808,6 +1808,7 @@ function InvestigationWorkspace({
     .filter((finding) => finding.text && finding.source && /^https?:\/\//i.test(finding.source.url))
     .sort((a, b) => (a.rank < 0 ? Number.MAX_SAFE_INTEGER : a.rank) - (b.rank < 0 ? Number.MAX_SAFE_INTEGER : b.rank) || b.confidence - a.confidence);
   const contradictions = brief?.contradictions ?? [];
+  const hasChallengeMaterial = sourcedFindings.length > 0 || contradictions.length > 0 || Boolean(brief?.supports.length);
   const unanswered = questions.map((question) => plainEditorText(question)).filter(Boolean);
   const linkedFollowUps = (detail?.investigationFollowUps ?? []).filter((followUp) => ["active", "paused"].includes(followUp.status) || followUp.lastState === "found");
   const sourceLink = (captureId: number) => {
@@ -2066,7 +2067,7 @@ function InvestigationWorkspace({
             {linkedFollowUps.length > 1 ? <details className="of-trail"><summary>More</summary>{linkedFollowUps.slice(1).map((followUp) => renderFollowUp(followUp, `follow-up-more-${followUp.id}`))}</details> : null}
           </div>
           <div className="astra-panel-acts">
-            <InkButton tone="quiet" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !detail?.run} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
+            <InkButton tone="quiet" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
           </div>
         </div>
       </div>
