@@ -95,7 +95,6 @@ import {
   editorDraftError,
   expectedDraftJobHasLanded,
   initialStoryTopic,
-  leadScoreLabel,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
@@ -1701,7 +1700,6 @@ function StoryPage() {
     unanswered,
     verify,
   });
-  const score = data.lead.newsworthiness ?? 0;
   /*
     The "how we report" page promises that leaning on another newsroom's
     reporting gets them named in the body, not just linked. Linking was
@@ -2322,7 +2320,7 @@ function StoryPage() {
       */}
       <div className="astra-wb-context">
         <span>
-          Story from lead · {sectionNameNow} · {leadScoreLabel(score)}
+          Story from lead · {sectionNameNow}
         </span>
         <Chip s={data.lead.status} />
         {/*
@@ -2634,7 +2632,7 @@ function StoryPage() {
             <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
-              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · {leadScoreLabel(score)}
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)}
               · {leadOrigin(data.lead)}
               {data.lead.investigation_id ? (
                 <>
