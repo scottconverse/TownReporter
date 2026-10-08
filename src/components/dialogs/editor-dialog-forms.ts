@@ -872,8 +872,8 @@ export function addToInitial(): AddToState {
 }
 
 /** The Limits dial starts where the design draws it: Standard. */
-export function darkFileInitial(): DarkFileState {
-  return { question: "", tip: "", explanation: "", limit: DARK_LIMITS[1].key, model: "auto", effort: null };
+export function darkFileInitial(model = "auto", effort: string | null = null): DarkFileState {
+  return { question: "", tip: "", explanation: "", limit: DARK_LIMITS[1].key, model, effort };
 }
 
 /**
@@ -894,8 +894,8 @@ export type DarkFilePrefill = { question?: string; tip?: string; explanation?: s
  * empty box they must notice is empty". The dialog reseeds from this on every
  * open (`useDialogState`), so one row's prefill never leaks into the next open.
  */
-export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
-  const seed = darkFileInitial();
+export function darkFileSeed(prefill?: DarkFilePrefill, model = "auto", effort: string | null = null): DarkFileState {
+  const seed = darkFileInitial(model, effort);
   if (prefill?.question !== undefined) seed.question = prefill.question;
   if (prefill?.tip !== undefined) seed.tip = prefill.tip;
   if (prefill?.explanation !== undefined) seed.explanation = prefill.explanation;
@@ -913,8 +913,8 @@ export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
  * files before this dialog replaced it (`paste.split("\n")[0]`), so a hand-over
  * files the same title it always did.
  */
-export function darkFileFromSeed(seed: string): DarkFileState {
-  return { ...darkFileInitial(), question: seed.split("\n")[0] ?? "", tip: seed };
+export function darkFileFromSeed(seed: string, model = "auto", effort: string | null = null): DarkFileState {
+  return { ...darkFileInitial(model, effort), question: seed.split("\n")[0] ?? "", tip: seed };
 }
 
 export function holdInitial(): HoldState {

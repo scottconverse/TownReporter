@@ -76,6 +76,8 @@ import { DOCUMENT_COUNT_LIMIT, DOCUMENT_FILE_LIMIT } from "@/lib/news/story-docu
 import type { SourceRow } from "@/lib/news/types";
 import { useEditorSections } from "@/lib/use-sections";
 import { sourceIdentity } from "@/lib/news/url-guard";
+import { useFirstRunPickerDefault } from "@/components/first-run-picker-default";
+import { defaultModelEffort } from "@/lib/news/provider-registry";
 import {
   AddLeadBody,
   AddSourcesBody,
@@ -958,6 +960,8 @@ export type DarkFileDialogProps = {
  */
 export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkFileDialogProps) {
   const press = usePress();
+  const defaultModel = useFirstRunPickerDefault("dark") ?? "auto";
+  const defaultEffort = defaultModelEffort(defaultModel);
   // The factory must be stable -- `useDialogState` reseeds on every open -- so
   // it is memoized on the seed and on the prefill's two strings rather than
   // rebuilt on each render. A caller passing an inline object literal for
@@ -970,9 +974,9 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
   const factory = React.useCallback(
     () =>
       seed
-        ? darkFileFromSeed(seed)
-        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }),
-    [seed, prefillQuestion, prefillTip, prefillExplanation],
+        ? darkFileFromSeed(seed, defaultModel, defaultEffort)
+        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }, defaultModel, defaultEffort),
+    [seed, prefillQuestion, prefillTip, prefillExplanation, defaultModel, defaultEffort],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
 

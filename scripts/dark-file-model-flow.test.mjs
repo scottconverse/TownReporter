@@ -1,0 +1,167 @@
+// guards: a file's chosen model could be silently replaced when the editor keeps investigating
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { installDom, transpileToUrl } from "./dom-harness.mjs";
+
+const window = installDom();
+const React = await import("react");
+const { createRoot } = await import("react-dom/client");
+const h = React.createElement;
+const calls = { keep: [] };
+globalThis.__darkFlow = { calls };
+
+const stub = (source) => transpileToUrl(source, "dark-flow-stub.js", {});
+const queryStub = stub(`
+  export function useQuery({ queryKey }) {
+    const data = globalThis.__darkFlow.fixtures;
+    const name = queryKey[0];
+    return { data: name === "investigation" ? data.detail : data[name], isPending: false, isError: false, isRefetching: false, refetch: async () => {} };
+  }
+  export function useMutation(options) {
+    return { isPending: false, isError: false, mutate(value) { Promise.resolve(options.mutationFn(value)).then((result) => options.onSuccess?.(result, value), (error) => options.onError?.(error, value)); } };
+  }
+  export function useQueryClient() { return { invalidateQueries() {}, setQueryData() {} }; }
+`);
+const routerStub = stub(`
+  import { createElement } from "react";
+  export function createFileRoute() { return (options) => options; }
+  export function Link({ children, to, ...props }) { return createElement("a", { href: String(to ?? "#"), ...props }, children); }
+`);
+const chromeStub = stub(`
+  import { createElement } from "react";
+  export function DeskShell({ children }) { return createElement("main", null, children); }
+  export function InkButton({ children, tone, small, pending, pendingLabel, ...props }) { return createElement("button", props, pending ? pendingLabel : children); }
+  export function Busy() { return null; } export function Score() { return null; } export function SecHead() { return null; }
+`);
+const statesStub = stub(`import { createElement } from "react"; export function ListSkeleton() { return null; } export function Notice({ children }) { return createElement("div", null, children); } export function ScreenError() { return null; }`);
+const darkStub = stub(`
+  export const continueInvestigation = async ({ data }) => { globalThis.__darkFlow.calls.keep.push(data); return { ok: true, pending: true, jobId: 9 }; };
+  export const listInvestigations = async () => globalThis.__darkFlow.fixtures.investigations;
+  export const listWorthALook = async () => [];
+  export const getInvestigation = async () => globalThis.__darkFlow.fixtures.detail;
+  export const getDarkDials = async () => ({ place: { city: "Longmont", county: "Boulder County" } });
+  export const investigationActivity = async () => [];
+  export const challengeInvestigation = async () => ({ ok: true });
+  export const draftSignalFile = async () => ({ ok: false });
+  export const findSomethingToDigInto = async () => ({ ok: false });
+  export const fileRedditTip = async () => ({ ok: true });
+  export const getArtifact = async () => null; export const getArtifactOcrJob = async () => null;
+  export const openDarkInvestigation = async () => ({ ok: true, investigationId: 2 });
+  export const parkInvestigation = async () => ({ ok: true }); export const queueInvestigation = async () => ({ ok: true });
+  export const queuePacket = async () => null; export const closeInvestigation = async () => ({ ok: true });
+  export const queueArtifactOcr = async () => ({ ok: true }); export const refreshBrief = async () => ({ ok: true });
+  export const reopenParkedInvestigation = async () => ({ ok: true }); export const retryDarkRound = async () => ({ ok: true });
+  export const scanTipSubreddit = async () => ({ ok: true }); export const getTipSubreddit = async () => ({ subreddit: "longmont" });
+`);
+const copyStub = stub(`
+  export const DIG_STOP_ACK = "Stop requested.";
+  export const blockedDigBannerText = () => ""; export const editorError = (v) => String(v ?? "");
+  export const editorKindLabel = () => "Record"; export const elapsedLabel = () => ""; export const excerptForEditor = (v) => String(v ?? "");
+  export const headlineFromUrl = () => ""; export const humanFrontierLabel = (v) => String(v ?? "");
+  export const darkJobActive = () => false; export const observedDarkJobFinished = () => false;
+  export const organizationFromUrl = () => ""; export const editorTitle = (v) => String(v ?? "");
+  export const investigationPileFor = (row) => row.status === "closed" ? "aside" : "desk";
+  export const plainEditorText = (v) => String(v ?? ""); export const plainFinding = (v) => String(v ?? "");
+  export const progressLine = () => ""; export const digStopControl = () => ({ visible: false, label: "Stop", disabled: false, line: null });
+  export const recordKindFromUrl = () => "page"; export const redditFeedLabel = () => "r/longmont";
+  export const redditFeedStatusLabel = () => ""; export const redditPostStateLabel = () => "";
+  export const redditResultHeadline = () => ""; export const sentenceCase = (v) => String(v ?? "");
+  export const stalledRunCopy = () => ""; export const worthItemOnDeskLine = () => ""; export const worthItemOnDeskReason = () => "";
+`);
+const modelPickerStub = stub(`
+  import { createElement } from "react";
+  export function ModelPicker(props) { return createElement("div", { className: "model-picker-stub", "data-value": props.value, "data-scope": props.scope, "data-effort": String(Boolean(props.onEffortChange)) }, createElement("span", null, props.label ?? "Digging model"), createElement("button", { type: "button", onClick: () => props.onChange("claude-sonnet") }, "Choose Claude Sonnet")); }
+`);
+const darkRailStub = stub(`
+  export const newestOpenFile = (rows) => rows.filter((row) => row.status !== "closed").sort((a,b) => Date.parse(b.updated_at)-Date.parse(a.updated_at))[0];
+  export const fullFileQuestion = (title) => title; export const signalCounts = () => ({ total: 0, covered: 0, toReview: 0 });
+`);
+const nullComponents = stub(`import { createElement } from "react"; export const DarkDialsPanel = () => null; export const PageWatchPanel = () => null; export const DarkFileDialog = () => null; export const Dialog = () => null; export const FollowUpDialog = () => null; export const InvestigationBriefCard = () => null; export const SectionTldr = () => null; export const SearchTrailEntry = () => null; export const ProviderSignInButton = () => null; export const PaperSetupGateNote = () => null;`);
+const imports = {
+  "@/lib/news/dark-rail": darkRailStub,
+  "@tanstack/react-router": routerStub,
+  "@tanstack/react-query": queryStub,
+  "@/components/desk-chrome": chromeStub,
+  "@/components/states": statesStub,
+  "@/lib/news/dark": darkStub,
+  "@/lib/news/job-progress": stub(`export const cancelStoryJob = async () => ({ ok: true });`),
+  "@/components/job-card-state": stub(`export const invalidateDeskJobs = () => {}; export const useDeskJobs = () => ({ data: [], isPending: false, isError: false });`),
+  "@/components/JobCard": stub(`export const DeskJobCard = () => null;`),
+  "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
+  "@/components/PaperSetupGateNote": nullComponents,
+  "@/lib/news/desk-copy": copyStub,
+  "@/lib/paper-context-state": stub(`export const usePaperDateFormatters = () => ({ formatListDateTime: () => "Sept. 26" });`),
+  "@/components/dark-dials-panel": nullComponents,
+  "@/components/model-picker": modelPickerStub,
+  "@/components/first-run-picker-default": stub(`export const useFirstRunPickerSeed = () => {}; export const useFirstRunPickerDefault = () => "claude-haiku";`),
+  "@/lib/news/dark-dials": stub(`export const scopeLabelsFor = () => ({ city: "Longmont", county: "Boulder County", region: "Region", adjacent: "Nearby" });`),
+  "@/lib/news/editor-dialog-logic": stub(`export const DARK_LIMITS = [{ key: "standard", label: "Standard", minutes: 120, hops: 5 }];`),
+  "@/components/investigation-brief": stub(`export const InvestigationBriefCard = () => null; export const SectionTldr = () => null;`),
+  "@/components/search-trail-entry": stub(`export const SearchTrailEntry = () => null;`),
+  "@/lib/news/dark-fact-lines": stub(`export const dedupeFactLines = () => []; export const factLinesDropped = () => 0;`),
+  "@/lib/news/html-text": stub(`export const captureBatchStats = () => ({ total: 0, blockedRatio: 0 }); export const readableCapture = () => ""; export const captureRefusalLabel = () => "";`),
+  "@/lib/news/extraction-label": stub(`export const describeExtractionMethod = () => "";`),
+  "@/lib/news/dark-seed": stub(`export const takeDarkSeed = () => null;`),
+  "@/components/provider-signin-button": nullComponents,
+  "@/lib/news/preflight": stub(`export const looksLikeProviderAuthFailure = () => false;`),
+  "@/components/dialogs/editor-dialogs": nullComponents,
+  "@/components/page-watch-panel": nullComponents,
+  "@/components/dialog": nullComponents,
+  "@/components/follow-up-dialog": nullComponents,
+  "@/lib/news/desk": stub(`export const createAiFollowUp = async () => ({ ok: true }); export const listFollowUpStoryOptions = async () => [];`),
+  "@/lib/news/page-watch-actions": stub(`export const checkPageWatch = async () => ({ ok: true }); export const createPageWatch = async () => ({ ok: true, id: 1 });`),
+  "@/lib/news/model-choice": stub(`export const darkModelChoice = (v) => v === "codex-sol" || v === "claude-sonnet" || v === "claude-haiku" ? v : "auto"; export const modelChoiceLabel = () => "Automatic"; export const shouldHydrateDarkModel = (selected, id, last, status) => selected === id && (last != null || status !== "investigating");`),
+  "@/lib/news/provider-registry": stub(`export const defaultModelEffort = () => null; export const modelEffort = (_choice, effort) => effort ?? null;`),
+};
+const routeUrl = await (async () => {
+  const { readFile } = await import("node:fs/promises");
+  return (await import("./dom-harness.mjs")).transpileToUrl(await readFile(new URL("../src/routes/desk.dark.tsx", import.meta.url), "utf8"), "desk.dark.tsx", imports);
+})();
+const Route = (await import(routeUrl)).Route;
+
+const file = { id: 1, title: "When was the notice posted?", status: "open", updated_at: "2026-10-08T12:00:00Z", limit_key: "standard", limit_minutes: 120, still_open: 0 };
+const detail = {
+  investigation: { ...file, ordinary_explanation: "A routine delay", scope_json: '{"scope":"city"}', budget: 5, hops: 0, last_model_choice: "codex-sol", pause_reason: null },
+  artifacts: [], claims: [], hypotheses: [], searches: [], frontier: [], deadEnds: [], anomalies: [], entities: [], signals: [], sourceCaptures: [], investigationFollowUps: [], captureCounts: { captures: 0, readable: 0, unreadable: 0 },
+};
+globalThis.__darkFlow.fixtures = { investigations: [file], "worth-a-look": [], "tip-subreddit": { subreddit: "longmont" }, "dark-dials": { place: { city: "Longmont", county: "Boulder County" } }, "investigation-activity": [], "follow-up-story-options": [], detail };
+
+test("the file model choice runs when the editor keeps investigating", async () => {
+  calls.keep.length = 0;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await React.act(async () => root.render(h(Route.component)));
+  try {
+    const workspace = container.querySelector("#investigation-workspace");
+    assert.ok(workspace, "the most recent open file should be in the work area");
+    const picker = workspace.querySelector(".model-picker-stub");
+    assert.ok(picker, "the open file should have a model picker");
+    assert.equal(picker.textContent.includes("Digging model"), true);
+    assert.equal(picker.dataset.scope, "dark");
+    assert.equal(picker.dataset.value, "codex-sol");
+    assert.equal(picker.dataset.effort, "true");
+    await React.act(async () => picker.querySelector("button").dispatchEvent(new window.Event("click", { bubbles: true })));
+    const keep = [...workspace.querySelectorAll("button")].find((button) => button.textContent.trim() === "Keep investigating");
+    assert.ok(keep);
+    await React.act(async () => keep.dispatchEvent(new window.Event("click", { bubbles: true })));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.keep, [{ id: 1, modelChoice: "claude-sonnet", modelEffort: null }]);
+  } finally {
+    await React.act(async () => root.unmount());
+    container.remove();
+  }
+
+  detail.investigation.last_model_choice = null;
+  const freshContainer = document.createElement("div");
+  document.body.append(freshContainer);
+  const freshRoot = createRoot(freshContainer);
+  await React.act(async () => freshRoot.render(h(Route.component)));
+  try {
+    const picker = freshContainer.querySelector("#investigation-workspace .model-picker-stub");
+    assert.equal(picker?.dataset.value, "claude-haiku", "a file with no prior choice starts on the Models default");
+  } finally {
+    await React.act(async () => freshRoot.unmount());
+    freshContainer.remove();
+  }
+});

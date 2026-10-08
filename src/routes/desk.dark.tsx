@@ -69,7 +69,7 @@ type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
-import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
+import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
 import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
 import { getDarkDials } from "@/lib/news/dark";
@@ -273,8 +273,11 @@ function DarkPage() {
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
+  const [fileModelChoice, setFileModelChoice] = useState<StoryModelChoice>("auto");
+  const [fileModelEffort, setFileModelEffort] = useState<ModelEffort | null>(null);
   const [ocrModelChoice, setOcrModelChoice] = useState<StoryModelChoice>("auto");
   const [ocrModelEffort, setOcrModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const darkDefaultModel = useFirstRunPickerDefault("dark");
   /* The Dark Desk's own first-run default; retained-PDF OCR has a separate
      picker because its automatic reader order is different. */
   const modelChoiceTouched = useRef(false);
@@ -288,6 +291,7 @@ function DarkPage() {
     },
   });
   const pickedFor = useRef<number | null>(null);
+  const fileModelTouchedFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
@@ -337,11 +341,18 @@ function DarkPage() {
       last,
       detail.data.investigation.status,
     )) return;
+    if (fileModelTouchedFor.current === openId) {
+      pickedFor.current = openId;
+      return;
+    }
+    if (last == null && darkDefaultModel == null) return;
     pickedFor.current = openId;
-    const remembered = darkModelChoice(last);
-    setModelChoice(remembered);
-    setModelEffort(validatedModelEffort(remembered, detail.data.run?.model_effort));
-  }, [openId, detail.data]);
+    const remembered = darkModelChoice(last ?? darkDefaultModel);
+    setFileModelChoice(remembered);
+    setFileModelEffort(last == null
+      ? defaultModelEffort(remembered)
+      : validatedModelEffort(remembered, detail.data.run?.model_effort));
+  }, [openId, detail.data, darkDefaultModel]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
   useEffect(() => {
@@ -456,7 +467,7 @@ function DarkPage() {
       return continueInvestigation({
         data: picked
           ? { id, modelChoice: picked.choice, modelEffort: picked.effort }
-          : { id, modelChoice, modelEffort },
+          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort },
       });
     },
     onSuccess: (res) => {
@@ -586,7 +597,7 @@ function DarkPage() {
   });
 
   const challengeCase = useMutation({
-    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice, modelEffort } }),
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
     onSuccess: (result) => {
       if (!result.ok) {
         showNotice(result.error || "Could not challenge this case.");
@@ -938,8 +949,14 @@ function DarkPage() {
             */
             const effort = validatedModelEffort(picked, run.modelEffort) ?? defaultModelEffort(picked);
             firstRoundPick.current = { choice: picked, effort };
-            setModelChoice(picked);
-            setModelEffort(effort);
+            fileModelTouchedFor.current = id;
+            setFileModelChoice(picked);
+            setFileModelEffort(effort);
+          } else {
+            const choice = darkDefaultModel ?? modelChoice;
+            fileModelTouchedFor.current = id;
+            setFileModelChoice(choice);
+            setFileModelEffort(defaultModelEffort(choice));
           }
           const signalId = pendingSignalId.current;
           pendingSignalId.current = null;
@@ -1348,6 +1365,17 @@ function DarkPage() {
               challengePending={challengeCase.isPending}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
+              modelChoice={fileModelChoice}
+              onModelChoice={(choice) => {
+                fileModelTouchedFor.current = openId;
+                setFileModelChoice(choice);
+                setFileModelEffort(defaultModelEffort(choice));
+              }}
+              modelEffort={fileModelEffort}
+              onModelEffort={(effort) => {
+                fileModelTouchedFor.current = openId;
+                setFileModelEffort(effort);
+              }}
               ocrModelChoice={ocrModelChoice}
               ocrModelEffort={ocrModelEffort}
             />
@@ -1608,6 +1636,10 @@ function InvestigationWorkspace({
   challengePending,
   onWriteBrief,
   briefPending,
+  modelChoice,
+  onModelChoice,
+  modelEffort,
+  onModelEffort,
   ocrModelChoice,
   ocrModelEffort,
 }: {
@@ -1643,6 +1675,10 @@ function InvestigationWorkspace({
   challengePending: boolean;
   onWriteBrief: () => void;
   briefPending: boolean;
+  modelChoice: StoryModelChoice;
+  onModelChoice: (choice: StoryModelChoice) => void;
+  modelEffort: ModelEffort | null;
+  onModelEffort: (effort: ModelEffort | null) => void;
   ocrModelChoice: StoryModelChoice;
   ocrModelEffort: ModelEffort | null;
 }) {
@@ -2001,6 +2037,15 @@ function InvestigationWorkspace({
           <p className="astra-note">No ordinary explanation has been added yet.</p>
         )}
       </div>
+
+      <ModelPicker
+        scope="dark"
+        value={modelChoice}
+        onChange={onModelChoice}
+        effort={modelEffort}
+        onEffortChange={onModelEffort}
+        disabled={digging || keepDisabled}
+      />
 
       {digJob || failedDarkJob ? (
         <DarkResearchCard
