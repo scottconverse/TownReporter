@@ -3502,6 +3502,7 @@ function candidateScore(claim: string, quote: string): number {
   const normalized = normalizeForMatch(quote);
   const terms = significantEvidenceWords(claim);
   const hits = terms.filter((term) => normalized.includes(term)).length;
+  const keyHits = wholeTranscriptKeyScore(claim, quote);
   const numbers = claim.match(/\d[\d,]*(?:\.\d+)?%?/g) ?? [];
   const spokenDigits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
   const quoteDigits = quote.toLowerCase()
@@ -3526,10 +3527,27 @@ function candidateScore(claim: string, quote: string): number {
   const hasClaimedResult = Boolean(claimedTally && hasAnnouncedResult(quote) &&
     [...spoken.matchAll(/\b(\d+)\s*(?:-|–|—|to)\s*(\d+)\b/gi)]
       .some((match) => match[1] === claimedTally[1] && match[2] === claimedTally[2]));
-  return hits + numberHits * 4 + topicHits * 4 + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 24 : 0) + (hasClaimedResult ? 8 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
+  return hits + numberHits * 4 + topicHits * 4 + keyHits + (budgetContextMatch ? 14 : 0) + ordinanceHits * 10 + (readingStageMatch ? 24 : 0) + (hasClaimedResult ? 8 : 0) + (normalized.includes(normalizeForMatch(claim)) ? 100 : 0);
 }
 
-const announcedResultWords = /\b(?:(?:(?:the\s+)?(?:motion|item)|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:(?:is|was|has\s+been)\s+)?(?:carries|passes|fails|carried|passed|failed|approved|approves)|(?:carries|carried|passes|passed|fails|failed)\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven|unanimously)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
+function wholeTranscriptKeyScore(claim: string, quote: string): number {
+  const normalized = normalizeForMatch(quote);
+  const ids = claim.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi) ?? [];
+  const amounts = claim.match(/\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:million|thousand))?/gi) ?? [];
+  const percentages = claim.match(/\b\d+(?:\.\d+)?\s?%(?=\s|$)/g) ?? [];
+  const numbers = claim.match(/\b\d[\d,]*(?:\.\d+)?\b/g) ?? [];
+  const idHits = ids.filter((value) => normalized.includes(normalizeForMatch(value))).length;
+  const amountHits = amounts.filter((value) => normalized.includes(normalizeForMatch(value))).length;
+  const percentageHits = percentages.filter((value) => quote.replace(/\s/g, "").includes(value.replace(/\s/g, "")) || normalized.includes(value.replace(/\D/g, ""))).length;
+  const numberHits = numbers.filter((value) => normalized.includes(value.replace(/\D/g, ""))).length;
+  const namedTerms = significantEvidenceWords(claim).filter((term) => term.length >= 5);
+  const nameHits = namedTerms.filter((term) => normalized.includes(term)).length;
+  const hasDelayedDisposition = /\b(?:died|dies|failed|fails)\b/i.test(claim) && /\b(?:second|motion|vote)\b/i.test(claim);
+  const dispositionHits = hasDelayedDisposition && /\b(?:dies|died|lack of a second|without a second|no second|fails|failed)\b/i.test(quote) ? 18 : 0;
+  return idHits * 24 + amountHits * 18 + percentageHits * 18 + numberHits * 5 + nameHits * 3 + dispositionHits;
+}
+
+const announcedResultWords = /\b(?:(?:(?:the\s+)?(?:motion|item)|that|it)\s+(?:(?:uh|um|to|amend|item)\s+){0,4}(?:(?:is|was|has\s+been)\s+)?(?:carries|passes|fails|carried|passed|failed|approved|approves)|(?:carries|carried|passes|passed|fails|failed)\s+(?:um\s+)?(?:\d|one|two|three|four|five|six|seven|unanimously)|(?:the\s+)?motion\s+(?:dies|died)\s+(?:for\s+lack\s+of\s+a\s+second|without\s+a\s+second)|all\s+in\s+favor|unanimously|the\s+vote\s+is|approved\s+on\s+a\s+vote)\b/i;
 
 function hasAnnouncedResult(text: string): boolean {
   return text.split(/[.!?;\r\n]+/).some((sentence) =>
@@ -3555,11 +3573,64 @@ function cappedPassage(segments: TapeSegment[]): string {
   return text.slice(0, 600).trimEnd() + " … " + text.slice(-596).trimStart();
 }
 
-function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl: string): ClaimCheckCandidate[] {
+function claimCitationStartSeconds(claim: PackageClaim): number | null {
+  const evidenceTimes = [
+    claim.transcriptEvidence?.startSeconds,
+    claim.recordEvidence?.kind === "transcript" ? claim.recordEvidence.startSeconds : undefined,
+    claim.closestEvidence?.kind === "transcript" ? claim.closestEvidence.startSeconds : undefined,
+  ];
+  const exact = evidenceTimes.find((value) => Number.isFinite(value));
+  if (exact !== undefined && exact !== null) return exact;
+  const locator = [claim.recordEvidence?.locator, claim.closestEvidence?.locator].filter(Boolean).join(" ");
+  const note = [locator, claim.nextCheck, claim.checkReason].filter(Boolean).join(" ");
+  const match = note.match(/\b(\d{1,2}:)?\d{1,2}:\d{2}(?:\.\d+)?\b/);
+  if (!match) return null;
+  const parts = match[0].split(":").map(Number);
+  return parts.length === 3 ? parts[0]! * 3600 + parts[1]! * 60 + parts[2]! : parts[0]! * 60 + parts[1]!;
+}
+
+function citedTranscriptCandidate(claim: PackageClaim, record: WholeRecord, videoUrl: string): ClaimCheckCandidate | null {
+  const seconds = claimCitationStartSeconds(claim);
+  if (seconds === null) return null;
+  const ordered = [...record.segments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
+  const cited = ordered.find((segment) => segment.seconds >= seconds - 10 && segment.seconds <= seconds + 90 &&
+    (!claim.item || !segment.item || segment.item === claim.item)) ??
+    ordered.reduce<TapeSegment | null>((best, segment) => {
+      if (claim.item && segment.item && segment.item !== claim.item) return best;
+      return !best || Math.abs(segment.seconds - seconds) < Math.abs(best.seconds - seconds) ? segment : best;
+    }, null);
+  if (!cited) return null;
+  const context = ordered.filter((segment) => segment.seconds >= cited.seconds - 15 && segment.seconds <= cited.seconds + 90 &&
+    (!claim.item || !segment.item || segment.item === claim.item));
+  const first = context[0] ?? cited;
+  const last = context[context.length - 1] ?? cited;
+  const quote = cappedPassage(context.length ? context : [cited]);
+  return {
+    kind: "transcript",
+    quote,
+    title: "Retained meeting transcript",
+    url: videoUrl,
+    locator: `Cited window; ${clockLabel(first.seconds)}–${clockLabel(last.seconds)}`,
+    startSeconds: first.seconds,
+    endSeconds: last.seconds,
+    anchorSeconds: cited.seconds,
+    page: null,
+    item: cited.item || claim.item,
+    score: candidateScore(claim.text, quote),
+  };
+}
+
+function transcriptClaimCandidates(claim: PackageClaim, record: WholeRecord, videoUrl: string): ClaimCheckCandidate[] {
+  const claimText = claim.text;
   const segments = [...record.segments].sort((a, b) => a.seconds - b.seconds || a.index - b.index);
-  const isVoteClaim = voteClaim(claim);
-  const isReadingClaim = /\b(?:first|second)[\s-]+reading\b/i.test(claim);
-  const matched = segments.filter((segment) => candidateScore(claim, segment.text) > 0 || (isVoteClaim && hasAnnouncedResult(segment.text)));
+  const isVoteClaim = voteClaim(claimText);
+  const isReadingClaim = /\b(?:first|second)[\s-]+reading\b/i.test(claimText);
+  const citationSeconds = claimCitationStartSeconds(claim);
+  const citedAnchor = citationSeconds === null ? null : segments.find((segment) =>
+    segment.seconds >= citationSeconds - 10 && segment.seconds <= citationSeconds + 90 &&
+    (!claim.item || !segment.item || segment.item === claim.item),
+  ) ?? null;
+  const matched = segments.filter((segment) => candidateScore(claimText, segment.text) > 0 || (isVoteClaim && hasAnnouncedResult(segment.text)));
   const passages = matched.map((match): ClaimCheckCandidate => {
     let anchor = match;
     if (isVoteClaim && !hasAnnouncedResult(match.text)) {
@@ -3574,7 +3645,10 @@ function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl:
       segment.seconds < anchor.seconds && anchor.seconds - segment.seconds <= 900 &&
       sameTranscriptItem(anchor, segment) && motionSegment(segment),
     );
-    const startSeconds = motion?.seconds ?? lowerBound;
+    const citedChain = citedAnchor && anchor.seconds > citedAnchor.seconds && anchor.seconds - citedAnchor.seconds <= 3_600 &&
+      hasAnnouncedResult(anchor.text) && sameTranscriptItem(citedAnchor, anchor) &&
+      candidateScore(claimText, citedAnchor.text) > 0;
+    const startSeconds = citedChain ? citedAnchor.seconds : motion?.seconds ?? lowerBound;
     const context = segments.filter((segment) =>
       segment.seconds >= startSeconds && segment.seconds <= anchor.seconds && sameTranscriptItem(anchor, segment),
     );
@@ -3593,7 +3667,7 @@ function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl:
       anchorSeconds: match.seconds,
       page: null,
       item: item || undefined,
-      score: candidateScore(claim, quote),
+      score: candidateScore(claimText, quote),
     };
   }).sort((a, b) => a.anchorSeconds! - b.anchorSeconds!);
 
@@ -3613,7 +3687,7 @@ function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl:
       prior.startSeconds = context[0]?.seconds ?? start;
       prior.endSeconds = context[context.length - 1]?.seconds ?? end;
       prior.locator = `${prior.item ? `Item ${prior.item}; ` : ""}${clockLabel(prior.startSeconds)}–${clockLabel(prior.endSeconds)}`;
-      prior.score = candidateScore(claim, prior.quote);
+      prior.score = candidateScore(claimText, prior.quote);
     } else {
       merged.push({ ...passage });
     }
@@ -3621,10 +3695,11 @@ function transcriptClaimCandidates(claim: string, record: WholeRecord, videoUrl:
   return merged;
 }
 
-function claimCheckCandidates(claim: string, record: WholeRecord, documents: DocumentRead[]): ClaimCheckCandidate[] {
+function claimCheckCandidates(claim: PackageClaim, record: WholeRecord, documents: DocumentRead[]): ClaimCheckCandidate[] {
   const videoId = str(record.identity.videoId);
   const videoUrl = str(record.identity.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
   const transcript = transcriptClaimCandidates(claim, record, videoUrl);
+  const cited = citedTranscriptCandidate(claim, record, videoUrl);
   const documentCandidates = documents.filter((doc) => doc.ok).flatMap((doc) => {
     const pages = (doc.pages ?? []).filter((page) => page.text.trim());
     const units = pages.length
@@ -3637,10 +3712,10 @@ function claimCheckCandidates(claim: string, record: WholeRecord, documents: Doc
       url: doc.url,
       locator: unit.page === null ? "Read document text" : `p. ${unit.page}`,
       page: unit.page,
-      score: candidateScore(claim, quote),
+      score: candidateScore(claim.text, quote),
     })));
   });
-  return [...transcript, ...documentCandidates];
+  return [...(cited ? [cited] : []), ...transcript, ...documentCandidates];
 }
 
 function clockLabel(seconds: number): string {
@@ -3743,13 +3818,15 @@ export async function reviewOpenStoryClaims(input: {
     await input.throwIfCancelled();
     const claim = story.claims.find((row) => row.id === id);
     if (!claim || claim.status === "VERIFIED") continue;
-    const candidates = claimCheckCandidates(claim.text, input.record, input.documents);
-    const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript").sort((a, b) => b.score - a.score).slice(0, 8);
+    const candidates = claimCheckCandidates(claim, input.record, input.documents);
+    const citedCandidate = candidates.find((candidate) => candidate.kind === "transcript" && candidate.locator.startsWith("Cited window;")) ?? null;
+    const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript" && candidate !== citedCandidate)
+      .sort((a, b) => b.score - a.score).slice(0, 8);
     const documentCandidates = candidates.filter((candidate) => candidate.kind === "document").sort((a, b) => b.score - a.score).slice(0, 12);
-    const reviewCandidates = [...transcriptCandidates, ...documentCandidates];
+    const reviewCandidates = [...(citedCandidate ? [citedCandidate] : []), ...transcriptCandidates, ...documentCandidates];
     const prompt = [
       "Check this one unresolved story claim against the supplied evidence, then return one JSON object.",
-      "The retained transcript is the meeting record. Search all transcript passages shown, not only the original agenda-item span.",
+      "Check the cited transcript window first. Then search the whole retained transcript by the claim's key terms, names, identifiers and numbers; do not stop at the cited time window. Finally check the already-read agenda packet and documents.",
       "Use only these already-read records. A model summary or source label is not evidence. If the record disagrees, return a corrected sentence supported by an exact quote, or set cut=true.",
       "The retained transcript is caption text and has no speaker labels. If the record proves the core fact but cannot show a speaker role, reading stage, or motion name, return NARROWED with a sentence that drops only that unsupported detail and an exact quote for what remains.",
       "Never infer a vote, adoption, date, name, amount or relationship from an unrelated passage.",
@@ -3758,8 +3835,11 @@ export async function reviewOpenStoryClaims(input: {
       "MEETING IDENTITY: " + JSON.stringify(input.record.identity),
       "CLAIM: " + claim.text,
       "NEXT CHECK NOTE: " + claim.nextCheck,
-      "ALREADY-READ DOCUMENTS: " + JSON.stringify(input.documents.map((doc) => ({ title: doc.title, url: doc.url, ok: doc.ok }))),
+      "CITED TRANSCRIPT WINDOW (checked first): " + JSON.stringify(citedCandidate ? { quote: citedCandidate.quote, locator: citedCandidate.locator, url: citedCandidate.url } : null),
+      "WHOLE-TRANSCRIPT SEARCH: all retained segments were scored using the claim's key terms, names, identifiers, amounts, percentages, and numbers. Best matching passages follow.",
       "CLOSEST FULL-TRANSCRIPT PASSAGES: " + JSON.stringify(transcriptCandidates.map(({ quote, locator, url }) => ({ quote, locator, url }))),
+      "AGENDA ITEMS ALREADY ON FILE: " + JSON.stringify(input.record.agenda),
+      "ALREADY-READ DOCUMENTS: " + JSON.stringify(input.documents.map((doc) => ({ title: doc.title, url: doc.url, ok: doc.ok }))),
       "CLOSEST ALREADY-READ DOCUMENT PASSAGES: " + JSON.stringify(documentCandidates.map(({ quote, title, locator, url }) => ({ quote, title, locator, url }))),
     ].join("\n\n");
     let response: Awaited<ReturnType<typeof input.chat>>;

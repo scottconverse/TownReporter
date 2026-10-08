@@ -2254,6 +2254,52 @@ it("checks an unresolved claim against the full transcript and already-read docu
   assert.equal(result.claims[0]?.item, "11");
 });
 
+// guards: an editor could be left with an open fact when its disposition is later in the retained transcript.
+it("finds a motion's delayed result after its cited window", async () => {
+  const videoUrl = "https://www.youtube.com/watch?v=S1kSaew-UUY";
+  const claim = "The Copper Peak concept plan amendment includes a 50% for-sale housing requirement; the motion dies for lack of a second.";
+  const opening = "Copper Peak concept plan amendment includes a 50% for-sale housing requirement.";
+  const result = "The motion dies for lack of a second.";
+  const segments = [
+    { index: 1, seconds: 100, item: "9I", itemTitle: "Copper Peak", text: opening },
+    ...Array.from({ length: 40 }, (_, index) => ({
+      index: index + 2, seconds: 110 + index * 10, item: "9I", itemTitle: "Copper Peak", text: "Council discussed another agenda detail.",
+    })),
+    { index: 42, seconds: 510, item: "9I", itemTitle: "Copper Peak", text: result },
+  ];
+  const checked = await reviewOpenStoryClaims({
+    story: {
+      id: "copper-peak", headline: "Council considers Copper Peak", draft: claim,
+      plainBrief: "", cannotSay: "", readinessTier: 1,
+      claims: [{
+        id: "C18", text: claim, status: "UNVERIFIED", sourceIds: [], nextCheck: "Recheck the cited passage at 00:01:40.",
+        closestEvidence: { kind: "transcript", quote: opening, url: videoUrl, locator: "Item 9I; 00:01:40", startSeconds: 100 },
+      }],
+      sources: [],
+    },
+    record: {
+      identity: { videoId: "S1kSaew-UUY", videoUrl, title: "City Council regular session", date: "Oct. 6, 2026" },
+      segments,
+    } as never,
+    documents: [],
+    method: { version: "test", text: "Use records only." } as never,
+    chat: (async (_system: string, prompt: string) => {
+      const marker = "CLOSEST FULL-TRANSCRIPT PASSAGES: ";
+      const start = prompt.indexOf(marker) + marker.length;
+      const end = prompt.indexOf("\n\nAGENDA ITEMS ALREADY ON FILE:", start);
+      const passages = JSON.parse(prompt.slice(start, end)) as Array<{ quote: string; url: string }>;
+      const passage = passages.find((candidate) => candidate.quote.includes("50%") && candidate.quote.includes("dies for lack of a second"));
+      return { ok: true, text: JSON.stringify(passage
+        ? { verdict: "VERIFIED", quote: passage.quote, sourceKind: "transcript", sourceUrl: videoUrl, replacement: "", cut: false, reason: "The full motion and its disposition are in the retained record." }
+        : { verdict: "OPEN", quote: passages[0]?.quote ?? "", sourceKind: "transcript", sourceUrl: videoUrl, replacement: "", cut: false, reason: "The cited passage has no result." }) };
+    }) as never,
+    chatOpts: { choice: "pinned-model", reasoningEffort: "high" },
+    throwIfCancelled: async () => {},
+  });
+  assert.equal(checked.claims[0]?.status, "VERIFIED", checked.claims[0]?.nextCheck);
+  assert.match(checked.claims[0]?.recordEvidence?.quote ?? "", /50%[\s\S]*dies for lack of a second/);
+});
+
 // guards: an announced vote could stay unchecked when its motion appears earlier in the transcript.
 it("checks a vote against the passage from its motion through the result", async () => {
   const videoId = "S1kSaew-UUY";
