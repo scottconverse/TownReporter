@@ -1822,7 +1822,7 @@ function InvestigationWorkspace({
   const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
   const activityAll = activityQuery.data ?? [];
-  const activityRows = activityAll.slice(-5);
+  const activityRows = activityAll.slice(-8);
   const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 
   // The saved scope is file-specific; the newsroom place supplies only its
