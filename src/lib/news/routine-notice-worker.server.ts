@@ -371,11 +371,28 @@ export async function performRoutineNoticeWorkWith(
   }
   if (malformedDeadlineReceipt)
     throw new Error("A prior deadline publication receipt is malformed; editor review is required.");
+  // Same-day receipts survive automation revisions and must be applied before the cap.
+  const sameDayKeys = new Map<string, Set<string>>();
+  for (const row of await sql.query<{ channel: string; candidate_keys_json: string }>(
+    "select channel,candidate_keys_json from routine_notice_publications where newsroom_id=$1 and issue_date=$2",
+    [run.newsroom_id, localDate],
+  )) {
+    let keys: unknown;
+    try {
+      keys = JSON.parse(row.candidate_keys_json);
+    } catch {
+      throw new Error("A same-day publication receipt is malformed; editor review is required.");
+    }
+    if (!Array.isArray(keys) || !keys.every((key) => typeof key === "string"))
+      throw new Error("A same-day publication receipt is malformed; editor review is required.");
+    sameDayKeys.set(row.channel, new Set(keys));
+  }
   const allEligible = planned.eligible.slice();
   const alreadyPublished = new Set<string>();
   const schedulable = allEligible.filter((item) => {
     const externalId = item.notice.provenance.externalId ?? "";
-    if (item.channel === "deadlines" && earlierDeadlineKeys.has(externalId)) {
+    if (sameDayKeys.get(item.channel)?.has(externalId) ||
+      (item.channel === "deadlines" && earlierDeadlineKeys.has(externalId))) {
       alreadyPublished.add(routineNoticeOutcomeKey(item));
       return false;
     }
@@ -579,9 +596,12 @@ export async function performRoutineNoticeWorkWith(
             run.id,
             fingerprint,
             JSON.stringify(
-              selectedEligible
-                .filter((entry) => entry.channel === plan.channel)
-                .map((entry) => entry.notice.provenance.externalId),
+              [...new Set([
+                ...(sameDayKeys.get(plan.channel) ?? []),
+                ...selectedEligible
+                  .filter((entry) => entry.channel === plan.channel)
+                  .map((entry) => entry.notice.provenance.externalId),
+              ])],
             ),
           ],
         );

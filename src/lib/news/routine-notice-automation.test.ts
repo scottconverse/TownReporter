@@ -646,7 +646,7 @@ test("nonowners cannot activate and a removed approval cascades the automation s
   await assert.rejects(readRoutineNoticeAutomationFor("routine-beta-editor", room), /only.*owner/i);
 });
 
-// guards: a sixth eligible public notice is dropped instead of saved for editors
+// guards: published notices consume the daily cap and displace unpublished notices
 test("six eligible notices save the overflow and put it first in the next plan", async () => {
   const source = await activateFixture();
   const sql = await getSql();
@@ -733,7 +733,7 @@ test("six eligible notices save the overflow and put it first in the next plan",
   );
   const second = [7, 8, 9, 10, 11]
     .map((id) => makeNotice(id, `A New Notice ${id}`))
-    .concat(makeNotice(6, "Z Deferred Concert"));
+    .concat(makeNotice(6, "Z Deferred Concert"), first.slice(0, 5));
   await performRoutineNoticeWorkWith(nextJob as DeskJob, {
     now: runNow,
     check: check(second) as any,
@@ -741,4 +741,8 @@ test("six eligible notices save the overflow and put it first in the next plan",
   });
   const [publication] = await sql.query<{ candidate_keys_json: string }>("select candidate_keys_json from routine_notice_publications where newsroom_id=$1 and channel='today'", [room]);
   assert.ok(JSON.parse(publication!.candidate_keys_json).includes(deferred.binding.externalId));
+  const [next] = await sql.query<{ summary_json: string }>("select summary_json from routine_notice_runs where id=$1", [nextRun!.id]);
+  assert.equal(JSON.parse(next!.summary_json).deferred, 1);
+  const [update] = await sql.query<{ body: string }>("select body from corrections where newsroom_id=$1", [room]);
+  assert.equal(update!.body.includes("A Concert"), false);
 });
