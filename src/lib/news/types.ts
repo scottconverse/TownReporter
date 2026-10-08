@@ -98,6 +98,7 @@ export type LeadRow = {
     id: number;
     headline: string;
     status: string;
+    topic?: string | null;
     why?: string | null;
     source_urls?: string | null;
     created_at?: string | null;

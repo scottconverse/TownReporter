@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
 import { parseUrlList } from "@/lib/paper";
+import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
@@ -55,6 +56,7 @@ export function LeadComparePanel({
   onNotADuplicate,
   onKillThis,
   onReopenPrior,
+  matchReason,
   formatDate,
 }: {
   current: CompareSide;
@@ -62,6 +64,7 @@ export function LeadComparePanel({
   onNotADuplicate?: () => Promise<CompareResult>;
   onKillThis?: () => Promise<CompareResult>;
   onReopenPrior?: () => Promise<CompareResult>;
+  matchReason?: string;
   /** The paper's own date formatter, passed in so the panel renders the same
    * dates as the rest of the desk and can be rendered in a test without the
    * paper-date context. */
@@ -98,6 +101,9 @@ export function LeadComparePanel({
           <h2 id="lead-compare-heading">{COMPARE_HEADING}</h2>
         </div>
       </div>
+      <p className="meta" role="note">
+        {matchReason || "This saved link has no matching explanation."}
+      </p>
       <div className="lead-compare-sides">
         <CompareSideView side={current} label={COMPARE_CURRENT_LABEL} formatDate={formatDate} />
         <CompareSideView
@@ -120,7 +126,13 @@ export function LeadComparePanel({
           <InkButton
             tone="quiet-danger"
             disabled={busy !== ""}
-            onClick={() => run("kill", onKillThis)}
+            onClick={() =>
+              confirmBeforeKillingDuplicate(
+                (message) => window.confirm(message),
+                "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
+                () => run("kill", onKillThis),
+              )
+            }
             ariaLabel={`${KILL_THIS_ONE_LABEL}: ${current.headline}`}
           >
             {busy === "kill" ? "Saving…" : KILL_THIS_ONE_LABEL}
