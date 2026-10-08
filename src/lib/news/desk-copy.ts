@@ -122,16 +122,8 @@ function activityText(event: InvestigationActivityInput): { text: string; tone: 
       return { text: `Page changed: ${subject}`, tone: "finding" };
     if (/^(?:captured|fetched|ok|success)$/i.test(event.outcome ?? ""))
       return { text: `Opened ${subject}, captured`, tone: "plain" };
-    const reason = event.httpStatus === 403
-      ? "403 blocked"
-      : /timeout/i.test(event.outcome ?? "")
-        ? "timeout"
-        : /parse/i.test(event.outcome ?? "")
-          ? "could not read the page"
-          : event.httpStatus
-            ? `${event.httpStatus} response`
-            : "could not load the page";
-    return { text: `Could not open ${subject} (${reason})`, tone: "failure" };
+    const reason = plainPageFailureReason(String(event.outcome ?? ""), event.httpStatus) ?? PAGE_FAILURE_COPY.server;
+    return { text: `Could not open ${subject}: ${reason}`, tone: "failure" };
   }
   if (event.kind === "search") {
     const count = activityResultCount(event.resultsJson);
@@ -258,8 +250,8 @@ export function editorStatus(status: string): string {
 export function editorError(raw: string | null | undefined, what = "continue with that"): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
-  if (/invalid byte sequence for encoding UTF8:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(t)) {
-    return "Could not read one record (bad text in the file)";
+  if (/invalid byte sequence for encoding\s+["']?UTF8["']?:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(t)) {
+    return "The page had no readable text";
   }
   /*
     Every test below is about what a provider did -- a refusal, a quota, a
@@ -342,6 +334,8 @@ export function editorPauseReason(
   if (/editor set this aside/i.test(raw)) {
     return "You set this aside. Pull it back onto the desk anytime.";
   }
+  const safePageReason = plainPageFailureReason(raw);
+  if (safePageReason) return safePageReason;
   const budget = raw.match(/(\d+)\s+frontier item/i);
   if (budget) {
     const n = budget[1];
@@ -355,6 +349,33 @@ export function editorPauseReason(
   return copy && copy !== plainEditorText(raw)
     ? copy
     : "Could not finish this round. What was found is still on the file.";
+}
+
+const PAGE_FAILURE_COPY = {
+  blocked: "The site refused the request",
+  unreadable: "The page had no readable text",
+  server: "The page could not be read",
+} as const;
+
+function plainPageFailureReason(raw: string, httpStatus?: number | null): string | null {
+  const status = Number(httpStatus ?? 0);
+  if (/invalid byte sequence for encoding\s+["']?UTF8["']?:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(raw)) {
+    return PAGE_FAILURE_COPY.unreadable;
+  }
+  if ([401, 403].includes(status) || /\b(?:401|403)\b|\bblocked\b|\brefused\b/i.test(raw)) {
+    return PAGE_FAILURE_COPY.blocked;
+  }
+  if (status >= 500 || /\b5\d\d\b|server error|failed to load|could not read the page|timeout|timed out/i.test(raw)) {
+    return PAGE_FAILURE_COPY.server;
+  }
+  if (status === 200 || /\b200\s+response\b|empty body|unreadable|no readable text|parse failed|extraction failed|\bempty\b/i.test(raw)) {
+    return PAGE_FAILURE_COPY.unreadable;
+  }
+  return null;
+}
+
+export function editorPauseIsPageFailure(raw: string | null | undefined): boolean {
+  return Boolean(raw?.trim() && plainPageFailureReason(raw));
 }
 
 /**

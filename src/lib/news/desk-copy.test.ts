@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { NewsroomPlace } from "./lead-match.ts";
 import {
+  buildInvestigationActivity,
   blockedDigBannerText,
   cameBackLabel,
   COMPARE_CURRENT_LABEL,
@@ -26,6 +27,7 @@ import {
   editorFetchError,
   editorKindLabel,
   editorPauseReason,
+  editorPauseIsPageFailure,
   editorScanError,
   editorStatus,
   flakyFailureCopy,
@@ -375,8 +377,24 @@ describe("editor copy", () => {
 
   // guards: a raw database failure could be printed as the file's pause reason
   it("explains unreadable record text without printing the database error", () => {
-    const msg = editorPauseReason("invalid byte sequence for encoding UTF8: 0x00");
-    assert.equal(msg, "Could not read one record (bad text in the file)");
+    const rawDatabaseError = 'invalid byte sequence for encoding "UTF8": 0x00';
+    const msg = editorPauseReason(rawDatabaseError);
+    assert.equal(msg, "The page had no readable text");
+    assert.equal(editorPauseIsPageFailure(rawDatabaseError), true);
+    assert.equal(editorPauseReason("page fetch returned 503 server error"), "The page could not be read");
+    assert.equal(editorPauseReason("page returned a 200 response with an empty body"), "The page had no readable text");
+    assert.equal(editorPauseReason("site refused the request (403)"), "The site refused the request");
+    const activity = buildInvestigationActivity([
+      { id: "server", at: "2026-10-08T12:00:00Z", kind: "capture", title: "Council notice", outcome: "HTTP 500", httpStatus: 500 },
+      { id: "empty", at: "2026-10-08T12:01:00Z", kind: "capture", title: "Meeting packet", outcome: "empty", httpStatus: 200 },
+      { id: "blocked", at: "2026-10-08T12:02:00Z", kind: "capture", title: "Budget page", outcome: "blocked", httpStatus: 403 },
+    ]);
+    assert.deepEqual(activity.map((line) => line.text), [
+      "Could not open Council notice: The page could not be read",
+      "Could not open Meeting packet: The page had no readable text",
+      "Could not open Budget page: The site refused the request",
+    ]);
+    assert.ok(activity.every((line) => line.tone === "failure"));
   });
 
   it("explains a stop after a round without hop or frontier", () => {

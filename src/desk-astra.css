@@ -6927,6 +6927,7 @@
 .desk-ltr.astra .astra-log-e { line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
 .desk-ltr.astra .astra-log-e.find { font-weight: 700; }
 .desk-ltr.astra .astra-log-e.fail { color: var(--danger); font-weight: 700; }
+.desk-ltr.astra .of-stop.fail { color: var(--danger); font-weight: 700; }
 .desk-ltr.astra .astra-case {
   display: flex;
   flex-direction: column;

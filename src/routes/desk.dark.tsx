@@ -37,6 +37,7 @@ import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
   editorError,
+  editorPauseIsPageFailure,
   editorPauseReason,
   editorKindLabel,
   elapsedLabel,
@@ -1959,7 +1960,7 @@ function InvestigationWorkspace({
         }
         {pending ? <p className="meta">Getting this ready…</p> : null}
         {inv?.status === "paused" && inv.pause_reason && !digging ? (
-          <p className="of-stop" role="status">
+          <p className={"of-stop" + (editorPauseIsPageFailure(inv.pause_reason) ? " fail" : "")} role="status">
             {editorPauseReason(inv.pause_reason, captureStats) ?? "Could not finish — retry."}
             {looksLikeProviderAuthFailure(inv.pause_reason) ? <ProviderSignInButton detail={inv.pause_reason} /> : null}
           </p>
