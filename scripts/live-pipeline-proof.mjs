@@ -43,6 +43,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import pg from "pg";
 import { checkedUrl } from "./browser-guard.mjs";
+import { storyDraftButton } from "./nightly-proof-actions.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -283,7 +284,7 @@ async function runDraft(page, pool) {
       Draft with AI button, and no Body label exists to wait for. The
       button itself is present in both cases; that is the stable target.
     */
-    const draftButton = page.getByRole("button", { name: /^Draft with AI$|^Redraft$/ });
+    const draftButton = storyDraftButton(page);
     // Generous, same reason as the /login heading wait in signIn(): a cold
     // Vite route compile under load can run well past 30s.
     await draftButton.waitFor({ timeout: 90_000 });
