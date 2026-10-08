@@ -34,7 +34,7 @@ import { fileURLToPath } from "node:url";
  * paper-settings.ts, mirrored by migrations/0118): 348. Group 6a added one (investigate.ts re-validates
  * its NOT VALID foreign keys once the data allows it): 349. WR1 fixes round 1
  * added one (paper_settings.elected_officials, in paper-settings.ts, mirrored
- * by migrations/0122): 350.
+ * by migrations/0122): 350. Slice D parity mirrors migrations 0140, 0141 and 0143: 362.
  *
  * What counts as a hit: the DDL verbs in `DDL_VERB`, in a non-test `.ts`/
  * `.tsx` file under `src/` or `server/`, on a line that is really code.
@@ -85,7 +85,7 @@ const ALLOWLIST: Record<string, { statements: number; reason: string }> = {
   "src/lib/db.ts": { statements: 2, reason: "the ensure* mechanism itself; deleted in U18a-10" },
 
   // U18a-5 -- the bulk and the pattern-setter.
-  "src/lib/news/investigate.ts": { statements: 155, reason: "runtime DDL, redundant with migrations; removed in U18a-5 (one is the FK re-validation added in 6a)" },
+  "src/lib/news/investigate.ts": { statements: 165, reason: "runtime DDL, redundant with migrations (0140 and 0143 parity mirror adds ten); removed in U18a-5 (one is the FK re-validation added in 6a)" },
   "src/lib/news/dark.ts": { statements: 36, reason: "runtime DDL, redundant with migrations; removed in U18a-5" },
   "src/lib/news/page-watch.ts": { statements: 14, reason: "runtime DDL, redundant with migrations; removed in U18a-5" },
 
@@ -94,7 +94,7 @@ const ALLOWLIST: Record<string, { statements: number; reason: string }> = {
   "src/lib/news/draft-batch.server.ts": { statements: 6, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
   "src/lib/news/desk.ts": { statements: 2, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
   "src/lib/news/editorial.server.ts": { statements: 4, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
-  "src/lib/news/follow-ups.ts": { statements: 20, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
+  "src/lib/news/follow-ups.ts": { statements: 22, reason: "runtime DDL, redundant with migrations (0141 parity mirror adds two); removed in U18a-6" },
   "src/lib/news/model-assignments-store.ts": { statements: 1, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
   "src/lib/news/model-request-commit.server.ts": { statements: 1, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
   "src/lib/news/pull.server.ts": { statements: 1, reason: "runtime DDL, redundant with migrations; removed in U18a-6" },
@@ -193,7 +193,7 @@ describe("no runtime DDL outside migrations/", () => {
 
   it("counts the whole surface, so the docstring's numbers are checkable", () => {
     /*
-      The header says "30 files, 350 statements", and this is what makes that
+      The header says "30 files, 362 statements", and this is what makes that
       sentence fail when it stops being true -- the count is the progress meter
       and a stale meter is worse than none.
     */
@@ -201,7 +201,7 @@ describe("no runtime DDL outside migrations/", () => {
     const files = Object.keys(ALLOWLIST).length;
     const statements = Object.values(measured).reduce((sum, n) => sum + n, 0);
     assert.equal(files, 30, "the allowlist header says 30 files");
-    assert.equal(statements, 350, "the allowlist header says 350 statements");
+    assert.equal(statements, 362, "the allowlist header says 362 statements");
   });
 });
 

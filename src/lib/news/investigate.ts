@@ -813,6 +813,32 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     next time someone presses the button.
   */
   `alter table investigations add column if not exists last_model_choice text`,
+  // Additive mirrors of migrations 0140 and 0143, including existing tables.
+  `alter table investigations add column if not exists ordinary_explanation text not null default ''`,
+  `alter table investigations add column if not exists scope_json text not null default '{"scope":"city"}'`,
+  `alter table investigations add column if not exists limit_key text not null default 'standard'`,
+  `alter table investigations add column if not exists limit_minutes integer not null default 120`,
+  `alter table investigations add column if not exists limit_dollars numeric`,
+  `alter table investigations add column if not exists closed_kind text`,
+  `alter table investigations add column if not exists close_note text`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_key_check') then
+      alter table investigations add constraint investigations_limit_key_check check (limit_key in ('quick', 'standard', 'deep'));
+    end if;
+  end $$`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_minutes_check') then
+      alter table investigations add constraint investigations_limit_minutes_check check (limit_minutes > 0);
+    end if;
+  end $$`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_dollars_check') then
+      alter table investigations add constraint investigations_limit_dollars_check check (limit_dollars is null or limit_dollars >= 0);
+    end if;
+  end $$`,
   `alter table source_monitors add column if not exists manual_watch boolean not null default false`,
   `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
   `drop index if exists recurring_baselines_user_id_key_key`,
