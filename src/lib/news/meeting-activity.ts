@@ -18,6 +18,8 @@ export type MeetingActivityRow = {
   audioSha256: string | null;
   audioBytes: number | null;
   audioTriggerReason: string | null;
+  audioIntegrityStatus: string | null;
+  canCaptureAgain: boolean;
   captureDisposition: "provisional" | "final" | null;
   revisionCount: number;
   settledUnderChurn: boolean;
@@ -72,9 +74,9 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
     );
 
     const artifacts = await sql.query<{
-      video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null; provenance_json: string | null;
+      video_id: string; artifact_type: string; storage_path: string; format: string; sha256: string; byte_size: number | null; provenance_json: string | null; integrity_status: string;
     }>(
-      "select video_id,artifact_type,storage_path,format,sha256,byte_size,provenance_json from meeting_transcript_artifacts where newsroom_id=$1 order by captured_at desc, id desc",
+      "select video_id,artifact_type,storage_path,format,sha256,byte_size,provenance_json,integrity_status from meeting_transcript_artifacts where newsroom_id=$1 order by captured_at desc, id desc",
       [newsroomId],
     );
     // Bind provenance to the capture's current transcript hash, never to an audio artifact.
@@ -82,6 +84,8 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
       .map((a) => [`${a.video_id}:${a.sha256}`, a]));
     const byVideo = new Map<string, typeof artifacts[number]>();
     for (const a of artifacts) if (!byVideo.has(a.video_id)) byVideo.set(a.video_id, a);
+    const audioByVideo = new Map<string, typeof artifacts[number]>();
+    for (const a of artifacts) if (a.artifact_type === "audio" && !audioByVideo.has(a.video_id)) audioByVideo.set(a.video_id, a);
 
     const alignments = await sql.query<{ video_id: string; aligned: boolean; reason: string | null }>(
       "select distinct on (video_id) video_id,aligned,reason from meeting_alignments where newsroom_id=$1 order by video_id, created_at desc",
@@ -141,6 +145,7 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
     return records.map((r) => {
       const leadRow = leadByVideo.get(r.video_id);
       const artifact = byVideo.get(r.video_id);
+      const audio = audioByVideo.get(r.video_id);
       const alignment = alignByVideo.get(r.video_id);
       const transcript = transcriptsByHash.get(`${r.video_id}:${r.caption_sha256}`);
       let provenance: Record<string, unknown> = {};
@@ -152,6 +157,7 @@ export const listMeetingActivity = createServerFn({ method: "GET" })
         transcriptionModel: typeof provenance.model === "string" ? provenance.model : null,
         captionFormat: r.caption_format, captionSha256: r.caption_sha256,
         audioFormat: r.audio_format, audioSha256: r.audio_sha256, audioBytes: r.audio_bytes, audioTriggerReason: r.audio_trigger_reason,
+        audioIntegrityStatus: audio?.integrity_status ?? null, canCaptureAgain: me.role === "owner",
         captureDisposition: r.capture_disposition, revisionCount: r.revision_count ?? 0, settledUnderChurn: r.settled_under_churn ?? false,
         forcedRecapture: r.forced_recapture ?? false,
         artifactPath: artifact?.storage_path ?? null, artifactFormat: artifact?.format ?? null,

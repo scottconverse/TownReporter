@@ -88,9 +88,14 @@ export async function enqueueMissingTranscriptions(
     `select r.video_id, a.id as audio_artifact_id
        from meeting_capture_records r
        join meeting_transcript_artifacts a
-         on a.newsroom_id = r.newsroom_id and a.video_id = r.video_id and a.artifact_type = 'audio'
+         on a.id = (
+           select newest.id from meeting_transcript_artifacts newest
+            where newest.newsroom_id=r.newsroom_id and newest.video_id=r.video_id and newest.artifact_type='audio'
+            order by newest.captured_at desc,newest.id desc limit 1
+         )
       where r.newsroom_id = $1
         and r.audio_path is not null
+        and a.integrity_status <> 'hash-mismatch'
         and not exists (
           select 1 from meeting_transcript_artifacts t
            where t.newsroom_id = r.newsroom_id and t.video_id = r.video_id
@@ -187,6 +192,14 @@ export async function performAudioTranscribeWork(job: DeskJob, deps: AudioTransc
   */
   const actualSha256 = sha256File(audio.storage_path);
   if (actualSha256 !== audio.sha256) {
+    await sql.query(
+      `update meeting_transcript_artifacts
+          set integrity_status='hash-mismatch',
+              integrity_detail='Recorded transcript hash does not match the stored bytes.',
+              integrity_checked_at=now()
+        where id=$1 and newsroom_id=$2 and artifact_type='audio'`,
+      [receipt.audioArtifactId, job.newsroom_id],
+    );
     throw new Error(`The retained audio no longer matches its recorded hash (expected ${audio.sha256}, found ${actualSha256}); nothing was transcribed.`);
   }
 

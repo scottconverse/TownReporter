@@ -224,6 +224,30 @@ test("textflowkit absent: the meeting stays audio-only and nothing is queued or 
   assert.equal((await transcriptArtifacts(sql, seed.room, seed.videoId)).length, 0);
 });
 
+// guards: a corrupted recording could be retried and fail on every scan
+test("a saved recording with a failed hash check is not queued again", async () => {
+  const sql = await getSql();
+  const audio = Buffer.from("bytes-with-a-recorded-hash-mismatch");
+  const seed = await seedCapturedMeeting(sql, 97110, { videoId: "stt-mismatch-1", audio, durationSeconds: 12 });
+  writeFileSync(seed.audioPath, "replacement bytes at the saved path");
+  const env = cliEnv();
+  runWorkerWith(env);
+  assert.equal((await enqueueMissingTranscriptions(sql, { newsroomId: seed.room, userId: seed.user, env })).queued, 1);
+  const failedJobs = await waitForJobSettled(sql, seed.room);
+  assert.equal(failedJobs.length, 1);
+  assert.equal(failedJobs[0]!.status, "failed");
+  const artifact = (await sql.query<{ integrity_status: string }>(
+    "select integrity_status from meeting_transcript_artifacts where id=$1",
+    [seed.audioArtifactId],
+  ))[0]!;
+  assert.equal(artifact.integrity_status, "hash-mismatch", "the worker should record the failed hash check on the audio row");
+
+  const result = await enqueueMissingTranscriptions(sql, { newsroomId: seed.room, userId: seed.user, env });
+  assert.deepEqual(result, { withAudio: 0, queued: 0, alreadyQueued: 0, notInstalled: false });
+  assert.equal((await jobRows(sql, seed.room)).length, 1, "later scans should not create another job for the same bad audio");
+  assert.equal(readFileSync(seed.audioPath).equals(Buffer.from("replacement bytes at the saved path")), true, "checking the audio should not rewrite it");
+});
+
 test("the audio becomes a revision with the CLI-reported engine and model", async () => {
   setEnv("FAKE_TEXTFLOWKIT_ENGINE", "whistle");
   setEnv("FAKE_TEXTFLOWKIT_MODEL", "whistle");

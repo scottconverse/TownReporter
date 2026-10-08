@@ -1,8 +1,10 @@
-import { agendaTitle } from "@/lib/news/desk-copy";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { agendaTitle, meetingAudioIntegrityNotice } from "@/lib/news/desk-copy";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
 import { meetingStatusLabel } from "@/lib/news/meeting-activity-label";
+import { captureAudioAgain } from "@/lib/news/meeting-manual-run";
 
 function fmtTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -18,6 +20,20 @@ function toneClass(tone: "ok" | "warn" | "bad"): string {
 
 function MeetingCard({ row }: { row: MeetingActivityRow }) {
   const label = meetingStatusLabel(row);
+  const queryClient = useQueryClient();
+  const [captureProblem, setCaptureProblem] = useState("");
+  const recapture = useMutation({
+    mutationFn: async () => {
+      const result = await captureAudioAgain({ data: { videoId: row.videoId } });
+      if (!result.ok) throw new Error(result.error);
+      return result;
+    },
+    onSuccess: async () => {
+      setCaptureProblem("");
+      await queryClient.invalidateQueries({ queryKey: ["meeting-activity"] });
+    },
+    onError: () => setCaptureProblem("The new audio capture did not finish."),
+  });
   return (
     <article className="border-b border-rule py-4 last:border-b-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -28,6 +44,25 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
         {row.published} · {row.channelUrl} · video {row.videoId}
         {row.forcedRecapture ? " · forced re-capture" : ""}
       </p>
+
+      {row.audioIntegrityStatus === "hash-mismatch" ? (
+        <div className="mt-2">
+          <p role="alert" className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {meetingAudioIntegrityNotice}
+          </p>
+          {row.canCaptureAgain ? (
+            <button
+              type="button"
+              className="mt-2 min-h-11 rounded border border-rule px-4 text-sm font-medium"
+              disabled={recapture.isPending}
+              onClick={() => recapture.mutate()}
+            >
+              {recapture.isPending ? "Capturing…" : "Capture again"}
+            </button>
+          ) : null}
+          {captureProblem ? <p className="mt-2 text-sm text-red-800" role="status">{captureProblem}</p> : null}
+        </div>
+      ) : null}
 
       {row.status === "failed" && (
         <p role="alert" className="mt-2 rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">

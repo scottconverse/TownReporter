@@ -1,5 +1,7 @@
 /** Editor-facing copy. Does not change investigative behavior. */
 
+export const meetingAudioIntegrityNotice = "The saved audio does not match its record. Capture it again.";
+
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { TOPICS } from "../paper.ts";
