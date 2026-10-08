@@ -1125,8 +1125,24 @@ function factsConflict(a: Iterable<string>, b: Iterable<string>): boolean {
  * meetings for September 2026" linked to every council session that month --
  * stop happening.
  */
+export type PairMatchSections = {
+  candidateTopic?: string | null;
+  leadTopic?: string | null;
+};
+
+function normalizedSection(topic?: string | null): string {
+  return String(topic ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ");
+}
+
 type NearDuplicateSignals = {
   sharedNames: number;
+  sharedSubjects: string[];
+  sectionsAgree: boolean;
+  sectionsDisagree: boolean;
+  subjectsDisagree: boolean;
   /** Every name one side has, the other has too (and it has at least one). */
   namesOneSided: boolean;
   oneSided: boolean;
@@ -1141,9 +1157,11 @@ function nearDuplicateSignals(
   a: string,
   b: string,
   place?: NewsroomPlace | null,
+  sections?: PairMatchSections,
 ): NearDuplicateSignals {
   const sa = subjectTokens(a, place);
   const sb = subjectTokens(b, place);
+  const sharedSubjects = [...sa].filter((token) => sb.has(token)).sort();
   const da = distinguishingTokens(a, b, place);
   const db = distinguishingTokens(b, a, place);
   const anchorsA = extractAnchors(a, place);
@@ -1151,6 +1169,8 @@ function nearDuplicateSignals(
   const namesA = nonStoplistedProperNouns(a, place);
   const namesB = nonStoplistedProperNouns(b, place);
   const sharedNames = sharedWordCount(namesA, namesB);
+  const candidateSection = normalizedSection(sections?.candidateTopic);
+  const leadSection = normalizedSection(sections?.leadTopic);
   const sharedAnchors = specificAnchors(
     [...anchorsA].filter((anchor) => anchorsB.has(anchor)),
   );
@@ -1158,6 +1178,12 @@ function nearDuplicateSignals(
 
   return {
     sharedNames,
+    sharedSubjects,
+    sectionsAgree:
+      Boolean(candidateSection) && candidateSection === leadSection,
+    sectionsDisagree:
+      Boolean(candidateSection) && Boolean(leadSection) && candidateSection !== leadSection,
+    subjectsDisagree: sa.size > 0 && sb.size > 0 && sharedSubjects.length === 0,
     /*
       The name half of the same idea as `oneSided` below, and its own signal
       because the two fail apart on the headline shape this desk keeps hitting:
@@ -1216,6 +1242,20 @@ function nearDuplicateSignals(
 }
 
 /**
+ * A shared amount, count or date cannot override clear evidence that the leads
+ * cover different subjects. Missing subject words or sections alone are not
+ * disagreement: scan headlines are often Title Case and still need the name
+ * and wording routes below.
+ */
+function factsAreTheOnlySharedEvidence(signals: NearDuplicateSignals): boolean {
+  return (
+    signals.sharedSpecificAnchors > 0 &&
+    signals.sharedSubjects.length === 0 &&
+    (signals.subjectsDisagree || signals.sectionsDisagree)
+  );
+}
+
+/**
  * Unit AO, stage 1: is this pair worth a second look? The filter is deliberately
  * wider than the classifier below -- every pair the classifier calls the same
  * story is a pair this accepts -- and it is the cheap signals that decide it,
@@ -1235,9 +1275,9 @@ function nearDuplicateSignals(
  *     Neighborhood Meeting" -- one day, one word ("meeting"), 0.43 of shared
  *     characters -- would be handed to the desk's AI check as a possible pair,
  *     and so would every other pair of meetings filed on the same October day.
- *     An amount or a count needs no such corroboration: 435's budget headline
- *     and 149 share $547.5 million and "2027" and nothing else at 0.49, and that
- *     is the same story told twice.
+ *     Every way in now needs a shared named entity AND shared subject words or
+ *     agreement on the desk's section. A date, amount or count cannot supply
+ *     either half by itself.
  *   - a headline that is the same characters in the same order (>= 0.85), which
  *     needs no corroboration beyond a shared name: two reporters cannot put
  *     that many characters of one sentence in one order by accident,
@@ -1250,15 +1290,26 @@ function nearDuplicateSignals(
  *     Village and King Soopers Reopens" sit at 0.74 with seven names in common
  *     and are two different retellings, not one story said twice.
  *
- * Every way in also requires that the two do not each bring a subject the other
- * lacks (see subjectsAgree). The filter is wide, but not so wide that two
- * agenda items on one board's meeting page are worth the desk's AI check every
- * time they share a date -- NEG-11 "Twin Peaks rezoning application" against
- * "Twin Peaks parking variance" is null before this and stays null.
+ * A shared amount, count or date cannot bridge two explicitly different
+ * subjects or section tags when no subject word is shared. Missing subject
+ * tokens or section tags alone are not disagreement; scan headlines often use
+ * Title Case and still need the name and wording routes below.
  */
-function nearDuplicateCandidate(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const signals = nearDuplicateSignals(a, b, place);
-  if (signals.sharedNames < 1 || !signals.factsAgree || !signals.subjectsAgree) return false;
+function nearDuplicateCandidate(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+  sections?: PairMatchSections,
+): boolean {
+  const signals = nearDuplicateSignals(a, b, place, sections);
+  if (
+    signals.sharedNames < 1 ||
+    !signals.factsAgree ||
+    !signals.subjectsAgree ||
+    factsAreTheOnlySharedEvidence(signals)
+  ) {
+    return false;
+  }
   if (signals.sharedSpecificAnchors >= NEAR_DUPLICATE_ANCHOR_MIN_SHARED) {
     if (
       !signals.sharedAnchorsAreDates ||
@@ -1346,9 +1397,21 @@ function nearDuplicateCandidate(a: string, b: string, place?: NewsroomPlace | nu
  * the desk's own duplicate check (dup-check.ts) when a scan has one, which is
  * the model the grey zone was always for.
  */
-function nearDuplicateStrong(a: string, b: string, place?: NewsroomPlace | null): boolean {
-  const signals = nearDuplicateSignals(a, b, place);
-  if (signals.sharedNames < 1 || !signals.factsAgree || !signals.subjectsAgree) return false;
+function nearDuplicateStrong(
+  a: string,
+  b: string,
+  place?: NewsroomPlace | null,
+  sections?: PairMatchSections,
+): boolean {
+  const signals = nearDuplicateSignals(a, b, place, sections);
+  if (
+    signals.sharedNames < 1 ||
+    !signals.factsAgree ||
+    !signals.subjectsAgree ||
+    factsAreTheOnlySharedEvidence(signals)
+  ) {
+    return false;
+  }
   if (signals.charRatio() >= HEADLINE_ONLY_THRESHOLD) return true;
   return (
     signals.sharedSpecificAnchors >= NEAR_DUPLICATE_ANCHOR_MIN_SHARED &&
@@ -1374,6 +1437,7 @@ export type MatchCandidateLead = {
    * comparison can fire at all (see newFactsIn). */
   why?: string | null;
   evidence?: string | null;
+  topic?: string | null;
   /** Unit AK item 2: when the lead was killed, and why, in the editor's
    * words (migration 0094). Read only so a new finding filed against a killed
    * lead can show the old reason; never used in matching. */
@@ -1448,16 +1512,23 @@ export type MatchCandidateLead = {
  * call this function and nothing else -- so a pair can never be "strong" for
  * the tiering without having passed the same gate the selection used.
  */
-function pairMatches(
+export type PairMatchRoute =
+  | "shared-source-headline"
+  | "shared-source-facts"
+  | "headline-only"
+  | "near-duplicate";
+
+export function pairMatchRoute(
   candidateHeadline: string,
   candidateUrls: string[],
   leadHeadline: string,
   leadUrls: string[],
   place?: NewsroomPlace | null,
-): boolean {
+  sections?: PairMatchSections,
+): PairMatchRoute | null {
   const shareUrl = sharesUrl(candidateUrls, leadUrls);
   if (shareUrl && headlinesOverlapEnough(candidateHeadline, leadHeadline, place)) {
-    return true;
+    return "shared-source-headline";
   }
   if (
     shareUrl &&
@@ -1467,20 +1538,81 @@ function pairMatches(
     ) >= ANCHOR_MATCH_MIN_SHARED &&
     sharesDistinguishingEvidence(candidateHeadline, leadHeadline, place)
   ) {
-    return true;
+    return "shared-source-facts";
   }
   if (!shareUrl && headlinesAloneMatch(candidateHeadline, leadHeadline, place)) {
-    return true;
+    return "headline-only";
   }
   // Unit AO (2026-10-03): the near-duplicate candidate filter -- see
   // nearDuplicateSignals. It is deliberately independent of `shareUrl`: 429
   // "Boulder County Opens Applications for Behavioral Health Funding Oversight
   // Roles" and the killed 354 cite no URL in common at all, and a headline that
   // is the same sentence twice needs no URL to be worth classifying.
-  if (nearDuplicateCandidate(candidateHeadline, leadHeadline, place)) {
-    return true;
+  if (nearDuplicateCandidate(candidateHeadline, leadHeadline, place, sections)) {
+    return "near-duplicate";
   }
-  return false;
+  return null;
+}
+
+export function pairMatches(
+  candidateHeadline: string,
+  candidateUrls: string[],
+  leadHeadline: string,
+  leadUrls: string[],
+  place?: NewsroomPlace | null,
+  sections?: PairMatchSections,
+): boolean {
+  return pairMatchRoute(candidateHeadline, candidateUrls, leadHeadline, leadUrls, place, sections) !== null;
+}
+
+export function explainPairMatch(
+  candidateHeadline: string,
+  candidateUrls: string[],
+  leadHeadline: string,
+  leadUrls: string[],
+  place?: NewsroomPlace | null,
+  sections?: PairMatchSections,
+): { route: PairMatchRoute; reason: string; sharedName: string | null; sharedSubject: string | null } | null {
+  const route = pairMatchRoute(candidateHeadline, candidateUrls, leadHeadline, leadUrls, place, sections);
+  if (!route) return null;
+  const candidateNames = nonStoplistedProperNouns(candidateHeadline, place);
+  const leadNames = nonStoplistedProperNouns(leadHeadline, place);
+  const commonNames = new Set([...candidateNames].filter((name) => leadNames.has(name)));
+  const nameWords = (headline: string) =>
+    [...headline.matchAll(/\b[A-Z][a-zA-Z']{2,}\b/g)].map((match) =>
+      match[0]!.toLowerCase().replace(/'s$/, ""),
+    );
+  const candidateNameWords = nameWords(candidateHeadline);
+  const leadNameWords = nameWords(leadHeadline);
+  let sharedName: string | null = null;
+  for (let index = 0; index < candidateNameWords.length - 1; index += 1) {
+    const first = candidateNameWords[index]!;
+    const second = candidateNameWords[index + 1]!;
+    if (!commonNames.has(first) || !commonNames.has(second)) continue;
+    const phrase = first + " " + second;
+    for (let prior = 0; prior < leadNameWords.length - 1; prior += 1) {
+      if (leadNameWords[prior] === first && leadNameWords[prior + 1] === second) {
+        sharedName = phrase;
+        break;
+      }
+    }
+    if (sharedName) break;
+  }
+  sharedName ??= [...commonNames].sort((a, b) => b.length - a.length || a.localeCompare(b))[0] ?? null;
+  const signals = nearDuplicateSignals(candidateHeadline, leadHeadline, place, sections);
+  const sharedSubject = signals.sharedSubjects[0] ?? null;
+  const display = (value: string) =>
+    value.replace(/(^|[\s-])([a-z])/g, (_match, gap: string, letter: string) => gap + letter.toUpperCase());
+  const section = normalizedSection(sections?.candidateTopic);
+  const reason =
+    sharedName && sharedSubject
+      ? "Matched because both leads name " + display(sharedName) + " and mention " + display(sharedSubject) + "."
+      : sharedName && signals.sectionsAgree
+        ? "Matched because both leads name " + display(sharedName) + " and use the " + display(section) + " section."
+        : route.startsWith("shared-source")
+          ? "Matched because both leads cite the same story source and share headline evidence."
+          : "Matched because the headlines share enough story details to be considered together.";
+  return { route, reason, sharedName, sharedSubject };
 }
 
 /**
@@ -1540,8 +1672,8 @@ function pairMatches(
  * the owner asked about ("Do I miss the real 2nd story?").
  */
 export function sameStoryForMerge(
-  candidate: { headline: string; source_urls?: string[] },
-  existing: { headline: string; source_urls?: string[] },
+  candidate: { headline: string; source_urls?: string[]; topic?: string | null },
+  existing: { headline: string; source_urls?: string[]; topic?: string | null },
   place?: NewsroomPlace | null,
 ): boolean {
   const candidateHeadline = candidate.headline ?? "";
@@ -1550,8 +1682,8 @@ export function sameStoryForMerge(
   const candidateUrls = candidate.source_urls ?? [];
   const existingUrls = existing.source_urls ?? [];
   const strength = matchStrength(
-    { headline: candidateHeadline, source_urls: candidateUrls },
-    { headline: existingHeadline, source_urls: existingUrls },
+    { headline: candidateHeadline, source_urls: candidateUrls, topic: candidate.topic },
+    { headline: existingHeadline, source_urls: existingUrls, topic: existing.topic },
     place,
   );
   if (strength === "strong") return true;
@@ -1642,7 +1774,7 @@ export function newFactsIn(
 }
 
 export function findMatchingLead(
-  candidate: { headline: string; source_urls: string[] },
+  candidate: { headline: string; source_urls: string[]; topic?: string | null },
   existing: MatchCandidateLead[],
   place?: NewsroomPlace | null,
 ): number | null {
@@ -1659,7 +1791,12 @@ export function findMatchingLead(
       if (Number.isFinite(t) && t < cutoff) continue;
     }
     const leadUrls = lead.source_urls ?? [];
-    if (pairMatches(headline, candidate.source_urls ?? [], lead.headline, leadUrls, place)) {
+    if (
+      pairMatches(headline, candidate.source_urls ?? [], lead.headline, leadUrls, place, {
+        candidateTopic: candidate.topic,
+        leadTopic: lead.topic,
+      })
+    ) {
       if (matchStrength(candidate, lead, place) === "strong") return lead.id;
       firstPossible ??= lead.id;
       if (lead.status === "killed") firstKilledPossible ??= lead.id;
@@ -1710,8 +1847,8 @@ export function findMatchingLead(
  * (see pairMatches, shared by both).
  */
 export function matchStrength(
-  candidate: { headline: string; source_urls?: string[] },
-  existing: { headline: string; source_urls?: string[] },
+  candidate: { headline: string; source_urls?: string[]; topic?: string | null },
+  existing: { headline: string; source_urls?: string[]; topic?: string | null },
   place?: NewsroomPlace | null,
 ): "strong" | "possible" | null {
   const candidateHeadline = candidate.headline ?? "";
@@ -1720,7 +1857,8 @@ export function matchStrength(
   const candidateUrls = candidate.source_urls ?? [];
   const existingUrls = existing.source_urls ?? [];
 
-  if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls, place)) {
+  const sections = { candidateTopic: candidate.topic, leadTopic: existing.topic };
+  if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls, place, sections)) {
     return null;
   }
 
@@ -1729,7 +1867,7 @@ export function matchStrength(
   // same thing in different names -- see nearDuplicateStrong. Both tiers of
   // this pair's decision come from the one signal struct (nearDuplicateSignals)
   // so the gate above and this cannot disagree about what they are looking at.
-  if (nearDuplicateStrong(candidateHeadline, existingHeadline, place)) return "strong";
+  if (nearDuplicateStrong(candidateHeadline, existingHeadline, place, sections)) return "strong";
 
   const ca = distinguishingTokens(candidateHeadline, existingHeadline, place);
   const cb = distinguishingTokens(existingHeadline, candidateHeadline, place);

@@ -1,0 +1,28 @@
+// guards: a published story could be presented as unfinished work on Today.
+import { it } from "node:test";
+import assert from "node:assert/strict";
+import { todayInProgressJobs, todayClosedLeadIds } from "./today-in-progress.ts";
+
+it("leaves published stories out of Today’s unfinished story list", () => {
+  const rows = [
+    { leadId: 461, kind: "draft", headline: "RTD Opens Feedback", status: "completed" },
+    { leadId: 462, kind: "draft", headline: "Council Sets a Hearing", status: "completed" },
+    { leadId: 463, kind: "scan", headline: null, status: "running" },
+  ];
+
+  assert.deepEqual(
+    todayInProgressJobs(rows, new Set([461])).map((row) => row.leadId),
+    [462],
+  );
+});
+
+// guards: a published article with stale lead status can appear as unfinished work on Today.
+it("Today excludes published articles even when lead status is stale", () => {
+  const leads = [
+    { id: 1, status: "drafted", article_slug: "printed-story" },
+    { id: 2, status: "published", article_slug: null },
+    { id: 3, status: "drafted", article_slug: null },
+  ];
+  assert.deepEqual(todayInProgressJobs(leads.map(lead => ({ leadId: lead.id, kind: "draft" })),
+    todayClosedLeadIds(leads)).map(row => row.leadId), [3]);
+});

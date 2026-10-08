@@ -72,6 +72,7 @@ import {
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { failureSummary } from "@/lib/news/pull-outcome";
+import { explainPairMatch } from "@/lib/news/lead-match";
 import { myDesk } from "@/lib/news/claim";
 import { uncreditedOutlets } from "@/lib/news/source-credit";
 import { parseUrlList } from "@/lib/paper";
@@ -1645,6 +1646,29 @@ function StoryPage() {
    */
   const priorLead = data.lead.possible_duplicate ?? null;
   const comparePair = data.lead.possible_duplicate_of && priorLead ? { prior: priorLead } : null;
+  const comparisonExplanation = comparePair
+    ? explainPairMatch(
+        data.lead.headline,
+        sources,
+        comparePair.prior.headline,
+        parseUrlList(comparePair.prior.source_urls ?? "[]"),
+        {
+          city: paperIdentity.city,
+          state: paperIdentity.state,
+          county: paperIdentity.county,
+        },
+        {
+          candidateTopic: data.lead.topic,
+          leadTopic: comparePair.prior.topic,
+        },
+      )
+    : null;
+  const comparisonReason = comparePair
+    ? data.lead.dup_ai_same === true && data.lead.dup_ai_why?.trim()
+      ? data.lead.dup_ai_why.trim()
+      : comparisonExplanation?.reason ??
+        "The saved link does not match the current story evidence."
+    : "";
   const compareShown = comparePair ? (compareOpen ?? true) : false;
   /*
    * Unit AK item 6: a kill leaves a record, and the record outlives the kill --
@@ -2353,6 +2377,7 @@ function StoryPage() {
             onNotADuplicate={moveToNew}
             onKillThis={killAsDuplicateOfPrior}
             onReopenPrior={reopenPrior}
+            matchReason={comparisonReason}
             formatDate={formatShortDate}
           />
         </div>
