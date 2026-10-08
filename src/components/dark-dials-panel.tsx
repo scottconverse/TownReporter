@@ -51,6 +51,7 @@ export function DarkDialsPanel({
       <ModelPicker
         scope="dark"
         label="Digging model"
+        layout="stacked"
         value={modelChoice}
         onChange={onModelChoice}
         effort={modelEffort}

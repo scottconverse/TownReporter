@@ -71,6 +71,7 @@ type PickerControls<T extends StoryModelChoice> = {
   onClear?: () => void;
   disabled?: boolean;
   compact?: boolean;
+  layout?: "stacked" | "inline";
   excludeAutomatic?: boolean;
   effort?: ModelEffort | null;
   onEffortChange?: (value: ModelEffort | null) => void;
@@ -440,7 +441,7 @@ export function ModelPicker(props: Props) {
       ? props.effort
       : defaultModelEffort(shownValue, exactModel);
   return (
-    <div className={props.compact ? "model-picker compact" : "model-picker"}>
+    <div className={["model-picker", props.compact ? "compact" : "", props.layout].filter(Boolean).join(" ")}>
       <label htmlFor={selectId} className="model-picker-label">
         {props.label ?? (props.scope === "dark" ? "Digging model" : "Writing model")}
       </label>
@@ -482,7 +483,7 @@ export function ModelPicker(props: Props) {
         {help}
       </span>
       {props.onEffortChange ? (
-        <div className="model-picker" style={{ gridColumn: "1 / -1" }}>
+        <div className={["model-picker", props.layout].filter(Boolean).join(" ")} style={{ gridColumn: "1 / -1" }}>
           <label htmlFor={effortId} className="model-picker-label">Thinking effort</label>
           <select
             id={effortId}
@@ -515,7 +516,7 @@ export function ModelPicker(props: Props) {
           Could not load custom API connections. Existing model choices still work.
         </span>
       ) : null}
-      <details className="min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
+      <details className="model-picker-setup min-w-0 text-sm" style={{ gridColumn: "1 / -1" }}>
         {/*
           `py-3` because this disclosure is a control, and the desk's controls
           are 44px tall: at the line's own height it measured 20px on every

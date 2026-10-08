@@ -72,6 +72,8 @@ describe("Start a Dark Desk file dialog", () => {
     // drawn pair and on the disabled-Automatic shape: an untouched row means
     // the desk's own default, which the note says out loud.
     const html = render({});
+    assert.match(html, /class="test-model-picker stacked"/);
+    assert.match(html, /<label>Digging model<\/label>/);
     assert.match(html, /aria-label="Model"/);
     assert.match(html, /aria-label="Effort"/);
     assert.match(html, /Automatic \(Recommended\)/);

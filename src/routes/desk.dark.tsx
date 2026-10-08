@@ -1937,6 +1937,7 @@ function InvestigationWorkspace({
 
       <ModelPicker
         scope="dark"
+        layout="stacked"
         value={modelChoice}
         onChange={onModelChoice}
         effort={modelEffort}

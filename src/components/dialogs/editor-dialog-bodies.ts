@@ -75,6 +75,7 @@ export type ChoiceRender = (props: {
 export type ModelPickerRenderProps = {
   scope: "story" | "scan" | "opinion" | "dark" | "forced";
   label: string;
+  layout?: "stacked" | "inline";
   value: string;
   effort: string | null;
   onChange: (value: string) => void;
@@ -215,6 +216,7 @@ function modelRow(
   return createElement(Picker, {
     scope,
     label,
+    layout: scope === "dark" ? "stacked" : undefined,
     value,
     effort,
     onChange: onValue,
@@ -801,7 +803,7 @@ export function DarkFileBody(p: DarkFileBodyProps): ReactNode {
       `opts.modelEffort` into `reasoningEffort` since it was written
       (src/lib/news/dark.ts:1882) -- so the wire, not the runner, was the gap.
     */
-    modelRow(p.ModelPicker, "dark", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v })),
+    modelRow(p.ModelPicker, "dark", s.model, s.effort, (v) => set({ model: v }), (v) => set({ effort: v }), "Digging model"),
     message(p.problem, "warn"),
     message(p.note, "ok"),
   );

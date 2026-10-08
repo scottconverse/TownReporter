@@ -263,6 +263,7 @@ export function PageWatchPanel({
         <ModelPicker
           scope="dark"
           label="Digging model"
+          layout="stacked"
           value={row ? row.watch_model_choice as StoryModelChoice : model}
           disabled={busy}
           onChange={(choice) => {

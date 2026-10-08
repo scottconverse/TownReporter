@@ -8426,3 +8426,63 @@
   border: 2px solid #111;
 }
 .desk-ltr.astra .queue-release-message .btn { color: #111; border-color: #111; }
+
+/* Dark Desk picker layout is opt-in so the shared picker keeps its other rows. */
+.desk-ltr.astra .model-picker.stacked {
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  gap: 4px;
+}
+.desk-ltr.astra .model-picker.stacked > :is(.model-picker-label, select, .model-picker-help, .model-picker-setup) {
+  grid-column: 1;
+}
+.desk-ltr.astra .model-picker.stacked > .model-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  width: 100%;
+}
+.desk-ltr.astra .model-picker.stacked > .model-picker > :is(.model-picker-label, select, .model-picker-help) {
+  grid-column: 1;
+}
+.desk-ltr.astra .model-picker.stacked > .model-picker-setup {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.desk-ltr.astra .model-picker.stacked > .model-picker-setup > summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* The page title and section labels match the Dark Desk drawing. */
+.desk-ltr.astra[data-desk-page="dark"] .astra-head {
+  border-bottom-width: 3px;
+}
+.desk-ltr.astra[data-desk-page="dark"] .astra-head .kick {
+  font: 700 calc(15px * var(--ts))/1.3 var(--fd);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--fg2);
+}
+.desk-ltr.astra[data-desk-page="dark"] .astra-head .h1 {
+  font: 800 calc(40px * var(--ts))/1.05 var(--fd);
+  letter-spacing: -0.03em;
+}
+.desk-ltr.astra[data-desk-page="dark"] .astra-pair .astra-case-h {
+  border-bottom: 2px solid var(--fg);
+}
+.desk-ltr.astra[data-desk-page="dark"] .astra-pair .astra-case-h > .astra-label {
+  font: 800 calc(19px * var(--ts))/1.25 var(--fd);
+  color: var(--fg);
+  letter-spacing: 0;
+  text-transform: none;
+}
