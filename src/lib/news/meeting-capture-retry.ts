@@ -1,19 +1,21 @@
 export const YOUTUBE_RETRIES_PER_UTC_DAY = 3;
 
 const MEETING_CAPTURE_LOCK = Symbol.for("townreporter:meeting-capture-pass-lock");
-type MeetingCaptureLockState = { tail: Promise<void> };
+type MeetingCaptureLockState = Map<number, Promise<void>>;
 
-export async function withMeetingCapturePassLock<T>(work: () => Promise<T>): Promise<T> {
+export async function withMeetingCapturePassLock<T>(newsroomId: number, work: () => Promise<T>): Promise<T> {
   const globalState = globalThis as typeof globalThis & Record<symbol, MeetingCaptureLockState | undefined>;
-  const lock = (globalState[MEETING_CAPTURE_LOCK] ??= { tail: Promise.resolve() });
-  const previous = lock.tail;
+  const locks = (globalState[MEETING_CAPTURE_LOCK] ??= new Map());
+  const previous = locks.get(newsroomId) ?? Promise.resolve();
   let release!: () => void;
-  lock.tail = new Promise<void>((resolve) => { release = resolve; });
+  const tail = new Promise<void>((resolve) => { release = resolve; });
+  locks.set(newsroomId, tail);
   await previous;
   try {
     return await work();
   } finally {
     release();
+    if (locks.get(newsroomId) === tail) locks.delete(newsroomId);
   }
 }
 

@@ -327,7 +327,7 @@ export async function resumeStoppedMeetings(
 }
 
 export async function runMeetingAwareness(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps = {}): Promise<MeetingAwarenessResult> {
-  return await withMeetingCapturePassLock(() => runMeetingAwarenessUnlocked(sql, newsroomId, deps));
+  return await withMeetingCapturePassLock(newsroomId, () => runMeetingAwarenessUnlocked(sql, newsroomId, deps));
 }
 
 async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: MeetingAwarenessDeps): Promise<MeetingAwarenessResult> {
