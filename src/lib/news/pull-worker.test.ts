@@ -91,6 +91,20 @@ describe("durable Pull pipeline", () => {
     assert.ok(documentSave >= 0 && completionSave > documentSave, events.join("\n"));
   });
 
+  // guards: a timed-out source read is mistaken for a search that found nothing
+  it("marks a timed-out source read as failed", async () => {
+    const result = await runPullPipeline(receipt(), {
+      search: async () => assert.fail("the saved search checkpoint must not run again"),
+      ingest: async () => { throw new Error("Request timed out"); },
+      stopRequested: async () => false,
+      saveDocument: async () => assert.fail("the timed-out source was not read"),
+      saveReceipt: async () => {},
+    });
+    assert.equal(result.status, "failed");
+    assert.match(result.stage, /timeout/i);
+    assert.doesNotMatch(result.stage, /no relevant public document found/i);
+  });
+
   it("stops at the next durable boundary and keeps the reporting item unresolved", async () => {
     let networkCalls = 0;
     const result = await runPullPipeline(receipt(), {
@@ -328,7 +342,7 @@ describe("durable Pull pipeline", () => {
         saveReceipt: async () => undefined,
       },
     );
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.equal(result.counters.providersAttempted, 1);
     assert.equal(result.counters.failures, 1);
     assert.match(result.errors[0] ?? "", /Exa: provider unavailable/);
@@ -385,7 +399,7 @@ describe("what a Pull says when it comes back with nothing", () => {
       },
     });
     const final = stages.at(-1) ?? "";
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.match(final, /search is unavailable/i);
     assert.match(final, /Exa: rate limited/);
     assert.match(final, /DuckDuckGo: blocked this computer/);
@@ -437,7 +451,8 @@ describe("what a Pull says when it comes back with nothing", () => {
       },
     });
     const final = stages.at(-1) ?? "";
-    assert.match(final, /no relevant public document found/);
+    assert.match(final, /failed · some searches could not be completed/i);
+    assert.doesNotMatch(final, /no relevant public document found/i);
     assert.match(final, /Exa: rate limited/);
   });
 
@@ -536,7 +551,7 @@ describe("what a Pull says when it comes back with nothing", () => {
         },
       },
     );
-    assert.equal(result.status, "completed");
+    assert.equal(result.status, "failed");
     assert.match(stages.at(-1) ?? "", /search is unavailable/i);
     assert.ok(
       stages.some((stage) => /skipped, blocked 2 minutes ago/.test(stage)),

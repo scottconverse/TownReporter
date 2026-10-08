@@ -979,6 +979,32 @@ export function editorFetchError(raw: string | null | undefined, url?: string | 
   return plainEditorText(t);
 }
 
+/** Plain failure copy for a Pull that could not finish reading or save a source. */
+export function pullFailureCopy(raw: string | null | undefined, url?: string | null): string {
+  const t = String(raw ?? "").trim();
+  if (/permission (?:was )?withdrawn|access .* changed|not authorized/i.test(t))
+    return "Could not save the Pull result because access to this story changed. Reload the story to check.";
+  if (/unknown.*save|could not confirm.*sav|save.*could not be confirmed|lease was lost|missing its saved request/i.test(t))
+    return "The desk could not confirm that the Pull result was saved. Reload the story to check before trying again.";
+  const site = organizationFromUrl(url ?? extractUrl(t)) || "the site";
+  const reason = /timeout|timed out|abort/i.test(t)
+    ? "timeout"
+    : /\b429\b|rate.?limit/i.test(t)
+      ? "rate limited"
+      : /\b401\b|login|unauthorized/i.test(t)
+        ? "login required"
+        : /\b403\b|blocked|forbidden|refused/i.test(t)
+          ? "blocked"
+          : /needs-ocr|scanned pdf|image-only/i.test(t)
+            ? "PDF needs OCR"
+            : /network|fetch.failed|socket|dns|econn/i.test(t)
+              ? "network error"
+              : /parse|could not read|no usable text/i.test(t)
+                ? "could not read the page"
+                : "read failed";
+  return `Could not open ${site} (${reason}).`;
+}
+
 /**
  * THE "KEEPS FAILING" SENTENCE, in the editor's words (SH0-2).
  *

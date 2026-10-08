@@ -28,6 +28,7 @@ import {
   siteOwnDocLinks,
 } from "./pull-plan.ts";
 import { officialDomainsEvery } from "./absence-gate.ts";
+import { pullFailureCopy } from "./desk-copy.ts";
 import {
   finalPullText,
   isPullTodoReason,
@@ -113,6 +114,8 @@ export type PullReceipt = {
   providerFailures?: ProviderFailure[];
   /** True once a provider really answered a query, even with zero results. */
   searchAnswered?: boolean;
+  /** Source reads that failed; kept apart from searches that ran and found nothing. */
+  readFailures?: Array<{ url: string; reason: string }>;
   checkpoint?: PullCheckpoint;
   startedAt: string | null;
   updatedAt: string;
@@ -208,6 +211,12 @@ export function parsePullReceipt(raw: string | null | undefined): PullReceipt | 
             .slice(-16)
         : [],
       searchAnswered: value.searchAnswered === true,
+      readFailures: Array.isArray(value.readFailures)
+        ? value.readFailures
+            .map((row) => ({ url: String(row?.url ?? ""), reason: String(row?.reason ?? "") }))
+            .filter((row) => row.url && row.reason)
+            .slice(-16)
+        : [],
       sourceUrl: typeof value.sourceUrl === "string" && value.sourceUrl ? value.sourceUrl : null,
     } as PullReceipt;
   } catch {
@@ -220,6 +229,12 @@ function addFailure(receipt: PullReceipt, message: string) {
   if (!clean) return;
   receipt.errors = [...receipt.errors, clean].slice(-16);
   receipt.counters.failures += 1;
+}
+
+function addReadFailure(receipt: PullReceipt, url: string, reason: string) {
+  const clean = reason.replace(/\s+/g, " ").trim().slice(0, 240);
+  if (!clean) return;
+  receipt.readFailures = [...(receipt.readFailures ?? []), { url, reason: clean }].slice(-16);
 }
 
 class PullDeadlineError extends Error {}
@@ -351,7 +366,7 @@ export async function runPullPipeline(
     `${receipt.counters.indexPagesChecked} index pages checked · ` +
     `${receipt.counters.documentsOpened} documents opened · ` +
     `${receipt.checkpoint.documents.length} documents saved`;
-  const finish = async (status: "completed" | "stopped" | "deadline", stage: string) => {
+  const finish = async (status: "completed" | "stopped" | "deadline" | "failed", stage: string) => {
     terminal = true;
     receipt.status = status;
     receipt.stage = stage;
@@ -399,7 +414,10 @@ export async function runPullPipeline(
       const got = await withinDeadline((signal) => deps.ingest(sourceUrl, signal), deadlineAt, now);
       receipt.counters.documentsOpened += 1;
       if (!got.text || got.text.trim().length < 40) {
-        addFailure(receipt, `${sourceUrl}: ${got.outcome || "no usable text"}`);
+        const reason = `${got.outcome || "no usable text"}${got.status ? ` (HTTP ${got.status})` : ""}`;
+        addFailure(receipt, `${sourceUrl}: ${reason}`);
+        if (["fetch-failed", "parse-failed", "needs-ocr"].includes(got.outcome))
+          addReadFailure(receipt, sourceUrl, reason);
       } else {
         const document = {
           title: (got.title || sourceUrl).slice(0, 160),
@@ -412,10 +430,13 @@ export async function runPullPipeline(
       }
     } catch (error) {
       if (error instanceof PullDeadlineError) return finish("deadline", stoppedStage("deadline"));
-      addFailure(
-        receipt,
-        `${sourceUrl}: ${error instanceof Error ? error.message : "could not open"}`,
-      );
+      const reason = error instanceof Error ? error.message : "could not open";
+      addFailure(receipt, `${sourceUrl}: ${reason}`);
+      addReadFailure(receipt, sourceUrl, reason);
+    }
+    if (!receipt.checkpoint.documents.length && receipt.readFailures?.length) {
+      const failed = receipt.readFailures[0]!;
+      return finish("failed", pullFailureCopy(failed.reason, failed.url));
     }
     return finish(
       "completed",
@@ -519,7 +540,7 @@ export async function runPullPipeline(
         */
         if (attempt.allProvidersCooling) {
           return finish(
-            "completed",
+            "failed",
             finalPullText({
               documents: 0,
               failures: providerFailureNotes(receipt.providerFailures ?? []),
@@ -591,6 +612,8 @@ export async function runPullPipeline(
         addUnique(receipt.checkpoint.indexedUrls, links);
         if (!got.ok && got.outcome !== "fetched") {
           addFailure(receipt, `${page}: ${got.outcome}${got.status ? ` (${got.status})` : ""}`);
+          if (["fetch-failed", "parse-failed", "needs-ocr"].includes(got.outcome))
+            addReadFailure(receipt, page, `${got.outcome}${got.status ? ` (HTTP ${got.status})` : ""}`);
         }
       } catch (error) {
         if (error instanceof PullDeadlineError) throw error;
@@ -598,6 +621,7 @@ export async function runPullPipeline(
           receipt,
           `${page}: ${error instanceof Error ? error.message : "could not open"}`,
         );
+        addReadFailure(receipt, page, error instanceof Error ? error.message : "could not open");
         indexPageResults[current] = [];
       }
       await save(
@@ -655,7 +679,10 @@ export async function runPullPipeline(
             : `Read candidate document ${current + 1} of ${receipt.checkpoint.rankedUrls.length}`,
         );
         if (!got.text || got.text.trim().length < 40) {
-          addFailure(receipt, `${url}: ${got.outcome || "no usable text"}`);
+          const reason = `${got.outcome || "no usable text"}${got.status ? ` (HTTP ${got.status})` : ""}`;
+          addFailure(receipt, `${url}: ${reason}`);
+          if (["fetch-failed", "parse-failed", "needs-ocr"].includes(got.outcome))
+            addReadFailure(receipt, url, reason);
           documentOutcomes[current] = "failed";
         } else if (
           !isOnSubject(
@@ -683,7 +710,9 @@ export async function runPullPipeline(
         }
       } catch (error) {
         if (error instanceof PullDeadlineError) throw error;
-        addFailure(receipt, `${url}: ${error instanceof Error ? error.message : "could not open"}`);
+        const reason = error instanceof Error ? error.message : "could not open";
+        addFailure(receipt, `${url}: ${reason}`);
+        addReadFailure(receipt, url, reason);
         documentOutcomes[current] = "failed";
       }
       await save(
@@ -703,11 +732,17 @@ export async function runPullPipeline(
       told three of Scott's pulls that the record did not exist when in fact
       nobody had been asked.
     */
+    const providerNotes = providerFailureNotes(receipt.providerFailures ?? []);
+    if (!receipt.checkpoint.documents.length && receipt.readFailures?.length) {
+      const failed = receipt.readFailures[0]!;
+      return finish("failed", pullFailureCopy(failed.reason, failed.url));
+    }
+    const hasSearchFailure = providerNotes.length > 0;
     return finish(
-      "completed",
+      hasSearchFailure && !receipt.checkpoint.documents.length ? "failed" : "completed",
       finalPullText({
         documents: receipt.checkpoint.documents.length,
-        failures: providerFailureNotes(receipt.providerFailures ?? []),
+        failures: providerNotes,
         answered: receipt.searchAnswered === true,
       }),
     );
@@ -965,6 +1000,11 @@ async function finishPullTodo(job: DeskJob, receipt: PullReceipt) {
               status: receipt.status,
               failures: providerFailureNotes(receipt.providerFailures ?? []),
               answered: receipt.searchAnswered === true,
+              failureReason: receipt.readFailures?.[0]
+                ? pullFailureCopy(receipt.readFailures[0].reason, receipt.readFailures[0].url)
+                : receipt.status === "failed" && !(receipt.providerFailures?.length) && receipt.errors.at(-1)
+                  ? pullFailureCopy(receipt.errors.at(-1))
+                  : undefined,
             }),
             // The run's own finish -- the moment this reason is written. A
             // crash path that got here without one still stamps the write.
@@ -1029,7 +1069,7 @@ export async function performPullWork(job: DeskJob) {
     );
   } catch (error) {
     receipt.status = "failed";
-    receipt.stage = "Pull failed; saved progress can be continued";
+    receipt.stage = pullFailureCopy(error instanceof Error ? error.message : "Pull failed");
     receipt.finishedAt = new Date().toISOString();
     addFailure(receipt, error instanceof Error ? error.message : "Pull failed");
     await saveJobReceipt(job, receipt);
