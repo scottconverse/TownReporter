@@ -1269,6 +1269,22 @@ describe("the writer's method prompt states the status policy", () => {
       await callWritingPass([])
     ).prompt;
   }
+  // guards: the editor could be told a budget motion is missing even though it is in the retained transcript.
+  it("removes a missing-motion caveat when the retained transcript has the motion", async () => {
+    const story = { id: "budget", headline: "Council gives final budget direction", dek: "The council considered its proposed budget and final direction, while the legal effect of the announced result remains under review for residents.", draft: "Council approved the budget motion.", plainBrief: "", cannotSay: "", readinessTier: 1, claims: [], sources: [] };
+    const reason = "The raw passage establishes unanimous passage. The complete motion is available only as a reconciled description, so final legislative enactment remains unverified.";
+    const { result } = await callWritingPass([], { identity: { videoId: "meeting" }, windows: [], votes: [], gaps: [], segments: [
+      { index: 1, seconds: 100, item: "12A", itemTitle: "Budget direction", text: "I move to approve the proposed budget and final council direction." },
+      { index: 2, seconds: 110, item: "12A", itemTitle: "Budget direction", text: "The motion carries unanimously." },
+    ] }, [], "Develop this lead", () => ({ ok: true, text: JSON.stringify({ stories: [story], held: [{ storyId: "budget", headline: "Final budget enactment and complete budget-motion wording", reason, nextCheck: "Check the complete motion.", unverified: true }] }) }));
+    assert.doesNotMatch(result.held[0]!.reason, /complete motion.*reconciled description/i);
+    const sql = await getSql();
+    const request = await loadReportingRequest(sql, await newRequest({ action: "Develop this lead", assignment: "Develop this lead" }), NEWSROOM);
+    const [filed] = await fileRunLeads({ sql, request: request!, stories: result.stories, score: null, actions: [], held: result.held, receipt: { methodVersion: "2.6.0", modelLabel: "fixture" } as never } as never);
+    const [row] = await sql<{ research_json: unknown }>`select research_json from drafts where id = ${filed!.draftId}`;
+    const research = typeof row!.research_json === "string" ? JSON.parse(row!.research_json) : row!.research_json as Record<string, unknown>;
+    assert.doesNotMatch(String((research.storyReadiness as Record<string, unknown>).reason), /complete motion.*reconciled description/i);
+  });
   it("tells the writer a proposal is not an adopted decision and to condition resident effects", async () => {
     const status = await writingUserPrompt();
     assert.match(status, /STATUS IS THE LEDE/, "the status policy is stated as its own rule");

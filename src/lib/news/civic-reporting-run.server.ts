@@ -580,6 +580,53 @@ export function normalizeHeld(raw: unknown): PackageHeld[] {
   });
   return out;
 }
+
+function correctTranscriptGapCaveat(text: string, kinds: Set<"motion" | "result">): string {
+  return text.split(/(?<=[.!?])\s+/).map((sentence) => {
+    const missing = /\b(?:missing|absent|unavailable|not\s+(?:shown|stated|supplied|present|found|available)|(?:does|do|did|cannot|could not)\s+(?:not\s+)?(?:supply|show|include|establish)|only\s+as\s+a\s+reconciled)\b/i.test(sentence);
+    if (!missing) return sentence;
+    const kind = /\b(?:motion|motions)\b/i.test(sentence) && kinds.has("motion") ? "motion"
+      : /\b(?:result|vote|outcome)\b/i.test(sentence) && kinds.has("result") ? "result" : null;
+    if (!kind) return sentence;
+    const remainder = sentence.match(/,\s*(?:so|but|while)\s+(.+?)[.!?]?$/i)?.[1]?.trim();
+    return `The retained transcript includes a related ${kind} passage${remainder ? ", and " + remainder.replace(/[.!?]+$/, "") : "; check any remaining wording and stage details"}.`;
+  }).join(" ");
+}
+
+function correctFalseTranscriptGapCaveats(held: PackageHeld[], stories: PackageStory[], record: WholeRecord): PackageHeld[] {
+  const videoId = str(record.identity.videoId);
+  const videoUrl = str(record.identity.videoUrl) || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : "");
+  const ignored = new Set(["about", "announced", "complete", "final", "full", "meeting", "motion", "passage", "record", "result", "the", "transcript", "unavailable", "wording"]);
+  return held.map((entry) => {
+    const story = stories.find((row) => row.id === entry.storyId);
+    if (!story) return entry;
+    const gapText = `${entry.reason} ${entry.nextCheck}`;
+    const motionGap = /\bmotion\b/i.test(gapText) && /\b(?:missing|absent|unavailable|not\s+(?:shown|stated|supplied|present|found|available)|(?:does|do|did|cannot|could not)\s+(?:not\s+)?(?:supply|show|include|establish)|only\s+as\s+a\s+reconciled)\b/i.test(gapText);
+    const resultGap = /\b(?:result|vote|outcome)\b/i.test(gapText) && /\b(?:missing|absent|unavailable|not\s+(?:shown|stated|supplied|present|found|available)|(?:does|do|did|cannot|could not)\s+(?:not\s+)?(?:supply|show|include|establish)|only\s+as\s+a\s+reconciled)\b/i.test(gapText);
+    if (!motionGap && !resultGap) return entry;
+    const topicText = `${entry.headline} ${story.headline}`;
+    const topics = [...new Set(normalizeForMatch(topicText).split(" ").filter((word) => word.length >= 4 && !ignored.has(word)))];
+    const identifiers = topicText.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi)?.map(normalizeForMatch) ?? [];
+    const query: PackageClaim = { id: "held-gap", text: topicText, status: "UNVERIFIED", sourceIds: [], nextCheck: entry.nextCheck };
+    const found = transcriptClaimCandidates(query, record, videoUrl).some((candidate) => {
+      const quote = normalizeForMatch(candidate.quote);
+      const identifiersMatch = identifiers.some((identifier) => quote.includes(identifier));
+      const topicMatches = topics.filter((topic) => quote.includes(topic)).length;
+      const motionFound = /\b(?:i move|we have a motion|move that|the motion was made|the motion has been made)\b/i.test(candidate.quote);
+      const resultFound = hasAnnouncedResult(candidate.quote);
+      return (identifiersMatch || topicMatches >= 2) && ((motionGap && motionFound) || (resultGap && resultFound));
+    });
+    if (!found) return entry;
+    const kinds = new Set<"motion" | "result">();
+    if (motionGap) kinds.add("motion");
+    if (resultGap) kinds.add("result");
+    return {
+      ...entry,
+      reason: correctTranscriptGapCaveat(entry.reason, kinds),
+      nextCheck: correctTranscriptGapCaveat(entry.nextCheck, kinds),
+    };
+  });
+}
 /* ------------------------------------------------------------------ *
  * The durable run workspace.
  *
@@ -2716,6 +2763,7 @@ export async function writingPass(input: {
     input.gather.observations ?? [],
     input.documents,
   );
+  held = correctFalseTranscriptGapCaveats(held, stories, input.record);
   if (!stories.length) {
     const fallback = noDraftFailure;
     gaps.push(fallback);
