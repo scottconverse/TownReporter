@@ -6737,11 +6737,70 @@
   border: 0;
   background: transparent;
 }
+.desk-ltr.astra .astra-show-all {
+  align-self: flex-start;
+  padding: 8px 16px;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-set-aside-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 16px;
+  color: var(--fg);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.desk-ltr.astra .astra-set-aside-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: calc(1rem * var(--ts));
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-set-aside-meta {
+  flex: 0 0 auto;
+  color: var(--fg2);
+  font-size: calc(0.875rem * var(--ts));
+  white-space: nowrap;
+}
+.desk-ltr.astra .astra-set-aside-row.on { background: var(--bg); box-shadow: inset 4px 0 0 var(--sel); }
+.desk-ltr.astra .astra-set-aside-row:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-file-t { font-weight: 700; font-size: calc(1rem * var(--ts)); line-height: 1.3; }
 .desk-ltr.astra .astra-file-m { font-size: calc(0.875rem * var(--ts)); color: var(--fg2); }
 .desk-ltr.astra .astra-file.on { background: var(--bg); box-shadow: inset 4px 0 0 var(--sel); }
 .desk-ltr.astra .astra-file:hover { background: var(--bg2); }
 .desk-ltr.astra .astra-piles-foot { padding: 14px 16px; }
+.desk-ltr.astra .astra-file-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+.desk-ltr.astra .astra-file-head > div:first-child { flex: 1 1 auto; min-width: 0; }
+.desk-ltr.astra .astra-more-file-actions { position: relative; flex: 0 0 auto; }
+.desk-ltr.astra .astra-more-file-actions > summary { cursor: pointer; text-decoration: underline; }
+.desk-ltr.astra .astra-more-file-actions > .astra-panel-acts {
+  position: absolute;
+  z-index: 5;
+  right: 0;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
 
 /* --- Dark Desk: the activity log and the case file ------------------------ */
 .desk-ltr.astra .astra-pair {

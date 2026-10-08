@@ -1,4 +1,4 @@
-import { newestTouchedFile, fullFileQuestion, signalCounts } from "@/lib/news/dark-rail";
+import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
@@ -7,7 +7,6 @@ import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
   challengeInvestigation,
-  findSomethingToDigInto,
   fileRedditTip,
   getInvestigation,
   getArtifact,
@@ -60,7 +59,6 @@ import {
   redditResultHeadline,
   sentenceCase,
   stalledRunCopy,
-  worthItemOnDeskLine,
   worthItemOnDeskReason,
 } from "@/lib/news/desk-copy";
 
@@ -495,7 +493,7 @@ function DarkPage() {
     // before the first open-state payload can hydrate Automatic and lock the
     // new id while the async job is still being committed.
     pickedFor.current = id;
-    if (cardId && cardId !== "find") claimCard(cardId);
+    if (cardId) claimCard(cardId);
     rememberOpen(id);
     setNotice(null);
     beginDigPhase();
@@ -507,33 +505,6 @@ function DarkPage() {
     });
     advance.mutate(id);
   }
-
-  const find = useMutation({
-    mutationFn: () => findSomethingToDigInto(),
-    onMutate: () => {
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res) => {
-      if (!res?.ok || !res.investigationId) {
-        /*
-          SG1: "nothing-new" is the desk's own quiet answer and keeps its
-          friendly sentence; any other refusal (an un-set-up paper, a database
-          that would not answer) carries words the editor needs, so they are
-          shown instead of being replaced by "paste a lead to start".
-        */
-        const error = (res as { error?: unknown } | undefined)?.error;
-        const said = typeof error === "string" && error && error !== "nothing-new" ? error : "";
-        showNotice(said || "Nothing to open yet. Paste a lead to start.");
-        clearPhase();
-        return;
-      }
-      afterOpen(res.investigationId, "find");
-    },
-    onError: (err) => {
-      showNotice(editorError(err instanceof Error ? err.message : "Find failed"));
-      clearPhase();
-    },
-  });
 
   const toQueue = useMutation({
     mutationFn: ({ id, preview }: { id: number; preview: InvestigationQueuePacket }) => queueInvestigation({ data: { id, preview } }),
@@ -758,7 +729,7 @@ function DarkPage() {
       showNotice(err instanceof Error ? err.message : "Could not write the brief."),
   });
 
-  const starting = find.isPending || followLead.isPending;
+  const starting = followLead.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -807,6 +778,9 @@ function DarkPage() {
   const active = allInv.filter((row) => investigationPileFor(row) === "desk");
   const waitingFiles = allInv.filter((row) => investigationPileFor(row) === "waiting");
   const parked = allInv.filter((row) => investigationPileFor(row) === "aside");
+  const hasEverStartedFollowUp = allInv.some((row) =>
+    row.has_ai_followup || row.waiting_follow_up || row.found_follow_up,
+  );
   /*
     FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened
     ... with 'SET ASIDE 0' throughout."
@@ -816,18 +790,14 @@ function DarkPage() {
     said nothing about it. The counter the editor checked counts PARKED FILES,
     which is a different thing, so the card simply left with no trace.
 
-    Split in two now: what is still a card, and what is covered, WITH the
-    reason and the file that covers it. Nothing is deleted from the screen to
-    make a list shorter -- the covered ones move under one line at the foot of
-    the pile that names the file each of them is already on.
+    Cards already attached to a file or claimed for a follow-up do not appear
+    in this review group. Every remaining card opens the start-a-file dialog.
   */
   const worthRows = (worth.data ?? []).map((item) => ({
     item,
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
   const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
-  const covered = worthRows.filter((row) => row.off);
-  const signalsCount = signalCounts(worthRows);
 
   function chooseSignal(item: WorthSeed) {
     pendingSignalId.current = item.id;
@@ -934,7 +904,7 @@ function DarkPage() {
       <div className="astra-deep-container">
       <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>
         <div className="astra-piles" hidden={noFiles}>
-          <div className="astra-pile">
+          <div className="astra-pile" hidden={!active.length && !investigations.isPending && !investigations.isError}>
             <div className="astra-pile-h">
               <span>Open files</span>
               <span>{active.length}</span>
@@ -955,9 +925,7 @@ function DarkPage() {
               <div className="astra-pile-pad">
                 <ListSkeleton rows={3} />
               </div>
-            ) : active.length === 0 ? (
-              <p className="meta astra-pile-pad">No files yet.</p>
-            ) : (
+            ) : active.length > 0 ? (
               (expandedPiles.open ? active : active.slice(0, 5)).map((row) => (
               <DeskFileCard
                 key={row.id}
@@ -966,11 +934,11 @@ function DarkPage() {
                 onOpen={() => rememberOpen(row.id)}
               />
             ))
-            )}
-            {active.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("open")}>{expandedPiles.open ? "Show fewer" : `Show all ${active.length}`}</InkButton> : null}
+            ) : null}
+            <PileShowAll count={active.length} expanded={Boolean(expandedPiles.open)} onToggle={() => togglePile("open")} />
           </div>
 
-          <div className="astra-pile">
+          <div className="astra-pile" hidden={!inbox.length && !worth.isPending && !worth.isError}>
             <div className="astra-pile-h">
               <span>Signals to review</span>
               <span>{inbox.length}</span>
@@ -991,11 +959,7 @@ function DarkPage() {
               <div className="astra-pile-pad">
                 <ListSkeleton rows={3} />
               </div>
-            ) : inbox.length === 0 ? (
-              <p className="meta astra-pile-pad">
-                Nothing new tonight — everything interesting is already on the desk.
-              </p>
-            ) : (
+            ) : inbox.length > 0 ? (
               (expandedPiles.signals ? inbox : inbox.slice(0, 5)).map((item) => (
                 <WorthSelector
                   key={item.id}
@@ -1003,57 +967,8 @@ function DarkPage() {
                   onOpen={() => chooseSignal(item)}
                 />
               ))
-            )}
-            {/*
-              FB7, item 5 (A2c C6): the cards this pile is NOT drawing, each
-              with the reason. A2c watched one of these vanish unopened and had
-              no way to find out where it went; the rule this unit sets is that
-              nothing disappears without one. The rows are real links, so the
-              file a tip is already on is one press away rather than a name the
-              editor has to go and search for.
-            */}
-            {inbox.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("signals")}>{expandedPiles.signals ? "Show fewer" : `Show all ${inbox.length}`}</InkButton> : null}
-            {covered.length ? (
-              <details className="wire-more astra-pile-pad">
-                <summary>
-                  {signalsCount.covered} {signalsCount.covered === 1 ? "signal is" : "signals are"} already accounted for
-                </summary>
-                {(expandedPiles.covered ? covered : covered.slice(0, 5)).map(({ item, off }) => (
-                  <p key={item.id} className="wire-line">
-                    <b>{editorTitle(plainEditorText(item.title))}</b> — {worthItemOnDeskLine(off!)}
-                    {off!.kind === "covered" ? (
-                      <>
-                        {" "}
-                        {/*
-                          The file this tip is already on, reached the way every
-                          other "open that file" link on this desk reaches one:
-                          the id is handed over in `OPEN_KEY` and read on
-                          arrival. The route carries no search params, so a
-                          query string here would have looked like a link and
-                          opened nothing.
-                        */}
-                        <Link
-                          to="/desk/dark"
-                          className="inline-link"
-                          onClick={() => {
-                            const covering = allInv.find((r) => r.title === off!.title);
-                            if (covering == null) return;
-                            try {
-                              sessionStorage.setItem(OPEN_KEY, String(covering.id));
-                            } catch {
-                              /* a browser that will not keep it opens its own box */
-                            }
-                          }}
-                        >
-                          Open that file →
-                        </Link>
-                      </>
-                    ) : null}
-                  </p>
-                ))}
-                {covered.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("covered")}>{expandedPiles.covered ? "Show fewer" : `Show all ${covered.length}`}</InkButton> : null}
-              </details>
             ) : null}
+            <PileShowAll count={inbox.length} expanded={Boolean(expandedPiles.signals)} onToggle={() => togglePile("signals")} />
             {reddit.isPending ? (
               <div className="astra-pile-pad">
                 <div className="reddit-progress">
@@ -1081,55 +996,32 @@ function DarkPage() {
                   filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
                 />
               </div>
-            ) : (
-              <p className="astra-note astra-pile-pad">
-                Tips from the subreddit arrive here as unverified cards. They are a reason to go
-                looking for the record, never a source to cite.
-              </p>
-            )}
+            ) : null}
           </div>
 
-          <div className="astra-pile">
-            <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
-            {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
-              <DeskFileCard key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
-            )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
-            {waitingFiles.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("waiting")}>{expandedPiles.waiting ? "Show fewer" : `Show all ${waitingFiles.length}`}</InkButton> : null}
-          </div>
-
-          {parked.length ? <details className="astra-pile astra-pile-aside">
-            <summary className="astra-pile-h">
-              <span>Set aside</span>
-              <span>{parked.length}</span>
-            </summary>
-            <p className="astra-note astra-pile-pad">Parked or finished. Pull anything back.</p>
-            {parked.length === 0 ? (
-              <p className="meta astra-pile-pad">Nothing set aside yet.</p>
-            ) : (
-              (expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
+          {waitingFiles.length || hasEverStartedFollowUp ? (
+            <div className="astra-pile">
+              <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
+              {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
                 <DeskFileCard key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
-              ))
-            )}
-            {parked.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("aside")}>{expandedPiles.aside ? "Show fewer" : `Show all ${parked.length}`}</InkButton> : null}
-          </details> : null}
+              )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
+              <PileShowAll count={waitingFiles.length} expanded={Boolean(expandedPiles.waiting)} onToggle={() => togglePile("waiting")} />
+            </div>
+          ) : null}
 
-          {/*
-            The rail's foot, as drawn: the two desks-wide actions that are not
-            about any one file. Pick one for me stays here rather than in the
-            signals pile so it is reachable with an empty rail.
-          */}
+          {parked.length ? (
+            <div className="astra-pile astra-pile-aside">
+              <div className="astra-pile-h"><span>Set aside</span><span>{parked.length}</span></div>
+              {(expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
+                <SetAsideRow key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
+              ))}
+              <PileShowAll count={parked.length} expanded={Boolean(expandedPiles.aside)} onToggle={() => togglePile("aside")} />
+            </div>
+          ) : null}
+
+          {/* The rail's foot holds the one desks-wide action: check the subreddit for signals. */}
           <div className="astra-piles-foot">
             <div className="astra-pile-acts">
-              <details className="astra-other-actions">
-                <summary>More ways to start</summary>
-                <InkButton
-                  tone="quiet"
-                  disabled={busyStart || digging || paperGate.blocked}
-                  onClick={() => find.mutate()}
-                >
-                  {find.isPending ? "Starting…" : "Pick one for me"}
-                </InkButton>
-              </details>
               <InkButton
                 tone="quiet"
                 disabled={
@@ -1329,12 +1221,14 @@ function DeskFileCard({
   selected: boolean;
   onOpen: () => void;
 }) {
-  const { formatListDateTime } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
-  const limitRecords = row.limit_key === "quick" ? 10 : row.limit_key === "deep" ? 100 : 30;
   const waitingCount = Number(row.still_open ?? 0);
+  const recordProgress = waitingCount > 0
+    ? `${records} of ${records + waitingCount} records`
+    : `${records} records`;
   const waitingLine = row.waiting_follow_up
-    ? `AI watching for ${row.waiting_follow_up}`
+    ? `AI watching for ${row.waiting_follow_up}${row.waiting_since ? ` · since ${formatShortDate(row.waiting_since)}` : ""}`
     : row.waiting_watch
       ? `Watching ${row.waiting_watch}`
       : null;
@@ -1345,16 +1239,16 @@ function DeskFileCard({
         ? `Closed · no finding${row.close_note ? ` · ${row.close_note}` : ""}`
         : `Closed · ${formatListDateTime(row.updated_at)}`
     : waitingLine
-      ? `${waitingLine}${row.waiting_since ? ` · since ${formatListDateTime(row.waiting_since)}` : ""}`
+      ? waitingLine
       : row.found_follow_up
         ? "Found an answer"
         : row.status === "investigating"
-        ? `Reading · ${records} of ${limitRecords} records`
-        : row.status === "open" && waitingCount > 0
-          ? `Waiting on ${waitingCount} ${waitingCount === 1 ? "record" : "records"}`
-          : row.status === "paused"
-            ? `Stopped · ${records} of ${limitRecords} records`
-            : `Case file ready · ${records} records`;
+          ? `Reading · ${recordProgress}`
+          : row.status === "open" && waitingCount > 0
+            ? `Waiting on ${waitingCount} ${waitingCount === 1 ? "record" : "records"}`
+            : row.status === "paused"
+              ? `Stopped · ${recordProgress}`
+              : `Case file ready · ${records} records`;
   return (
     <div className={"astra-file astra-pile-row" + (selected ? " on" : "")}>
       {/*
@@ -1373,6 +1267,30 @@ function DeskFileCard({
         <span className="astra-file-m">{stateLine}</span>
       </button>
     </div>
+  );
+}
+
+function PileShowAll({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
+  if (count <= 5) return null;
+  return (
+    <button type="button" className="astra-show-all" aria-expanded={expanded} onClick={onToggle}>
+      {expanded ? "Show fewer" : `Show all ${count}`}
+    </button>
+  );
+}
+
+function SetAsideRow({ row, selected, onOpen }: { row: InvestigationRow; selected: boolean; onOpen: () => void }) {
+  const { formatShortDate } = usePaperDateFormatters();
+  return (
+    <button
+      type="button"
+      className={"astra-set-aside-row" + (selected ? " on" : "")}
+      onClick={onOpen}
+      aria-current={selected ? "true" : undefined}
+    >
+      <span className="astra-set-aside-title">{editorTitle(row.title) || `File ${row.id}`}</span>
+      <span className="astra-set-aside-meta">Set aside {formatShortDate(row.updated_at)}</span>
+    </button>
   );
 }
 
@@ -1521,6 +1439,9 @@ function RedditResultPanel({
 }
 
 function WorthSelector({ item, onOpen }: { item: WorthSeed; onOpen: () => void }) {
+  const meta = item.kind === "reddit-tip"
+    ? "1 post · unverified"
+    : `${item.badge || editorKindLabel(item.kind)} · unverified`.toLowerCase();
   return (
     <button
       type="button"
@@ -1528,7 +1449,7 @@ function WorthSelector({ item, onOpen }: { item: WorthSeed; onOpen: () => void }
       onClick={onOpen}
     >
       <span className="astra-file-t">{editorTitle(item.title)}</span>
-      <span className="astra-file-m">{item.badge || editorKindLabel(item.kind)} · Unverified</span>
+      <span className="astra-file-m">{meta}</span>
     </button>
   );
 }
@@ -1929,9 +1850,19 @@ function InvestigationWorkspace({
         The question the file is: the largest voice on the screen, and
         everything below it is evidence about this one line.
       */}
-      <div>
-        <p className="astra-label">The question</p>
-        <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
+      <div className="astra-file-head">
+        <div>
+          <p className="astra-label">The question</p>
+          <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
+        </div>
+        <details className="astra-more-file-actions of-trail">
+          <summary>More file actions</summary>
+          <div className="astra-panel-acts">
+            <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
+            {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
+            {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
+          </div>
+        </details>
       </div>
       {explanation ? (
         <div>
@@ -2182,14 +2113,6 @@ function InvestigationWorkspace({
         <p className="astra-note">
           Publication remains an editorial decision.
         </p>
-        <details className="of-trail">
-          <summary>More file actions</summary>
-          <div className="astra-panel-acts">
-            <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
-            {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
-            {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
-          </div>
-        </details>
       </div>
 
       {followUpOpen ? (

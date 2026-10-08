@@ -676,6 +676,7 @@ export type InvestigationRow = {
   found_follow_up?: string | null;
   waiting_watch?: string | null;
   waiting_since?: string | null;
+  has_ai_followup?: boolean;
   closed_kind?: string | null;
   close_note?: string | null;
   /**
@@ -1034,6 +1035,10 @@ export async function listInvestigationsFor(newsroomId: number) {
       select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
         i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
         i.created_at, i.updated_at, i.closed_kind, i.close_note,
+        exists(
+          select 1 from follow_ups f
+          where f.newsroom_id = i.newsroom_id and f.agent_kind is not null
+        ) as has_ai_followup,
         (select f.what from follow_ups f
          where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
            and f.status = 'active' and f.agent_kind is not null and f.last_state is distinct from 'found'
