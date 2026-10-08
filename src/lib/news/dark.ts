@@ -3847,7 +3847,7 @@ export async function queuePacketFor(newsroomId: number, id: number) {
   return {
     investigationId: id,
     title: clean(files[0].title),
-    suggestedHeadline: clean(brief?.headline || files[0].title),
+    suggestedHeadline: clean(brief?.headline || files[0].title).slice(0, 240),
     evidence: claims.map((claim) => ({ text: clean(claim.body), source: claim.source_url })),
     uncertainties,
     contradictions: brief?.contradictions ?? [],
@@ -3918,7 +3918,7 @@ export async function queueInvestigationFor(
   userId: string,
   newsroomId: number,
   id: number,
-  _opts: { asTip?: boolean } = {},
+  opts: { asTip?: boolean; preview?: unknown } = {},
 ) {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -3928,6 +3928,12 @@ export async function queueInvestigationFor(
     from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+  // Rebuild from this newsroom's records; client text is only a freshness check.
+  const packet = await queuePacketFor(newsroomId, id);
+  if (!packet) return { ok: false as const, error: "Investigation not found" };
+  if (opts.preview !== undefined && JSON.stringify(opts.preview) !== JSON.stringify(packet))
+    return { ok: false as const, error: "The file packet changed. Open the preview again before sending it." };
+
   const gate = await sql<{ total: number; verified: number }>`
     select count(*)::int as total,
            count(*) filter (where verification_status = 'verified')::int as verified
@@ -4069,17 +4075,20 @@ export async function queueInvestigationFor(
     the model's: `topicFromText` answers with a key from the newsroom's own
     section list.
   */
-  const evidence = stripUngroundedNotes(
-    storableText(
-      `${handoff}\n\nFile summary: ${shorten(plain(inv[0].summary), Math.max(0, 4000 - handoff.length - 16))}`,
-    ),
-  );
+  const packetEvidence = packet.evidence.map(row => `${row.text}${row.source ? ` (${row.source})` : ""}`).join("\n");
+  const evidence = stripUngroundedNotes(storableText([
+    packetEvidence ? `Previewed evidence:\n${packetEvidence}` : "",
+    handoff,
+    `File summary: ${plain(inv[0].summary)}`,
+  ].filter(Boolean).join("\n\n"))).slice(0, 4000);
+  // Preserve the full approved packet even when the lead's readable excerpt is shortened.
+  const notes = JSON.stringify({ darkPacket: packet });
   const created = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen, notes_json)
     values (
       ${userId},
       ${newsroomId},
-      ${storableText(stripUngroundedNotes(inv[0].title)).slice(0, 240)},
+      ${storableText(packet.suggestedHeadline)},
       ${evidence},
       ${topic},
       'new',
@@ -4087,7 +4096,8 @@ export async function queueInvestigationFor(
       ${evidence},
       ${12},
       ${id},
-      ${topicUnchosen}
+      ${topicUnchosen},
+      ${notes}
     )
     returning id
   `;
@@ -4133,7 +4143,10 @@ export async function queueInvestigationFor(
 
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: unknown) => darkSignalInput.parse(input))
+   .validator((input: unknown) => ({
+    ...darkSignalInput.parse(input),
+    preview: (input as { preview?: unknown })?.preview,
+  }))
   .handler(async ({ context, data }) => {
     // SG1 / Option A: sending an investigation to the Queue is how a Dark Desk
     // finding becomes a spent draft, so it is refused until setup is done.
@@ -4141,6 +4154,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     if (notSetUp) return { ok: false as const, error: notSetUp };
     return queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
+      preview: data.preview,
     });
   });
 

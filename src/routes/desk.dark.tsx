@@ -541,13 +541,13 @@ function DarkPage() {
   });
 
   const toQueue = useMutation({
-    mutationFn: (id: number) => queueInvestigation({ data: { id } }),
-    onMutate: (id) => {
+    mutationFn: ({ id, preview }: { id: number; preview: InvestigationQueuePacket }) => queueInvestigation({ data: { id, preview } }),
+    onMutate: ({ id }) => {
       // Clear any stale error/confirmation from a previous attempt on this
       // file so a retry does not show two contradictory banners at once.
       setQueueError((prev) => (prev?.invId === id ? null : prev));
     },
-    onSuccess: (res, id) => {
+    onSuccess: (res, { id }) => {
       void qc.invalidateQueries({ queryKey: ["leads"] });
       if (res?.ok) {
         setQueueError(null);
@@ -557,7 +557,7 @@ function DarkPage() {
         setQueueError({ invId: id, message: res?.error ?? "Could not send to the queue." });
       }
     },
-    onError: (err, id) => {
+    onError: (err, { id }) => {
       setQueueError({
         invId: id,
         message: err instanceof Error ? err.message : "Could not send to the queue.",
@@ -1338,7 +1338,7 @@ function DarkPage() {
                 beginDigPhase();
                 advance.mutate(openId);
               }}
-              onQueue={() => toQueue.mutate(openId)}
+              onQueue={(preview) => toQueue.mutate({ id: openId, preview })}
               onClose={() => rememberOpen(null)}
               onPark={() => park.mutate(openId)}
               onPullBack={() => pullBack.mutate(openId)}
@@ -1633,7 +1633,7 @@ function InvestigationWorkspace({
   stopControl: { visible: boolean; label: string; disabled: boolean; line: string | null };
   onStopDig: () => void;
   onKeepDigging: () => void;
-  onQueue: () => void;
+  onQueue: (preview: InvestigationQueuePacket) => void;
   onClose: () => void;
   onCloseWithoutFinding: (note: string) => void;
   closePending: boolean;
@@ -2316,7 +2316,7 @@ function InvestigationWorkspace({
         primaryPendingLabel="Sending…"
         pending={queuePending}
         primaryDisabled={!queuePacketQuery.data || queuePending}
-        onPrimary={() => { setQueuePreviewOpen(false); onQueue(); }}
+        onPrimary={() => { if (queuePacketQuery.data) { setQueuePreviewOpen(false); onQueue(queuePacketQuery.data); } }}
         footNote="Publication remains an editorial decision."
       >
         {queuePacketQuery.isPending ? <p role="status">Preparing the file packet…</p> : null}
