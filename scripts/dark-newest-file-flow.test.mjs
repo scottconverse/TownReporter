@@ -1,7 +1,7 @@
 // guards: a newer investigation must not be stranded behind an older file
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { React, createRoot, h, file, Route } from "./dark-file-model-flow.harness.mjs";
+import { React, createRoot, h, window, file, Route } from "./dark-file-model-flow.harness.mjs";
 
 function fileDetail(row) {
   return {
@@ -43,4 +43,36 @@ test("the newest file opens and the empty desk hides its rail", async () => {
     await React.act(async () => emptyRoot.unmount());
     emptyContainer.remove();
   }
+});
+
+// guards: a slow or failed investigation read could leave the editor with a blank, misleading desk
+test("the file area explains loading and offers a safe retry after a failed list read", async () => {
+  const fixtures = globalThis.__darkFlow.fixtures;
+  fixtures.investigations = undefined;
+  fixtures.pending = { investigations: true };
+  fixtures.errors = {};
+  const loading = document.createElement("div"); document.body.append(loading);
+  const loadingRoot = createRoot(loading);
+  await React.act(async () => loadingRoot.render(h(Route.component)));
+  try {
+    assert.ok(loading.querySelector(".list-skeleton"));
+    assert.match(loading.textContent, /Loading the file…/);
+    assert.doesNotMatch(loading.textContent, /Open files\s*0/);
+  } finally { await React.act(async () => loadingRoot.unmount()); loading.remove(); }
+
+  fixtures.pending = {};
+  fixtures.errors = { investigations: new Error("Internal Server Error 503") };
+  const failed = document.createElement("div"); document.body.append(failed);
+  const failedRoot = createRoot(failed);
+  await React.act(async () => failedRoot.render(h(Route.component)));
+  try {
+    assert.match(failed.textContent, /Could not load Dark Desk/);
+    assert.match(failed.textContent, /The page could not be read/);
+    assert.ok([...failed.querySelectorAll("a")].some((link) => link.textContent === "Open Server health" && link.getAttribute("href") === "/desk/ops"));
+    const retry = [...failed.querySelectorAll("button")].find((button) => button.textContent === "Try again");
+    assert.ok(retry);
+    await React.act(async () => retry.dispatchEvent(new window.Event("click", { bubbles: true })));
+    assert.equal(globalThis.__darkFlow.calls.refetch, 1);
+    assert.doesNotMatch(failed.textContent, /\["investigations"\]|Internal Server Error/);
+  } finally { await React.act(async () => failedRoot.unmount()); failed.remove(); }
 });

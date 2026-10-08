@@ -3,7 +3,7 @@ const window = installDom();
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
 const h = React.createElement;
-const calls = { keep: [], draft: [] };
+const calls = { keep: [], draft: [], refetch: 0 };
 globalThis.__darkFlow = { calls };
 
 const stub = (source) => transpileToUrl(source, "dark-flow-stub.js", {});
@@ -12,7 +12,7 @@ const queryStub = stub(`
     const data = globalThis.__darkFlow.fixtures;
     const name = queryKey[0];
     const value = name === "investigation" ? data.details?.[queryKey[1]] ?? data.detail : data[name];
-    return { data: value, isPending: Boolean(data.pending?.[name]), isError: false, isRefetching: false, refetch: async () => {} };
+    return { data: value, isPending: Boolean(data.pending?.[name]), isError: Boolean(data.errors?.[name]), error: data.errors?.[name], isRefetching: false, refetch: async () => { globalThis.__darkFlow.calls.refetch++; } };
   }
   export function useMutation(options) {
     return { isPending: false, isError: false, mutate(value) { Promise.resolve(options.mutationFn(value)).then((result) => options.onSuccess?.(result, value), (error) => options.onError?.(error, value)); } };
@@ -30,7 +30,7 @@ const chromeStub = stub(`
   export function InkButton({ children, tone, small, pending, pendingLabel, ...props }) { return createElement("button", props, pending ? pendingLabel : children); }
   export function Busy() { return null; } export function Score() { return null; } export function SecHead() { return null; }
 `);
-const statesStub = stub(`import { createElement } from "react"; export function ListSkeleton() { return null; } export function Notice({ children }) { return createElement("div", null, children); } export function ScreenError() { return null; }`);
+const statesStub = stub(`import { createElement } from "react"; export function ListSkeleton({ rows }) { return createElement("div", { className: "list-skeleton" }, rows + " loading rows"); } export function Notice({ children }) { return createElement("div", null, children); } export function ScreenError({ message, onRetry, retrying }) { return createElement("div", { role: "alert" }, message, createElement("button", { onClick: onRetry }, retrying ? "Trying again…" : "Try again")); }`);
 const darkStub = stub(`
   export const continueInvestigation = async ({ data }) => { globalThis.__darkFlow.calls.keep.push(data); return { ok: true, pending: true, jobId: 9 }; };
   export const listInvestigations = async () => globalThis.__darkFlow.fixtures.investigations;

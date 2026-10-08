@@ -103,6 +103,21 @@ export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
 });
 
+function darkDeskReadFailureReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  if (/invalid byte sequence for encoding|empty body|unreadable|no readable text/i.test(raw)) {
+    return "The page had no readable text";
+  }
+  if (/\b(?:401|403)\b|blocked|refused/i.test(raw)) return "The site refused the request";
+  if (/\b5\d\d\b|server error|internal server error|sqlstate|database/i.test(raw)) {
+    return "The page could not be read";
+  }
+  if (/failed to fetch|network|timeout|econnrefused|econnreset|socket hang up/i.test(raw)) {
+    return "The server could not be reached";
+  }
+  return "The investigation list could not be read.";
+}
+
 function DarkPage() {
   const qc = useQueryClient();
   /*
@@ -810,6 +825,22 @@ function DarkPage() {
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
   const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
+  const investigationListFailed = investigations.isError && !investigations.data;
+  const detailReadFailed = openId != null && detail.isError && !detail.data;
+  const darkDeskReadError = investigationListFailed
+    ? investigations.error
+    : detailReadFailed
+      ? detail.error
+      : null;
+  const loadingFile = !noFiles && !darkDeskReadError && (
+    (investigations.isPending && !investigations.data) ||
+    (openId != null && detail.isPending && !detail.data) ||
+    (Boolean(investigations.data?.length) && openId == null)
+  );
+  const retryDarkDeskRead = () => {
+    if (investigationListFailed) void investigations.refetch();
+    else void detail.refetch();
+  };
 
   function chooseSignal(item: WorthSeed) {
     pendingSignalId.current = item.id;
@@ -942,15 +973,13 @@ function DarkPage() {
           <div className="astra-pile" hidden={!active.length && !investigations.isPending && !investigations.isError}>
             <div className="astra-pile-h">
               <span>Open files</span>
-              <span>{active.length}</span>
+              <span>{investigations.data ? active.length : ""}</span>
             </div>
             {investigations.isError && !investigations.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
                   message={
-                    investigations.error instanceof Error
-                      ? editorError(investigations.error.message) || "Could not load the desk."
-                      : "Could not load the desk."
+                    darkDeskReadFailureReason(investigations.error)
                   }
                   onRetry={() => void investigations.refetch()}
                   retrying={investigations.isRefetching}
@@ -1103,6 +1132,21 @@ function DarkPage() {
             </p>
           ) : null}
 
+          {darkDeskReadError ? (
+            <section className="astra-panel" role="alert" aria-labelledby="dark-desk-read-error">
+              <h2 id="dark-desk-read-error" className="astra-panel-h">Could not load Dark Desk</h2>
+              <p className="astra-note">{darkDeskReadFailureReason(darkDeskReadError)}</p>
+              <div className="astra-panel-acts">
+                <Link to="/desk/ops" className="inline-link">Open Server health</Link>
+                <InkButton tone="quiet" onClick={retryDarkDeskRead}>
+                  {investigations.isRefetching || detail.isRefetching ? "Trying again…" : "Try again"}
+                </InkButton>
+              </div>
+            </section>
+          ) : loadingFile ? (
+            <p className="astra-panel astra-note" role="status" aria-busy="true">Loading the file…</p>
+          ) : null}
+
           {/* The no-files state follows the state table and hides the rail. */}
           {noFiles ? (
             <section className="astra-panel astra-empty" aria-label="No investigations">
@@ -1135,7 +1179,7 @@ function DarkPage() {
             </section>
           ) : null}
 
-          {openId != null && !noFiles ? (
+          {openId != null && !noFiles && detail.data?.investigation.id === openId ? (
             <InvestigationWorkspace
               key={openId}
               openId={openId}
