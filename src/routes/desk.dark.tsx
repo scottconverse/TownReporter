@@ -1527,7 +1527,7 @@ function InvestigationWorkspace({
   ocrModelChoice: StoryModelChoice;
   ocrModelEffort: ModelEffort | null;
 }) {
-  const { formatListDateTime } = usePaperDateFormatters();
+  const { formatListDateTime, formatClockTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [frN, setFrN] = useState(6);
   const [followUpOpen, setFollowUpOpen] = useState(false);
@@ -2000,7 +2000,7 @@ function InvestigationWorkspace({
           ) : (
             activityRows.map((a) => (
               <div key={a.id} className="astra-log">
-                <span className="astra-log-t">{a.time}</span>
+                <time className="astra-log-t" dateTime={a.occurredAt}>{formatClockTime(a.occurredAt)}</time>
                 <span
                   className={
                     "astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")
@@ -2016,7 +2016,7 @@ function InvestigationWorkspace({
               <summary>Show all activity</summary>
               {activityAll.slice(0, -activityRows.length).map((a) => (
                 <div key={a.id} className="astra-log">
-                  <span className="astra-log-t">{a.time}</span>
+                  <time className="astra-log-t" dateTime={a.occurredAt}>{formatClockTime(a.occurredAt)}</time>
                   <span className={"astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")}>{a.text}</span>
                 </div>
               ))}
