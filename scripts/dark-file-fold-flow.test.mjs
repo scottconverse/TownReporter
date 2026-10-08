@@ -1,7 +1,7 @@
 // guards: long evidence could push Decide below the editor's first view
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { React, createRoot, h, window, detail, Route } from "./dark-file-model-flow.harness.mjs";
+import { React, createRoot, h, detail, Route } from "./dark-file-model-flow.harness.mjs";
 
 test("the open file keeps recent activity and long case entries compact", async () => {
   const longFinding = "The public record states that the agreement was amended after the hearing. ".repeat(5).trim();

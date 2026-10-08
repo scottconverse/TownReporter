@@ -1,7 +1,7 @@
 // guards: a file's chosen model could be silently replaced when the editor keeps investigating
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { React, createRoot, h, window, calls, file, detail, Route } from "./dark-file-model-flow.harness.mjs";
+import { React, createRoot, h, window, calls, detail, Route } from "./dark-file-model-flow.harness.mjs";
 
 test("the file model choice runs when the editor keeps investigating", async () => {
   calls.keep.length = 0;

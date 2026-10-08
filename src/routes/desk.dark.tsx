@@ -76,7 +76,7 @@ import { SearchTrailEntry } from "@/components/search-trail-entry";
 import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
-import { takeDarkSeed } from "@/lib/news/dark-seed";
+import { DARK_OPEN_KEY, takeDarkFilePrefill, takeDarkSeed } from "@/lib/news/dark-seed";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
@@ -101,8 +101,6 @@ import {
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
 });
-
-const OPEN_KEY = "townreporter.dark.openId";
 
 function DarkPage() {
   const qc = useQueryClient();
@@ -146,13 +144,13 @@ function DarkPage() {
   useEffect(() => {
     const timerRef = phaseTimer;
     try {
-      const raw = sessionStorage.getItem(OPEN_KEY);
+      const raw = sessionStorage.getItem(DARK_OPEN_KEY);
       const requested = raw ? Number(raw) : null;
       if (requested != null && Number.isInteger(requested) && requested > 0) {
         requestedOpenId.current = requested;
         setOpenId(requested);
       }
-      sessionStorage.removeItem(OPEN_KEY);
+      sessionStorage.removeItem(DARK_OPEN_KEY);
       // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
       // copy, so this holds the lead for the dialog and the next visit to the
       // desk opens its own empty one.
@@ -167,6 +165,12 @@ function DarkPage() {
       if (seed) {
         setSeedFromImport(seed);
         setStartOpen(true);
+      } else {
+        const prefill = takeDarkFilePrefill(sessionStorage);
+        if (prefill) {
+          setStartPrefill(prefill);
+          setStartOpen(true);
+        }
       }
     } catch {
       /* ignore */
@@ -203,7 +207,7 @@ function DarkPage() {
     setFileFocusRequest(null);
     setOpenId(id);
     try {
-      sessionStorage.removeItem(OPEN_KEY);
+      sessionStorage.removeItem(DARK_OPEN_KEY);
     } catch {
       /* ignore */
     }
@@ -1128,7 +1132,6 @@ function DarkPage() {
               openId={openId}
               onOpenFile={() => rememberOpen(openId)}
               detail={detail.data ?? undefined}
-              fileWaiting={Boolean(investigations.data?.find((row) => row.id === openId)?.waiting_follow_up || investigations.data?.find((row) => row.id === openId)?.waiting_watch)}
               canUndoDisposition={undoDisposition?.id === openId}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
@@ -1454,7 +1457,6 @@ function InvestigationWorkspace({
   openId,
   onOpenFile,
   detail,
-  fileWaiting,
   canUndoDisposition,
   pending,
   digging,
@@ -1492,7 +1494,6 @@ function InvestigationWorkspace({
   openId: number;
   onOpenFile: () => void;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
-  fileWaiting: boolean;
   canUndoDisposition: boolean;
   pending: boolean;
   digging: boolean;

@@ -60,6 +60,7 @@ import {
 } from "@/lib/news/queue-bulk";
 import { useEditorSections } from "@/lib/use-sections";
 import { parseUrlList } from "@/lib/paper";
+import { darkLeadPrefill } from "@/lib/news/dark-seed";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
 import { newsInTownPlaceholder } from "@/lib/paper-phrases";
@@ -112,15 +113,9 @@ function bulkSelectLabel(filter: QueueFilter): string {
  * Unit BN2, item 4: what a row's "Send to Dark Desk" already knows, handed to
  * `DarkFileDialog` so the editor does not retype it.
  *
- * The tip is a *starting point* -- the field's own placeholder is "Link,
- * document, post or what you heard" -- so it leads with the first source URL
- * the lead carries: that is the thing an investigation can actually fetch. A
- * lead filed by hand with no link falls back to this desk's own story path, so
- * the tip is never empty (`darkProblem` wants eight characters) and never
- * pretends to be a link it is not.
- *
- * The question is left blank on purpose: it is the one field only the editor
- * can answer, and it is what the drawing's dialog asks for first.
+ * The lead headline becomes the question and its first source becomes the
+ * starting point. When no source exists the starting point stays empty so the
+ * editor can supply one; a story-screen path is not a public source.
  */
 /**
  * Is this lead one the Queue's row presses refuse?
@@ -135,9 +130,9 @@ function closedOrHeld(lead: LeadRow): boolean {
   return lead.status === "held" || lead.status === "killed" || lead.status === "published";
 }
 
-function darkPrefill(lead: LeadRow): { tip: string } {
+function darkPrefill(lead: LeadRow) {
   const source = parseUrlList(lead.source_urls)[0];
-  return { tip: `${lead.headline}\n${source ?? `/desk/story/${lead.id}`}` };
+  return darkLeadPrefill(lead.headline, source ?? null);
 }
 
 function QueuePage() {

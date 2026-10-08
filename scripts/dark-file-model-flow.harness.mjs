@@ -98,7 +98,16 @@ const imports = {
   "@/lib/news/dark-fact-lines": stub(`export const dedupeFactLines = () => []; export const factLinesDropped = () => 0;`),
   "@/lib/news/html-text": stub(`export const captureBatchStats = () => ({ total: 0, blockedRatio: 0 }); export const readableCapture = () => ""; export const captureRefusalLabel = () => "";`),
   "@/lib/news/extraction-label": stub(`export const describeExtractionMethod = () => "";`),
-  "@/lib/news/dark-seed": stub(`export const takeDarkSeed = () => null;`),
+  "@/lib/news/dark-seed": stub(`
+    export const DARK_OPEN_KEY = "townreporter.dark.openId";
+    export const takeDarkSeed = () => null;
+    export function takeDarkFilePrefill(storage) {
+      const raw = storage.getItem("townreporter.dark.prefill");
+      if (raw == null) return null;
+      storage.removeItem("townreporter.dark.prefill");
+      return JSON.parse(raw);
+    }
+  `),
   "@/components/provider-signin-button": nullComponents,
   "@/lib/news/preflight": stub(`export const looksLikeProviderAuthFailure = () => false;`),
   "@/components/dialogs/editor-dialogs": nullComponents,

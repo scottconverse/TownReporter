@@ -373,6 +373,10 @@ const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx",
   "@/lib/news/desk-copy": deskCopyUrl,
   "@/components/dialog": dialogUrl,
   "@/components/model-picker": modelPickerStub,
+  "@/components/first-run-picker-default": stub(
+    "export const useFirstRunPickerDefault = () => 'auto';",
+  ),
+  "@/lib/news/provider-registry": stub("export const defaultModelEffort = () => null;"),
   /* UI1a3: the Hold dialog hands the foot its pending word through this module,
      so the real one is loaded rather than stubbed. */
   "@/lib/news/dialog-press": await load("src/lib/news/dialog-press.ts"),
