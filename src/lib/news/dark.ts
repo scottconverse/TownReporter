@@ -2111,6 +2111,85 @@ async function runVerificationStage(
     return out.summary;
 }
 
+export async function performChallengeWork(
+  job: DeskJob,
+  deps: { verify?: typeof verifyRunSignals; readPlace?: typeof readDarkPlace } = {},
+) {
+  await ensureDarkSchema();
+  await throwIfJobCancelled(job.id);
+  const sql = await getSql();
+  const investigationId = job.subject_id;
+  const runs = await sql<{
+    id: number;
+    model_choice: string | null;
+    research_preferences_json: string | null;
+  }>`
+    select id, model_choice, research_preferences_json from dark_runs
+    where newsroom_id = ${job.newsroom_id} and investigation_id = ${investigationId}
+    order by started_at desc, id desc limit 1
+  `;
+  const run = runs[0] ?? null;
+  const choice = effectiveStoryModelChoice(run?.model_choice ?? job.model_choice);
+  const overrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(job.newsroom_id, "dark").catch(() => ({})),
+  );
+  let preferences: ResearchSnapshot | undefined;
+  try {
+    const snapshot = JSON.parse(run?.research_preferences_json ?? "{}") as {
+      preferences?: ResearchSnapshot;
+    };
+    preferences = snapshot.preferences;
+  } catch {
+    preferences = undefined;
+  }
+  const report = progressReporterFor(job);
+  await report("Challenging the case", pctFor(0, 1));
+  let result: Awaited<ReturnType<typeof verifyRunSignals>> = {
+    checked: 0,
+    eligible: 0,
+    deferred: 0,
+    failed: 0,
+    verified: 0,
+    unverified: 0,
+    searches: [],
+    summary: "No prior research round to challenge.",
+  };
+  if (run) {
+    const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
+    const verify = deps.verify ?? verifyRunSignals;
+    result = await waitForModel({
+      jobId: job.id,
+      label: () => modelChoiceLabel(choice),
+      run: () => verify({
+        userId: job.user_id,
+        newsroomId: job.newsroom_id,
+        runId: run.id,
+        investigationId,
+        place: place.place,
+        officialDomains: place.official,
+        pressDomains: place.press,
+        choice,
+        overrides,
+        preferences,
+        reasoningEffort: savedJobEffort(job),
+      }),
+    });
+  }
+  await throwIfJobCancelled(job.id);
+  await sql`
+    insert into investigation_challenges (
+      newsroom_id, investigation_id, job_id, run_id, summary, result_json
+    ) values (
+      ${job.newsroom_id}, ${investigationId}, ${job.id}, ${run?.id ?? null},
+      ${result.summary.slice(0, 4000)}, ${JSON.stringify(result)}
+    )
+    on conflict (newsroom_id, job_id) do update set
+      run_id = excluded.run_id, summary = excluded.summary,
+      result_json = excluded.result_json
+  `;
+}
+
 function asDarkError(err: unknown): string {
   if (err && typeof err === "object" && "error" in err)
     return String((err as { error: unknown }).error);

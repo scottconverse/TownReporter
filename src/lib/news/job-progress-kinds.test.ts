@@ -49,7 +49,7 @@ describe("reporting result navigation", () => {
 
   `job-progress.test.ts` proves the model on ONE kind (`draft`) because that was
   the only kind with a stage list when it was written. This file is the same
-  proof stated for all eleven, plus the two things the owner's complaint was
+  proof stated for every kind, plus the two things the owner's complaint was
   actually about:
 
     - the bar moves  ->  a counted step's percentage climbs and never falls
@@ -97,7 +97,7 @@ describe("the progress model, for every kind", () => {
           the list is written at claim and `stageIndexFor` reads it off the row
           the worker was handed. A worker given the pre-claim row would resolve
           every arrival against null and no chip would ever light -- which is
-          exactly what happened to eight of these eleven kinds before FB1.
+          exactly what happened to eight of the earlier kinds before FB1.
         */
         assert.deepEqual(jobStages(claimed), [...stages], `${kind}: the worker holds the list`);
         const report = progressReporterFor(claimed, { minWriteMs: 0 });
@@ -253,11 +253,11 @@ describe("the progress model, for every kind", () => {
 });
 
 describe("one reader for every kind", () => {
-  it("returns a card for all eleven kinds, not only the story ones", async () => {
+  it("returns a card for every kind, not only the story ones", async () => {
     /*
       THE REPORT'S R2, AS A TEST. `listStoryJobProgress` filtered
       `kind in ('draft','reconcile')` and the shell's own reader filtered
-      `kind='draft'`, so six of these eleven kinds had no card surface anywhere
+      `kind='draft'`, so six of the earlier kinds had no card surface anywhere
       in the product. This enqueues one job of every kind and asks the reader
       for them by name.
     */
