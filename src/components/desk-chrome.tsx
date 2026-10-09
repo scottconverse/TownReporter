@@ -1,3 +1,4 @@
+import { NativeDialog, DialogScrim } from "@/components/dialog";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -663,7 +664,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
     )
     .slice(0, 30);
   return (
-    <dialog
+    <NativeDialog
       ref={dialog}
       className="astra-dialog"
       onClose={onClose}
@@ -752,7 +753,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
             !pages.length && <p>No matches. Try a name, topic or part of a headline.</p>}
         </nav>
       </div>
-    </dialog>
+    </NativeDialog>
   );
 }
 

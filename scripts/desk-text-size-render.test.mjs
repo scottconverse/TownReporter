@@ -98,6 +98,7 @@ const claimStub = inlineModule(`
 `);
 
 const dialogStub = inlineModule(`
+  export function NativeDialog(props) { return createElement("dialog", props); } export function DialogScrim(props) { return createElement("button", props); }
   import { createElement } from "react";
   export function Dialog({ open, title, children, primaryLabel, cancelLabel, onPrimary, onClose }) {
     if (!open) return null;

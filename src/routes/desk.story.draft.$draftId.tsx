@@ -1,3 +1,4 @@
+import { NativeDialog } from "@/components/dialog";
 import { evidenceNeedsReview, type EvidenceDecision } from "@/lib/news/draft-evidence";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -588,7 +589,7 @@ function EditorialPage() {
         </div>
       ) : null}
 
-      <dialog
+      <NativeDialog
         ref={preview}
         className="astra-dialog astra-preview"
         aria-labelledby="editorial-preview-title"
@@ -607,7 +608,7 @@ function EditorialPage() {
             <StoryBody body={body} />
           </div>
         </article>
-      </dialog>
+      </NativeDialog>
     </DeskShell>
   );
 }

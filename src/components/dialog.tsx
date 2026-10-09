@@ -3,6 +3,58 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import { InkButton } from "./desk-chrome";
 
+// A scrollbar targets its scroll container, and a drag can synthesize a click
+// on a common ancestor. Neither means the editor clicked the backdrop.
+function useScrimGesture(close: () => void, native = false) {
+  const press = React.useRef<number | null>(null);
+  const isScrim = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget || event.button !== 0 || event.ctrlKey) return false;
+    const { clientX: x, clientY: y, currentTarget: el } = event;
+    const viewport = el.ownerDocument.documentElement;
+    if (x < 0 || y < 0 || x >= viewport.clientWidth || y >= viewport.clientHeight) return false;
+    const rect = el.getBoundingClientRect();
+    if (native) return x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom;
+    // clientWidth/Height exclude the scrollbar gutter (including RTL gutters).
+    const left = rect.left + el.clientLeft, top = rect.top + el.clientTop;
+    return x >= left && x < left + el.clientWidth && y >= top && y < top + el.clientHeight;
+  };
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      press.current = isScrim(event) ? event.pointerId : null;
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+      const dismiss = press.current === event.pointerId && isScrim(event);
+      press.current = null;
+      // Touch implicitly captures to the down target: check the actual release.
+      if (dismiss && (native || elAtPoint(event) === event.currentTarget)) close();
+    },
+    onPointerCancel: () => { press.current = null; },
+  };
+}
+
+function elAtPoint(event: React.PointerEvent<HTMLElement>) {
+  return event.currentTarget.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+}
+
+/** The navigation scrim follows the same press/release rule as every modal. */
+export function DialogScrim({ onClose, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { onClose: () => void }) {
+  const gesture = useScrimGesture(onClose);
+  return <button {...props} {...gesture} onClick={event => { if (event.detail === 0) onClose(); }} />;
+}
+
+/** Retains native showModal, focus trapping and Escape for search and previews. */
+export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTMLAttributes<HTMLDialogElement>>(
+  function NativeDialog(props, ref) {
+    const gesture = useScrimGesture(() => local.current?.close(), true);
+    const local = React.useRef<HTMLDialogElement | null>(null);
+    return <dialog {...props} {...gesture} ref={element => {
+      local.current = element;
+      if (typeof ref === "function") return ref(element);
+      if (ref) ref.current = element;
+    }} />;
+  },
+);
+
 /**
  * The one dialog, and the one card that goes inside it.
  *
@@ -139,6 +191,7 @@ export function Dialog({
   //                    replaced) and its `preventDefault` is what stops the
   //                    FocusScope from falling back to `document.body`.
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const scrimGesture = useScrimGesture(onClose);
 
   return (
     <DialogPrimitive.Root
@@ -169,9 +222,10 @@ export function Dialog({
           {/* The scrim: one scrim, painted here, and the click-outside target
               Radix uses to dismiss. The wrapper is only the scroll container,
               so a tall dialog scrolls instead of overflowing the viewport. */}
-          <DialogPrimitive.Overlay className="astra-modal-scrim" />
+          <DialogPrimitive.Overlay className="astra-modal-scrim" {...scrimGesture} />
           <DialogPrimitive.Content
             className="astra-modal"
+            onPointerDownOutside={event => event.preventDefault()}
             onOpenAutoFocus={() => {
               const opener = document.activeElement;
               returnFocusRef.current =

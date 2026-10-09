@@ -287,7 +287,7 @@ const DESK_CHROME_IMPORTS = {
     desk-chrome.tsx cannot load without the specifier resolving.
   */
   "@/components/dialog": inlineModule(
-    "export function Dialog() { return null; } export function ChoiceCard() { return null; }",
+    "export function Dialog() { return null; } export function ChoiceCard() { return null; } export function NativeDialog() { return null; } export function DialogScrim() { return null; }",
   ),
   /*
     Redesign BN item 1 put the drawn New-story dialog in the shell header,

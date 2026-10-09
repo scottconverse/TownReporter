@@ -1,3 +1,4 @@
+import { NativeDialog } from "@/components/dialog";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
@@ -170,7 +171,7 @@ export function ReaderDialog({
     };
   }, []);
   return (
-    <dialog ref={ref} className="reader-dialog" onCancel={close}>
+    <NativeDialog ref={ref} className="reader-dialog" onCancel={close}>
       <div className="dialoghead">
         <h2>{title}</h2>
         <button type="button" className="iconbtn" aria-label="Close dialog" onClick={close}>
@@ -178,7 +179,7 @@ export function ReaderDialog({
         </button>
       </div>
       {children}
-    </dialog>
+    </NativeDialog>
   );
 }
 export function ReadingButton({ label = false }: { label?: boolean }) {
