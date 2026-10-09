@@ -32,13 +32,17 @@ export async function deskOverlayBrowser(fixture) {
       if(id==='overlay-fixture'||id in stubs)return '\0'+id;
       if(id.startsWith('@/')){const path=resolve(import.meta.dirname,'../src',id.slice(2));return extname(id)?path:['.tsx','.ts'].map(ext=>path+ext).find(existsSync);}
     },
-    load(id){if(id==='\0overlay-fixture')return `import React from 'react';import {createRoot} from 'react-dom/client';import {DeskMoreMenu,DeskShell,InkButton} from './src/components/desk-chrome.tsx';import {ModelPicker} from './src/components/model-picker.tsx';import {Dialog,NativeDialog,DialogScrim} from './src/components/dialog.tsx';import {UnsavedChangesGuard} from './src/components/unsaved-changes-guard.tsx';const root=createRoot(document.getElementById('root'));${fixture}`;if(id.slice(1) in stubs)return stubs[id.slice(1)];},
+    async load(id){
+      const path=id.replaceAll('\\','/');
+      if(process.env.DIALOG_SOURCE_OVERRIDE && path.includes('/src/')){const before=resolve(process.env.DIALOG_SOURCE_OVERRIDE,'src',path.split('/src/')[1]);if(existsSync(before))return readFile(before,'utf8');}
+      if(id==='\0overlay-fixture')return `import React from 'react';import {createRoot} from 'react-dom/client';import {DeskMoreMenu,DeskShell,InkButton} from './src/components/desk-chrome.tsx';import {ModelPicker} from './src/components/model-picker.tsx';import {Dialog,NativeDialog,DialogScrim} from './src/components/dialog.tsx';import {UnsavedChangesGuard} from './src/components/unsaved-changes-guard.tsx';const root=createRoot(document.getElementById('root'));${fixture}`;if(id.slice(1) in stubs)return stubs[id.slice(1)];
+    },
   }]});
   const {output}=await bundle.generate({format:'iife'});await bundle.close();
   const browser=await chromium.launch({ignoreDefaultArgs:['--hide-scrollbars']});const page=await browser.newPage();
   await page.route('**/*',route=>route.abort());
   await page.setContent('<html><body style="margin:0"><div id="root"></div></body></html>');
-  for(const file of ['styles.css','desk-astra.css','reader-astra.css'])await page.addStyleTag({content:await readFile(new URL('../src/'+file,import.meta.url),'utf8')});
+  for(const file of ['styles.css','desk-astra.css','reader-astra.css']){const before=process.env.DIALOG_SOURCE_OVERRIDE&&resolve(process.env.DIALOG_SOURCE_OVERRIDE,'src',file);await page.addStyleTag({content:await readFile(before&&existsSync(before)?before:new URL('../src/'+file,import.meta.url),'utf8')});}
   await page.addScriptTag({content:output[0].code});return {browser,page};
 }
 
