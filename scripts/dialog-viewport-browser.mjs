@@ -38,6 +38,7 @@ test("tall dialogs keep their header and actions visible while only the body scr
             const rect=await body.boundingBox();
             await page.mouse.move(rect.x+rect.width-7,rect.y+Math.min(14,rect.height/4)); await page.mouse.down();
             await page.mouse.move(rect.x+rect.width-7,rect.y+rect.height-26,{steps:5}); await page.mouse.up();
+            await page.waitForFunction(()=>document.querySelector('.astra-modal-body,.astra-dialog-body,.reader-dialog-body').scrollTop>0, null, {timeout:3000});
             assert.ok(await body.evaluate(el=>el.scrollTop)>0,'dragging the body scrollbar must scroll: '+JSON.stringify({kind,metrics:await body.evaluate(el=>({height:el.clientHeight,scrollHeight:el.scrollHeight,gutter:el.offsetWidth-el.clientWidth,scrollTop:el.scrollTop}))}));
             await body.evaluate(el=>el.scrollTop=0); await body.focus();
             await page.keyboard.press('ArrowDown');
