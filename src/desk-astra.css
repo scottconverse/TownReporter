@@ -8014,6 +8014,17 @@
 }
 
 /* Sign-in follows the paper's current palette without changing its fields. */
+:root:is([data-appearance="reader-dark"], [data-appearance="desk-dark"]) .r2-login {
+  color-scheme: dark;
+  --color-paper: #1b1916;
+  --color-paper-2: #27231f;
+  --color-ink: #e8e6e1;
+  --color-ink-2: #bdbab3;
+  --color-muted: #bdbab3;
+  --color-rule: #bdbab3;
+  --color-rust: #e8e6e1;
+  --color-danger: #f0998c;
+}
 .r2-login { --fg2: var(--color-ink-2); padding: 0 24px 48px; font-family: var(--font-serif); }
 .r2-login-masthead { max-width: 1100px; margin: 0 auto; padding: 24px 0; border-bottom: 3px solid var(--color-ink); display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
 .r2-login-brand { font-family: var(--font-display); font-weight: 700; font-size: clamp(24px, 4vw, 36px); text-decoration: underline; }
