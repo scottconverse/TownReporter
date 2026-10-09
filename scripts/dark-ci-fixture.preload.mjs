@@ -18,11 +18,14 @@ const timer = setInterval(async () => {
       await tx.query("insert into dark_runs (user_id, newsroom_id, investigation_id, finished_at, summary) select $1,$2,$3,now(),'The saved case file remains ready for the editor' from generate_series(1,30)", [user, newsroom, id]);
       for (let i = 0; i < 363; i++) {
         const url = `https://example.test/public-record/${i}`;
-        const { rows: captures } = await tx.query("insert into capture_events (user_id, newsroom_id, investigation_id, source_url, fetch_outcome, http_status) values ($1,$2,$3,$4,$5,$6) returning id", [user, newsroom, id, url, i < 262 ? "fetched" : "failed", i < 262 ? 200 : 403]);
-        if (i >= 262) continue;
+        // Retain 262 records overall, with the real file's 43 blocked pages
+        // among its latest 60 attempts so its guidance also consumes space.
+        const saved = i < 245 || i >= 346;
+        const { rows: captures } = await tx.query("insert into capture_events (user_id, newsroom_id, investigation_id, source_url, fetch_outcome, http_status) values ($1,$2,$3,$4,$5,$6) returning id", [user, newsroom, id, url, saved ? "fetched" : "failed", saved ? 200 : 403]);
         const capture = captures[0].id;
-        const text = "The construction contract was discussed by the Board of Trustees after the public hearing. ".repeat(6);
-        await tx.query("insert into artifacts (user_id, newsroom_id, investigation_id, url, title, content_hash, full_text, classification, fetch_status, capture_event_id) values ($1,$2,$3,$4,$5,$6,$7,'captured',200,$8)", [user, newsroom, id, url, "Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees public hearing", String(i), text, capture]);
+        const text = saved ? "The construction contract was discussed by the Board of Trustees after the public hearing. ".repeat(6) : "Access denied";
+        await tx.query("insert into artifacts (user_id, newsroom_id, investigation_id, url, title, content_hash, full_text, classification, fetch_status, capture_event_id) values ($1,$2,$3,$4,$5,$6,$7,'captured',$8,$9)", [user, newsroom, id, url, "Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees public hearing", String(i), text, saved ? 200 : 403, capture]);
+        if (!saved) continue;
         await tx.query("insert into claims (user_id, newsroom_id, investigation_id, body, kind, confidence, capture_event_id) values ($1,$2,$3,$4,'FINDING',0.9,$5)", [user, newsroom, id, text, capture]);
       }
     });

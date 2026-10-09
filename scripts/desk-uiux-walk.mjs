@@ -954,10 +954,11 @@ async function captureSurface(page, scenario, surface) {
     await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
     if (scenario.viewport.width === 1440 && process.argv.includes("--local")) {
       const top = await page.locator(".decide").evaluate((node) => node.getBoundingClientRect().top + scrollY);
-      console.log(`Seeded large file Decide top (${scenario.size}): ${top.toFixed(2)} px`);
-      if (scenario.size === "normal" && top >= 1000) throw new Error(`Large file hides Decide at ${top.toFixed(2)} px`);
+      const bottom = await page.locator('[aria-label="File decisions"] button').first().evaluate((node) => node.getBoundingClientRect().bottom + scrollY);
+      console.log(`Seeded large file Decide (${scenario.size}): top ${top.toFixed(2)} px; first action row bottom ${bottom.toFixed(2)} px`);
+      if (bottom >= 1100 || (scenario.size === "large" && top >= 1000)) throw new Error(`Large file hides Decide: top ${top.toFixed(2)}, action bottom ${bottom.toFixed(2)} px`);
       report.darkDecideMeasurements ??= [];
-      report.darkDecideMeasurements.push({ theme: scenario.theme, size: scenario.size, top, findings: 262, captureRecords: 363, activityLines: await page.locator(".astra-log").count() });
+      report.darkDecideMeasurements.push({ theme: scenario.theme, size: scenario.size, top, bottom, findings: 262, captureRecords: 363, activityLines: await page.locator(".astra-log").count() });
     }
   }
   if (surface.name === "Queue") {

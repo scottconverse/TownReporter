@@ -9,7 +9,7 @@ export async function startLocalWalkServer(base, artifactDir) {
   if (url.hostname !== "127.0.0.1" || ["3000", "3100", "3400", "5433"].includes(url.port)) throw new Error("Local CI walk requires an allowed temporary loopback port");
   mkdirSync(artifactDir, { recursive: true });
   process.env.TOWNREPORTER_DATA_ROOT = resolve(artifactDir, "disposable-data");
-  const env = { ...safeTestEnvironment(), UIWALK_LOCAL_FIXTURE: "1", PORT: url.port, HOST: "127.0.0.1", BETTER_AUTH_URL: base, BETTER_AUTH_SECRET: "local-ci-walk-disposable-auth-only", TOWNREPORTER_DATA_ROOT: resolve(artifactDir, "disposable-data"), TOWNREPORTER_CODEX: "0", TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_GEMINI: "0", TOWNREPORTER_TEST_ALLOW_REAL_MODELS: "" };
+  const env = { ...safeTestEnvironment(), UIWALK_LOCAL_FIXTURE: "1", PORT: url.port, HOST: "127.0.0.1", BETTER_AUTH_URL: base, BETTER_AUTH_SECRET: "local-ci-walk-disposable-auth-only", TOWNREPORTER_DATA_ROOT: resolve(artifactDir, "disposable-data"), TOWNREPORTER_CODEX: "1", TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_GEMINI: "0", TOWNREPORTER_TEST_ALLOW_REAL_MODELS: "" };
   for (const key of Object.keys(env)) if (/(?:API_KEY|ACCESS_TOKEN|LLM_BASE_URL|LLM_MODEL|DATABASE_URL)/.test(key)) env[key] = "";
   const log = createWriteStream(resolve(artifactDir, "local-server.log"));
   const child = spawn(process.execPath, ["--import", new URL("../src/lib/test-support/model-seal.ts", import.meta.url).href, "--import", new URL("./dark-ci-fixture.preload.mjs", import.meta.url).href, ".output/server/index.mjs"], { env, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });

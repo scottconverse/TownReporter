@@ -7001,7 +7001,7 @@
 /* Evidence grows independently of the editor's decision controls. Each
    column remains readable, including expanded saved prose, in its own box. */
 .desk-ltr.astra[data-desk-page="dark"] .astra-pair > div {
-  max-height: 320px;
+  max-height: 120px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   min-width: 0;

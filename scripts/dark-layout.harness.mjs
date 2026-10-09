@@ -13,7 +13,7 @@ export async function fileScreen({ width = 1440, large = false, storedCopy = fal
   globalThis.__darkFlow.fixtures["investigation-activity"] = Array.from({ length: 363 }, (_, i) => ({ id: String(i), occurredAt: "2026-10-08T12:00:00Z", tone: "plain", text: "Opened Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing, captured" }));
   if (storedCopy) { detail.claims[0].body = "An artifact records $1,200 after two hops. ".repeat(8); globalThis.__darkFlow.fixtures["investigation-activity"].forEach((a) => a.text = "Saved artifacts after 3 hops for $1,200"); }
   globalThis.__darkFlow.fixtures.investigations[0].status = aside ? "closed" : "open";
-  globalThis.__darkFlow.fixtures.captureStats = blocked ? { total: 10, blocked: 9, empty: 0, ok: 1, blockedRatio: 0.9, dominantReason: "blocked" } : null;
+  globalThis.__darkFlow.fixtures.captureStats = blocked ? { total: 60, blocked: 43, empty: 0, ok: 17, blockedRatio: 43 / 60, dominantReason: "blocked" } : null;
   const node = document.createElement("div"); document.body.append(node);
   const root = createRoot(node);
   await React.act(async () => root.render(h(Route.component)));
