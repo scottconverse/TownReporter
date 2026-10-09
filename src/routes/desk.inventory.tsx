@@ -57,7 +57,7 @@ function InventoryPage() {
         <span>{counts?.neverChecked ?? 0} never checked</span>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse text-sm">
+        <table className="source-inventory w-full border-collapse text-sm">
           <thead>
             <tr className="border-b border-ink text-left">
               <th className="p-2">Source</th>
@@ -71,7 +71,7 @@ function InventoryPage() {
           <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="border-b border-rule align-top">
-                <td className="p-2">
+                <td className="p-2" data-label="Source">
                   <a
                     href={row.url}
                     target="_blank"
@@ -82,14 +82,14 @@ function InventoryPage() {
                   </a>
                   <div className="text-sm text-ink-3">{row.url}</div>
                 </td>
-                <td className="p-2">{row.purpose}</td>
-                <td className="p-2">{row.observation}</td>
-                <td className="p-2">
+                <td className="p-2" data-label="Purpose">{row.purpose}</td>
+                <td className="p-2" data-label="Last observation">{row.observation}</td>
+                <td className="p-2" data-label="Review">
                   {row.reviewStatus}
                   {row.duplicateOf ? ` (repeats ${row.duplicateOf})` : ""}
                 </td>
-                <td className="p-2">{row.lastReadAt ? row.lastReadAt.slice(0, 10) : "never"}</td>
-                <td className="p-2 text-sm text-ink-3">{row.unverified}</td>
+                <td className="p-2" data-label="Last read">{row.lastReadAt ? row.lastReadAt.slice(0, 10) : "never"}</td>
+                <td className="p-2 text-sm text-ink-3" data-label="Still unverified">{row.unverified}</td>
               </tr>
             ))}
           </tbody>

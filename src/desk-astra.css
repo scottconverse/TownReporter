@@ -8574,3 +8574,11 @@
 .desk-ltr.astra .astra-pair .of-block > .side-label { margin: 0 0 2px; }
 .desk-ltr.astra .astra-pair .of-block > .side-item { margin: 0; }
 .desk-ltr.astra .astra-pair .of-block > .of-trail { margin-top: 0; }
+
+@media (max-width: 600px) {
+  .source-inventory, .source-inventory tbody, .source-inventory tr, .source-inventory td { display: block; width: 100%; box-sizing: border-box; }
+  .source-inventory thead { display: none; }
+  .source-inventory tr { padding-block: 12px; }
+  .source-inventory td { overflow-wrap: anywhere; }
+  .source-inventory td::before { content: attr(data-label); display: block; font-weight: 700; color: var(--fg2); }
+}
