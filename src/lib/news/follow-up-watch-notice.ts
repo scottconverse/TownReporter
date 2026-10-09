@@ -75,8 +75,9 @@ function canonical(raw: string): string | null {
 function parseTargets(raw: string | null): string[] {
   if (!raw) return [];
   try {
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    const parsed = JSON.parse(raw);
+    const targets: unknown = Array.isArray(parsed) ? parsed : parsed?.targets;
+    return Array.isArray(targets) ? targets.filter((item): item is string => typeof item === "string") : [];
   } catch {
     return [];
   }

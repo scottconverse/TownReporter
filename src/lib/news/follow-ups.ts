@@ -1,4 +1,5 @@
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
+import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { parseNotes, packNotes } from "./notes.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -317,7 +318,7 @@ const MAX_TARGETS = 8;
  * silently dead follow-up.
  */
 type NormalizedAiFollowUp =
-  | { ok: true; what: string; targets: string[]; modelChoice: string }
+  | { ok: true; what: string; targets: string[]; modelChoice: string; effort: ModelEffort | null }
   | { ok: false; error: string };
 
 /**
@@ -345,7 +346,7 @@ function normalizeAiFollowUp(input: CreateAiFollowUpInput): NormalizedAiFollowUp
     return { ok: false as const, error: "Add at least one link to check." };
   }
   const modelChoice = (input.modelChoice ?? "auto").trim().slice(0, 120) || "auto";
-  return { ok: true as const, what, targets, modelChoice };
+  return { ok: true as const, what, targets, modelChoice, effort: input.modelEffort == null ? null : modelEffort(modelChoice, input.modelEffort) };
 }
 
 export async function performCreateAiFollowUp(
@@ -355,7 +356,7 @@ export async function performCreateAiFollowUp(
   await ensureFollowUpsSchema();
   const checked = normalizeAiFollowUp(input);
   if (!checked.ok) return checked;
-  const { what, targets, modelChoice } = checked;
+  const { what, targets, modelChoice, effort } = checked;
   const sql = await getSql();
   const investigationId = input.investigationId ?? null;
   if (investigationId != null) {
@@ -374,7 +375,7 @@ export async function performCreateAiFollowUp(
     values (
       ${context.userId}, ${owned(context)}, ${input.leadId ?? null}, ${input.articleId ?? null}, ${investigationId},
       ${AGENT_METHOD_LABELS[input.agentKind]}, ${what}, 'active',
-      ${input.agentKind}, ${JSON.stringify(targets)}, ${input.schedule}, ${modelChoice},
+      ${input.agentKind}, ${JSON.stringify(effort == null ? targets : { targets, modelEffort: effort })}, ${input.schedule}, ${modelChoice},
       'waiting', ${nextRunAt(input.schedule)?.toISOString() ?? null}
     )
     returning id
@@ -419,7 +420,7 @@ export async function performUpdateAiFollowUp(
   await ensureFollowUpsSchema();
   const checked = normalizeAiFollowUp(input);
   if (!checked.ok) return checked;
-  const { what, targets, modelChoice } = checked;
+  const { what, targets, modelChoice, effort } = checked;
   const sql = await getSql();
   const next = nextRunAt(input.schedule)?.toISOString() ?? null;
   const [before] = await sql<{ lead_id: number | null; last_state: FollowUpState | null; finding_json: string | null }>`
@@ -428,7 +429,7 @@ export async function performUpdateAiFollowUp(
   `;
   const rows = await sql`
     update follow_ups
-    set what = ${what}, agent_kind = ${input.agentKind}, targets_json = ${JSON.stringify(targets)},
+    set what = ${what}, agent_kind = ${input.agentKind}, targets_json = ${JSON.stringify(effort == null ? targets : { targets, modelEffort: effort })},
         schedule = ${input.schedule}, model_choice = ${modelChoice},
         lead_id = coalesce(${input.leadId ?? null}, lead_id),
         article_id = coalesce(${input.articleId ?? null}, article_id),

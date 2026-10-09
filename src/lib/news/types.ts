@@ -290,7 +290,7 @@ export type FollowUpRow = {
   created_at: string;
   /** null on a manual row; recheck | search | agenda on an agent (0101). */
   agent_kind: FollowUpAgentKind | null;
-  /** JSON array of URL strings -- see followUpTargets() in ./follow-ups.ts. */
+  /** Legacy URL array or { targets, modelEffort }; read through followUpTargets(). */
   targets_json: string;
   /** 2h | 6h | 12h | daily | weekly | posting-days, or '' on a manual row. */
   schedule: string;

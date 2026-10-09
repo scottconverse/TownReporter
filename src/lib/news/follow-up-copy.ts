@@ -1,4 +1,5 @@
 import type { FollowUpAgentKind, FollowUpRow, FollowUpState } from "./types.ts";
+import type { ModelEffort } from "./provider-registry.ts";
 
 /**
  * The follow-up vocabulary, in a module a browser can load.
@@ -183,16 +184,26 @@ export function packFinding(finding: Partial<FollowUpFinding> | null | undefined
   return JSON.stringify({ ...EMPTY_FINDING, ...(finding ?? {}) });
 }
 
-/** `targets_json` as the array of URLs it is. Tolerant for the same reason. */
+/** URL list from a legacy array or the saved follow-up configuration. */
 export function followUpTargets(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+    const parsed = JSON.parse(raw);
+    const targets: unknown = Array.isArray(parsed) ? parsed : parsed?.targets;
+    if (!Array.isArray(targets)) return [];
+    return targets.filter((item): item is string => typeof item === "string" && item.length > 0);
   } catch {
     return [];
   }
+}
+
+/** Legacy target arrays have no effort; new configurations keep both together. */
+export function followUpModelEffort(raw: string | null | undefined): ModelEffort | null {
+  try {
+    const value: unknown = JSON.parse(raw || "[]")?.modelEffort;
+    const efforts: readonly ModelEffort[] = ["none", "low", "medium", "high", "xhigh", "max"];
+    return typeof value === "string" && efforts.includes(value as ModelEffort) ? value as ModelEffort : null;
+  } catch { return null; }
 }
 
 /**
@@ -219,6 +230,7 @@ export type CreateAiFollowUpInput = {
   schedule: FollowUpSchedule;
   targets?: string[];
   modelChoice?: string;
+  modelEffort?: import("./provider-registry.ts").ModelEffort | null;
 };
 
 /* ==========================================================================
