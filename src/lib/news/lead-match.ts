@@ -947,6 +947,28 @@ function sharesDistinguishingEvidence(
   );
 }
 
+/** A review flag for reworded coverage with shared names, dates or amounts.
+ * Never a strong match: wording/entity overlap cannot discard reporting.
+ * Keep conflicting dates and amounts separate, and remove the newsroom's
+ * place words before scoring so geography alone cannot earn a flag. */
+export function titleEntityOverlap(a: string, b: string, place?: NewsroomPlace | null): boolean {
+  const anchorsA = extractAnchors(a, place), anchorsB = extractAnchors(b, place);
+  if (factsConflict(anchorsA, anchorsB)) return false;
+  const actionWords = new Set(["review", "plan", "report", "announce", "schedule", "come", "propose", "approve", "require", "decide"]);
+  const meaningful = (headline: string) => new Set([...subjectTokens(headline, place)].filter(word => !actionWords.has(word)));
+  const subjectsA = meaningful(a), subjectsB = meaningful(b);
+  const namesA = nonStoplistedProperNouns(a, place), namesB = nonStoplistedProperNouns(b, place);
+  const names = sharedWordCount(namesA, namesB);
+  const subjects = sharedWordCount(subjectsA, subjectsB);
+  const facts = specificAnchors([...anchorsA].filter(anchor => anchorsB.has(anchor))).length;
+  // A named policy can be written without capitals in both headlines.
+  const openSpace = /open[-\s]+space/i.test(a) && /open[-\s]+space/i.test(b);
+  if (!((names >= 3 && (subjects >= 1 || !subjectsA.size || !subjectsB.size)) || (names >= 2 && subjects >= 1) ||
+      (facts >= 1 && subjects >= 2) || (openSpace && subjects >= 2))) return false;
+  const titleA = new Set([...subjectsA, ...namesA]), titleB = new Set([...subjectsB, ...namesB]);
+  return jaccard(titleA, titleB) >= 0.25 || containment(titleA, titleB) >= 0.5;
+}
+
 /** The normalized form two headlines are compared at character level:
  * lowercased, punctuation dropped, whitespace collapsed. */
 function normalizedHeadline(headline: string): string {
@@ -1791,7 +1813,8 @@ export function findMatchingLead(
       if (Number.isFinite(t) && t < cutoff) continue;
     }
     const leadUrls = lead.source_urls ?? [];
-    if (
+    const entityMatch = ["new", "held", "drafted"].includes(lead.status) && titleEntityOverlap(headline, lead.headline, place);
+    if (entityMatch ||
       pairMatches(headline, candidate.source_urls ?? [], lead.headline, leadUrls, place, {
         candidateTopic: candidate.topic,
         leadTopic: lead.topic,
@@ -1859,7 +1882,7 @@ export function matchStrength(
 
   const sections = { candidateTopic: candidate.topic, leadTopic: existing.topic };
   if (!pairMatches(candidateHeadline, candidateUrls, existingHeadline, existingUrls, place, sections)) {
-    return null;
+    return titleEntityOverlap(candidateHeadline, existingHeadline, place) ? "possible" : null;
   }
 
   // Unit AO (2026-10-03): the near-duplicate classifier's strong tier, before
