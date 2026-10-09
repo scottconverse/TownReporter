@@ -39,7 +39,8 @@ export async function deskOverlayBrowser(fixture) {
     },
   }]});
   const {output}=await bundle.generate({format:'iife'});await bundle.close();
-  const browser=await chromium.launch({ignoreDefaultArgs:['--hide-scrollbars']});const page=await browser.newPage();
+  const headed=process.env.TOWNREPORTER_DIALOG_HEADED==='1';
+  const browser=await chromium.launch({headless:!headed,ignoreDefaultArgs:['--hide-scrollbars'],args:headed&&process.platform==='win32'?['--window-position=-2000,-2000']:[]});const page=await browser.newPage();
   await page.route('**/*',route=>route.abort());
   await page.setContent('<html><body style="margin:0"><div id="root"></div></body></html>');
   for(const file of ['styles.css','desk-astra.css','reader-astra.css']){const before=process.env.DIALOG_SOURCE_OVERRIDE&&resolve(process.env.DIALOG_SOURCE_OVERRIDE,'src',file);await page.addStyleTag({content:await readFile(before&&existsSync(before)?before:new URL('../src/'+file,import.meta.url),'utf8')});}

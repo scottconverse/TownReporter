@@ -38,7 +38,8 @@ export async function dialogBrowser() {
   });
   const { output } = await bundle.generate({ format: "iife" });
   await bundle.close();
-  const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
+  const headed = process.env.TOWNREPORTER_DIALOG_HEADED === "1";
+  const browser = await chromium.launch({ headless: !headed, ignoreDefaultArgs: ["--hide-scrollbars"], args: headed && process.platform === "win32" ? ["--window-position=-2000,-2000"] : [] });
   const page = await browser.newPage();
   await page.route("**/*", route => route.abort());
   await page.setContent('<html><body style="margin:0"><div id="root"></div><div style="height:3000px"></div></body></html>');
@@ -51,6 +52,7 @@ export async function dialogBrowser() {
     :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar { width: 14px; }
     :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar-track { background: #eee; }
     :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar-thumb { background: #666; min-height: 28px; }
+    :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar-button { display: none; }
   ` });
   await page.addScriptTag({ content: output[0].code });
   return { browser, page };

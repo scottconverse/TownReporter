@@ -135,7 +135,9 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Dialog actions stay reachable and scrolling keeps work open
-        run: node --test scripts/dialog-*-browser.mjs
+        env:
+          TOWNREPORTER_DIALOG_HEADED: "1"
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 -nolisten tcp" node --test scripts/dialog-*-browser.mjs
 
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint
