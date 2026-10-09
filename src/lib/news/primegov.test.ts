@@ -1,3 +1,4 @@
+// guards: meeting catalogs omit packet links or confuse meeting and publication dates.
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -198,7 +199,8 @@ describe("meeting match", () => {
 });
 
 describe("the catalog", () => {
-  it("lists meetings and emits packet extras", () => {
+  it("lists meetings and emits packet extras", (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-08-26T20:00:00Z") });
     const { text, extras } = catalogAndExtras("https://longmont.primegov.com", [avis, council]);
     assert.match(text, /206 S\. Main/);
     assert.match(text, /City Council Regular Session/);
@@ -306,7 +308,8 @@ describe("reading a portal", () => {
   });
 
   // guards: a city error page could be read as an empty record or its meeting date could be shown as its publish date
-  it("rejects portal error bodies and keeps meeting and publish dates separate", async () => {
+  it("rejects portal error bodies and keeps meeting and publish dates separate", async (t) => {
+    t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-08-26T20:00:00Z") });
     setFetchImplForTests(async () => new Response(JSON.stringify("<html><body>Portal error</body></html>"), {
       status: 200,
       headers: { "content-type": "application/json" },
