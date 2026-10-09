@@ -2290,6 +2290,7 @@ type AnnouncedResultPassage = {
   startSeconds: number;
   endSeconds: number;
   passage: string;
+  subjectPassage: string;
   resultText: string;
 };
 
@@ -2315,11 +2316,13 @@ function announcedResultPassages(record: WholeRecord): AnnouncedResultPassage[] 
     const firstResult = group[0]!;
     const lastResult = group[group.length - 1]!;
     const resultText = group.map((segment) => segment.text.trim()).filter(Boolean).join(" ");
+    const announcement = group.find((segment) => hasAnnouncedResult(segment.text)) ?? firstResult;
     const motion = [...segments].reverse().find((segment) =>
       segment.seconds < firstResult.seconds && firstResult.seconds - segment.seconds <= 900 &&
       sameTranscriptItem(firstResult, segment) && motionSegment(segment),
     );
-    const startSeconds = motion?.seconds ?? Math.max(0, firstResult.seconds - 10);
+    const previousResult = [...triggers].reverse().find((segment) => segment.seconds < (motion?.seconds ?? firstResult.seconds) && sameTranscriptItem(firstResult, segment));
+    const startSeconds = motion ? Math.max(motion.seconds - 120, (previousResult?.seconds ?? -1) + 1) : Math.max(0, firstResult.seconds - 10);
     const context = segments.filter((segment) =>
       segment.seconds >= startSeconds && segment.seconds <= lastResult.seconds && sameTranscriptItem(firstResult, segment),
     );
@@ -2328,6 +2331,7 @@ function announcedResultPassages(record: WholeRecord): AnnouncedResultPassage[] 
       startSeconds: context[0]?.seconds ?? startSeconds,
       endSeconds: context[context.length - 1]?.seconds ?? lastResult.seconds,
       passage: cappedPassage(context.length ? context : group),
+      subjectPassage: context.filter((segment) => segment.seconds <= announcement.seconds).map((segment) => segment.text).join(" "),
       resultText,
     };
   }).filter((result) => Boolean(result.item) && (voteWordsIn(result.resultText).length > 0 || /\bunanimously\b|\ball in favor\b/i.test(result.resultText)));
@@ -2348,8 +2352,8 @@ function statedVoteTallies(text: string): string[] {
   };
   const spelled: string[] = [];
   for (const sentence of text.split(/[.!?;:\n]+/)) {
-    if (!/\b(?:vote|voted|votes|carry|carries|carried|pass|passes|passed|fail|fails|failed|approve|approves|approved|adopt|adopts|adopted)\b/i.test(sentence)) continue;
-    for (const match of sentence.matchAll(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+to\s+(zero|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\b/gi)) {
+    if (!/\b(?:vote|voted|votes|carry|carries|carried|pass|passes|passed|fail|fails|failed|approve|approves|approved|approval|adopt|adopts|adopted|announced|result)\b/i.test(sentence)) continue;
+    for (const match of sentence.matchAll(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|10|\d)\s*(?:to|[-–])\s*(zero|one|two|three|four|five|six|seven|eight|nine|ten|10|\d)\b/gi)) {
       spelled.push(`${numberWords[match[1]!.toLowerCase()] ?? match[1]}-${numberWords[match[2]!.toLowerCase()] ?? match[2]}`);
     }
   }
@@ -2357,7 +2361,7 @@ function statedVoteTallies(text: string): string[] {
 }
 
 function resultOutcome(text: string): "pass" | "fail" | null {
-  const outcomes = [...text.matchAll(/\b(?:fail(?:s|ed)?|carri(?:es|ed)|pass(?:es|ed)?|approv(?:e|es|ed)|adopt(?:s|ed)?|approval|unanim(?:ous|ously)|all in favor)\b/gi)]
+  const outcomes = [...text.matchAll(/\b(?:fail(?:s|ed)?|carri(?:es|ed)|pass(?:es|ed)?|approv(?:e|es|ed)|adopt(?:s|ed)?|advanc(?:e|es|ed)|approval|unanim(?:ous|ously)|all in favor)\b/gi)]
     .filter((match) => !/\b(?:not|never|no)\s+(?:(?:yet|been)\s+)?$/i.test(text.slice(0, match.index ?? 0)));
   const last = outcomes[outcomes.length - 1]?.[0]?.toLowerCase();
   if (!last) return null;
@@ -2368,7 +2372,7 @@ function agendaActionMentioned(paragraph: string, item: string, title: string, a
   const normalized = normalizeForMatch(paragraph);
   const identity = [title, action?.motionOrAction ?? ""].join(" ");
   const identifiers = [...`${identity} ${passage}`.matchAll(/\b\d{4}\s*[-–]\s*\d+\b/g)].map((match) => normalizeForMatch(match[0]));
-  if (identifiers.some((identifier) => normalized.includes(identifier))) return true;
+  if (identifiers.length) return identifiers.some((identifier) => normalized.includes(identifier));
   const code = normalizeForMatch(item);
   const tokens = normalized.split(" ");
   if (code && tokens.some((token, index) => token === code && (tokens[index - 1] === "item" || !/^\d+$/.test(code)))) return true;
@@ -2386,7 +2390,7 @@ function requiredResultPassages(record: WholeRecord): AnnouncedResultPassage[] {
     if (/^(?:PROC|procedural)$/i.test(result.item) || /\b(?:extend (?:the )?meeting|adjourn)\b/i.test(result.passage)) continue;
     // One coarse agenda label can contain several ordinances. Never let a
     // later vote on another ordinance replace an already detected result.
-    const ids = result.passage.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi) ?? [];
+    const ids = result.subjectPassage.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]\s*\d+\b/gi) ?? [];
     const identifier = ids[ids.length - 1];
     const key = `${result.item}:${identifier ? normalizeForMatch(identifier) : ""}:${result.startSeconds}:${result.endSeconds}`;
     finalResults.set(key, result);
@@ -2394,10 +2398,36 @@ function requiredResultPassages(record: WholeRecord): AnnouncedResultPassage[] {
   return [...finalResults.values()];
 }
 
-function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord, wholeMeeting = false): { item: string; action: string; result: string; passage: string }[] {
-  const paragraphs = [story.headline, story.dek ?? "", story.plainBrief, story.draft]
-    .flatMap((text) => text.split(/\r?\n\s*\r?\n/)).map((text) => text.trim())
+function voteSubjects(text: string): string[] {
+  const facets: [string, RegExp][] = [
+    ["fire", /\bfire|fuel loads?|hazardous vegetation/i],
+    ["traffic", /traffic|neighborhood.protection/i],
+    ["historical", /historical|historically|silo/i],
+    ["applicant-requests", /four.{0,30}(?:requests?|requirements?)|applicant.{0,20}requests?/i],
+    ["eligibility", /eligible.{0,40}annex|eligibility|annex.{0,40}eligible/i],
+  ];
+  const matched = facets.filter(([, pattern]) => pattern.test(text)).map(([key]) => key);
+  const ids = text.match(/\b(?:ordinance|resolution)\s+\d{4}\s*[-–]?\s*\d+\b/gi);
+  if (matched.length || ids?.length) return [...matched, ...(ids ?? []).map((id) => id.toLowerCase().replace(/[^a-z0-9]/g, ""))];
+  return [["airport", /airport|subsidy/i], ["budget", /budget|capital (?:improvement|program)/i],
+    ["minutes", /\bminutes\b/i], ["consent", /\bconsent\b/i]]
+    .filter(([, pattern]) => (pattern as RegExp).test(text)).map(([key]) => key as string);
+}
+
+function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[], record: WholeRecord, wholeMeeting = false, coverage = [story]): { item: string; action: string; result: string; passage: string }[] {
+  if (wholeMeeting && story.id !== coverage[0]?.id) return [];
+  const paragraphs = (wholeMeeting ? coverage : [story]).flatMap((row) => [row.headline, row.dek ?? "", row.plainBrief, row.draft])
+    .flatMap((text) => text.replace(/\b(Mr|Ms|Dr|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\./g, "$1").split(/(?<=[.!?;])\s+|\r?\n\s*\r?\n/)).map((text) => text.trim())
     .filter((text) => Boolean(text) && !/^receipts?\s*:/i.test(text));
+  const statements = paragraphs.map((sentence, index) => {
+    const previous = paragraphs[index - 1] ?? "";
+    if (/announced|approved/i.test(sentence) && !statedVoteTallies(sentence).length &&
+      /unanimous (?:announcements|votes|results|approvals)/i.test(paragraphs.slice(Math.max(0, index - 3), index).join(" "))) return `${sentence} unanimously`;
+    // A chair's short result sentence can refer to the subject just named.
+    return (statedVoteTallies(sentence).length > 0 || /unanimous/i.test(sentence)) && !voteSubjects(sentence).length &&
+      !statedVoteTallies(previous).length && !/unanimous/i.test(previous)
+      ? `${previous} ${sentence}` : sentence;
+  }).flatMap((sentence) => sentence.split(/\s+and\s+(?=unanimous|\d\s*[-–]\s*\d)/i));
   const results = requiredResultPassages(record);
   const missing: { item: string; action: string; result: string; passage: string }[] = [];
   for (const result of results) {
@@ -2414,9 +2444,23 @@ function missingAnnouncedResults(story: PackageStory, actions: CoverageAction[],
     const expectedTally = tallyKey(rawTallies[rawTallies.length - 1] ?? (/\bunanimously\b|\ball in favor\b/i.test(result.resultText) ? "unanimously" : ""));
     const expectedOutcome = resultOutcome(result.resultText);
     if (!expectedTally || !expectedOutcome) continue;
-    const stated = related.some((paragraph) => {
+    const allSubjects = voteSubjects(result.subjectPassage);
+    const facets = allSubjects.filter((subject) => !/^(?:ordinance|resolution)\d/.test(subject));
+    const subjects = facets.length ? facets : allSubjects;
+    const stated = statements.some((paragraph) => {
+      if (/\bnot stated\b|\btranscript announced\b/i.test(paragraph)) return false;
+      const actualSubjects = voteSubjects(paragraph);
+      const parentIds = voteSubjects(result.subjectPassage).filter((subject) => /^(?:ordinance|resolution)\d/.test(subject));
+      const origin = paragraphs.find((sentence) => sentence.includes(paragraph)) ?? paragraph;
+      const preceding = [...record.segments].reverse().find((segment) => segment.item === result.item && segment.seconds < result.startSeconds &&
+        voteSubjects(segment.text).some((subject) => /^(?:ordinance|resolution)\d/.test(subject)));
+      const parentNamed = [...parentIds, ...voteSubjects(preceding?.text ?? "")].some((id) => voteSubjects(origin).includes(id));
+      if (/\btwo amendments\b/i.test(paragraph) && parentNamed &&
+        subjects.some((subject) => subject === "historical" || subject === "applicant-requests")) actualSubjects.push(...subjects);
+      if (subjects.length ? !subjects.some((subject) => actualSubjects.includes(subject)) :
+        !agendaActionMentioned(paragraph, result.item, title, action, result.passage)) return false;
       const actualTally = statedVoteTallies(paragraph).some((tally) => tallyKey(tally) === expectedTally) ||
-        (expectedTally === "unanimous" && /\bunanimously\b|\ball in favor\b/i.test(paragraph));
+        (expectedTally === "unanimous" && /\bunanim(?:ous|ously)\b|\ball in favor\b/i.test(paragraph));
       return actualTally && resultOutcome(paragraph) === expectedOutcome;
     });
     if (!stated) {
@@ -2689,11 +2733,10 @@ export async function writingPass(input: {
       .filter((claim) => claim.status === "UNVERIFIED" && story.claims.some((original) => original.id === claim.id && original.status === "VERIFIED"))
       .map((claim) => ({ claimId: claim.id, text: claim.text, issue: claim.nextCheck }));
   }) : [];
-  const voteResultProblems = Array.isArray(parsed.stories) ? parsed.stories.flatMap((raw, index) => {
-    if (!raw || typeof raw !== "object") return [];
-    const story = buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline));
-    return missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting").map((result) => ({ story: story.headline, ...result }));
-  }) : [];
+  const voteStories = Array.isArray(parsed.stories) ? parsed.stories.filter((raw) => raw && typeof raw === "object").map((raw, index) =>
+    buildStoryFromReply(raw as Record<string, unknown>, index, strOf((raw as Record<string, unknown>).headline))) : [];
+  const voteResultProblems = voteStories.flatMap((story) =>
+    missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting", voteStories).map((result) => ({ story: story.headline, ...result })));
   if (lengthProblems.length || citationProblems.length || relationshipProblems.length || voteResultProblems.length) {
     await input.throwIfCancelled();
     let revision: Awaited<ReturnType<typeof input.chat>>;
@@ -2772,7 +2815,7 @@ export async function writingPass(input: {
       }
     }
     const remainingVoteResults = selectedStories.flatMap((story) =>
-      missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting").map((result) => ({ story, result })),
+      missingAnnouncedResults(story, input.reconcile.actions, input.record, input.action === "Report this meeting", selectedStories).map((result) => ({ story, result })),
     );
     if (remainingVoteResults.length) {
       const fallback = "The writer omitted an announced result for an agenda item already in the draft after one revision.";
