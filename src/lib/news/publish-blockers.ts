@@ -210,7 +210,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       sentence: state.readinessReason || (state.readiness === "checking"
         ? "The AI is still checking this story against the meeting record."
         : "This story is not ready to publish."),
-      action: { label: "Review open facts", target: { kind: "evidence-review" } },
+      action: { label: "Review remaining checks", target: { kind: "evidence-review" } },
     });
   }
 
@@ -378,7 +378,7 @@ export function publishBlockedSummary(blockers: readonly PublishBlocker[]): stri
  */
 export function publishGateNote(blockers: readonly PublishBlocker[]): string {
   const first = blockers[0];
-  return first ? `${first.action.label} to publish.` : "";
+  return first?.key === "readiness" ? first.sentence : first ? `${first.action.label} to publish.` : "";
 }
 
 /**

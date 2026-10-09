@@ -14,6 +14,7 @@ export function storyReadiness(input: {
   body: string;
   claims: readonly Pick<PackageClaim, "text" | "status">[];
   checking?: boolean;
+  held?: readonly { headline: string; reason: string }[];
 }): StoryReadiness {
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
   const paragraphs = input.body.split(/\r?\n\s*\r?\n/).map((text) => text.trim()).filter(Boolean);
@@ -30,6 +31,10 @@ export function storyReadiness(input: {
     openCount,
     totalCount: input.claims.length,
     reason: "The AI is checking the story's claims against the meeting record.",
+  };
+  if (input.held?.length) return {
+    state: "not-ready", openCount, totalCount: input.claims.length,
+    reason: input.held.map((item) => `${item.headline}: ${item.reason}`).join(" "),
   };
   if (openCount === 0) return {
     state: "verified",

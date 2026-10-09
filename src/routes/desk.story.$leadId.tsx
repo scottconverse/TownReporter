@@ -565,6 +565,7 @@ function StoryPage() {
       customConnection:
         writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
     }),
+    savedStoryReadiness(data?.draft?.research_json),
   );
   let civicReportingDraft = false;
   try {

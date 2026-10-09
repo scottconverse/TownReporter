@@ -408,7 +408,7 @@ describe("performReportingWork: the run", () => {
       const research = typeof draft!.research_json === "string" ? JSON.parse(draft!.research_json) : draft!.research_json as Record<string, unknown>;
       const readiness = (research as Record<string, unknown>).storyReadiness as Record<string, unknown>;
       assert.equal(readiness.state, "not-ready");
-      assert.equal(readiness.reason, openReason);
+      assert.ok(String(readiness.reason).includes(openReason));
       const blockers = publishBlockers({
         headline: draft!.headline, dek: draft!.dek, body: draft!.body, sectionReady: true,
         readiness: "not-ready", readinessReason: String(readiness.reason), openClaims: 0,
@@ -1409,9 +1409,9 @@ describe("the writer's method prompt states the status policy", () => {
     const research = typeof row!.research_json === "string" ? JSON.parse(row!.research_json) : row!.research_json as Record<string, unknown>;
     const readiness = research.storyReadiness as { state: string; reason: string };
     assert.equal(readiness.state, "not-ready");
-    assert.equal(readiness.reason, held!.reason);
+    assert.ok(readiness.reason.includes(held!.reason));
     const blockers = publishBlockers({ headline, dek: "The council considered Dry Creek ordinance 2026-62 as amended during its meeting, giving residents time to understand the measure before the chair's announced result.", body: draft, sectionReady: true, readiness: readiness.state as never, readinessReason: readiness.reason, openClaims: 0, unreviewedClaims: 0, unreviewedAccepted: false, namedOutlets: [], evidenceStale: false, reviewingEvidence: false, reconcileActive: false, publishing: false });
-    assert.equal(blockers.find((blocker) => blocker.key === "readiness")?.sentence, held!.reason);
+    assert.equal(blockers.find((blocker) => blocker.key === "readiness")?.sentence, readiness.reason);
   });
   // guards: an assignment can divert the writer into changing models or effort.
   it("keeps model and effort instructions in the assignment from changing the desk's route", async () => {

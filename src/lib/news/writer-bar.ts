@@ -54,7 +54,11 @@ export function writerIsReady(input: {
  * "not set up" when it cannot -- the same two words that picker already puts
  * on an option it cannot reach, in the desk's warn color.
  */
-export function readinessDot(ready: boolean): { label: string; tone: WriterTone } {
+export function readinessDot(ready: boolean, story?: { state: string; reason: string } | null): { label: string; tone: WriterTone } {
+  if (story) return {
+    label: story.state === "verified" ? "● Ready" : story.state === "checking" ? "● Checking" : story.state === "to-check" ? "● To check" : "● Not ready",
+    tone: story.state === "verified" ? "ok" : "warn",
+  };
   return ready
     ? { label: "● Ready", tone: "ok" }
     : { label: "● Not set up", tone: "warn" };

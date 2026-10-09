@@ -1300,9 +1300,8 @@ export async function fileRunLeads(input: {
     let draftId: number | null = null;
     if (leadId && story.draft.trim()) {
       const urls = story.sources.filter((s) => s.url).map((s) => s.url);
-      const readiness = storyReadiness({ headline: story.headline, body: story.draft, claims: story.claims });
-      const openItem = input.held?.find((entry) => entry.storyId === story.id && entry.unverified);
-      const needsReview = Boolean(openItem) || readiness.openCount > 0;
+      const held = input.held?.filter((entry) => entry.storyId === story.id && entry.unverified) ?? [];
+      const readiness = storyReadiness({ headline: story.headline, body: story.draft, claims: story.claims, held });
       const [draft] = await input.sql<{ id: number }>`
         insert into drafts (
           user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls,
@@ -1317,7 +1316,6 @@ export async function fileRunLeads(input: {
             storyReadiness: {
               version: 1,
               ...readiness,
-              ...(needsReview ? { state: "not-ready", reason: openItem?.reason || readiness.reason } : {}),
             },
             reportedClaims: await reportingStoryReviewClaims(input.sql, input.request.newsroom_id, story) })}
         ) returning id
