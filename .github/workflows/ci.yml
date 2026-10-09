@@ -138,6 +138,12 @@ jobs:
         env:
           TOWNREPORTER_DIALOG_HEADED: "1"
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 -nolisten tcp" node --test scripts/dialog-*-browser.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: dialog-scrollbar-diagnostics
+          path: artifacts/dialog-browser/
+          if-no-files-found: ignore
 
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint
@@ -444,7 +450,7 @@ jobs:
         part: [1, 2, 3, 4]
     services:
       postgres:
-        image: postgres:18
+        image: mirror.gcr.io/library/postgres:18
         env:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: townreporter_ci
@@ -1075,7 +1081,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18
+        image: mirror.gcr.io/library/postgres:18
         env:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: townreporter_delete_corr
