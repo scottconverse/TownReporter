@@ -1737,6 +1737,12 @@
 .reader .reader-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .reader .reader-dialog-foot { flex: none; padding-top: 16px; }
 .reader .reader-dialog :is(button, input, select, textarea) { min-height: 44px; font-size: max(14px, 1em); }
+.reader .reader-dialog :is(a[href], summary, label:has(input:is([type="checkbox"], [type="radio"]))) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: max(14px, 1em);
+}
 .reader .reader-toast {
   position: fixed;
   bottom: 25px;

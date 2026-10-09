@@ -3485,6 +3485,16 @@
   overflow-wrap: anywhere;
 }
 .desk-ltr.astra .queue-draft-controls .model-picker > * { grid-column: 1; min-width: 0; }
+.desk-ltr.astra :is(.more-menu, .row-more-panel, .astra-dialog) :is(a[href], summary) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: max(14px, calc(14px * var(--ts)));
+}
+.desk-ltr.astra :is(.more-menu, .row-more-panel) :is(button, select, input:not([type="checkbox"]):not([type="radio"])) {
+  min-height: 44px;
+  font-size: max(14px, calc(14px * var(--ts)));
+}
 
 /* Top-layer menus escape list clipping and the sidebar's stacking context. */
 .desk-ltr.astra :is(.more-menu, .row-more-panel).viewport-menu {

@@ -2422,6 +2422,12 @@
 .desk-ltr.astra-modal-layer .astra-modal label:has(input:is([type="checkbox"], [type="radio"])) {
   min-height: 44px;
 }
+.desk-ltr.astra-modal-layer .astra-modal a[href] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: max(14px, 1em);
+}
 
 /* The Queue's batch dialog (unit BF2, defect 8): the stack the old "Draft
    selected leads" panel held, now inside the one dialog. The portal is
