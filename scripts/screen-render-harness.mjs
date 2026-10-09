@@ -23,6 +23,10 @@ async function runtimeModule(file) {
 
 // Load the real screen; replace transport, providers and unrelated controls.
 export async function screenModule(path, overrides = {}, real = []) {
+  return import(await screenModuleUrl(path, overrides, real));
+}
+
+export async function screenModuleUrl(path, overrides = {}, real = []) {
   const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
   const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const imports = {};
@@ -104,5 +108,5 @@ export async function screenModule(path, overrides = {}, real = []) {
     imports[name] = stubUrl(
       `import {createElement as h} from ${JSON.stringify(import.meta.resolve("react"))};\n` + body,
     );
-  return import(transpileToUrl(source, path, imports));
+  return transpileToUrl(source, path, imports);
 }

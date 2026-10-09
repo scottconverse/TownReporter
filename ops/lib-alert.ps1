@@ -519,13 +519,20 @@ function Test-TownReporterScanAlert {
     return @{ Active = $false; Detail = 'the daily scan is not switched on'; Due = $false }
   }
 
-  $deadline = $Now.Date.AddHours($DeadlineHour)
+  # SQL supplies both the scan day and the clock in the paper's timezone.
+  # The watchdog's machine clock may be UTC; it must not decide a local deadline.
+  $localNow = [datetime]::MinValue
+  if (-not [datetime]::TryParseExact("$($State.LocalDay) $($State.LocalClock)", 'yyyy-MM-dd HH:mm',
+      [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$localNow)) {
+    return @{ Active = $null; Detail = 'the paper local scan clock could not be read'; Due = $false }
+  }
+  $deadline = $localNow.Date.AddHours($DeadlineHour)
   $configured = $null
   if ($State.LocalTime -match '^(\d{1,2}):(\d{2})$') {
-    $configured = $Now.Date.AddHours([int]$Matches[1]).AddMinutes([int]$Matches[2]).AddMinutes(30)
+    $configured = $localNow.Date.AddHours([int]$Matches[1]).AddMinutes([int]$Matches[2]).AddMinutes(30)
     if ($configured -gt $deadline) { $deadline = $configured }
   }
-  if ($Now -lt $deadline) {
+  if ($localNow -lt $deadline) {
     return @{ Active = $null; Detail = "today's scan is not due until $(Get-Date -Date $deadline -Format 'HH:mm')"; Due = $false }
   }
 

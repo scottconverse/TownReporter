@@ -37,8 +37,8 @@ function fmtTime(s: number): string {
 }
 
 function toneClass(tone: "ok" | "warn" | "bad"): string {
-  if (tone === "bad") return "text-red-800";
-  if (tone === "warn") return "text-amber-800";
+  if (tone === "bad") return "meeting-danger";
+  if (tone === "warn") return "meeting-warn";
   return "text-ink";
 }
 
@@ -134,7 +134,7 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
       )}
 
       {row.aligned !== null && (
-        <p className={`mt-2 text-sm ${row.aligned ? "" : "text-amber-800"}`}>
+        <p className={`mt-2 text-sm ${row.aligned ? "" : "meeting-warn"}`}>
           {row.aligned ? "Transcript matched to agenda items." : "The transcript could not be matched to agenda items."}
         </p>
       )}
@@ -169,11 +169,11 @@ function MeetingCard({ row }: { row: MeetingActivityRow }) {
               <a href={`/desk/story/${row.leadId}`}>Open the story</a>
             </>
           ) : row.aligned === false ? (
-            <span className="text-amber-800">
+            <span className="meeting-warn">
               No story filed: the transcript could not be aligned to agenda items.
             </span>
           ) : row.aligned === true ? (
-            <span className="text-amber-800">
+            <span className="meeting-warn">
               Aligned to agenda items but no story filed yet. The capture pass files a lead when it aligns.
             </span>
           ) : null}

@@ -645,11 +645,30 @@ function checkedSupportedCaveat(text: string, stories: PackageStory[]): string {
   }).join(" ");
 }
 
+function readableReportingDraft(text: string): string {
+  const spaced = text.replace(/([a-z0-9][.!?]["'”’)]?)(?=[A-Z])/g, "$1 ");
+  const segmenter = new Intl.Segmenter("en", { granularity: "sentence" });
+  return spaced.split(/\r?\n\s*\r?\n/).map((paragraph) => {
+    const paragraphs: string[] = [];
+    let sentences: string[] = [];
+    for (const { segment } of segmenter.segment(paragraph.trim())) {
+      if (sentences.length && (sentences.length >= 3 ||
+        [...sentences, segment].join(" ").split(/\s+/).length > 85)) {
+        paragraphs.push(sentences.join(" "));
+        sentences = [];
+      }
+      sentences.push(segment.trim());
+    }
+    if (sentences.length) paragraphs.push(sentences.join(" "));
+    return paragraphs.join("\n\n");
+  }).filter(Boolean).join("\n\n");
+}
+
 function checkedStoryCaveats(story: PackageStory, record: WholeRecord): PackageStory {
   const context = `${story.headline} ${story.claims.map((claim) => claim.text).join(" ")}`;
   const clean = (text: string) => checkedTranscriptCaveat(checkedSupportedCaveat(text, [story]), context, record);
   return {
-    ...story, draft: clean(story.draft), plainBrief: clean(story.plainBrief), cannotSay: clean(story.cannotSay),
+    ...story, draft: readableReportingDraft(clean(story.draft)), plainBrief: clean(story.plainBrief), cannotSay: clean(story.cannotSay),
     claims: story.claims.map((claim) => ({ ...claim,
       nextCheck: checkedTranscriptCaveat(claim.nextCheck, claim.text, record),
       ...(claim.checkReason ? { checkReason: checkedTranscriptCaveat(claim.checkReason, claim.text, record) } : {}),
@@ -2989,7 +3008,13 @@ export function bindClaimsToEvidence(
       : [];
     const transcriptSupported = Boolean(
       transcriptItem?.text === "Cited transcript passage" &&
-      !transcriptChecks.some((check) => check.checkStatus === "flagged"),
+      (!transcriptChecks.some((check) => check.checkStatus === "flagged") ||
+        claimEvidenceCheckPasses(claim.text, {
+          kind: "transcript", quote: transcriptItem.sourceExcerpt, title: transcriptItem.text,
+          url: record.identity.videoUrl, locator: "Cited transcript passage",
+          startSeconds: transcriptItem.startSeconds ?? undefined,
+          endSeconds: transcriptItem.endSeconds ?? undefined, page: null, score: 0,
+        }, { ...record, segments: record.segments.filter((segment) => transcriptItem.evidenceSegmentIndexes?.includes(segment.index)) })),
     );
     const unrelatedFigureNote = documentEvidence
       ? unrelatedDocumentFigureNote(claim, documentEvidence)
@@ -3009,7 +3034,8 @@ export function bindClaimsToEvidence(
         ? {
             ...claim,
             status: "VERIFIED",
-            transcriptEvidence: closestTranscriptEvidence(claim.text, record, transcriptItem),
+            transcriptEvidence: claim.recordEvidence?.kind === "transcript" && claim.transcriptEvidence
+              ? claim.transcriptEvidence : closestTranscriptEvidence(claim.text, record, transcriptItem),
           }
         : claim);
       continue;
@@ -3018,7 +3044,8 @@ export function bindClaimsToEvidence(
       out.push({
         ...claim,
         status: "VERIFIED",
-        transcriptEvidence: closestTranscriptEvidence(claim.text, record, transcriptItem),
+        transcriptEvidence: claim.recordEvidence?.kind === "transcript" && claim.transcriptEvidence
+          ? claim.transcriptEvidence : closestTranscriptEvidence(claim.text, record, transcriptItem),
       });
       continue;
     }
@@ -3990,14 +4017,23 @@ function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate,
     packetPages,
     segments: record.segments,
   });
+  // Captions can retain a spoken date correction: "September 20 22nd".
+  // Match the final ordinal day, without changing the retained quote.
+  const months = "January|February|March|April|May|June|July|August|September|October|November|December";
+  const correctedDates = candidate.quote.replace(new RegExp(`\\b(${months})\\s+\\d{1,2}\\s+(\\d{1,2})(?:st|nd|rd|th)\\b`, "gi"), "$1 $2");
   return checks.every((check) => check.checkStatus === "found" ||
-    (sameTally(check.claim, claim) && sameTallyIsAnnounced(check.claim, candidate.quote)));
+    (sameTally(check.claim, claim) && sameTallyIsAnnounced(check.claim, candidate.quote)) ||
+    (new RegExp(`^(${months})\\s+\\d{1,2}(?:,?\\s+\\d{4})?$`, "i").test(check.claim) &&
+      normalizeForMatch(correctedDates).includes(normalizeForMatch(check.claim))));
+}
+
+function numericTallyText(text: string): string {
+  const digits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
+  return text.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => digits[word]!);
 }
 
 function numericTallies(text: string): string[] {
-  const digits: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
-  const normalized = text.toLowerCase().replace(/\b(?:zero|one|two|three|four|five|six|seven|eight|nine|ten)\b/g, (word) => digits[word]!);
-  return [...normalized.matchAll(/\b(\d+)\s*(?:to\s*|[-–—])\s*(\d+)\b/g)].map((match) => `${match[1]}-${match[2]}`);
+  return [...numericTallyText(text).matchAll(/\b(\d+)\s*(?:to\s*|[-–—])\s*(\d+)\b/g)].map((match) => `${match[1]}-${match[2]}`);
 }
 
 function sameTally(check: string, claim: string): boolean {
@@ -4009,7 +4045,7 @@ function sameTally(check: string, claim: string): boolean {
 function sameTallyIsAnnounced(check: string, quote: string): boolean {
   const checked = numericTallies(check);
   return checked.length > 0 && hasAnnouncedResult(quote) &&
-    checked.every((tally) => voteWordsIn(quote).some((result) => numericTallies(result).includes(tally)));
+    checked.every((tally) => voteWordsIn(numericTallyText(quote)).some((result) => numericTallies(result).includes(tally)));
 }
 
 function exactQuoteCandidate(
@@ -4103,7 +4139,7 @@ export async function reviewOpenStoryClaims(input: {
     const transcriptCandidates = candidates.filter((candidate) => candidate.kind === "transcript" && candidate !== citedCandidate)
       .sort((a, b) => b.score - a.score).slice(0, 8);
     const documentCandidates = candidates.filter((candidate) => candidate.kind === "document").sort((a, b) => b.score - a.score).slice(0, 12);
-    const reviewCandidates = [...(citedCandidate ? [citedCandidate] : []), ...transcriptCandidates, ...documentCandidates];
+    let reviewCandidates = [...(citedCandidate ? [citedCandidate] : []), ...transcriptCandidates, ...documentCandidates];
     const prompt = [
       "Check this one unresolved story claim against the supplied evidence, then return one JSON object.",
       "Check the cited transcript window first. Then search the whole retained transcript by the claim's key terms, names, identifiers and numbers; do not stop at the cited time window. Finally check the already-read agenda packet and documents.",
@@ -4129,13 +4165,56 @@ export async function reviewOpenStoryClaims(input: {
       if (error instanceof JobCancelledError) throw error;
       response = { ok: false, error: writerErrorText(error) };
     }
-    const answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
+    let answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
+    const finalOpenRecheck = str(answer?.verdict).toUpperCase() === "OPEN";
+    if (finalOpenRecheck) {
+      await input.throwIfCancelled();
+      // Revisit every search hit before filing an Open fact. The first review's
+      // shortened windows can omit a title, amendment or the eventual result.
+      reviewCandidates = candidates.map((candidate) => candidate.kind !== "transcript" ? candidate : {
+        ...candidate,
+        quote: input.record.segments.filter((segment) =>
+          segment.seconds >= candidate.startSeconds! && segment.seconds <= candidate.endSeconds! &&
+          (!candidate.item || !segment.item || segment.item === candidate.item),
+        ).map((segment) => segment.text.trim()).filter(Boolean).join(" "),
+      });
+      try {
+        response = await input.chat(methodSystemPrompt(input.method), [
+          "FINAL OPEN-FACT RECHECK. Search results cover the whole retained transcript, with complete matching windows.",
+          "Check only what this claim asserts. An official spelling or name that is not asserted must not hold an answered claim open. Keep genuine unsupported assertions OPEN.",
+          "An earlier OPEN verdict is not evidence of absence. Check titles and eventual results, including consent exclusions, against the actual words. Never infer a result from an unrelated passage.",
+          'Return JSON: {"verdict":"VERIFIED|NARROWED|CONTRADICTED|OPEN","quote":"exact source words","sourceKind":"transcript|document","sourceUrl":"","replacement":"","cut":false,"reason":"one-line reason"}',
+          "CLAIM: " + claim.text,
+          "EARLIER OPEN REASON: " + str(answer?.reason),
+          "WHOLE-TRANSCRIPT SEARCH RESULTS AND READ DOCUMENTS: " + JSON.stringify(reviewCandidates),
+        ].join("\n\n"), 3_000, input.chatOpts as never);
+        answer = response.ok ? readJsonBlock<Record<string, unknown>>(response.text) : null;
+      } catch (error) {
+        if (error instanceof JobCancelledError) throw error;
+        response = { ok: false, error: writerErrorText(error) };
+        answer = null;
+      }
+    }
     const verdict = str(answer?.verdict).toUpperCase();
     const replacement = str(answer?.replacement).trim();
     const supportedText = verdict === "CONTRADICTED" || verdict === "NARROWED" ? replacement : claim.text;
-    const candidate = answer && (verdict === "VERIFIED" || verdict === "NARROWED" || verdict === "CONTRADICTED")
+    let candidate = answer && (verdict === "VERIFIED" || verdict === "NARROWED" || verdict === "CONTRADICTED")
       ? exactQuoteCandidate(reviewCandidates, answer)
       : null;
+    if (finalOpenRecheck && candidate?.kind === "transcript") {
+      const quote = str(answer?.quote);
+      const segments = input.record.segments.filter((segment) =>
+        segment.seconds >= candidate!.startSeconds! && segment.seconds <= candidate!.endSeconds!,
+      );
+      const offset = normalizeForMatch(segments.map((segment) => segment.text).join(" "))
+        .indexOf(normalizeForMatch(quote));
+      let position = 0;
+      const first = segments.find((segment) => {
+        position += normalizeForMatch(segment.text).length + 1;
+        return position > offset;
+      });
+      candidate = { ...candidate, quote, startSeconds: first?.seconds ?? candidate.startSeconds };
+    }
     const supported = Boolean(
       supportedText && candidate && claimEvidenceCheckPasses(supportedText, candidate, input.record),
     );

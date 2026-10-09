@@ -3144,3 +3144,7 @@
   white-space: normal;
   max-width: 100%;
 }
+
+/* Capture state text and controls use the active desk palette. */
+.desk-ltr .meeting-warn { color: var(--warn); }
+.desk-ltr .meeting-danger { color: var(--danger); }

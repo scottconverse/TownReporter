@@ -50,6 +50,7 @@ import {
   draftLead,
   fixDraftStyle,
   getLead,
+  loadLeadReportingPackage,
   getDraftHistoryItem,
   listDraftHistory,
   listPullJobs,
@@ -260,6 +261,11 @@ function StoryPage() {
   const { leadId } = Route.useParams();
   const id = Number(leadId);
   const qc = useQueryClient();
+  const reportingPackage = useQuery({
+    queryKey: ["reporting-package", id],
+    queryFn: () => loadLeadReportingPackage({ data: { leadId: id } }),
+    enabled: Number.isFinite(id),
+  });
   const [headline, setHeadline] = useState("");
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
@@ -552,15 +558,6 @@ function StoryPage() {
     hand, and it is empty unless the desk recorded a draft job that finished:
     an hour nobody wrote down is not an hour this bar may print.
   */
-  const readiness = readinessDot(
-    writerIsReady({
-      choice: modelChoice,
-      availability: writerAvailability.data,
-      customConnection:
-        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
-    }),
-    savedStoryReadiness(data?.draft?.research_json),
-  );
   let civicReportingDraft = false;
   try {
     const research: unknown = JSON.parse(data?.draft?.research_json ?? "{}");
@@ -1858,7 +1855,9 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
-  const draftReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting);
+  let draftReadiness = data.draft
+    ? savedStoryReadiness(data.draft.research_json, reconcileActive || waiting)
+    : { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1884,7 +1883,7 @@ function StoryPage() {
     refusal: publishRefusal,
     publishedSlug: justPublished ? publishedSlug : null,
   });
-  const blockers = publishBlockers({
+  const publishChecks = publishBlockers({
     headline,
     dek,
     body,
@@ -1905,12 +1904,16 @@ function StoryPage() {
     // M5: which part of that number the record disagrees with, so the blocker
     // and its override can say so.
     contradictedClaims: evidenceState.contradicted,
-    unreviewedAccepted: acceptanceCovers,
+    unreviewedAccepted: false,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
     publishing: publish.isPending,
   });
+  // Acceptance clears the Publish gate; it does not resolve the evidence claims.
+  const blockers = publishChecks.filter((blocker) =>
+    blocker.key !== "claims-unreviewed" || !acceptanceCovers,
+  );
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
@@ -1926,6 +1929,29 @@ function StoryPage() {
     settled answer is the whole of the fix, and it is a pure function of what
     the mutations report, so it is testable without mounting this route.
   */
+  // The resolved Checks state outranks an older saved memo, including published drafts.
+  const evidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
+  if (evidenceBlocker) draftReadiness = {
+    state: "not-ready", openCount: evidenceState.toReview,
+    totalCount: Math.max(draftReadiness.totalCount, evidenceState.toReview),
+    reason: evidenceBlocker.sentence,
+  };
+  const readiness = readinessDot(
+    writerIsReady({
+      choice: modelChoice,
+      availability: writerAvailability.data,
+      customConnection:
+        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
+    }),
+    draftReadiness,
+  );
+  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
+  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
+    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
+    : [];
+  const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
+    ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
+    : "";
   const blockerPress = blockerPressState({
     accept: {
       isPending: acceptUnreviewed.isPending,
@@ -2696,7 +2722,7 @@ function StoryPage() {
               </p>
             ) : null}
           </div>
-          {modelResearchOpen && !locked && !onPaper ? (
+          {modelResearchOpen && !locked ? (
             <section
               className="astra-model-research"
               id="story-model-research"
@@ -3815,11 +3841,16 @@ function StoryPage() {
                   */}
                   {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {publishGateNote(blockers)}{" "}
+                      {heldPublishNote || publishGateNote(blockers)}{" "}
                       <button
                         type="button"
                         className="inline-link"
                         onClick={() => {
+                          if (heldPublishNote) {
+                            setInspector("reporting");
+                            document.getElementById("inspector-reporting")?.scrollIntoView({ block: "start" });
+                            return;
+                          }
                           setInspector("checks");
                           document
                             .getElementById("publish-blockers")
