@@ -50,6 +50,7 @@ import {
   draftLead,
   fixDraftStyle,
   getLead,
+  loadLeadReportingPackage,
   getDraftHistoryItem,
   listDraftHistory,
   listPullJobs,
@@ -260,6 +261,11 @@ function StoryPage() {
   const { leadId } = Route.useParams();
   const id = Number(leadId);
   const qc = useQueryClient();
+  const reportingPackage = useQuery({
+    queryKey: ["reporting-package", id],
+    queryFn: () => loadLeadReportingPackage({ data: { leadId: id } }),
+    enabled: Number.isFinite(id),
+  });
   const [headline, setHeadline] = useState("");
   const [dek, setDek] = useState("");
   const [body, setBody] = useState("");
@@ -1935,6 +1941,13 @@ function StoryPage() {
     }),
     draftReadiness,
   );
+  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
+  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
+    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
+    : [];
+  const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
+    ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
+    : "";
   const blockerPress = blockerPressState({
     accept: {
       isPending: acceptUnreviewed.isPending,
@@ -3824,11 +3837,16 @@ function StoryPage() {
                   */}
                   {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {publishGateNote(blockers)}{" "}
+                      {heldPublishNote || publishGateNote(blockers)}{" "}
                       <button
                         type="button"
                         className="inline-link"
                         onClick={() => {
+                          if (heldPublishNote) {
+                            setInspector("reporting");
+                            document.getElementById("inspector-reporting")?.scrollIntoView({ block: "start" });
+                            return;
+                          }
                           setInspector("checks");
                           document
                             .getElementById("publish-blockers")

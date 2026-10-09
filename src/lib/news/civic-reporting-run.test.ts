@@ -2455,7 +2455,7 @@ it("checks a vote against the passage from its motion through the result", async
     chat: (async (_system: string, sent: string) => {
       calls++;
       if (calls === 1) prompt = sent;
-      else stagePrompt = sent;
+      else if (calls === 2) stagePrompt = sent;
       return { ok: true, text: JSON.stringify({
         verdict: calls === 1 ? "VERIFIED" : "OPEN", quote: calls === 1 ? quote : "", sourceKind: "transcript", sourceUrl: videoUrl,
         replacement: "", cut: false, reason: "The retained transcript supplies the closest context.",
@@ -2468,7 +2468,7 @@ it("checks a vote against the passage from its motion through the result", async
   const stageLine = stagePrompt.split(/\r?\n/).find((line) => line.startsWith("CLOSEST FULL-TRANSCRIPT PASSAGES: "));
   const stagePassages = JSON.parse(stageLine!.slice("CLOSEST FULL-TRANSCRIPT PASSAGES: ".length)) as Array<{ quote: string }>;
   assert.ok(stagePassages.some((passage) => passage.quote.includes("ordinance 2026-69") && passage.quote.includes("approved on first reading")));
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(result.claims[0]?.status, "VERIFIED", result.claims[0]?.nextCheck);
 });
 
