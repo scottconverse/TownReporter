@@ -45,6 +45,13 @@ export async function dialogBrowser() {
   for (const file of ["styles.css", "desk-astra.css", "reader-astra.css"]) {
     await page.addStyleTag({ content: await readFile(new URL("../src/" + file, import.meta.url), "utf8") });
   }
+  // Use a visible, fixed-width native thumb on Linux and Windows alike.
+  // Platform overlay-scrollbar defaults otherwise give the drag no thumb.
+  await page.addStyleTag({ content: `
+    :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar { width: 14px; }
+    :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar-track { background: #eee; }
+    :is(.astra-modal-body,.astra-dialog-body,.reader-dialog-body)::-webkit-scrollbar-thumb { background: #666; min-height: 28px; }
+  ` });
   await page.addScriptTag({ content: output[0].code });
   return { browser, page };
 }
