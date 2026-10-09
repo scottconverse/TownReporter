@@ -484,7 +484,7 @@ async function upsertSource(
     title,
     kind,
     tier,
-  }) as Promise<SourceRow | null>;
+  }) as Promise<(SourceRow & { alreadyExisted: boolean }) | null>;
 }
 
 export const addSource = createServerFn({ method: "POST" })
@@ -512,7 +512,7 @@ export const addSource = createServerFn({ method: "POST" })
       owned(context),
     );
     if (!source) return { ok: false as const, error: "Could not save that source." };
-    return { ok: true as const, source };
+    return { ok: true as const, source, added: source.alreadyExisted ? 0 : 1, alreadyExisted: source.alreadyExisted ? 1 : 0 };
   });
 
 export const addSourcesBulk = createServerFn({ method: "POST" })
@@ -528,6 +528,7 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
       };
     }
     let added = 0;
+    let alreadyExisted = 0;
     const byTier = { A: 0, B: 0, C: 0 };
     for (const row of rows) {
       const source = await upsertSource(
@@ -538,14 +539,15 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
         row.tier,
         owned(context),
       );
-      if (source) {
+      if (source?.alreadyExisted) alreadyExisted += 1;
+      else if (source) {
         added += 1;
         if (row.tier === "A" || row.tier === "B" || row.tier === "C") {
           byTier[row.tier] += 1;
         }
       }
     }
-    return { ok: true as const, added, total: rows.length, byTier };
+    return { ok: true as const, added, alreadyExisted, total: rows.length, byTier };
   });
 
 /**
@@ -1935,7 +1937,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // the editor's chosen model and the normal manual claim/commit boundaries.
   const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
   const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
-    ? JSON.parse(scanRun.source_snapshot) : undefined;
+    ? (dailyPolicy.acceptedSources ?? JSON.parse(scanRun.source_snapshot)) : undefined;
   const allSources =
     deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
@@ -3157,7 +3159,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           -- did not knock on is not an attempt. The live row above keeps the
           -- full scope on purpose (see scanRunningLine's pin: the scope is not
           -- progress); this is the record of the finished pass.
-          sources_attempted = ${Math.max(0, watchSlice.length - skippedThisPass)},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${analyzedSourceCount},
           model_batches_used = ${batches.length},

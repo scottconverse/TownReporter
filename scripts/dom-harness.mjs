@@ -67,6 +67,10 @@ export function installDom() {
     });
   }
 
+  // linkedom has no layout; scrolling is a browser default action, like focus.
+  if (!window.HTMLElement.prototype.scrollIntoView)
+    window.HTMLElement.prototype.scrollIntoView = function () {};
+
   globalThis.window = window;
   globalThis.document = document;
   Object.defineProperty(globalThis, "navigator", { value: window.navigator, configurable: true });
