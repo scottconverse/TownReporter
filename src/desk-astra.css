@@ -3486,6 +3486,23 @@
 }
 .desk-ltr.astra .queue-draft-controls .model-picker > * { grid-column: 1; min-width: 0; }
 
+/* Top-layer menus escape list clipping and the sidebar's stacking context. */
+.desk-ltr.astra :is(.more-menu, .row-more-panel).viewport-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 24px));
+  min-width: 0;
+  max-width: calc(100% - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
    stand-in can never be mistaken for the compact Job card the design draws
    (Job card anatomy: stage list, progress bar, last activity). */
