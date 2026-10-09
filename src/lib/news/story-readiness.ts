@@ -1,6 +1,6 @@
 import type { PackageClaim } from "./civic-reporting.ts";
 
-export type StoryReadinessState = "checking" | "verified" | "to-check" | "not-ready";
+export type StoryReadinessState = "ready" | "checking" | "verified" | "to-check" | "not-ready";
 
 export type StoryReadiness = {
   state: StoryReadinessState;
@@ -9,10 +9,10 @@ export type StoryReadiness = {
   reason: string;
 };
 
-/** Read the filed state once for Story, Drafts and Today; missing checks never imply a pass. */
+/** Read the filed state once; a missing memo is Ready, without claiming verified facts. */
 export function savedStoryReadiness(raw: unknown, checking = false): StoryReadiness {
   const missing: StoryReadiness = {
-    state: "not-ready",
+    state: "ready",
     openCount: 0,
     totalCount: 0,
     reason: "No fact check has been saved for this draft.",
@@ -57,6 +57,8 @@ export function storyReadinessChip(readiness: StoryReadiness): {
   switch (readiness.state) {
     case "checking":
       return { text: "… Checking facts", tone: "quiet" };
+    case "ready":
+      return { text: "✓ Ready", tone: "ok" };
     case "verified":
       return { text: "✓ Verified", tone: "ok" };
     case "to-check":
@@ -71,6 +73,7 @@ export function storyReadiness(input: {
   body: string;
   claims: readonly Pick<PackageClaim, "text" | "status">[];
   checking?: boolean;
+  held?: readonly { headline: string; reason: string }[];
 }): StoryReadiness {
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
   const paragraphs = input.body
@@ -94,6 +97,13 @@ export function storyReadiness(input: {
       openCount,
       totalCount: input.claims.length,
       reason: "The AI is checking the story's claims against the meeting record.",
+    };
+  if (input.held?.length)
+    return {
+      state: "not-ready",
+      openCount,
+      totalCount: input.claims.length,
+      reason: input.held.map((item) => `${item.headline}: ${item.reason}`).join(" "),
     };
   if (openCount === 0)
     return {

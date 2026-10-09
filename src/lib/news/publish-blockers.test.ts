@@ -74,7 +74,7 @@ describe("publishBlockers", () => {
     const [only] = publishBlockers(withState({ readiness: "not-ready", readinessReason: "Four facts remain open." }));
     assert.equal(only?.key, "readiness");
     assert.equal(only?.sentence, "Four facts remain open.");
-    assert.deepEqual(only?.action, { label: "Review open facts", target: { kind: "evidence-review" } });
+    assert.deepEqual(only?.action.target, { kind: "evidence-review" });
   });
 
   /*

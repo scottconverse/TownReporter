@@ -25,6 +25,7 @@
 
 import { editorActionError } from "./desk-copy.ts";
 import { refusedAnswer } from "./refused-answer.ts";
+import type { StoryReadinessState } from "./story-readiness.ts";
 
 /**
  * Where a blocker's button goes. The page turns each of these into a real
@@ -89,7 +90,7 @@ export type PublishBlockerState = {
   /** A person has chosen, or confirmed, the section this files under. */
   sectionReady: boolean;
   /** The AI's last saved readiness result for a civic-reporting draft. */
-  readiness?: "checking" | "verified" | "to-check" | "not-ready";
+  readiness?: StoryReadinessState;
   readinessReason?: string;
   /** Claims of absence not yet ticked by a person (`uncheckedGateTodos`). */
   openClaims: number;
@@ -214,7 +215,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       sentence: state.readinessReason || (state.readiness === "checking"
         ? "The AI is still checking this story against the meeting record."
         : "This story is not ready to publish."),
-      action: { label: "Review open facts", target: { kind: "evidence-review" } },
+      action: { label: "Review remaining checks", target: { kind: "evidence-review" } },
     });
   }
 
@@ -382,7 +383,7 @@ export function publishBlockedSummary(blockers: readonly PublishBlocker[]): stri
  */
 export function publishGateNote(blockers: readonly PublishBlocker[]): string {
   const first = blockers[0];
-  return first ? `${first.action.label} to publish.` : "";
+  return first?.key === "readiness" ? first.sentence : first ? `${first.action.label} to publish.` : "";
 }
 
 /**

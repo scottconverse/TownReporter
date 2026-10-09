@@ -559,6 +559,7 @@ function StoryPage() {
       customConnection:
         writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
     }),
+    savedStoryReadiness(data?.draft?.research_json),
   );
   let civicReportingDraft = false;
   try {
@@ -1887,12 +1888,8 @@ function StoryPage() {
     headline,
     dek,
     body,
-    // A missing fact-check memo describes the chip, not a publishing requirement.
-    // Only an active check or saved open reporting facts hold Publish down.
-    readiness:
-      draftReadiness?.state === "checking" || (draftReadiness?.openCount ?? 0) > 0
-        ? draftReadiness.state
-        : undefined,
+    // Missing memos are Ready; saved held items, open facts and active checks still block.
+    readiness: draftReadiness?.state,
     readinessReason: draftReadiness?.reason,
     sectionReady,
     openClaims: openClaims.length,

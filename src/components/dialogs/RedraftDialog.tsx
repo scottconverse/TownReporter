@@ -45,7 +45,7 @@ export type RedraftDialogProps = {
    * without a second guess about what the default is.
    */
   modelEffort: ModelEffort | null;
-  writerStatus?: { label: string; tone: string };
+  writerStatus?: { label: string; tone: string; reason?: string };
   onModelChange: (choice: StoryModelChoice) => void;
   onEffortChange: (effort: ModelEffort | null) => void;
   /** True while a draft is already running, so a second one cannot start. */
@@ -130,7 +130,7 @@ export function RedraftDialog({
           compact
         />
         <span className="astra-modal-note-inline">Set per job in Redraft settings.</span>
-        {writerStatus ? <span className={`astra-wb-ready astra-wb-ready-${writerStatus.tone}`} role="status">{writerStatus.label}</span> : null}
+        {writerStatus ? <span className={`astra-wb-ready astra-wb-ready-${writerStatus.tone}`} role="status" title={writerStatus.reason}>{writerStatus.label}</span> : null}
       </div>
       {error ? (
         <p className="astra-modal-alert" role="alert">

@@ -24,20 +24,24 @@ const story = await screenModule(
 );
 const drafts = await screenModule("src/routes/desk.drafts.tsx", {}, real);
 const today = await screenModule("src/routes/desk.index.tsx", {}, real);
-const { publishBlockers } = await import(
+const { publishBlockers, publishGateNote } = await import(
   await moduleUrl("src/lib/news/publish-blockers.ts", {
     "./desk-copy.ts": stubUrl("export const editorActionError = () => '';"),
   })
 );
 globalThis.readinessPublishBlockers = publishBlockers;
+globalThis.readinessPublishGateNote = publishGateNote;
 const publishStory = await screenModule(
   "src/routes/desk.story.$leadId.tsx",
   {
     publishBlockers:
       "state => (globalThis.readinessBlockers = globalThis.readinessPublishBlockers(state))",
+    publishGateNote: "blockers => globalThis.readinessPublishGateNote(blockers)",
     useMutation:
       "({mutationFn}) => ({mutate(){}, isPending: Boolean(globalThis.readinessDecisionPending && /decision/.test(String(mutationFn)))})",
     ActionButton: "({children, disabled}) => h('button', {disabled}, children)",
+    RedraftDialog:
+      "({writerStatus}) => h('span', {'data-writer-status':true, title:writerStatus.reason}, writerStatus.label)",
     stripReporterNotebook: "body => body",
   },
   real,
@@ -192,6 +196,79 @@ test("Story, Drafts and Today show one matching chip for all four readiness stat
         html,
         /Ready to check|\bClear\b|Lead score|● Ready|Evidence check not decided|Names not checked|Tier [123].*(?:ready|print)/i,
       );
+    }
+  }
+});
+
+// guards: zero open facts must not hide a held item or block an ordinary pasted story.
+test("Publish and the Writer agree for a missing memo and a saved held item with zero open facts", async () => {
+  const heldReason = "Airport future charges: The future charge amount needs checking.";
+  for (const [memo, label, blocked] of [
+    [null, "Ready", false],
+    [
+      JSON.stringify({
+        storyReadiness: {
+          version: 1,
+          state: "not-ready",
+          openCount: 0,
+          totalCount: 0,
+          reason: heldReason,
+        },
+      }),
+      "Not ready",
+      true,
+    ],
+  ]) {
+    globalThis.screenData = {
+      lead: {
+        lead: {
+          id: 22,
+          headline: "Airport policy",
+          topic: "government",
+          status: "drafted",
+          source_urls: "[]",
+        },
+        draft: {
+          id: 8,
+          lead_id: 22,
+          headline: "Airport policy",
+          dek: "Policy approved",
+          body: "Council approved the airport policy.",
+          topic: "government",
+          research_json: memo,
+        },
+        topicConfirmed: "government",
+        namedOutlets: [],
+        outletOverrides: [],
+      },
+      sources: [],
+      memory: [],
+    };
+    const { document } = installDom();
+    const { createRoot } = await import("react-dom/client");
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(h(publishStory.Route.component)));
+      const button = [...document.querySelectorAll("button")].find((b) =>
+        /^Publish in /.test(b.textContent),
+      );
+      assert.ok(button);
+      assert.equal(button.hasAttribute("disabled"), blocked);
+      assert.ok(document.querySelector("[data-story-readiness]").textContent.includes(label));
+      assert.ok(host.textContent.includes(`● ${label}`));
+      const blocker = globalThis.readinessBlockers.find((item) => item.key === "readiness");
+      if (blocked) {
+        assert.equal(blocker?.sentence, heldReason);
+        assert.equal(host.querySelector("[data-writer-status]").getAttribute("title"), heldReason);
+        assert.ok(host.textContent.includes(heldReason));
+      } else {
+        assert.equal(blocker, undefined);
+      }
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
     }
   }
 });

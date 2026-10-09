@@ -120,7 +120,7 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
 
   if (facts.story_readiness !== undefined) {
     const readiness = savedStoryReadiness(facts.story_readiness, running);
-    const key = running ? "running" : failed ? "failed" : readiness.state === "verified" ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
+    const key = running ? "running" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
     return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou: readiness.state === "to-check" };
   }
 
