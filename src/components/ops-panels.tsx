@@ -883,7 +883,7 @@ export function RecentlyDeletedPanel() {
       ) : (
         <ul className="mt-4 divide-y divide-rule border-y border-rule">
           {rows.map((r) => (
-            <li key={r.id} className="py-3">
+            <li key={r.id} className="trash-entry py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-3">
                 <span className="min-w-0 flex-1">
                   <span className="text-sm tracking-[0.14em] text-rust uppercase">

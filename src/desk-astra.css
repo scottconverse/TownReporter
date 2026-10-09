@@ -8582,3 +8582,9 @@
   .source-inventory td { overflow-wrap: anywhere; }
   .source-inventory td::before { content: attr(data-label); display: block; font-weight: 700; color: var(--fg2); }
 }
+
+@media (max-width: 600px) {
+  .trash-entry > div { flex-direction: column; align-items: stretch; }
+  .trash-entry > div > span { width: 100%; }
+  .trash-entry .row-acts { justify-content: flex-start; flex-wrap: wrap; }
+}
