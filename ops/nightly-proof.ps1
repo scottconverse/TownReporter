@@ -1,14 +1,13 @@
 <#
   The nightly live-pipeline proof: scan -> draft, with a REAL model, run
-  automatically every night against the disposable dev database copy.
+  automatically every night against the already-running Test server.
 
   Two things this script does, picked by switch:
 
     (default)  Register (or refresh) the "TownReporter Nightly Proof"
                scheduled task, at 03:30 daily, as the current user, then
                print how to run it right now.
-    -Now       Run the proof immediately: stage the editor account, then
-               scripts\live-pipeline-proof.mjs. This is also exactly what
+    -Now       Run scripts\live-pipeline-proof.mjs against Test. This is exactly what
                the scheduled task's own action runs -- there is only one
                code path, so a manual run and the 03:30 run behave
                identically.
@@ -83,15 +82,14 @@ if ($Now) {
   Write-Host "  TownReporter nightly live-pipeline proof"
   Write-Host "  ------------------------------------------------------------"
 
-  Say "staging the editor account (scripts\stage-editor.mjs against townreporter_dev)"
-  $prevDbUrl = $env:DATABASE_URL
-  $env:DATABASE_URL = "postgres://postgres@127.0.0.1:5433/townreporter_dev"
-  $r = Invoke-External { node scripts/stage-editor.mjs }
-  $env:DATABASE_URL = $prevDbUrl
-  Write-Host $r.Output
-  if ($r.ExitCode -ne 0) { Die "scripts\stage-editor.mjs failed (exit $($r.ExitCode)). Fix that before the proof can sign in." }
+  # Both entry paths use the Node configuration defaults: Test on port 3400,
+  # newest townreporter_test_<stamp> on 5547 via a SELECT-only discovery.
+  # An explicit DATABASE_URL is passed through and guarded there; never pin
+  # a dated database here. The Test owner already exists: do not stage it.
+  # Email/password-file overrides are passed through, and the private file
+  # is read only at run time (never embedded in the scheduled action).
 
-  Say "running scripts\live-pipeline-proof.mjs (scan up to 6 min, draft up to 8 min)"
+  Say "running scripts\live-pipeline-proof.mjs (daily scan up to 10 min, draft queued up to 2 min then running up to 8 min)"
   $r = Invoke-External { node scripts/live-pipeline-proof.mjs }
   Write-Host $r.Output
   if ($r.ExitCode -ne 0) {
@@ -150,7 +148,7 @@ $settings = New-ScheduledTaskSettingsSet `
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
   -Principal $principal -Settings $settings `
-  -Description "TownReporter: nightly scan-then-draft proof against townreporter_dev, with the real model providers" | Out-Null
+  -Description "TownReporter: nightly scan-then-draft proof on the Test server (3400), newest townreporter_test_<stamp> on 5547, with the real model providers" | Out-Null
 
 $verb = if ($existing) { "updated" } else { "created" }
 Write-Host "  $verb  $taskName  (daily at 03:30, interactive logon as $env:USERNAME)"
