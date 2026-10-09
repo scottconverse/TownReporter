@@ -81,6 +81,7 @@ export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTML
   function NativeDialog(props, ref) {
     const gesture = useScrimGesture(() => local.current?.close(), true);
     const local = React.useRef<HTMLDialogElement | null>(null);
+    const opener = React.useRef<HTMLElement | null>(null);
     React.useEffect(() => {
       const element = local.current;
       if (!element) return;
@@ -92,10 +93,44 @@ export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTML
       sync();
       const observer = new MutationObserver(sync);
       observer.observe(element, { attributes: true, attributeFilter: ["open"] });
-      return () => { observer.disconnect(); release?.(); };
+      // Native Tab cycling can visit BODY. Intercept the two boundaries so
+      // search and preview keep the editor inside the currently open dialog.
+      const controls = () => Array.from(element.querySelectorAll<HTMLElement>(
+        'a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])',
+      )).filter(node => node.getClientRects().length && !node.closest('[inert]'));
+      const trap = (event: KeyboardEvent) => {
+        if (event.key !== "Tab" || !element.open) return;
+        const all = controls();
+        const first = all[0], last = all.at(-1);
+        const active = element.ownerDocument.activeElement;
+        if (!all.length || !element.contains(active) || (event.shiftKey ? active === first : active === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      };
+      const show = element.showModal;
+      element.showModal = () => {
+        if (!element.open) {
+          const active = element.ownerDocument.activeElement;
+          if (active instanceof HTMLElement && active !== element.ownerDocument.body && !element.contains(active)) opener.current = active;
+        }
+        show.call(element);
+        sync();
+      };
+      const restore = () => { if (opener.current?.isConnected) opener.current.focus(); };
+      element.addEventListener("keydown", trap);
+      element.addEventListener("close", restore);
+      return () => {
+        observer.disconnect(); release?.();
+        element.showModal = show;
+        element.removeEventListener("keydown", trap);
+        element.removeEventListener("close", restore);
+      };
     }, []);
     return <dialog {...props} {...gesture} ref={element => {
       local.current = element;
+      // A callback ref may call showModal before effects have installed it.
+      if (element && !element.open && document.activeElement instanceof HTMLElement && !element.contains(document.activeElement)) opener.current = document.activeElement;
       if (typeof ref === "function") return ref(element);
       if (ref) ref.current = element;
     }} />;

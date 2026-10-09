@@ -82,12 +82,45 @@ function useViewportMenus() {
         if (![...open.values()].some(panel => event.target instanceof Node && panel.contains(event.target))) place();
       };
       document.addEventListener("scroll", scroll, true);
+      const escape = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return;
+        for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.more[open],details.row-more[open]")) {
+          menu.open = false;
+          menu.querySelector<HTMLElement>("summary")?.focus();
+        }
+      };
+      // Hand focus to a visible menu opener before a press can hide its row.
+      const handoff = (event: Event) => {
+        if (!(event.target instanceof Element)) return;
+        const control = event.target.closest("button,a[href]");
+        const menu = control?.closest<HTMLDetailsElement>("details.more,details.row-more");
+        if (!menu?.open) return;
+        menu.querySelector<HTMLElement>(":scope > summary")?.focus();
+      };
+      const outside = (event: Event) => {
+        for (const menu of open.keys()) if (event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      };
+      // Raw row menus may keep a confirmation inline. Close them only once a
+      // dialog opens, so that menu's controls cannot cover the new dialog.
+      const dialogs = new MutationObserver(() => {
+        if (document.querySelector('dialog[open],.astra-modal[role="dialog"],.astra-modal[role="alertdialog"]')) {
+          for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.more[open],details.row-more[open]")) menu.open = false;
+        }
+      });
+      dialogs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
+      document.addEventListener("keydown", escape);
+      document.addEventListener("click", handoff, true);
+      document.addEventListener("pointerdown", outside);
       shared = { count: 0, dispose: () => {
         observer.disconnect();
         for (const panel of open.values()) panel.hidePopover();
         document.removeEventListener("toggle", toggle, true);
         window.removeEventListener("resize", place);
         document.removeEventListener("scroll", scroll, true);
+        dialogs.disconnect();
+        document.removeEventListener("keydown", escape);
+        document.removeEventListener("click", handoff, true);
+        document.removeEventListener("pointerdown", outside);
       } };
       users.set(document, shared);
     }
