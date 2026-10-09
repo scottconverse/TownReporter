@@ -89,7 +89,7 @@ const imports = {
   "@/components/paper-setup-gate": stub(`export const usePaperSetupGate = () => ({ blocked: false });`),
   "@/components/PaperSetupGateNote": nullComponents,
   "@/lib/news/desk-copy": copyStub,
-  "@/lib/paper-context-state": stub(`export const usePaperDateFormatters = () => ({ formatListDateTime: () => "Sept. 26", formatShortDate: () => "Sept. 26", formatClockTime: () => "7:02 a.m." });`),
+  "@/lib/paper-context-state": stub(`export { formatListDate, formatListDateTime, formatClockTime } from ${JSON.stringify(new URL("../src/lib/paper.ts", import.meta.url).href)}; import { formatListDate, formatListDateTime, formatClockTime } from ${JSON.stringify(new URL("../src/lib/paper.ts", import.meta.url).href)}; export const usePaperDateFormatters = () => ({ formatListDate, formatListDateTime, formatShortDate: () => "Sept. 26", formatClockTime });`),
   "@/components/dark-dials-panel": nullComponents,
   "@/components/model-picker": modelPickerStub,
   "@/components/read-more-text": await moduleUrl("src/components/read-more-text.tsx", {

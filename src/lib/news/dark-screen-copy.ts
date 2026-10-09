@@ -1,4 +1,9 @@
 /** Presentation only: imported and stored evidence remains intact. */
+export function darkStoredDates(text: string, timestamp: (iso: string) => string, day: (iso: string) => string): string {
+  return text.replace(/\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?\b/g,
+    (iso) => (iso.includes("T") ? timestamp(iso) : day(`${iso}T12:00:00Z`)) || iso);
+}
+
 export function darkScreenText(text: string): string {
   return text
     .replace(/\bartifacts?\b/gi, (word) => word.toLowerCase().endsWith("s") ? "records" : "record")

@@ -8,7 +8,8 @@ test("expanded stored findings and activity use plain record language without do
     await page.locator(".astra-case-compact summary").first().click();
     await page.getByText("Show earlier", { exact: true }).click();
     const text = await page.locator("#investigation-workspace").textContent();
-    assert.doesNotMatch(text, /\bartifacts?\b|\bhops?\b|\$/i);
+    assert.doesNotMatch(text, /\bartifacts?\b|\bhops?\b|\$|\d{4}-\d{2}-\d{2}/i);
     assert.match(text, /record/); assert.match(text, /step/);
+    assert.match(text, /Oct\. 7, 6:30 p\.m\./);
   } finally { await close(); }
 });

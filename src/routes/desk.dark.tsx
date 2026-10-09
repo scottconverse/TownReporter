@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { darkScreenData, darkScreenText } from "@/lib/news/dark-screen-copy";
+import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
 import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1586,7 +1586,7 @@ function InvestigationWorkspace({
   ocrModelChoice: StoryModelChoice;
   ocrModelEffort: ModelEffort | null;
 }) {
-  const { formatListDateTime, formatClockTime } = usePaperDateFormatters();
+  const { formatListDateTime, formatListDate, formatClockTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   const [frN, setFrN] = useState(6);
   const [followUpOpen, setFollowUpOpen] = useState(false);
@@ -1826,7 +1826,9 @@ function InvestigationWorkspace({
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
   const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
-  const activityAll = darkScreenData(activityQuery.data ?? []);
+  const activityAll = darkScreenData(activityQuery.data ?? []).map((entry) => ({
+    ...entry, text: darkStoredDates(entry.text, formatListDateTime, formatListDate),
+  }));
   const activityRows = activityAll.slice(-5);
   const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 

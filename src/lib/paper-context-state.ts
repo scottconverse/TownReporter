@@ -5,6 +5,7 @@ import {
   formatShortDate,
   formatDateTime,
   formatListDateTime,
+  formatListDate,
   formatClockTime,
 } from "./paper";
 import { clockTextAt } from "./desk/ops-rows";
@@ -48,6 +49,7 @@ export function usePaperDateFormatters() {
       formatDateTime: (iso: string | Date | null | undefined) => formatDateTime(iso, timezone),
       /** "Oct. 2, 6:43 a.m." -- the designer's list face, for desk rows. */
       formatListDateTime: (iso: string | Date | null | undefined) => formatListDateTime(iso, timezone),
+      formatListDate: (iso: string | Date | null | undefined) => formatListDate(iso, timezone),
       formatClockTime: (iso: string | Date | null | undefined) => formatClockTime(iso, timezone),
       /** "12:15 p.m." -- the desk's clock, for a moment that was tried. */
       clockTime: (iso: string | Date | null | undefined) => clockTextAt(iso, timezone),
