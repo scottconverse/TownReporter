@@ -114,7 +114,7 @@ jobs:
           check run_first_owner_setup_code '^(scripts/first-owner-setup-code-walk\.mjs)$'
           check run_legal_gone_nav '^(scripts/cp-desk-dialogs-walk\.mjs|scripts/desk-clickable-guard-walk\.mjs|scripts/desk-narrow-width-walk\.mjs|scripts/legal-gone-nav-e2e\.mjs|scripts/publish-blockers-walk\.mjs)$'
           # These isolated dialog flows also gate PRs touching their UI or harness.
-          if [ "$everything" = true ] || git diff --name-only "$BASE" "$HEAD" | grep -Eq '^(src/components/(dialog|follow-up-dialog|reader-controls|unsaved-changes-guard)\.tsx|src/(styles|desk-astra|reader-astra)\.css|scripts/dialog-(viewport-browser|dismissal-browser|browser-harness)\.mjs|\.github/workflows/ci\.yml)$'; then
+          if [ "$everything" = true ] || git diff --name-only "$BASE" "$HEAD" | grep -Eq '^(src/components/(dialog|desk-chrome|model-picker|follow-up-dialog|reader-controls|unsaved-changes-guard)\.tsx|src/(styles|desk-astra|reader-astra)\.css|scripts/dialog-[^/]+\.mjs|\.github/workflows/ci\.yml)$'; then
             echo 'run_dialogs=true' >> "$GITHUB_OUTPUT"
           else
             echo 'run_dialogs=false' >> "$GITHUB_OUTPUT"

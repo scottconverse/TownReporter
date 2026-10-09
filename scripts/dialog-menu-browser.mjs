@@ -11,8 +11,10 @@ test('action menus keep every action reachable above navigation by mouse and key
         const menu=page.locator(selector);await menu.locator(':scope > summary').click();
         const panel=menu.locator('.more-menu,.row-more-panel');await page.waitForTimeout(30);const box=await panel.boundingBox();
         assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=width&&box.y+box.height<=height,JSON.stringify({width,height,box}));
-        for(const control of await panel.locator('button').all()){
-          await control.focus();await control.scrollIntoViewIfNeeded();
+        const controls=await panel.locator('button').all();await menu.locator(':scope > summary').focus();
+        for(const control of controls){
+          await page.keyboard.press('Tab');assert.equal(await control.evaluate(el=>el===document.activeElement),true,'Tab must reach each action');
+          await control.scrollIntoViewIfNeeded();
           assert.equal(await control.evaluate(el=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}),true,'sidebar must not cover an action');
         }
         await panel.locator('button').last().click();if(await menu.evaluate(el=>el.open))await menu.locator(':scope > summary').click();
