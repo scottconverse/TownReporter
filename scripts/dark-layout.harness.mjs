@@ -11,7 +11,7 @@ export async function fileScreen({ width = 1440, large = false, storedCopy = fal
   detail.claims = Array.from({ length: 262 }, (_, i) => ({ kind: "FINDING", capture_event_id: i + 1, body: "The public record describes the construction contract and the Board of Trustees hearing. ".repeat(6), confidence: 0.9 }));
   detail.sourceCaptures = detail.claims.map((_, i) => ({ id: i + 1, title: "Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing", url: "https://example.test/record/" + i }));
   globalThis.__darkFlow.fixtures["investigation-activity"] = Array.from({ length: 363 }, (_, i) => ({ id: String(i), occurredAt: "2026-10-08T12:00:00Z", tone: "plain", text: "Opened Firestone Boulevard and I-25 Frontage Road Construction Contract — Board of Trustees hearing, captured" }));
-  if (storedCopy) { detail.claims[0].body = "An artifact records $1,200 after two hops. ".repeat(8); globalThis.__darkFlow.fixtures["investigation-activity"].forEach((a) => a.text = "Saved artifacts after 3 hops for $1,200 on 2026-10-08T00:30:00Z; post dated 2025-10-28"); }
+  if (storedCopy) { detail.claims[0].body = "An artifact records $1,200 after a hop and two hops. ".repeat(8); globalThis.__darkFlow.fixtures["investigation-activity"].forEach((a) => a.text = "Saved artifacts after 3 hops for $1,200 on 2026-10-08T00:30:00Z; post dated 2025-10-28"); }
   globalThis.__darkFlow.fixtures.investigations[0].status = aside ? "closed" : "open";
   globalThis.__darkFlow.fixtures.captureStats = blocked ? { total: 60, blocked: 43, empty: 0, ok: 17, blockedRatio: 43 / 60, dominantReason: "blocked" } : null;
   const node = document.createElement("div"); document.body.append(node);

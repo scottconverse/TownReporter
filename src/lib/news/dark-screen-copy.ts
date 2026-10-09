@@ -6,8 +6,12 @@ export function darkStoredDates(text: string, timestamp: (iso: string) => string
 
 export function darkScreenText(text: string): string {
   return text
-    .replace(/\bartifacts?\b/gi, (word) => word.toLowerCase().endsWith("s") ? "records" : "record")
-    .replace(/\bhops?\b/gi, (word) => word.toLowerCase().endsWith("s") ? "steps" : "step")
+    .replace(/\b(?:(a|an)\s+)?(artifacts?|hops?)\b/gi, (_match, article: string | undefined, word: string) => {
+      const replacement = /^artifact/i.test(word) ? "record" : "step";
+      const plural = word.toLowerCase().endsWith("s") ? "s" : "";
+      const prefix = article ? `${article[0] === "A" ? "A" : "a"} ` : "";
+      return `${prefix}${replacement}${plural}`;
+    })
     .replace(/\$\s*\d[\d,]*(?:\.\d+)?(?:\s*(?:million|billion|thousand|[kmb]\b))?/gi, "[amount omitted]")
     .replace(/\$/g, "");
 }
