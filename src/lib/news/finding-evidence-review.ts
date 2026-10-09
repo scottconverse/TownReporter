@@ -53,6 +53,8 @@ export type FindingEvidenceRow = {
     reason: string;
     contraryVersionId: number | null;
     ai?: AiEvidenceJudgment;
+    acceptedBy?: string;
+    acceptedAt?: string;
   };
 };
 
@@ -1139,6 +1141,75 @@ export type SaveFindingJudgmentInput = {
   contraryVersionId: number | null;
   evidenceToken: string;
 };
+
+type AiEvidenceDecisionInput = { leadId: number; draftId: number; evidenceToken: string;
+  action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string };
+
+/** One atomic save, fenced to the draft and retained evidence the editor saw. */
+export const persistAiEvidenceDecision = createServerOnlyFn(async function persistAiEvidenceDecision(
+  context: { newsroomId: number; userId: string }, input: AiEvidenceDecisionInput,
+): Promise<FindingEvidenceReview> {
+  const { withLeadDraftLock } = await import("./draft-order.server.ts");
+  await withLeadDraftLock(context, input.leadId, async (sql) => {
+    const draft = await currentDraft(sql, context.newsroomId, input.leadId);
+    const findings = parseFindings(draft.found_note), claims = storedClaims(draft), manual = storedManualClaims(draft);
+    if (draft.id !== input.draftId || input.evidenceToken !== await fullReviewToken(sql, context.newsroomId, draft, findings, claims, manual, true))
+      throw new ReviewError("conflict", "The draft or retained evidence changed. Reload before deciding.");
+    const review = await loadFindingEvidenceReview(sql, context.newsroomId, input.leadId);
+    const rows = [...review.rows, ...review.claimRows].filter((row) => input.action === "accept-supported"
+      ? row.judgment.ai?.verdict === "Supported" && row.judgment.value === "supports"
+      : row.key === input.findingKey && row.judgment.ai?.verdict === "Not supported");
+    if (!rows.length) throw new ReviewError("conflict", "There are no matching AI judgments to save.");
+    const memo = objectMemo(draft.research_json);
+    const [editor] = await sql.query<{ name: string }>('select name from "user" where id=$1', [context.userId]);
+    const acceptedBy = editor?.name || context.userId, acceptedAt = new Date().toISOString();
+    if (input.action === "remove-sentence") {
+      const row = rows[0], text = "finding" in row ? row.finding.text : row.claim.fact;
+      const sentences = draft.body.split(/(?<=[.!?])\s+/);
+      const exact = sentences.findIndex((sentence) => normalizedText(sentence) === normalizedText(text));
+      if (exact < 0 || sentences.length < 2)
+        throw new ReviewError("invalid-input", "That claim is not a whole removable sentence. Edit the draft or mark it checked.");
+      sentences.splice(exact, 1);
+      draft.body = sentences.join(" ");
+      draft.found_note = JSON.stringify(findings.filter((finding) => finding.text !== text));
+      const reported = memo.reportedClaims as { rows?: ReportingReviewClaim[] } | undefined;
+      if (reported?.rows) reported.rows = reported.rows.filter((claim) => claim.fact !== text);
+      const ai = memo.aiEvidenceReview as AiEvidenceReview;
+      ai.checkedText = draft.body;
+      ai.rows = ai.rows.filter((judgment) => judgment.text !== text);
+      memo.aiEvidenceRemoval = { text, acceptedBy, acceptedAt };
+    } else {
+      for (const row of rows) {
+        const isFinding = "finding" in row;
+        const namespace: ReviewNamespace = isFinding ? "findingEvidenceReview" : "claimEvidenceReview";
+        const index = isFinding ? findings.findIndex((finding) => finding.text === row.finding.text) :
+          claims.findIndex((claim, index) => row.key.startsWith(`claim:${index}:`) && claim.fact === row.claim.fact);
+        const previous = (memo[namespace] as ReviewMemo | undefined) ?? {};
+        const judgments = previous.contentToken === findingEvidenceContentToken(draft) ? { ...previous.judgments } : {};
+        judgments[row.key] = { value: input.action === "accept-supported" ? "supports" : "does-not-support",
+          reason: input.action === "accept-supported" ? "Accepted the AI's grounded support." : "Editor checked despite the AI's unsupported verdict.",
+          contraryVersionId: null, acceptedBy, acceptedAt,
+          evidenceBinding: await findingReferenceBinding(sql, context.newsroomId, isFinding ? findings[index] : provenanceForClaim(draft, claims[index]), true) };
+        memo[namespace] = { contentToken: findingEvidenceContentToken(draft), judgments };
+      }
+    }
+    await sql.query("update drafts set body=$1,found_note=$2,research_json=$3,updated_at=now() where id=$4 and newsroom_id=$5",
+      [draft.body, draft.found_note, JSON.stringify(memo), draft.id, context.newsroomId]);
+  });
+  return loadFindingEvidenceReview(await getSql(), context.newsroomId, input.leadId);
+});
+
+export const decideAiEvidence = createServerFn({ method: "POST" }).middleware([deskMiddleware])
+  .validator((input: AiEvidenceDecisionInput) => {
+    if (!input || !Number.isSafeInteger(input.leadId) || input.leadId < 1 ||
+      !Number.isSafeInteger(input.draftId) || input.draftId < 1 || typeof input.evidenceToken !== "string" ||
+      !["accept-supported", "mark-checked", "remove-sentence"].includes(input.action)) throw new Error("Invalid evidence decision.");
+    return input;
+  }).handler(async ({ context, data }): Promise<FindingEvidenceResult> => {
+    try { return { ok: true, review: await persistAiEvidenceDecision(context, data) }; }
+    catch (error) { return { ok: false, code: error instanceof ReviewError ? error.code : "invalid-input",
+      error: error instanceof Error ? error.message : "The evidence decision could not be saved." }; }
+  });
 
 export const persistFindingEvidenceJudgment = createServerOnlyFn(
   async function persistFindingEvidenceJudgment(

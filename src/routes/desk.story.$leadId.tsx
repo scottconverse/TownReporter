@@ -2494,6 +2494,7 @@ function StoryPage() {
                   */
                   evidenceRecorded: draftChecks.evidenceChecked,
                   onEvidenceState,
+                  onDraftChanged: (draft) => { setHeadline(draft.headline); setDek(draft.dek); setBody(draft.body); setTopic(draft.topic); },
                 }}
               />
             ) : (

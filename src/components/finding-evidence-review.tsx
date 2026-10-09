@@ -5,6 +5,7 @@ import {
   getFindingEvidenceReview,
   saveManualClaim,
   saveFindingEvidenceJudgment,
+  decideAiEvidence,
   type FindingCaptureEvidence,
   type FindingEvidenceCaptureResult,
   type FindingEvidenceReview,
@@ -555,6 +556,7 @@ function JudgmentControls({
 }
 
 export type EvidenceListInputs = {
+  onDraftChanged?: (draft: FindingEvidenceReview["canonicalDraft"]) => void;
   /** When the checks ran, for the drawn "Ran 8:14 a.m." line. */
   checkedAt: string | null;
   /** The writer they ran with, or "" when no check is on the books. */
@@ -953,6 +955,23 @@ export function FindingEvidenceReviewPanel({
       setRecordToAdd("");
     },
     onError: (error) => setFeedback({ kind: "err", text: error instanceof Error ? error.message : "Manual claim could not be saved." }),
+  });
+
+  const aiDecision = useMutation({
+    mutationFn: ({ action, findingKey }: { action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string }) => {
+      if (!review || dirtyKeys.current.size || localDraftChanged || reloadRequired) throw new Error("Save or reload your unsaved changes before deciding on AI rows.");
+      return decideAiEvidence({ data: { leadId, draftId: review.draftId, evidenceToken: review.evidenceToken, action, findingKey } });
+    },
+    onSuccess: async (result) => {
+      if (!result.ok) { setFeedback({ kind: "err", text: result.error }); return; }
+      qc.setQueryData(["finding-evidence-review", leadId], result);
+      setDrafts(draftsFrom(result.review));
+      setFeedback({ kind: "ok", text: "Evidence decision saved." });
+      await qc.invalidateQueries({ queryKey: ["lead", leadId] });
+      await qc.invalidateQueries({ queryKey: ["finding-evidence-review", leadId] });
+      list.onDraftChanged?.(result.review.canonicalDraft);
+    },
+    onError: (error) => setFeedback({ kind: "err", text: error instanceof Error ? error.message : "Evidence decision could not be saved." }),
   });
 
   function updateDraft(key: string, update: Partial<JudgmentDraft>) {
@@ -1827,6 +1846,10 @@ export function FindingEvidenceReviewPanel({
       ) : null}
 
       <EvidenceCheckList
+        busy={aiDecision.isPending || locked || localDraftChanged || reloadRequired}
+        onAcceptSupported={() => aiDecision.mutate({ action: "accept-supported" })}
+        onRemoveSentence={(row) => aiDecision.mutate({ action: "remove-sentence", findingKey: row.ref?.id })}
+        onMarkChecked={(row) => aiDecision.mutate({ action: "mark-checked", findingKey: row.ref?.id })}
         ranLine={ranLine}
         rows={listRows}
         compareLabel={list.compareLabel}

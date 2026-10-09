@@ -96,6 +96,7 @@ export type EvidenceRowRef =
   | { kind: "style"; id: string };
 
 export type EvidenceListRow = {
+  aiVerdict?: "Supported" | "Not supported" | "Needs a human";
   key: string;
   chip: string;
   tone: EvidenceChipTone;
@@ -339,10 +340,11 @@ export function evidenceCheckRows(input: {
     const { chip, tone } = judgmentChip(row.judgment.value, row.captures);
     list.push({
       key: `finding:${row.key}`,
+      aiVerdict: row.judgment.ai?.verdict,
       chip,
       tone,
       what: findingWhat(row),
-      note: findingNote(row),
+      note: row.judgment.ai ? [row.judgment.ai.quote, row.judgment.ai.reason, row.judgment.ai.checkedAt].filter(Boolean).join(" · ") : findingNote(row),
       action: openRecordAction(row.captures),
       ref: { kind: "finding", id: row.key },
     });
@@ -380,10 +382,11 @@ export function evidenceCheckRows(input: {
       : null;
     list.push({
       key: `claim:${row.key}`,
+      aiVerdict: row.judgment.ai?.verdict,
       chip: judged.chip,
       tone: judged.tone,
       what: row.claim.fact.trim() || "A claim recorded for this draft.",
-      note: row.claim.reporting?.checkReason
+      note: row.judgment.ai ? [row.judgment.ai.quote, row.judgment.ai.reason, row.judgment.ai.checkedAt].filter(Boolean).join(" · ") : row.claim.reporting?.checkReason
         ? [row.claim.reporting.checkReason, row.claim.reporting.closestQuote || savedQuote]
             .filter(Boolean).join(" “") + (row.claim.reporting.closestQuote || savedQuote ? "”" : "")
         : savedQuote
