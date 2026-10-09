@@ -318,6 +318,7 @@ const guardUrl = moduleUrl(
   await readFile(new URL("../src/components/unsaved-changes-guard.tsx", import.meta.url), "utf8"),
   "unsaved-changes-guard.tsx",
   {
+    "./dialog": inlineModule("export function Dialog() { return null; }"),
     "@tanstack/react-router": routerStub,
     "./desk-chrome": deskChromeUrl,
     react: import.meta.resolve("react"),

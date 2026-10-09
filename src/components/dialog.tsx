@@ -3,10 +3,43 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import { InkButton } from "./desk-chrome";
 
+const pageLocks = new WeakMap<Document, { count: number; restore: () => void }>();
+function lockPage(doc: Document) {
+  let lock = pageLocks.get(doc);
+  if (!lock) {
+    const style = doc.documentElement.style;
+    const overflow = style.getPropertyValue("overflow");
+    const priority = style.getPropertyPriority("overflow");
+    lock = { count: 0, restore: () => {
+      if (overflow) style.setProperty("overflow", overflow, priority);
+      else style.removeProperty("overflow");
+    } };
+    pageLocks.set(doc, lock);
+    style.setProperty("overflow", "hidden");
+  }
+  lock.count++;
+  return () => {
+    if (--lock.count === 0) { lock.restore(); pageLocks.delete(doc); }
+  };
+}
+
 // A scrollbar targets its scroll container, and a drag can synthesize a click
 // on a common ancestor. Neither means the editor clicked the backdrop.
 function useScrimGesture(close: () => void, native = false) {
   const press = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    const reset = () => { press.current = null; };
+    // A release inside Content never reaches the scrim's handler. Forget that
+    // gesture too, so it cannot be reused by a later drag out of Content.
+    document.addEventListener("pointerdown", reset, true);
+    document.addEventListener("pointerup", reset);
+    document.addEventListener("pointercancel", reset, true);
+    return () => {
+      document.removeEventListener("pointerdown", reset, true);
+      document.removeEventListener("pointerup", reset);
+      document.removeEventListener("pointercancel", reset, true);
+    };
+  }, []);
   const isScrim = (event: React.PointerEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget || event.button !== 0 || event.ctrlKey) return false;
     const { clientX: x, clientY: y, currentTarget: el } = event;
@@ -39,6 +72,7 @@ function elAtPoint(event: React.PointerEvent<HTMLElement>) {
 /** The navigation scrim follows the same press/release rule as every modal. */
 export function DialogScrim({ onClose, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { onClose: () => void }) {
   const gesture = useScrimGesture(onClose);
+  React.useEffect(() => lockPage(document), []);
   return <button {...props} {...gesture} onClick={event => { if (event.detail === 0) onClose(); }} />;
 }
 
@@ -47,6 +81,19 @@ export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTML
   function NativeDialog(props, ref) {
     const gesture = useScrimGesture(() => local.current?.close(), true);
     const local = React.useRef<HTMLDialogElement | null>(null);
+    React.useEffect(() => {
+      const element = local.current;
+      if (!element) return;
+      let release: (() => void) | undefined;
+      const sync = () => {
+        if (element.open && !release) release = lockPage(element.ownerDocument);
+        else if (!element.open && release) { release(); release = undefined; }
+      };
+      sync();
+      const observer = new MutationObserver(sync);
+      observer.observe(element, { attributes: true, attributeFilter: ["open"] });
+      return () => { observer.disconnect(); release?.(); };
+    }, []);
     return <dialog {...props} {...gesture} ref={element => {
       local.current = element;
       if (typeof ref === "function") return ref(element);
@@ -66,11 +113,8 @@ export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTML
  * on Radix Dialog (focus trap, scroll lock, focus return) with this styling").
  * So the look below is the reference's, to the pixel; the behavior is Radix's.
  *
- * **Nothing uses this yet.** Phase 0 puts it here so that phase 2 has one
- * target when the desk's existing dialogs (the native `<dialog class="astra-
- * dialog">` on /desk/ops and the story screen, and the hand-rolled
- * `role="alertdialog"` in unsaved-changes-guard.tsx) move onto it. Migrating
- * those is deliberately not part of this change.
+ * Shared by the desk's editing and confirmation dialogs. Native search,
+ * preview and reader dialogs retain their top layer through NativeDialog.
  *
  * Why the portal wrapper carries `desk-ltr astra-modal-layer`:
  *
@@ -96,6 +140,8 @@ export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTML
  * the two strings a caller may need to reword.
  */
 export type DialogProps = {
+  role?: "dialog" | "alertdialog";
+  ariaLabel?: string;
   open: boolean;
   /** Called by Escape, by the close button, by Cancel, and by a click outside. */
   onClose: () => void;
@@ -147,6 +193,8 @@ export type DialogProps = {
 };
 
 export function Dialog({
+  role = "dialog",
+  ariaLabel,
   open,
   onClose,
   title,
@@ -219,12 +267,12 @@ export function Dialog({
       {open ? (
       <DialogPrimitive.Portal>
         <div className="desk-ltr astra-modal-layer">
-          {/* The scrim: one scrim, painted here, and the click-outside target
-              Radix uses to dismiss. The wrapper is only the scroll container,
-              so a tall dialog scrolls instead of overflowing the viewport. */}
+          {/* Only a complete scrim gesture dismisses. The body owns scrolling. */}
           <DialogPrimitive.Overlay className="astra-modal-scrim" {...scrimGesture} />
           <DialogPrimitive.Content
             className="astra-modal"
+            role={role}
+            aria-label={ariaLabel}
             onPointerDownOutside={event => event.preventDefault()}
             onOpenAutoFocus={() => {
               const opener = document.activeElement;
@@ -254,7 +302,7 @@ export function Dialog({
                 <span aria-hidden="true">✕</span>
               </InkButton>
             </div>
-            <div className="astra-modal-body">{children}</div>
+            <div className="astra-modal-body" tabIndex={0}>{children}</div>
             <div className="astra-modal-foot">
               {footNote ? <span className="astra-modal-note">{footNote}</span> : null}
               <div className="astra-modal-actions">

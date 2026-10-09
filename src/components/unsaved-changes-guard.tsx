@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useBlocker } from "@tanstack/react-router";
 import { InkButton } from "./desk-chrome";
+import { Dialog } from "./dialog";
 
 /*
   THE STICKY BAR AND THE LEAVE-PAGE PROMPT (0.6.63, Unit W).
@@ -122,27 +123,21 @@ export function UnsavedChangesGuard({
         </div>
       </div>
       {blocker.status === "blocked" ? (
-        <div
+        <Dialog
           role="alertdialog"
-          aria-modal="true"
-          aria-label={leaveLabel}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          open
+          title={message}
+          ariaLabel={leaveLabel}
+          primaryLabel="Leave and discard changes"
+          onPrimary={() => blocker.proceed()}
+          cancelLabel="Stay on this page"
+          closeLabel="Stay on this page"
+          onClose={() => blocker.reset()}
         >
-          <div className="max-w-md border-2 border-rule bg-paper p-5 text-sm">
-            <h4 className="font-display text-xl">{message}</h4>
-            <p className="mt-2">
+            <p>
               Leaving now discards the draft. Review and confirm first if you want to keep it.
             </p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <InkButton tone="solid" onClick={() => blocker.proceed()}>
-                Leave and discard changes
-              </InkButton>
-              <InkButton tone="ghost" onClick={() => blocker.reset()}>
-                Stay on this page
-              </InkButton>
-            </div>
-          </div>
-        </div>
+        </Dialog>
       ) : null}
     </>
   );

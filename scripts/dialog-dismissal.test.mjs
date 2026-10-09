@@ -19,6 +19,8 @@ test("scrollbar presses and drags keep the dialog open until a complete scrim pr
     await page.waitForTimeout(30);
     assert.equal(await page.evaluate(() => window.closes), 0);
     const box = await page.locator('[role="dialog"]').boundingBox();
+    await page.mouse.move(5,5); await page.mouse.down();
+    await page.mouse.move(box.x+10,box.y+10); await page.mouse.up();
     await page.mouse.move(box.x + 10, box.y + 10);
     await page.mouse.down();
     await page.mouse.move(5, 5);
@@ -46,5 +48,3 @@ test("scrollbar presses and drags keep the dialog open until a complete scrim pr
     await page.waitForFunction(()=>window.closes===1);
   } finally { await browser.close(); }
 });
-
-

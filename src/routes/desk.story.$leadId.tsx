@@ -3894,7 +3894,7 @@ function StoryPage() {
             Close preview
           </button>
         </div>
-        <article className="astra-dialog-body">
+        <article className="astra-dialog-body" tabIndex={0}>
           <p className="kick">{topic} · Draft for review</p>
           <h1>{headline}</h1>
           <p className="astra-preview-dek">{dek}</p>

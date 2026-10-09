@@ -1,3 +1,4 @@
+// guards: dialog actions become unreachable or scrolling dismisses an editor's work.
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { rolldown } from "rolldown";
@@ -25,11 +26,11 @@ export async function dialogBrowser() {
           import {FollowUpDialog} from './src/components/follow-up-dialog.tsx';
           const root=createRoot(document.getElementById('root'));
           window.closes=0;
-          window.mount=(native=false)=>root.render(native ? React.createElement('div',{className:'desk-ltr astra'},
-            React.createElement(dialogs.NativeDialog || 'dialog',{className:'astra-dialog',onClose(){window.closes++;},ref:el=>el&&!el.open&&el.showModal()},
-              React.createElement('div',{className:'astra-dialog-head'},'Preview',React.createElement('button',null,'Close')),
-              React.createElement('div',{className:'astra-dialog-body',tabIndex:0},Array.from({length:50},(_,i)=>React.createElement('p',{key:i},'Story paragraph '+i))),
-              React.createElement('div',{className:'astra-dialog-foot'},React.createElement('button',null,'Done')))) :
+          window.mount=(native=false)=>root.render(native ? React.createElement('div',{className:native==='reader'?'reader':'desk-ltr astra'+(document.documentElement.dataset.deskSize==='large'?' large':'')},
+            React.createElement(dialogs.NativeDialog,{className:native==='reader'?'reader-dialog':'astra-dialog',onClose(){window.closes++;},ref:el=>el&&!el.open&&el.showModal()},
+              React.createElement('div',{className:native==='reader'?'dialoghead':'astra-dialog-head'},'Preview',React.createElement('button',null,'Close')),
+              React.createElement('div',{className:native==='reader'?'reader-dialog-body':'astra-dialog-body',tabIndex:0},Array.from({length:50},(_,i)=>React.createElement('p',{key:i},'Story paragraph '+i))),
+              React.createElement('div',{className:native==='reader'?'reader-dialog-foot':'astra-dialog-foot'},React.createElement('button',null,'Done')))) :
             React.createElement(FollowUpDialog,{leads:[],onSubmit(){},onClose(){window.closes++;},initial:{what:'Follow the record',targets:'https://example.invalid/record'}}));
         `;
       },
@@ -47,4 +48,3 @@ export async function dialogBrowser() {
   await page.addScriptTag({ content: output[0].code });
   return { browser, page };
 }
-

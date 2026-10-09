@@ -1086,8 +1086,8 @@
   border-radius: 0;
   padding: 30px;
   width: min(620px, calc(100% - 32px));
-  max-height: 85vh;
-  overflow: auto;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
   background: var(--surface);
   color: var(--ink);
   box-shadow: var(--shadow-dialog);
@@ -1097,6 +1097,7 @@
   backdrop-filter: blur(5px);
 }
 .reader .dialoghead {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1732,6 +1733,10 @@
   color: var(--ink);
   background: var(--surface);
 }
+.reader .reader-dialog[open] { display: flex; flex-direction: column; }
+.reader .reader-dialog-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.reader .reader-dialog-foot { flex: none; padding-top: 16px; }
+.reader .reader-dialog :is(button, input, select, textarea) { min-height: 44px; font-size: max(14px, 1em); }
 .reader .reader-toast {
   position: fixed;
   bottom: 25px;

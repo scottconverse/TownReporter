@@ -293,10 +293,10 @@ export function DeskShell({
         Skip to desk
       </a>
       {menuOpen && (
-        <button
+        <DialogScrim
           className="astra-scrim"
           aria-label="Close navigation"
-          onClick={() => setMenuOpen(false)}
+          onClose={() => setMenuOpen(false)}
         />
       )}
       <aside
@@ -333,6 +333,7 @@ export function DeskShell({
           shell still owns the one mount below, so both keep opening the same
           three tabs.
         */}
+        <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
         <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
@@ -347,6 +348,7 @@ export function DeskShell({
           pathname={pathname}
           hash={hash}
         />
+        </div>
         <div className="astra-nav-foot">
           <Link to="/" className="astra-foot-paper" title="Public news page">
             View the paper ↗
@@ -676,7 +678,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
           <X size={20} />
         </button>
       </div>
-      <div className="astra-dialog-body">
+      <div className="astra-dialog-body" tabIndex={0}>
         <label className="field">
           <span>Search your newsroom</span>
           <input
