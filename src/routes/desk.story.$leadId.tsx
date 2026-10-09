@@ -1,5 +1,5 @@
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
-import { savedStoryReadiness } from "@/lib/news/story-readiness";
+import { editorStoryState } from "@/lib/news/story-readiness";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -10,7 +10,6 @@ import {
 import {
   blockerPressState,
   publishBlockers,
-  publishGateNote,
   publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
@@ -1838,7 +1837,10 @@ function StoryPage() {
     (`recordedChecks`), which is exactly what it printed before this unit. That
     fallback can only ever under-report, and only for the first paint.
   */
-  const evidenceState: EvidenceCheckState = panelEvidence ?? {
+  const evidenceLoaded = Boolean(panelEvidence?.evidenceToken && (() => {
+    try { return JSON.parse(panelEvidence.evidenceToken)[0] === data.evidenceToken; } catch { return false; }
+  })());
+  const evidenceState: EvidenceCheckState = (evidenceLoaded ? panelEvidence : null) ?? {
     ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
     toReview: 0,
     contradicted: 0,
@@ -1855,9 +1857,10 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
-  let draftReadiness = data.draft
-    ? savedStoryReadiness(data.draft.research_json, reconcileActive || waiting)
-    : { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
+  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
+    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
+    : [];
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1887,9 +1890,9 @@ function StoryPage() {
     headline,
     dek,
     body,
-    // Missing memos are Ready; saved held items, open facts and active checks still block.
-    readiness: draftReadiness?.state,
-    readinessReason: draftReadiness?.reason,
+    evidenceLoading: Boolean(data.draft && !evidenceLoaded),
+    readiness: reconcileActive || waiting ? "checking" : heldForDraft.length ? "not-ready" : undefined,
+    readinessReason: reconcileActive || waiting ? "The AI is checking this draft." : heldForDraft[0]?.reason,
     sectionReady,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,
@@ -1930,12 +1933,8 @@ function StoryPage() {
     the mutations report, so it is testable without mounting this route.
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
-  const evidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
-  if (evidenceBlocker) draftReadiness = {
-    state: "not-ready", openCount: evidenceState.toReview,
-    totalCount: Math.max(draftReadiness.totalCount, evidenceState.toReview),
-    reason: evidenceBlocker.sentence,
-  };
+  const draftReadiness = data.draft ? editorStoryState(blockers, evidenceState.toReview) :
+    { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const readiness = readinessDot(
     writerIsReady({
       choice: modelChoice,
@@ -1945,10 +1944,6 @@ function StoryPage() {
     }),
     draftReadiness,
   );
-  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
-  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
-    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
-    : [];
   const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
     : "";
@@ -2494,6 +2489,7 @@ function StoryPage() {
                   */
                   evidenceRecorded: draftChecks.evidenceChecked,
                   onEvidenceState,
+                  readinessReason: draftReadiness.reason,
                   onDraftChanged: (draft) => { setHeadline(draft.headline); setDek(draft.dek); setBody(draft.body); setTopic(draft.topic); },
                 }}
               />
@@ -3842,7 +3838,7 @@ function StoryPage() {
                   */}
                   {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {heldPublishNote || publishGateNote(blockers)}{" "}
+                      {draftReadiness.reason}{" "}
                       <button
                         type="button"
                         className="inline-link"

@@ -37,6 +37,7 @@ export function EvidenceCheckList({
   onRemoveSentence,
   onMarkChecked,
   busy = false,
+  readinessReason,
 }: {
   /** "Ran 8:14 a.m. · Claude Sonnet · checked against 3 captures", or "". */
   ranLine: string;
@@ -60,6 +61,7 @@ export function EvidenceCheckList({
   onRemoveSentence?: (row: EvidenceListRow) => void;
   onMarkChecked?: (row: EvidenceListRow) => void;
   busy?: boolean;
+  readinessReason?: string;
 }) {
   const [spotChecking, setSpotChecking] = useState(false);
   const supported = rows.filter((row) => row.aiVerdict === "Supported");
@@ -91,6 +93,7 @@ export function EvidenceCheckList({
   return (
     <section className="astra-evidence" aria-label="Evidence check">
       <h2 className="astra-evidence-title">Evidence check</h2>
+      {readinessReason ? <p role="status">{readinessReason}</p> : null}
       {checked ? <p role="status">AI checked {checked} claims against the record: {supported.length} supported, {checked - supported.length} need you</p> : null}
       {ranLine ? (
         <p className="astra-evidence-ran" role="status">

@@ -556,6 +556,7 @@ function JudgmentControls({
 }
 
 export type EvidenceListInputs = {
+  readinessReason?: string;
   onDraftChanged?: (draft: FindingEvidenceReview["canonicalDraft"]) => void;
   /** When the checks ran, for the drawn "Ran 8:14 a.m." line. */
   checkedAt: string | null;
@@ -1846,6 +1847,7 @@ export function FindingEvidenceReviewPanel({
       ) : null}
 
       <EvidenceCheckList
+        readinessReason={list.readinessReason}
         busy={aiDecision.isPending || locked || localDraftChanged || reloadRequired}
         onAcceptSupported={() => aiDecision.mutate({ action: "accept-supported" })}
         onRemoveSentence={(row) => aiDecision.mutate({ action: "remove-sentence", findingKey: row.ref?.id })}

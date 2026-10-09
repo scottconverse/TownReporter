@@ -9,6 +9,13 @@ export type StoryReadiness = {
   reason: string;
 };
 
+/** Every story surface reads the Publish gate's current first reason. */
+export function editorStoryState(blockers: readonly { key: string; sentence: string }[], openCount: number): StoryReadiness {
+  const first = blockers[0];
+  return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : "not-ready" : "ready",
+    openCount, totalCount: openCount, reason: first?.sentence ?? "Ready to publish." };
+}
+
 /** Read the filed state once; a missing memo is Ready, without claiming verified facts. */
 export function savedStoryReadiness(raw: unknown, checking = false): StoryReadiness {
   const missing: StoryReadiness = {

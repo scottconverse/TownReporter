@@ -84,6 +84,7 @@ export type PublishBlocker = {
  * that does nothing.
  */
 export type PublishBlockerState = {
+  evidenceLoading?: boolean;
   headline: string;
   dek: string;
   body: string;
@@ -174,6 +175,8 @@ export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
  */
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
+  if (state.evidenceLoading) blockers.push({ key: "evidence-loading", sentence: "Loading evidence judgments.",
+    action: { label: "Review the checks", target: { kind: "evidence-review" } } });
 
   if (empty(state.headline)) {
     blockers.push({
