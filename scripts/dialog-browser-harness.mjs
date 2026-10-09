@@ -38,7 +38,7 @@ export async function dialogBrowser() {
   });
   const { output } = await bundle.generate({ format: "iife" });
   await bundle.close();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] });
   const page = await browser.newPage();
   await page.route("**/*", route => route.abort());
   await page.setContent('<html><body style="margin:0"><div id="root"></div><div style="height:3000px"></div></body></html>');
