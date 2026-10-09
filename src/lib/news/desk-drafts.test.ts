@@ -24,6 +24,12 @@ const quiet: DeskDraftFacts = {
   headline_source: "model",
 };
 
+test("a plain draft with no memo is Ready in both its chip and its desk key", () => {
+  const state = deskDraftState({ ...quiet, story_readiness: null });
+  assert.equal(state.key, "ready");
+  assert.equal(state.label, "✓ Ready");
+});
+
 test("a job still writing prints its own stage text and how long it has been at it", () => {
   const state = deskDraftState(
     { ...quiet, job_status: "running", job_stage: "Researching the editorial", job_started_at: "2026-09-26T10:00:00.000Z" },

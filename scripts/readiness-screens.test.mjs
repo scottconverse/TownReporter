@@ -40,7 +40,8 @@ const publishStory = await screenModule(
     useMutation:
       "({mutationFn}) => ({mutate(){}, isPending: Boolean(globalThis.readinessDecisionPending && /decision/.test(String(mutationFn)))})",
     ActionButton: "({children, disabled}) => h('button', {disabled}, children)",
-    RedraftDialog: "({writerStatus}) => h('span', {}, writerStatus.label)",
+    RedraftDialog:
+      "({writerStatus}) => h('span', {'data-writer-status':true, title:writerStatus.reason}, writerStatus.label)",
     stripReporterNotebook: "body => body",
   },
   real,
@@ -260,6 +261,7 @@ test("Publish and the Writer agree for a missing memo and a saved held item with
       const blocker = globalThis.readinessBlockers.find((item) => item.key === "readiness");
       if (blocked) {
         assert.equal(blocker?.sentence, heldReason);
+        assert.equal(host.querySelector("[data-writer-status]").getAttribute("title"), heldReason);
         assert.ok(host.textContent.includes(heldReason));
       } else {
         assert.equal(blocker, undefined);

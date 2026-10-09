@@ -83,6 +83,11 @@ describe("writerIsReady", () => {
 });
 
 describe("readinessDot", () => {
+  it("carries the saved held-item reason to the Writer chip", () => {
+    const reason = "Airport future charges: The future charge amount needs checking.";
+    const status = readinessDot(true, { state: "not-ready", reason });
+    assert.equal("reason" in status ? status.reason : undefined, reason);
+  });
   it("says the drawn word for a writer that can run", () => {
     assert.deepEqual(readinessDot(true), { label: "● Ready", tone: "ok" });
   });

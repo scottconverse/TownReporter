@@ -1889,7 +1889,7 @@ function StoryPage() {
     dek,
     body,
     // Missing memos are Ready; saved held items, open facts and active checks still block.
-    readiness: draftReadiness.state,
+    readiness: draftReadiness?.state,
     readinessReason: draftReadiness?.reason,
     sectionReady,
     openClaims: openClaims.length,

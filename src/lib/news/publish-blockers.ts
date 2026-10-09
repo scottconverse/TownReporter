@@ -25,6 +25,7 @@
 
 import { editorActionError } from "./desk-copy.ts";
 import { refusedAnswer } from "./refused-answer.ts";
+import type { StoryReadinessState } from "./story-readiness.ts";
 
 /**
  * Where a blocker's button goes. The page turns each of these into a real
@@ -89,7 +90,7 @@ export type PublishBlockerState = {
   /** A person has chosen, or confirmed, the section this files under. */
   sectionReady: boolean;
   /** The AI's last saved readiness result for a civic-reporting draft. */
-  readiness?: "checking" | "verified" | "to-check" | "not-ready";
+  readiness?: StoryReadinessState;
   readinessReason?: string;
   /** Claims of absence not yet ticked by a person (`uncheckedGateTodos`). */
   openClaims: number;
