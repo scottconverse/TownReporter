@@ -862,8 +862,9 @@ export const STAGE_START_WINDOW_MS = 150_000;
  * anything at all -- the same reason every other side effect on this page is a
  * seam. What it runs in production is `lms ps --json`, and nothing else.
  */
-export async function probeQwen({ exe = null, timeoutMs = 20_000, run = spawnFixed } = {}) {
-  const lms = exe || resolveOnPath("lms");
+export async function probeQwen({ exe = null, env = process.env, timeoutMs = 20_000, run = spawnFixed } = {}) {
+  const userCli = env.USERPROFILE ? path.join(env.USERPROFILE, ".lmstudio", "bin", "lms.exe") : null;
+  const lms = exe || resolveOnPath("lms", env) || (userCli && fs.existsSync(userCli) ? userCli : null);
   if (!lms) return { ok: true, found: false, models: [], loaded: [], detail: "LM Studio not found" };
   const { code, output } = await run(lms, ["ps", "--json"], { timeoutMs });
   const text = output.join("\n");

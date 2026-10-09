@@ -1577,6 +1577,7 @@ test("a listing this page cannot read never turns into a model name", async () =
   try {
     const missing = await probeQwen({
       exe: null,
+      env: { PATH: process.env.PATH, USERPROFILE: "" },
       run: async () => {
         throw new Error("nothing may be spawned when there is no lms to spawn");
       },
