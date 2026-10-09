@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {deskOverlayBrowser} from './dialog-flow-harness.mjs';
 test('action menus keep every action reachable above navigation by mouse and keyboard',async()=>{
-  const {browser,page}=await deskOverlayBrowser(`root.render(React.createElement(DeskShell,{title:'Story'},React.createElement('div',{style:{position:'fixed',left:240,top:260}},React.createElement(DeskMoreMenu,{items:Array.from({length:10},(_,i)=>({label:'Action '+i,onSelect(){window.chosen=i}}))}),React.createElement('details',{className:'row-more story-more'},React.createElement('summary',{className:'btn quiet'},'Story more'),React.createElement('div',{className:'row-more-panel'},['Preview','Checks','Compare'].map(label=>React.createElement('button',{key:label,onClick(){window.chosen=label}},label)))))));`);
+  const {browser,page}=await deskOverlayBrowser(`root.render(React.createElement(DeskShell,{title:'Story'},React.createElement('div',{className:'menu-anchors',style:{position:'fixed',left:240,top:260}},React.createElement(DeskMoreMenu,{items:Array.from({length:10},(_,i)=>({label:'Action '+i,onSelect(){window.chosen=i}}))}),React.createElement('details',{className:'row-more story-more'},React.createElement('summary',{className:'btn quiet'},'Story more'),React.createElement('div',{className:'row-more-panel'},['Preview','Checks','Compare'].map(label=>React.createElement('button',{key:label,onClick(){window.chosen=label}},label)))))));`);
   try{
     for(const [width,height] of [[720,450],[390,844],[1100,600]]){
       await page.setViewportSize({width,height});
@@ -11,6 +11,9 @@ test('action menus keep every action reachable above navigation by mouse and key
         const menu=page.locator(selector);await menu.locator(':scope > summary').click();
         const panel=menu.locator('.more-menu,.row-more-panel');await page.waitForTimeout(30);const box=await panel.boundingBox();
         assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=width&&box.y+box.height<=height,JSON.stringify({width,height,box}));
+        await page.evaluate(()=>{document.querySelector('.menu-anchors').style.top=(innerHeight+100)+'px';dispatchEvent(new Event('resize'));});
+        assert.ok(await panel.evaluate(el=>el.getBoundingClientRect().bottom<=innerHeight),'an open menu must fit even when its row moves offscreen');
+        await page.evaluate(()=>{document.querySelector('.menu-anchors').style.top='260px';dispatchEvent(new Event('resize'));});
         const controls=await panel.locator('button').all();await menu.locator(':scope > summary').focus();
         for(const control of controls){
           await page.keyboard.press('Tab');assert.equal(await control.evaluate(el=>el===document.activeElement),true,'Tab must reach each action');

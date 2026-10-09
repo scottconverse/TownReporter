@@ -50,7 +50,7 @@ function useViewportMenus() {
           const below = anchor.bottom + 6;
           const top = below + box.height <= height - 12 ? below : Math.max(12, anchor.top - box.height - 6);
           panel.style.setProperty("left", `${left}px`, "important");
-          panel.style.setProperty("top", `${top}px`, "important");
+          panel.style.setProperty("top", `${Math.min(top, height - box.height - 12)}px`, "important");
         }
       };
       const observer = new ResizeObserver(place);
