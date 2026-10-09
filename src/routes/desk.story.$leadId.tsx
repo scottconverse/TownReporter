@@ -1883,7 +1883,7 @@ function StoryPage() {
     refusal: publishRefusal,
     publishedSlug: justPublished ? publishedSlug : null,
   });
-  const blockers = publishBlockers({
+  const publishChecks = publishBlockers({
     headline,
     dek,
     body,
@@ -1904,12 +1904,16 @@ function StoryPage() {
     // M5: which part of that number the record disagrees with, so the blocker
     // and its override can say so.
     contradictedClaims: evidenceState.contradicted,
-    unreviewedAccepted: acceptanceCovers,
+    unreviewedAccepted: false,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
     publishing: publish.isPending,
   });
+  // Acceptance clears the Publish gate; it does not resolve the evidence claims.
+  const blockers = publishChecks.filter((blocker) =>
+    blocker.key !== "claims-unreviewed" || !acceptanceCovers,
+  );
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
@@ -1926,7 +1930,7 @@ function StoryPage() {
     the mutations report, so it is testable without mounting this route.
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
-  const evidenceBlocker = blockers.find((blocker) => blocker.key === "claims-unreviewed");
+  const evidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
   if (evidenceBlocker) draftReadiness = {
     state: "not-ready", openCount: evidenceState.toReview,
     totalCount: Math.max(draftReadiness.totalCount, evidenceState.toReview),
