@@ -253,7 +253,7 @@ export async function storeMeetingTranscriptArtifact(
     `insert into meeting_transcript_artifacts
        (newsroom_id,video_id,artifact_type,storage_path,format,sha256,captured_at,source_method,retention_mode,byte_size,info_path,info_sha256,info_bytes,info_missing_reason,integrity_status,integrity_detail,integrity_checked_at,provenance_json)
      values ($1,$2,'transcript',$3,$4,$5,now(),$6,$7,$8,$9,$10,$11,$12,$13,$14,now(),$15)
-     on conflict (newsroom_id,video_id,artifact_type,sha256)
+     on conflict (newsroom_id,video_id,artifact_type,sha256) where artifact_type='transcript'
      do update set storage_path=excluded.storage_path,format=excluded.format,source_method=excluded.source_method,
        retention_mode=excluded.retention_mode,byte_size=excluded.byte_size,info_path=excluded.info_path,info_sha256=excluded.info_sha256,info_bytes=excluded.info_bytes,info_missing_reason=excluded.info_missing_reason,
        integrity_status=excluded.integrity_status,integrity_detail=excluded.integrity_detail,integrity_checked_at=excluded.integrity_checked_at,

@@ -361,12 +361,13 @@ function ImpactScoreBlock({ impact }: { impact: LedgerItemRow["impact"] }) {
   return (
     <div className="ledger-impact">
       <p className="ledger-impact-head">
-        <span className="ledger-impact-total">{total}/20</span>{" "}
+        <span className="ledger-impact-total">Impact {total} of 20</span>{" "}
         <span className={`ledger-impact-decision ledger-impact-${impactDecision(total).toLowerCase()}`}>
           {impactDecision(total)}
         </span>{" "}
         <span className="ledger-impact-caption">resident impact</span>
       </p>
+      <p className="meta">The maximum of 20 combines four dimensions, each rated from 1 to 5: immediacy, local impact, conflict and novelty.</p>
       <ul className="ledger-impact-parts">
         {IMPACT_DIMENSIONS.map((dimension) => (
           <li key={dimension}>

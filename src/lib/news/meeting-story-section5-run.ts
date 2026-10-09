@@ -1,5 +1,5 @@
 import type { Sql } from "../db.ts";
-import { primeGovDocumentsForTitle } from "./primegov.ts";
+import { primeGovDocumentsForTitle, type PrimeGovMeeting } from "./primegov.ts";
 import { primeGovOriginForNewsroom } from "./primegov-source.ts";
 import { packetItemsForMeeting } from "./meeting-agenda-items.ts";
 import {
@@ -19,6 +19,7 @@ import {
 } from "./meeting-story-section5.ts";
 import { persistSection5, unalignedMeetingLead } from "./meeting-story-section5-persist.ts";
 import { meetingClock } from "./meeting-draft-input.ts";
+import { primeGovVoteRecordsForMeeting, type PrimeGovVoteDocuments } from "./primegov-vote-documents.ts";
 
 export type Section5Deps = {
   packetForTitle?: typeof primeGovDocumentsForTitle;
@@ -29,6 +30,8 @@ export type Section5Deps = {
   structuredVoteBaseUrl?: typeof structuredVoteBaseUrlForNewsroom;
   /** Test seam: the structured vote read itself, so a test never reaches a real council site. */
   structuredVotesForDate?: typeof fetchStructuredVotesForDate;
+  /** Test seam: the portal's own minutes and packet vote records. */
+  voteRecordsForMeeting?: typeof primeGovVoteRecordsForMeeting;
 };
 
 export type Section5Result = {
@@ -93,6 +96,8 @@ export async function runSection5ForArtifact(
 
   const packetLookup = deps.packetForTitle ?? primeGovDocumentsForTitle;
   let packetItems: PacketItem[] = [];
+  let portalOrigin: string | null = null;
+  let portalMeeting: PrimeGovMeeting | null = null;
   try {
     /*
       The portal to ask comes out of this newsroom's own watch list. It used to
@@ -100,13 +105,14 @@ export async function runSection5ForArtifact(
       was matched against Longmont's meetings; with no portal configured there
       is no lookup at all, which is the honest answer and not a fallback.
     */
-    const origin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
-    if (origin) {
-      const packet = await packetLookup(input.title, origin);
+    portalOrigin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
+    if (portalOrigin) {
+      const packet = await packetLookup(input.title, portalOrigin);
       if (packet?.meeting) {
+        portalMeeting = packet.meeting;
         // Real item list comes from the compiled agenda document via the parser,
         // not from documentList template names ("Agenda"/"Packet").
-        packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting, origin);
+        packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting, portalOrigin);
       }
     }
   } catch {
@@ -142,27 +148,36 @@ export async function runSection5ForArtifact(
         url: "",
       }))
     : NO_STRUCTURED_VOTE_SOURCE;
+  let voteDocuments: PrimeGovVoteDocuments = { minutes: [], packet: [] };
+  if (portalMeeting && portalOrigin) {
+    try {
+      voteDocuments = await (deps.voteRecordsForMeeting ?? primeGovVoteRecordsForMeeting)(portalMeeting, portalOrigin);
+    } catch {
+      voteDocuments = { minutes: [], packet: [] };
+    }
+  }
   // Structured records are keyed by ordinance/resolution id (O-2026-46), while
   // chunks are keyed by agenda item number (9). Attach a record to the chunk
   // whose transcript span actually mentions that identifier or motion text.
   const chunkText = (chunk: (typeof chunks)[number]) =>
     segments.filter((s) => chunk.segmentIndexes.includes(s.segmentIndex)).map((s) => s.excerpt).join(" ");
+  const recordMatchesChunk = (record: { item: string; motion: string }, chunk: (typeof chunks)[number], text: string) => {
+    if (record.item.toLowerCase() === chunk.item.toLowerCase()) return true;
+    const bare = record.item.replace(/^[A-Z]-/i, "").toLowerCase();
+    if (text.includes(record.item.toLowerCase()) || (bare.length > 4 && text.includes(bare))) return true;
+    const head = record.motion.slice(0, 40).toLowerCase();
+    return head.length > 10 && text.includes(head);
+  };
   const votes: StructuredVote[] = chunks.map((chunk) => {
     const text = chunkText(chunk).toLowerCase();
-    const matched = structured.records.find((r) => {
-      if (r.item === chunk.item) return true;
-      // The transcript says "ordinance 2026-47"; the record is "O-2026-47".
-      // Compare on the numeric identity so the O/R prefix does not matter.
-      const bare = r.item.replace(/^[A-Z]-/i, "").toLowerCase();
-      if (text.includes(r.item.toLowerCase()) || (bare.length > 4 && text.includes(bare))) return true;
-      const head = r.motion.slice(0, 40).toLowerCase();
-      return head.length > 10 && text.includes(head);
-    }) ?? null;
+    const matched = structured.records.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
+    const minutes = voteDocuments.minutes.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
+    const packet = voteDocuments.packet.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
     return extractStructuredVote({
       item: chunk.item,
       structuredRecord: matched,
-      minutes: null,
-      packet: null,
+      minutes,
+      packet,
       transcript: { excerpt: chunkText(chunk), source: "transcript" },
     });
   });

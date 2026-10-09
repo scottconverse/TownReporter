@@ -1,7 +1,9 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
-import { dailyScanRuntime, planDailySourceRotation, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanPlan } from "./daily-scan-plan.server.ts";
+import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
 import {
   resolveAutomaticForcedRuntime,
@@ -241,21 +243,8 @@ export async function tickDailyScans(
           A pool read is a larger select but it is the only way the rotation can
           see what is due; it is still one indexed read of a 201-row table.
         */
-        const pool = await tx.query<any>(
-          "select id,url,title,kind,tier,status,last_hash,last_fetched_at,last_error,last_ok_at,retry_after,blocked_at,blocked_attempts,consecutive_failures from sources where newsroom_id=$1 and status='accepted' order by id",
-          [p.newsroom_id],
-        );
-        const rotation = planDailySourceRotation({
-          facts: pool,
-          selectedSourceIds: p.selected_source_ids ?? [],
-          cap: p.source_cap,
-        });
-        const sources =
-          rotation.sourceIds.length === pool.length
-            ? pool
-            : rotation.sourceIds
-                .map((id: number) => pool.find((row: { id: number }) => row.id === id))
-                .filter(Boolean);
+        const plan = await dailyScanPlan(tx, p.newsroom_id, p);
+        const sources = plan.sources;
         if (sources.length > p.source_cap)
           throw new Error(
             "Scheduled sources exceed the configured limit. Review the selected accepted sources and resume manually.",
@@ -272,6 +261,8 @@ export async function tickDailyScans(
               localTime: p.local_time,
               timezone,
               sourceCap: p.source_cap,
+              everyDaySourceCount: p.every_day_source_count ?? 8,
+              rotatingSourceCount: Math.max(0, p.source_cap - (p.every_day_source_count ?? 8)),
             }),
             JSON.stringify(sources),
             JSON.stringify(model),
@@ -288,6 +279,12 @@ export async function tickDailyScans(
             JSON.stringify(model),
             r.id,
           ],
+        );
+        await saveScanSourceCoverage(
+          tx,
+          p.newsroom_id,
+          run.id,
+          plan.coverage,
         );
         const [job] = await tx.query<{ id: number }>(
           "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,failover_note,result_json) values($1,$2,'scan',$3,$4,'scheduled','default','queued',$5,$6,$7) returning id",
@@ -327,7 +324,7 @@ export async function tickDailyScans(
 export async function assertDailyScanCanContinue(job: DeskJob) {
   const sql = await getSql();
   const [r] = await sql.query<any>(
-    "select p.enabled,p.paused,p.revision,r.policy_revision,r.model_snapshot,r.source_snapshot from daily_scan_reservations r join daily_scan_policies p on p.newsroom_id=r.newsroom_id join desk_jobs j on j.id=r.desk_job_id where r.scan_run_id=$1 and r.newsroom_id=$2 and j.status='running' and j.claim_token=$3",
+    "select p.enabled,p.paused,p.revision,r.policy_revision,r.model_snapshot,r.source_snapshot,sr.source_coverage from daily_scan_reservations r join scan_runs sr on sr.id=r.scan_run_id join daily_scan_policies p on p.newsroom_id=r.newsroom_id join desk_jobs j on j.id=r.desk_job_id where r.scan_run_id=$1 and r.newsroom_id=$2 and j.status='running' and j.claim_token=$3",
     [job.subject_id, job.newsroom_id, job.claim_token],
   );
   const owner = await sql.query(
@@ -615,7 +612,7 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
       ...deps.scanDeps,
       grokChat: forcedChat as any,
       scheduledGuard: () => assertDailyScanCanContinue(job),
-      scheduledSnapshot: { model, sources: state.source_snapshot },
+      scheduledSnapshot: { model, sources: state.source_snapshot, coverage: state.source_coverage },
       onModelSwitch: async (receipt: {
         previousChoice: string;
         nextChoice: string;

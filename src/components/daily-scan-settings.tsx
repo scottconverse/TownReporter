@@ -20,7 +20,13 @@ import { defaultModelEffort } from "@/lib/news/provider-registry";
 
 type Draft = Pick<
   DailyScanPolicy,
-  "enabled" | "localTime" | "runtime" | "modelEffort" | "sourceCap" | "selectedSourceIds"
+  | "enabled"
+  | "localTime"
+  | "runtime"
+  | "modelEffort"
+  | "sourceCap"
+  | "everyDaySourceCount"
+  | "selectedSourceIds"
 >;
 
 function policyDraft(policy: DailyScanPolicy): Draft {
@@ -30,6 +36,7 @@ function policyDraft(policy: DailyScanPolicy): Draft {
     runtime: policy.runtime,
     modelEffort: policy.modelEffort,
     sourceCap: policy.sourceCap,
+    everyDaySourceCount: policy.everyDaySourceCount,
     selectedSourceIds: policy.selectedSourceIds,
   };
 }
@@ -57,6 +64,7 @@ function sameScheduleConfig(a: Draft, b: Draft): boolean {
     a.runtime === b.runtime &&
     a.modelEffort === b.modelEffort &&
     a.sourceCap === b.sourceCap &&
+    a.everyDaySourceCount === b.everyDaySourceCount &&
     a.selectedSourceIds.length === b.selectedSourceIds.length &&
     a.selectedSourceIds.every((id, index) => id === b.selectedSourceIds[index])
   );
@@ -109,6 +117,8 @@ export function DailyScanSettings() {
     [sources.data],
   );
   const selected = draft?.selectedSourceIds ?? [];
+  const everyDaySourceLimit = Math.min(selected.length, draft?.sourceCap ?? 0);
+  const tooManyEveryDaySources = (draft?.everyDaySourceCount ?? 0) > everyDaySourceLimit;
   const tooManySelected = selected.length > (draft?.sourceCap ?? 0);
   const unavailableSelected = selected.filter((id) => !accepted.some((source) => source.id === id));
 
@@ -347,7 +357,7 @@ export function DailyScanSettings() {
         </div>
         <Field
           label="Daily source limit"
-          hint={`${selected.length} selected / ${draft.sourceCap} daily limit. This first supported schedule reads every selected source, up to 12, in one pass.`}
+          hint={`${selected.length} selected · ${draft.everyDaySourceCount} read every day · ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} rotate through accepted sources.`}
         >
           <input
             className={`${inputClass} mt-1 w-32`}
@@ -356,7 +366,30 @@ export function DailyScanSettings() {
             max={12}
             step={1}
             value={draft.sourceCap}
-            onChange={(event) => changeDraft({ ...draft, sourceCap: Number(event.target.value) })}
+            onChange={(event) => {
+              const sourceCap = Number(event.target.value);
+              changeDraft({
+                ...draft,
+                sourceCap,
+                everyDaySourceCount: Math.min(draft.everyDaySourceCount, sourceCap),
+              });
+            }}
+          />
+        </Field>
+        <Field
+          label="Read every day"
+          hint={`Choose 0 to ${everyDaySourceLimit} daily sources, bounded by ${selected.length} selected and a daily limit of ${draft.sourceCap}. Read them in saved order. Rotate: ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} of ${draft.sourceCap}.`}
+        >
+          <input
+            className={`${inputClass} mt-1 w-32`}
+            type="number"
+            min={0}
+            max={everyDaySourceLimit}
+            step={1}
+            value={draft.everyDaySourceCount}
+            onChange={(event) =>
+              changeDraft({ ...draft, everyDaySourceCount: Number(event.target.value) })
+            }
           />
         </Field>
         <fieldset className="border border-rule p-4">
@@ -364,8 +397,8 @@ export function DailyScanSettings() {
             Accepted community sources ({accepted.length})
           </legend>
           <p className="mt-1 text-sm text-muted">
-            Choose every source this schedule may scan. All accepted sources are shown; none are
-            hidden by beat or format.
+            Choose accepted sources for the daily set. The rest of the limit rotates through other
+            accepted sources by age.
           </p>
           {accepted.length === 0 ? (
             <p className="mt-3 text-sm text-muted">There are no accepted sources yet.</p>
@@ -430,6 +463,12 @@ export function DailyScanSettings() {
             Increase the limit or deselect sources; nothing will be silently skipped.
           </p>
         ) : null}
+        {tooManyEveryDaySources ? (
+          <p className="text-sm text-rust" role="alert">
+            The daily source count exceeds the current maximum of {everyDaySourceLimit}.
+            Reduce it or select more sources within the daily limit.
+          </p>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3">
           <InkButton
             disabled={
@@ -440,7 +479,10 @@ export function DailyScanSettings() {
               tooManySelected ||
               unavailableSelected.length > 0 ||
               draft.sourceCap > 12 ||
-              draft.sourceCap < 1
+              draft.sourceCap < 1 ||
+              !Number.isInteger(draft.everyDaySourceCount) ||
+              draft.everyDaySourceCount < 0 ||
+              tooManyEveryDaySources
             }
             onClick={() => save.mutate()}
           >

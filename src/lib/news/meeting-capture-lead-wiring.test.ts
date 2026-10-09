@@ -82,7 +82,7 @@ function harness() {
       });
       return [];
     }
-    if (/insert into meeting_transcript_artifacts/i.test(text)) return [{ id: 5, captured_at: "2026-01-01T00:00:00Z" }];
+    if (/insert into (?:meeting_audio_captures|meeting_transcript_artifacts)/i.test(text)) return [{ id: 5, captured_at: "2026-01-01T00:00:00Z" }];
     if (/insert into meeting_transcript_segments/i.test(text)) return [];
     if (/from meeting_transcript_artifacts/i.test(text)) return [{ id: 5 }];
     return null;

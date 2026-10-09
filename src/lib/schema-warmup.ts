@@ -2,6 +2,9 @@ import { getSql, readSchemaEnsureMarker } from "./db.ts";
 import { ensureCustomAiConnectionsSchema } from "./news/custom-ai-connections.server.ts";
 import { ensureDarkSchema } from "./news/dark.ts";
 import { ensureDeskDraftMemoSchema } from "./news/desk.ts";
+import { ensureDailyScanPolicySchema } from "./news/daily-scan.ts";
+import { ensureSourceScanPreferencesSchema } from "./news/source-scan-preferences.server.ts";
+import { ensureScanSourceCoverageSchema } from "./news/scan-source-coverage.server.ts";
 import { ensureDraftBatchSchema } from "./news/draft-batch.server.ts";
 import { ensureEditorialRequestSchema, ensureEditorialSchema } from "./news/editorial.server.ts";
 import { ensureFollowUpsSchema } from "./news/follow-ups.ts";
@@ -94,6 +97,27 @@ export const SCHEMA_WARMUP_REGISTRY: readonly SchemaWarmupEntry[] = [
     exportName: "ensureDarkSchema",
     fn: ensureDarkSchema,
     run: ensureDarkSchema,
+  },
+  {
+    name: "daily-scan-fixed-source-count",
+    module: "news/daily-scan.ts",
+    exportName: "ensureDailyScanPolicySchema",
+    fn: ensureDailyScanPolicySchema,
+    run: ensureDailyScanPolicySchema,
+  },
+  {
+    name: "source-scan-preferences",
+    module: "news/source-scan-preferences.server.ts",
+    exportName: "ensureSourceScanPreferencesSchema",
+    fn: ensureSourceScanPreferencesSchema,
+    run: ensureSourceScanPreferencesSchema,
+  },
+  {
+    name: "scan-source-coverage",
+    module: "news/scan-source-coverage.server.ts",
+    exportName: "ensureScanSourceCoverageSchema",
+    fn: ensureScanSourceCoverageSchema,
+    run: ensureScanSourceCoverageSchema,
   },
   {
     name: "desk-draft-memo-columns",
