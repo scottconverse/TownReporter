@@ -593,7 +593,10 @@ function checkedTranscriptCaveat(text: string, context: string, record: WholeRec
     const resultGap = /\b(?:result|vote|outcome)\b/i.test(sentence);
     const stageGap = /\b(?:procedural stage|reading)\b/i.test(sentence);
     if (!motionGap && !resultGap && !stageGap) return sentence;
-    const queryText = `${sentence} ${context}`;
+    // Copy can cover many unrelated agenda items. Never borrow its other
+    // claims' identifiers to answer this sentence's own absence assertion.
+    const queryText = /^(?:find|check|review) (?:the )?(?:missing |original |originating )?motion[.!]?$/i.test(sentence.trim())
+      ? `${sentence} ${context}` : sentence;
     const ids = queryText.match(/\b\d{4}\s*[-–]\s*\d+\b/g)?.map(normalizeForMatch) ?? [];
     const topics = [...new Set(normalizeForMatch(queryText).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
     const query: PackageClaim = { id: "absence-check", text: queryText, status: "UNVERIFIED", sourceIds: [], nextCheck: "" };
@@ -604,8 +607,9 @@ function checkedTranscriptCaveat(text: string, context: string, record: WholeRec
       return related && ((motionGap && motionSegment({ text: candidate.quote } as TapeSegment)) || (resultGap && hasAnnouncedResult(candidate.quote)) || (stageGap && /\b(?:first|second)[\s-]+reading\b/i.test(candidate.quote)));
     });
     if (!found) return sentence;
-    const kind = motionGap ? "motion" : resultGap ? "result" : "reading-stage";
-    return `The retained transcript includes a related ${kind} passage at ${found.locator}; check only remaining substance or legal-effect details.`;
+    // An answered absence is no longer a caveat. Dropping it also avoids
+    // printing a search memo or an imprecise window locator as story copy.
+    return "";
   }).join(" ");
 }
 
