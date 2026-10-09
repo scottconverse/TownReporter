@@ -135,7 +135,7 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - name: Dialog actions stay reachable and scrolling keeps work open
-        run: node --test scripts/dialog-viewport-browser.mjs scripts/dialog-dismissal-browser.mjs
+        run: node --test scripts/dialog-*-browser.mjs
 
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint

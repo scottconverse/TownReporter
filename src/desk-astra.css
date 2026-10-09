@@ -3464,6 +3464,28 @@
   white-space: nowrap;
 }
 
+/* Expanded model help must not size the Queue menu by its longest sentence. */
+.desk-ltr.astra .more:has(.queue-draft-controls > details[open]) > .more-menu {
+  position: fixed;
+  inset: 12px 12px auto auto;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 24px));
+  min-width: 0;
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  z-index: 80;
+}
+.desk-ltr.astra .queue-draft-controls > details { width: 100%; min-width: 0; }
+.desk-ltr.astra .queue-draft-controls .model-picker {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .queue-draft-controls .model-picker > * { grid-column: 1; min-width: 0; }
+
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a
    stand-in can never be mistaken for the compact Job card the design draws
    (Job card anatomy: stage list, progress bar, last activity). */
