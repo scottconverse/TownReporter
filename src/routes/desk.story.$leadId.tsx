@@ -2696,7 +2696,7 @@ function StoryPage() {
               </p>
             ) : null}
           </div>
-          {modelResearchOpen && !locked && !onPaper ? (
+          {modelResearchOpen && !locked ? (
             <section
               className="astra-model-research"
               id="story-model-research"
