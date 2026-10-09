@@ -1,14 +1,11 @@
+import { StoryReadinessChip } from "@/components/story-readiness-chip";
+import { savedStoryReadiness } from "@/lib/news/story-readiness";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
 import {
-  evidenceChip,
-  namesChip,
   pageGateChip,
-  publishBarNote,
   recordedChecks,
-  storyStages,
-  type CheckFacts,
 } from "@/lib/news/check-gates";
 import {
   blockerPressState,
@@ -23,7 +20,7 @@ import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
-import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
+import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
@@ -45,7 +42,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { editorTitle } from "@/lib/news/desk-copy";
-import { Busy, Chip, DeskShell, Field, InkButton } from "@/components/desk-chrome";
+import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
@@ -96,7 +93,6 @@ import {
   editorDraftError,
   expectedDraftJobHasLanded,
   initialStoryTopic,
-  leadScoreLabel,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
@@ -125,7 +121,7 @@ import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
   The Writer / Effort bar's own lines (unit CW): the readiness dot, the
   last-draft line and the save line under the Story label. Each is derived,
   and each refuses to say something the desk did not record -- see the
-  module's own note on what "● Ready" is about.
+  module's own note on what "model availability" is about.
 */
 import {
   lastDraftLine,
@@ -172,22 +168,6 @@ import {
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
-
-function savedStoryReadiness(raw: string | null | undefined): { state: "checking" | "verified" | "to-check" | "not-ready"; reason: string } | null {
-  try {
-    const memo = JSON.parse(raw ?? "{}") as Record<string, unknown>;
-    const value = memo.storyReadiness;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const readiness = value as Record<string, unknown>;
-    if (readiness.version !== 1 || !["checking", "verified", "to-check", "not-ready"].includes(String(readiness.state))) return null;
-    return {
-      state: readiness.state as "checking" | "verified" | "to-check" | "not-ready",
-      reason: typeof readiness.reason === "string" ? readiness.reason : "",
-    };
-  } catch {
-    return null;
-  }
-}
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -538,7 +518,7 @@ function StoryPage() {
 
   /*
     Whether the writer the editor has chosen can actually run, for the drawn
-    "● Ready" dot (unit CW).
+    "model availability" dot (unit CW).
 
     Both reads are `ModelPicker`'s own, under its own query keys, so the bar
     above the panel and the panel's option list are served from one cache entry
@@ -566,7 +546,7 @@ function StoryPage() {
     The writer row's derived words (unit CW).
 
     `readiness` is about the writer -- can the chosen model run on this server?
-    -- not about the draft: the drawing itself shows "● Ready" above a sticky
+    -- not about the draft: the drawing itself shows "model availability" above a sticky
     bar reading "Review 1 name to publish.", so the dot cannot mean "this may
     print". `lastDraft` is the one line the drawing draws about the draft in
     hand, and it is empty unless the desk recorded a draft job that finished:
@@ -1724,7 +1704,6 @@ function StoryPage() {
     unanswered,
     verify,
   });
-  const score = data.lead.newsworthiness ?? 0;
   /*
     The "how we report" page promises that leaning on another newsroom's
     reporting gets them named in the body, not just linked. Linking was
@@ -1878,7 +1857,7 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
-  const draftReadiness = savedStoryReadiness(data.draft?.research_json);
+  const draftReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting);
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1908,7 +1887,12 @@ function StoryPage() {
     headline,
     dek,
     body,
-    readiness: draftReadiness?.state,
+    // A missing fact-check memo describes the chip, not a publishing requirement.
+    // Only an active check or saved open reporting facts hold Publish down.
+    readiness:
+      draftReadiness?.state === "checking" || (draftReadiness?.openCount ?? 0) > 0
+        ? draftReadiness.state
+        : undefined,
     readinessReason: draftReadiness?.reason,
     sectionReady,
     openClaims: openClaims.length,
@@ -2124,41 +2108,7 @@ function StoryPage() {
   */
   const draftChecks = recordedChecks(data.draft?.research_json);
   const nameCheck = readNameCheck(data.draft?.research_json);
-  const checkFacts: CheckFacts = {
-    hasDraft: Boolean(data.draft),
-    /*
-      Unit U24b: the PASS is the RECORD and nothing else. U24 widened this to
-      "a check ran at all", which turned a draft whose findings were all
-      `Could not check` or judged `contradicts` into `✓ Evidence checked` and
-      "All checks done." -- a green claim about an answer nobody had given.
-      "It ran" is the separate fact below, and it only chooses wording.
-    */
-    evidenceChecked: draftChecks.evidenceChecked,
-    evidenceRan: evidenceState.ran,
-    evidenceToReview: evidenceState.toReview,
-    evidenceRequired: draftChecks.evidenceRequired,
-    evidenceOutstanding:
-      evidenceStale || openClaims.length > 0 || reconcileActive || reviewEvidence.isPending,
-    namesUnresolved: draftChecks.namesUnresolved,
-    namedOutlets: data.namedOutlets.length,
-    nameCheckRecorded: draftChecks.nameCheckRecorded,
-    /*
-      The same staleness `DeskNameCheck` prints on the Checks tab: a name check
-      applies to the text it was run against, so a check that finished before
-      the last edit cannot be shown as a pass over this one.
-    */
-    nameCheckComplete: draftChecks.nameCheckComplete,
-    namesOutstanding: Boolean(
-      nameCheck && nameCheck.checkedText !== nameCheckText({ headline, dek, body }),
-    ),
-  };
-  const stages = storyStages(checkFacts, onPaper);
-  const publishGates = [
-    pageGateChip(`${hasUnsavedDraftEdits ? "!" : "✓"} Saved`, !hasUnsavedDraftEdits),
-    evidenceChip(checkFacts),
-    namesChip(checkFacts),
-    pageGateChip(`${previewSeen ? "✓" : "!"} Preview viewed`, previewSeen),
-  ];
+  const publishGates = [pageGateChip(`${hasUnsavedDraftEdits ? "!" : "✓"} Saved`, !hasUnsavedDraftEdits)];
 
   /*
     The evidence check's props, in one place because the drawn action row needs
@@ -2319,17 +2269,6 @@ function StoryPage() {
         <Link to="/desk" className="astra-wb-back">
           ← Today
         </Link>
-        <ol className="astra-wb-stages" aria-label="Story stages">
-          {stages.map((stage) => (
-            <li
-              key={stage.label}
-              className={`astra-wb-stage is-${stage.state}`}
-              aria-current={stage.state === "now" ? "step" : undefined}
-            >
-              {stage.label}
-            </li>
-          ))}
-        </ol>
       </div>
       {/*
         v3.1 fix: the context line is its own row, under the bar, rather than a
@@ -2345,9 +2284,9 @@ function StoryPage() {
       */}
       <div className="astra-wb-context">
         <span>
-          Story from lead · {sectionNameNow} · {leadScoreLabel(score)}
+          Story from lead · {sectionNameNow}
         </span>
-        <Chip s={data.lead.status} />
+        <StoryReadinessChip readiness={draftReadiness} />
         {/*
           Unit BH2 decision 5: the Kill press, on the row that already carries
           this lead's status, because a kill is a change to exactly that. It is
@@ -2467,7 +2406,7 @@ function StoryPage() {
               second list of controls that cannot be reached is the desk
               contradicting itself.
             */}
-            {showsPublishPrep(data.lead.status, Boolean(data.draft)) ? (
+            {showsPublishPrep(data.lead.status, Boolean(data.draft)) && blockers.length > 0 ? (
               <BeforeYouCanPublish
                 blockers={blockers}
                 onAct={actOnBlocker}
@@ -2653,12 +2592,11 @@ function StoryPage() {
                 </button>
               </div>
             ) : null}
-            <Chip s={data.lead.status} />
             <p className="kick">{fromDark ? "Working notes from Dark Desk" : "The lead"}</p>
             <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
-              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)} · {leadScoreLabel(score)}
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)}
               · {leadOrigin(data.lead)}
               {data.lead.investigation_id ? (
                 <>
@@ -2733,25 +2671,7 @@ function StoryPage() {
         </aside>
 
         <section className="story-work">
-          {/*
-            The writer row (Desk Story.dc.html): "Writer | <the model> | Effort
-            | ● Ready | Last draft: Codex Sol, 7:48 a.m.".
-
-            The drawing's first two words are the model and its effort, drawn
-            as two selects. The desk's picker owns both, and it owns the exact
-            model id the effort list depends on (`ModelPicker` resolves it
-            itself), so this row does not try to re-render the drawn value: the
-            first press is the one that already exists -- "Model & research ·
-            <model>", opening the panel that holds both selects -- and the
-            second is a way into the same panel from the Effort side. What the
-            row adds is the two things the drawing says about this draft: the
-            dot, which is about the writer (see `readiness`), and the hour the
-            last draft finished.
-
-            The save state moved from here to the head of the Story editor,
-            where the drawing writes it: it is a sentence about the text below
-            it, not about the model above it.
-          */}
+          {/* Model availability appears only in the Redraft dialog. */}
           <div className="astra-wb-writer">
             <span className="astra-wb-writer-label">Writer</span>
             <button
@@ -2772,9 +2692,6 @@ function StoryPage() {
             >
               Thinking effort
             </button>
-            <span className={`astra-wb-ready astra-wb-ready-${readiness.tone}`} role="status">
-              {readiness.label}
-            </span>
             {lastDraft ? <span className="astra-wb-last">{lastDraft}</span> : null}
             {retiredModelNote ? (
               <p className="note" role="status">
@@ -3926,7 +3843,7 @@ function StoryPage() {
                       panel below it said "This draft has no recorded name
                       check." `publishBarNote` says which one did not run.
                     */
-                    <span className="note">{publishBarNote(checkFacts)}</span>
+                    <span className="note">{draftReadiness.reason}</span>
                   )}
                 </>
               )
@@ -4025,6 +3942,7 @@ function StoryPage() {
           it is rather than a resolved copy that could disagree with it.
         */
         modelEffort={modelEffort}
+        writerStatus={readiness}
         onModelChange={(choice) => {
           modelChoiceTouched.current = true;
           setModelChoice(choice);

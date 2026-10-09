@@ -1,3 +1,4 @@
+import type { StoryReadiness } from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
@@ -4469,6 +4470,7 @@ const DESK_DRAFT_ROWS_SQL = `
            coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
            v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
            v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
+           v.research->'storyReadiness' as story_readiness,
            jb.status as job_status, jb.stage as job_stage,
            jb.started_at as job_started_at, jb.updated_at as job_updated_at,
            jb.model_choice as job_model_choice,
@@ -4521,6 +4523,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
     updated_at: string;
     /** Has any prose been written into this draft row yet? See the CTE note. */
     has_body: boolean;
+    story_readiness: (StoryReadiness & { version: number }) | null;
     lead_status: string;
     origin: string | null;
     newsworthiness: number | null;
@@ -4784,6 +4787,21 @@ export const saveReportingCorrection = createServerFn({ method: "POST" })
         evidence: data.evidence,
       },
     );
+  });
+
+/** Open the run's exact saved draft, without selecting a newer version. */
+export const getFiledReportingDraft = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => rowId.parse(input))
+  .handler(async ({ context, data: draftId }) => {
+    const sql = await getSql();
+    const [draft] = await sql<Pick<DraftRow, "id" | "lead_id" | "headline" | "dek" | "body">>`
+      select d.id, d.lead_id, d.headline, d.dek, d.body from drafts d
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+        and d.lead_id is not null
+      limit 1
+    `;
+    return draft ?? null;
   });
 
 /** The structured reporting package for a lead, scoped to this newsroom. */

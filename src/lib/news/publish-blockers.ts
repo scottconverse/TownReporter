@@ -204,7 +204,11 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
-  if (state.readiness === "checking" || state.readiness === "not-ready") {
+  if (
+    state.readiness === "checking" ||
+    state.readiness === "not-ready" ||
+    state.readiness === "to-check"
+  ) {
     blockers.push({
       key: "readiness",
       sentence: state.readinessReason || (state.readiness === "checking"
