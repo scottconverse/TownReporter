@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import type { ModelEffort } from "./provider-registry.ts";
 import {
   jobStages,
   requestJobCancel,
@@ -44,7 +45,7 @@ export type JobProgressView = {
    * The row's `subject_id`, uninterpreted -- what this job is ABOUT.
    *
    * FB7, item 2. What the subject MEANS depends on the kind: for a draft or a
-   * reconcile it is a lead, for a `dark` or a `brief` it is an investigation,
+   * reconcile it is a lead, for a `dark`, `brief` or `challenge` it is an investigation,
    * and for an `artifact-ocr` it is the artifact whose pages are being read.
    * `leadId` above is the story-card view of the same column and is 0 for
    * every kind that is not a story -- which is exactly why a screen cannot use
@@ -71,6 +72,8 @@ export type JobProgressView = {
   headline: string | null;
   /** Resolved provider label ("Codex Sol", "Local model"), never "auto". */
   model: string;
+  /** Saved reasoning effort for a Dark Desk research run, when present. */
+  modelEffort: ModelEffort | null;
   stages: string[] | null;
   stageIndex: number | null;
   pct: number | null;
@@ -122,6 +125,7 @@ const TITLES: Partial<Record<JobKind, string>> = {
   dark: "Digging the file",
   editorial: "Writing an editorial",
   brief: "Writing the editor brief",
+  challenge: "Challenging the case",
   "routine-notice": "Filing the routine edition",
   "artifact-ocr": "Reading the PDF",
   pull: "Pulling the public record",
@@ -134,9 +138,10 @@ const DONE_TEXT: Partial<Record<JobKind, string>> = {
   reconcile: "The evidence check is done",
   "follow-up": "The check is done",
   scan: "The scan is done",
-  dark: "The round is done",
+  dark: "Case file ready for your decision",
   editorial: "The editorial is written",
   brief: "The brief is written",
+  challenge: "The case review is done",
   "routine-notice": "The routine edition is filed",
   "artifact-ocr": "The PDF pages are read",
   pull: "The pull is done",
@@ -149,9 +154,10 @@ const OPEN_LABEL: Partial<Record<JobKind, string>> = {
   reconcile: "Open the checked draft",
   "follow-up": "Open the follow-up",
   scan: "Open the scan",
-  dark: "Open the file",
+  dark: "Open file",
   editorial: "Open Opinion",
   brief: "Open the file",
+  challenge: "Open the file",
   "routine-notice": "Open the routine desk",
   "artifact-ocr": "Open the file",
   pull: "Open the story",
@@ -168,6 +174,7 @@ const OPEN_LABEL: Partial<Record<JobKind, string>> = {
 const RESULT_HREF: Partial<Record<JobKind, (subjectId: number) => string>> = {
   scan: () => "/desk/scan",
   dark: () => "/desk/dark",
+  challenge: () => "/desk/dark",
   "artifact-ocr": () => "/desk/dark",
   editorial: () => "/desk/opinion",
   // The transcript screen is keyed by the ARTIFACT, and this job's subject IS
@@ -209,6 +216,20 @@ type ProgressShape = Omit<
   | "canRetry"
 >;
 
+const SAVED_MODEL_EFFORTS = new Set<ModelEffort>(["none", "low", "medium", "high", "xhigh", "max"]);
+
+function darkJobEffort(row: Pick<DeskJob, "kind" | "result_json">): ModelEffort | null {
+  if (!["dark", "challenge", "brief"].includes(row.kind) || !row.result_json) return null;
+  try {
+    const value = (JSON.parse(row.result_json) as { modelEffort?: unknown }).modelEffort;
+    return typeof value === "string" && SAVED_MODEL_EFFORTS.has(value as ModelEffort)
+      ? value as ModelEffort
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function progressShape(row: DeskJob, model: string): ProgressShape {
   return {
     id: row.id,
@@ -216,6 +237,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
     subjectId: row.subject_id,
     status: row.status,
     model,
+    modelEffort: darkJobEffort(row),
     stages: jobStages(row),
     stageIndex: row.stage_index ?? null,
     pct: row.pct ?? null,
@@ -389,7 +411,7 @@ export const listFollowUpJobProgress = createServerFn({ method: "GET" })
  *
  * THE ONE READER. It replaces two narrow ones -- `listStoryJobProgress`
  * (`kind in ('draft','reconcile')`) and the shell's `listRecentStoryWork`
- * (`kind='draft'`) -- which between them meant six of the eleven kinds had no
+ * (`kind='draft'`) -- which between them meant six of the earlier kinds had no
  * card surface anywhere in the product: a Scan, a Dark Desk round, a brief, a
  * PDF read, a Pull, a transcription and a routine edition could all be running
  * with nothing on any screen that said so.

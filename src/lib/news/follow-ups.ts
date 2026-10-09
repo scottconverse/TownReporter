@@ -116,6 +116,8 @@ export async function ensureFollowUpsSchema() {
   `,
     "create index if not exists follow_ups_newsroom_status_due on follow_ups (newsroom_id, status, due_on)",
     ...AI_FOLLOW_UP_STATEMENTS,
+    "alter table follow_ups add column if not exists investigation_id integer",
+    "create index if not exists follow_ups_newsroom_investigation_idx on follow_ups (newsroom_id, investigation_id)",
   ]);
 }
 
@@ -178,12 +180,14 @@ export async function performListFollowUps(
   return sql<FollowUpRow>`
     select f.id, f.newsroom_id, f.user_id, f.lead_id, f.article_id, f.who, f.what, f.due_on,
            f.status, f.nudged_at, f.answered_at, f.reply_text, f.created_at, f.updated_at,
-           f.agent_kind, f.targets_json, f.schedule, f.model_choice,
+           f.agent_kind, f.targets_json, f.schedule, f.model_choice, f.investigation_id,
            f.last_run_at, f.next_run_at, f.last_state, f.finding_json,
-           l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline
+           l.headline as lead_headline, a.slug as article_slug, a.headline as article_headline,
+           i.title as investigation_title
     from follow_ups f
     left join leads l on l.id = f.lead_id
     left join articles a on a.id = f.article_id
+    left join investigations i on i.id = f.investigation_id and i.newsroom_id = f.newsroom_id
     where f.newsroom_id = ${owned(context)}
       and f.agent_kind is not null
     order by f.created_at desc
@@ -353,12 +357,22 @@ export async function performCreateAiFollowUp(
   if (!checked.ok) return checked;
   const { what, targets, modelChoice } = checked;
   const sql = await getSql();
+  const investigationId = input.investigationId ?? null;
+  if (investigationId != null) {
+    if (!Number.isSafeInteger(investigationId) || investigationId < 1) {
+      return { ok: false as const, error: "Choose a Dark Desk file in this newsroom." };
+    }
+    const file = await sql<{ id: number }>`
+      select id from investigations where id = ${investigationId} and newsroom_id = ${owned(context)} limit 1
+    `;
+    if (!file[0]) return { ok: false as const, error: "Choose a Dark Desk file in this newsroom." };
+  }
   const rows = await sql<{ id: number }>`
     insert into follow_ups
-      (user_id, newsroom_id, lead_id, article_id, who, what, status,
+      (user_id, newsroom_id, lead_id, article_id, investigation_id, who, what, status,
        agent_kind, targets_json, schedule, model_choice, last_state, next_run_at)
     values (
-      ${context.userId}, ${owned(context)}, ${input.leadId ?? null}, ${input.articleId ?? null},
+      ${context.userId}, ${owned(context)}, ${input.leadId ?? null}, ${input.articleId ?? null}, ${investigationId},
       ${AGENT_METHOD_LABELS[input.agentKind]}, ${what}, 'active',
       ${input.agentKind}, ${JSON.stringify(targets)}, ${input.schedule}, ${modelChoice},
       'waiting', ${nextRunAt(input.schedule)?.toISOString() ?? null}

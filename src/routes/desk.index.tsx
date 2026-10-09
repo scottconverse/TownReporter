@@ -70,7 +70,8 @@ import {
   type DuplicateWarning,
 } from "@/lib/news/import-review";
 import { PASTE_ONE_DISCLOSURE, pasteOneStoryCard } from "@/lib/news/paste-one-story";
-import { listInvestigations, listWorthALook, openDarkInvestigation } from "@/lib/news/dark";
+import { listInvestigations, listWorthALook } from "@/lib/news/dark";
+import { rememberDarkJobFile, saveDarkFilePrefill } from "@/lib/news/dark-seed";
 import {
   editorKindLabel,
   editorDraftError,
@@ -124,8 +125,6 @@ import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { wireScanLine } from "@/lib/news/scan-wire-line";
 
 export const Route = createFileRoute("/desk/")({ component: DeskHome });
-
-const OPEN_KEY = "townreporter.dark.openId";
 
 
 /**
@@ -191,7 +190,17 @@ function openJob(
     case "scan":
       return { label: "Open the scan", go: () => void navigate({ to: "/desk/scan" }) };
     case "dark":
-      return { label: "Open the file", go: () => void navigate({ to: "/desk/dark" }) };
+      return {
+        label: "Open file",
+        go: () => {
+          try {
+            rememberDarkJobFile(sessionStorage, job.subjectId);
+          } catch {
+            /* The Dark Desk will choose its newest file if storage is unavailable. */
+          }
+          void navigate({ to: "/desk/dark" });
+        },
+      };
     case "editorial":
       return { label: "Open Opinion", go: () => void navigate({ to: "/desk/opinion" }) };
     case "follow-up":
@@ -431,30 +440,14 @@ function DeskHome() {
     failedLead: "Could not start the scan. ",
     what: "start the scan",
   });
-  const [darkErr, setDarkErr] = useState<string | null>(null);
-  const startDark = useMutation({
-    mutationFn: (item: { seed: string; title: string }) =>
-      openDarkInvestigation({ data: { paste: item.seed, title: item.title } }),
-    onSuccess: (res) => {
-      if (res?.ok && res.investigationId) {
-        setDarkErr(null);
-        try {
-          sessionStorage.setItem(OPEN_KEY, String(res.investigationId));
-          sessionStorage.setItem("townreporter.dark.autodig", String(res.investigationId));
-        } catch {
-          /* ignore */
-        }
-        void navigate({ to: "/desk/dark" });
-        return;
-      }
-      setDarkErr(
-        res && "error" in res && res.error ? String(res.error) : "Could not open that file.",
-      );
-    },
-    onError: (err) => {
-      setDarkErr(err instanceof Error ? err.message : "Could not open that file.");
-    },
-  });
+  const openDarkStart = (prefill: { question?: string; tip?: string } = {}) => {
+    try {
+      saveDarkFilePrefill(sessionStorage, prefill);
+    } catch {
+      /* The start box remains available if this browser blocks session storage. */
+    }
+    void navigate({ to: "/desk/dark" });
+  };
 
   /*
     "Write a story" -- one box, one click, the way Opinion already works.
@@ -809,9 +802,13 @@ function DeskHome() {
     that has stopped is not running, and the drafts grid below is where a
     stopped job's story is looked at.
   */
-  const liveJobs = (deskJobs.data ?? [])
+  const allDeskJobs = deskJobs.data ?? [];
+  const liveJobs = allDeskJobs
     .filter((row) => row.status === "queued" || row.status === "running")
     .slice(0, 3);
+  const readyDarkJob = allDeskJobs
+    .filter((row) => row.kind === "dark" && row.status === "completed")
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0] ?? null;
   /*
     THE SCAN'S OWN CARD (FB6, item 3). The open scan, if there is one, read from
     the same one job query. A scan whose row has not been written yet (the press
@@ -1320,12 +1317,26 @@ function DeskHome() {
                 <DeskJobCard
                   key={job.id}
                   job={job}
-                  compact
+                  compact={job.kind !== "dark"}
+                  cancelLabel={job.kind === "dark" ? "Stop" : "Cancel"}
                   viewLabel={open?.label}
                   onNavigate={open ? open.go : undefined}
                 />
               );
             })}
+          </div>
+        </section>
+      ) : null}
+
+      {readyDarkJob ? (
+        <section aria-label="Ready to decide">
+          <SecHead title="Ready to decide" sub="The case file is ready for your review." />
+          <div className="today-running">
+            <DeskJobCard
+              job={readyDarkJob}
+              cancelLabel="Stop"
+              onNavigate={(job) => openJob(job, navigate)?.go()}
+            />
           </div>
         </section>
       ) : null}
@@ -2230,11 +2241,6 @@ function DeskHome() {
               drawn for the eye and silent to a screen reader. It is the desk's
               alert now, like every other failure sentence.
             */}
-            {darkErr ? (
-              <p className="note err" role="alert">
-                {darkErr}
-              </p>
-            ) : null}
             {/*
                 CY item 3. The piles by their drawn names, each a label, the
                 sentence that says what is in it, and the count:
@@ -2281,7 +2287,7 @@ function DeskHome() {
             {inbox.length === 0 && onDesk.length === 0 ? (
               <p className="wire-sum">
                 Nothing new tonight.{" "}
-                <Link to="/desk/dark" className="inline-link">
+                <Link to="/desk/dark" className="inline-link" onClick={() => openDarkStart({})}>
                   Start from a tip
                 </Link>
                 .
@@ -2299,10 +2305,7 @@ function DeskHome() {
                       <InkButton
                         tone="invert"
                         small
-                        pending={startDark.isPending}
-                        pendingLabel="Opening…"
-                        disabled={startDark.isPending}
-                        onClick={() => startDark.mutate({ seed: item.seed, title: item.title })}
+                        onClick={() => openDarkStart({ tip: item.seed })}
                       >
                         Start digging
                       </InkButton>
@@ -2324,7 +2327,7 @@ function DeskHome() {
                         className="btn solid small"
                         onClick={() => {
                           try {
-                            sessionStorage.setItem(OPEN_KEY, String(row.id));
+                            rememberDarkJobFile(sessionStorage, row.id);
                           } catch {
                             /* ignore */
                           }

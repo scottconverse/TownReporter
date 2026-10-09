@@ -14,6 +14,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
+import { prepareDarkDeskCapture, assertDarkTapTargets } from "./desk-uiux-dark-case.mjs";
+import { startLocalWalkServer } from "./dark-ci-server.harness.mjs";
 
 const base = checkedUrl(process.env.UIWALK_BASE_URL || "http://127.0.0.1:3491").replace(/\/$/, "");
 const artifactDir = resolve(process.env.UIWALK_ARTIFACT_DIR || "../desk-uiux-walk");
@@ -40,7 +42,7 @@ const SURFACES = [
   { name: "Stats", path: "/desk/stats", kind: "desk", heading: "Stats" },
 ];
 const VIEWPORTS = [
-  { name: "1440px", width: 1440, height: 1000 },
+  { name: "1440px", width: 1440, height: 1100 },
   { name: "1280px", width: 1280, height: 1000 },
   { name: "1024px", width: 1024, height: 1000 },
   { name: "900px", width: 900, height: 1000 },
@@ -116,6 +118,7 @@ const report = {
   authTelemetry: [],
 };
 let browser;
+let stopLocalServer;
 let page;
 let currentCapture = null;
 let createdOwner = false;
@@ -931,6 +934,34 @@ async function captureSurface(page, scenario, surface) {
     timeout: 30_000,
   });
   await establishIdentity(page, surface, scenario);
+  // Finish the route's saved-data requests before comparing its DOM and AX snapshot.
+  await page.waitForLoadState("networkidle");
+  if (surface.name === "Dark Desk") {
+    if (process.argv.includes("--local")) await page.locator(".astra-question").waitFor({ timeout: 30000 });
+    // A fresh desk hides the loading rail when its empty query resolves.
+    // Settle that state before recording numeric control positions to scroll.
+    await prepareDarkDeskCapture(page);
+    await page.getByRole("button", { name: "+ Start a file", exact: true }).click();
+    const startDialog = page.getByRole("dialog", { name: "Start a Dark Desk file", exact: true });
+    await startDialog.waitFor();
+    await assertDarkTapTargets(startDialog);
+    for (const label of await startDialog.locator(".model-picker-label").all()) {
+      const drawn = await label.evaluate((node) => ({ transform: getComputedStyle(node).textTransform, bottom: node.getBoundingClientRect().bottom, controlTop: node.nextElementSibling.getBoundingClientRect().top }));
+      if (drawn.transform !== "none" || drawn.controlTop < drawn.bottom) throw new Error("Start-a-file model labels must stack above their controls in sentence case");
+    }
+    await page.screenshot({ path: screenshotPathFor(scenario, "start-a-file"), fullPage: false });
+    await startDialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await startDialog.waitFor({ state: "hidden" });
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: "instant" }));
+    if (scenario.viewport.width === 1440 && process.argv.includes("--local")) {
+      const top = await page.locator(".decide").evaluate((node) => node.getBoundingClientRect().top + scrollY);
+      const bottom = await page.locator('[aria-label="File decisions"] button').first().evaluate((node) => node.getBoundingClientRect().bottom + scrollY);
+      console.log(`Seeded large file Decide (${scenario.size}): top ${top.toFixed(2)} px; first action row bottom ${bottom.toFixed(2)} px`);
+      if (bottom >= 1100 || (scenario.size === "large" && top >= 1000)) throw new Error(`Large file hides Decide: top ${top.toFixed(2)}, action bottom ${bottom.toFixed(2)} px`);
+      report.darkDecideMeasurements ??= [];
+      report.darkDecideMeasurements.push({ theme: scenario.theme, size: scenario.size, top, bottom, findings: 262, captureRecords: 363, activityLines: await page.locator(".astra-log").count() });
+    }
+  }
   if (surface.name === "Queue") {
     await page.waitForFunction(
       () => document.querySelector('.queue-sel select[aria-label="Section"]')?.options.length > 1,
@@ -1892,11 +1923,12 @@ function checkScaleRatios() {
 }
 
 async function run() {
-  browser = await chromium.launch();
+  browser = await chromium.launch(process.argv.includes("--local") && process.platform === "win32" ? { channel: "chrome" } : {});
   const context = await browser.newContext({
     viewport: { width: VIEWPORTS[0].width, height: VIEWPORTS[0].height },
   });
   page = await context.newPage();
+  await page.route("**/*", (route) => new URL(route.request().url()).origin === new URL(base).origin ? route.continue() : route.abort());
   trackAuthHttp(page);
   page.setDefaultNavigationTimeout(30_000);
   let index = 0;
@@ -2029,6 +2061,7 @@ async function run() {
 }
 
 try {
+  if (process.argv.includes("--local")) stopLocalServer = await startLocalWalkServer(base, artifactDir);
   console.log(
     "Rendered design walk: " + EXPECTED_CAPTURES + " captures across " +
       VIEWPORTS.length + " viewports × " + THEMES.length + " themes × " + SIZES.length + " text sizes.",
@@ -2061,6 +2094,7 @@ try {
   await flushAuthTelemetry();
   persistReport();
   await browser?.close().catch(() => {});
+  await stopLocalServer?.();
 }
 
 console.log(

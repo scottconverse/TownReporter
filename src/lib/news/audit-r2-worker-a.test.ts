@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { editorTitle } from "./desk-copy.ts";
 import {
   INVESTIGATION_TITLE_LIMIT,
-  newestOpenFile,
+  newestTouchedFile,
   fullFileQuestion,
   signalCounts,
 } from "./dark-rail.ts";
@@ -22,15 +22,16 @@ test("shared title cleaner strips provenance and preserves agenda identifiers", 
   );
 });
 
-test("auto-open picks the newest Open file and never a newer Set aside or Waiting file", () => {
+// guards: a newer file must not be hidden because it is running or set aside
+test("auto-open picks the most recently touched file", () => {
   const rows = [
     { id: 1, status: "open", updated_at: "2026-09-10T00:00:00Z" },
     { id: 2, status: "paused", updated_at: "2026-09-12T00:00:00Z" },
     { id: 3, status: "aside", updated_at: "2026-09-15T00:00:00Z" },
     { id: 4, status: "investigating", updated_at: "2026-09-16T00:00:00Z" },
   ];
-  assert.equal(newestOpenFile(rows)?.id, 2);
-  assert.equal(newestOpenFile(rows.slice(2)), undefined);
+  assert.equal(newestTouchedFile(rows)?.id, 4);
+  assert.equal(newestTouchedFile([]), undefined);
   assert.deepEqual(
     rows.map((r) => r.id),
     [1, 2, 3, 4],

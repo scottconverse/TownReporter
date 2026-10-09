@@ -76,6 +76,10 @@ import { DOCUMENT_COUNT_LIMIT, DOCUMENT_FILE_LIMIT } from "@/lib/news/story-docu
 import type { SourceRow } from "@/lib/news/types";
 import { useEditorSections } from "@/lib/use-sections";
 import { sourceIdentity } from "@/lib/news/url-guard";
+import { useFirstRunPickerDefault } from "@/components/first-run-picker-default";
+import { defaultModelEffort } from "@/lib/news/provider-registry";
+import type { ModelEffort } from "@/lib/news/provider-registry";
+import type { StoryModelChoice } from "@/lib/news/model-choice";
 import {
   AddLeadBody,
   AddSourcesBody,
@@ -897,8 +901,11 @@ export function AddToStoryDialog({
 export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
+  defaultLimit?: string;
+  defaultModel?: StoryModelChoice;
+  defaultEffort?: ModelEffort | null;
   /**
-   * Seeds the two fields the caller already knows, instead of making the editor
+   * Seeds the file fields the caller already knows, instead of making the editor
    * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
    * row's prefill is cleared again by the next open that has none.
    */
@@ -957,8 +964,11 @@ export type DarkFileDialogProps = {
  * memoized on the two strings rather than on the object: a caller passing an
  * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride }: DarkFileDialogProps) {
   const press = usePress();
+  const modelFromModels = useFirstRunPickerDefault("dark") ?? "auto";
+  const defaultModel = modelOverride ?? modelFromModels;
+  const defaultEffort = effortOverride ?? defaultModelEffort(defaultModel);
   // The factory must be stable -- `useDialogState` reseeds on every open -- so
   // it is memoized on the seed and on the prefill's two strings rather than
   // rebuilt on each render. A caller passing an inline object literal for
@@ -967,10 +977,13 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed }: DarkF
   // beyond winning over the prefill when a caller somehow passes both.
   const prefillQuestion = prefill?.question;
   const prefillTip = prefill?.tip;
+  const prefillExplanation = prefill?.explanation;
   const factory = React.useCallback(
     () =>
-      seed ? darkFileFromSeed(seed) : darkFileSeed({ question: prefillQuestion, tip: prefillTip }),
-    [seed, prefillQuestion, prefillTip],
+      seed
+        ? darkFileFromSeed(seed, defaultModel, defaultEffort, defaultLimit)
+        : darkFileSeed({ question: prefillQuestion, tip: prefillTip, explanation: prefillExplanation }, defaultModel, defaultEffort, defaultLimit),
+    [seed, prefillQuestion, prefillTip, prefillExplanation, defaultModel, defaultEffort, defaultLimit],
   );
   const [state, set] = useDialogState<DarkFileState>(factory, open, press.clear);
 

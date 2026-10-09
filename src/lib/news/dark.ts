@@ -5,6 +5,7 @@ import {
   darkCountyInput,
   darkOpenInput,
   darkRunInput,
+  darkRetryInput,
   darkSignalInput,
   darkStepInput,
   redditTipInput,
@@ -51,6 +52,7 @@ import { assertRate, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
+  evidenceAppearsInText,
   groundingCorpus,
   matchDeadEnds,
   researchLoop,
@@ -84,9 +86,17 @@ import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
-import { rankWorthItems, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
+import { rankWorthItems, presentWorthItems, signalReviewItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
-import { titlesOverlap, topicFromText } from "./desk-copy.ts";
+import { ensureFollowUpsSchema, parseFinding, performListFollowUps } from "./follow-ups.ts";
+import { ensurePageWatchSchema } from "./page-watch.ts";
+import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
+import {
+  buildInvestigationActivity,
+  titlesOverlap,
+  topicFromText,
+  type InvestigationActivityInput,
+} from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
@@ -106,10 +116,12 @@ import {
   describeDials,
   estimateMinutes,
   stanceFor,
+  type DarkScope,
   type DarkDials,
 } from "./dark-dials.ts";
 import {
   enqueueJob,
+  ensureJobsSchema,
   findOpenJob,
   latestJob,
   pctFor,
@@ -126,7 +138,7 @@ import {
   type DeskJob,
 } from "./jobs.ts";
 import {
-  createDarkRunBudget,
+  createDarkRunBudgetForFile,
   type DarkRunBudget,
   type DarkRunStopReason,
   type DarkRunUsageSnapshot,
@@ -138,19 +150,55 @@ const DARK_ARTIFACT_CAP = 12_000;
 const DARK_ARTIFACT_COUNT = 8;
 const SECTION_BUDGET_MARKER = "\n[section budget reached]";
 
+type DarkFileRunLimits = { key: DarkLimitKey; minutes: number; dollars: number | null; scope: DarkScope };
+
+async function darkFileRunLimits(investigationId: number, newsroomId: number): Promise<DarkFileRunLimits> {
+  const sql = await getSql();
+  const rows = await sql<{
+    limit_key: string;
+    limit_minutes: number;
+    limit_dollars: number | string | null;
+    scope_json: string;
+  }>`
+    select limit_key, limit_minutes, limit_dollars, scope_json
+    from investigations where id = ${investigationId} and newsroom_id = ${newsroomId} limit 1
+  `;
+  const saved = rows[0];
+  const limit = DARK_LIMITS.find((row) => row.key === saved?.limit_key) ?? DARK_LIMITS[1];
+  let scope: DarkScope = "city";
+  try {
+    const parsed = JSON.parse(saved?.scope_json || "{}") as { scope?: unknown };
+    if (["city", "county", "region", "adjacent"].includes(String(parsed.scope))) scope = parsed.scope as DarkScope;
+  } catch {
+    /* Old or malformed rows keep the city default. */
+  }
+  const minutes = Number(saved?.limit_minutes);
+  const dollars = saved?.limit_dollars == null ? limit.dollars : Number(saved.limit_dollars);
+  return {
+    key: limit.key,
+    minutes: Number.isFinite(minutes) && minutes > 0 ? minutes : limit.minutes,
+    dollars: dollars != null && Number.isFinite(dollars) ? dollars : null,
+    scope,
+  };
+}
+
 function darkRunBudget(
   dials: DarkDials,
   choice: EffectiveProviderChoice,
   overrides: ProviderOverrides | null,
   verificationLimit: number,
+  fileLimits: DarkFileRunLimits,
 ): DarkRunBudget {
-  const hopLimit = budgetFor(dials).hops;
-  return createDarkRunBudget({
-    elapsedMs: providerBudget(choice, overrides).wallMs,
-    modelCalls: hopLimit * 2 + Math.max(0, verificationLimit) + 3,
-    searches: hopLimit * 3 + Math.max(0, verificationLimit) * 4,
-    documentReads: hopLimit * 4,
-  });
+  const hopLimit = hopsForLimit(fileLimits.key);
+  return createDarkRunBudgetForFile(
+    {
+      elapsedMs: providerBudget(choice, overrides).wallMs,
+      modelCalls: hopLimit * 2 + Math.max(0, verificationLimit) + 3,
+      searches: hopLimit * 3 + Math.max(0, verificationLimit) * 4,
+      documentReads: hopLimit * 4,
+    },
+    { minutes: fileLimits.minutes, dollars: fileLimits.dollars },
+  );
 }
 
 /**
@@ -403,7 +451,7 @@ const readDarkSettingsFor = createServerOnlyFn(async (newsroomId: number) =>
 );
 const saveDarkSettingsFor = createServerOnlyFn(async (
   newsroomId: number,
-  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences },
+  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences; defaultLimitKey?: DarkLimitKey },
 ) => (await import("./dark-preferences.server.ts")).saveDarkSettingsFor(newsroomId, input));
 const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
   (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
@@ -611,6 +659,11 @@ export type DarkPromiseRow = {
 export type InvestigationRow = {
   id: number;
   title: string;
+  ordinary_explanation: string;
+  scope_json: string;
+  limit_key: string;
+  limit_minutes: number;
+  limit_dollars: number | string | null;
   status: string;
   summary: string;
   hops: number;
@@ -620,6 +673,13 @@ export type InvestigationRow = {
   updated_at: string;
   records?: number;
   still_open?: number;
+  waiting_follow_up?: string | null;
+  found_follow_up?: string | null;
+  waiting_watch?: string | null;
+  waiting_since?: string | null;
+  has_ai_followup?: boolean;
+  closed_kind?: string | null;
+  close_note?: string | null;
   /**
    * The model that last dug this file (0.6.2). Null on every investigation
    * opened before Dark Desk had a picker; the page falls back to Automatic.
@@ -824,6 +884,7 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
       dig integer not null default 4,
       nerve integer not null default 5,
       scope text not null default 'city',
+      default_limit_key text not null default 'standard' check (default_limit_key in ('quick', 'standard', 'deep')),
       updated_at timestamptz not null default now()
     )`,
   `create table if not exists dark_runs (
@@ -906,6 +967,7 @@ export const DARK_SCHEMA_STATEMENTS: readonly string[] = [
   `alter table dark_runs add column if not exists stage text`,
   `alter table dark_settings add column if not exists county text`,
   `alter table dark_settings add column if not exists research_preferences text not null default '{}'`,
+  `alter table dark_settings add column if not exists default_limit_key text not null default 'standard' check (default_limit_key in ('quick', 'standard', 'deep'))`,
   `alter table dark_runs add column if not exists research_preferences_json text`,
   `alter table dark_runs add column if not exists verification_counts_json text`,
   `alter table dark_runs add column if not exists investigation_id integer`,
@@ -967,14 +1029,35 @@ export const listDarkPromises = createServerFn({ method: "GET" })
     `;
   });
 
-export const listInvestigations = createServerFn({ method: "GET" })
-  .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
-    await ensureDarkSchema();
-    const sql = await getSql();
-    const rows = await sql<InvestigationRow>`
-      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
-        i.created_at, i.updated_at,
+export async function listInvestigationsFor(newsroomId: number) {
+  await ensureDarkSchema();
+  await ensureFollowUpsSchema();
+  await ensurePageWatchSchema();
+  const sql = await getSql();
+  const rows = await sql<InvestigationRow>`
+      select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
+        i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+        i.created_at, i.updated_at, i.closed_kind, i.close_note,
+        exists(
+          select 1 from follow_ups f
+          where f.newsroom_id = i.newsroom_id and f.agent_kind is not null
+        ) as has_ai_followup,
+        (select f.what from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.status = 'active' and f.agent_kind is not null and f.last_state is distinct from 'found'
+         order by f.id desc limit 1) as waiting_follow_up,
+        (select f.created_at::text from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.status = 'active' and f.agent_kind is not null and f.last_state is distinct from 'found'
+         order by f.id desc limit 1) as waiting_since,
+        (select f.what from follow_ups f
+         where f.investigation_id = i.id and f.newsroom_id = i.newsroom_id
+           and f.agent_kind is not null and f.last_state = 'found'
+         order by f.id desc limit 1) as found_follow_up,
+        (select coalesce(nullif(m.watch_reason, ''), m.title) from source_monitors m
+         where m.investigation_id = i.id and m.newsroom_id = i.newsroom_id
+           and m.manual_watch = true and m.watch_state = 'active' and m.enabled = true
+         order by m.id desc limit 1) as waiting_watch,
         coalesce((
           -- Unit DD1, item 6: captures, and only captures. The editor's own
           -- pasted tip is an editor:// row, and counting it here is what put
@@ -988,15 +1071,19 @@ export const listInvestigations = createServerFn({ method: "GET" })
             and f.status in ('open', 'investigating', 'reopened', 'deferred')
         ), 0) as still_open
       from investigations i
-      where i.newsroom_id = ${owned(context)}
+      where i.newsroom_id = ${newsroomId}
       order by i.updated_at desc
     `;
-    return rows.map((r) => ({
-      ...r,
-      records: Number(r.records ?? 0),
-      still_open: Number(r.still_open ?? 0),
-    }));
-  });
+  return rows.map((r) => ({
+    ...r,
+    records: Number(r.records ?? 0),
+    still_open: Number(r.still_open ?? 0),
+  }));
+}
+
+export const listInvestigations = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => listInvestigationsFor(owned(context)));
 
 async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
   const sql = await getSql();
@@ -1066,7 +1153,7 @@ async function gatherWorthALook(newsroomId: number): Promise<WorthSeed[]> {
     order by id desc limit 8
   `.catch(() => []);
   return presentWorthItems(
-    rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises }),
+    signalReviewItems(rankWorthItems({ anomalies, monitors, leads, frontier, signals, promises })),
   );
 }
 
@@ -1084,7 +1171,9 @@ export const getInvestigation = createServerFn({ method: "GET" })
     await ensureDarkSchema();
     const sql = await getSql();
     const inv = await sql<InvestigationRow>`
-      select i.id, i.title, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+      select i.id, i.title, i.ordinary_explanation, i.scope_json, i.limit_key, i.limit_minutes,
+             i.limit_dollars, i.status, i.summary, i.hops, i.budget, i.pause_reason,
+             i.closed_kind, i.close_note,
              i.created_at, i.updated_at, i.last_model_choice,
              coalesce((
                select count(*)::int from frontier_items f
@@ -1315,6 +1404,24 @@ export const getInvestigation = createServerFn({ method: "GET" })
       // below are the real content; this only ever helps.
       brief = null;
     }
+    const sourceCaptureIds = [...new Set([
+      ...claims.map((claim) => claim.capture_event_id).filter((captureId): captureId is number => captureId != null),
+      ...(brief?.contradictions ?? []).flatMap((pair) => [pair.first.captureId, pair.second.captureId]),
+    ])];
+    const sourceCaptures = sourceCaptureIds.length
+      ? await sql<{ id: number; title: string; url: string }>`
+          select ce.id, coalesce(a.title, '') as title, ce.source_url as url
+          from capture_events ce
+          left join artifacts a on a.capture_event_id = ce.id and a.newsroom_id = ce.newsroom_id
+          where ce.id = any(${sourceCaptureIds}) and ce.investigation_id = ${id}
+            and ce.newsroom_id = ${owned(context)}
+        `.catch(() => [] as { id: number; title: string; url: string }[])
+      : [];
+    const challengeRows = await sql<{ summary: string; createdAt: string }>`
+      select summary, created_at::text as "createdAt" from investigation_challenges
+      where investigation_id = ${id} and newsroom_id = ${owned(context)}
+      order by id desc limit 1
+    `.catch(() => [] as { summary: string; createdAt: string }[]);
 
     /*
       "investigating" is the only status the page polls on -- see
@@ -1344,6 +1451,26 @@ export const getInvestigation = createServerFn({ method: "GET" })
       kind: "brief",
       subjectId: id,
     });
+    const challenge_job = await latestJob({
+      newsroomId: owned(context),
+      kind: "challenge",
+      subjectId: id,
+    });
+    const investigationFollowUps = (await performListFollowUps(
+      { userId: context.userId, newsroomId: owned(context) },
+      { limit: 200 },
+    ))
+      .filter((row) => row.investigation_id === id)
+      .map((row) => ({
+        id: row.id,
+        what: row.what,
+        agentKind: row.agent_kind,
+        status: row.status,
+        lastState: row.last_state,
+        findingJson: row.finding_json,
+        targetsJson: row.targets_json,
+        createdAt: row.created_at,
+      }));
 
     return {
       investigation: inv[0],
@@ -1355,7 +1482,13 @@ export const getInvestigation = createServerFn({ method: "GET" })
       briefJob: brief_job
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
+      challengeJob: challenge_job
+        ? { id: challenge_job.id, status: challenge_job.status, stage: challenge_job.stage, error: challenge_job.error }
+        : null,
+      latestChallenge: challengeRows[0] ?? null,
+      sourceCaptures,
       brief,
+      investigationFollowUps,
       captureCounts,
       frontier,
       artifacts,
@@ -1369,6 +1502,90 @@ export const getInvestigation = createServerFn({ method: "GET" })
       searches,
       signals,
     };
+  });
+
+export const investigationActivity = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((id: unknown) => rowId.parse(id))
+  .handler(async ({ context, data: id }) => {
+    await ensureDarkSchema();
+    await ensureInvestigateSchema();
+    await ensurePageWatchSchema();
+    const sql = await getSql();
+    const newsroomId = owned(context);
+    const [captures, searches, findings, deadEnds, runs, followUps, watchedPages] = await Promise.all([
+      sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }>`
+        select ce.id, ce.observed_at::text as at, coalesce(a.title, '') as title, ce.source_url as url,
+          ce.fetch_outcome as outcome, ce.http_status as "httpStatus", ce.disappearance as removed
+        from capture_events ce
+        left join artifacts a on a.capture_event_id = ce.id and a.newsroom_id = ce.newsroom_id
+        where ce.investigation_id = ${id} and ce.newsroom_id = ${newsroomId}
+        order by ce.observed_at desc limit 120
+      `.catch(() => [] as { id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }[]),
+      sql<{ id: number; at: string; state: string | null; resultsJson: string }>`
+        select id, created_at::text as at, state, results_json as "resultsJson"
+        from search_log where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        order by created_at desc limit 120
+      `.catch(() => [] as { id: number; at: string; state: string | null; resultsJson: string }[]),
+      sql<{ id: number; at: string; body: string }>`
+        select id, created_at::text as at, body from claims
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+          and (capture_event_id is not null or source_url is not null)
+        order by created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; body: string }[]),
+      sql<{ id: number; at: string; hypothesis: string }>`
+        select id, created_at::text as at, hypothesis from dead_ends
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        order by created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; hypothesis: string }[]),
+      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }>`
+        select id, coalesce(finished_at, started_at)::text as at, stop_reason as "stopReason",
+          (error is not null) as failed, error
+        from dark_runs
+        where investigation_id = ${id} and newsroom_id = ${newsroomId}
+          and (finished_at is not null or error is not null or stop_reason is not null)
+        order by started_at desc limit 30
+      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }[]),
+      performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
+      sql<{ id: number; at: string; title: string; url: string; state: string }>`
+        select c.id, c.created_at::text as at, m.title, m.url, c.state
+        from manual_watch_checks c
+        join source_monitors m on m.id = c.monitor_id and m.newsroom_id = c.newsroom_id
+        where m.investigation_id = ${id} and m.newsroom_id = ${newsroomId}
+          and m.manual_watch = true and c.state in ('changed', 'unavailable')
+        order by c.created_at desc limit 60
+      `.catch(() => [] as { id: number; at: string; title: string; url: string; state: string }[]),
+    ]);
+    const events: InvestigationActivityInput[] = [
+      ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed })),
+      ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson })),
+      ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
+      ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
+      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed, failureReason: row.error })),
+      ...watchedPages.map((row) => ({
+        id: `watch-${row.id}`,
+        at: row.at,
+        kind: "watch" as const,
+        title: row.title,
+        url: row.url,
+        changed: row.state === "changed",
+        removed: row.state === "unavailable",
+      })),
+      ...followUps
+        .filter((row) => row.investigation_id === id && (["active", "paused"].includes(row.status) || row.last_state === "found"))
+        .map((row) => {
+          const finding = parseFinding(row.finding_json);
+          const found = row.last_state === "found";
+          return {
+            id: `follow-up-${row.id}`,
+            at: row.last_run_at ?? row.created_at,
+            kind: "follow-up" as const,
+            body: found ? finding.summary || finding.title || row.what : row.what,
+            found,
+          };
+        }),
+    ];
+    return buildInvestigationActivity(events);
   });
 
 export async function readArtifactForEditor(sql: Sql, id: number, newsroomId: number, offset: number) {
@@ -1537,8 +1754,8 @@ export async function buildDarkSynthesisPack(
   packCap: number = DARK_SYNTHESIS_PACK_CAP,
 ): Promise<string> {
   const sql = await getSql();
-  const investigation = await sql<{ title: string }>`
-    select title from investigations
+  const investigation = await sql<{ title: string; ordinary_explanation: string }>`
+    select title, ordinary_explanation from investigations
     where id = ${investigationId} and newsroom_id = ${newsroomId}
     limit 1
   `;
@@ -1591,6 +1808,9 @@ export async function buildDarkSynthesisPack(
   const { place } = await readDarkPlace(newsroomId);
   const context = [
     `INVESTIGATION QUESTION:\n${capText(investigation[0]?.title ?? "(unknown)", 600)}${paste ? `\nEDITOR PASTE:\n${capText(paste, 4_000)}` : ""}`,
+    ...(investigation[0]?.ordinary_explanation?.trim()
+      ? [`ORDINARY EXPLANATION TO RULE OUT FIRST:\n${capText(investigation[0].ordinary_explanation, 1_600)}`]
+      : []),
     `CITY: ${place.city}, ${place.state}. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
     `WATCH LIST:\n${sources.slice(0, 30).map((s) => `${s.tier} ${s.status} ${capText(s.title, 180)} ${capText(s.url, 300)}`).join("\n") || "(empty)"}`,
     `SEARCHES RUN:\n${searches.map((s) => capText(s.query, 360)).join("\n") || "(none)"}`,
@@ -2012,6 +2232,100 @@ async function runVerificationStage(
     return out.summary;
 }
 
+export async function performChallengeWork(
+  job: DeskJob,
+  deps: { verify?: typeof verifyRunSignals; readPlace?: typeof readDarkPlace } = {},
+) {
+  await ensureDarkSchema();
+  await throwIfJobCancelled(job.id);
+  const sql = await getSql();
+  const investigationId = job.subject_id;
+  const runs = await sql<{
+    id: number;
+    model_choice: string | null;
+    research_preferences_json: string | null;
+  }>`
+    select id, model_choice, research_preferences_json from dark_runs
+    where newsroom_id = ${job.newsroom_id} and investigation_id = ${investigationId}
+    order by started_at desc, id desc limit 1
+  `;
+  const run = runs[0] ?? null;
+  let caseBrief: InvestigationBrief | null = null;
+  if (!run) {
+    const briefRows = await sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${investigationId} and newsroom_id = ${job.newsroom_id} limit 1
+    `;
+    try {
+      caseBrief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+    } catch {
+      caseBrief = null;
+    }
+  }
+  const choice = effectiveStoryModelChoice(job.model_choice);
+  const overrides = applyJobLocalModelSnapshot(
+    job,
+    await readProviderOverrides(job.newsroom_id, "dark").catch(() => ({})),
+  );
+  let preferences: ResearchSnapshot | undefined;
+  try {
+    const snapshot = JSON.parse(run?.research_preferences_json ?? "{}") as {
+      preferences?: ResearchSnapshot;
+    };
+    preferences = snapshot.preferences;
+  } catch {
+    preferences = undefined;
+  }
+  const report = progressReporterFor(job);
+  await report("Challenging the case", pctFor(0, 1));
+  let result: Awaited<ReturnType<typeof verifyRunSignals>> = {
+    checked: 0,
+    eligible: 0,
+    deferred: 0,
+    failed: 0,
+    verified: 0,
+    unverified: 0,
+    searches: [],
+    summary: caseBrief
+      ? "The saved case brief was challenged."
+      : "No saved case brief or research round to challenge.",
+  };
+  if (run || caseBrief) {
+    const place = await (deps.readPlace ?? readDarkPlace)(job.newsroom_id);
+    const verify = deps.verify ?? verifyRunSignals;
+    result = await waitForModel({
+      jobId: job.id,
+      label: () => modelChoiceLabel(choice),
+      run: () => verify({
+        userId: job.user_id,
+        newsroomId: job.newsroom_id,
+        runId: run?.id ?? null,
+        investigationId,
+        caseBrief,
+        place: place.place,
+        officialDomains: place.official,
+        pressDomains: place.press,
+        choice,
+        overrides,
+        preferences,
+        reasoningEffort: savedJobEffort(job),
+      }),
+    });
+  }
+  await throwIfJobCancelled(job.id);
+  await sql`
+    insert into investigation_challenges (
+      newsroom_id, investigation_id, job_id, run_id, summary, result_json
+    ) values (
+      ${job.newsroom_id}, ${investigationId}, ${job.id}, ${run?.id ?? null},
+      ${result.summary.slice(0, 4000)}, ${JSON.stringify(result)}
+    )
+    on conflict (newsroom_id, job_id) do update set
+      run_id = excluded.run_id, summary = excluded.summary,
+      result_json = excluded.result_json
+  `;
+}
+
 function asDarkError(err: unknown): string {
   if (err && typeof err === "object" && "error" in err)
     return String((err as { error: unknown }).error);
@@ -2098,9 +2412,10 @@ async function executeDarkRun(
 
     // Same setting as a continued round: an editor who turned the desk up
     // expects the file they open next to dig that hard too.
-    const dials = snapshot.dials;
-    const budget = budgetFor(dials);
-    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const fileLimits = await darkFileRunLimits(investigationId, newsroomId);
+    const dials = { ...snapshot.dials, scope: fileLimits.scope };
+    const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
+    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
@@ -2486,6 +2801,127 @@ export const continueInvestigation = createServerFn({ method: "POST" })
       ? startDarkRound(context, data)
       : startDarkRound(context, data.id, data.modelChoice, data.modelEffort);
   });
+
+export type DarkRoundRetryDeps = {
+  nextModel?: (job: DeskJob, failure: string) => Promise<EffectiveProviderChoice | null>;
+  start?: typeof startDarkRound;
+};
+
+export async function retryDarkRoundFor(
+  context: { userId: string; newsroomId?: number },
+  jobId: number,
+  nextModel = false,
+  deps: DarkRoundRetryDeps = {},
+) {
+  await ensureDarkSchema();
+  await ensureJobsSchema();
+  const sql = await getSql();
+  const rows = await sql<DeskJob>`
+    select * from desk_jobs
+    where id = ${jobId} and newsroom_id = ${owned(context)} and kind = 'dark'
+    limit 1
+  `;
+  const job = rows[0];
+  if (!job) return { ok: false as const, error: "Research round not found." };
+  if (job.status !== "failed") return { ok: false as const, error: "Only a stopped round can be retried." };
+  const file = await sql<{ status: string }>`
+    select status from investigations where id = ${job.subject_id} and newsroom_id = ${owned(context)} limit 1
+  `;
+  if (!file[0]) return { ok: false as const, error: "Investigation not found." };
+  if (file[0].status === "closed") return { ok: false as const, error: "Pull the file back before retrying." };
+
+  let choice = effectiveStoryModelChoice(job.model_choice);
+  if (nextModel) {
+    const failure = job.error && !/cancel(?:led|ed)? by the editor|stopped by the editor/i.test(job.error)
+      ? job.error
+      : "the previous model timed out with no output";
+    const planned = deps.nextModel
+      ? await deps.nextModel(job, failure)
+      : (await planDarkRoundFailover(job, failure, {
+          setModelChoice: async () => undefined,
+          setStage: async () => undefined,
+        }))?.next ?? null;
+    if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." };
+    choice = planned;
+  }
+  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job));
+  if (!result.ok) return { ok: false as const, error: result.error || "Could not restart this round." };
+  return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
+}
+
+export const retryDarkRound = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => darkRetryInput.parse(raw))
+  .handler(async ({ context, data }) => {
+    const notSetUp = await paperSetUpRefusal(owned(context), "retry this research round");
+    if (notSetUp) return { ok: false as const, error: notSetUp };
+    return retryDarkRoundFor(context, data.jobId, data.nextModel);
+  });
+
+export async function queueInvestigationChallengeFor(
+  context: { userId: string; newsroomId?: number },
+  id: number,
+  modelChoice = "auto",
+  effortValue?: unknown,
+  kick = true,
+) {
+  await ensureDarkSchema();
+  const newsroomId = owned(context);
+  const sql = await getSql();
+  const file = await sql<{ id: number }>`
+    select id from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!file[0]) return { ok: false as const, error: "Investigation not found" };
+  const priorRun = await sql<{ id: number }>`
+    select id from dark_runs where investigation_id = ${id} and newsroom_id = ${newsroomId}
+    order by started_at desc, id desc limit 1
+  `;
+  if (!priorRun[0]) {
+    const briefRows = await sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
+    `;
+    let brief: InvestigationBrief | null = null;
+    try {
+      brief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+    } catch {
+      brief = null;
+    }
+    if (!brief || (!brief.supports.length && !brief.contradictions.length))
+      return { ok: false as const, error: "Save a brief with findings before challenging the case." };
+  }
+  const asked = storyModelChoice(modelChoice);
+  const modelEffort = validatedModelEffort(asked, effortValue);
+  const open = await findOpenJob({ newsroomId, kind: "challenge", subjectId: id });
+  if (open) return { ok: true as const, pending: true as const, jobId: open.id };
+  await assertRate(context.userId, "dark", newsroomId);
+  const job = await enqueueJob({
+    userId: context.userId,
+    newsroomId,
+    kind: "challenge",
+    subjectId: id,
+    modelChoice: asked,
+    modelChoiceSource: asked === "auto" ? "auto" : "editor",
+    resultJson: JSON.stringify({ modelEffort }),
+    kick,
+  });
+  return { ok: true as const, pending: true as const, jobId: job.id };
+}
+
+export const challengeInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => {
+    const input = raw as { id?: unknown; modelChoice?: unknown; modelEffort?: unknown };
+    const modelChoice = storyModelChoice(input?.modelChoice);
+    return {
+      id: rowId.parse(input?.id),
+      modelChoice,
+      modelEffort: validatedModelEffort(modelChoice, input?.modelEffort),
+    };
+  })
+  .handler(async ({ context, data }) =>
+    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort),
+  );
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
  * `PerformDraftWorkDeps` uses in desk-model-run.ts. */
@@ -2961,9 +3397,10 @@ export async function performDarkRound(job: DeskJob) {
       and whatever the editor wanted. The machinery underneath could always
       chase a trail; nothing could ask it to.
     */
-    const dials = snapshot.dials;
-    const budget = budgetFor(dials);
-    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6);
+    const fileLimits = await darkFileRunLimits(id, owned(context));
+    const dials = { ...snapshot.dials, scope: fileLimits.scope };
+    const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
+    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
@@ -3384,6 +3821,118 @@ export const sendDarkSignalToQueue = createServerFn({ method: "POST" })
     }),
   );
 
+export type InvestigationQueuePacket = {
+  investigationId: number;
+  title: string;
+  suggestedHeadline: string;
+  evidence: { text: string; source: string | null }[];
+  uncertainties: string[];
+  contradictions: InvestigationBrief["contradictions"];
+  whatWouldDisproveIt: string[];
+  publicationNotice: "Publication remains an editorial decision.";
+};
+
+export async function queuePacketFor(newsroomId: number, id: number) {
+  await ensureDarkSchema();
+  const sql = await getSql();
+  const files = await sql<{ id: number; title: string; ordinary_explanation: string }>`
+    select id, title, ordinary_explanation from investigations
+    where id = ${id} and newsroom_id = ${newsroomId} limit 1
+  `;
+  if (!files[0]) return null;
+  const [claims, signalRows, briefRows] = await Promise.all([
+    sql<{ body: string; source_url: string | null }>`
+      select body, source_url from claims
+      where investigation_id = ${id} and newsroom_id = ${newsroomId}
+        and (capture_event_id is not null or source_url is not null)
+      order by id desc limit 8
+    `.catch(() => [] as { body: string; source_url: string | null }[]),
+    sql<{ name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }>`
+      select name, verification_status, gate_missing_context, what_would_kill
+      from dark_signals where investigation_id = ${id} and newsroom_id = ${newsroomId}
+      order by id desc limit 5
+    `.catch(() => [] as { name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }[]),
+    sql<{ brief_json: string }>`
+      select brief_json from investigation_briefs
+      where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
+    `.catch(() => [] as { brief_json: string }[]),
+  ]);
+  let brief: InvestigationBrief | null = null;
+  try {
+    brief = briefRows[0] ? parseBrief(JSON.parse(briefRows[0].brief_json)) : null;
+  } catch {
+    brief = null;
+  }
+  const clean = (value: unknown) => stripUngroundedNotes(String(value ?? "")).replace(/\s+/g, " ").trim();
+  const unique = (values: string[]) => [...new Set(values.map(clean).filter(Boolean))];
+  const uncertainties = unique([
+    files[0].ordinary_explanation,
+    brief?.benign ?? "",
+    brief?.kills_it ?? "",
+    ...signalRows
+      .filter((signal) => signal.verification_status !== "verified")
+      .map((signal) => `${signal.name}: ${signal.gate_missing_context || "This signal has not completed verification."}`),
+  ]);
+  return {
+    investigationId: id,
+    title: clean(files[0].title),
+    suggestedHeadline: clean(brief?.headline || files[0].title).slice(0, 240),
+    evidence: claims.map((claim) => ({ text: clean(claim.body), source: claim.source_url })),
+    uncertainties,
+    contradictions: brief?.contradictions ?? [],
+    whatWouldDisproveIt: unique([
+      brief?.kills_it ?? "",
+      ...signalRows.map((signal) => signal.what_would_kill),
+    ]),
+    publicationNotice: "Publication remains an editorial decision." as const,
+  };
+}
+
+export const queuePacket = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((id: unknown) => rowId.parse(id))
+  .handler(async ({ context, data: id }) => queuePacketFor(owned(context), id));
+
+async function markInvestigationDisposition(
+  newsroomId: number,
+  id: number,
+  kind: "set-aside" | "no-finding" | "queued",
+  note: string | null,
+) {
+  const sql = await getSql();
+  const rows = await sql<{ id: number }>`
+    update investigations
+    set status = 'closed', closed_kind = ${kind}, close_note = ${note},
+        pause_reason = ${kind === "queued" ? "Sent to the reporting queue." : null},
+        updated_at = now()
+    where id = ${id} and newsroom_id = ${newsroomId}
+    returning id
+  `;
+  return rows[0]?.id != null;
+}
+
+export async function closeInvestigationFor(
+  userId: string,
+  newsroomId: number,
+  id: number,
+  note?: string | null,
+) {
+  await ensureDarkSchema();
+  const cleanNote = String(note ?? "").replace(/\s+/g, " ").trim().slice(0, 500) || null;
+  const closed = await markInvestigationDisposition(newsroomId, id, "no-finding", cleanNote);
+  if (!closed) return { ok: false as const, error: "Investigation not found" };
+  await audit(userId, "dark", `closed inv ${id} without a finding`, newsroomId);
+  return { ok: true as const, investigationId: id };
+}
+
+export const closeInvestigation = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => {
+    const value = input as { id?: unknown; note?: unknown };
+    return { id: rowId.parse(value?.id), note: typeof value?.note === "string" ? value.note : null };
+  })
+  .handler(async ({ context, data }) => closeInvestigationFor(context.userId, owned(context), data.id, data.note));
+
 /**
  * Create-or-find the story lead for an investigation. Research completeness
  * is preserved in the notes and never blocks this editor-controlled handoff.
@@ -3398,7 +3947,7 @@ export async function queueInvestigationFor(
   userId: string,
   newsroomId: number,
   id: number,
-  _opts: { asTip?: boolean } = {},
+  opts: { asTip?: boolean; preview?: unknown } = {},
 ) {
   await ensureDarkSchema();
   const sql = await getSql();
@@ -3408,6 +3957,12 @@ export async function queueInvestigationFor(
     from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
   `;
   if (!inv[0]) return { ok: false as const, error: "Investigation not found" };
+  // Rebuild from this newsroom's records; client text is only a freshness check.
+  const packet = await queuePacketFor(newsroomId, id);
+  if (!packet) return { ok: false as const, error: "Investigation not found" };
+  if (opts.preview !== undefined && JSON.stringify(opts.preview) !== JSON.stringify(packet))
+    return { ok: false as const, error: "The file packet changed. Open the preview again before sending it." };
+
   const gate = await sql<{ total: number; verified: number }>`
     select count(*)::int as total,
            count(*) filter (where verification_status = 'verified')::int as verified
@@ -3427,6 +3982,7 @@ export async function queueInvestigationFor(
     order by id asc limit 1
   `;
   if (already[0]) {
+    await markInvestigationDisposition(newsroomId, id, "queued", `Lead ${already[0].id}`);
     await audit(userId, "dark-handoff", `inv ${id} existing lead ${already[0].id}`, newsroomId);
     return { ok: true as const, leadId: already[0].id, alreadyQueued: true as const };
   }
@@ -3548,17 +4104,20 @@ export async function queueInvestigationFor(
     the model's: `topicFromText` answers with a key from the newsroom's own
     section list.
   */
-  const evidence = stripUngroundedNotes(
-    storableText(
-      `${handoff}\n\nFile summary: ${shorten(plain(inv[0].summary), Math.max(0, 4000 - handoff.length - 16))}`,
-    ),
-  );
+  const packetEvidence = packet.evidence.map(row => `${row.text}${row.source ? ` (${row.source})` : ""}`).join("\n");
+  const evidence = stripUngroundedNotes(storableText([
+    packetEvidence ? `Previewed evidence:\n${packetEvidence}` : "",
+    handoff,
+    `File summary: ${plain(inv[0].summary)}`,
+  ].filter(Boolean).join("\n\n"))).slice(0, 4000);
+  // Preserve the full approved packet even when the lead's readable excerpt is shortened.
+  const notes = JSON.stringify({ darkPacket: packet });
   const created = await sql<{ id: number }>`
-    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen)
+    insert into leads (user_id, newsroom_id, headline, why, topic, status, source_urls, evidence, newsworthiness, investigation_id, topic_unchosen, notes_json)
     values (
       ${userId},
       ${newsroomId},
-      ${storableText(stripUngroundedNotes(inv[0].title)).slice(0, 240)},
+      ${storableText(packet.suggestedHeadline)},
       ${evidence},
       ${topic},
       'new',
@@ -3566,7 +4125,8 @@ export async function queueInvestigationFor(
       ${evidence},
       ${12},
       ${id},
-      ${topicUnchosen}
+      ${topicUnchosen},
+      ${notes}
     )
     returning id
   `;
@@ -3606,12 +4166,16 @@ export async function queueInvestigationFor(
       reason: `Read while developing "${inv[0].title.slice(0, 120)}" on the Dark Desk.`,
     })),
   });
+  await markInvestigationDisposition(newsroomId, id, "queued", `Lead ${created[0]!.id}`);
   return { ok: true as const, leadId: created[0]!.id, alreadyQueued: false as const };
 }
 
 export const queueInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: unknown) => darkSignalInput.parse(input))
+   .validator((input: unknown) => ({
+    ...darkSignalInput.parse(input),
+    preview: (input as { preview?: unknown })?.preview,
+  }))
   .handler(async ({ context, data }) => {
     // SG1 / Option A: sending an investigation to the Queue is how a Dark Desk
     // finding becomes a spent draft, so it is refused until setup is done.
@@ -3619,6 +4183,7 @@ export const queueInvestigation = createServerFn({ method: "POST" })
     if (notSetUp) return { ok: false as const, error: notSetUp };
     return queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
+      preview: data.preview,
     });
   });
 
@@ -3627,14 +4192,7 @@ export const parkInvestigation = createServerFn({ method: "POST" })
   .validator((id: unknown) => rowId.parse(id))
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
-    const sql = await getSql();
-    await sql`
-      update investigations
-      set status = ${"closed"},
-          pause_reason = ${"Editor set this aside."},
-          updated_at = now()
-      where id = ${id} and newsroom_id = ${owned(context)}
-    `;
+    await markInvestigationDisposition(owned(context), id, "set-aside", null);
     await audit(context.userId, "dark", `set aside inv ${id}`, owned(context));
     return { ok: true as const, investigationId: id };
   });
@@ -3654,6 +4212,8 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
     await sql`
       update investigations
       set status = ${still > 0 ? "paused" : "open"},
+          closed_kind = null,
+          close_note = null,
           pause_reason = ${still > 0 ? `Hop budget resumed with ${still} frontier item(s) still open.` : null},
           updated_at = now()
       where id = ${id} and newsroom_id = ${owned(context)}
@@ -3857,11 +4417,12 @@ export const getDarkDials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }) => {
     await ensureDarkSchema();
-    const {dials,preferences} = await readDarkSettingsFor(owned(context));
+    const {dials,preferences,defaultLimitKey} = await readDarkSettingsFor(owned(context));
     const {place} = await readDarkPlace(owned(context));
     return {
       dials,
       preferences,
+      defaultLimitKey,
       budget: budgetFor(dials),
       stance: stanceFor(dials),
       place,
@@ -3882,25 +4443,33 @@ export const getDarkCounty = createServerFn({ method: "GET" })
 
 export const saveDarkDials = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { dig: number; nerve: number; scope: string; preferences?: ResearchPreferences }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
+  .validator((input: { dig?: number; nerve?: number; scope?: string; preferences?: ResearchPreferences; defaultLimitKey?: string }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     // Clamped on the way in as well as on the way out: a stored 40 would be a
     // very expensive typo.
-    const d = clampDials(data as Partial<DarkDials>);
-    const saved = await saveDarkSettingsFor(owned(context), {dials:d,preferences:data.preferences});
-    await audit(
-      context.userId,
-      "dark-dials",
-      `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}`,
-      owned(context),
-    );
+    const d = data.dig !== undefined || data.nerve !== undefined || data.scope !== undefined
+      ? clampDials(data as Partial<DarkDials>)
+      : null;
+    const defaultLimitKey = DARK_LIMITS.some((limit) => limit.key === data.defaultLimitKey)
+      ? data.defaultLimitKey as DarkLimitKey
+      : undefined;
+    const saved = await saveDarkSettingsFor(owned(context), {dials:d ?? undefined,preferences:data.preferences,defaultLimitKey});
+    if (d || defaultLimitKey) {
+      await audit(
+        context.userId,
+        "dark-dials",
+        d ? `dig ${d.dig} nerve ${d.nerve} scope ${d.scope}` : `default depth ${saved.defaultLimitKey}`,
+        owned(context),
+      );
+    }
     return {
       ok: true as const,
       dials: saved.dials,
       preferences: saved.preferences,
-      description: describeDials(saved.dials, (await readDarkPlace(owned(context))).place),
-      minutes: estimateMinutes(d),
+      defaultLimitKey: saved.defaultLimitKey,
+      description: d ? describeDials(saved.dials, (await readDarkPlace(owned(context))).place) : "",
+      minutes: d ? estimateMinutes(d) : null,
     };
   });
 
@@ -4045,6 +4614,23 @@ export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus):
   const prepared = typeof corpus === "string" ? prepareCorpus(corpus) : corpus;
   const text = (value: string) => markUngroundedSpecifics(value, prepared);
   const list = (values: string[]) => values.map(text);
+  const captureText = new Map(
+    (typeof corpus === "string" ? [] : (corpus.captures ?? [])).map((capture) => [
+      capture.captureEventId,
+      capture.text,
+    ]),
+  );
+  const contradictions = brief.contradictions.filter((pair) => {
+    const first = captureText.get(pair.first.captureId);
+    const second = captureText.get(pair.second.captureId);
+    return Boolean(
+      pair.first.captureId > 0 &&
+      pair.second.captureId > 0 &&
+      first && second &&
+      evidenceAppearsInText(pair.first.text, first) &&
+      evidenceAppearsInText(pair.second.text, second),
+    );
+  });
   return {
     ...brief,
     headline: text(brief.headline),
@@ -4052,6 +4638,7 @@ export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus):
     why_verdict: text(brief.why_verdict),
     hypothesis: text(brief.hypothesis),
     supports: list(brief.supports),
+    contradictions,
     benign: text(brief.benign),
     kills_it: text(brief.kills_it),
     /*

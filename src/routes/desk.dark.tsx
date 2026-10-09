@@ -1,53 +1,57 @@
-import { newestOpenFile, fullFileQuestion, signalCounts } from "@/lib/news/dark-rail";
+import type { ReactNode } from "react";
+import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
+import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
 import {
   continueInvestigation,
-  findSomethingToDigInto,
+  challengeInvestigation,
   fileRedditTip,
   getInvestigation,
   getArtifact,
   getArtifactOcrJob,
-  listDarkRuns,
   listInvestigations,
   listWorthALook,
   openDarkInvestigation,
   parkInvestigation,
   queueInvestigation,
+  queuePacket,
+  closeInvestigation,
   queueArtifactOcr,
   refreshBrief,
   reopenParkedInvestigation,
+  retryDarkRound,
   scanTipSubreddit,
   getTipSubreddit,
-  type DarkRunRow,
+  investigationActivity,
+  type InvestigationQueuePacket,
   type InvestigationRow,
 } from "@/lib/news/dark";
 import { cancelStoryJob } from "@/lib/news/job-progress";
+import type { JobProgressView } from "@/lib/news/job-progress";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
-import { DeskJobCard } from "@/components/JobCard";
+import { DeskJobCard, JobCard } from "@/components/JobCard";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
 import {
   blockedDigBannerText,
   editorError,
-  editorKindLabel,
+  editorPauseIsPageFailure,
   editorPauseReason,
-  editorStatus,
+  editorKindLabel,
   elapsedLabel,
   excerptForEditor,
   headlineFromUrl,
   humanFrontierLabel,
-  investigationRoundLabel,
   darkJobActive,
   observedDarkJobFinished,
-  looksLikeInternalSummary,
   organizationFromUrl,
   editorTitle,
-  pileForStatus,
-  plainEditorText,
+  investigationPileFor,
+  plainEditorText as storedEditorText,
   plainFinding,
   progressLine,
   DIG_STOP_ACK,
@@ -58,9 +62,7 @@ import {
   redditPostStateLabel,
   redditResultHeadline,
   sentenceCase,
-  shouldShowDarkRunStopNote,
   stalledRunCopy,
-  worthItemOnDeskLine,
   worthItemOnDeskReason,
 } from "@/lib/news/desk-copy";
 
@@ -69,22 +71,25 @@ import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
 import { ReadMoreText } from "@/components/read-more-text";
-import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
-import { estimateMinutes, scopeLabelsFor } from "@/lib/news/dark-dials";
+import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
+import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
+import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
-import { searchOutcomeWords } from "@/lib/news/search-trail-words";
-import { captureCounterLine, digRailCounterLine } from "@/lib/news/dark-counters";
 import { dedupeFactLines, factLinesDropped } from "@/lib/news/dark-fact-lines";
 import { captureBatchStats, readableCapture, captureRefusalLabel } from "@/lib/news/html-text";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
-import { takeDarkSeed } from "@/lib/news/dark-seed";
+import { DARK_OPEN_KEY, takeDarkFilePrefill, takeDarkSeed } from "@/lib/news/dark-seed";
 import type { WorthSeed } from "@/lib/news/worth-a-look";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { looksLikeProviderAuthFailure } from "@/lib/news/preflight";
 import { DarkFileDialog } from "@/components/dialogs/editor-dialogs";
 import { PageWatchPanel } from "@/components/page-watch-panel";
+import { Dialog } from "@/components/dialog";
+import { FollowUpDialog, type FollowUpDialogInput } from "@/components/follow-up-dialog";
+import { createAiFollowUp, listFollowUpStoryOptions } from "@/lib/news/desk";
+import { checkPageWatch, createPageWatch } from "@/lib/news/page-watch-actions";
 import {
   darkModelChoice,
   modelChoiceLabel,
@@ -97,14 +102,28 @@ import {
   type ModelEffort,
 } from "@/lib/news/provider-registry";
 
+const plainEditorText = (text: string) => darkScreenText(storedEditorText(text));
+
 export const Route = createFileRoute("/desk/dark")({
   component: DarkPage,
 });
 
-const OPEN_KEY = "townreporter.dark.openId";
+function darkDeskReadFailureReason(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error ?? "");
+  if (/invalid byte sequence for encoding|empty body|unreadable|no readable text/i.test(raw)) {
+    return "The page had no readable text";
+  }
+  if (/\b(?:401|403)\b|blocked|refused/i.test(raw)) return "The site refused the request";
+  if (/\b5\d\d\b|server error|internal server error|sqlstate|database/i.test(raw)) {
+    return "The page could not be read";
+  }
+  if (/failed to fetch|network|timeout|econnrefused|econnreset|socket hang up/i.test(raw)) {
+    return "The server could not be reached";
+  }
+  return "The investigation list could not be read.";
+}
 
 function DarkPage() {
-  const { formatListDateTime } = usePaperDateFormatters();
   const qc = useQueryClient();
   /*
     A hand-over the editor asked for on another screen -- an import's review
@@ -117,12 +136,15 @@ function DarkPage() {
   const [seedFromImport, setSeedFromImport] = useState("");
   /** The header's "+ Start a file": the drawn dialog, open or shut. */
   const [startOpen, setStartOpen] = useState(false);
+  const [startPrefill, setStartPrefill] = useState<{ question?: string; tip?: string; explanation?: string }>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedPiles, setExpandedPiles] = useState<Record<string, boolean>>({});
   const togglePile = (key: string) => setExpandedPiles((prev) => ({ ...prev, [key]: !prev[key] }));
   const [notice, setNotice] = useState<string | null>(null);
   const [noticeOk, setNoticeOk] = useState(false);
+  const [noticeFor, setNoticeFor] = useState<number | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
+  const requestedOpenId = useRef<number | null>(null);
   const [fileFocusRequest, setFileFocusRequest] = useState<{ id: number } | null>(null);
   const [queued, setQueued] = useState<{
     leadId: number;
@@ -130,11 +152,11 @@ function DarkPage() {
     alreadyQueued: boolean;
   } | null>(null);
   const [queueError, setQueueError] = useState<{ invId: number; message: string } | null>(null);
-  const [pendingCard, setPendingCard] = useState<string | null>(null);
-  const [cardError, setCardError] = useState<{ id: string; message: string } | null>(null);
+  const [undoDisposition, setUndoDisposition] = useState<{ id: number; expiresAt: number } | null>(null);
   const [cardPhase, setCardPhase] = useState<string>("");
   const [claimedIds, setClaimedIds] = useState<string[]>([]);
   const phaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSignalId = useRef<string | null>(null);
   const wasInvestigating = useRef(false);
   const [redditResult, setRedditResult] = useState<RedditScanResult | null>(null);
   const [redditElapsed, setRedditElapsed] = useState(0);
@@ -144,9 +166,13 @@ function DarkPage() {
   useEffect(() => {
     const timerRef = phaseTimer;
     try {
-      const raw = sessionStorage.getItem(OPEN_KEY);
-      if (raw) setOpenId(Number(raw));
-      sessionStorage.removeItem(OPEN_KEY);
+      const raw = sessionStorage.getItem(DARK_OPEN_KEY);
+      const requested = raw ? Number(raw) : null;
+      if (requested != null && Number.isInteger(requested) && requested > 0) {
+        requestedOpenId.current = requested;
+        setOpenId(requested);
+      }
+      sessionStorage.removeItem(DARK_OPEN_KEY);
       // `takeDarkSeed` reads the hand-over once and clears the `sessionStorage`
       // copy, so this holds the lead for the dialog and the next visit to the
       // desk opens its own empty one.
@@ -161,6 +187,12 @@ function DarkPage() {
       if (seed) {
         setSeedFromImport(seed);
         setStartOpen(true);
+      } else {
+        const prefill = takeDarkFilePrefill(sessionStorage);
+        if (prefill) {
+          setStartPrefill(prefill);
+          setStartOpen(true);
+        }
       }
     } catch {
       /* ignore */
@@ -169,6 +201,13 @@ function DarkPage() {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!undoDisposition) return;
+    const delay = Math.max(0, undoDisposition.expiresAt - Date.now());
+    const timer = setTimeout(() => setUndoDisposition(null), delay);
+    return () => clearTimeout(timer);
+  }, [undoDisposition]);
 
   function claimCard(id: string) {
     setClaimedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
@@ -181,16 +220,19 @@ function DarkPage() {
     dialog's own press now and reports its refusals inside itself, so the only
     notices left are the file's, and there is one place to put them.
   */
-  function showNotice(text: string | null, ok = false) {
+  const showNotice = useCallback((text: string | null, ok = false, investigationId = openId) => {
     setNotice(text);
     setNoticeOk(ok);
-  }
+    setNoticeFor(investigationId);
+  }, [openId]);
 
-  function rememberOpen(id: number | null) {
+  function rememberOpen(id: number) {
     setFileFocusRequest(null);
+    setNotice(null);
+    setNoticeFor(null);
     setOpenId(id);
     try {
-      sessionStorage.removeItem(OPEN_KEY);
+      sessionStorage.removeItem(DARK_OPEN_KEY);
     } catch {
       /* ignore */
     }
@@ -217,16 +259,21 @@ function DarkPage() {
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
-  const runs = useQuery({ queryKey: ["dark-runs"], queryFn: () => listDarkRuns() });
-  // Open the most recently touched file once, when the list first arrives. Not on every
-  // openId change: "Close file" sets openId to null, and that choice must stick.
+  const darkSettings = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
+  const noFiles = Boolean(
+    investigations.data?.length === 0 && !investigations.isPending && !investigations.isError,
+  );
+  // Open the most recently touched file once, when the list first arrives.
   const autoOpened = useRef(false);
   useEffect(() => {
     const rows = investigations.data;
     if (autoOpened.current || !rows?.length) return;
     autoOpened.current = true;
-    setOpenId((current) => current ??
-      newestOpenFile(rows)?.id ?? null);
+    setOpenId((current) => {
+      if (current != null && rows.some((row) => row.id === current)) return current;
+      const handedOff = rows.find((row) => row.id === requestedOpenId.current);
+      return handedOff?.id ?? newestTouchedFile(rows)?.id ?? null;
+    });
   }, [investigations.data]);
 
   /*
@@ -240,10 +287,11 @@ function DarkPage() {
   */
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
-  const [ocrModelChoice, setOcrModelChoice] = useState<StoryModelChoice>("auto");
-  const [ocrModelEffort, setOcrModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
-  /* The Dark Desk's own first-run default; retained-PDF OCR has a separate
-     picker because its automatic reader order is different. */
+  const [fileModelChoice, setFileModelChoice] = useState<StoryModelChoice>("auto");
+  const [fileModelEffort, setFileModelEffort] = useState<ModelEffort | null>(null);
+  const ocrModelChoice = useFirstRunPickerDefault("ocr") ?? "auto";
+  const ocrModelEffort = defaultModelEffort(ocrModelChoice);
+  const darkDefaultModel = useFirstRunPickerDefault("dark");
   const modelChoiceTouched = useRef(false);
   useFirstRunPickerSeed({
     surface: "dark",
@@ -255,6 +303,7 @@ function DarkPage() {
     },
   });
   const pickedFor = useRef<number | null>(null);
+  const fileModelTouchedFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
@@ -268,6 +317,8 @@ function DarkPage() {
       // The brief is its own job (0.6.2); poll while one is in flight.
       const bj = q.state.data?.briefJob;
       if (bj && (bj.status === "queued" || bj.status === "running")) return 2000;
+      const cj = q.state.data?.challengeJob;
+      if (cj && (cj.status === "queued" || cj.status === "running")) return 2000;
       return false;
     },
   });
@@ -302,11 +353,18 @@ function DarkPage() {
       last,
       detail.data.investigation.status,
     )) return;
+    if (fileModelTouchedFor.current === openId) {
+      pickedFor.current = openId;
+      return;
+    }
+    if (last == null && darkDefaultModel == null) return;
     pickedFor.current = openId;
-    const remembered = darkModelChoice(last);
-    setModelChoice(remembered);
-    setModelEffort(validatedModelEffort(remembered, detail.data.run?.model_effort));
-  }, [openId, detail.data]);
+    const remembered = darkModelChoice(last ?? darkDefaultModel);
+    setFileModelChoice(remembered);
+    setFileModelEffort(last == null
+      ? defaultModelEffort(remembered)
+      : validatedModelEffort(remembered, detail.data.run?.model_effort));
+  }, [openId, detail.data, darkDefaultModel]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
   useEffect(() => {
@@ -317,10 +375,10 @@ function DarkPage() {
     showNotice(
       bj.status === "completed"
         ? "The brief is written."
-        : `No brief: ${editorError(bj.error ?? "") || bj.error || "it did not finish."}`,
+        : `No brief: ${editorError(bj.error ?? "") || "the job did not finish."}`,
       bj.status === "completed",
     );
-  }, [detail.data?.briefJob, briefWaiting]);
+  }, [detail.data?.briefJob, briefWaiting, showNotice]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["worth-a-look"] });
@@ -421,7 +479,7 @@ function DarkPage() {
       return continueInvestigation({
         data: picked
           ? { id, modelChoice: picked.choice, modelEffort: picked.effort }
-          : { id, modelChoice, modelEffort },
+          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort },
       });
     },
     onSuccess: (res) => {
@@ -441,9 +499,8 @@ function DarkPage() {
           refusal; keep `editorError`'s translation for every other failure.
         */
         const isPreflightRefusal = Boolean(res && typeof res === "object" && "kind" in res);
-        const msg = isPreflightRefusal ? raw : editorError(raw) || raw || "Research failed";
+        const msg = isPreflightRefusal ? raw : editorError(raw) || "This round did not finish.";
         showNotice(msg, false);
-        setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
         clearPhase();
         invalidate();
         return;
@@ -455,7 +512,6 @@ function DarkPage() {
       const msg =
         editorError(err instanceof Error ? err.message : "Research failed") || "Research failed";
       showNotice(msg, false);
-      setCardError(pendingCard ? { id: pendingCard, message: msg } : null);
       clearPhase();
       invalidate();
     },
@@ -466,6 +522,7 @@ function DarkPage() {
     // before the first open-state payload can hydrate Automatic and lock the
     // new id while the async job is still being committed.
     pickedFor.current = id;
+    if (cardId) claimCard(cardId);
     rememberOpen(id);
     setNotice(null);
     beginDigPhase();
@@ -476,84 +533,29 @@ function DarkPage() {
         ?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
     advance.mutate(id);
-    if (cardId) setPendingCard(cardId);
   }
 
-  const openFromCard = useMutation({
-    mutationFn: (item: WorthSeed) =>
-      openDarkInvestigation({ data: { paste: item.seed, title: item.title } }),
-    onMutate: (item) => {
-      setPendingCard(item.id);
-      setCardError(null);
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res, item) => {
-      if (!res?.ok || !res.investigationId) {
-        setCardError({ id: item.id, message: "Could not open an investigation." });
-        setPendingCard(null);
-        clearPhase();
-        return;
-      }
-      claimCard(item.id);
-      afterOpen(res.investigationId, item.id);
-    },
-    onError: (err, item) => {
-      const msg =
-        editorError(err instanceof Error ? err.message : "Could not start") || "Could not start";
-      setCardError({ id: item.id, message: msg });
-      setPendingCard(null);
-      clearPhase();
-    },
-  });
-
-  const find = useMutation({
-    mutationFn: () => findSomethingToDigInto(),
-    onMutate: () => {
-      setPendingCard("find");
-      setCardPhase("Starting…");
-    },
-    onSuccess: (res) => {
-      if (!res?.ok || !res.investigationId) {
-        /*
-          SG1: "nothing-new" is the desk's own quiet answer and keeps its
-          friendly sentence; any other refusal (an un-set-up paper, a database
-          that would not answer) carries words the editor needs, so they are
-          shown instead of being replaced by "paste a lead to start".
-        */
-        const error = (res as { error?: unknown } | undefined)?.error;
-        const said = typeof error === "string" && error && error !== "nothing-new" ? error : "";
-        showNotice(said || "Nothing to open yet. Paste a lead to start.");
-        clearPhase();
-        return;
-      }
-      afterOpen(res.investigationId, "find");
-    },
-    onError: (err) => {
-      showNotice(editorError(err instanceof Error ? err.message : "Find failed"));
-      clearPhase();
-    },
-  });
-
   const toQueue = useMutation({
-    mutationFn: (id: number) => queueInvestigation({ data: { id } }),
-    onMutate: (id) => {
+    mutationFn: ({ id, preview }: { id: number; preview: InvestigationQueuePacket }) => queueInvestigation({ data: { id, preview } }),
+    onMutate: ({ id }) => {
       // Clear any stale error/confirmation from a previous attempt on this
       // file so a retry does not show two contradictory banners at once.
       setQueueError((prev) => (prev?.invId === id ? null : prev));
     },
-    onSuccess: (res, id) => {
+    onSuccess: (res, { id }) => {
       void qc.invalidateQueries({ queryKey: ["leads"] });
       if (res?.ok) {
         setQueueError(null);
         setQueued({ leadId: res.leadId, invId: id, alreadyQueued: Boolean(res.alreadyQueued) });
+        setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       } else {
-        setQueueError({ invId: id, message: res?.error ?? "Could not send to the queue." });
+        setQueueError({ invId: id, message: editorError(res?.error ?? "") || "Could not send to the queue." });
       }
     },
-    onError: (err, id) => {
+    onError: (err, { id }) => {
       setQueueError({
         invId: id,
-        message: err instanceof Error ? err.message : "Could not send to the queue.",
+        message: editorError(err instanceof Error ? err.message : "") || "Could not send to the queue.",
       });
     },
   });
@@ -561,7 +563,6 @@ function DarkPage() {
   const followLead = useMutation({
     mutationFn: (seed: { paste: string; title: string }) => openDarkInvestigation({ data: seed }),
     onMutate: () => {
-      setPendingCard("follow");
       setCardPhase("Starting…");
     },
     onSuccess: (res, seed) => {
@@ -580,15 +581,46 @@ function DarkPage() {
     },
   });
 
+  const challengeCase = useMutation({
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
+    onSuccess: (result, id) => {
+      if (openId !== id) return;
+      if (!result.ok) {
+        showNotice(editorError(result.error ?? "") || "Could not challenge this case.", false, id);
+        return;
+      }
+      showNotice("Challenging the case…", true, id);
+      invalidate();
+    },
+    onError: (error, id) => {
+      if (openId === id) showNotice(editorError(error instanceof Error ? error.message : "") || "Could not challenge this case.", false, id);
+    },
+  });
+
+  const closeWithoutFinding = useMutation({
+    mutationFn: (input: { id: number; note: string }) => closeInvestigation({ data: input }),
+    onSuccess: (result, input) => {
+      if (!result.ok) {
+        showNotice(editorError(result.error ?? "") || "Could not close this file.");
+        return;
+      }
+      setUndoDisposition({ id: input.id, expiresAt: Date.now() + 10_000 });
+      showNotice("Closed with no finding. The file stays readable.", true);
+      invalidate();
+    },
+    onError: (error) => showNotice(editorError(error instanceof Error ? error.message : "") || "Could not close this file."),
+  });
+
   const park = useMutation({
     mutationFn: (id: number) => parkInvestigation({ data: id }),
-    onSuccess: () => {
-      rememberOpen(null);
+    onSuccess: (_result, id) => {
+      rememberOpen(id);
+      setUndoDisposition({ id, expiresAt: Date.now() + 10_000 });
       showNotice("Set aside. Pull it back from that pile anytime.", true);
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not set that aside.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not set that aside.");
     },
   });
 
@@ -597,6 +629,7 @@ function DarkPage() {
     onSuccess: (res) => {
       if (res?.ok && res.investigationId) {
         rememberOpen(res.investigationId);
+        setUndoDisposition(null);
         setNotice(null);
       } else {
         showNotice("Could not pull that back.");
@@ -604,7 +637,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not pull that back.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not pull that back.");
     },
   });
 
@@ -647,7 +680,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      const msg = err instanceof Error ? err.message : "Reddit did not answer.";
+      const msg = editorError(err instanceof Error ? err.message : "") || "Reddit did not answer.";
       showNotice(msg);
       setRedditAnnounce(msg);
     },
@@ -690,7 +723,7 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) => {
-      showNotice(err instanceof Error ? err.message : "Could not file that tip.");
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not file that tip.");
     },
   });
 
@@ -715,7 +748,7 @@ function DarkPage() {
     mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
     onSuccess: (res) => {
       if (!res?.ok) {
-        showNotice(res?.error ? `No brief: ${res.error}` : "No brief written.");
+        showNotice(res?.error ? `No brief: ${editorError(res.error) || "the request did not finish."}` : "No brief written.");
         return;
       }
       // Queued, not written: the brief is a job now, and the file view below
@@ -725,11 +758,10 @@ function DarkPage() {
       invalidate();
     },
     onError: (err) =>
-      showNotice(err instanceof Error ? err.message : "Could not write the brief."),
+      showNotice(editorError(err instanceof Error ? err.message : "") || "Could not write the brief."),
   });
 
-  const starting =
-    openFromCard.isPending || find.isPending || followLead.isPending;
+  const starting = followLead.isPending;
   const digging = advance.isPending || darkJobActive(detail.data?.darkJob?.status);
   const busyStart = starting;
 
@@ -774,10 +806,13 @@ function DarkPage() {
     searches: detail.data?.searches.length ?? 0,
     claims: detail.data?.claims.length ?? 0,
   });
-  const allInv = investigations.data ?? [];
-  const active = allInv.filter((row) => pileForStatus(row.status) === "desk" && row.status !== "investigating");
-  const waitingFiles = allInv.filter((row) => row.status === "investigating");
-  const parked = allInv.filter((row) => pileForStatus(row.status) === "aside");
+  const allInv = darkScreenData(investigations.data ?? []);
+  const active = allInv.filter((row) => investigationPileFor(row) === "desk");
+  const waitingFiles = allInv.filter((row) => investigationPileFor(row) === "waiting");
+  const parked = allInv.filter((row) => investigationPileFor(row) === "aside");
+  const hasEverStartedFollowUp = allInv.some((row) =>
+    row.has_ai_followup || row.waiting_follow_up || row.found_follow_up,
+  );
   /*
     FB7, item 5 (A2c C6). "An r/longmont tip card still disappears unopened
     ... with 'SET ASIDE 0' throughout."
@@ -787,18 +822,36 @@ function DarkPage() {
     said nothing about it. The counter the editor checked counts PARKED FILES,
     which is a different thing, so the card simply left with no trace.
 
-    Split in two now: what is still a card, and what is covered, WITH the
-    reason and the file that covers it. Nothing is deleted from the screen to
-    make a list shorter -- the covered ones move under one line at the foot of
-    the pile that names the file each of them is already on.
+    Cards already attached to a file or claimed for a follow-up do not appear
+    in this review group. Every remaining card opens the start-a-file dialog.
   */
-  const worthRows = (worth.data ?? []).map((item) => ({
+  const worthRows = darkScreenData(worth.data ?? []).map((item) => ({
     item,
     off: worthItemOnDeskReason(item, allInv, claimedIds),
   }));
   const inbox = worthRows.filter((row) => !row.off).map((row) => row.item);
-  const covered = worthRows.filter((row) => row.off);
-  const signalsCount = signalCounts(worthRows);
+  const investigationListFailed = investigations.isError && !investigations.data;
+  const detailReadFailed = openId != null && detail.isError && !detail.data;
+  const darkDeskReadError = investigationListFailed
+    ? investigations.error
+    : detailReadFailed
+      ? detail.error
+      : null;
+  const loadingFile = !noFiles && !darkDeskReadError && (
+    (investigations.isPending && !investigations.data) ||
+    (openId != null && detail.isPending && !detail.data) ||
+    (Boolean(investigations.data?.length) && openId == null)
+  );
+  const retryDarkDeskRead = () => {
+    if (investigationListFailed) void investigations.refetch();
+    else void detail.refetch();
+  };
+
+  function chooseSignal(item: WorthSeed) {
+    pendingSignalId.current = item.id;
+    setStartPrefill({ tip: item.seed });
+    setStartOpen(true);
+  }
 
   return (
     /*
@@ -832,7 +885,10 @@ function DarkPage() {
             type="button"
             className="btn solid"
             disabled={paperGate.blocked}
-            onClick={() => setStartOpen(true)}
+            onClick={() => {
+              setStartPrefill(undefined);
+              setStartOpen(true);
+            }}
           >
             + Start a file
           </button>
@@ -850,10 +906,16 @@ function DarkPage() {
       */}
       <DarkFileDialog
         open={startOpen}
+        defaultLimit={darkSettings.data?.defaultLimitKey ?? "standard"}
+        defaultModel={modelChoiceTouched.current ? modelChoice : darkDefaultModel ?? modelChoice}
+        defaultEffort={modelChoiceTouched.current ? modelEffort : defaultModelEffort(darkDefaultModel ?? modelChoice)}
         seed={seedFromImport || undefined}
+        prefill={startPrefill}
         onClose={() => {
           setStartOpen(false);
           setSeedFromImport("");
+          setStartPrefill(undefined);
+          pendingSignalId.current = null;
         }}
         onOpened={(id, run) => {
           // The editor's pick, for the first round: `afterOpen` issues the
@@ -869,36 +931,60 @@ function DarkPage() {
             */
             const effort = validatedModelEffort(picked, run.modelEffort) ?? defaultModelEffort(picked);
             firstRoundPick.current = { choice: picked, effort };
-            setModelChoice(picked);
-            setModelEffort(effort);
+            fileModelTouchedFor.current = id;
+            setFileModelChoice(picked);
+            setFileModelEffort(effort);
+          } else {
+            const choice = darkDefaultModel ?? modelChoice;
+            fileModelTouchedFor.current = id;
+            setFileModelChoice(choice);
+            setFileModelEffort(defaultModelEffort(choice));
           }
-          afterOpen(id);
+          const signalId = pendingSignalId.current;
+          pendingSignalId.current = null;
+          afterOpen(id, signalId ?? undefined);
         }}
       />
       {/*
         The drawing's grid: a 320px rail of piles on the left, the open file on
         the right (desk-astra.css `.astra-split-deep`). The rail is the desk's
         index -- every file, every unopened signal -- so an editor can switch
-        files without leaving the one they are reading. Below 980px the two
-        columns stack and the rail becomes the top of the page.
+        files without leaving the one they are reading. The columns sit beside
+        each other when this content area reaches 900px; narrower areas stack.
       */}
-      <div className="astra-split-deep">
-        <div className="astra-piles">
-          <div className="astra-pile">
+      <div className="astra-deep-container">
+      <section id="dark-settings" className="astra-settings-panel" hidden={!settingsOpen} aria-labelledby="dark-settings-title">
+        <div className="astra-settings-head">
+          <h2 id="dark-settings-title">Dark Desk settings</h2>
+          <button type="button" className="btn quiet" onClick={() => setSettingsOpen(false)}>Close</button>
+        </div>
+        <div className="astra-settings-body">
+          <DarkDialsPanel
+            modelChoice={modelChoice}
+            onModelChoice={(choice) => {
+              modelChoiceTouched.current = true;
+              setModelChoice(choice);
+              setModelEffort(defaultModelEffort(choice));
+            }}
+            modelEffort={modelEffort}
+            onModelEffort={setModelEffort}
+            modelDisabled={digging || busyStart}
+          />
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} modelDefault={darkDefaultModel ?? undefined} />
+        </div>
+      </section>
+      <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>
+        <div className="astra-piles" hidden={noFiles}>
+          <div className="astra-pile" hidden={!active.length && !investigations.isPending && !investigations.isError}>
             <div className="astra-pile-h">
               <span>Open files</span>
-              <span>{active.length}</span>
+              <span>{investigations.data ? active.length : ""}</span>
             </div>
-            <p className="astra-note astra-pile-pad">
-              Started. A stop mid-file is normal — it means more to read, not a failure.
-            </p>
             {investigations.isError && !investigations.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
                   message={
-                    investigations.error instanceof Error
-                      ? investigations.error.message
-                      : "Could not load the desk."
+                    darkDeskReadFailureReason(investigations.error)
                   }
                   onRetry={() => void investigations.refetch()}
                   retrying={investigations.isRefetching}
@@ -908,48 +994,30 @@ function DarkPage() {
               <div className="astra-pile-pad">
                 <ListSkeleton rows={3} />
               </div>
-            ) : active.length === 0 ? (
-              <p className="meta astra-pile-pad">
-                Empty. Paste a tip above, or start digging on a signal.
-              </p>
-            ) : (
+            ) : active.length > 0 ? (
               (expandedPiles.open ? active : active.slice(0, 5)).map((row) => (
-                <DeskFileCard
-                  key={row.id}
-                  row={row}
-                  selected={row.id === openId}
-                  digging={digging && openId === row.id}
-                  locked={digging || busyStart}
-                  onOpen={() => rememberOpen(row.id)}
-                  onKeep={() => {
-                    if (digging || busyStart) return;
-                    setNotice(null);
-                    rememberOpen(row.id);
-                    beginDigPhase();
-                    advance.mutate(row.id);
-                  }}
-                  onPark={() => {
-                    if (digging) return;
-                    park.mutate(row.id);
-                  }}
-                />
-              ))
-            )}
-            {active.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("open")}>{expandedPiles.open ? "Show fewer" : `Show all ${active.length}`}</InkButton> : null}
+              <DeskFileCard
+                key={row.id}
+                row={row}
+                selected={row.id === openId}
+                onOpen={() => rememberOpen(row.id)}
+              />
+            ))
+            ) : null}
+            <PileShowAll count={active.length} expanded={Boolean(expandedPiles.open)} onToggle={() => togglePile("open")} />
           </div>
 
-          <div className="astra-pile">
+          <div className="astra-pile" hidden={!inbox.length && !worth.isPending && !worth.isError}>
             <div className="astra-pile-h">
-              <span>Signals</span>
-              <span>{signalsCount.total}</span>
+              <span>Signals to review</span>
+              <span>{inbox.length}</span>
             </div>
-            <p className="astra-note astra-pile-pad">{signalsCount.toReview} to review · {signalsCount.covered} already accounted for.</p>
             {worth.isError && !worth.data ? (
               <div className="astra-pile-pad">
                 <ScreenError
                   message={
                     worth.error instanceof Error
-                      ? worth.error.message
+                      ? editorError(worth.error.message) || "Could not load new material."
                       : "Could not load new material."
                   }
                   onRetry={() => void worth.refetch()}
@@ -960,72 +1028,16 @@ function DarkPage() {
               <div className="astra-pile-pad">
                 <ListSkeleton rows={3} />
               </div>
-            ) : inbox.length === 0 ? (
-              <p className="meta astra-pile-pad">
-                Nothing new tonight — everything interesting is already on the desk.
-              </p>
-            ) : (
+            ) : inbox.length > 0 ? (
               (expandedPiles.signals ? inbox : inbox.slice(0, 5)).map((item) => (
-                <WorthCard
+                <WorthSelector
                   key={item.id}
                   item={item}
-                  busy={busyStart || digging}
-                  phase={pendingCard === item.id ? cardPhase : ""}
-                  error={cardError?.id === item.id ? cardError.message : null}
-                  onStart={() => openFromCard.mutate(item)}
+                  onOpen={() => chooseSignal(item)}
                 />
               ))
-            )}
-            {/*
-              FB7, item 5 (A2c C6): the cards this pile is NOT drawing, each
-              with the reason. A2c watched one of these vanish unopened and had
-              no way to find out where it went; the rule this unit sets is that
-              nothing disappears without one. The rows are real links, so the
-              file a tip is already on is one press away rather than a name the
-              editor has to go and search for.
-            */}
-            {inbox.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("signals")}>{expandedPiles.signals ? "Show fewer" : `Show all ${inbox.length}`}</InkButton> : null}
-            {covered.length ? (
-              <details className="wire-more astra-pile-pad">
-                <summary>
-                  {signalsCount.covered} {signalsCount.covered === 1 ? "signal is" : "signals are"} already accounted for
-                </summary>
-                {(expandedPiles.covered ? covered : covered.slice(0, 5)).map(({ item, off }) => (
-                  <p key={item.id} className="wire-line">
-                    <b>{editorTitle(plainEditorText(item.title))}</b> — {worthItemOnDeskLine(off!)}
-                    {off!.kind === "covered" ? (
-                      <>
-                        {" "}
-                        {/*
-                          The file this tip is already on, reached the way every
-                          other "open that file" link on this desk reaches one:
-                          the id is handed over in `OPEN_KEY` and read on
-                          arrival. The route carries no search params, so a
-                          query string here would have looked like a link and
-                          opened nothing.
-                        */}
-                        <Link
-                          to="/desk/dark"
-                          className="inline-link"
-                          onClick={() => {
-                            const covering = allInv.find((r) => r.title === off!.title);
-                            if (covering == null) return;
-                            try {
-                              sessionStorage.setItem(OPEN_KEY, String(covering.id));
-                            } catch {
-                              /* a browser that will not keep it opens its own box */
-                            }
-                          }}
-                        >
-                          Open that file →
-                        </Link>
-                      </>
-                    ) : null}
-                  </p>
-                ))}
-                {covered.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("covered")}>{expandedPiles.covered ? "Show fewer" : `Show all ${covered.length}`}</InkButton> : null}
-              </details>
             ) : null}
+            <PileShowAll count={inbox.length} expanded={Boolean(expandedPiles.signals)} onToggle={() => togglePile("signals")} />
             {reddit.isPending ? (
               <div className="astra-pile-pad">
                 <div className="reddit-progress">
@@ -1053,91 +1065,32 @@ function DarkPage() {
                   filingUrl={fileTip.isPending ? (fileTip.variables?.url ?? null) : null}
                 />
               </div>
-            ) : (
-              <p className="astra-note astra-pile-pad">
-                Tips from the subreddit arrive here as unverified cards. They are a reason to go
-                looking for the record, never a source to cite.
-              </p>
-            )}
-          </div>
-
-          <div className="astra-pile">
-            <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
-            {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
-              <DeskFileCard key={row.id} row={row} selected={row.id === openId} digging={true} locked={digging || busyStart} onOpen={() => rememberOpen(row.id)} onKeep={() => advance.mutate(row.id)} onPark={() => park.mutate(row.id)} />
-            )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
-            {waitingFiles.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("waiting")}>{expandedPiles.waiting ? "Show fewer" : `Show all ${waitingFiles.length}`}</InkButton> : null}
-          </div>
-
-          <div className="astra-pile">
-            <div className="astra-pile-h">
-              <span>Set aside</span>
-              <span>{parked.length}</span>
-            </div>
-            <p className="astra-note astra-pile-pad">Parked or finished. Pull anything back.</p>
-            {parked.length === 0 ? (
-              <p className="meta astra-pile-pad">Nothing set aside yet.</p>
-            ) : (
-              (expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
-                <div key={row.id} className={"astra-file dim astra-aside-file" + (row.id === openId ? " on" : "")}>
-                  {row.id === openId ? <span className="astra-file-m">Open now</span> : null}
-                  <span className="astra-file-t" title={row.title}>{editorTitle(row.title) || `File ${row.id}`}</span>
-                  <InkButton tone="quiet" onClick={() => rememberOpen(row.id)}>Read</InkButton>
-                  <details className="row-more">
-                    <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
-                    <div className="row-more-panel"><InkButton tone="quiet" disabled={pullBack.isPending} onClick={() => pullBack.mutate(row.id)}>{pullBack.isPending ? "Pulling back?" : "Pull back"}</InkButton></div>
-                  </details>
-                </div>
-              ))
-            )}
-            {parked.length > 5 ? <InkButton tone="quiet" onClick={() => togglePile("aside")}>{expandedPiles.aside ? "Show fewer" : `Show all ${parked.length}`}</InkButton> : null}
-            {(runs.data ?? []).length > 0 ? (
-              <details className="of-trail runs astra-pile-pad">
-                <summary>What Dark Desk did — {(runs.data ?? []).length} recent runs</summary>
-                {(expandedPiles.runs ? runs.data ?? [] : (runs.data ?? []).slice(0, 5)).map((r) => (
-                  <div key={r.id} className="run-row">
-                    <p className="meta">
-                      {formatListDateTime(r.started_at)}
-                      {/*
-                        Which model dug this round. A round that dug badly and a
-                        round that dug on a different model are different facts
-                        about the same file, and the history could not tell them
-                        apart before 0.6.2. Rounds dug before the picker existed
-                        have no answer, and say nothing rather than guessing.
-                      */}
-                      {r.model_choice ? ` · ${modelChoiceLabel(r.model_choice)}` : ""}
-                    </p>
-                    {r.error ? (
-                      <p className="side-item">
-                        {editorError(r.error)}
-                        {looksLikeProviderAuthFailure(r.error) ? (
-                          <ProviderSignInButton detail={r.error} />
-                        ) : null}
-                      </p>
-                    ) : null}
-                    {r.summary ? <p className="side-item">{plainEditorText(r.summary)}</p> : null}
-                    <DarkRunMeter run={r} history={runs.data ?? []} />
-                  </div>
-                ))}
-                {(runs.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => togglePile("runs")}>{expandedPiles.runs ? "Show fewer" : `Show all ${runs.data?.length}`}</InkButton> : null}
-              </details>
             ) : null}
           </div>
 
-          {/*
-            The rail's foot, as drawn: the two desks-wide actions that are not
-            about any one file. Pick one for me stays here rather than in the
-            signals pile so it is reachable with an empty rail.
-          */}
+          {waitingFiles.length || hasEverStartedFollowUp ? (
+            <div className="astra-pile">
+              <div className="astra-pile-h"><span>Waiting on an AI follow-up</span><span>{waitingFiles.length}</span></div>
+              {waitingFiles.length ? (expandedPiles.waiting ? waitingFiles : waitingFiles.slice(0, 5)).map((row) => (
+                <DeskFileCard key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
+              )) : <p className="meta astra-pile-pad">Nothing waiting on AI.</p>}
+              <PileShowAll count={waitingFiles.length} expanded={Boolean(expandedPiles.waiting)} onToggle={() => togglePile("waiting")} />
+            </div>
+          ) : null}
+
+          {parked.length ? (
+            <div className="astra-pile astra-pile-aside">
+              <div className="astra-pile-h"><span>Set aside</span><span>{parked.length}</span></div>
+              {(expandedPiles.aside ? parked : parked.slice(0, 5)).map((row) => (
+                <SetAsideRow key={row.id} row={row} selected={row.id === openId} onOpen={() => rememberOpen(row.id)} />
+              ))}
+              <PileShowAll count={parked.length} expanded={Boolean(expandedPiles.aside)} onToggle={() => togglePile("aside")} />
+            </div>
+          ) : null}
+
+          {/* The rail's foot holds the one desks-wide action: check the subreddit for signals. */}
           <div className="astra-piles-foot">
             <div className="astra-pile-acts">
-              <InkButton
-                tone="quiet"
-                disabled={busyStart || digging || paperGate.blocked}
-                onClick={() => find.mutate()}
-              >
-                {find.isPending ? "Starting…" : "Pick one for me"}
-              </InkButton>
               <InkButton
                 tone="quiet"
                 disabled={
@@ -1170,20 +1123,6 @@ function DarkPage() {
         </div>
 
         <div className="astra-col">
-          <section id="dark-settings" hidden={!settingsOpen} aria-label="Dark Desk settings">
-          <DarkDialsPanel
-            modelChoice={modelChoice}
-            onModelChoice={(choice) => {
-              modelChoiceTouched.current = true;
-              setModelChoice(choice);
-              setModelEffort(defaultModelEffort(choice));
-            }}
-            modelEffort={modelEffort}
-            onModelEffort={setModelEffort}
-            modelDisabled={digging || busyStart}
-          />
-          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
-          </section>
           {/*
             FB7, item 1. Every notice on this screen was `<p className="note">`
             with no role at all (FB0-REPORT.md Table B, Dark Desk: "no role
@@ -1194,47 +1133,78 @@ function DarkPage() {
           */}
           {notice && openId == null && !redditResult ? (
             <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
-              {notice}
+              {notice}{undoDisposition ? <InkButton small tone="quiet" onClick={() => pullBack.mutate(undoDisposition.id)}>Undo</InkButton> : null}
             </p>
           ) : null}
 
-          {/*
-            No file open: the drawing's right side is a short empty state, not
-            the settings that used to fill it. Before 0.6.72 an empty desk
-            showed Watched pages and How hard to dig and nothing else, which
-            read as a settings page rather than as a desk with no file on it.
-            Both panels are still below, so nothing became unreachable.
-          */}
-          {openId == null && !investigations.data?.length && !investigations.isPending ? (
-            <div className="astra-panel astra-empty">
-              <h2 className="astra-panel-h">No file open</h2>
-              <p className="astra-note">
-                Pick a file from Open files, open a signal nobody has read yet, or start one of
-                your own with <strong>+ Start a file</strong> above.
-              </p>
-            </div>
+          {darkDeskReadError ? (
+            <section className="astra-panel" role="alert" aria-labelledby="dark-desk-read-error">
+              <h2 id="dark-desk-read-error" className="astra-panel-h">Could not load Dark Desk</h2>
+              <p className="astra-note">{darkDeskReadFailureReason(darkDeskReadError)}</p>
+              <div className="astra-panel-acts">
+                <Link to="/desk/ops" className="inline-link">Open Server health</Link>
+                <InkButton tone="quiet" onClick={retryDarkDeskRead}>
+                  {investigations.isRefetching || detail.isRefetching ? "Trying again…" : "Try again"}
+                </InkButton>
+              </div>
+            </section>
+          ) : loadingFile ? (
+            <p className="astra-panel astra-note" role="status" aria-busy="true">Loading the file…</p>
           ) : null}
 
-          {openId != null ? (
+          {/* The no-files state follows the state table and hides the rail. */}
+          {noFiles ? (
+            <section className="astra-panel astra-empty" aria-label="No investigations">
+              <h2 className="astra-panel-h">No investigations yet</h2>
+              <p className="astra-note">Start a file with a question, or check a public page for signals.</p>
+              <div className="astra-panel-acts">
+                <button
+                  type="button"
+                  className="btn solid"
+                  disabled={paperGate.blocked}
+                  onClick={() => {
+                    setStartPrefill(undefined);
+                    setStartOpen(true);
+                  }}
+                >
+                  + Start a file
+                </button>
+                <InkButton
+                  tone="quiet"
+                  disabled={reddit.isPending || !tipSubreddit.data?.subreddit}
+                  onClick={() => reddit.mutate()}
+                >
+                  {reddit.isPending
+                    ? `Reading ${redditLabel}…`
+                    : tipSubreddit.data?.subreddit
+                      ? `Check ${redditLabel} for signals`
+                      : "Reddit unavailable"}
+                </InkButton>
+              </div>
+            </section>
+          ) : null}
+
+          {openId != null && !noFiles && detail.data?.investigation.id === openId ? (
             <InvestigationWorkspace
+              key={openId}
               openId={openId}
-              detail={detail.data ?? undefined}
+              onOpenFile={() => rememberOpen(openId)}
+              detail={darkScreenData(detail.data ?? undefined)}
+              canUndoDisposition={undoDisposition?.id === openId}
               pending={detail.isPending && !detail.data}
               digging={digRunning}
-              keepDisabled={digRunning}
+              keepDisabled={digRunning || !detail.data || detail.data.investigation.id !== openId}
               stalled={stalled}
               darkJobError={
                 detail.data?.darkJob?.status === "failed"
                   ? editorError(detail.data.darkJob.error ?? "") ||
-                    detail.data.darkJob.error ||
-                    "This research run did not finish."
+                    "This round did not finish."
                   : null
               }
               phase={liveJobStage || cardPhase || liveLine}
-              notice={notice}
+              notice={noticeFor === openId ? notice : null}
               noticeOk={noticeOk}
               queuedLead={queued?.invId === openId ? queued.leadId : null}
-              queuedAlready={queued?.invId === openId ? queued.alreadyQueued : false}
               queuePending={toQueue.isPending}
               queueError={queueError?.invId === openId ? queueError.message : null}
               followPending={followLead.isPending}
@@ -1265,21 +1235,35 @@ function DarkPage() {
                 beginDigPhase();
                 advance.mutate(openId);
               }}
-              onQueue={() => toQueue.mutate(openId)}
-              onClose={() => rememberOpen(null)}
+              onQueue={(preview) => toQueue.mutate({ id: openId, preview })}
               onPark={() => park.mutate(openId)}
+              onPullBack={() => pullBack.mutate(openId)}
+              onCloseWithoutFinding={(note) => closeWithoutFinding.mutate({ id: openId, note })}
+              closePending={closeWithoutFinding.isPending}
               onFollow={(seed) => followLead.mutate(seed)}
+              onChallenge={() => challengeCase.mutate(openId)}
+              challengePending={challengeCase.isPending}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
+              modelChoice={fileModelChoice}
+              onModelChoice={(choice) => {
+                fileModelTouchedFor.current = openId;
+                setFileModelChoice(choice);
+                setFileModelEffort(defaultModelEffort(choice));
+              }}
+              modelEffort={fileModelEffort}
+              onModelEffort={(effort) => {
+                fileModelTouchedFor.current = openId;
+                setFileModelEffort(effort);
+              }}
               ocrModelChoice={ocrModelChoice}
-              onOcrModelChoiceChange={setOcrModelChoice}
               ocrModelEffort={ocrModelEffort}
-              onOcrModelEffortChange={setOcrModelEffort}
             />
           ) : null}
 
 
         </div>
+      </div>
       </div>
     </DeskShell>
   );
@@ -1288,25 +1272,42 @@ function DarkPage() {
 function DeskFileCard({
   row,
   selected,
-  digging,
-  locked,
   onOpen,
-  onKeep,
-  onPark,
 }: {
   row: InvestigationRow;
   selected: boolean;
-  digging: boolean;
-  locked: boolean;
   onOpen: () => void;
-  onKeep: () => void;
-  onPark: () => void;
 }) {
-  const { formatListDateTime } = usePaperDateFormatters();
+  const { formatListDateTime, formatShortDate } = usePaperDateFormatters();
   const records = Number(row.records ?? 0);
-  const still = Number(row.still_open ?? 0);
+  const waitingCount = Number(row.still_open ?? 0);
+  const recordProgress = waitingCount > 0
+    ? `${records} of ${records + waitingCount} records`
+    : `${records} records`;
+  const waitingLine = row.waiting_follow_up
+    ? `AI watching for ${row.waiting_follow_up}${row.waiting_since ? ` · since ${formatShortDate(row.waiting_since)}` : ""}`
+    : row.waiting_watch
+      ? `Watching ${row.waiting_watch}`
+      : null;
+  const stateLine = row.status === "closed"
+    ? row.closed_kind === "queued"
+      ? `Sent to the queue${row.close_note ? ` · ${row.close_note}` : ""}`
+      : row.closed_kind === "no-finding"
+        ? `Closed · no finding${row.close_note ? ` · ${row.close_note}` : ""}`
+        : `Closed · ${formatListDateTime(row.updated_at)}`
+    : waitingLine
+      ? waitingLine
+      : row.found_follow_up
+        ? "Found an answer"
+        : row.status === "investigating"
+          ? `Reading · ${recordProgress}`
+          : row.status === "open" && waitingCount > 0
+            ? `Waiting on ${waitingCount} ${waitingCount === 1 ? "record" : "records"}`
+            : row.status === "paused"
+              ? `Stopped · ${recordProgress}`
+              : `Case file ready · ${records} records`;
   return (
-    <div className={"astra-file" + (selected ? " on" : "")}>
+    <div className={"astra-file astra-pile-row" + (selected ? " on" : "")}>
       {/*
         The row is the control. The drawing's rail rows are selectors -- a bold
         title and one line of metadata -- so "Open file" / "Viewing above" is no
@@ -1320,45 +1321,33 @@ function DeskFileCard({
         aria-current={selected ? "true" : undefined}
       >
         <span className="astra-file-t">{editorTitle(row.title) || `File ${row.id}`}</span>
-        <span className="astra-file-m">
-          {selected ? "Open now · " : ""}{editorStatus(row.status)} · {digRailCounterLine(records)}
-          {still > 0 ? ` · ${still} open follow-up entries` : ""} · last touched{" "}
-          {formatListDateTime(row.updated_at)}
-        </span>
+        <span className="astra-file-m">{stateLine}</span>
       </button>
-      {/*
-        Keep digging and Set aside keep the behavior they had on the old card,
-        but move under More: the drawing's rail row carries one action, and the
-        rail is an index, not a workbench. Neither act is lost -- both are one
-        click away, and Keep digging is also on the open file's own Decide
-        strip.
-      */}
-      <div className="astra-file-acts">
-        <details className="row-more">
-          <summary className="btn quiet">
-            More ▾
-          </summary>
-          <div className="row-more-panel">
-            <button
-              type="button"
-              className="btn quiet"
-              disabled={digging || locked}
-              onClick={onKeep}
-            >
-              {digging ? "Reading…" : "Keep digging"}
-            </button>
-            <button
-              type="button"
-              className="btn quiet"
-              disabled={digging || locked}
-              onClick={onPark}
-            >
-              Set aside
-            </button>
-          </div>
-        </details>
-      </div>
     </div>
+  );
+}
+
+function PileShowAll({ count, expanded, onToggle }: { count: number; expanded: boolean; onToggle: () => void }) {
+  if (count <= 5) return null;
+  return (
+    <button type="button" className="astra-show-all" aria-expanded={expanded} onClick={onToggle}>
+      {expanded ? "Show fewer" : `Show all ${count}`}
+    </button>
+  );
+}
+
+function SetAsideRow({ row, selected, onOpen }: { row: InvestigationRow; selected: boolean; onOpen: () => void }) {
+  const { formatShortDate } = usePaperDateFormatters();
+  return (
+    <button
+      type="button"
+      className={"astra-set-aside-row" + (selected ? " on" : "")}
+      onClick={onOpen}
+      aria-current={selected ? "true" : undefined}
+    >
+      <span className="astra-set-aside-title">{editorTitle(row.title) || `File ${row.id}`}</span>
+      <span className="astra-set-aside-meta">Set aside {formatShortDate(row.updated_at)}</span>
+    </button>
   );
 }
 
@@ -1447,7 +1436,7 @@ function RedditResultPanel({
       <p className="reddit-headline">{redditResultHeadline(result)}</p>
       <p className="reddit-sub">Automatic filing uses dated posts from the past 30 days. Older or undated results remain available to file by hand.</p>
       <p className="reddit-sub">
-        <strong>Full-thread reading:</strong> {result.enrichment.reason}
+        <strong>Full-thread reading:</strong> {editorError(result.enrichment.reason) || "Could not read the replies."}
       </p>
       {result.searched.length > 0 ? (
         <p className="reddit-searched">Searched: {result.searched.join(" · ")}</p>
@@ -1457,7 +1446,7 @@ function RedditResultPanel({
       </p>
       {result.incomplete ? (
         <Notice kind="warn">
-          {result.reason || "The read stopped early."}
+          {editorError(result.reason ?? "") || "The read stopped early."}
         </Notice>
       ) : null}
       {result.read > 0 && result.civic === 0 ? (
@@ -1506,111 +1495,27 @@ function RedditResultPanel({
   );
 }
 
-function WorthCard({
-  item,
-  busy,
-  phase,
-  error,
-  onStart,
-}: {
-  item: WorthSeed;
-  busy: boolean;
-  phase: string;
-  error: string | null;
-  onStart: () => void;
-}) {
+function WorthSelector({ item, onOpen }: { item: WorthSeed; onOpen: () => void }) {
+  const meta = item.kind === "reddit-tip"
+    ? "1 post · unverified"
+    : `${item.badge || editorKindLabel(item.kind)} · unverified`.toLowerCase();
   return (
-    <div className="astra-file">
-      <p className="astra-file-t">{editorTitle(item.title)}</p>
-      <p className="astra-file-m">
-        {item.badge || editorKindLabel(item.kind)} · {item.why}
-      </p>
-      <div className="astra-file-acts">
-        <InkButton disabled={busy} onClick={onStart}>
-          {phase.startsWith("Starting") ? "Starting…" : phase ? "Digging…" : "Start digging"}
-        </InkButton>
-        {/*
-          The two lines the card used to print in full -- what changed and the
-          first question -- are what makes a signal worth opening, so they stay
-          one click away rather than being cut. The rail's row shape is one
-          line of metadata; the why is the line that decides whether to look.
-        */}
-        <details className="row-more">
-          <summary className="btn quiet">More ▾</summary>
-          <div className="row-more-panel">
-            <p className="row-more-h">What changed</p>
-            <p>{item.happened}</p>
-            <p className="row-more-h">First question</p>
-            <p>{item.question}</p>
-            {item.source_line ? <p className="meta">{item.source_line}</p> : null}
-          </div>
-        </details>
-      </div>
-      {phase ? (
-        <p className="astra-file-m" aria-live="polite">
-          {phase}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="note err" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-const DARK_STOP_COPY: Record<string, string> = {
-  "elapsed-time-limit": "Stopped at the total time limit",
-  "model-call-limit": "Stopped at the model-call limit",
-  "search-limit": "Stopped at the search limit",
-  "document-read-limit": "Stopped at the document-read limit",
-  "evidence-sufficient": "This run paused after the planner judged the current evidence sufficient; unresolved trails remain saved",
-  "diminishing-returns": "This run paused after diminishing returns; it did not reject the remaining leads",
-  "repeated-sources": "This run paused after sources began repeating; it did not resolve the hypothesis",
-  "no-materially-new-finding": "This run paused after two rounds without a material new finding; unresolved trails remain saved",
-  "frontier-exhausted": "This run ended because no productive unresolved lead remained in the active frontier",
-  "hop-limit": "Stopped at the hop limit; unresolved leads remain saved",
-  "synthesis-failed": "Stopped because synthesis failed; completed research remains saved",
-  "provider-failed": "Stopped because the provider failed; completed work remains saved",
-  // Unit U25, B4: the editor's own Stop, so the run history says what happened
-  // rather than falling through to the raw enum word.
-  cancelled: "Stopped by the editor; everything found before the stop is saved",
-  completed: "Completed within the run limits",
-};
-
-function DarkRunMeter({ run, active = false, history = [] }: { run: DarkRunRow; active?: boolean; history?: readonly DarkRunRow[] }) {
-  if (!active && run.usageRecorded === false) return <p className="of-stop">Not recorded for this older run</p>;
-  const totals = run.usage.totals;
-  const startedAt = Date.parse(run.started_at);
-  const elapsedMs = active && Number.isFinite(startedAt)
-    ? Math.max(totals.elapsedMs, Date.now() - startedAt)
-    : totals.elapsedMs;
-  const tokens = totals.totalTokens == null ? "tokens not reported for every call" : `${totals.totalTokens.toLocaleString()} tokens`;
-  return (
-    <div className="of-stop" role={active ? "status" : undefined} aria-live={active ? "polite" : undefined}>
-      <p>
-        <b>{active ? "Live run:" : "Run usage:"}</b>{" "}
-        {totals.modelCalls} model call{totals.modelCalls === 1 ? "" : "s"} · {totals.searches} search{totals.searches === 1 ? "" : "es"} · {totals.documentReads} document read{totals.documentReads === 1 ? "" : "s"} · {elapsedLabel(Math.ceil(elapsedMs / 1000))} · {tokens}
-      </p>
-      {!active && shouldShowDarkRunStopNote(run, history) ? <p className="meta">{DARK_STOP_COPY[run.stopReason!] ?? run.stopReason}</p> : null}
-      {run.usage.calls.length ? (
-        <details className="of-trail">
-          <summary>Model calls — {run.usage.calls.length}</summary>
-          {run.usage.calls.map((call, index) => (
-            <p className="side-item" key={`${call.stage}-${index}`}>
-              <b>{call.stage}</b> · {call.provider} · {call.model} · {elapsedLabel(Math.ceil(call.durationMs / 1000))} · {call.result}{call.totalTokens == null ? "" : ` · ${call.totalTokens.toLocaleString()} tokens`}
-            </p>
-          ))}
-        </details>
-      ) : null}
-    </div>
+    <button
+      type="button"
+      className="astra-file-open astra-signal-open"
+      onClick={onOpen}
+    >
+      <span className="astra-file-t">{editorTitle(item.title)}</span>
+      <span className="astra-file-m">{meta}</span>
+    </button>
   );
 }
 
 function InvestigationWorkspace({
   openId,
+  onOpenFile,
   detail,
+  canUndoDisposition,
   pending,
   digging,
   keepDisabled,
@@ -1620,7 +1525,6 @@ function InvestigationWorkspace({
   notice,
   noticeOk,
   queuedLead,
-  queuedAlready,
   queuePending,
   queueError,
   followPending,
@@ -1629,18 +1533,26 @@ function InvestigationWorkspace({
   onStopDig,
   onKeepDigging,
   onQueue,
-  onClose,
+  onCloseWithoutFinding,
+  closePending,
   onPark,
+  onPullBack,
   onFollow,
+  onChallenge,
+  challengePending,
   onWriteBrief,
   briefPending,
+  modelChoice,
+  onModelChoice,
+  modelEffort,
+  onModelEffort,
   ocrModelChoice,
-  onOcrModelChoiceChange,
   ocrModelEffort,
-  onOcrModelEffortChange,
 }: {
   openId: number;
+  onOpenFile: () => void;
   detail: Awaited<ReturnType<typeof getInvestigation>> | undefined;
+  canUndoDisposition: boolean;
   pending: boolean;
   digging: boolean;
   keepDisabled: boolean;
@@ -1650,7 +1562,6 @@ function InvestigationWorkspace({
   notice: string | null;
   noticeOk: boolean;
   queuedLead: number | null;
-  queuedAlready: boolean;
   queuePending: boolean;
   queueError: string | null;
   followPending: boolean;
@@ -1658,19 +1569,34 @@ function InvestigationWorkspace({
   stopControl: { visible: boolean; label: string; disabled: boolean; line: string | null };
   onStopDig: () => void;
   onKeepDigging: () => void;
-  onQueue: () => void;
-  onClose: () => void;
+  onQueue: (preview: InvestigationQueuePacket) => void;
+  onCloseWithoutFinding: (note: string) => void;
+  closePending: boolean;
   onPark: () => void;
+  onPullBack: () => void;
   onFollow: (seed: { paste: string; title: string }) => void;
+  onChallenge: () => void;
+  challengePending: boolean;
   onWriteBrief: () => void;
   briefPending: boolean;
+  modelChoice: StoryModelChoice;
+  onModelChoice: (choice: StoryModelChoice) => void;
+  modelEffort: ModelEffort | null;
+  onModelEffort: (effort: ModelEffort | null) => void;
   ocrModelChoice: StoryModelChoice;
-  onOcrModelChoiceChange: (choice: StoryModelChoice) => void;
   ocrModelEffort: ModelEffort | null;
-  onOcrModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
-  const { formatShortDate } = usePaperDateFormatters();
+  const { formatListDateTime, formatListDate, formatClockTime } = usePaperDateFormatters();
+  const qc = useQueryClient();
   const [frN, setFrN] = useState(6);
+  const [followUpOpen, setFollowUpOpen] = useState(false);
+  const [followUpNotice, setFollowUpNotice] = useState("");
+  const [watchOpen, setWatchOpen] = useState(false);
+  const [watchPageIds, setWatchPageIds] = useState<number[]>([]);
+  const [watchNotice, setWatchNotice] = useState("");
+  const [queuePreviewOpen, setQueuePreviewOpen] = useState(false);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closeNote, setCloseNote] = useState("");
   useEffect(() => {
     setFrN(6);
   }, [openId]);
@@ -1697,7 +1623,80 @@ function InvestigationWorkspace({
     keeps).
   */
   const jobs = useDeskJobs();
-  const fileJob = (kind: "dark" | "brief" | "artifact-ocr", subjectId: number | null) =>
+  const activityQuery = useQuery({
+    queryKey: ["investigation-activity", openId],
+    queryFn: () => investigationActivity({ data: openId }),
+    refetchInterval: digging ? 2000 : false,
+  });
+  const followUpLeads = useQuery({
+    queryKey: ["follow-up-story-options"],
+    queryFn: () => listFollowUpStoryOptions(),
+    enabled: followUpOpen,
+  });
+  const queuePacketQuery = useQuery({
+    queryKey: ["dark-queue-packet", openId],
+    queryFn: () => queuePacket({ data: openId }),
+    enabled: queuePreviewOpen,
+  });
+  const createFileFollowUp = useMutation({
+    mutationFn: (input: FollowUpDialogInput) => createAiFollowUp({
+      data: {
+        investigationId: openId,
+        what: input.what,
+        agentKind: input.agentKind,
+        schedule: input.schedule,
+        targets: input.targets,
+        leadId: input.leadId,
+        modelChoice: input.modelChoice,
+      },
+    }),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      setFollowUpOpen(false);
+      setFollowUpNotice("AI follow-up started. This file is now waiting on its next check.");
+      void qc.invalidateQueries({ queryKey: ["follow-ups"] });
+      void qc.invalidateQueries({ queryKey: ["investigations"] });
+      void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+    },
+  });
+  const createFileWatches = useMutation({
+    mutationFn: async (pages: { id: number; title: string; url: string }[]) => {
+      const saved: string[] = [];
+      const failed: string[] = [];
+      for (const page of pages) {
+        try {
+          const result = await createPageWatch({ data: {
+            url: page.url,
+            name: page.title.slice(0, 200),
+            reason: `Watch for changes relevant to: ${detail?.investigation.title ?? "this file"}`,
+            investigationId: openId,
+          } });
+          if (!result.ok) {
+            failed.push(page.title);
+            continue;
+          }
+          if (!result.alreadyExists) await checkPageWatch({ data: result.id });
+          saved.push(page.title);
+        } catch {
+          failed.push(page.title);
+        }
+      }
+      return { saved, failed };
+    },
+    onSuccess: (result) => {
+      if (result.saved.length) {
+        setWatchNotice(result.failed.length
+          ? `Watching ${result.saved.length} ${result.saved.length === 1 ? "page" : "pages"}; ${result.failed.length} could not be added.`
+          : `Watching ${result.saved.length} ${result.saved.length === 1 ? "page" : "pages"}.`);
+        void qc.invalidateQueries({ queryKey: ["page-watches"] });
+        void qc.invalidateQueries({ queryKey: ["investigations"] });
+        void qc.invalidateQueries({ queryKey: ["investigation", openId] });
+        void qc.invalidateQueries({ queryKey: ["investigation-activity", openId] });
+      }
+      if (!result.failed.length) setWatchOpen(false);
+    },
+  });
+  const fileJob = (kind: "dark" | "brief" | "artifact-ocr" | "challenge", subjectId: number | null) =>
     subjectId == null
       ? null
       : ((jobs.data ?? []).find(
@@ -1706,11 +1705,22 @@ function InvestigationWorkspace({
             row.subjectId === subjectId &&
             (row.status === "queued" || row.status === "running"),
         ) ?? null);
-  const digJob = fileJob("dark", openId);
+  const darkResearchJob = (jobs.data ?? []).find((row) => row.kind === "dark" && row.subjectId === openId) ?? null;
+  const digJob = darkResearchJob && (darkResearchJob.status === "queued" || darkResearchJob.status === "running") ? darkResearchJob : null;
+  const failedDarkJob = darkResearchJob?.status === "failed" ? darkResearchJob : null;
   const briefJob = fileJob("brief", openId);
+  const challengeJob = fileJob("challenge", openId);
   const inv = detail?.investigation;
+  const detailReady = inv?.id === openId;
   const allArtifacts = detail?.artifacts ?? [];
   const artifacts = allArtifacts.filter((a) => !a.url.startsWith("editor://"));
+  const watchPages = artifacts
+    .filter((artifact) => /^https?:\/\//i.test(artifact.url))
+    .map((artifact) => {
+      const title = editorTitle(plainEditorText(artifact.title));
+      return { id: artifact.id, title: title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(artifact.url), url: artifact.url };
+    });
+  const foundAnswer = detail?.investigationFollowUps?.find((followUp) => followUp.lastState === "found") ?? null;
   const pasteArt = allArtifacts.find((a) => a.url.startsWith("editor://"));
   // Real-vs-blocked, not raw row counts: a mostly-blocked dig must not look
   // identical to a working one (Dark Desk F6).
@@ -1730,7 +1740,6 @@ function InvestigationWorkspace({
     disagree by one (the editor's pasted tip) and, on a long file, by more.
   */
   const captureCounts = detail?.captureCounts ?? { captures: 0, readable: 0, unreadable: 0 };
-  const readableLabel = captureCounterLine(captureCounts);
   const readableCountBadge =
     captureCounts.captures === 0
       ? 0
@@ -1747,8 +1756,7 @@ function InvestigationWorkspace({
   const entities = detail?.entities ?? [];
   const signals = detail?.signals ?? [];
   const brief = detail?.brief ?? null;
-  const run = detail?.run ?? null;
-  const verifiedSignals = signals.filter((s) => s.verification_status === "verified");
+  const sourceCaptures = detail?.sourceCaptures ?? [];
   /*
     FB7, item 5 (A2c X3). Five rounds that each recorded the same sentence left
     five `claims` rows -- `investigate.ts` inserts one per planned claim per
@@ -1816,70 +1824,94 @@ function InvestigationWorkspace({
   })();
   const leftover = nextDeduped.length;
   const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
-  const pauseText = editorPauseReason(inv?.pause_reason, captureStats);
-  const parentTitle = fullFileQuestion(inv?.title || `File ${openId}`, pasteArt?.excerpt ?? "");
-  const started = startedLine(parentTitle, pasteArt?.excerpt ?? "", inv?.summary ?? "");
-  const statusBit = !inv
-    ? "Opening…"
-    : inv.status === "paused"
-      ? leftover > 0
-        ? "Stopped — more to read"
-        : editorStatus(inv.status)
-      : editorStatus(inv.status);
-  const round = inv?.hops ?? 0;
-  const budget = inv?.budget ?? 5;
+  const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
-  /*
-    Activity, from the run's own call record. The drawing's left column is a
-    clock time; a call has a duration but no timestamp of its own, so the
-    column is the elapsed time into the round -- the same fact from the other
-    end, and it cannot be wrong. With no run record yet, this round's searches
-    carry the log instead.
-  */
-  const callLog = run?.usage.calls ?? [];
-  const activityAll: { when: string; what: string; tone: "find" | "fail" | "plain" }[] = [];
-  if (callLog.length) {
-    let ms = 0;
-    for (const call of callLog) {
-      ms += call.durationMs;
-      const failed = /fail|error|blocked|refus|timeout|unavailable/i.test(call.result);
-      const found = /found|new |result|captur/i.test(call.result);
-      activityAll.push({
-        when: elapsedLabel(Math.ceil(ms / 1000)),
-        what: `${call.stage} — ${call.result}`,
-        tone: failed ? "fail" : found ? "find" : "plain",
-      });
-    }
-  } else {
-    for (const s of searches.slice(-14)) {
-      const outcome = String(s.state ?? "");
-      activityAll.push({
-        when: `Round ${Math.max(1, Number(s.hop ?? 0) + 1)}`,
-        what: `Search — ${searchOutcomeWords(s)}`,
-        tone: /FAIL|BLOCKED|TIMEOUT/.test(outcome) ? "fail" : "plain",
-      });
-    }
-  }
-  const activityRows = activityAll.slice(-14);
+  const activityAll = darkScreenData(activityQuery.data ?? []).map((entry) => ({
+    ...entry, text: darkStoredDates(entry.text, formatListDateTime, formatListDate),
+  }));
+  const activityRows = activityAll.slice(-5);
+  const earlierActivity = activityAll.slice(0, activityAll.length - activityRows.length);
 
-  /*
-    How hard the desk is set to dig, for the boundaries strip. Same query key as
-    the settings panel below, so this reads that panel's cache instead of asking
-    the server a second time.
-  */
+  // The saved scope is file-specific; the newsroom place supplies only its
+  // human-readable jurisdiction names.
   const dialsQ = useQuery({ queryKey: ["dark-dials"], queryFn: () => getDarkDials() });
-  const dials = dialsQ.data?.dials;
-  const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[dials?.scope ?? "city"] : null;
-  const roundMinutes = dials ? estimateMinutes(dials) : null;
-  const statusLine = [
-    statusBit,
-    readableLabel,
-    totalOpen > 0 ? `${totalOpen} unresolved follow-up entries` : null,
-    investigationRoundLabel(round, budget),
-    inv?.updated_at ? `last touched ${formatShortDate(inv.updated_at)}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const savedScope = (() => {
+    try {
+      const scope = (JSON.parse(inv?.scope_json || "{}") as { scope?: unknown }).scope;
+      return ["city", "county", "region", "adjacent"].includes(String(scope))
+        ? (scope as DarkScope)
+        : "city";
+    } catch {
+      return "city";
+    }
+  })();
+  const scopeLabel = dialsQ.data ? scopeLabelsFor(dialsQ.data.place)[savedScope] : "City scope";
+  const limit = DARK_LIMITS.find((row) => row.key === inv?.limit_key) ?? DARK_LIMITS[1];
+  const limitMinutes = Number(inv?.limit_minutes ?? limit.minutes);
+  const limitTimeLabel = limitMinutes % 60 === 0
+    ? `${limitMinutes / 60} hour${limitMinutes === 60 ? "" : "s"}`
+    : `${limitMinutes} minutes`;
+  const explanation = inv?.ordinary_explanation?.trim();
+  const sourceByCapture = new Map(sourceCaptures.map((capture) => [capture.id, capture]));
+  const normalizedSupport = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const sourcedFindings = claims
+    .filter((claim) => claim.capture_event_id != null && /FINDING|PATTERN|FACT|OBSERVATION/i.test(claim.kind))
+    .map((claim) => {
+      const source = sourceByCapture.get(claim.capture_event_id!);
+      const text = plainEditorText(claim.body);
+      const normalized = normalizedSupport(text);
+      const rank = (brief?.supports ?? []).findIndex((support) => {
+        const supportText = normalizedSupport(support);
+        return supportText && (normalized.includes(supportText) || supportText.includes(normalized));
+      });
+      return { text, source, confidence: Number(claim.confidence ?? 0), rank };
+    })
+    .filter((finding) => finding.text && finding.source && /^https?:\/\//i.test(finding.source.url))
+    .sort((a, b) => (a.rank < 0 ? Number.MAX_SAFE_INTEGER : a.rank) - (b.rank < 0 ? Number.MAX_SAFE_INTEGER : b.rank) || b.confidence - a.confidence);
+  const contradictions = brief?.contradictions ?? [];
+  const hasChallengeMaterial = sourcedFindings.length > 0 || contradictions.length > 0 || Boolean(brief?.supports.length);
+  const unanswered = questions.map((question) => plainEditorText(question)).filter(Boolean);
+  const linkedFollowUps = (detail?.investigationFollowUps ?? []).filter((followUp) => ["active", "paused"].includes(followUp.status) || followUp.lastState === "found");
+  const sourceLink = (captureId: number) => {
+    const source = sourceByCapture.get(captureId);
+    if (!source || !/^https?:\/\//i.test(source.url)) return null;
+    const title = editorTitle(plainEditorText(source.title));
+    const label = title && !/^https?:\/\//i.test(title) ? title : headlineFromUrl(source.url);
+    return <a className="inline-link astra-citation" href={source.url} target="_blank" rel="noreferrer">{label}</a>;
+  };
+  const renderCompactCaseText = (value: string, key: string) => {
+    const full = plainEditorText(value).replace(/\s+/g, " ").trim();
+    return <p key={key} className="side-item astra-case-v">{full}</p>;
+  };
+  const renderCaseList = <T,>(items: T[], text: (item: T) => string, render: (item: T, key: string) => ReactNode, empty: string, key: string) => {
+    if (!items.length) return <p className="side-item">{empty}</p>;
+    const full = plainEditorText(text(items[0]!)).replace(/\s+/g, " ").trim();
+    const preview = full.length > 64 ? full.slice(0, 64).trimEnd() + "…" : full;
+    return <details className="of-trail astra-case-compact">
+      <summary><span className="side-item astra-case-v">{preview}</span><span className="meta">More</span></summary>
+      <div className="astra-case-list">{items.map((item, i) => render(item, key + "-" + i))}</div>
+    </details>;
+  };
+  const renderFinding = (finding: (typeof sourcedFindings)[number], key: string) => (
+    <div key={key} className="astra-case">
+      {renderCompactCaseText(finding.text, `${key}-text`)}
+      <span className="meta">— {sourceLink(finding.source!.id)}</span>
+    </div>
+  );
+  const renderQuestion = (question: string, key: string) => <div key={key} className="astra-case">{renderCompactCaseText(question, `${key}-text`)}</div>;
+  const renderContradiction = (pair: (typeof contradictions)[number], key: string) => (
+    <div key={key} className="astra-case">
+      {renderCompactCaseText(`${plainEditorText(pair.first.text)}; another record says ${plainEditorText(pair.second.text)}`, `${key}-text`)}
+      <span className="meta">— {sourceLink(pair.first.captureId)}; {sourceLink(pair.second.captureId)}</span>
+    </div>
+  );
+  const renderFollowUp = (followUp: (typeof linkedFollowUps)[number], key: string) => (
+    <div key={key} className="astra-case">
+      <p className="side-item astra-case-v"><span className="meta">{followUp.lastState === "found" ? "Found an answer" : followUp.status === "paused" ? "Paused" : "Watching"}</span></p>
+      {renderCompactCaseText(followUp.what, `${key}-what`)}
+      <Link to="/desk/follow-ups" className="inline-link">{followUp.lastState === "found" ? "Review finding" : "Open follow-up"}</Link>
+    </div>
+  );
 
   return (
     <section
@@ -1892,30 +1924,56 @@ function InvestigationWorkspace({
         The question the file is: the largest voice on the screen, and
         everything below it is evidence about this one line.
       */}
-      <div>
-        <p className="astra-label">The question</p>
-        <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
-        <p className="astra-note">{statusLine}</p>
+      <div className="astra-file-head">
+        <div>
+          <p className="astra-label">The question</p>
+          <h2 className="astra-question" title={parentTitle}>{parentTitle}</h2>
+        </div>
+        <details className="astra-more-file-actions of-trail">
+          <summary>More file actions</summary>
+          <div className="astra-panel-acts">
+            <InkButton tone="quiet" disabled={keepDisabled || parkPending || inv?.status === "closed"} pending={parkPending} pendingLabel="Setting aside…" onClick={onPark}>Set aside</InkButton>
+            {inv?.status === "closed" ? <InkButton tone="quiet" disabled={keepDisabled} onClick={onPullBack}>Pull back</InkButton> : null}
+            {foundAnswer ? <InkButton tone="quiet" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>Start another AI follow-up</InkButton> : null}
+          </div>
+        </details>
       </div>
+      {explanation ? (
+        <div>
+          <p className="astra-label">Ordinary explanation to rule out</p>
+          <p className="astra-serif">{explanation}</p>
+        </div>
+      ) : null}
 
-      {/*
-        The drawing puts "the ordinary explanation to rule out first" here. The
-        investigations table has no such column (migrations/0006_investigate.sql:
-        id, title, status, summary, hops, budget), so the honest line in that
-        slot is where the file actually started -- the pasted tip, or the file's
-        own saved summary. Nothing is invented to fill the drawn sentence.
-      */}
-      {started ? <p className="astra-serif">{started}</p> : null}
+      <ModelPicker
+        scope="dark"
+        layout="stacked"
+        value={modelChoice}
+        onChange={onModelChoice}
+        effort={modelEffort}
+        onEffortChange={onModelEffort}
+        disabled={digging || keepDisabled}
+        compact
+      />
+
+      {digJob || failedDarkJob ? (
+        <DarkResearchCard
+          job={digJob ?? failedDarkJob!}
+          onStop={onStopDig}
+          onOpen={onOpenFile}
+          stopDisabled={stopControl.disabled}
+        />
+      ) : null}
 
       {/* Status, in the order it matters: stopped, failed, running, then the rest. */}
       <div className="astra-notices">
-        {stalled ? (
+        {stalled && !digJob ? (
           <p className="note err" role="status">
             {stalledRunCopy("dark")}
           </p>
         ) : null}
-        {darkJobError ? <p className="note err" role="alert">{darkJobError}</p> : null}
-        {digging ? <Busy label={phase || "Searching records…"} /> : null}
+        {darkJobError && !failedDarkJob ? <p className="note err" role="alert">{darkJobError}</p> : null}
+        {digging && !digJob ? <Busy label={phase || "Searching records…"} /> : null}
         {/*
           Unit DD1, item 3. The acknowledgement belongs here, above the notice
           line, and NOT inside it: the notice line is suppressed while a run is
@@ -1923,18 +1981,17 @@ function InvestigationWorkspace({
           walkthrough measured 102 seconds of a desk that had accepted the stop
           and said nothing about it.
         */}
-        {stopControl.line ? (
+        {stopControl.line && !digJob ? (
           <p className="note" role="status">
             {stopControl.line}
           </p>
         ) : null}
-        {run ? <DarkRunMeter run={run} active={digging} /> : null}
         {/* The same live region as the one above the file pane -- see the note
             there. This is the copy of the notice line the editor sees while a
             file is open, which is when most of these presses happen. */}
         {notice && !digging && stopControl.line == null ? (
           <p className={"note" + (noticeOk ? "" : " err")} role={noticeOk ? "status" : "alert"}>
-            {notice}
+            {notice}{canUndoDisposition ? <InkButton small tone="quiet" onClick={onPullBack}>Undo</InkButton> : null}
           </p>
         ) : null}
         {
@@ -1953,10 +2010,7 @@ function InvestigationWorkspace({
             </Notice>
           ) : queuedLead != null ? (
             <Notice kind="ok">
-              {queuedAlready
-                ? "Already on the working queue as a story lead."
-                : "On the working queue as a story lead."}{" "}
-              Dark Desk did not publish.{" "}
+              Filed to the Queue ·{" "}
               <Link
                 to="/desk/story/$leadId"
                 params={{ leadId: String(queuedLead) }}
@@ -1964,26 +2018,15 @@ function InvestigationWorkspace({
               >
                 Open the lead →
               </Link>
-              {" · "}
-              <Link to="/desk/queue" className="inline-link">
-                Open the queue
-              </Link>
+              {canUndoDisposition ? <InkButton small tone="quiet" onClick={onPullBack}>Undo</InkButton> : null}
             </Notice>
           ) : null
         }
-        {signals.length > 0 && queuedLead == null ? (
-          <p className="of-stop" role="status">
-            <b>Lead status:</b>{" "}
-            {`${verifiedSignals.length} of ${signals.length} signal${signals.length === 1 ? "" : "s"} completed the research protocol. Incomplete checks remain visible in the file and travel with the lead; they do not block sending it to the working queue.`}
-          </p>
-        ) : null}
         {pending ? <p className="meta">Getting this ready…</p> : null}
-        {inv?.status === "paused" && pauseText && !digging ? (
-          <p className="of-stop">
-            <b>Why it stopped:</b> {pauseText}
-            {looksLikeProviderAuthFailure(inv?.pause_reason) ? (
-              <ProviderSignInButton detail={inv?.pause_reason} />
-            ) : null}
+        {inv?.status === "paused" && inv.pause_reason && !digging ? (
+          <p className={"of-stop" + (editorPauseIsPageFailure(inv.pause_reason) ? " fail" : "")} role="status">
+            {editorPauseReason(inv.pause_reason, captureStats) ?? "Could not finish — retry."}
+            {looksLikeProviderAuthFailure(inv.pause_reason) ? <ProviderSignInButton detail={inv.pause_reason} /> : null}
           </p>
         ) : null}
         {showBlockedBanner ? (
@@ -1993,14 +2036,7 @@ function InvestigationWorkspace({
         ) : null}
       </div>
 
-      {/*
-        The boundaries strip, as drawn. Every cell is a real stored value:
-        Scope is the saved map scope, Depth is this file's round against its
-        budget, Limit is where a round stops at the saved dig settings. The
-        dials come from the same ["dark-dials"] query the settings panel below
-        reads, so the strip and the panel cannot disagree and nothing is
-        fetched twice.
-      */}
+      {/* Each boundary is the value saved on this file when it was opened. */}
       <div className="astra-bounds">
         <div className="astra-bound">
           <p className="astra-bound-k">Scope</p>
@@ -2008,16 +2044,11 @@ function InvestigationWorkspace({
         </div>
         <div className="astra-bound">
           <p className="astra-bound-k">Depth</p>
-          <p className="astra-bound-v">{investigationRoundLabel(round, budget)}</p>
+          <p className="astra-bound-v">{limit.label.split(",")[0]}</p>
         </div>
         <div className="astra-bound">
           <p className="astra-bound-k">Limit</p>
-          <p className="astra-bound-v">
-            Stops at the time, search and model-call limits
-            {roundMinutes != null
-              ? ` · about ${roundMinutes} minute${roundMinutes === 1 ? "" : "s"} a round`
-              : ""}
-          </p>
+          <p className="astra-bound-v">{limitTimeLabel}</p>
         </div>
       </div>
 
@@ -2032,222 +2063,205 @@ function InvestigationWorkspace({
         <div>
           <div className="astra-case-h">
             <p className="astra-label">Activity</p>
-            <p className="astra-note">
-              What the desk did, in order. Failures stay on the record.
-            </p>
           </div>
-          {activityRows.length === 0 ? (
+          {activityQuery.isError ? (
+            <div className="astra-note" role="alert">
+              <p>Could not load the activity</p>
+              <InkButton tone="quiet" onClick={() => void activityQuery.refetch()}>Try again</InkButton>
+            </div>
+          ) : activityRows.length === 0 ? (
             <p className="astra-note">
-              No activity recorded yet. Keep digging starts the first round.
+              {activityQuery.isPending ? "Loading activity…" : "No activity recorded yet."}
             </p>
           ) : (
-            activityRows.map((a, i) => (
-              <div key={i} className="astra-log">
-                <span className="astra-log-t">{a.when}</span>
+            activityRows.map((a) => (
+              <div key={a.id} className="astra-log">
+                <time className="astra-log-t" dateTime={a.occurredAt}>{formatClockTime(a.occurredAt)}</time>
                 <span
                   className={
-                    "astra-log-e" + (a.tone === "fail" ? " fail" : a.tone === "find" ? " find" : "")
+                    "astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")
                   }
                 >
-                  {a.what}
+                  {a.text}
                 </span>
               </div>
             ))
           )}
+          {earlierActivity.length ? (
+            <details className="of-trail">
+              <summary>Show earlier</summary>
+              {earlierActivity.map((a) => (
+                <div key={a.id} className="astra-log">
+                  <time className="astra-log-t" dateTime={a.occurredAt}>{formatClockTime(a.occurredAt)}</time>
+                  <span className={"astra-log-e" + (a.tone === "failure" ? " fail" : a.tone === "finding" ? " find" : "")}>{a.text}</span>
+                </div>
+              ))}
+            </details>
+          ) : null}
         </div>
         <div>
           <div className="astra-case-h">
             <p className="astra-label">Case file</p>
-            <p className="astra-note">
-              What is established, what is being tested, and what is still unanswered.
-            </p>
           </div>
-          {/*
-            Above the four lists, because the question an editor opens a file
-            with -- is there something here, is it worth an hour -- is the one
-            thing the lists cannot answer.
-          */}
-          <InvestigationBriefCard
-            brief={brief}
-            onRefresh={onWriteBrief}
-            refreshing={briefPending}
-          />
-          {/*
-            FB7, item 2. The brief's card, directly under the brief it is
-            rewriting -- the same "the card is where the press was" rule the
-            scan follows. A model call that
-            writes a whole brief with no stage, no clock and no Cancel was
-            Table B's "LAZY BAR" on Write/Rewrite the brief.
-          */}
-          {briefJob ? (
-            <div className="dark-job-card">
-              <DeskJobCard job={briefJob} />
-            </div>
+          {challengeJob ? <div className="dark-job-card"><DeskJobCard job={challengeJob} /></div> : null}
+          {briefJob ? <div className="dark-job-card"><DeskJobCard job={briefJob} /></div> : null}
+          {brief || detail?.latestChallenge ? (
+            <details className="of-trail">
+              <summary>More</summary>
+              {brief ? <InvestigationBriefCard brief={brief} onRefresh={onWriteBrief} refreshing={briefPending} /> : null}
+              {detail?.latestChallenge ? <p className="meta">Challenged {formatListDateTime(detail.latestChallenge.createdAt)}: {plainEditorText(detail.latestChallenge.summary)}</p> : null}
+            </details>
           ) : null}
-          {findings.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">On the record</p>
-              <SectionTldr text={brief?.sections?.record ?? ""} />
-              {findings.slice(0, 8).map((f, i) => (
-                <p key={i} className="side-item">
-                  {f.text}
-                  {f.sourceNote ? (
-                    <span className="meta"> — {f.sourceNote}</span>
-                  ) : (
-                    <span className="meta evidence-weak">
-                      {" "}
-                      — pattern-level, not tied to one source
-                    </span>
-                  )}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {tests.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">Being tested</p>
-              <SectionTldr text={brief?.sections?.tested ?? ""} />
-              {tests.slice(0, 6).map((n, i) => (
-                <p key={i} className="side-item">
-                  {n}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {questions.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">Still open</p>
-              <SectionTldr text={brief?.sections?.open ?? ""} />
-              {questions.slice(0, 8).map((n, i) => (
-                <p key={i} className="side-item">
-                  {n}
-                </p>
-              ))}
-            </div>
-          ) : null}
-          {facts.length > 0 ? (
-            <div className="of-block">
-              <p className="side-label">What we know</p>
-              <SectionTldr text={brief?.sections?.known ?? ""} />
-              {facts.map((c, i) => (
-                <p key={i} className="side-item">
-                  {plainEditorText(c.body)}
-                  {c.evidence ? (
-                    <span className="meta"> — {plainEditorText(c.evidence).slice(0, 160)}</span>
-                  ) : null}
-                </p>
-              ))}
-              {/*
-                The folded echoes are COUNTED, not just dropped. The editor
-                read five lines here yesterday; a section that silently shows
-                one is the same "nothing may vanish without a reason" rule this
-                unit is about, one level down.
-              */}
-              {factsFolded > 0 ? (
-                <p className="meta">
-                  {factsFolded} repeated {factsFolded === 1 ? "record" : "records"} folded into the{" "}
-                  {facts.length === 1 ? "line" : "lines"} above — {factsFolded === 1 ? "it was" : "they were"}{" "}
-                  recorded again by later rounds, word for word.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-          {/*
-            The drawing ends this column with "Challenge the case". There is no
-            challenge action on this base -- the adversarial work is a round,
-            i.e. Keep digging, which already stands in the Decide strip below,
-            and the brief card's own refresh rewrites the brief rather than
-            challenging it. No button is drawn here that would only re-run
-            something under a name that means something else.
-          */}
+          <div className="of-block">
+            <p className="side-label">Findings</p>
+            {renderCaseList(sourcedFindings, (finding) => finding.text, renderFinding, "No sourced findings yet.", "finding")}
+          </div>
+          <div className="of-block">
+            <p className="side-label">Contradictions</p>
+            {renderCaseList(contradictions, (pair) => `${pair.first.text}; another record says ${pair.second.text}`, renderContradiction, "No captured records disagree yet.", "contradiction")}
+          </div>
+          <div className="of-block">
+            <p className="side-label">Unanswered</p>
+            {renderCaseList(unanswered, (question) => question, renderQuestion, "No unanswered questions listed yet.", "question")}
+          </div>
+          <div className="of-block">
+            <p className="side-label">AI follow-ups running</p>
+            {renderCaseList(linkedFollowUps, (followUp) => followUp.what, renderFollowUp, "No AI follow-ups are running.", "follow-up")}
+          </div>
+          <div className="astra-panel-acts">
+            <InkButton tone="ghost" disabled={keepDisabled || challengePending || Boolean(challengeJob) || !hasChallengeMaterial} pending={challengePending} pendingLabel="Challenging…" onClick={onChallenge}>Challenge the case</InkButton>
+          </div>
         </div>
       </div>
 
-      {/*
-        Decide: the file's verbs, in the drawing's order. "Start an AI
-        follow-up" is the drawn primary. Follow-ups are lane 2's screen
-        (/desk/follow-ups); there is no add-follow-up component on this base,
-        so the drawn primary links there rather than pretending to start one
-        in place. Everything else is the same action it was before the
-        restyle, with the same label.
-      */}
+      {/* The five editor decisions stay on the file. */}
       <div className="astra-panel decide">
         <div className="astra-case-h">
           <p className="astra-label">Decide</p>
-          <p className="astra-note">It digs; it never prints.</p>
         </div>
-        {/*
-          The drawing's Decide is the five verbs and the sentence under them.
-          Which model digs is a dial, not a verb, and it lives with the other
-          dials in "How hard to dig" below the file -- see the panel's own
-          comment. Nothing became unreachable: the state behind it is the same
-          one this route has always held, and the picker writes it from there.
-        */}
-        {/*
-          FB7, item 2. The dig round's card, under the verb that started it.
-
-          Table B's row for Keep digging was "LAZY BAR -- a whole dig round, no
-          card, no cancel": the round can run for minutes and spend real money,
-          and all it drew was the button reading "Reading…". The card carries
-          the stage list, the percent, the elapsed clock, the stall rule's
-          Keep waiting, and Cancel -- which the worker already honours (it
-          stops at its next hop boundary).
-        */}
-        {digJob ? (
-          <div className="dark-job-card">
-            <DeskJobCard job={digJob} />
-          </div>
-        ) : null}
-        <div className="astra-panel-acts">
-          <InkButton disabled={keepDisabled} onClick={onKeepDigging}>
-            {digging ? "Reading…" : "Keep digging"}
+        {digging ? <p className="astra-note" role="status">Decide when this round ends.</p> : null}
+        <div className="astra-panel-acts" aria-label="File decisions">
+          <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
+            Keep investigating
           </InkButton>
-          {/*
-            Unit U25, B4. Only while a run is in flight, and it asks rather
-            than kills: the worker stops at its next hop boundary, and the
-            sentence under the strip says so. Before this there was no press
-            here at all -- the walkthrough scanned every button and summary on
-            this page for /stop|pause|halt|cancel|abandon/ and found none.
-          */}
-          {stopControl.visible ? (
-            <InkButton tone="quiet" disabled={stopControl.disabled} onClick={onStopDig}>
-              {stopControl.label}
-            </InkButton>
-          ) : null}
-          <Link to="/desk/follow-ups" className="btn solid">
+          <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
             Start an AI follow-up
-          </Link>
-          <InkButton tone="quiet" disabled={keepDisabled || parkPending} onClick={onPark}>
-            {parkPending ? "Setting aside…" : "Set aside"}
           </InkButton>
-          {queuedLead != null ? (
-            <Link
-              to="/desk/story/$leadId"
-              params={{ leadId: String(queuedLead) }}
-              className="btn queue-done"
-            >
-              {queuedAlready ? "✓ Already on the queue · Open →" : "✓ On the queue · Open →"}
-            </Link>
-          ) : (
-            <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={onQueue}>
-              {queuePending ? "Sending…" : "Send to the queue"}
-            </InkButton>
-          )}
-          <InkButton tone="quiet" onClick={onClose}>
-            Close file
+          <InkButton tone="ghost" disabled={keepDisabled} onClick={() => { setWatchNotice(""); setWatchPageIds(watchPages.map((page) => page.id)); setWatchOpen(true); }}>
+            Wait and watch
+          </InkButton>
+          <InkButton tone="ghost" disabled={keepDisabled || queuePending} onClick={() => setQueuePreviewOpen(true)}>
+            {queuePending ? "Sending…" : "Send to the queue"}
+          </InkButton>
+          <InkButton tone="quiet" disabled={keepDisabled || closePending} onClick={() => { setCloseNote(""); setCloseDialogOpen(true); }}>
+            Close: no finding
           </InkButton>
         </div>
+        {followUpNotice ? <p className="note" role="status">{followUpNotice}</p> : null}
+        {watchNotice ? <p className="note" role="status">{watchNotice}</p> : null}
         <p className="astra-note">
-          Nothing here prints. “Send to the queue” files a lead for you to review.
+          Nothing here prints. "Send to the queue" files a lead for you to review.
         </p>
       </div>
 
-      {/*
-        The file's own captures and its unresolved trails. The drawing shows a
-        file that is already dug; these are the records it was dug from, and
-        they stay on the page -- clicking a title opens the captured page, and
-        that page is the file.
-      */}
+      {followUpOpen && detailReady ? (
+        <FollowUpDialog
+          leads={followUpLeads.data ?? []}
+          initial={{
+            what: parentTitle,
+            agentKind: watchPages.length ? "recheck" : "search",
+            targets: watchPages.slice(0, 3).map((page) => page.url).join("\n"),
+            leadId: null,
+            leadHeadline: null,
+            modelChoice: "auto",
+          }}
+          onClose={() => setFollowUpOpen(false)}
+          onSubmit={(input) => createFileFollowUp.mutate(input)}
+          pending={createFileFollowUp.isPending}
+          error={createFileFollowUp.error instanceof Error
+            ? editorError(createFileFollowUp.error.message) || "Could not start the AI follow-up."
+            : createFileFollowUp.data?.ok === false
+              ? editorError(createFileFollowUp.data.error ?? "") || "Could not start the AI follow-up."
+              : null}
+        />
+      ) : null}
+
+      <Dialog
+        open={watchOpen}
+        onClose={() => setWatchOpen(false)}
+        title="Wait and watch"
+        subtitle="Choose public pages already in this file. Their watches stay linked to the file."
+        primaryLabel="Start watching"
+        primaryPendingLabel="Saving watches…"
+        pending={createFileWatches.isPending}
+        primaryDisabled={!watchPageIds.length || createFileWatches.isPending}
+        onPrimary={() => createFileWatches.mutate(watchPages.filter((page) => watchPageIds.includes(page.id)))}
+        footNote="The file moves to Waiting while its pages are watched."
+      >
+        {watchPages.length ? (
+          <div className="fu-form">
+            {watchPages.map((page) => (
+              <label key={page.id} className="fu-field">
+                <span className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={watchPageIds.includes(page.id)}
+                    onChange={(event) => setWatchPageIds((current) => event.target.checked
+                      ? [...current, page.id]
+                      : current.filter((id) => id !== page.id))}
+                  />
+                  <span><b>{page.title}</b><br /><span className="meta astra-case-v">{page.url}</span></span>
+                </span>
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p role="status">No captured public pages are ready to watch. Keep investigating to add pages to this file.</p>
+        )}
+        {createFileWatches.error instanceof Error ? <p className="fu-err" role="alert">{editorError(createFileWatches.error.message) || "Could not start watching these pages."}</p> : null}
+        {createFileWatches.data?.failed.length ? <p className="fu-err" role="alert">Some pages could not be added. Retry the remaining pages or close this window.</p> : null}
+      </Dialog>
+
+      <Dialog
+        open={queuePreviewOpen}
+        onClose={() => setQueuePreviewOpen(false)}
+        title="Send to the queue"
+        subtitle="Review the AI-prepared packet before you hand this file to the reporting queue."
+        primaryLabel="Send to the queue"
+        primaryPendingLabel="Sending…"
+        pending={queuePending}
+        primaryDisabled={!queuePacketQuery.data || queuePending}
+        onPrimary={() => { if (queuePacketQuery.data) { setQueuePreviewOpen(false); onQueue(queuePacketQuery.data); } }}
+        footNote="Publication remains an editorial decision."
+      >
+        {queuePacketQuery.isPending ? <p role="status">Preparing the file packet…</p> : null}
+        {queuePacketQuery.isError ? <p className="fu-err" role="alert">Could not prepare the queue packet. Close this window and try again.</p> : null}
+        {queuePacketQuery.data ? <QueuePacketPreview packet={queuePacketQuery.data} /> : null}
+      </Dialog>
+
+      <Dialog
+        open={closeDialogOpen}
+        onClose={() => setCloseDialogOpen(false)}
+        title="Close: no finding"
+        subtitle="The file stays readable in Set aside. Add a reason if there is one."
+        primaryLabel={closeNote.trim() ? "Close the file" : "Close, no reason"}
+        primaryPendingLabel="Closing file…"
+        pending={closePending}
+        onPrimary={() => { onCloseWithoutFinding(closeNote.trim()); setCloseDialogOpen(false); }}
+        altLabel={closeNote.trim() ? "Close, no reason" : undefined}
+        altDisabled={closePending}
+        onAlt={() => { onCloseWithoutFinding(""); setCloseDialogOpen(false); }}
+        footNote="This records a no-finding decision and keeps the research available."
+      >
+        <label className="fu-field">
+          <span>Reason (optional)</span>
+          <textarea className="fu-input" maxLength={500} value={closeNote} onChange={(event) => setCloseNote(event.target.value)} />
+        </label>
+      </Dialog>
+
+      <details className="of-trail astra-records">
+        <summary>The file's records ▸</summary>
+        <p className="astra-note">Run history is on the <Link to="/desk/ops" className="inline-link">Server</Link>.</p>
       <div>
         <SecHead
           title="What to read"
@@ -2258,9 +2272,7 @@ function InvestigationWorkspace({
           <OpenedRecords
             artifacts={artifacts}
             modelChoice={ocrModelChoice}
-            onModelChoiceChange={onOcrModelChoiceChange}
             modelEffort={ocrModelEffort}
-            onModelEffortChange={onOcrModelEffortChange}
           />
         ) : digging ? (
           <p className="meta">Opening pages now. They land on the file as they are read…</p>
@@ -2346,22 +2358,52 @@ function InvestigationWorkspace({
         <details className="of-trail">
           <summary>Searches this round — {searches.length}</summary>
           {searches.length ? (
-            searches.map((s, i) => <SearchTrailEntry key={`${s.hop}-${i}`} record={s} />)
+        searches.map((s, i) => (
+          <SearchTrailEntry
+            key={`${s.hop}-${i}`}
+            record={{ ...s, query: plainEditorText(s.query).replace(/https?:\/\/[^\s<>"']+/gi, (url) => headlineFromUrl(url)) }}
+          />
+        ))
           ) : (
             <p className="side-item">No searches logged yet.</p>
           )}
         </details>
-        {deadEnds.length > 0 ? (
-          <details className="of-trail">
-            <summary>Dead ends — {deadEnds.length}</summary>
+      {deadEnds.length > 0 ? (
+        <details className="of-trail">
+          <summary>Dead ends — {deadEnds.length}</summary>
             {deadEnds.map((d, i) => (
               <p key={i} className="side-item">
                 <b>{d.hypothesis}</b> — {plainEditorText(d.dismissed_because)}
               </p>
-            ))}
-          </details>
-        ) : null}
+          ))}
+        </details>
+      ) : null}
+      {tests.length > 0 ? (
+        <details className="of-trail">
+          <summary>Questions the AI tested — {tests.length}</summary>
+          {tests.map((question, i) => <p key={i} className="side-item">{question}</p>)}
+        </details>
+      ) : null}
+      {findings.length > 0 ? (
+        <details className="of-trail">
+          <summary>Other research notes — {findings.length}</summary>
+          {findings.map((finding, i) => (
+            <p key={i} className="side-item">{finding.text}{finding.sourceNote ? <span className="meta"> — {finding.sourceNote}</span> : <span className="meta evidence-weak"> — pattern-level, not tied to one source</span>}</p>
+          ))}
+        </details>
+      ) : null}
       </div>
+      {facts.length > 0 ? (
+        <div className="of-block">
+          <p className="side-label">What we know</p>
+          <SectionTldr text={brief?.sections?.known ?? ""} />
+          {facts.map((claim, i) => (
+            <p key={i} className="side-item">{plainEditorText(claim.body)}{claim.evidence ? <span className="meta"> — {plainEditorText(claim.evidence).slice(0, 160)}</span> : null}</p>
+          ))}
+          {factsFolded > 0 ? <p className="meta">{factsFolded} repeated records folded into the lines above.</p> : null}
+        </div>
+      ) : null}
+      </details>
     </section>
   );
 }
@@ -2379,6 +2421,122 @@ function ocrStatusLine(method: string | null | undefined): string | null {
   return describeExtractionMethod(raw);
 }
 
+function darkJobStepLine(step: string): string {
+  const value = step.trim();
+  const pass = value.match(/^Researching hop (\d+)\/(\d+)$/i);
+  if (pass) return `Reading public records · pass ${pass[1]} of up to ${pass[2]}`;
+  const search = value.match(/^Searching (\d+)\/(\d+) on hop (\d+)$/i);
+  if (search) return `Checking public pages · search ${search[1]} of ${search[2]}`;
+  if (/^Researching the file$/i.test(value)) return "Starting to read public records";
+  if (/^Synthesizing signals/i.test(value)) return "Putting the case file together";
+  if (/^Testing explanations$/i.test(value)) return "Checking ordinary explanations";
+  if (/^Writing editor brief$/i.test(value)) return "Finishing the case file";
+  if (/^Switched to /i.test(value)) return "Changing models to keep the work moving";
+  return "Working on the case file";
+}
+
+function DarkResearchCard({ job, onStop, onOpen, stopDisabled }: { job: JobProgressView; onStop: () => void; onOpen: () => void; stopDisabled: boolean }) {
+  const qc = useQueryClient();
+  const [retryNote, setRetryNote] = useState("");
+  const [retryAfterStop, setRetryAfterStop] = useState(false);
+  const retry = useMutation({
+    mutationFn: (nextModel: boolean) => retryDarkRound({ data: { jobId: job.id, nextModel } }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setRetryNote(editorError(result.error ?? "") || "Could not retry this round.");
+        return;
+      }
+      setRetryNote(`Retry queued on ${result.model}.`);
+      invalidateDeskJobs(qc);
+      void qc.invalidateQueries({ queryKey: ["investigation", job.subjectId] });
+      void qc.invalidateQueries({ queryKey: ["investigations"] });
+    },
+    onError: (error) => setRetryNote(editorError(error instanceof Error ? error.message : "") || "Could not retry this round."),
+  });
+  const retryRound = retry.mutate;
+  useEffect(() => {
+    if (!retryAfterStop || job.status !== "failed") return;
+    setRetryAfterStop(false);
+    retryRound(true);
+  }, [retryAfterStop, job.status, job.id, retryRound]);
+  const displayJob: JobProgressView = {
+    ...job,
+    stages: ["Question", "Gather", "Case file", "Challenge"],
+    stageIndex: job.status === "queued" ? 0 : Math.min(3, Math.max(1, (job.stageIndex ?? 0) + 1)),
+    step: darkJobStepLine(job.step),
+    doneText: "Case file ready for your decision",
+    openLabel: "Open file",
+    error: job.status === "failed"
+      ? /cancel(?:led|ed)? by the editor/i.test(job.error ?? "")
+        ? "Stopped at the editor's request. What was found remains saved."
+        : editorError(job.error ?? "") || "Could not finish — retry."
+      : job.error,
+    cancelRequested: job.cancelRequested || stopDisabled,
+    canRetry: false,
+  };
+  const retryOnNextModel = () => {
+    if (stopDisabled || retryAfterStop) return;
+    setRetryAfterStop(true);
+    setRetryNote("Stopping this run before retrying on another model.");
+    onStop();
+  };
+  return (
+    <div>
+      <JobCard
+        job={displayJob}
+        cancelLabel="Stop"
+        failoverNote={false}
+        onCancel={onStop}
+        onOpen={onOpen}
+        onRetryNext={job.status === "running" ? retryOnNextModel : undefined}
+      />
+      {job.status === "failed" ? (
+        <div className="astra-panel-acts">
+          <InkButton pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(false)}>Retry</InkButton>
+          <InkButton tone="quiet" pending={retry.isPending} pendingLabel="Retrying…" onClick={() => retry.mutate(true)}>Retry on next model</InkButton>
+        </div>
+      ) : null}
+      {retryNote ? <p className="meta" role="status">{retryNote}</p> : null}
+    </div>
+  );
+}
+
+function QueuePacketPreview({ packet }: { packet: InvestigationQueuePacket }) {
+  const safeSource = (url: string | null) => /^https?:\/\//i.test(url ?? "")
+    ? <a className="inline-link" href={url!} target="_blank" rel="noreferrer">{organizationFromUrl(url!) || "Source record"}</a>
+    : <span className="meta">Source record</span>;
+  return (
+    <div className="fu-form">
+      <section>
+        <p className="side-label">Suggested headline</p>
+        <p>{plainEditorText(packet.suggestedHeadline)}</p>
+      </section>
+      <section>
+        <p className="side-label">Evidence</p>
+        {packet.evidence.length ? packet.evidence.map((item, index) => (
+          <p key={`evidence-${index}`} className="side-item">{plainEditorText(item.text)} — {safeSource(item.source)}</p>
+        )) : <p className="meta">No sourced evidence is attached yet.</p>}
+      </section>
+      <section>
+        <p className="side-label">Uncertainties</p>
+        {packet.uncertainties.length ? packet.uncertainties.map((item, index) => <p key={`uncertainty-${index}`} className="side-item">{plainEditorText(item)}</p>) : <p className="meta">None listed.</p>}
+      </section>
+      <section>
+        <p className="side-label">Contradictions</p>
+        {packet.contradictions.length ? packet.contradictions.map((item, index) => (
+          <p key={`contradiction-${index}`} className="side-item">
+            {plainEditorText(item.first.text)}; another record says {plainEditorText(item.second.text)}
+          </p>
+        )) : <p className="meta">No captured records disagree yet.</p>}
+      </section>
+      <section>
+        <p className="side-label">What would kill the story</p>
+        {packet.whatWouldDisproveIt.length ? packet.whatWouldDisproveIt.map((item, index) => <p key={`disprove-${index}`} className="side-item">{plainEditorText(item)}</p>) : <p className="meta">No disconfirming fact is listed yet.</p>}
+      </section>
+    </div>
+  );
+}
+
 function isPdfCapture(record: {
   url: string;
   retained_pdf?: boolean;
@@ -2391,9 +2549,7 @@ function isPdfCapture(record: {
 function OpenedRecords({
   artifacts,
   modelChoice,
-  onModelChoiceChange,
   modelEffort,
-  onModelEffortChange,
 }: {
   artifacts: {
     id: number;
@@ -2409,9 +2565,7 @@ function OpenedRecords({
     retained_pdf?: boolean;
   }[];
   modelChoice: StoryModelChoice;
-  onModelChoiceChange: (choice: StoryModelChoice) => void;
   modelEffort: ModelEffort | null;
-  onModelEffortChange: (effort: ModelEffort | null) => void;
 }) {
   const qc = useQueryClient();
   const { formatShortDate } = usePaperDateFormatters();
@@ -2534,7 +2688,7 @@ function OpenedRecords({
 
   return (
     <div className="reader">
-      <div className="reader-index" role="list">
+      <div className="reader-index" role="group" aria-label="Saved records">
         {ordered.map((a, i) => {
           const preview = previewOf(a);
           const rowTitle =
@@ -2551,7 +2705,6 @@ function OpenedRecords({
             <button
               key={a.id}
               type="button"
-              role="listitem"
               className={
                 "reader-row" +
                 (a.id === selected?.id ? " on" : "") +
@@ -2609,16 +2762,6 @@ function OpenedRecords({
             </button>
           </p>
           {body.data?.retained_pdf ? <>
-          <div className="mb-3 max-w-xl">
-            <ModelPicker
-              scope="ocr"
-              label="Model for reading this PDF"
-              value={modelChoice}
-              onChange={onModelChoiceChange}
-              effort={modelEffort}
-              onEffortChange={onModelEffortChange}
-            />
-          </div>
           <form
             className="read-acts"
             onSubmit={(event) => {
@@ -2672,12 +2815,12 @@ function OpenedRecords({
               were drawn without a role -- silent to a screen reader. */}
           {requestPageRead.error ? (
             <p className="note err" role="alert">
-              {requestPageRead.error.message}
+              {editorError(requestPageRead.error.message) || "Could not read these pages."}
             </p>
           ) : null}
           {pageRead.data?.error ? (
             <p className="note err" role="alert">
-              {pageRead.data.error}
+              {editorError(pageRead.data.error) || "Could not read these pages."}
             </p>
           ) : null}
           {pageRead.data?.stage && (pageRead.data.status === "queued" || pageRead.data.status === "running") ? (
@@ -2692,17 +2835,17 @@ function OpenedRecords({
               <section className="read-full">
                 <p className="meta">
                   {result.mode === "complete"
-                    ? `Entire PDF · ${result.pagesRead ?? 0} of ${result.pagesTotal ?? "?"} pages saved${result.batchesTotal ? ` · batch ${result.batchesCompleted ?? 0} of ${result.batchesTotal}` : ""}${result.modelCalls != null ? ` · ${result.modelCalls} model calls` : ""}${result.budgetPaused ? " · paused at run budget" : ""}`
+                    ? `Entire PDF · ${result.pagesRead ?? 0} of ${result.pagesTotal ?? "?"} pages saved${result.batchesTotal ? ` · batch ${result.batchesCompleted ?? 0} of ${result.batchesTotal}` : ""}`
                     : `Requested PDF pages ${result.start}-${result.end}`}
                   {` · ${result.provider ?? modelChoiceLabel(modelChoice)}`}
                 </p>
                 {result.pages?.map((page) => <p key={page.page}><strong>Page {page.page}</strong> saved to the captured reader above.</p>)}
-                {result.reason ? <p className="meta">{result.reason}</p> : null}
+                {result.reason ? <p className="meta">{editorError(result.reason) || "The page read stopped early."}</p> : null}
                 {result.unreadPages?.length ? <p className="note err">Still unread: {result.unreadPages.slice(0, 16).join(", ")}{result.unreadPages.length > 16 ? `, and ${result.unreadPages.length - 16} more` : ""}. Run Read entire PDF again to retry only these pages.</p> : null}
               </section>
             );
           })()}
-          {selected.url.startsWith("http") ? <p className="read-url">{selected.url}</p> : null}
+          {selected.url.startsWith("http") ? <p className="read-url">{darkScreenText(selected.url)}</p> : null}
           {ocrStatusLine(selected.extraction_method) ? (
             <p className="meta">{ocrStatusLine(selected.extraction_method)}</p>
           ) : null}
@@ -2735,16 +2878,16 @@ function OpenedRecords({
           }) ? (
             <ReadMoreText
               key={selected.id}
-              text={body.data?.full_text ?? cap.body}
+              text={darkScreenText(body.data?.full_text ?? cap.body)}
               totalCharacters={body.data?.total_characters ?? Array.from(cap.body).length}
               onReadRest={async (offset) => {
                 const next = await getArtifact({ data: { id: selected.id, offset } });
                 if (!next) throw new Error("No saved document was returned");
-                return next.full_text;
+                return darkScreenText(next.full_text);
               }}
             />
           ) : cap?.body ? (
-            <div className="read-full">{cap.body}</div>
+            <div className="read-full">{darkScreenText(cap.body)}</div>
           ) : (
             <p className="read-ex">
               Opened, but no readable text was extracted. Use Open original to read the live page.
@@ -2754,21 +2897,6 @@ function OpenedRecords({
       ) : null}
     </div>
   );
-}
-
-function startedLine(title: string, paste: string, summary: string): string {
-  const text = paste.trim();
-  if (/^followed from the/i.test(text)) {
-    return text.split("\n")[0]!.slice(0, 280);
-  }
-  if (text) {
-    const first = text.split("\n")[0]!.replace(/\s+/g, " ").trim();
-    if (first && !looksLikeInternalSummary(first)) return first.slice(0, 220);
-  }
-  if (summary && !looksLikeInternalSummary(summary)) {
-    return plainEditorText(summary).slice(0, 220);
-  }
-  return `Opened as “${title}.”`;
 }
 
 function openQuestionsFrom(

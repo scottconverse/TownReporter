@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { z } from "zod";
 import type { NewsroomPlace } from "./lead-match.ts";
 import {
+  buildInvestigationActivity,
   blockedDigBannerText,
   cameBackLabel,
   COMPARE_CURRENT_LABEL,
@@ -26,6 +27,7 @@ import {
   editorFetchError,
   editorKindLabel,
   editorPauseReason,
+  editorPauseIsPageFailure,
   editorScanError,
   editorStatus,
   flakyFailureCopy,
@@ -44,6 +46,7 @@ import {
   openLeads,
   plainEditorText,
   plainFinding,
+  plainSystemCopy,
   progressLine,
   clockFromLocalTime,
   dailyScheduleLabel,
@@ -349,7 +352,7 @@ describe("editor copy", () => {
     const msg = editorError("Cannot read properties of undefined (reading 'ok')");
     assert.ok(msg);
     assert.doesNotMatch(msg!, /Cannot read properties/i);
-    assert.match(msg!, /Keep digging/i);
+    assert.match(msg!, /Keep investigating/i);
   });
 
   it("does not dump Research failed as the editor message", () => {
@@ -357,7 +360,7 @@ describe("editor copy", () => {
     assert.ok(msg);
     assert.doesNotMatch(msg!, /^Research failed$/i);
     assert.match(msg!, /still on the file/i);
-    assert.match(msg!, /Keep digging/i);
+    assert.match(msg!, /Keep investigating/i);
   });
 
   it("labels investigation status in English", () => {
@@ -373,13 +376,38 @@ describe("editor copy", () => {
     assert.doesNotMatch(humanFrontierLabel("frontier: next hop"), /frontier/i);
   });
 
+  // guards: a raw database failure could be printed as the file's pause reason
+  it("explains unreadable record text without printing the database error", () => {
+    const rawDatabaseError = 'invalid byte sequence for encoding "UTF8": 0x00';
+    const msg = editorPauseReason(rawDatabaseError);
+    assert.equal(msg, "The page had no readable text");
+    assert.equal(editorPauseIsPageFailure(rawDatabaseError), true);
+    assert.equal(editorPauseReason("page fetch returned 503 server error"), "The page could not be read");
+    assert.equal(editorPauseReason("page returned a 200 response with an empty body"), "The page had no readable text");
+    assert.equal(editorPauseReason("site refused the request (403)"), "The site refused the request");
+    const activity = buildInvestigationActivity([
+      { id: "server", at: "2026-10-08T12:00:00Z", kind: "capture", title: "Council notice", outcome: "HTTP 500", httpStatus: 500 },
+      { id: "empty", at: "2026-10-08T12:01:00Z", kind: "capture", title: "Meeting packet", outcome: "empty", httpStatus: 200 },
+      { id: "blocked", at: "2026-10-08T12:02:00Z", kind: "capture", title: "Budget page", outcome: "blocked", httpStatus: 403 },
+    ]);
+    assert.deepEqual(activity.map((line) => line.text), [
+      "Could not open Council notice: The page could not be read",
+      "Could not open Meeting packet: The page had no readable text",
+      "Could not open Budget page: The site refused the request",
+    ]);
+    assert.ok(activity.every((line) => line.tone === "failure"));
+  });
+
+  // guards: an editor could follow outdated guidance on the Dark Desk
   it("explains a stop after a round without hop or frontier", () => {
     const msg = editorPauseReason(
       "Hop budget 5 reached with 65 frontier item(s) still open. Budget pauses work; evidence exhaustion would close it.",
     );
     assert.ok(msg);
     assert.match(msg!, /65 open follow-up entries remain/);
-    assert.match(msg!, /Keep digging/);
+    assert.match(msg!, /Click Keep investigating/);
+    assert.match(msg!, /Click Keep investigating/);
+    assert.doesNotMatch(msg!, /Click Keep digging/);
     assert.match(msg!, /not an error/i);
     assert.doesNotMatch(msg!, /frontier/i);
     assert.doesNotMatch(msg!, /\bhop\b/i);
@@ -397,7 +425,7 @@ describe("editor copy", () => {
     assert.doesNotMatch(mostlyBlocked!, /that is normal/i);
     assert.match(mostlyBlocked!, /7 of 10/);
     assert.match(mostlyBlocked!, /blocks, paywalls, or empty pages/i);
-    assert.match(mostlyBlocked!, /Keep digging/);
+    assert.match(mostlyBlocked!, /Click Keep investigating/);
   });
 
   it("defaults to the normal reassurance when no capture stats are given", () => {
@@ -455,7 +483,7 @@ describe("editor copy", () => {
   });
 
   it("translates engine dumps into English", () => {
-    const run = plainEditorText("Hops 5. Artifacts 34. Open frontier 149.");
+    const run = plainSystemCopy("Hops 5. Artifacts 34. Open frontier 149.");
     assert.match(run, /5 rounds/);
     assert.match(run, /34 records/);
     assert.match(run, /149 things still to open/);
@@ -463,6 +491,32 @@ describe("editor copy", () => {
     const finding = plainFinding("Document changed: https://youtube.com/@CityofLongmont");
     assert.match(finding, /YouTube|different/i);
     assert.doesNotMatch(finding, /Document changed/i);
+  });
+
+  // guards: a reported fact or source sentence could be rewritten as engine jargon
+  it("translates engine terms only on system lines", () => {
+    const source = "The artifact made two hops in 2024; the claim was $60,000.";
+    assert.equal(plainEditorText(source), source);
+    assert.equal(plainFinding(source), source);
+
+    const raw = "The engine saved 1 artifact after 2 hops. Click Keep digging to continue.";
+    const pause = editorPauseReason(raw)!;
+    assert.match(pause, /1 record/);
+    assert.match(pause, /2 rounds/);
+    assert.match(pause, /Click Keep investigating/);
+    assert.doesNotMatch(pause, /artifact|hops?|Keep digging/i);
+
+    const [activity] = buildInvestigationActivity([{
+      id: "system-failure",
+      at: "2026-10-08T12:00:00Z",
+      kind: "run-stop",
+      failed: true,
+      failureReason: raw,
+    }]);
+    assert.match(activity!.text, /1 record/);
+    assert.match(activity!.text, /2 rounds/);
+    assert.match(activity!.text, /Click Keep investigating/);
+    assert.doesNotMatch(activity!.text, /artifact|hops?|Keep digging/i);
   });
 });
 
@@ -1348,7 +1402,7 @@ describe("blockedDigBannerText (Dark Desk F6)", () => {
     assert.match(text, /8 of 10/);
     assert.match(text, /rate-limited \(429/i);
     assert.match(text, /not evidence there is nothing here/i);
-    assert.match(text, /Keep digging/);
+    assert.match(text, /Keep investigating/);
   });
 
   it("names an app-shell page when empty captures dominate", () => {
@@ -1855,7 +1909,7 @@ describe("a validation dump never reaches the editor", () => {
     assert.ok(saidTitle, "a dump must produce a sentence, not null");
     assert.doesNotMatch(saidTitle, /too_big|"path"|"code"|[{}[\]]|maximum/);
     // The provider sentences are unaffected by the new guard.
-    assert.match(editorError("xAI API error 403") ?? "", /Keep digging/i);
+    assert.match(editorError("xAI API error 403") ?? "", /Keep investigating/i);
   });
 
   it("turns a bare server failure into something the editor can act on", () => {

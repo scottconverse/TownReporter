@@ -726,6 +726,8 @@ export function darkRequest(state: DarkFileState) {
         .join("\n\n"),
       title: state.question.trim(),
       budget: hopsForLimit(limit.key),
+      ordinaryExplanation: explanation,
+      limitKey: limit.key,
     },
     /*
       Unit CY item 9: the dialog draws an Effort select beside the model, so
@@ -898,17 +900,17 @@ export function addToInitial(): AddToState {
 }
 
 /** The Limits dial starts where the design draws it: Standard. */
-export function darkFileInitial(): DarkFileState {
-  return { question: "", tip: "", explanation: "", limit: DARK_LIMITS[1].key, model: "auto", effort: null };
+export function darkFileInitial(model = "auto", effort: string | null = null, defaultLimit: string = DARK_LIMITS[1].key): DarkFileState {
+  const limit = DARK_LIMITS.find((row) => row.key === defaultLimit)?.key ?? DARK_LIMITS[1].key;
+  return { question: "", tip: "", explanation: "", limit, model, effort };
 }
 
 /**
- * The two fields a caller may already know when it opens the file. Only the
- * question and the starting point: the Limits dial and the model pick are the
- * editor's calls, and a caller that guessed them would be choosing how much
- * money to spend.
+ * The file fields a caller may already know when it opens the dialog. The
+ * Limits dial and model pick stay with the editor, who is choosing how much to
+ * spend.
  */
-export type DarkFilePrefill = { question?: string; tip?: string };
+export type DarkFilePrefill = { question?: string; tip?: string; explanation?: string };
 
 /**
  * Unit BN2, item 4: the state the dialog opens on, seeded with what the caller
@@ -921,10 +923,11 @@ export type DarkFilePrefill = { question?: string; tip?: string };
  * empty box they must notice is empty". The dialog reseeds from this on every
  * open (`useDialogState`), so one row's prefill never leaks into the next open.
  */
-export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
-  const seed = darkFileInitial();
+export function darkFileSeed(prefill?: DarkFilePrefill, model = "auto", effort: string | null = null, defaultLimit: string = DARK_LIMITS[1].key): DarkFileState {
+  const seed = darkFileInitial(model, effort, defaultLimit);
   if (prefill?.question !== undefined) seed.question = prefill.question;
   if (prefill?.tip !== undefined) seed.tip = prefill.tip;
+  if (prefill?.explanation !== undefined) seed.explanation = prefill.explanation;
   return seed;
 }
 
@@ -939,8 +942,8 @@ export function darkFileSeed(prefill?: DarkFilePrefill): DarkFileState {
  * files before this dialog replaced it (`paste.split("\n")[0]`), so a hand-over
  * files the same title it always did.
  */
-export function darkFileFromSeed(seed: string): DarkFileState {
-  return { ...darkFileInitial(), question: seed.split("\n")[0] ?? "", tip: seed };
+export function darkFileFromSeed(seed: string, model = "auto", effort: string | null = null, defaultLimit?: string): DarkFileState {
+  return { ...darkFileInitial(model, effort, defaultLimit), question: seed.split("\n")[0] ?? "", tip: seed };
 }
 
 export function holdInitial(): HoldState {

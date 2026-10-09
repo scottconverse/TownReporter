@@ -154,7 +154,7 @@ export function filenameFromUrl(url: string): string {
 
 export function headlineFromUrl(url: string): string {
   const raw = filenameFromUrl(url);
-  if (!raw) return organizationFromUrl(url) || url;
+  if (!raw) return organizationFromUrl(url) || "Public page";
   const parts = raw.split(/[-_.]+/).filter(Boolean);
   const drop = /^(rst|td\d+|o|pdf|docx?|final|draft|rev\d+|v\d+|pct|\d+pct)$/i;
   const kept = parts.filter((p) => !drop.test(p) && !/^\d+(\.\d+)?$/.test(p));
@@ -166,7 +166,127 @@ export function headlineFromUrl(url: string): string {
     .trim();
   const isDoc = /\.pdf($|\?)/i.test(url);
   if (title && isDoc && !/document|report|packet|minutes/i.test(title)) return `${title} document`;
-  return title || organizationFromUrl(url) || url;
+  return title || organizationFromUrl(url) || "Public page";
+}
+
+export type InvestigationActivityInput = {
+  id: string;
+  at: string | Date;
+  kind: "capture" | "search" | "finding" | "dead-end" | "run-stop" | "follow-up" | "watch";
+  title?: string | null;
+  url?: string | null;
+  outcome?: string | null;
+  httpStatus?: number | null;
+  resultsJson?: string | null;
+  body?: string | null;
+  failed?: boolean;
+  failureReason?: string | null;
+  stopReason?: string | null;
+  removed?: boolean;
+  changed?: boolean;
+  found?: boolean;
+  query?: string;
+  stage?: string;
+  rawReason?: string;
+};
+
+export type InvestigationActivityLine = {
+  id: string;
+  time: string;
+  text: string;
+  tone: "plain" | "finding" | "failure";
+  occurredAt: string;
+};
+
+function activityClock(at: string | Date): string {
+  const date = at instanceof Date ? at : new Date(at);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const parts = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).formatToParts(date);
+  return `${parts.find((part) => part.type === "hour")?.value ?? "0"}:${parts.find((part) => part.type === "minute")?.value ?? "00"}`;
+}
+
+function replaceRawUrls(text: string): string {
+  return text.replace(/https?:\/\/[^\s<>"']+/gi, (match) => {
+    const punctuation = match.match(/[.,;!?)]*$/)?.[0] ?? "";
+    const url = punctuation ? match.slice(0, -punctuation.length) : match;
+    return `${headlineFromUrl(url)}${punctuation}`;
+  });
+}
+
+function activitySubject(event: InvestigationActivityInput): string {
+  const title = replaceRawUrls(String(event.title ?? "").replace(/\s+/g, " ").trim());
+  const url = String(event.url ?? "").trim();
+  return (title || headlineFromUrl(url) || "the page").slice(0, 180);
+}
+
+function activityResultCount(resultsJson: string | null | undefined): number | null {
+  try {
+    const parsed = JSON.parse(resultsJson || "[]") as unknown;
+    if (Array.isArray(parsed)) return parsed.length;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as { results?: unknown; count?: unknown };
+      if (Array.isArray(record.results)) return record.results.length;
+      if (typeof record.count === "number" && Number.isFinite(record.count)) return Math.max(0, record.count);
+    }
+  } catch {
+    /* A malformed legacy result has no reliable count. */
+  }
+  return null;
+}
+
+function activityText(event: InvestigationActivityInput): { text: string; tone: InvestigationActivityLine["tone"] } {
+  const subject = activitySubject(event);
+  const body = replaceRawUrls(plainEditorText(String(event.body ?? "").replace(/\s+/g, " ").trim())).slice(0, 240);
+  if (event.kind === "capture") {
+    if (event.removed || /^(?:removed|not-found|soft-404)$/i.test(event.outcome ?? ""))
+      return { text: `Page removed: ${subject}`, tone: "plain" };
+    if (event.changed || /^(?:changed|updated)$/i.test(event.outcome ?? ""))
+      return { text: `Page changed: ${subject}`, tone: "finding" };
+    if (/^(?:captured|fetched|ok|success)$/i.test(event.outcome ?? ""))
+      return { text: `Opened ${subject}, captured`, tone: "plain" };
+    const reason = plainPageFailureReason(String(event.outcome ?? ""), event.httpStatus) ?? PAGE_FAILURE_COPY.server;
+    return { text: `Could not open ${subject}: ${reason}`, tone: "failure" };
+  }
+  if (event.kind === "search") {
+    const count = activityResultCount(event.resultsJson);
+    if (count != null) return { text: count ? `Searched public records: ${count} results` : "Searched public records: no results", tone: "plain" };
+    const outcome = String(event.outcome ?? "");
+    const text = /BLOCKED/i.test(outcome) ? "Search was blocked" : /TIMEOUT/i.test(outcome) ? "Search timed out" : /FAILED|ERROR/i.test(outcome) ? "Search could not finish" : "Search outcome not recorded";
+    return { text, tone: /could not|blocked|timed out/i.test(text) ? "failure" : "plain" };
+  }
+  if (event.kind === "finding") return { text: body ? `Found: ${body}` : "Found a new detail", tone: "finding" };
+  if (event.kind === "dead-end") return { text: body ? `Dead end: ${body}` : "This line of inquiry did not lead to a record", tone: "plain" };
+  if (event.kind === "follow-up") {
+    if (event.found) return { text: body ? `AI follow-up found: ${body}` : "AI follow-up found an answer", tone: "finding" };
+    return { text: body ? `AI follow-up watching: ${body}` : "AI follow-up is watching for a response", tone: "plain" };
+  }
+  if (event.kind === "watch") return { text: event.removed ? `Watched page removed: ${subject}` : `Watched page changed: ${subject}`, tone: event.removed ? "plain" : "finding" };
+  if (event.failed) {
+    const mapped = event.failureReason && /cancel(?:led|ed)? by the editor/i.test(event.failureReason)
+      ? "Stopped at the editor's request. What was found remains saved."
+      : event.failureReason ? editorError(event.failureReason) : null;
+    const displayed = mapped ? plainSystemCopy(mapped) : null;
+    const safeReason = displayed && event.failureReason && displayed !== plainEditorText(event.failureReason)
+      && !/synthesis|— ok|frontier|entries|model call/i.test(displayed)
+      ? displayed
+      : null;
+    return { text: safeReason ? `Could not finish: ${safeReason}` : "Could not finish — retry", tone: "failure" };
+  }
+  if (event.stopReason === "elapsed-time-limit") return { text: "Stopped at the time limit", tone: "plain" };
+  if (event.stopReason === "document-read-limit") return { text: "Stopped at the record limit", tone: "plain" };
+  if (event.stopReason === "model-call-limit") return { text: "Stopped at the run limit", tone: "plain" };
+  if (event.stopReason === "cancelled") return { text: "Stopped at the editor's request", tone: "plain" };
+  if (event.stopReason) return { text: "Round stopped", tone: "plain" };
+  return { text: "Round finished", tone: "plain" };
+}
+
+export function buildInvestigationActivity(events: InvestigationActivityInput[]): InvestigationActivityLine[] {
+  return events
+    .map((event) => {
+      const occurredAt = event.at instanceof Date ? event.at.toISOString() : String(event.at);
+      return { id: event.id, time: activityClock(event.at), occurredAt, ...activityText(event) };
+    })
+    .sort((left, right) => Date.parse(left.occurredAt) - Date.parse(right.occurredAt));
 }
 
 export function sourceLineFromUrl(url: string): string {
@@ -180,7 +300,7 @@ export function sourceLineFromUrl(url: string): string {
     : "";
   const org = organizationFromUrl(url);
   if (pretty && org) return `${pretty} — ${org}`;
-  return pretty || org || url;
+  return pretty || org || "Public page";
 }
 
 export function extractUrl(text: string): string {
@@ -253,6 +373,9 @@ export function editorStatus(status: string): string {
 export function editorError(raw: string | null | undefined, what = "continue with that"): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (/invalid byte sequence for encoding\s+["']?UTF8["']?:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(t)) {
+    return "The page had no readable text";
+  }
   /*
     Every test below is about what a provider did -- a refusal, a quota, a
     login, a socket. A boundary check that throws before anything is called
@@ -266,7 +389,7 @@ export function editorError(raw: string | null | undefined, what = "continue wit
   if (looksLikeValidationDump(t)) return editorActionError(t, what);
   // Login first: a mid-round 401 also matches the "writing model did not
   // finish" branch below (it contains "Claude Code" and "API Error"), which
-  // used to send the editor back into "Click Keep digging to continue" — the
+  // used to send the editor back into "Click Keep investigating to continue" — the
   // exact retry loop that cannot succeed until the login is renewed.
   if (looksLikeProviderAuthFailure(t) && !/timed out|timeout/i.test(t)) {
     return providerSignInCopy(t, "click Keep digging");
@@ -275,10 +398,10 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     return "Sign-in hiccup on that click — you are still signed in. Click Start digging again.";
   }
   if (/cannot read propert/i.test(t) || /undefined \(reading/i.test(t) || /is not a function/i.test(t)) {
-    return "Something broke after the records were already saved. Nothing was thrown away. Click Keep digging to continue.";
+    return "Something broke after the records were already saved. Nothing was thrown away. Click Keep investigating to continue.";
   }
   if (/403/.test(t) || /forbidden/i.test(t)) {
-    return "The writing model was unavailable. Searches and captures already ran are kept. Click Keep digging to retry.";
+    return "The writing model was unavailable. Searches and captures already ran are kept. Click Keep investigating to retry.";
   }
   if (
     /xai api error/i.test(t) ||
@@ -288,20 +411,27 @@ export function editorError(raw: string | null | undefined, what = "continue wit
     (/claude code/i.test(t) && !/timed out/i.test(t)) ||
     /AI is not available/i.test(t)
   ) {
-    return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep digging to continue.";
+    return "The writing model did not finish this round. Searches and captures already ran are kept. Click Keep investigating to continue.";
   }
   if (/timeout|timed out|network/i.test(t)) {
     return "A search or page load timed out. What was already found is still here.";
   }
   if (/rate limit/i.test(t)) {
-    return "Dark Desk paused so it does not burn through the hourly allowance. Try again in a bit.";
+    return "The model is rate limited right now. Try again in a bit.";
   }
   if (
     /research failed|dark desk failed|failed to fetch|aborte?d|504|503|502|econnreset|socket hang up/i.test(
       t,
     )
   ) {
-    return "This round stopped before it finished. The records already captured are still on the file. Click Keep digging to continue.";
+    return "This round stopped before it finished. The records already captured are still on the file. Click Keep investigating to continue.";
+  }
+  if (
+    /^(?:[\w.]+Error|SQLSTATE)\s*:/i.test(t) ||
+    /(?:^|\n)\s+at\s+[^\n]+(?:\([^\n]*:\d+:\d+\)|:\d+:\d+)/i.test(t) ||
+    /^\s*\{[\s\S]*"(?:error|message|stack|code)"\s*:/i.test(t)
+  ) {
+    return "Could not finish this round. What was found is still on the file.";
   }
   return plainEditorText(t);
 }
@@ -327,16 +457,49 @@ export function editorPauseReason(
   if (/editor set this aside/i.test(raw)) {
     return "You set this aside. Pull it back onto the desk anytime.";
   }
+  const safePageReason = plainPageFailureReason(raw);
+  if (safePageReason) return safePageReason;
   const budget = raw.match(/(\d+)\s+frontier item/i);
   if (budget) {
     const n = budget[1];
     if (isMostlyBlocked(captureStats)) {
       const blocked = captureStats!.total - captureStats!.ok;
-      return `Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep digging and it will try different pages.`;
+      return plainSystemCopy(`Dark Desk opened a batch of records, but most of them (${blocked} of ${captureStats!.total}) hit blocks, paywalls, or empty pages — not real content. ${n} open follow-up entries remain. Click Keep investigating and it will try different pages.`);
     }
-    return `Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep digging to read the next batch.`;
+    return plainSystemCopy(`Dark Desk opened a batch of records, then stopped so it would not run all night. ${n} open follow-up entries remain. That is normal — not an error, and not “too many leads.” Click Keep investigating to read the next batch.`);
   }
-  return editorError(raw);
+  const copy = editorError(raw);
+  const displayCopy = copy ? plainSystemCopy(copy) : null;
+  return displayCopy && displayCopy !== plainEditorText(raw)
+    ? displayCopy
+    : "Could not finish this round. What was found is still on the file.";
+}
+
+const PAGE_FAILURE_COPY = {
+  blocked: "The site refused the request",
+  unreadable: "The page had no readable text",
+  server: "The page could not be read",
+} as const;
+
+function plainPageFailureReason(raw: string, httpStatus?: number | null): string | null {
+  const status = Number(httpStatus ?? 0);
+  if (/invalid byte sequence for encoding\s+["']?UTF8["']?:\s*0x00|contains? (?:a )?NUL byte|zero byte in (?:the )?text/i.test(raw)) {
+    return PAGE_FAILURE_COPY.unreadable;
+  }
+  if ([401, 403].includes(status) || /\b(?:401|403)\b|\bblocked\b|\brefused\b/i.test(raw)) {
+    return PAGE_FAILURE_COPY.blocked;
+  }
+  if (status >= 500 || /\b5\d\d\b|server error|failed to load|could not read the page|timeout|timed out/i.test(raw)) {
+    return PAGE_FAILURE_COPY.server;
+  }
+  if (status === 200 || /\b200\s+response\b|empty body|unreadable|no readable text|parse failed|extraction failed|\bempty\b/i.test(raw)) {
+    return PAGE_FAILURE_COPY.unreadable;
+  }
+  return null;
+}
+
+export function editorPauseIsPageFailure(raw: string | null | undefined): boolean {
+  return Boolean(raw?.trim() && plainPageFailureReason(raw));
 }
 
 /**
@@ -361,7 +524,7 @@ export function blockedDigBannerText(stats: {
     other: "not readable",
   };
   const why = reasonText[stats.dominantReason ?? "other"] ?? reasonText.other;
-  return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep digging to try different pages, or open a record directly to check by hand.`;
+  return `This dig is mostly hitting walls: ${failing} of ${stats.total} opened pages were ${why}. That is the source or the fetcher, not evidence there is nothing here. Click Keep investigating to try different pages, or open a record directly to check by hand.`;
 }
 
 export function looksLikeInternalSummary(text: string): boolean {
@@ -462,24 +625,8 @@ export function progressLine(input: {
 /** Strip engine jargon from anything an editor might read. */
 export function plainEditorText(text: string): string {
   return text
-    .replace(
-      /Hops?\s+(\d+)\.?\s*Artifacts?\s+(\d+)\.?\s*Open frontier\s+(\d+)\.?/gi,
-      (_m, h, a, f) =>
-        `Looked through ${h} rounds. Saved ${a} records. ${f} things still to open.`,
-    )
-    .replace(
-      /Heuristic hop:\s*(\d+) searches,\s*(\d+) fetches,\s*(\d+) frontier items\.?/gi,
-      (_m, s, f, n) =>
-        `This round ran ${s} searches and opened ${f} pages. It added ${n} things to follow.`,
-    )
-    .replace(/Hop budget \d+ reached with (\d+) frontier item\(s\) still open[^.]*\./gi, (_m, n) => {
-      return `Stopped after this round with ${n} things still to open.`;
-    })
-    .replace(/\bhop budget\b/gi, "this round")
     .replace(/\bfrontier items?\b/gi, "things to follow")
     .replace(/\bfrontier\b/gi, "to-follow list")
-    .replace(/\bartifacts?\b/gi, "records")
-    .replace(/\bhops?\b/gi, "rounds")
     .replace(/\bSynthesis:\s*/gi, "")
     .replace(/xAI API error \d+/gi, "the writing model did not finish")
     // The Claude Code path returns its own wording. Without these the editor
@@ -496,7 +643,6 @@ export function plainEditorText(text: string): string {
     .replace(/Planner fetch target/gi, "mentioned in a record")
     .replace(/Queued for fetch/gi, "waiting to be opened")
     .replace(/Attachment\/document link on/gi, "linked from")
-    .replace(/Discovered this hop — fetch next/gi, "turned up this round — not opened yet")
     .replace(/Budget pauses work; evidence exhaustion would close it\.?/gi, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -605,6 +751,15 @@ export function worthItemOnDesk(
 export function pileForStatus(status: string): "desk" | "aside" {
   if (["open", "investigating", "paused"].includes(status)) return "desk";
   return "aside";
+}
+
+export function investigationPileFor(row: {
+  status: string;
+  waiting_follow_up?: string | null;
+  waiting_watch?: string | null;
+}): "desk" | "waiting" | "aside" {
+  if (row.status !== "closed" && (row.waiting_follow_up || row.waiting_watch)) return "waiting";
+  return pileForStatus(row.status) === "aside" ? "aside" : "desk";
 }
 
 export function recordKindFromUrl(url: string): string {
@@ -2595,9 +2750,43 @@ export function recoverExpectedDraftJobId(input: {
 /** Editor-facing label for a still-unopened line. Never show engine tokens. */
 export function humanFrontierLabel(label: string): string {
   const cleaned = label.replace(/^\s*(?:frontier|hop)\s*[:#.\-–—]?\s*/i, "").trim();
-  const t = cleaned || label.trim();
-  if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || t;
+  const t = replaceRawUrls(plainEditorText(cleaned || label.trim()));
+  if (/^https?:/i.test(t)) return headlineFromUrl(t) || sourceLineFromUrl(t) || "Public page";
   return t;
+}
+
+/** Translate system-authored Dark Desk copy at the point it is displayed. */
+export function plainSystemCopy(text: string): string {
+  const system = text
+    .replace(
+      /Hops?\s+(\d+)\.?\s*Artifacts?\s+(\d+)\.?\s*Open frontier\s+(\d+)\.?/gi,
+      (_m, h, a, f) => `Looked through ${h} rounds. Saved ${a} records. ${f} things still to open.`,
+    )
+    .replace(
+      /Heuristic hop:\s*(\d+) searches,\s*(\d+) fetches,\s*(\d+) frontier items\.?/gi,
+      (_m, s, f, n) => `This round ran ${s} searches and opened ${f} pages. It added ${n} things to follow.`,
+    )
+    .replace(/Hop budget \d+ reached with (\d+) frontier item\(s\) still open[^.]*\./gi, (_m, n) =>
+      `Stopped after this round with ${n} things still to open.`,
+    )
+    .replace(/Discovered this hop — fetch next/gi, "turned up this round — not opened yet");
+  return plainEditorText(system)
+    .replace(/\bhop budget\b/gi, "this round")
+    .replace(/\bartifacts?\b/gi, (word) => {
+      const plural = word.toLowerCase().endsWith("s");
+      const translated = plural ? "records" : "record";
+      return word[0] === word[0]?.toUpperCase()
+        ? translated[0]!.toUpperCase() + translated.slice(1)
+        : translated;
+    })
+    .replace(/\bhops?\b/gi, (word) => {
+      const plural = word.toLowerCase().endsWith("s");
+      const translated = plural ? "rounds" : "round";
+      return word[0] === word[0]?.toUpperCase()
+        ? translated[0]!.toUpperCase() + translated.slice(1)
+        : translated;
+    })
+    .replace(/Click Keep digging/gi, "Click Keep investigating");
 }
 
 /*

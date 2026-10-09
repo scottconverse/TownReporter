@@ -20,6 +20,8 @@ globalThis.lifecycleHoldRequest = data => holdRequest(data);
 const { HoldLeadDialog } = await import(await moduleUrl("src/components/dialogs/editor-dialogs.tsx", {
   "@/components/dialog": await moduleUrl("src/components/dialog.tsx", { "./desk-chrome": chrome }),
   "@/components/model-picker": stub("export const ModelPicker=()=>null;"),
+  "@/components/first-run-picker-default": stub("export const useFirstRunPickerDefault=()=>\"auto\";"),
+  "@/lib/news/provider-registry": stub("export const defaultModelEffort=()=>null;"),
   "@/components/desk-chrome": chrome,
   "@/components/desk-chrome-utils": stub("export const announceToDesk=()=>{};"),
   "@/lib/news/dialog-press": await moduleUrl("src/lib/news/dialog-press.ts"),

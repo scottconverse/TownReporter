@@ -45,10 +45,10 @@ export const ChoiceDouble: ChoiceRender = ({
   );
 
 /** Minimal renderer double for dialog body tests; production supplies ModelPicker. */
-export const ModelPickerDouble: ModelPickerRender = ({ label, value, effort }): ReactNode =>
+export const ModelPickerDouble: ModelPickerRender = ({ label, value, effort, layout }): ReactNode =>
   createElement(
     "div",
-    { className: "test-model-picker" },
+    { className: ["test-model-picker", layout].filter(Boolean).join(" ") },
     createElement("label", null, label),
     createElement(
       "select",

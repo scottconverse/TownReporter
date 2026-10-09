@@ -146,6 +146,7 @@ describe("Dark Desk brief grounding (DD1 item 1)", () => {
     hypothesis: "The Longmont closure is unconfirmed.",
     strength: 0.2,
     supports: ["The Reddit post says 1941 Terry Street."],
+    contradictions: [],
     benign: "A quarterly posting cycle.",
     kills_it: "The licensing record for 1941 Terry Street.",
     next: "Pull the licensing record for the property at 1749 Main Street.",

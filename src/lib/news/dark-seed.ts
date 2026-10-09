@@ -23,6 +23,71 @@ import { UNVERIFIED_FLAG } from "./import-stories.ts";
 
 /** Where the review screen parks a hypothesis on its way to the Dark Desk. */
 export const DARK_SEED_KEY = "townreporter.dark.seed";
+export const DARK_FILE_PREFILL_KEY = "townreporter.dark.prefill";
+export const DARK_OPEN_KEY = "townreporter.dark.openId";
+
+export type DarkFilePrefill = {
+  question?: string;
+  tip?: string;
+  explanation?: string;
+};
+
+export type DarkFilePrefillStore = {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+};
+
+/** Park a start-box prefill while another desk screen navigates to Dark Desk. */
+export function saveDarkFilePrefill(
+  storage: Pick<DarkFilePrefillStore, "setItem">,
+  prefill: DarkFilePrefill,
+): boolean {
+  try {
+    storage.setItem(DARK_FILE_PREFILL_KEY, JSON.stringify(prefill));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Take a pending start-box prefill once; null means this visit has no handoff. */
+export function takeDarkFilePrefill(storage: DarkFilePrefillStore): DarkFilePrefill | null {
+  try {
+    const raw = storage.getItem(DARK_FILE_PREFILL_KEY);
+    if (raw == null) return null;
+    storage.removeItem(DARK_FILE_PREFILL_KEY);
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const fields = value as Record<string, unknown>;
+    const prefill: DarkFilePrefill = {};
+    for (const key of ["question", "tip", "explanation"] as const) {
+      if (typeof fields[key] === "string") prefill[key] = fields[key];
+    }
+    return prefill;
+  } catch {
+    return null;
+  }
+}
+
+/** A Queue lead's headline is the question; its first source is the starting point. */
+export function darkLeadPrefill(headline: string, sourceUrl: string | null): DarkFilePrefill {
+  return { question: headline, tip: sourceUrl ?? "" };
+}
+
+/** Preserve which file a completed Dark job asked the editor to open. */
+export function rememberDarkJobFile(
+  storage: Pick<DarkFilePrefillStore, "setItem">,
+  fileId: number,
+): boolean {
+  if (!Number.isInteger(fileId) || fileId <= 0) return false;
+  try {
+    storage.setItem(DARK_OPEN_KEY, String(fileId));
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The two `sessionStorage` calls the handoff makes, spelled out rather than

@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { heuristicPlan } from "./extract.ts";
 import { PAPER, SEED_SOURCES } from "../paper.ts";
 import { researchScopeOf } from "./research-scope.ts";
@@ -11,6 +12,7 @@ import { researchScopeOf } from "./research-scope.ts";
   SHIPPED paper, read through the same configuration production reads.
 */
 const SHIPPED = researchScopeOf({ city: PAPER.city, state: PAPER.state, seedSources: SEED_SOURCES });
+await applyMigrationsToTestPglite();
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import {
   checkBaselines,

@@ -1,3 +1,4 @@
+// guards: the file picker could promise a model spending limit the product does not enforce
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
@@ -57,8 +58,9 @@ describe("Start a Dark Desk file dialog", () => {
       // The copy the design draws: records and hours, not hops.
       assert.match(html, new RegExp(l.label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     }
-    assert.match(selectedCard(html), /Standard · up to 30 records, 2 hours or \$3/);
-    assert.match(selectedCard(render({ limit: "deep" })), /Deep · up to 100 records, 8 hours or \$15/);
+    assert.match(selectedCard(html), /Standard · up to 30 records, 2 hours/);
+    assert.match(selectedCard(render({ limit: "deep" })), /Deep · up to 100 records, 8 hours/);
+    assert.doesNotMatch(html, /\$3|\$15|Spend not measured/);
   });
 
   it("draws the model row's Effort select too, the way the reference draws that block", () => {
@@ -70,6 +72,8 @@ describe("Start a Dark Desk file dialog", () => {
     // drawn pair and on the disabled-Automatic shape: an untouched row means
     // the desk's own default, which the note says out loud.
     const html = render({});
+    assert.match(html, /class="test-model-picker stacked"/);
+    assert.match(html, /<label>Digging model<\/label>/);
     assert.match(html, /aria-label="Model"/);
     assert.match(html, /aria-label="Effort"/);
     assert.match(html, /Automatic \(Recommended\)/);
@@ -162,6 +166,16 @@ describe("Start a Dark Desk file dialog", () => {
     // box when the editor opens the file from somewhere else.
     darkFileSeed({ tip: "Longmont council has two closed-door sessions on the books" });
     assert.equal(darkFileSeed().tip, "");
+  });
+
+  // guards: a signal's ordinary explanation must reach the saved investigation
+  it("carries the signal's suggested ordinary explanation into the file request", () => {
+    const seeded = darkFileSeed({
+      question: "Why did the notice change?",
+      tip: "The captured notice.",
+      explanation: "The city may have corrected a routine date.",
+    });
+    assert.equal(darkRequest(seeded).open.ordinaryExplanation, "The city may have corrected a routine date.");
   });
 
   it("opens a handed-over hypothesis as the question and the material, keeping the dial defaults", () => {

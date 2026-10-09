@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureFollowUpsSchema } from "./follow-ups.ts";
+
+await applyMigrationsToTestPglite();
 
 /**
  * Migration/ensure drift for `follow_ups`, both directions, without a Postgres.
@@ -29,7 +32,7 @@ import { ensureFollowUpsSchema } from "./follow-ups.ts";
  * touch, and that a second replay of the file is a no-op.
  */
 
-const MIGRATION_FILES = ["0042_follow_ups.sql", "0101_ai_follow_ups.sql"];
+const MIGRATION_FILES = ["0042_follow_ups.sql", "0101_ai_follow_ups.sql", "0141_follow_up_investigation_link.sql"];
 
 /** The retirement statement's file, read whole the same way the two above are. */
 const RETIRE_FILE = "0106_retire_manual_follow_ups.sql";
@@ -39,7 +42,7 @@ const migrationUrl = (file: string) => new URL(`../../../migrations/${file}`, im
 /** Every column the table must have after both migrations, sorted. */
 const EXPECTED_COLUMNS = [
   "agent_kind", "answered_at", "article_id", "created_at", "due_on", "finding_json",
-  "id", "last_run_at", "last_state", "lead_id", "model_choice", "newsroom_id",
+  "id", "investigation_id", "last_run_at", "last_state", "lead_id", "model_choice", "newsroom_id",
   "next_run_at", "nudged_at", "reply_text", "schedule", "status", "targets_json",
   "updated_at", "user_id", "what", "who",
 ].sort();

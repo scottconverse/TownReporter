@@ -28,6 +28,7 @@ import {
 } from "./dark-preferences.ts";
 import { grokChat, parseJsonBlock, plannerModel, providerBudget, type EffectiveProviderChoice } from "./ai.ts";
 import type { ModelEffort, ProviderOverrides } from "./provider-registry.ts";
+import type { InvestigationBrief } from "./dark-brief.ts";
 import { searchWithFallback } from "./search-web.ts";
 import { boilerplatePageReason } from "./result-quality.ts";
 import { storableText } from "./storable-text.ts";
@@ -99,8 +100,9 @@ async function defaultSearch(
 export async function verifyRunSignals(opts: {
   userId: string;
   newsroomId: number;
-  runId: number;
+  runId: number | null;
   investigationId: number;
+  caseBrief?: InvestigationBrief | null;
   place: Place;
   officialDomains?: string[];
   pressDomains?: string[];
@@ -157,14 +159,23 @@ export async function verifyRunSignals(opts: {
   */
   const refusedQueries: string[] = [];
 
-  const rows = await sql<Row>`
-    select id, name, observation, pattern, alternatives, counter_narrative,
-           linkage_map, what_would_kill, pathway, handoff
-    from dark_signals
-    where run_id = ${opts.runId} and newsroom_id = ${opts.newsroomId}
-      and coalesce(stage, 'black-desk') = 'black-desk'
-    order by strength desc, id desc
-  `.catch(() => null);
+  let rows = opts.runId == null
+    ? await sql<Row>`
+        select id, name, observation, pattern, alternatives, counter_narrative,
+               linkage_map, what_would_kill, pathway, handoff
+        from dark_signals
+        where investigation_id = ${opts.investigationId} and newsroom_id = ${opts.newsroomId}
+          and run_id is null and coalesce(stage, 'black-desk') = 'black-desk'
+        order by strength desc, id desc
+      `.catch(() => null)
+    : await sql<Row>`
+        select id, name, observation, pattern, alternatives, counter_narrative,
+               linkage_map, what_would_kill, pathway, handoff
+        from dark_signals
+        where run_id = ${opts.runId} and newsroom_id = ${opts.newsroomId}
+          and coalesce(stage, 'black-desk') = 'black-desk'
+        order by strength desc, id desc
+      `.catch(() => null);
   if (!rows)
     return {
       checked: 0,
@@ -177,6 +188,27 @@ export async function verifyRunSignals(opts: {
       summary:
         "Verification could not read the signals. No verification result was established; retry the round.",
     };
+
+  if (rows.length === 0 && opts.caseBrief) {
+    const brief = opts.caseBrief;
+    const statements = [
+      ...brief.supports,
+      ...brief.contradictions.map((pair) => `${pair.first.text}; another record says ${pair.second.text}`),
+    ].filter(Boolean).slice(0, 6);
+    if (!statements.length && brief.hypothesis) statements.push(brief.hypothesis);
+    rows = statements.map((observation, index) => ({
+      id: 0,
+      name: brief.headline || `Saved case finding ${index + 1}`,
+      observation,
+      pattern: brief.hypothesis,
+      alternatives: brief.benign,
+      counter_narrative: brief.benign,
+      linkage_map: brief.connections.join("; "),
+      what_would_kill: brief.kills_it,
+      pathway: brief.next,
+      handoff: "HOLD FOR PATTERN",
+    }));
+  }
 
   /*
     M1 of the pre-merge audit: what this lane judges its own queries against.
@@ -358,6 +390,7 @@ export async function verifyRunSignals(opts: {
         hits: hits.length,
         state,
       };
+
       evidence.push(
         `[${q.kind}] Search snippets (untrusted search evidence, not fetched page text):\n${JSON.stringify(hits.slice(0, 2).map((h) => ({ url: h.url.slice(0, 250), title: h.title.slice(0, 150), snippet: h.snippet.slice(0, 450) })))}`,
       );
@@ -402,6 +435,17 @@ export async function verifyRunSignals(opts: {
 
     const pack = [
       opts.preferences ? describeResearchWindow(opts.preferences) : "",
+      opts.caseBrief
+        ? `SAVED CASE BRIEF: ${JSON.stringify({
+            headline: opts.caseBrief.headline,
+            hypothesis: opts.caseBrief.hypothesis,
+            supports: opts.caseBrief.supports,
+            contradictions: opts.caseBrief.contradictions,
+            benign: opts.caseBrief.benign,
+            kills_it: opts.caseBrief.kills_it,
+            next: opts.caseBrief.next,
+          }).slice(0, 4000)}`
+        : "",
       `SIGNAL: ${sig.name}`,
       `OBSERVATION: ${sig.observation.slice(0, 1000)}`,
       `PATTERN: ${sig.pattern.slice(0, 1000)}`,
@@ -507,7 +551,7 @@ export async function verifyRunSignals(opts: {
 
       `storableText`: the model wrote it. See storable-text.ts.
     */
-    const saved = await sql`
+    const saved = sig.id > 0 ? await sql`
       update dark_signals set
         stage = ${"dark-signal-desk"},
         verification_status = ${verdict.status},
@@ -527,7 +571,7 @@ export async function verifyRunSignals(opts: {
       returning id
     `
       .then((rows) => rows.length > 0)
-      .catch(() => false);
+      .catch(() => false) : true;
     if (saved && verdict.status === "verified") verified += 1;
     else unverified += 1;
     if (!saved) unsaved += 1;
@@ -541,7 +585,7 @@ export async function verifyRunSignals(opts: {
       failed += 1;
   }
 
-  const runSaved = await sql`
+  const runSaved = opts.runId == null ? true : await sql`
     update dark_runs
     set searches_json = ${JSON.stringify(allSearches)},
         verification_counts_json = ${JSON.stringify({ eligible: rows.length, attempted: selected.length, verified, unverified, failed, deferred })},

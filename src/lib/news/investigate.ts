@@ -377,6 +377,14 @@ export type CaptureRecord = {
   url: string;
 };
 
+export function hypothesisStatusForPlan(supporting: string, contradicting: string) {
+  // These fields are the planner's proposed searches, not captured evidence.
+  // Only the challenge/case review can later establish a sourced result.
+  void contradicting;
+  void supporting;
+  return "active" as const;
+}
+
 const SCHEMA_SQL = `
 alter table snapshots add column if not exists url text;
 alter table snapshots add column if not exists fetch_status integer;
@@ -805,6 +813,32 @@ const INVESTIGATE_SCHEMA_STATEMENTS: readonly string[] = [
     next time someone presses the button.
   */
   `alter table investigations add column if not exists last_model_choice text`,
+  // Additive mirrors of migrations 0140 and 0143, including existing tables.
+  `alter table investigations add column if not exists ordinary_explanation text not null default ''`,
+  `alter table investigations add column if not exists scope_json text not null default '{"scope":"city"}'`,
+  `alter table investigations add column if not exists limit_key text not null default 'standard'`,
+  `alter table investigations add column if not exists limit_minutes integer not null default 120`,
+  `alter table investigations add column if not exists limit_dollars numeric`,
+  `alter table investigations add column if not exists closed_kind text`,
+  `alter table investigations add column if not exists close_note text`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_key_check') then
+      alter table investigations add constraint investigations_limit_key_check check (limit_key in ('quick', 'standard', 'deep'));
+    end if;
+  end $$`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_minutes_check') then
+      alter table investigations add constraint investigations_limit_minutes_check check (limit_minutes > 0);
+    end if;
+  end $$`,
+  `do $$ begin
+    if not exists (select 1 from pg_constraint where conrelid = 'investigations'::regclass
+      and conname = 'investigations_limit_dollars_check') then
+      alter table investigations add constraint investigations_limit_dollars_check check (limit_dollars is null or limit_dollars >= 0);
+    end if;
+  end $$`,
   `alter table source_monitors add column if not exists manual_watch boolean not null default false`,
   `alter table recurring_baselines drop constraint if exists recurring_baselines_user_id_key_key`,
   `drop index if exists recurring_baselines_user_id_key_key`,
@@ -2572,10 +2606,11 @@ export async function groundingCorpus(
     title: string;
     url: string;
     full_text: string;
+    capture_event_id: number | null;
     fetch_status: number | null;
     fetch_outcome: string | null;
   }>`
-    select title, url, full_text, fetch_status, fetch_outcome from artifacts
+    select title, url, full_text, capture_event_id, fetch_status, fetch_outcome from artifacts
     where newsroom_id = ${room} and investigation_id = ${investigationId}
     order by id desc limit 120
   `.catch(() => []);
@@ -2641,6 +2676,8 @@ export async function groundingCorpus(
   `.catch(() => []);
   const entityLabels = new Set(entityNames.map((entity) => normaliseForGrounding(entity.name)));
   const parts: string[] = [];
+  const groundedCaptures = new Map<number, string>();
+  let captureTextLength = 0;
   const investigation = head[0];
   if (investigation)
     parts.push(`${investigation.title}\n${investigation.summary}`);
@@ -2660,10 +2697,19 @@ export async function groundingCorpus(
     )
       continue;
     parts.push(`${capture.title}\n${capture.url}\n${capture.full_text}`);
+    if (capture.capture_event_id != null && !groundedCaptures.has(capture.capture_event_id)) {
+      const remaining = Math.max(0, GROUNDING_CORPUS_CAP - captureTextLength);
+      if (remaining > 0) {
+        const text = `${capture.title}\n${capture.url}\n${capture.full_text}`.slice(0, remaining);
+        groundedCaptures.set(capture.capture_event_id, text);
+        captureTextLength += text.length;
+      }
+    }
   }
   return prepareCorpus(
     parts.join("\n\n").slice(0, GROUNDING_CORPUS_CAP),
     place ? placeCorpus(place) : undefined,
+    [...groundedCaptures].map(([captureEventId, text]) => ({ captureEventId, text })),
   );
 }
 
@@ -4535,11 +4581,7 @@ async function persistPlan(
     const text = storableText(h.text);
     const supporting = storableText(h.supporting);
     const contradicting = storableText(h.contradicting);
-    const status = contradicting.trim()
-      ? "weakened"
-      : supporting.trim()
-        ? "strengthened"
-        : "active";
+    const status = hypothesisStatusForPlan(supporting, contradicting);
     const existing = await sql<{ id: number }>`
       select id from hypotheses
       where investigation_id = ${investigationId} and body = ${text.slice(0, 2000)}

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { rankWorthItems, presentWorthItem, presentWorthItems, type WorthSeed } from "./worth-a-look.ts";
+import { rankWorthItems, presentWorthItem, presentWorthItems, signalReviewItems, type WorthSeed } from "./worth-a-look.ts";
 
 /**
  * UX-003 (Critical): an outside audit found Dark Desk cards rendering
@@ -22,6 +22,16 @@ import { rankWorthItems, presentWorthItem, presentWorthItems, type WorthSeed } f
 const ATTACHMENT_URL = "https://www.linkedin.com/company/datum-engineers";
 
 describe("worth-a-look card text (UX-003)", () => {
+  // guards: the Signals to review pile must not swallow leads or internal trails
+  it("keeps story leads and unresolved trails off the signal review pile", () => {
+    const ranked = rankWorthItems({
+      frontier: [{ label: "Next filing", kind: "document", why: "Read the filing", status: "open", closed_reason: null }],
+      leads: [{ id: 82, headline: "A lead", why: "Scanner match", evidence: "Report", newsworthiness: 18, source_urls: "[]" }],
+      anomalies: [{ kind: "changed", summary: "A changed page", url: "https://records.example/notice", details: "The notice changed." }],
+    });
+    assert.deepEqual(signalReviewItems(ranked).map((item) => item.title), ["A changed page"]);
+  });
+
   it("never lets 'Attachment/document link on <url>' collapse to a bare 'linked from'", () => {
     const [card] = rankWorthItems({
       frontier: [

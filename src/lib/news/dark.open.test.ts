@@ -1,10 +1,15 @@
-import { describe, it } from "node:test";
+import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
+import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import { ensureInvestigateSchema } from "./investigate.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 
 describe("open investigation", { timeout: 60000 }, () => {
+  before(async () => {
+    await applyMigrationsToTestPglite();
+  });
+
   it("creates an investigation id immediately without waiting for hops", async () => {
     await ensureInvestigateSchema();
     const user = `dark-open-${Date.now()}`;

@@ -1323,6 +1323,7 @@ export const followUpsInput = z.preprocess(
 export const aiFollowUpInput = z.object({
   leadId: nullableId.optional(),
   articleId: nullableId.optional(),
+  investigationId: rowId.optional(),
   what: z.string().trim().min(1).max(LIMITS.followUpWhat),
   agentKind: z.enum(["recheck", "search", "agenda"]),
   schedule: z.enum(["2h", "6h", "12h", "daily", "weekly", "posting-days"]),
@@ -1332,7 +1333,7 @@ export const aiFollowUpInput = z.object({
 });
 
 /** `desk.ts:2796` updateAiFollowUp. */
-export const aiFollowUpUpdateInput = aiFollowUpInput.extend({ id: rowId });
+export const aiFollowUpUpdateInput = aiFollowUpInput.omit({ investigationId: true }).extend({ id: rowId });
 
 /** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
 export const followUpActionInput = z.object({
@@ -1445,6 +1446,8 @@ export const darkRunInput = z.object({
 export const darkOpenInput = z.object({
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
+  ordinaryExplanation: z.string().max(1600).optional(),
+  limitKey: z.enum(["quick", "standard", "deep"]).optional(),
   /*
     Unit BK: the dark-file dialog draws three Limits, and the dial is stored as
     `investigations.budget` in hops. Absent = the 5 the open path has always
@@ -1474,6 +1477,12 @@ export const darkSignalInput = z.preprocess(
   (v) => (typeof v === "number" ? { id: v } : v),
   z.object({ id: rowId, asTip: z.boolean().optional() }),
 );
+
+/** `dark.ts` retryDarkRound (retry only the failed round's owned job). */
+export const darkRetryInput = z.object({
+  jobId: rowId,
+  nextModel: z.boolean().optional().default(false),
+});
 
 /** `dark.ts:3232` fileRedditTip (`fileRedditTipFor` reads these five). */
 export const redditTipInput = z.object({

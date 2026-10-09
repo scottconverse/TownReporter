@@ -1,5 +1,7 @@
 > **Historical UI brief, with continuing reading-list requirements.** Current doctrine and verification behavior are in [dark-desk.md](dark-desk.md); the current Astra interface is in [editor-desk.md](editor-desk.md), and current work is in [../TODO.md](../TODO.md). The 0.5.1 implementation descriptions and “engine off-limits” scope below applied to that earlier design pass. They do not override subsequent engine work or the current Astra design.
 
+Current screen spec: `docs/design/dark-desk-2026-10-07/01-DARK-DESK-SPEC.md`.
+
 # Dark Desk — editor UI brief (for design)
 
 As of **0.5.1** the desk is reached through two dials — Dig and Nerve, see [editor.md](editor.md#how-hard-to-dig--the-two-dials) — the planner actually runs (it never had), and confidence is capped by evidence label in code rather than requested in a prompt. The hop engine is otherwise the same as 0.3.0: hops belong to the file, URL history / watches / names belong to the newsroom, and a claim is `resolved` only when the quoted evidence is in the captured document. Keep digging is a persisted job; Start digging no longer dumps the last 16 snapshots into the file. This is the signed-in investigative desk at `/desk/dark`. It is **not** the public paper and **not** the reporting queue.
