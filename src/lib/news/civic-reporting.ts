@@ -115,6 +115,7 @@ export type PackageScore = {
  * global appendix.
  */
 export type PackageStory = {
+  aiEvidenceReview?: import("./evidence-ai.ts").AiEvidenceReview;
   id: string;
   headline: string;
   /** The draft body. Substantial; never a rewritten scan excerpt. */

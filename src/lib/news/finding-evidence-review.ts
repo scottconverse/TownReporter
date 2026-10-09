@@ -12,6 +12,7 @@ import { reportingStoryReviewClaims, type ReportingReviewClaim } from "./reporti
 import type { ReportingPackage } from "./civic-reporting.ts";
 import type { CurrentReportingDocumentCheck } from "./reporting-document-check.ts";
 import { reportingDocumentClaimIdentity } from "./reporting-document-check.ts";
+import type { AiEvidenceReview, AiEvidenceJudgment } from "./evidence-ai.ts";
 
 export type FindingJudgment =
   "unreviewed" | "supports" | "does-not-support" | "contradicts" | "needs-reporting";
@@ -51,6 +52,7 @@ export type FindingEvidenceRow = {
     value: FindingJudgment;
     reason: string;
     contraryVersionId: number | null;
+    ai?: AiEvidenceJudgment;
   };
 };
 
@@ -963,7 +965,7 @@ export async function loadFindingEvidenceReview(
     ? await (await import("./reporting-document-check.server.ts")).loadCurrentReportingDocumentChecks(sql, newsroomId, Number(reporting.requestId))
     : {};
   const storyChecks = typeof reporting.storyId === "string" ? currentDocumentChecks[reporting.storyId] : undefined;
-  return {
+  const review: FindingEvidenceReview = {
     leadId,
     draftId: draft.id,
     civicReporting: reporting.civicReporting === true,
@@ -998,6 +1000,61 @@ export async function loadFindingEvidenceReview(
     groundingRows: storedGrounding(draft),
     manualClaimCaptureOptions: await manualClaimCaptureOptions(sql, newsroomId, draft),
   };
+  const ai = reporting.aiEvidenceReview as AiEvidenceReview | undefined;
+  if (ai?.checkedText === draft.body && Array.isArray(ai.rows)) {
+    for (const row of [...review.rows, ...review.claimRows]) {
+      const text = "finding" in row ? row.finding.text : row.claim.fact;
+      const saved = ai.rows.find((judgment) => judgment.text === text);
+      if (
+        !saved ||
+        judgmentFor(
+          draft,
+          row.key,
+          "finding" in row ? "findingEvidenceReview" : "claimEvidenceReview",
+        ).value !== "unreviewed"
+      )
+        continue;
+      const matches = row.captures.filter(
+        (capture) => capture.url === saved.sourceUrl && capture.readable && !capture.takenDown,
+      );
+      let grounded = false;
+      for (const capture of matches) {
+        if (capture.versionId != null) {
+          const [retained] = await sql.query<{ full_text: string }>(
+            "select full_text from artifact_versions where id=$1 and newsroom_id=$2 and taken_down_at is null",
+            [capture.versionId, newsroomId],
+          );
+          grounded ||= Boolean(
+            retained &&
+            saved.quote &&
+            (await sha256(retained.full_text)) === saved.sourceHash &&
+            normalizedText(retained.full_text).includes(normalizedText(saved.quote)),
+          );
+        } else if ("claim" in row && row.claim.reporting?.recordEvidence) {
+          grounded ||= row.claim.reporting.recordEvidence.quote === saved.quote;
+        }
+      }
+      row.judgment = {
+        value:
+          grounded && saved.verdict === "Supported"
+            ? "supports"
+            : grounded && saved.verdict === "Not supported"
+              ? "does-not-support"
+              : "needs-reporting",
+        reason: saved.reason,
+        contraryVersionId: null,
+        ai:
+          grounded || saved.verdict === "Needs a human"
+            ? saved
+            : {
+                ...saved,
+                verdict: "Needs a human",
+                reason: "The retained passage changed or is unavailable.",
+              },
+      };
+    }
+  }
+  return review;
 }
 
 /**

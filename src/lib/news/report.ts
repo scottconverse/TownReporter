@@ -8,6 +8,7 @@ import {
 import type { MeetingStoryFocus } from "./meeting-evidence-retrieval.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
+import { judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
@@ -118,6 +119,7 @@ export type StoryClaim = {
 };
 
 export type ResearchMemo = {
+  aiEvidenceReview?: AiEvidenceReview;
   nameCheck?: NameCheck;
   /** The single transcript-backed subject and exactly what the writer could see. */
   meetingFocus?: MeetingStoryFocus;
@@ -2175,6 +2177,27 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     }),
   };
 
+  const aiEvidenceReview = {
+    checkedText: body,
+    rows: await judgeEvidenceClaims(
+      [
+        ...findings.map((finding) => ({
+          text: finding.text,
+          urls: finding.source_urls,
+          quote: finding.excerpt,
+        })),
+        ...claims.map((claim) => ({ text: claim.fact, urls: [claim.url] })),
+      ],
+      docs.filter((doc) => Boolean(doc.text)).map((doc) => ({ url: doc.url, text: doc.text })),
+      (prompt) =>
+        nameChat(
+          "Check draft claims against retained evidence only. Return grounded JSON judgments.",
+          prompt,
+          4000,
+        ),
+    ),
+  };
+
   return {
     headline: coerced.headline,
     dek: coerced.dek,
@@ -2192,6 +2215,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     claims,
     documentClaims,
     research_memo: {
+      aiEvidenceReview,
       nameCheck: names.check,
       ...(meetingFocus ? { meetingFocus } : {}),
       ...(meetingEvidenceWide ? { meetingEvidenceWide: true } : {}),
