@@ -115,6 +115,9 @@ const reactQueryStub = stub(`
   export function useQueryClient() { return { invalidateQueries: async () => {} }; }
 `);
 const paperStub = stub(`
+  export const PAPER = { timezone: "America/Denver" };
+  export function formatClockTime() { return "2:10 p.m."; }
+  export function formatListDateTime() { return "Oct. 8, 2:10 p.m."; }
   export function formatAge() { return "2h ago"; }
   export function parseUrlList(raw) {
     if (!raw) return [];

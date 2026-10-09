@@ -45,6 +45,7 @@ import { Route as EvidenceVersionIdRouteImport } from './routes/evidence.$versio
 import { Route as EvidenceCompareRouteImport } from './routes/evidence.compare'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiCronMonitorsRouteImport } from './routes/api/cron.monitors'
+import { Route as DeskFiledDraftDraftIdRouteImport } from './routes/desk.filed-draft.$draftId'
 import { Route as DeskOpsCardRouteImport } from './routes/desk.ops_.$card'
 import { Route as DeskStoryLeadIdRouteImport } from './routes/desk.story.$leadId'
 import { Route as DeskTranscriptArtifactIdRouteImport } from './routes/desk.transcript.$artifactId'
@@ -230,6 +231,11 @@ const ApiCronMonitorsRoute = ApiCronMonitorsRouteImport.update({
   path: '/api/cron/monitors',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DeskFiledDraftDraftIdRoute = DeskFiledDraftDraftIdRouteImport.update({
+  id: '/filed-draft/$draftId',
+  path: '/filed-draft/$draftId',
+  getParentRoute: () => DeskRoute,
+} as any)
 const DeskOpsCardRoute = DeskOpsCardRouteImport.update({
   id: '/ops_/$card',
   path: '/ops/$card',
@@ -289,6 +295,7 @@ export interface FileRoutesByFullPath {
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
+  '/desk/filed-draft/$draftId': typeof DeskFiledDraftDraftIdRoute
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
@@ -330,6 +337,7 @@ export interface FileRoutesByTo {
   '/desk': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
+  '/desk/filed-draft/$draftId': typeof DeskFiledDraftDraftIdRoute
   '/desk/ops/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
@@ -373,6 +381,7 @@ export interface FileRoutesById {
   '/desk/': typeof DeskIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/cron/monitors': typeof ApiCronMonitorsRoute
+  '/desk/filed-draft/$draftId': typeof DeskFiledDraftDraftIdRoute
   '/desk/ops_/$card': typeof DeskOpsCardRoute
   '/desk/story/$leadId': typeof DeskStoryLeadIdRoute
   '/desk/transcript/$artifactId': typeof DeskTranscriptArtifactIdRoute
@@ -417,6 +426,7 @@ export interface FileRouteTypes {
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
+    | '/desk/filed-draft/$draftId'
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
@@ -458,6 +468,7 @@ export interface FileRouteTypes {
     | '/desk'
     | '/api/auth/$'
     | '/api/cron/monitors'
+    | '/desk/filed-draft/$draftId'
     | '/desk/ops/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
@@ -500,6 +511,7 @@ export interface FileRouteTypes {
     | '/desk/'
     | '/api/auth/$'
     | '/api/cron/monitors'
+    | '/desk/filed-draft/$draftId'
     | '/desk/ops_/$card'
     | '/desk/story/$leadId'
     | '/desk/transcript/$artifactId'
@@ -782,6 +794,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiCronMonitorsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/desk/filed-draft/$draftId': {
+      id: '/desk/filed-draft/$draftId'
+      path: '/filed-draft/$draftId'
+      fullPath: '/desk/filed-draft/$draftId'
+      preLoaderRoute: typeof DeskFiledDraftDraftIdRouteImport
+      parentRoute: typeof DeskRoute
+    }
     '/desk/ops_/$card': {
       id: '/desk/ops_/$card'
       path: '/ops/$card'
@@ -831,6 +850,7 @@ interface DeskRouteChildren {
   DeskSourcesRoute: typeof DeskSourcesRoute
   DeskStatsRoute: typeof DeskStatsRoute
   DeskIndexRoute: typeof DeskIndexRoute
+  DeskFiledDraftDraftIdRoute: typeof DeskFiledDraftDraftIdRoute
   DeskOpsCardRoute: typeof DeskOpsCardRoute
   DeskStoryLeadIdRoute: typeof DeskStoryLeadIdRoute
   DeskTranscriptArtifactIdRoute: typeof DeskTranscriptArtifactIdRoute
@@ -855,6 +875,7 @@ const DeskRouteChildren: DeskRouteChildren = {
   DeskSourcesRoute: DeskSourcesRoute,
   DeskStatsRoute: DeskStatsRoute,
   DeskIndexRoute: DeskIndexRoute,
+  DeskFiledDraftDraftIdRoute: DeskFiledDraftDraftIdRoute,
   DeskOpsCardRoute: DeskOpsCardRoute,
   DeskStoryLeadIdRoute: DeskStoryLeadIdRoute,
   DeskTranscriptArtifactIdRoute: DeskTranscriptArtifactIdRoute,

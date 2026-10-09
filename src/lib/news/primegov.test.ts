@@ -305,6 +305,46 @@ describe("reading a portal", () => {
     }
   });
 
+  // guards: a city error page could be read as an empty record or its meeting date could be shown as its publish date
+  it("rejects portal error bodies and keeps meeting and publish dates separate", async () => {
+    setFetchImplForTests(async () => new Response(JSON.stringify("<html><body>Portal error</body></html>"), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    try {
+      const read = await readPrimeGovPortal(OTHER_CITY);
+      assert.equal(read.ok, false);
+      assert.equal(read.status, 200);
+      assert.match(read.failure ?? "", /error page/i);
+    } finally {
+      setFetchImplForTests(null);
+    }
+
+    setFetchImplForTests(async () => new Response("", { status: 200 }));
+    try {
+      const read = await readPrimeGovPortal(OTHER_CITY);
+      assert.equal(read.ok, false);
+      assert.match(read.failure ?? "", /empty body/i);
+    } finally {
+      setFetchImplForTests(null);
+    }
+
+    const postedLater = { ...council, publishDate: "Oct 8, 2026" };
+    setFetchImplForTests(async (url) =>
+      jsonResponse(url.toString().includes("ListUpcomingMeetings") ? [postedLater] : []),
+    );
+    try {
+      const read = await readPrimeGovPortal(OTHER_CITY);
+      assert.equal(read.meetings[0]?.date, "Aug 25, 2026");
+      assert.equal(read.meetings[0]?.publishDate, "Oct 8, 2026");
+      const catalog = catalogAndExtras(OTHER_CITY, read.meetings).text;
+      assert.match(catalog, /Meeting date: Aug 25, 2026/);
+      assert.match(catalog, /posted: Oct 8, 2026/);
+    } finally {
+      setFetchImplForTests(null);
+    }
+  });
+
   it("names the portal it read in the title, not a city", async () => {
     // The title used to be the constant "Longmont agendas, packets, and
     // minutes (PrimeGov)" whatever portal answered. Longmont's host is used

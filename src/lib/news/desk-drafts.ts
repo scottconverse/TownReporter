@@ -15,9 +15,11 @@
  * `headline-control.ts` and `draft-evidence.ts` already use.
  */
 import { editorOwnsHeadline } from "./headline-control.ts";
+import { savedStoryReadiness, storyReadinessChip, type StoryReadiness } from "./story-readiness.ts";
 
 /** The facts about one draft that decide its state, as the query returns them. */
 export type DeskDraftFacts = {
+  story_readiness?: unknown;
   /** The newest `desk_jobs` row for this lead, if there is one. */
   job_status: string | null;
   job_stage: string | null;
@@ -51,10 +53,12 @@ export type DeskDraftStateKey =
   | "evidence"
   | "imported"
   | "empty"
+  | "not-ready"
   | "yours"
   | "ready";
 
 export type DeskDraftState = {
+  readiness?: StoryReadiness;
   key: DeskDraftStateKey;
   /** The state, in words, exactly as the row prints it. */
   label: string;
@@ -113,6 +117,12 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   const yours = editorOwnsHeadline(facts);
   const unresolved = Math.max(0, Number(facts.names_unresolved) || 0);
   const base = { needsYou: false, running, failed, yours };
+
+  if (facts.story_readiness !== undefined) {
+    const readiness = savedStoryReadiness(facts.story_readiness, running);
+    const key = running ? "running" : failed ? "failed" : readiness.state === "verified" ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
+    return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou: readiness.state === "to-check" };
+  }
 
   if (failed) return { ...base, key: "failed", label: "Draft failed" };
   if (running) {
@@ -235,6 +245,7 @@ export function deskDraftAction(state: DeskDraftState): string {
       // The Queue's own word for opening a filed lead and starting its story.
       return "Start story";
     case "ready":
+    case "not-ready":
       return "Review";
   }
 }
@@ -243,7 +254,7 @@ export function deskDraftAction(state: DeskDraftState): string {
 export function tonightDrafts<T>(rows: readonly T[], states: readonly DeskDraftState[]) {
   const edition = rows
     .map((row, index) => ({ row, state: states[index]! }))
-    .filter(({ state }) => state.key === "ready" || state.needsYou)
+    .filter(({ state }) => state.readiness || state.key === "ready" || state.needsYou)
     .sort((a, b) => Number(b.state.key === "ready") - Number(a.state.key === "ready"));
   return {
     rows: edition,

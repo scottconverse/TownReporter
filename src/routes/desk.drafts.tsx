@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
@@ -7,7 +8,7 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { useNowMs } from "@/components/desk-jobs";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import { listDraftsDesk, listDraftsDeskPage } from "@/lib/news/desk";
-import { editorTitle, sentenceCase } from "@/lib/news/desk-copy";
+import { editorTitle } from "@/lib/news/desk-copy";
 import {
   deskDraftAction,
   deskDraftElapsed,
@@ -53,23 +54,6 @@ const FILTERS: { key: DeskDraftFilter; label: string }[] = [
   { key: "failed", label: "Failed" },
 ];
 
-/** The tone the state chip is drawn in -- the words carry the state, the
- *  border carries the tone. */
-function stateTone(state: DeskDraftState): string {
-  if (state.failed) return "d-danger";
-  if (state.running) return "d-run";
-  if (state.needsYou) return "d-warn";
-  /*
-    UI1b-5. "Ready to check" was drawn in `d-ok` -- the green 1px border the
-    state table gives a ✓ that has been verified. This row has not been
-    verified: the checks it still faces are recorded on the story page, not
-    here, so green was a verdict the row could not read. The designer's ruling
-    is the neutral chip, which is the state table's "Waiting" level.
-  */
-  if (state.key === "ready") return "d-ready";
-  return "d-quiet";
-}
-
 /**
  * Where this draft came from, in the drawing's three words.
  *
@@ -112,7 +96,7 @@ function DraftsPage() {
     that starts with it. A key of its own would go stale behind those writes.
 
     Today's edition keeps reading the whole list through `listDraftsDesk`: its
-    "writing now" and "ready to check" counts describe every draft, and a page
+    "writing now" and "to check" counts describe every draft, and a page
     of 25 would make them describe the page.
   */
   const query = useQuery({
@@ -152,7 +136,7 @@ function DraftsPage() {
   // shown; the elapsed time is read here only for the rows on screen.
   const shown = rows.map((row) => ({
     row,
-    state: deskDraftState(row, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
+    state: deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
   }));
 
   const sectionName = (topic: string | null) =>
@@ -238,11 +222,7 @@ function DraftsPage() {
             return (
               <div className="drafts-row" key={row.id}>
                 <span className="drafts-state">
-                  {/* UI1b-6: sentence case, wherever the word came from. Most
-                      of `deskDraftState`'s labels are already capitalised; a
-                      running row's is the worker's own stage line, which is
-                      not. `sentenceCase` leaves a capital or a marker alone. */}
-                  <span className={"chip " + stateTone(state)}>{sentenceCase(state.label)}</span>
+                    <StoryReadinessChip readiness={state.readiness!} />
                 </span>
                 <div className="drafts-main">
                   {/* The origin drops out rather than leaving a hanging

@@ -1,9 +1,11 @@
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getSql } from "../db.ts";
 import type { Sql } from "../db.ts";
+import { storeMeetingAudioArtifact } from "./meeting-audio-artifacts.ts";
 
 type Row = Record<string, unknown>;
 
@@ -61,10 +63,12 @@ function statefulSql(): {
       }
       return [];
     }
-    if (/insert into meeting_transcript_artifacts/i.test(text)) {
-      audioRows.push({ params });
-      return [{ id: 9, captured_at: "2026-01-01T00:00:00Z" }];
+    if (/insert into meeting_audio_captures/i.test(text)) {
+      const row = { id: audioRows.length + 9, storage_path: String(params[2]), params };
+      audioRows.push(row);
+      return [{ id: row.id, captured_at: "2026-01-01T00:00:00Z" }];
     }
+    if (/from meeting_audio_captures/i.test(text)) return audioRows;
     return null;
   };
   const makeSql = (): Sql => {
@@ -141,5 +145,40 @@ describe("meeting capture M-1 audio fallback in the real pipeline", () => {
     } as never;
     await runMeetingAwareness(state.sql, 1, deps);
     assert.equal(audioCalls, 0, "audio must not run on the captions-first path");
+  });
+
+  // guards: a repeat capture could overwrite the reporter's earlier audio evidence
+  it("a second capture keeps the first audio file and record", async () => {
+    const sql = await getSql();
+    const testRoot = mkdtempSync(join(tmpdir(), "meeting-audio-write-once-"));
+    const storageRoot = join(testRoot, "stored");
+    const newsroomId = 900000 + Math.floor(Math.random() * 900000);
+    const videoId = "write-once-video";
+    const firstSource = join(testRoot, "first.opus");
+    const secondSource = join(testRoot, "second.opus");
+    try {
+      await sql.query(
+        "insert into meeting_capture_settings(newsroom_id,storage_root,retention_mode) values($1,$2,'audio-only')",
+        [newsroomId, storageRoot],
+      );
+      writeFileSync(firstSource, "first captured audio bytes");
+      writeFileSync(secondSource, "second captured audio bytes");
+      const first = await storeMeetingAudioArtifact(sql, {
+        newsroomId, videoId, audioSourcePath: firstSource, format: "opus", triggerReason: "captions unavailable",
+      });
+      const second = await storeMeetingAudioArtifact(sql, {
+        newsroomId, videoId, audioSourcePath: secondSource, format: "opus", triggerReason: "captions unavailable",
+      });
+      const rows = await sql.query<{ id: number; storage_path: string }>(
+        "select id,storage_path from meeting_audio_captures where newsroom_id=$1 and video_id=$2 order by id",
+        [newsroomId, videoId],
+      );
+      assert.notEqual(first.id, second.id, "each capture must have a new record id");
+      assert.equal(rows.length, 2, "both audio captures must remain in the record");
+      assert.equal(new Set(rows.map((row) => row.storage_path)).size, 2, "each capture must have its own file");
+      assert.equal(readFileSync(first.storagePath, "utf8"), "first captured audio bytes");
+    } finally {
+      rmSync(testRoot, { recursive: true, force: true });
+    }
   });
 });

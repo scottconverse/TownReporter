@@ -19,6 +19,7 @@ export type PrimeGovMeeting = {
   id: number;
   title: string;
   date: string;
+  publishDate?: string | null;
   dateTime: string;
   time: string;
   location: string;
@@ -242,6 +243,7 @@ function asMeeting(row: Record<string, unknown>): PrimeGovMeeting {
     id: Number(row.id) || 0,
     title: String(row.title ?? "Untitled meeting"),
     date: String(row.date ?? ""),
+    publishDate: typeof row.publishDate === "string" ? row.publishDate : null,
     dateTime: String(row.dateTime ?? ""),
     time: String(row.time ?? ""),
     location: String(row.location ?? ""),
@@ -281,9 +283,24 @@ async function getJson(url: string): Promise<unknown> {
   if (!res.ok) {
     throw new PrimeGovPortalError(`the portal answered ${res.status}`, res.status);
   }
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text();
+  if (!text.trim()) {
+    throw new PrimeGovPortalError("the portal returned an empty body", res.status);
+  }
+  const looksLikeMarkup = (body: string) =>
+    /text\/html/i.test(contentType) || /<\s*(?:!doctype|\/?html|head|body|title|main|h1|div)\b/i.test(body);
+  if (looksLikeMarkup(text)) {
+    throw new PrimeGovPortalError("the portal returned an error page instead of meeting data", res.status);
+  }
   try {
-    return await res.json();
-  } catch {
+    const body: unknown = JSON.parse(text);
+    if (typeof body === "string" && looksLikeMarkup(body)) {
+      throw new PrimeGovPortalError("the portal returned an error page instead of meeting data", res.status);
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof PrimeGovPortalError) throw error;
     throw new PrimeGovPortalError("the portal's answer was not a meeting list", res.status);
   }
 }
@@ -297,7 +314,9 @@ type PortalCall =
 async function listMeetingsAt(url: string): Promise<PortalCall> {
   try {
     const body = await getJson(url);
-    return { ok: true, rows: Array.isArray(body) ? body : [] };
+    return Array.isArray(body)
+      ? { ok: true, rows: body }
+      : { ok: false, detail: "the portal's answer was not a meeting list", status: 200 };
   } catch (error) {
     if (error instanceof PrimeGovPortalError) {
       return { ok: false, detail: error.message, status: error.status };
@@ -419,7 +438,8 @@ export function catalogAndExtras(
     const docs = preferredDocuments(m);
     const labels = docs.map((d) => d.templateName).join(", ") || "no documents yet";
     const gap = minutesGap(m);
-    lines.push(`- ${m.date} ${m.time} ${m.title} [${labels}]${gap ? ` — ${gap}` : ""}`);
+    const publishDate = m.publishDate ?? docs.find((doc) => doc.publishDate)?.publishDate ?? null;
+    lines.push(`- Meeting date: ${m.date} ${m.time}; posted: ${publishDate ?? "not recorded"}; ${m.title} [${labels}]${gap ? ` — ${gap}` : ""}`);
     for (const d of docs) {
       if (/html agenda/i.test(d.templateName)) continue;
       const href = compiledDocumentUrl(origin, d);

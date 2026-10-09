@@ -1,3 +1,5 @@
+import type { StoryReadiness } from "./story-readiness.ts";
+import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
   insertProposedNewsroomSource,
@@ -243,6 +245,10 @@ import {
 import { newPullReceipt, parsePullReceipt, type PullRunView } from "./pull.server.ts";
 import { providerFailureNotes } from "./pull-outcome.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership";
+import {
+  defaultMeetingTranscriptArtifactId,
+  meetingArtifactIdFromDraftReceipt,
+} from "./meeting-transcript-choice.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import {
@@ -1045,6 +1051,7 @@ export const getLead = createServerFn({ method: "GET" })
     await ensureDeskDraftMemoSchema();
     const leads = await sql<LeadRow>`
       select l.id, l.scan_run_id, l.headline, l.why, l.topic, l.topic_unchosen, l.status, l.source_urls, l.evidence, l.newsworthiness, l.created_at, l.investigation_id, l.notes_json,
+             l.meeting_video_id,l.meeting_artifact_id,l.meeting_lead_purpose,
              l.origin,
              l.possible_duplicate_of, l.dup_kind, l.kill_reason, l.kill_reason_url, l.killed_at,
              -- U28: the duplicate check's verdict, so the story page's chip
@@ -1069,6 +1076,9 @@ export const getLead = createServerFn({ method: "GET" })
     `;
     const lead = leads[0];
     if (!lead) return null;
+    const meetingTranscriptChoices = lead.meeting_video_id && lead.meeting_lead_purpose === "transcript-story"
+      ? await loadMeetingTranscriptChoices(sql, owned(context), lead.meeting_video_id)
+      : [];
     const drafts = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json,
@@ -1133,6 +1143,16 @@ export const getLead = createServerFn({ method: "GET" })
       }
     }
     const job = await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id });
+    const activeMeetingArtifactId = job?.status === "queued" || job?.status === "running"
+      ? (() => {
+          try {
+            const receipt = JSON.parse(job.result_json || "{}") as { meetingArtifactId?: unknown };
+            return Number.isInteger(receipt.meetingArtifactId)
+              ? Number(receipt.meetingArtifactId)
+              : lead.meeting_artifact_id == null ? null : Number(lead.meeting_artifact_id);
+          } catch { return null; }
+        })()
+      : null;
     /*
       "Documents opened for this draft" is model-authored (notes.opened, from
       the draft's own notebook) and carries no capture status of its own --
@@ -1200,6 +1220,9 @@ export const getLead = createServerFn({ method: "GET" })
     const outletOverrides = outletReport.overrides;
     return {
       lead,
+      meetingTranscriptChoices,
+      defaultMeetingTranscriptArtifactId: activeMeetingArtifactId
+        ?? defaultMeetingTranscriptArtifactId(meetingTranscriptChoices),
       draft,
       draftMeetingEvidence,
       meetingAccounting,
@@ -3297,6 +3320,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   const lead = leads[0];
   if (!lead) throw new Error("Lead not found");
   if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
+  const selectedMeetingArtifactId = meetingArtifactIdFromDraftReceipt(
+    job.result_json,
+    lead.meeting_artifact_id == null ? null : Number(lead.meeting_artifact_id),
+  );
   let expectedDraft =
     (
       await sql<DraftRow>`select * from drafts where lead_id=${leadId} and newsroom_id=${owned(context)} order by updated_at desc,id desc limit 1`
@@ -3327,7 +3354,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     lead.meeting_video_id && lead.meeting_artifact_id && lead.meeting_lead_purpose === "transcript-story"
       ? await (await import("./meeting-draft-material.server.ts")).loadMeetingDraftMaterial(sql, {
           newsroomId: owned(context),
-          artifactId: Number(lead.meeting_artifact_id),
+          artifactId: selectedMeetingArtifactId ?? Number(lead.meeting_artifact_id),
           videoId: lead.meeting_video_id,
           fallbackTitle: lead.headline,
           videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
@@ -3578,7 +3605,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
       await setFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
       job.model_choice = nextChoice;
-      job.result_json = JSON.stringify({ modelEffort: nextEffort });
+      job.result_json = JSON.stringify({
+        modelEffort: nextEffort,
+        ...(selectedMeetingArtifactId != null ? { meetingArtifactId: selectedMeetingArtifactId } : {}),
+      });
       activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort };
     };
     draftInput.onProviderSwitch = async ({ transport, model, reason }) => {
@@ -3842,13 +3872,13 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         newsroomId: owned(context),
         userId: context.userId,
         leadId,
-        artifactId: Number(lead.meeting_artifact_id),
-        videoId: lead.meeting_video_id ?? "",
+        artifactId: selectedMeetingArtifactId ?? Number(lead.meeting_artifact_id),
+        videoId: meetingMaterial?.meeting.videoId ?? lead.meeting_video_id ?? "",
         fallbackTitle: lead.headline,
         // The draft files under the lead's own section, so the sections trigger
         // resolves to a section this newsroom actually has.
         topic: lead.topic ?? "",
-        videoUrl: urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
+        videoUrl: meetingMaterial?.videoUrl ?? urls.find((url) => /youtube\.com|youtu\.be/i.test(url)),
         modelChoice: effectiveStoryModelChoice(job.model_choice),
         chat:
           reportDeps.chat ??
@@ -3953,7 +3983,10 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       // Publication must fail closed if a tape-derived draft somehow loses its
       // persisted used-citation link. The lead's candidate list is not proof of
       // what the final story actually used.
-      meetingEvidence: { used: meetingMaterial != null },
+      meetingEvidence: {
+        used: meetingMaterial != null,
+        ...(meetingMaterial ? { artifactId: meetingMaterial.meeting.artifactId } : {}),
+      },
       reportedClaims: { version: 1, rows: reported.claims },
       reportedDocumentClaims: {
         version: 1,
@@ -4179,20 +4212,23 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       */
       const completion = JSON.stringify(
         sanitizeJsonLeaves(
-          buildDraftCompletionReceipt({
-            checkpointDraftId,
-            finalDraftId: Number(savedDraft.id),
-            citationStatus:
-              transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
-              (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
-                ? "complete"
-                : "review-required"),
-            evidenceCheckIncomplete: notes.includes(
-              "Evidence reconciliation not completed within the available edit pass.",
-            ),
-            nameCheck: reported.research_memo.nameCheck,
-            styleAudit: styleAuditSummary(styleRecord),
-          }),
+          {
+            ...buildDraftCompletionReceipt({
+              checkpointDraftId,
+              finalDraftId: Number(savedDraft.id),
+              citationStatus:
+                transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
+                (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
+                  ? "complete"
+                  : "review-required"),
+              evidenceCheckIncomplete: notes.includes(
+                "Evidence reconciliation not completed within the available edit pass.",
+              ),
+              nameCheck: reported.research_memo.nameCheck,
+              styleAudit: styleAuditSummary(styleRecord),
+            }),
+            ...(meetingMaterial ? { meetingArtifactId: meetingMaterial.meeting.artifactId } : {}),
+          },
         ),
       );
       await sql`
@@ -4288,6 +4324,7 @@ export const draftLead = createServerFn({ method: "POST" })
       modelChoice,
       modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
+      meetingArtifactId: typeof data === "number" ? undefined : data.meetingArtifactId,
     });
   });
 
@@ -4345,6 +4382,7 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
       modelChoice,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       researchScope: data.researchScope,
+      meetingArtifactId: data.meetingArtifactId,
       reuseLedger: true,
     });
   });
@@ -4432,6 +4470,7 @@ const DESK_DRAFT_ROWS_SQL = `
            coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
            v.dek, v.topic, v.form, v.updated_at, v.lead_status, v.origin,
            v.newsworthiness, v.why, v.model_headline, v.headline_source, v.has_body,
+           v.research->'storyReadiness' as story_readiness,
            jb.status as job_status, jb.stage as job_stage,
            jb.started_at as job_started_at, jb.updated_at as job_updated_at,
            jb.model_choice as job_model_choice,
@@ -4484,6 +4523,7 @@ async function queryDraftRows(context: { newsroomId: number }) {
     updated_at: string;
     /** Has any prose been written into this draft row yet? See the CTE note. */
     has_body: boolean;
+    story_readiness: (StoryReadiness & { version: number }) | null;
     lead_status: string;
     origin: string | null;
     newsworthiness: number | null;
@@ -4747,6 +4787,21 @@ export const saveReportingCorrection = createServerFn({ method: "POST" })
         evidence: data.evidence,
       },
     );
+  });
+
+/** Open the run's exact saved draft, without selecting a newer version. */
+export const getFiledReportingDraft = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => rowId.parse(input))
+  .handler(async ({ context, data: draftId }) => {
+    const sql = await getSql();
+    const [draft] = await sql<Pick<DraftRow, "id" | "lead_id" | "headline" | "dek" | "body">>`
+      select d.id, d.lead_id, d.headline, d.dek, d.body from drafts d
+      where d.id = ${draftId} and d.newsroom_id = ${owned(context)}
+        and d.lead_id is not null
+      limit 1
+    `;
+    return draft ?? null;
   });
 
 /** The structured reporting package for a lead, scoped to this newsroom. */
