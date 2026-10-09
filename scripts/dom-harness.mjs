@@ -89,6 +89,8 @@ export function installDom() {
     display: "block",
   });
   globalThis.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 0);
+  // This DOM has no layout, but screen callbacks still call the browser API.
+  window.HTMLElement.prototype.scrollIntoView ??= function () {};
   globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   return window;
