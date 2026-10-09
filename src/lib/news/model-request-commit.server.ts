@@ -402,7 +402,7 @@ export async function commitScanForAuthenticatedEditor(
   let dailyPlan;
   if (input.daily) {
     const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
-    try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId); }
+    try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId, undefined, true); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true }; }
   }
   const runRows = await sql<{ id: number }>`

@@ -111,6 +111,8 @@ export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string
 export function scanSourceCoverageReason(entry: ScanSourceCoverageEntry): string {
   if (entry.reason?.trim()) return entry.reason;
   switch (entry.reasonCode) {
+    case "time-budget":
+      return "The scan reading time budget ended.";
     case "over-cap":
       return "Over the scan limit.";
     case "waiting":

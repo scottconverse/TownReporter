@@ -1,3 +1,4 @@
+import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
 import type { StoryReadiness } from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
@@ -2127,12 +2128,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
-  const SCAN_WATCH_CAP = 200;
-  const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
+  const scanDeadline = Date.now() + DAILY_SCAN_TIME_BUDGET_MS;
+  const [priorityPolicy] = await sql<{ selected_source_ids: number[]; every_day_source_count: number }>`
+    select selected_source_ids,every_day_source_count from daily_scan_policies
+    where newsroom_id=${owned(context)}
+  `;
+  const fixedIds = (priorityPolicy?.selected_source_ids ?? []).slice(0, priorityPolicy?.every_day_source_count ?? 8);
+  const watchSlice = dailySources || deps.scheduledSnapshot ? sources : orderAcceptedSources(sources, fixedIds);
   failureReceipt.sourcesAttempted = 0;
   sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
   if (!sourceCoverage.length && sources.length)
-    sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
+    sourceCoverage = manualScanCoverage(sources, sources.length);
 
   const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
@@ -2246,7 +2252,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // One source at a time makes Cancel a boundary the editor can rely on:
   // finish the current fetch, keep its observation, and never start the next.
   // A batch of six could otherwise begin five more reads after the press.
-  for (const src of watchSlice) {
+  readingSources: for (const batch of sourceBatches(watchSlice, Date.now, scanDeadline)) for (const src of batch) {
+    if (Date.now() >= scanDeadline) break readingSources;
     try {
     await throwIfJobCancelled(job.id);
     await deps.scheduledGuard?.();
@@ -2488,9 +2495,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     } catch (error) {
       fetchLoopError = error;
-      break;
+      break readingSources;
     }
   }
+  if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
+    ? { ...entry, status: "skipped" as const, reasonCode: "time-budget" as const,
+        reason: "The 90-minute scan reading budget ended before this source was reached." } : entry);
   sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
   /*
@@ -2500,7 +2510,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
     to come back is not recorded as a fetch that never happened.
   */
-  failureReceipt.sourcesAttempted = Math.max(0, watchSlice.length - skippedThisPass);
+  // Actual fetch attempts are counted at dispatch, including failures.
+  // Watches left at the deadline were never attempted.
 
   const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
