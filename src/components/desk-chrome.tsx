@@ -68,7 +68,7 @@ function useViewportMenus() {
           place();
         } else {
           observer.unobserve(panel);
-          panel.hidePopover();
+          if (panel.matches(":popover-open")) panel.hidePopover();
           panel.removeAttribute("popover");
           panel.classList.remove("viewport-menu");
           panel.style.removeProperty("top");
