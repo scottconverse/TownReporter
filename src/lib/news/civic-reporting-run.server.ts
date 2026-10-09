@@ -584,38 +584,70 @@ export function normalizeHeld(raw: unknown): PackageHeld[] {
 /** Every published absence assertion must use the same whole-record search as an open fact. */
 function checkedTranscriptCaveat(text: string, context: string, record: WholeRecord): string {
   if (!record.segments?.length) return text;
-  const absent = /\b(?:missing|absent|unavailable|not\s+(?:shown|stated|supplied|present|found|available)|(?:does|do|did)\s+not\s+(?:supply|show|include|establish)|cannot\s+(?:show|establish)|only\s+as\s+a\s+reconciled)\b/i;
+  const absent = /\b(?:missing|absent|unavailable|unverified|unknown|not\s+(?:identified|established|shown|stated|supplied|present|found|available)|(?:does|do|did)\s+not\s+(?:supply|show|include|establish)|cannot\s+(?:show|establish)|only\s+as\s+a\s+reconciled)\b/i;
   const ignored = new Set(["about", "complete", "final", "full", "missing", "motion", "original", "originating", "passage", "record", "result", "retained", "supplied", "transcript", "unavailable", "wording", "council", "ordinance", "approval", "announced", "pending"]);
-  return text.split(/(?<=[.!?])\s+/).map((sentence) => {
-    // A result omitted from the copy is a writer gap, not a claim of absent evidence.
-    if (!absent.test(sentence) || /\btranscript announced\b/i.test(sentence)) return sentence;
-    const motionGap = /\b(?:motions?|amendment.{0,30}wording)\b/i.test(sentence);
-    const resultGap = /\b(?:result|vote|outcome)\b/i.test(sentence);
-    const stageGap = /\b(?:procedural stage|reading)\b/i.test(sentence);
-    if (!motionGap && !resultGap && !stageGap) return sentence;
-    // Copy can cover many unrelated agenda items. Never borrow its other
-    // claims' identifiers to answer this sentence's own absence assertion.
-    const queryText = /^(?:find|check|review) (?:the )?(?:missing |original |originating )?motion[.!]?$/i.test(sentence.trim())
-      ? `${sentence} ${context}` : sentence;
-    const ids = queryText.match(/\b\d{4}\s*[-–]\s*\d+\b/g)?.map(normalizeForMatch) ?? [];
-    const topics = [...new Set(normalizeForMatch(queryText).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
-    const query: PackageClaim = { id: "absence-check", text: queryText, status: "UNVERIFIED", sourceIds: [], nextCheck: "" };
-    const candidates = transcriptClaimCandidates(query, record, record.identity.videoUrl || `https://www.youtube.com/watch?v=${record.identity.videoId}`);
-    const found = candidates.sort((a, b) => b.score - a.score).find((candidate) => {
-      const quote = normalizeForMatch(candidate.quote);
-      const related = ids.length ? ids.some((id) => quote.includes(id)) : topics.filter((word) => quote.split(" ").includes(word)).length >= 2;
-      return related && ((motionGap && motionSegment({ text: candidate.quote } as TapeSegment)) || (resultGap && hasAnnouncedResult(candidate.quote)) || (stageGap && /\b(?:first|second)[\s-]+reading\b/i.test(candidate.quote)));
+  return text.split(/(?<=[.!?])\s+/).map((original) => {
+    const clauses = original.split(/,\s+(?:so|but)\s+/);
+    const checked = clauses.map((sentence) => {
+      // A result omitted from the copy is a writer gap, not a claim of absent evidence.
+      if (!absent.test(sentence) || /\btranscript announced\b/i.test(sentence)) return sentence;
+      const motionGap = /\b(?:motions?|amendment.{0,30}wording)\b/i.test(sentence);
+      const resultGap = /\b(?:results?|votes?|outcomes?|dispositions?)\b/i.test(sentence);
+      const subjectGap = /\bsubject\b/i.test(sentence);
+      const stageGap = /\b(?:procedural stage|reading)\b/i.test(sentence);
+      if (!motionGap && !resultGap && !stageGap && !subjectGap) return sentence;
+      // Copy can cover many unrelated agenda items. Never borrow its other
+      // claims' identifiers to answer this sentence's own absence assertion.
+      const queryText = /^(?:(?:find|check|review) (?:the )?(?:missing |original |originating )?motion[.!]?|the complete motion is available only as a reconciled description)$/i.test(sentence.trim())
+        ? `${sentence} ${context}` : sentence;
+      const ids = queryText.match(/\b\d{4}\s*[-–]\s*\d+\b/g)?.map(normalizeForMatch) ?? [];
+      const topics = [...new Set(normalizeForMatch(queryText).split(" ").filter((word) => word.length >= 4 && !/^\d+$/.test(word) && !ignored.has(word)))];
+      const query: PackageClaim = { id: "absence-check", text: queryText, status: "UNVERIFIED", sourceIds: [], nextCheck: "" };
+      const candidates = transcriptClaimCandidates(query, record, record.identity.videoUrl || `https://www.youtube.com/watch?v=${record.identity.videoId}`);
+      const citedClock = motionGap && /^(?:the )?motion is not identified[.!]?$/i.test(sentence.trim())
+        ? claimCitationStartSeconds({ ...query, nextCheck: context }) : null;
+      const cited = citedClock === null ? null : citedTranscriptCandidate({ ...query, nextCheck: context }, record, record.identity.videoUrl);
+      if (cited && Math.abs((cited.anchorSeconds ?? 0) - citedClock!) <= 90) candidates.unshift(cited);
+      const answers = (candidate: ClaimCheckCandidate, id?: string) => {
+        const quote = normalizeForMatch(candidate.quote);
+        const related = id ? quote.includes(id) : cited === candidate || topics.filter((word) => quote.split(" ").includes(word)).length >= 2;
+        return related && ((motionGap && motionSegment({ text: candidate.quote } as TapeSegment)) || (resultGap && hasAnnouncedResult(candidate.quote)) || (stageGap && /\b(?:first|second)[\s-]+reading\b/i.test(candidate.quote)) || (subjectGap && candidate.quote.split(/\s+/).length >= 12));
+      };
+      // A compound unknown remains until every named subject has an answer.
+      const found = ids.length ? ids.every((id) => candidates.some((candidate) => answers(candidate, id))) : candidates.some((candidate) => answers(candidate));
+      if (!found) return sentence;
+      // An answered absence is no longer a caveat. Dropping it also avoids
+      // printing a search memo or an imprecise window locator as story copy.
+      return "";
     });
-    if (!found) return sentence;
-    // An answered absence is no longer a caveat. Dropping it also avoids
-    // printing a search memo or an imprecise window locator as story copy.
-    return "";
+    return checked.some((clause) => !clause) ? checked.filter(Boolean).join(". ") : original;
+  }).join(" ");
+}
+
+/** Resolve only the requested substance, never every concern about an ordinance. */
+function checkedSupportedCaveat(text: string, stories: PackageStory[]): string {
+  const ignored = new Set(["the", "this", "that", "with", "from", "record", "transcript", "retained", "supplied", "missing", "absent", "unknown", "unverified", "unavailable", "not", "been", "shown", "stated", "identified", "established", "supported", "check", "find", "verify", "whether", "motion", "ordinance", "result", "disposition", "subject"]);
+  return text.split(/(?<=[.!?])\s+/).filter((sentence) => {
+    if (!/\b(?:missing|absent|unknown|unverified|unavailable|not (?:shown|stated|identified|established))\b/i.test(sentence)) return true;
+    const ids = sentence.match(/\b\d{4}\s*[-–]\s*\d+\b/g)?.map(normalizeForMatch) ?? [];
+    const supported = stories.flatMap((story) => story.claims.filter((claim) => claim.status === "VERIFIED"));
+    if (/\b(?:dispositions?|outcomes?|results?)\b/i.test(sentence) && ids.length &&
+      ids.every((id) => supported.some((claim) => normalizeForMatch(claim.text).includes(id) && resultOutcome(claim.text)))) return false;
+    const terms = [...new Set(normalizeForMatch(sentence).split(" ").filter((word) => word.length >= 4 && !ignored.has(word)))];
+    if (terms.length < 2) return true;
+    return !stories.some((story) => story.claims.some((claim) => {
+      if (claim.status !== "VERIFIED") return false;
+      const evidence = normalizeForMatch(`${claim.text} ${claim.recordEvidence?.quote ?? ""}`);
+      if (ids.some((id) => !evidence.includes(id))) return false;
+      const words = new Set(evidence.split(" "));
+      return terms.every((term) => words.has(term));
+    }));
   }).join(" ");
 }
 
 function checkedStoryCaveats(story: PackageStory, record: WholeRecord): PackageStory {
   const context = `${story.headline} ${story.claims.map((claim) => claim.text).join(" ")}`;
-  const clean = (text: string) => checkedTranscriptCaveat(text, context, record);
+  const clean = (text: string) => checkedTranscriptCaveat(checkedSupportedCaveat(text, [story]), context, record);
   return {
     ...story, draft: clean(story.draft), plainBrief: clean(story.plainBrief), cannotSay: clean(story.cannotSay),
     claims: story.claims.map((claim) => ({ ...claim,
@@ -625,18 +657,28 @@ function checkedStoryCaveats(story: PackageStory, record: WholeRecord): PackageS
   };
 }
 
-function checkedHeldCaveats(held: PackageHeld[], stories: PackageStory[], record: WholeRecord): PackageHeld[] {
-  return held.map((entry) => {
+export function checkedHeldCaveats(held: PackageHeld[], stories: PackageStory[], record: WholeRecord): PackageHeld[] {
+  return held.flatMap((entry) => {
     const story = stories.find((row) => row.id === entry.storyId);
     const context = `${entry.headline} ${entry.nextCheck} ${story?.headline ?? ""}`;
-    const clean = (text: string) => checkedTranscriptCaveat(text, context, record)
+    if (/\bmotion is not identified\b/i.test(entry.reason)) {
+      const claim: PackageClaim = { id: "held-motion", text: entry.headline, status: "UNVERIFIED", sourceIds: [], nextCheck: context };
+      const clock = claimCitationStartSeconds(claim);
+      const cited = clock === null ? null : citedTranscriptCandidate(claim, record, record.identity.videoUrl);
+      const tallies = statedVoteTallies(entry.reason);
+      if (cited && Math.abs((cited.anchorSeconds ?? 0) - clock!) <= 90 && motionSegment({ text: cited.quote } as TapeSegment) &&
+        hasAnnouncedResult(cited.quote) && tallies.length && tallies.every((tally) =>
+          voteWordsIn(cited.quote).some((found) => tallyKey(found) === tallyKey(tally)))) return [];
+    }
+    const clean = (text: string) => checkedTranscriptCaveat(checkedSupportedCaveat(text, stories), context, record)
       .split(/(?<=[.!?])\s+/).map((sentence) => {
         const ids = sentence.match(/\bC\d+\b/g) ?? [];
         return ids.length && /\b(?:extraction accounts|identifier binding)\b/i.test(sentence) &&
           ids.every((id) => story?.claims.some((claim) => claim.id === id && claim.status === "VERIFIED" && claim.recordEvidence))
-          ? "The named facts are supported by retained record passages." : sentence;
+          ? "" : sentence;
       }).join(" ");
-    return { ...entry, reason: clean(entry.reason), nextCheck: clean(entry.nextCheck) };
+    const reason = clean(entry.reason);
+    return reason.trim() ? [{ ...entry, reason, nextCheck: clean(entry.nextCheck) }] : [];
   });
 }
 
@@ -2030,8 +2072,10 @@ export async function performReportingWork(
     stories.push(checkedStoryCaveats(validatePacketSources(rechecked, record), record));
   }
   const held = checkedHeldCaveats(guardCorrectionHolds(writing.held, gather.observations, allDocuments), stories, record);
-  for (let index = 0; index < unknowns.length; index++) unknowns[index] = checkedTranscriptCaveat(unknowns[index]!, "", record);
-  for (let index = 0; index < gaps.length; index++) gaps[index] = checkedTranscriptCaveat(gaps[index]!, "", record);
+  for (const list of [unknowns, gaps]) {
+    const remaining = list.map((text) => checkedTranscriptCaveat(checkedSupportedCaveat(text, stories), "", record)).filter((text) => text.trim());
+    list.splice(0, list.length, ...remaining);
+  }
   for (const action of actions) action.outcome = checkedTranscriptCaveat(action.outcome, action.motionOrAction, record);
   // ---- Stage 8: filing ----------------------------------------------------
   await report(STAGE.filing);
