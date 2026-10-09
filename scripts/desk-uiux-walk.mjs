@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
-import { prepareDarkDeskCapture } from "./desk-uiux-dark-case.mjs";
+import { prepareDarkDeskCapture, assertDarkTapTargets } from "./desk-uiux-dark-case.mjs";
 import { startLocalWalkServer } from "./dark-ci-server.harness.mjs";
 
 const base = checkedUrl(process.env.UIWALK_BASE_URL || "http://127.0.0.1:3491").replace(/\/$/, "");
@@ -944,6 +944,7 @@ async function captureSurface(page, scenario, surface) {
     await page.getByRole("button", { name: "+ Start a file", exact: true }).click();
     const startDialog = page.getByRole("dialog", { name: "Start a Dark Desk file", exact: true });
     await startDialog.waitFor();
+    await assertDarkTapTargets(startDialog);
     for (const label of await startDialog.locator(".model-picker-label").all()) {
       const drawn = await label.evaluate((node) => ({ transform: getComputedStyle(node).textTransform, bottom: node.getBoundingClientRect().bottom, controlTop: node.nextElementSibling.getBoundingClientRect().top }));
       if (drawn.transform !== "none" || drawn.controlTop < drawn.bottom) throw new Error("Start-a-file model labels must stack above their controls in sentence case");

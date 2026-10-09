@@ -7254,6 +7254,8 @@
    takes its 44px in the label that owns the press (see `.queue-check`).
 */
 .desk-ltr.astra select,
+.desk-ltr.astra-modal-layer select,
+.desk-ltr.astra-modal-layer button,
 .desk-ltr.astra summary,
 .desk-ltr.astra .np-link,
 .desk-ltr.astra .astra-check,

@@ -63,6 +63,14 @@ export async function waitForDarkDeskAudit(readHtml, { timeout = 1000, interval 
 }
 
 /** The rebuilt Dark Desk's settled states, before the walk indexes controls. */
+export async function assertDarkTapTargets(root) {
+  for (const control of await root.locator("select,button").all()) {
+    if (!(await control.isVisible())) continue;
+    const box = await control.boundingBox();
+    if (box.height < 44) throw new Error(`Dark Desk control is ${box.height}px tall: ${await control.getAttribute("aria-label") || await control.textContent()}`);
+  }
+}
+
 export async function prepareDarkDeskCapture(page) {
   await page.waitForFunction(
     () => {
@@ -87,6 +95,7 @@ export async function prepareDarkDeskCapture(page) {
   try {
     await panel.getByRole("heading", { name: "How hard to dig", exact: true }).waitFor();
     await panel.getByRole("heading", { name: "Watched pages", exact: true }).waitFor();
+    await assertDarkTapTargets(panel);
     // Read names and geometry without pressing any model or network action.
     const controls = panel.locator('button,select,input:not([type="hidden"]),a[href]');
     for (const control of await controls.all()) {
@@ -106,6 +115,7 @@ export async function prepareDarkDeskCapture(page) {
   }
   await panel.waitFor({ state: "hidden" });
   auditDarkDeskHtml(await page.content());
+  await assertDarkTapTargets(page);
 
   const empty = page.getByRole("heading", { name: "No investigations yet", exact: true });
   if (await empty.isVisible()) return;
