@@ -1,3 +1,4 @@
+import { createServerOnlyFn } from "@tanstack/react-start";
 import { looksLikeSoft404, type FetchOutcome } from "./fetch-outcome.ts";
 import { assertPublicHttpUrl, fetchPublicHttp, fetchPublicHttpTracked } from "./fetch-url.ts";
 import { htmlToPlainText } from "./html-text.ts";
@@ -561,11 +562,12 @@ type RedditIngest = {
  * code, so the import is dynamic and gated the same way `render-fetch.ts`
  * is used further down in this file: server-side only.
  */
+const redditServer = createServerOnlyFn(() => import("./reddit.server.ts"));
 async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
   if (typeof window !== "undefined") return null;
   const { isRedditUrl } = await import("./reddit.ts");
   if (!isRedditUrl(url)) return null;
-  const { fetchRedditDocument } = await import("./reddit.server.ts");
+  const { fetchRedditDocument } = await redditServer();
   return fetchRedditDocument(url);
 }
 
@@ -592,7 +594,7 @@ async function ingestRedditSourceIfNeeded(url: URL): Promise<IngestResult | null
   if (typeof window !== "undefined") return null;
   const { isRedditUrl } = await import("./reddit.ts");
   if (!isRedditUrl(url)) return null;
-  const { fetchRedditSourceText } = await import("./reddit.server.ts");
+  const { fetchRedditSourceText } = await redditServer();
   const source = await fetchRedditSourceText(url);
   if (!source.ok) throw new Error(source.text);
   return { text: source.text, titleHint: source.title, extras: [] };

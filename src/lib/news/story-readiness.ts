@@ -34,7 +34,7 @@ export function savedStoryReadiness(raw: unknown, checking = false): StoryReadin
         : {};
     if (
       value.version === 1 &&
-      ["checking", "verified", "to-check", "not-ready"].includes(String(value.state)) &&
+      ["ready", "checking", "verified", "to-check", "not-ready"].includes(String(value.state)) &&
       typeof value.openCount === "number" &&
       Number.isInteger(value.openCount) &&
       value.openCount >= 0 &&

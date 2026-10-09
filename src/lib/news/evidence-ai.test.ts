@@ -39,9 +39,10 @@ it("checks retained passages in bounded batches and leaves ungrounded claims for
     sources,
     async () => {
       calls++;
+      if (calls === 2) return { ok: true, text: JSON.stringify({ rows: Array.from({ length: 10 }, (_, index) => ({ index, verdict: "Supported", sourceUrl: sources[0].url, quote: sources[0].text })) }) };
       throw new Error("offline");
     },
   );
-  assert.equal(calls, 5);
   assert.ok(failed.every((row) => row.verdict === "Needs a human" && row.reason));
+  assert.equal(calls, 3);
 });

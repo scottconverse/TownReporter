@@ -13,20 +13,30 @@ export type AiEvidenceJudgment = EvidenceClaim & {
   checkedAt: string;
 };
 export type AiEvidenceReview = { checkedText: string; rows: AiEvidenceJudgment[] };
+export function aiEvidenceReadiness(review: AiEvidenceReview): import("./story-readiness.ts").StoryReadiness & { version: 1 } {
+  const openCount = review.rows.filter((row) => row.verdict !== "Supported").length;
+  return { version: 1, state: openCount ? "not-ready" : "ready", openCount, totalCount: review.rows.length,
+    reason: openCount ? `${openCount} claims need review.` : "Ready to publish." };
+}
 const normalized = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
 
 /** A model cannot upgrade a proposal into a decision or add an absent number. */
 export function quoteCoversClaim(claim: string, quote: string): boolean {
-  const decisions = /\b(approved|adopted|passed|authorized|enacted)\b/i;
-  if (
-    decisions.test(claim) &&
-    (!decisions.test(quote) ||
-      /\b(if|would|could|proposed|recommended|submitted|pending)\b/i.test(quote))
-  )
-    return false;
+  if (!quoteDoesNotOverstate(claim, quote)) return false;
   const numbers: string[] = claim.match(/\d[\d,.]*/g) ?? [];
   const quotedNumbers: string[] = quote.match(/\d[\d,.]*/g) ?? [];
   return numbers.every((number) => quotedNumbers.includes(number));
+}
+
+export function quoteDoesNotOverstate(claim: string, quote: string): boolean {
+  const decisions = /\b(approved|adopted|passed|authorized|enacted)\b/i;
+  if (
+    decisions.test(claim) &&
+    (!/\b(approved|adopted|passed|authorized|enacted|carries|carried|passes)\b/i.test(quote) ||
+      /\b(if|would|could)\b[^.!?]{0,60}\b(approved|adopted|passed|authorized|enacted)\b/i.test(quote))
+  )
+    return false;
+  return true;
 }
 
 /** Search the whole retained text, as the reporting re-check does; never fetch. */
@@ -116,7 +126,10 @@ export async function judgeEvidenceClaims(
           typeof row.reason === "string"
             ? row.reason.replace(/\s+/g, " ").slice(0, 240)
             : result.reason;
-        if (!passage || !original) continue;
+        if (!passage || !original) {
+          if (row.verdict !== "Needs a human") result.reason = "The AI could not ground its verdict in an exact retained passage.";
+          continue;
+        }
         Object.assign(result, {
           quote,
           sourceUrl: passage.url,
@@ -132,11 +145,12 @@ export async function judgeEvidenceClaims(
         }
       }
     } catch (error) {
-      for (const result of results.slice(offset, offset + 10)) {
+      for (const result of results) {
         result.verdict = "Needs a human";
         result.reason =
           error instanceof Error ? error.message.slice(0, 240) : "The AI check failed.";
       }
+      break;
     }
   }
   for (const result of results.slice(40))

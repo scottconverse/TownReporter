@@ -46,7 +46,7 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getSql, withTransaction, type Sql } from "../db.ts";
-import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
+import { reportingStoryReviewClaims, retainReportingEvidence } from "./reporting-evidence-adapter.ts";
 import { persistReportingActionLedger } from "./reporting-ledger-adapter.ts";
 import {
   JobCancelledError,
@@ -95,7 +95,7 @@ import { KIND_BUDGETS, modelEffort, PROVIDER_REGISTRY, providerEntry, type Model
 import { readProviderOverrides } from "./provider-settings.ts";
 import { dekRuleProblems, firstSentenceForDek } from "./dek-fallback.ts";
 import { storyReadiness } from "./story-readiness.ts";
-import { judgeEvidenceClaims, quoteCoversClaim } from "./evidence-ai.ts";
+import { judgeEvidenceClaims, quoteDoesNotOverstate } from "./evidence-ai.ts";
 
 // Whole-meeting writing asks for 18,000 tokens, rather than a short pass reply.
 // Reuse the registry long-call allowance; the 913-second rehearsal failed with
@@ -1975,6 +1975,8 @@ export async function performReportingWork(
     });
   }
   const allDocuments = further.documents;
+  await throwIfCancelled(job.id);
+  await retainReportingEvidence(sql, { newsroomId: request.newsroom_id, userId: request.user_id }, allDocuments);
   // Preserve the exact records later stages received, including newly found
   // documents. The initial digest alone cannot explain their claim bindings.
   writeWorkspace(workspaceDir, "all-documents.json", JSON.stringify(allDocuments));
@@ -4027,7 +4029,7 @@ function clockLabel(seconds: number): string {
 }
 
 function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate, record: WholeRecord): boolean {
-  if (claim.length === 0 || candidate.quote.trim().length < 8 || !quoteCoversClaim(claim, candidate.quote)) return false;
+  if (claim.length === 0 || candidate.quote.trim().length < 8 || !quoteDoesNotOverstate(claim, candidate.quote)) return false;
   const item: LedgerItem = {
     itemNo: 0,
     kind: candidate.kind === "transcript" ? "reporting" : "document-source",

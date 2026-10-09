@@ -40,7 +40,11 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
 import { deskTakenLoginCopy } from "./desk-copy.ts";
-import { isSetupCodeRequired } from "./setup-code.server.ts";
+import { createServerOnlyFn } from "@tanstack/react-start";
+const isSetupCodeRequired = createServerOnlyFn(async () => {
+  const setup = await import("./setup-code.server.ts");
+  return setup.isSetupCodeRequired();
+});
 
 export const DEFAULT_NEWSROOM_ID = 1;
 

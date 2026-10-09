@@ -1,4 +1,8 @@
+import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
+const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
+const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
+const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
 
 export type { ChatResultMetadata } from "./ai-result-metadata.ts";
 export type GrokOk = { ok: true; text: string; meta?: ChatResultMetadata };
@@ -463,7 +467,7 @@ async function resolveCustomProvider(
   }
   try {
     const resolve =
-      injected ?? (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+      injected ?? (await customServer()).resolveCustomAiChoice;
     const connection = await resolve(newsroomId, choice.slice("custom:".length));
     return {
       ok: true,
@@ -823,7 +827,7 @@ export async function probeProvider(
     localOverride = { baseUrl: provider.baseUrl, id: provider.model };
   }
   if (provider.kind === "codex") {
-    const { probeCodex } = await import("./ai-codex.server.ts");
+    const { probeCodex } = await codexServer();
     const result = await probeCodex(provider.label);
     return result.ok ? { ...result, choice: storyModelChoice(choice) } : result;
   }
@@ -858,7 +862,7 @@ export async function probeProvider(
   if (provider.kind === "anthropic") {
     return probeAnthropic(provider, storyModelChoice(choice || "claude-frontier"));
   }
-  const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+  const { probeClaudeCode } = await claudeServer();
   const result = await probeClaudeCode(provider.label);
   return result.ok ? { ...result, choice: storyModelChoice(choice || "claude-frontier") } : result;
 }
@@ -1057,7 +1061,7 @@ export async function grokChat(
   if (provider.kind === "claude-code") {
     // Server-only module — dynamic import keeps node:child_process out of the
     // browser bundle (same pattern as isolation.server.ts / render-fetch.ts).
-    const { claudeCodeChat } = await import("./ai-claude-code.server.ts");
+    const { claudeCodeChat } = await claudeServer();
     // The CLI spawns a process and reloads its preamble each call, so give it
     // more room than an HTTP request would need.
     // Honour the caller's timeout. Silently raising it (this used to force a
@@ -1074,7 +1078,7 @@ export async function grokChat(
     });
   }
   if (provider.kind === "codex") {
-    const { codexChat } = await import("./ai-codex.server.ts");
+    const { codexChat } = await codexServer();
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   const llm = provider;

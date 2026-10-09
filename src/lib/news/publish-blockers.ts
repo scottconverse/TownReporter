@@ -175,8 +175,6 @@ export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
  */
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
-  if (state.evidenceLoading) blockers.push({ key: "evidence-loading", sentence: "Loading evidence judgments.",
-    action: { label: "Review the checks", target: { kind: "evidence-review" } } });
 
   if (empty(state.headline)) {
     blockers.push({
@@ -222,6 +220,8 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  if (state.evidenceLoading) blockers.push({ key: "evidence-loading", sentence: "Loading evidence judgments.",
+    action: { label: "Review the checks", target: { kind: "evidence-review" } } });
   if (!state.sectionReady) {
     blockers.push({
       key: "section",

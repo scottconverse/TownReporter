@@ -1,5 +1,5 @@
 import { getSql } from "../db.ts";
-import { judgeEvidenceClaims } from "./evidence-ai.ts";
+import { aiEvidenceReadiness, judgeEvidenceClaims } from "./evidence-ai.ts";
 import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
@@ -173,6 +173,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     chat: (system, user, maxTokens) => runChat(system, user, maxTokens, active.modelChoice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
   });
   Object.assign(edited, names.draft);
+  let judgmentOffset = 0;
   const aiEvidenceReview = {
     checkedText: edited.body,
     rows: await judgeEvidenceClaims(
@@ -185,7 +186,15 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
         ...parseClaims(parsed.claims).map((claim) => ({ text: claim.fact, urls: [claim.url] })),
       ],
       captures.map((capture) => ({ url: capture.url, text: capture.full_text })),
-      async () => ({ ok: true, text: JSON.stringify(parsed.evidence_judgments ?? {}) }),
+      async () => {
+        const answer = parsed.evidence_judgments as { rows?: Record<string, unknown>[] } | undefined;
+        const offset = judgmentOffset;
+        judgmentOffset += 10;
+        const rows = Array.isArray(answer?.rows) ? answer.rows
+          .filter(row => typeof row.index === "number" && row.index >= offset && row.index < offset + 10)
+          .map(row => ({ ...row, index: Number(row.index) - offset })) : [];
+        return { ok: true, text: JSON.stringify({ rows }) };
+      },
     ),
   };
   await withClaimedLeadDraftLock(job, draft.lead_id, async tx => {
@@ -256,6 +265,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       ...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),
       nameCheck:names.check,
       aiEvidenceReview,
+      storyReadiness: aiEvidenceReadiness(aiEvidenceReview),
       reportedClaims:{version:1,rows:claims},
       evidenceReconciledAt:new Date().toISOString(),
     }));

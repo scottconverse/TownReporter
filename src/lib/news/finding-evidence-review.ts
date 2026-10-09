@@ -1,4 +1,5 @@
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+const reportingDocumentServer = createServerOnlyFn(() => import("./reporting-document-check.server.ts"));
 import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
@@ -964,7 +965,7 @@ export async function loadFindingEvidenceReview(
   const manualClaims = storedManualClaims(draft);
   const reporting = objectMemo(draft.research_json);
   const currentDocumentChecks = reporting.civicReporting === true && Number.isSafeInteger(reporting.requestId)
-    ? await (await import("./reporting-document-check.server.ts")).loadCurrentReportingDocumentChecks(sql, newsroomId, Number(reporting.requestId))
+    ? await (await reportingDocumentServer()).loadCurrentReportingDocumentChecks(sql, newsroomId, Number(reporting.requestId))
     : {};
   const storyChecks = typeof reporting.storyId === "string" ? currentDocumentChecks[reporting.storyId] : undefined;
   const review: FindingEvidenceReview = {
@@ -1007,15 +1008,15 @@ export async function loadFindingEvidenceReview(
     for (const row of [...review.rows, ...review.claimRows]) {
       const text = "finding" in row ? row.finding.text : row.claim.fact;
       const saved = ai.rows.find((judgment) => judgment.text === text);
-      if (
-        !saved ||
-        judgmentFor(
-          draft,
-          row.key,
-          "finding" in row ? "findingEvidenceReview" : "claimEvidenceReview",
-        ).value !== "unreviewed"
-      )
+      if (!saved) continue;
+      const namespace = "finding" in row ? "findingEvidenceReview" : "claimEvidenceReview";
+      const human = judgmentFor(draft, row.key, namespace);
+      if (human.value !== "unreviewed") {
+        const stored = storedReview(draft, namespace).judgments?.[row.key];
+        if (row.judgment.value === "supports" && stored?.acceptedBy && saved.verdict === "Supported")
+          row.judgment = { ...row.judgment, ai: saved, acceptedBy: stored.acceptedBy, acceptedAt: stored.acceptedAt };
         continue;
+      }
       const matches = row.captures.filter(
         (capture) => capture.url === saved.sourceUrl && capture.readable && !capture.takenDown,
       );
@@ -1032,7 +1033,7 @@ export async function loadFindingEvidenceReview(
             (await sha256(retained.full_text)) === saved.sourceHash &&
             normalizedText(retained.full_text).includes(normalizedText(saved.quote)),
           );
-        } else if ("claim" in row && row.claim.reporting?.recordEvidence) {
+        } else if ("claim" in row && row.claim.reporting?.recordEvidence?.kind === "transcript") {
           grounded ||= row.claim.reporting.recordEvidence.quote === saved.quote;
         }
       }
@@ -1570,3 +1571,4 @@ export const saveManualClaim = createServerFn({ method: "POST" })
       };
     }
   });
+

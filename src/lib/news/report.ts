@@ -8,7 +8,7 @@ import {
 import type { MeetingStoryFocus } from "./meeting-evidence-retrieval.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
-import { judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
+import { aiEvidenceReadiness, judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
@@ -120,6 +120,7 @@ export type StoryClaim = {
 
 export type ResearchMemo = {
   aiEvidenceReview?: AiEvidenceReview;
+  storyReadiness?: import("./story-readiness.ts").StoryReadiness & { version: 1 };
   nameCheck?: NameCheck;
   /** The single transcript-backed subject and exactly what the writer could see. */
   meetingFocus?: MeetingStoryFocus;
@@ -2216,6 +2217,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     documentClaims,
     research_memo: {
       aiEvidenceReview,
+      storyReadiness: aiEvidenceReadiness(aiEvidenceReview),
       nameCheck: names.check,
       ...(meetingFocus ? { meetingFocus } : {}),
       ...(meetingEvidenceWide ? { meetingEvidenceWide: true } : {}),
