@@ -151,7 +151,7 @@ export function MeetingCaptureSettings() {
                 <span className="min-w-0 flex-1 truncate text-sm">{url}</span>
                 <button type="button" className="px-1" aria-label="Move up" onClick={() => move(i, -1)}>↑</button>
                 <button type="button" className="px-1" aria-label="Move down" onClick={() => move(i, 1)}>↓</button>
-                <button type="button" className="px-1 text-red-700" aria-label="Remove" onClick={() => removeChannel(i)}>✕</button>
+                <button type="button" className="px-1 meeting-danger" aria-label="Remove" onClick={() => removeChannel(i)}>✕</button>
               </li>
             ))}
             {!list.length && <li className="text-sm text-ink-2">No channels yet.</li>}
