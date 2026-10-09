@@ -219,7 +219,7 @@ type ProgressShape = Omit<
 const SAVED_MODEL_EFFORTS = new Set<ModelEffort>(["none", "low", "medium", "high", "xhigh", "max"]);
 
 function darkJobEffort(row: Pick<DeskJob, "kind" | "result_json">): ModelEffort | null {
-  if (row.kind !== "dark" || !row.result_json) return null;
+  if (!["dark", "challenge", "brief"].includes(row.kind) || !row.result_json) return null;
   try {
     const value = (JSON.parse(row.result_json) as { modelEffort?: unknown }).modelEffort;
     return typeof value === "string" && SAVED_MODEL_EFFORTS.has(value as ModelEffort)

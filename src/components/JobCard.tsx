@@ -94,10 +94,11 @@ export function JobCard({
   // Stored jobs retain their worker vocabulary. Present the same case stages
   // on Today, the sidebar and the full job card, including older saved runs.
   const legacyDark = storedJob.kind === "dark" && storedJob.stages?.some((stage) => /Researching the file|Synthesizing signals|Testing explanations|Writing editor brief/.test(stage));
-  const job = storedJob.kind === "dark" ? {
+  const darkCase = ["dark", "challenge", "brief"].includes(storedJob.kind);
+  const job = darkCase ? {
     ...storedJob,
     stages: ["Question", "Gather", "Case file", "Challenge"],
-    stageIndex: storedJob.status === "queued" ? 0 : legacyDark ? [1, 2, 3, 2][storedJob.stageIndex ?? 0] : storedJob.stageIndex,
+    stageIndex: storedJob.kind === "challenge" ? 3 : storedJob.kind === "brief" ? 2 : storedJob.status === "queued" ? 0 : legacyDark ? [1, 2, 3, 2][storedJob.stageIndex ?? 0] : storedJob.stageIndex,
     step: storedJob.step
       .replace(/^Researching the file$/i, "Gathering public records")
       .replace(/^Researching hop (\d+)\/(\d+)$/i, "Gathering records · step $1 of $2")
@@ -106,7 +107,7 @@ export function JobCard({
       .replace(/^Testing explanations/i, "Challenging the case")
       .replace(/^Writing editor brief$/i, "Writing the case file"),
   } : storedJob;
-  if (job.kind === "dark") cancelLabel = "Stop";
+  if (darkCase) cancelLabel = "Stop";
   const state = jobCardState(job);
   const running = state === "running";
   const [, tick] = useState(0);
@@ -142,7 +143,7 @@ export function JobCard({
   const col = state === "done" ? "done" : state === "failed" ? "failed" : stalled ? "stalled" : "running";
 
   return (
-    <div className={`job-card${compact ? " compact" : ""} state-${col}`}>
+    <div className={`job-card${compact ? " compact" : ""}${darkCase ? " case-job" : ""} state-${col}`}>
       {/*
         THE HEAD IS TWO COLUMNS, AND THE TITLE OWNS ONE LINE (FB1b, item 4).
 
@@ -175,7 +176,7 @@ export function JobCard({
         </b>
       </div>
 
-      {!compact && job.stages && job.stages.length ? (
+      {(!compact || darkCase) && job.stages && job.stages.length ? (
         <div className="job-card-stages">
           {job.stages.map((stage, i) => {
             const done = i < (job.stageIndex ?? -1) || state === "done";

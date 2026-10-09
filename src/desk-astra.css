@@ -5175,6 +5175,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.desk-ltr.astra .job-card.compact.case-job .job-card-model {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .desk-ltr.astra .job-card.compact .job-card-id {
   align-items: center;
 }
