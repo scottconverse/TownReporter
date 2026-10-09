@@ -1,3 +1,4 @@
+import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
 import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
 import type { StoryReadiness } from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
@@ -220,8 +221,6 @@ import {
   type DupCheckOutcome,
   type DupCheckPrinted,
 } from "./dup-check.ts";
-import { readModelAssignments } from "./model-assignments-store.ts";
-import { resolveJobModel } from "./model-assignments.ts";
 import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
@@ -2707,7 +2706,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           leads_created = 0,
           sources_proposed = 0,
           sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${sourcesAnalyzed},
           model_batches_used = ${batches.length},
@@ -2903,19 +2902,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     are these the same news story? See ./dup-check.ts for what that decides
     (a chip, and only a chip) and what it deliberately does not.
 
-    The model is the one this newsroom assigned to the `lead-score` job -- the
-    row the Models screen already draws as "Lead scoring & duplicates / Scores
-    leads, spots ≈ printed" -- resolved through the same order every other job
-    uses (`resolveJobModel`: an explicit pick, then the saved rows, then the
-    surface's default, which is Automatic and therefore the ladder's first rung,
-    DeepSeek v4.1 Flash). Nothing here hard-codes a provider, and the answer
-    records which model actually replied rather than which one was meant to.
-
-    The SCHEDULED scan is the one exception, and it is a transport fact rather
-    than a second policy: that lane is pinned to exactly one runtime
-    (`forcedChat`, daily-scan.server.ts), so the check runs on the model the
-    scan itself is already running on. There is no other transport available to
-    hand a per-job assignment to.
+    The duplicate check uses the scan's current pinned provider, reasoning
+    effort and local model snapshot. A separate lead-scoring assignment cannot
+    override the editor's pick. Technical scan failovers are already recorded
+    on the job, so the check follows that same effective runtime.
 
     A failure here is never fatal and never moves a chip on its own: the
     outcome is empty, `fileScanLeads` falls back to the word rule, and the only
@@ -2943,30 +2933,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         passing it back to that same runtime is a no-op rather than a
         re-resolution.
       */
-      const assigned = deps.scheduledCommit
-        ? String(job.model_choice)
-        : (
-            await resolveJobModel({
-              jobKey: "lead-score",
-              explicit: null,
-              assignments: await readModelAssignments(job.newsroom_id).catch(() => []),
-            })
-          ).providerId;
-      const dupChoice = assigned as EffectiveProviderChoice;
-      const dupTimeoutMs = Math.min(batchTimeoutMs(assigned), DUP_CHECK_TIMEOUT_MS);
+      const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
       dupCheck = await runDupCheck({
         pairs: collected.pairs,
         skipped: collected.skipped,
-        chat: async (system, user, maxTokens) => {
-          const got = await runChat(system, user, maxTokens, {
-            timeoutMs: dupTimeoutMs,
-            choice: dupChoice,
-            newsroomId: job.newsroom_id,
-          });
-          return got.ok
-            ? { ok: true as const, text: got.text, model: got.meta?.model ?? null }
-            : { ok: false as const, error: got.error };
-        },
+        chat: scanDuplicateChat({
+          modelChoice: job.model_choice,
+          reasoningEffort: effortFromJob(job),
+          newsroomId: job.newsroom_id,
+          localModel: scanLocalModel,
+          timeoutMs: dupTimeoutMs,
+        }, runChat),
       });
     }
   } catch (error) {

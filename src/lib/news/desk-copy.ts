@@ -18,7 +18,8 @@ export const meetingTranscriptSelectionRefused = "Choose a transcript saved for 
 export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
-import { distinguishingOverlap, titleEntityOverlap, type NewsroomPlace } from "./lead-match.ts";
+import * as leadMatchSignals from "./lead-match.ts";
+import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
 import type { SourceCadence } from "./adaptive-source-selection.ts";
 import type { SourcePurpose } from "./source-inventory.ts";
@@ -2176,7 +2177,7 @@ export function nearDuplicate(
 ): PrintedDup | null {
   for (const p of published) {
     const recent = Date.parse(p.published_at) >= Date.now() - 60 * 24 * 60 * 60 * 1000;
-    if (recent && titleEntityOverlap(lead.headline, p.headline, place))
+    if (recent && leadMatchSignals.titleEntityOverlap?.(lead.headline, p.headline, place))
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
     const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);

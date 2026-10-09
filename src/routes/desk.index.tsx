@@ -1882,6 +1882,20 @@ function DeskHome() {
                   left `queue` when the Open count stopped including it, and a
                   desk whose only lead is on hold is not a desk with no leads.
                 */}
+                <ModelPicker
+                  scope="story"
+                  label="Model for Start story"
+                  value={storyModel}
+                  onChange={(choice) => {
+                    storyModelTouched.current = true;
+                    setStoryModel(choice);
+                    setStoryModelEffort(defaultModelEffort(choice));
+                  }}
+                  effort={storyModelEffort}
+                  onEffortChange={setStoryModelEffort}
+                  disabled={startDraft.isPending}
+                  compact
+                />
                 {queue.length === 0 && heldQueue.length === 0 ? (
                   !last && publishedCount === 0 ? (
                     <p className="wire-sum">

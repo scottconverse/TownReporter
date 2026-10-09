@@ -954,10 +954,11 @@ function sharesDistinguishingEvidence(
 export function titleEntityOverlap(a: string, b: string, place?: NewsroomPlace | null): boolean {
   const anchorsA = extractAnchors(a, place), anchorsB = extractAnchors(b, place);
   if (factsConflict(anchorsA, anchorsB)) return false;
-  const actionWords = new Set(["review", "plan", "report", "announce", "schedule", "come", "propose", "approve", "require", "decide"]);
+  const actionWords = new Set(["review", "plan", "report", "announce", "schedule", "come", "propose", "approve", "require", "decide", "receiv", "receive", "new", "million", "billion", "trillion"]);
   const meaningful = (headline: string) => new Set([...subjectTokens(headline, place)].filter(word => !actionWords.has(word)));
   const subjectsA = meaningful(a), subjectsB = meaningful(b);
-  const namesA = nonStoplistedProperNouns(a, place), namesB = nonStoplistedProperNouns(b, place);
+  const named = (headline: string) => new Set([...nonStoplistedProperNouns(headline, place)].filter(word => !actionWords.has(stem(word))));
+  const namesA = named(a), namesB = named(b);
   const names = sharedWordCount(namesA, namesB);
   const subjects = sharedWordCount(subjectsA, subjectsB);
   const facts = specificAnchors([...anchorsA].filter(anchor => anchorsB.has(anchor))).length;
