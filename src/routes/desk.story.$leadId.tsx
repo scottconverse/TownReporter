@@ -552,15 +552,6 @@ function StoryPage() {
     hand, and it is empty unless the desk recorded a draft job that finished:
     an hour nobody wrote down is not an hour this bar may print.
   */
-  const readiness = readinessDot(
-    writerIsReady({
-      choice: modelChoice,
-      availability: writerAvailability.data,
-      customConnection:
-        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
-    }),
-    savedStoryReadiness(data?.draft?.research_json),
-  );
   let civicReportingDraft = false;
   try {
     const research: unknown = JSON.parse(data?.draft?.research_json ?? "{}");
@@ -1858,7 +1849,9 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
-  const draftReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting);
+  let draftReadiness = data.draft
+    ? savedStoryReadiness(data.draft.research_json, reconcileActive || waiting)
+    : { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1926,6 +1919,22 @@ function StoryPage() {
     settled answer is the whole of the fix, and it is a pure function of what
     the mutations report, so it is testable without mounting this route.
   */
+  // The resolved Checks state outranks an older saved memo, including published drafts.
+  const evidenceBlocker = blockers.find((blocker) => blocker.key === "claims-unreviewed");
+  if (evidenceBlocker) draftReadiness = {
+    state: "not-ready", openCount: evidenceState.toReview,
+    totalCount: Math.max(draftReadiness.totalCount, evidenceState.toReview),
+    reason: evidenceBlocker.sentence,
+  };
+  const readiness = readinessDot(
+    writerIsReady({
+      choice: modelChoice,
+      availability: writerAvailability.data,
+      customConnection:
+        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
+    }),
+    draftReadiness,
+  );
   const blockerPress = blockerPressState({
     accept: {
       isPending: acceptUnreviewed.isPending,
