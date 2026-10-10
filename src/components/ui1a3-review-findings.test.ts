@@ -44,6 +44,7 @@ function render(node: Parameters<typeof renderToStaticMarkup>[0]) {
 
 const CLAIMS_BLOCKER: PublishBlocker = {
   key: "claims-unreviewed",
+  kind: "warning",
   sentence: "3 claims need review. The evidence check raised them and no one has judged them.",
   action: { label: "Review the claims", target: { kind: "evidence-review" } },
   altAction: {
@@ -54,6 +55,7 @@ const CLAIMS_BLOCKER: PublishBlocker = {
 
 const OUTLET_BLOCKER: PublishBlocker = {
   key: "named-outlet",
+  kind: "warning",
   sentence: "The story names Longmont Leader and no source shows it.",
   action: { label: "Open the sources", target: { kind: "add-source" } },
   altAction: { label: "Override Longmont Leader", target: { kind: "override-outlet", outlet: "Longmont Leader" } },

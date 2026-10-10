@@ -84,12 +84,15 @@ export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
     await ensureEditorialRequestSchema();
     const sql = await getSql();
-    const [row] = await sql<{ source_text: string; asked_for: string; error: string | null; finished_at: string | null; draft_id: number | null }>`
+    const [row] = await sql<{ source_text: string; asked_for: string; error: string | null; finished_at: string | null; draft_id: number | null;
+    }>`
       select source_text, asked_for, error, finished_at, draft_id from editorial_requests
       where id=${requestId} and newsroom_id=${owned(context)} limit 1
     `;
     if (!row || !row.finished_at || !row.error || row.draft_id !== null) return { ok: false as const, error: "That failed request has no restorable material." };
-    const [docs] = await sql<{ count: number }>`select count(*) as count from story_documents where editorial_request_id=${requestId} and newsroom_id=${owned(context)}`;
+    const [docs] = await sql<{
+      count: number;
+    }>`select count(*) as count from story_documents where editorial_request_id=${requestId} and newsroom_id=${owned(context)}`;
     const attachmentCount = Number(docs?.count ?? 0);
     if (!row.source_text && !attachmentCount) return { ok: false as const, error: "This older request was saved before full-paste recovery existed; its missing text cannot be reconstructed." };
     return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, attachmentCount };
@@ -195,8 +198,15 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number }) =>
-      editorialStartInput.parse(input),
+    (input: {
+      subject: string;
+      askedFor?: string;
+      articleSlug?: string;
+      modelChoice?: string;
+      modelEffort?: ModelEffort | null;
+      documentIds?: string[];
+      retryRequestId?: number;
+    }) => editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
     const modelChoice = opinionModelChoice(data.modelChoice);
@@ -270,7 +280,17 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
 
 export const saveEditorialDraft = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { draftId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string }) => editorialDraftInput.parse(input))
+  .validator(
+    (input: {
+      draftId: number;
+      headline: string;
+      dek: string;
+      body: string;
+      topic: string;
+      evidenceDecision?: EvidenceDecision;
+      evidenceToken?: string;
+    }) => editorialDraftInput.parse(input),
+  )
   .handler(async ({ context, data }) => {
     const { saveOpinionDraft } = await import("./opinion-draft.server.ts");
     return saveOpinionDraft(owned(context), data);
@@ -288,45 +308,136 @@ export const saveEditorialDraft = createServerFn({ method: "POST" })
  * column is unique, and a single retry could still collide.
  */
 /**
+ * A publish request for a standalone editorial: the draft, and the warning keys
+ * the editor has acknowledged at the press.
+ *
+ * Two shapes are accepted, deliberately: the bare draft id every existing
+ * caller sends (`desk.opinion.tsx`, the story workbench), and
+ * `{draftId, acknowledgedWarningKeys}` once the confirmation dialog lists what
+ * it is asking the editor to overrule. A non-array, or an array holding
+ * anything but strings, is dropped to `[]` rather than refused: a request is
+ * not the place to discover that a key is not text, and an empty acknowledgement
+ * list is exactly "the editor acknowledged nothing", which the publish path
+ * already answers with a refusal naming every current warning.
+ *
+ * This never refuses a request the old shape allowed; it only carries more.
+ */
+export function cleanEditorialPublishRequest(raw: unknown): {
+  draftId: number | null;
+  acknowledgedWarningKeys: string[];
+} {
+  if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
+    const o = raw as { draftId?: unknown; acknowledgedWarningKeys?: unknown };
+    const keys = Array.isArray(o.acknowledgedWarningKeys)
+      ? o.acknowledgedWarningKeys.filter(
+          (k): k is string => typeof k === "string" && k.trim() !== "",
+        )
+      : [];
+    return { draftId: cleanPublishId(o.draftId), acknowledgedWarningKeys: keys };
+  }
+  return { draftId: cleanPublishId(raw), acknowledgedWarningKeys: [] };
+}
+
+/**
  * The body of `publishEditorial`, pulled out so it can be called directly in
  * a test with a plain `{ userId, newsroomId }` context and a real (PGlite)
  * database -- the same shape `performPublish` (desk.ts) exposes for the same
  * reason. `publishEditorial` itself stays the RPC entry point, unwrapping the
- * validated `draftId` and calling straight through.
+ * validated `{draftId, acknowledgedWarningKeys}` and calling straight through.
+ *
+ * HUMAN OVERRIDE AT PUBLISH. Until now the editorial path only ever THREW its
+ * gate (`assertOpinionEvidenceReady`), so an editor with a missing dek or stale
+ * evidence had a dead button and no sentence. It now works like the reported
+ * workbench (`performPublish`, `publish-overrides.behavior.test.ts`): the
+ * refusal carries EVERY warning current inside this transaction, names the keys
+ * the caller did not acknowledge, and stands aside for the ones it did --
+ * printing over them with one `publish-override` audit row per warned key.
+ *
+ * The order is deliberate and load-bearing:
+ *
+ *   1. The true impossibilities first -- a draft that is not there, an empty
+ *      headline, an empty body. These are refused however many keys arrive:
+ *      they are not warnings, they are the absence of a piece to print.
+ *   2. The warnings, recomputed INSIDE the locked transaction, so a key the
+ *      client acknowledged for a draft version that has since moved does not
+ *      carry: the current list comes back and the editor re-presses.
+ *   3. Already-published short-circuit before any audit write, so a retry of a
+ *      print that already happened writes no duplicate override rows.
  */
 export async function performPublishEditorial(
   context: { userId: string; newsroomId?: number },
   draftId: number | null,
+  acknowledgedWarningKeys: readonly string[] = [],
 ) {
-    if (draftId === null) return { ok: false as const, error: "There is no such draft." };
-    const { slugify } = await import("@/lib/paper");
-    const { withEditorialDraft, assertOpinionEvidenceReady } = await import("./opinion-draft.server.ts");
-    const result = await withEditorialDraft(owned(context), draftId, async (sql, d) => {
-    assertOpinionEvidenceReady(d);
-    if (!d.headline.trim() || !d.body.trim()) {
+  if (draftId === null) return { ok: false as const, error: "There is no such draft." };
+  const { slugify } = await import("@/lib/paper");
+  const { withEditorialDraftOrNull, opinionPublishWarnings } =
+    await import("./opinion-draft.server.ts");
+  const { ensureAuditEventsSchema, auditWithSql } = await import("./ops.ts");
+
+  /*
+      The audit schema is DDL, so it cannot join the transaction below; ensure it
+      once here, the same way `audit()` would before writing an ordinary event.
+    */
+  await ensureAuditEventsSchema();
+
+  const ack = new Set(
+    acknowledgedWarningKeys.filter(
+      (key): key is string => typeof key === "string" && key.trim() !== "",
+    ),
+  );
+
+  const result = await withEditorialDraftOrNull(owned(context), draftId, async (sql, d) => {
+    /*
+        The true impossibilities. A missing headline or body is not a warning a
+        person can accept -- there is nothing to print -- so an acknowledgement
+        of any key does not move it.
+      */
+    if (!(d.headline ?? "").trim()) {
+      return { ok: false as const, error: "An editorial needs a headline before it can publish." };
+    }
+    if (!(d.body ?? "").trim()) {
       return { ok: false as const, error: "An editorial needs a headline and a body." };
     }
-    /*
-      An editorial is filed with `dek: ""` unconditionally (`editorial.server.ts:501`),
-      whether the model wrote the piece or the editor pasted one in
-      (`fileWrittenEditorial`, opinion.ts) -- nothing before this click ever
-      required one. The workbench that edits an editorial draft
-      (`desk.story.draft.$draftId.tsx:259`) already has a dek field, so this
-      refuses at publish rather than adding a second entry point.
-    */
-    if (!d.dek.trim()) {
-      return {
-        ok: false as const,
-        error: "Add a dek, the one-line summary under the headline, before you publish.",
-      };
-    }
 
+    /*
+        Already on the paper: resolve to the printed piece before the warning
+        gate. A retry of a print that happened -- with or without an
+        acknowledgement -- must not append a second set of override rows, and a
+        second refusal for a piece the editor can see is the piece itself would
+        be the desk contradicting it. Nothing new is written, so there is
+        nothing to audit.
+      */
     const already = await sql<{ slug: string }>`
-      select slug from articles
+        select slug from articles
       where headline = ${d.headline} and status = 'published' and newsroom_id = ${owned(context)}
       limit 1
-    `;
+      `;
     if (already[0]) return { ok: true as const, slug: already[0].slug };
+
+    /*
+        Recompute the warnings inside the locked transaction. A refusal must name
+        what is true of THIS row, not what the client last saw, or a stale
+        acknowledgement would print over a warning nobody read.
+      */
+    const warnings = opinionPublishWarnings(d);
+    const unacknowledged = warnings.filter((warning) => !ack.has(warning.key));
+    if (unacknowledged.length > 0) {
+      /*
+          The error is the FIRST unacknowledged warning's own sentence -- the
+          desk's words for what the editor must read, not an internal key list.
+          The whole list rides along in `warnings`, and `unacknowledged` names
+          the keys, so the client can list every reason before it asks the
+          editor to confirm. An empty acknowledgement therefore reproduces the
+          single-warning refusal this path always gave.
+        */
+      return {
+        ok: false as const,
+        error: unacknowledged[0].sentence,
+        warnings,
+        unacknowledged: unacknowledged.map((w) => w.key),
+      };
+    }
 
     const baseSlug = slugify(d.headline);
     const printed = await (async () => {
@@ -339,8 +450,8 @@ export async function performPublishEditorial(
         if (!clash[0]) break;
         candidate = n === 0 ? `${baseSlug}-${draftId}` : `${baseSlug}-${draftId}-${n + 1}`;
       }
-      const [article] = await tx<{id:number}>`
-        insert into articles (
+      const [article] = await tx<{ id: number }>`
+          insert into articles (
           user_id, newsroom_id, lead_id, slug, headline, dek, body, topic, source_urls, status,
           published_at, form, origin_draft_id
         )
@@ -349,21 +460,54 @@ export async function performPublishEditorial(
           ${d.topic || "opinion"}, ${d.source_urls || "[]"}, 'published', now(),
           ${d.form || "editorial"}, ${draftId}
         ) returning id
-      `;
-      return {slug:candidate,id:article.id};
+        `;
+      return { slug: candidate, id: article.id };
     })();
 
+    /*
+        One override row per warning this print stands over. The detail names the
+        warning key, the draft and the editor; the entity is the draft, so an
+        override is traceable to the piece it was made for. Written INSIDE the
+        transaction (`auditWithSql`), so a print that rolls back leaves no
+        record of an override that never happened.
+      */
+    for (const warning of warnings) {
+      await auditWithSql(
+        sql,
+        context.userId,
+        "publish-override",
+        JSON.stringify({ key: warning.key, draftId, editor: context.userId }),
+        owned(context),
+        { kind: "drafts", id: draftId },
+      );
+    }
+
     return { ok: true as const, slug:printed.slug, articleId:printed.id };
-    });
-    if (result.ok && typeof result.articleId === "number") await audit(context.userId, "publish-editorial", `Article ${result.articleId}`, owned(context), {kind:"articles",id:result.articleId});
-    return result;
+  });
+
+  /*
+      No row: the draft is gone, or it was never an editorial the caller owns
+      (a reporting draft, or another newsroom's). Answered, not thrown -- the
+      caller is a person who pressed a button.
+    */
+  if (result === null) {
+    return {
+      ok: false as const,
+      error: "That standalone editorial is gone. Open reporting drafts from the story queue.",
+    };
+  }
+  if (result.ok && typeof result.articleId === "number") {
+    await audit(context.userId, "publish-editorial", `Article ${result.articleId}`, owned(context), {kind:"articles",id:result.articleId});
+  }
+  return result;
 }
 
 export const publishEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  // Same annotation-not-a-check as publishLead: see request-input.ts.
-  .validator((raw: unknown) => cleanPublishId(raw))
-  .handler(async ({ context, data: draftId }) => performPublishEditorial(context, draftId));
+  .validator((raw: unknown) => cleanEditorialPublishRequest(raw))
+  .handler(async ({ context, data }) =>
+    performPublishEditorial(context, data.draftId, data.acknowledgedWarningKeys),
+  );
 
 /**
  * Throw an editorial away.
@@ -382,7 +526,9 @@ export const deleteEditorial = createServerFn({ method: "POST" })
   .handler(async ({ context, data: draftId }) => {
     const sql = await getSql();
     const { keepACopy, snapshotDraft } = await import("./trash");
-    const [ownedEditorial] = await sql<{id:number}>`select id from drafts where id=${draftId} and newsroom_id=${owned(context)} and form='editorial' and lead_id is null`;
+    const [ownedEditorial] = await sql<{
+      id: number;
+    }>`select id from drafts where id=${draftId} and newsroom_id=${owned(context)} and form='editorial' and lead_id is null`;
     if (!ownedEditorial) return { ok: false as const, error: "That standalone editorial is gone." };
     const snapshot = await snapshotDraft(sql, draftId);
     if (!snapshot) return { ok: false as const, error: "That draft is already gone." };

@@ -407,19 +407,53 @@ export function cleanPublishRequest(raw: unknown): {
   leadId: number | null;
   topic?: string;
   area?: string;
+  acknowledgedWarningKeys?: string[];
 } {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown };
+    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown;
+      acknowledgedWarningKeys?: unknown;
+    };
     const leadId = cleanPublishId(o.leadId);
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
     const area = cleanStoryArea(o.area);
+    /*
+      `acknowledgedWarningKeys` is OPTIONAL and only present when the client
+      actually sent it. An older client (or the bare id) sends no such field,
+      and its cleaned request must keep EXACTLY the old shape -- adding an empty
+      array would be an API drift the older callers and their tests never asked
+      for. The server function defaults an absent field to "acknowledged
+      nothing", so an old caller and a new caller-with-no-ticks mean the same
+      thing without the shape changing.
+    */
+    const acknowledged = cleanAcknowledgedWarningKeys(o.acknowledgedWarningKeys);
     return {
       leadId,
       ...(topic ? { topic } : {}),
       ...(area ? { area } : {}),
+      ...(o.acknowledgedWarningKeys === undefined ? {} : { acknowledgedWarningKeys: acknowledged }),
     };
   }
   return { leadId: cleanPublishId(raw) };
+}
+
+/**
+ * The warning keys an editor has acknowledged in the publish request (PR233).
+ *
+ * Preserve exact keys: clipping an outlet name would make its warning impossible
+ * to acknowledge. Only the server's recomputed current keys grant an override.
+ */
+function cleanAcknowledgedWarningKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const key = value;
+    if (!key.trim() || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
 }
 
 /**
@@ -645,7 +679,8 @@ export function cleanYoutubeKeyTestInput(raw: unknown): { apiKey?: string } {
 }
 
 export function cleanConnectionEnabled(raw: unknown): { id: string; enabled: boolean } {
-  const enabled = (raw && typeof raw === "object" ? (raw as { enabled?: unknown }).enabled : undefined);
+  const enabled =
+    raw && typeof raw === "object" ? (raw as { enabled?: unknown }).enabled : undefined;
   if (typeof enabled !== "boolean") throw new Error("Enabled must be true or false.");
   return { ...cleanConnectionId(raw), enabled };
 }
@@ -777,11 +812,11 @@ export const modelEffortLoose = modelEffortValue.nullable().catch(null);
  */
 export const suggestHeadlinesInput = z.object({
   leadId: publishId,
-  headline: z
-    .preprocess(
-      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
-      z.string(),
-    )
+  headline: z.preprocess(
+    (v) =>
+      typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
+    z.string(),
+  )
     .optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.optional(),
