@@ -335,6 +335,49 @@ const SECOND_HEADLINE = "Council approves the pilot program";
  * with a dek and claims, published articles with source records, follow-ups,
  * and dark desk files.
  */
+// The control sweep can enqueue newer drafts or cancel jobs. Re-create the
+// three state fixtures immediately before their separate assertions so that
+// latestJob reads the intended scenario, not a side effect of an earlier press.
+async function seedJobStates(pg, userId, { leadId, leadId2, leadId3 }) {
+  const q = (sql, params) => pg.query(sql, params);
+  /* ── jobs: one stalled, one failed on quota, one cancelled ────────────── */
+  /*
+    One job per state, each on its own lead, because the desk shows the NEWEST
+    job for a (kind, subject_id) pair (src/lib/news/jobs.ts:312 `latestJob`).
+
+    The stall is the desk's OWN rule read off `beat_at`: `src/components/JobCard.tsx`
+    calls a running job stalled when now - beat_at >= 60s, so a running row whose
+    last sign of life is five minutes old is stalled by the product's definition,
+    not by a class this walk sets. The quota row carries the provider-shaped
+    failure text the fake answers with; the cancelled row carries the desk's own
+    `JOB_CANCELLED_REASON` (src/lib/news/jobs.ts:879) -- there is no `cancelled`
+    status, a cancel is a failure with that exact reason.
+  */
+  await q(
+    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
+                            created_at, updated_at, started_at, beat_at)
+     values (1, $1, 'draft', $2, 'deepseek-flash', 'running', 'Writing the draft',
+             $3, $4, $3, $5)`,
+    [userId, leadId2, ago(9 * MIN), ago(5 * MIN), ago(5 * MIN)],
+  );
+  await q(
+    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
+                            error, failover_note, created_at, updated_at, started_at, finished_at)
+     values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
+             'DeepSeek API error 429: usage limit reached; resets 11:30pm (America/Denver).',
+             '', $3, $4, $3, $4)`,
+    [userId, leadId, ago(40 * MIN), ago(38 * MIN)],
+  );
+  await q(
+    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
+                            error, created_at, updated_at, started_at, finished_at)
+     values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
+             'Cancelled by the editor', $3, $4, $3, $4)`,
+    [userId, leadId3, ago(30 * MIN), ago(29 * MIN)],
+  );
+
+}
+
 async function seed(pg, userId) {
   const q = (sql, params) => pg.query(sql, params);
 
@@ -683,41 +726,7 @@ async function seed(pg, userId) {
     [userId, ago(5 * DAY), ago(20 * HOUR), ago(8 * DAY), ago(2 * DAY), ago(12 * DAY), ago(4 * DAY)],
   );
 
-  /* ── jobs: one stalled, one failed on quota, one cancelled ────────────── */
-  /*
-    One job per state, each on its own lead, because the desk shows the NEWEST
-    job for a (kind, subject_id) pair (src/lib/news/jobs.ts:312 `latestJob`).
-
-    The stall is the desk's OWN rule read off `beat_at`: `src/components/JobCard.tsx`
-    calls a running job stalled when now - beat_at >= 60s, so a running row whose
-    last sign of life is five minutes old is stalled by the product's definition,
-    not by a class this walk sets. The quota row carries the provider-shaped
-    failure text the fake answers with; the cancelled row carries the desk's own
-    `JOB_CANCELLED_REASON` (src/lib/news/jobs.ts:879) -- there is no `cancelled`
-    status, a cancel is a failure with that exact reason.
-  */
-  await q(
-    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
-                            created_at, updated_at, started_at, beat_at)
-     values (1, $1, 'draft', $2, 'deepseek-flash', 'running', 'Writing the draft',
-             $3, $4, $3, $5)`,
-    [userId, leadId2, ago(9 * MIN), ago(5 * MIN), ago(5 * MIN)],
-  );
-  await q(
-    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
-                            error, failover_note, created_at, updated_at, started_at, finished_at)
-     values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
-             'DeepSeek API error 429: usage limit reached; resets 11:30pm (America/Denver).',
-             '', $3, $4, $3, $4)`,
-    [userId, leadId, ago(40 * MIN), ago(38 * MIN)],
-  );
-  await q(
-    `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, status, stage,
-                            error, created_at, updated_at, started_at, finished_at)
-     values (1, $1, 'draft', $2, 'deepseek-flash', 'failed', 'Writing the draft',
-             'Cancelled by the editor', $3, $4, $3, $4)`,
-    [userId, leadId3, ago(30 * MIN), ago(29 * MIN)],
-  );
+  await seedJobStates(pg, userId, { leadId, leadId2, leadId3 });
 
   return { leadId, leadId2, leadId3, draftId, ordinanceId, studyId };
 }
@@ -1157,6 +1166,7 @@ step(`${linkTargets.size} distinct internal links collected`);
 
 const LINK_EXCEPTIONS = {
   "/TownReporter.zip": "/get-the-code",
+  "/desk/memory": "/desk/published#beat-memory",
 };
 const linkPage = await readerCtx.newPage();
 linkPage.on("console", (m) => {
@@ -1185,7 +1195,7 @@ for (const [key, info] of linkTargets) {
     const landedPath = landedUrl.pathname;
     row.landed = `${landedPath}${landedUrl.search}`;
     const wanted = new URL(`${base}${key}`);
-    const expected = LINK_EXCEPTIONS[key];
+    const expected = LINK_EXCEPTIONS[key] ? new URL(LINK_EXCEPTIONS[key], base) : null;
     /*
       This page is the SIGNED-OUT reader. A desk link on a public page is not
       broken when it goes to the sign-in form -- the reader is not the editor,
@@ -1193,7 +1203,9 @@ for (const [key, info] of linkTargets) {
     */
     const isDeskLink = key.startsWith("/desk");
     if (row.status === null || row.status >= 400) row.result = `HTTP ${row.status}`;
-    else if (expected && landedPath === expected) row.result = `landed on ${expected} as it says`;
+    else if (expected && landedPath === expected.pathname &&
+      sameQuery(landedUrl.search, expected.search) && landedUrl.hash === expected.hash)
+      row.result = `landed on ${expected.pathname}${expected.hash} as it says`;
     else if (isDeskLink && landedPath === "/login")
       row.result = "landed on /login, the sign-in form a signed-out reader gets";
     else if (landedPath !== wanted.pathname || !sameQuery(landedUrl.search, wanted.search))
@@ -1227,6 +1239,7 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
 
 /* ── 6. the job states, each on the screen that shows it ─────────────────── */
 {
+  await seedJobStates(pg, ownerId, seeded);
   /*
     Each state is checked against what the desk ACTUALLY draws, which differs
     by state because the desk draws them in different places:

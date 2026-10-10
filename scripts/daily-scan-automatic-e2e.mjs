@@ -339,6 +339,7 @@ async function theOwnerSwitchesTheScanToAutomatic(panel) {
   await panel.getByLabel("Local time").fill("00:00");
   await panel.getByRole("checkbox", { name: /Run once each day/ }).check();
   await panel.getByRole("checkbox", { name: new RegExp(SOURCE_NAME) }).check();
+  await panel.getByLabel(/^Read every day/).fill("1");
   await panel.getByRole("button", { name: "Save daily scan" }).click();
   /*
     An ENABLED policy is validated before it is stored, and Automatic validates

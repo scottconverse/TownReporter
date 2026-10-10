@@ -299,19 +299,21 @@ async function dailySettingsJourney(context, observePage) {
   const freshPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await freshPanel.getByText(/Accepted community sources \(1\)/).waitFor();
   await freshPanel.getByRole("checkbox", { name: /Daily settings source/ }).check();
-  const cap = freshPanel.getByLabel("Daily source limit");
+  const cap = freshPanel.getByLabel("Daily priority set");
   await cap.fill("13");
   if (!(await freshPanel.getByRole("button", { name: "Save daily scan" }).isDisabled())) {
     throw new Error("source cap above 12 did not disable Save");
   }
-  await freshPanel.getByText(/selected \/ 13 daily limit/).waitFor();
+  await expect(cap).toHaveValue("13");
+  await freshPanel.getByText(/^1 selected ·/).waitFor();
+  await expect(freshPanel.getByRole("checkbox", { name: /Daily settings source/ })).toBeChecked();
   step("source count and over-cap validation are visible without silently dropping a source");
 
   await cap.fill("1");
   const time = freshPanel.getByLabel("Local time");
   await time.fill("");
   await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
-  await freshPanel.getByText("Choose a valid time, runtime, and source limit from 1 to 12.").waitFor();
+  await freshPanel.getByText("Choose a valid time, runtime, and source limit from 1 to 12, with no more daily sources than the limit.").waitFor();
   step("an invalid local time returns actionable server feedback");
 
   const future = futureDenverTime();
@@ -335,8 +337,8 @@ async function dailySettingsJourney(context, observePage) {
   await other.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const otherPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await otherPanel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
-  await otherPanel.getByLabel("Daily source limit").fill("3");
-  await persistedPanel.getByLabel("Daily source limit").fill("2");
+  await otherPanel.getByLabel("Daily priority set").fill("3");
+  await persistedPanel.getByLabel("Daily priority set").fill("2");
   await persistedPanel.getByRole("button", { name: "Save daily scan" }).click();
   await persistedPanel.getByText("Daily scan settings saved.").waitFor();
   page = other;
@@ -344,13 +346,13 @@ async function dailySettingsJourney(context, observePage) {
   await otherPanel.getByText("The schedule changed in another window. Refresh and try again.").waitFor();
   await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
   await otherPanel.getByText("Latest settings reloaded.").waitFor();
-  await expect.poll(() => otherPanel.getByLabel("Daily source limit").inputValue(), { timeout: 10_000 }).toBe("2");
+  await expect.poll(() => otherPanel.getByLabel("Daily priority set").inputValue(), { timeout: 10_000 }).toBe("2");
   step("a stale second tab gets an explicit conflict and reload path");
 
-  await otherPanel.getByLabel("Daily source limit").fill("13");
+  await otherPanel.getByLabel("Daily priority set").fill("13");
   await otherPanel.getByRole("button", { name: "Pause daily scan" }).click();
   await otherPanel.getByText("Daily scan paused. Unsaved edits retained.").waitFor();
-  if ((await otherPanel.getByLabel("Daily source limit").inputValue()) !== "13") throw new Error("pause discarded dirty edits");
+  if ((await otherPanel.getByLabel("Daily priority set").inputValue()) !== "13") throw new Error("pause discarded dirty edits");
   step("pause works with invalid dirty edits and retains them");
 
   mkdirSync(evidenceDir, { recursive: true });

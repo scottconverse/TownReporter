@@ -332,6 +332,7 @@ try {
     .getAttribute("value");
   assert.equal(dailyCustomChoice, storyCustomChoice);
   await dailyPicker.selectOption(dailyCustomChoice);
+  await dailyPanel.getByLabel(/^Read every day/).fill("0");
   await dailyPanel.getByRole("button", { name: "Save daily scan", exact: true }).click();
   await dailyPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload();

@@ -321,7 +321,7 @@ async function leavingInAppIsBlocked() {
   await queueLink().click();
   const dialog = page.getByRole("alertdialog", { name: "Leave with unsaved section changes?" });
   await dialog.waitFor({ timeout: 30_000 });
-  await dialog.getByRole("button", { name: "Stay on this page" }).click();
+  await dialog.getByRole("button", { name: "Stay on this page", exact: true }).filter({ hasText: /^Stay on this page$/ }).click();
   await page.waitForTimeout(300);
   assert.match(page.url(), /\/desk\/ops/, "Stay must leave the draft alone");
   step("navigating away with a draft asks, and Stay keeps the page and the draft");
