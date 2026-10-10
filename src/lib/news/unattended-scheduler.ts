@@ -7,6 +7,7 @@ import { foldSmallPlaces, pruneLocationDaily } from "./reading.server.ts";
 import { tickFollowUps } from "./follow-up-scheduler.ts";
 import { restoreYoutubeCaptureRetries, tickYoutubeCaptureRetries } from "./meeting-capture.ts";
 import { getSql } from "../db.ts";
+import { tickNewsletterMailboxes } from "./newsletter-poll.server.ts";
 
 /**
  * The built server's unattended clock: monitors recapture, job reclaim, and
@@ -50,6 +51,8 @@ export function startUnattendedScheduler(): void {
     if (ticking) return;
     ticking = true;
     try {
+      try { await tickNewsletterMailboxes(); }
+      catch { console.error("[townreporter] newsletter mailbox check could not run."); }
       await tickYoutubeCaptureRetries();
       await tickAllDueMonitors();
       await tickDailyScans();
