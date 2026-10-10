@@ -402,13 +402,13 @@ export async function commitScanForAuthenticatedEditor(
   let dailyPlan;
   if (input.daily) {
     const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
-    try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId); }
+    try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId, undefined, true); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true }; }
   }
   const runRows = await sql<{ id: number }>`
     insert into scan_runs (user_id, newsroom_id, section_snapshot, source_snapshot, policy_snapshot, source_coverage)
     values (${input.context.userId}, ${input.context.newsroomId}, ${scopeSnapshot?JSON.stringify(scopeSnapshot):null},
-      ${dailyPlan ? JSON.stringify(dailyPlan.sources) : null}, ${dailyPlan ? JSON.stringify(dailyPlan.policy) : null},
+      ${dailyPlan ? JSON.stringify(dailyPlan.prioritySources) : null}, ${dailyPlan ? JSON.stringify(dailyPlan.policy) : null},
       ${JSON.stringify(dailyPlan?.coverage ?? [])}::jsonb) returning id
   `;
   const runId = runRows[0]!.id;

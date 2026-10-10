@@ -18,6 +18,7 @@ export const meetingTranscriptSelectionRefused = "Choose a transcript saved for 
 export const noMeetingTranscriptToChoose = "This lead has no meeting transcript to choose.";
 
 import { looksLikeProviderAuthFailure, providerAuthTarget } from "./preflight.ts";
+import * as leadMatchSignals from "./lead-match.ts";
 import { distinguishingOverlap, type NewsroomPlace } from "./lead-match.ts";
 import { formatClockTime, formatListDateTime, PAPER, TOPICS } from "../paper.ts";
 import type { SourceCadence } from "./adaptive-source-selection.ts";
@@ -111,6 +112,8 @@ export function scanSourceCoverageStatus(entry: ScanSourceCoverageEntry): string
 export function scanSourceCoverageReason(entry: ScanSourceCoverageEntry): string {
   if (entry.reason?.trim()) return entry.reason;
   switch (entry.reasonCode) {
+    case "time-budget":
+      return "The scan reading time budget ended.";
     case "over-cap":
       return "Over the scan limit.";
     case "waiting":
@@ -2173,6 +2176,9 @@ export function nearDuplicate(
   place?: NewsroomPlace | null,
 ): PrintedDup | null {
   for (const p of published) {
+    const recent = Date.parse(p.published_at) >= Date.now() - 60 * 24 * 60 * 60 * 1000;
+    if (recent && leadMatchSignals.titleEntityOverlap?.(lead.headline, p.headline, place))
+      return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
     const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);
     // Nothing else can fire, and the Queue calls this once per published
@@ -2386,9 +2392,13 @@ export function killRecordLine(input: {
     : "Killed before the desk started recording why — no reason was kept";
 }
 
+// News and event hosts in the owner's October 9 source research. Subdomains inherit the host label.
+export const LOCAL_NEWS_HOSTS = ["timescall.com","times-call.com","dailycamera.com","longmontleader.com","denverpost.com","bizwest.com","coloradopolitics.com","substack.com","sentineltm.com","lefthandvalley.com","lhvc.com","boulderreportinglab.org","boulderweekly.com","yellowscene.com","kgnu.org","kunc.org","9news.com","denver7.com","coloradonewsline.com","berthoudsurveyor.com","lyonsrecorder.org","thefrontpagefrcc.com","schsnews.org","axios.com","mavnewspaper.com","joshuaberman.net","longmontpublicmedia.org"];
+export const LOCAL_EVENT_HOSTS = ["visitlongmont.org","downtownlongmont.com","longmontchamber.org","bouldercountyfair.org","bcfm.org","lefthandbrewing.com","wibbybrewing.com","300sunsbrewing.com","bootstrapbrewing.com","firehouseart.org","longmonttheatre.org","jesterstheatre.com","dickensoperahouse.co","longmontsymphony.org","lexlocalevents.com","heartoflongmont.org","longmonthumane.org","ourcenter.org","eventbrite.com","meetup.com","bouldercoloradousa.com","teamsideline.com","kiwanis.org","stvrainhistory.org","soundpostsessions.com","tinkermill.org","abetterstandarddirection.com","rmequality.org","colorado.com","boulderoperacompany.com"];
+
 export function kindFromSourceUrl(
   url: string,
-): "youtube" | "official" | "news" | "social" | "unclassified" {
+): "youtube" | "official" | "news" | "social" | "community" | "unclassified" {
   let host: string;
   try {
     host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
@@ -2402,25 +2412,12 @@ export function kindFromSourceUrl(
     matches(["twitter.com", "x.com", "facebook.com", "instagram.com", "nextdoor.com", "reddit.com"])
   )
     return "social";
-  if (
-    matches([
-      "timescall.com",
-      "times-call.com",
-      "dailycamera.com",
-      "longmontleader.com",
-      "denverpost.com",
-      "bizwest.com",
-      "coloradopolitics.com",
-      "substack.com",
-      "sentineltm.com",
-      "lefthandvalley.com",
-    ])
-  )
-    return "news";
+  if (matches(LOCAL_NEWS_HOSTS)) return "news";
   // Government prefixes in the state/locality .us namespace, not commercial .us hosts.
   const governmentUs = /(?:^|\.)(?:ci|town|co|county|state)\.(?:[a-z0-9-]+\.)?[a-z]{2}\.us$/.test(host);
   if (host.endsWith(".gov") || governmentUs || matches(["longmont.primegov.com", "svvsd.org", "rtd-denver.com"]))
     return "official";
+  if (matches(LOCAL_EVENT_HOSTS) || /\/(?:events?|calendar)(?:\/|$)/i.test(new URL(url).pathname)) return "community";
   return "unclassified";
 }
 
