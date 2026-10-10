@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
@@ -538,12 +539,12 @@ export const cancelStoryJob = createServerFn({ method: "POST" })
 export const retryStoryJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => {
-    const raw = input as { jobId?: unknown; nextModel?: unknown } | null;
+    const raw = input as { jobId?: unknown; nextModel?: unknown; override?: unknown } | null;
     const jobId = Number(raw?.jobId);
     if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
-    return { jobId, nextModel: Boolean(raw?.nextModel) };
+    return { jobId, nextModel: Boolean(raw?.nextModel), override: z.array(z.string()).optional().parse(raw?.override) };
   })
-  .handler(async ({ context, data }): Promise<{ ok: boolean; model: string }> => {
+  .handler(async ({ context, data }) => {
     const sql = await getSql();
     const newsroomId = context.newsroomId ?? 1;
     const [row] = await sql<DeskJob>`
@@ -586,11 +587,13 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     const context2 = { userId: context.userId, newsroomId };
     if (row.kind === "reconcile") {
       const { requestDraftReconciliation } = await import("./draft-reconcile.server.ts");
-      await requestDraftReconciliation(context2, { leadId, modelChoice: choice });
+      const result = await requestDraftReconciliation(context2, { leadId, modelChoice: choice, override: data.override });
+      if ("warning" in result) return { ...result, model: label };
     } else {
       const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
       const result = await commitStoryDraftForAuthenticatedEditor({
         context: context2,
+        override: data.override,
         leadId,
         modelChoice: choice,
         modelEffort: null,
@@ -602,7 +605,7 @@ export const retryStoryJob = createServerFn({ method: "POST" })
         carries the sentence the editor needs. Swallowing it here would leave the
         card showing the old failure as though the press had done nothing.
       */
-      if (!result.ok) throw new Error(result.error);
+      if (!result.ok) return { ...result, model: label };
     }
     return { ok: true, model: label };
   });

@@ -1,3 +1,5 @@
+import { requestDraftReconciliationFn } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, readinessWithAcceptedClaims, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -11,11 +13,7 @@ import {
 import {
   blockerPressState,
   publishBlockers,
-<<<<<<< HEAD
-  publishGateNote,
-=======
   publishConfirmation,
->>>>>>> origin/feat/editor-override-publish
   publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
@@ -52,29 +50,7 @@ import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
-import {
-  draftLead,
-  fixDraftStyle,
-  getLead,
-  loadLeadReportingPackage,
-  getDraftHistoryItem,
-  listDraftHistory,
-  listPullJobs,
-  publishLead,
-  pullTodo,
-  resolveDraftMeetingReview,
-  acceptUnreviewedClaims,
-  continuePullJob,
-  overrideNamedOutlet,
-  resolveLeadDuplicate,
-  rewriteFromLedger,
-  saveDraft,
-  saveReportingNotes,
-  setLeadStatus,
-  stopPullJob,
-  suggestHeadlines,
-  updateArticleHeadline,
-} from "@/lib/news/desk";
+import { fixDraftStyle, getLead, loadLeadReportingPackage, getDraftHistoryItem, listDraftHistory, listPullJobs, publishLead, resolveDraftMeetingReview, acceptUnreviewedClaims, overrideNamedOutlet, saveDraft, saveReportingNotes, stopPullJob, suggestHeadlines, updateArticleHeadline } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { failureSummary } from "@/lib/news/pull-outcome";
 import { explainPairMatch } from "@/lib/news/lead-match";
@@ -162,16 +138,7 @@ import { jobProgressView } from "@/lib/news/job-progress";
 */
 import { ReportingPackagePanel } from "@/components/reporting-package-panel";
 import { ReportThisLeadControl } from "@/components/report-this-lead";
-import {
-  assessCheckedDraftResult,
-  assessRefreshedCheckedDraft,
-  draftFieldsMatch,
-  getCheckedDraftResultFn,
-  getDraftReconciliationStatusFn,
-  requestDraftReconciliationFn,
-  type CheckedDraftResult,
-  type EditableDraftFields,
-} from "@/lib/news/draft-reconcile-actions";
+import { assessCheckedDraftResult, assessRefreshedCheckedDraft, draftFieldsMatch, getCheckedDraftResultFn, getDraftReconciliationStatusFn, type CheckedDraftResult, type EditableDraftFields } from "@/lib/news/draft-reconcile-actions";
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
@@ -3157,24 +3124,47 @@ function StoryPage() {
               with the way back. After a reopen it stays, saying the kill was
               undone, because a record that vanishes hides what happened.
             */
+            <>
             <KilledLeadRecord
               lead={leadForRecord}
               reopened={!locked}
               onReopen={locked ? reopenThisLead : undefined}
               formatDate={formatShortDate}
             />
+            {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton> : null}
+            </>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
               No draft yet. Draft with AI writes a first pass from the lead and its sources; you
               edit, then publish.
             </p>
           )}
-          <div className="work-bar astra-story-actions">
-            {/*
-          The fold used to print a count of failures -- "13 provider or page
-          failures" -- which is our bookkeeping and told the editor nothing
-          about why the pull came back empty. It now names the providers in
-          plain words; the raw lines stay inside for support.
+      {locked && data.draft ? <div>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
+      </div> : null}
+      {waiting ? <section className="astra-model-research">
+        <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
+        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} compact />
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
+      </section> : null}
+      <div className="work-bar astra-story-actions">
+        {/*
+          THE DRAWN ACTION ROW (unit CW).
+
+          `Desk Story.dc.html:112` draws, in this order: Save edits ⌘S |
+          Check draft against evidence | + Add to story | Redraft… |
+          Preview as reader. This row is those five presses in that order,
+          each still wired to the server function it always called -- save,
+          the reconcile job, the add-to-story dialog, the redraft dialog,
+          the preview. The desk's own extras (the jump into the inspector,
+          the two comparison presses) follow them, because the drawing has
+          no equivalent and a working press is not dropped to match a
+          picture.
+
+          Tone is the drawing's: the three presses that change what is
+          saved are the heavy 2px ink (`.btn`), the two that only look are
+          the light 1px rule (`.btn.quiet`).
         */}
             {/*
           The fold used to print a count of failures -- "13 provider or page
@@ -3777,13 +3767,9 @@ function StoryPage() {
         */}
                   {mergedBlockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-<<<<<<< HEAD
-                      {hasAiJudgments ? draftReadiness.reason : heldPublishNote || publishGateNote(blockers)}{" "}
-=======
                       {hasAiJudgments
                         ? draftReadiness.reason
                         : heldPublishNote || mergedBlockers[0]?.sentence}{" "}
->>>>>>> origin/feat/editor-override-publish
                       <button
                         type="button"
                         className="inline-link"

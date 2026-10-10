@@ -827,6 +827,8 @@ const { Chip } = await import(
         "export async function listLeads() { return []; } export async function listDeskJobs() { return []; } export async function listFollowUps() { return []; } export async function countDraftsDesk() { return 0; }",
       ),
       "@/lib/news/opinion": inlineModule("export async function listEditorials() { return []; }"),
+      "@/components/warning-consent-host": inlineModule("export function WarningConsentHost() { return null; }"),
+      "@/components/editor-warning-consent": inlineModule("export function deskWarningConsent() { return {}; }"),
       /*
         CY item 6 put the Dark Desk and Follow-ups nav counts in the shell, so
         desk-chrome.tsx now imports these two modules. Chip() does not read
@@ -1251,4 +1253,16 @@ test("a ticked Queue row carries the picked class and an unticked row does not",
     /\.desk-ltr \.lead-row\.dead \{color:var\(--fg2\)\}/,
     "the killed row dims its own text and leaves the picked row's fill alone",
   );
+});
+
+test("killed and published rows offer Edit, Hold, Kill and Draft so the server can warn on press", () => {
+  for (const status of ["killed", "published"]) {
+    const html = renderToStaticMarkup(createElement(LeadRowView, {
+      lead: baseLead({status}), onEdit() {}, onHold() {}, onKill() {}, onDraft() {},
+    }));
+    assert.match(html, />Edit the lead</);
+    assert.match(html, />Hold</);
+    assert.match(html, />Kill</);
+    assert.match(html, />Draft with AI</);
+  }
 });

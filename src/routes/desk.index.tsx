@@ -1,3 +1,4 @@
+import { writeStoryFromInput } from "@/components/scoped-actions";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
 import { TodayInProgress } from "@/components/today-in-progress";
@@ -29,22 +30,8 @@ import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import {
-  draftLead,
-  importFinishedStories,
-  listDraftsDesk,
-  listFollowUpFindings,
-  listFollowUps,
-  listLeads,
-  listMemory,
-  listPublishedDesk,
-  listScans,
-  listSources,
-  runScan,
-  setLeadStatus,
-  setSourceStatus,
-  writeStoryFromInput,
-} from "@/lib/news/desk";
+import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus } from "@/lib/news/desk";
+import { draftLead, runScan, setLeadStatus } from "@/components/scoped-actions";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 /*
   Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
@@ -1468,7 +1455,7 @@ function DeskHome() {
             primaryDisabled={
               writeStory.isPending ||
               uploadingDocuments ||
-              (storyInput.length < 8 && !storyDocuments.length)
+              (storyInput.trim().length === 0 && !storyDocuments.length)
             }
             cancelLabel="Close"
             closeLabel="Close the composer"
@@ -1526,7 +1513,7 @@ function DeskHome() {
                       if (
                         !writeStory.isPending &&
                         !uploadingDocuments &&
-                        (storyInput.length >= 8 || storyDocuments.length)
+                        (storyInput.trim().length > 0 || storyDocuments.length)
                       )
                         writeStory.mutate();
                     }

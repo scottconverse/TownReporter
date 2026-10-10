@@ -928,6 +928,7 @@ export const suggestedSourceReviewInput = z.object({
 
 /** `desk.ts:507` fileLead (`desk.ts:511-519` slice the same three fields). */
 export const fileLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   headline: z.string().max(LIMITS.leadHeadline),
   why: z.string().max(LIMITS.leadWhy),
   topic: z.string().max(LIMITS.leadTopic),
@@ -1015,6 +1016,7 @@ export const runScanInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),
   z.object({
     daily: z.boolean().optional(),
+    override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     sectionKey: z.string().max(LIMITS.sectionKey).optional(),
@@ -1028,6 +1030,7 @@ export const draftLeadInput = z.union([
   rowId,
   z.object({
     leadId: rowId,
+    override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     researchScope: researchScopeValue.optional(),
@@ -1037,6 +1040,7 @@ export const draftLeadInput = z.union([
 
 /** `desk.ts:1934` writeStoryFromInput (`story-documents.server.ts:123` caps 22). */
 export const writeStoryInput = z.object({
+  override: z.array(z.string()).optional(),
   text: z.string().max(LIMITS.storyText),
   documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
   modelChoice: modelChoiceText.optional(),
@@ -1116,6 +1120,7 @@ export const reportingNotesInput = z.object({
 
 /** `desk.ts:2011` pullTodo. */
 export const pullTodoInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: rowId,
   query: z.string().max(LIMITS.pullQuery),
   index: z.number().int().nonnegative().max(1_000).optional(),
@@ -1166,6 +1171,7 @@ export const claimReviewedInput = z.object({
  * (`reuseLedger`) is a server-side decision, not something the screen picks.
  */
 export const rewriteFromLedgerInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: rowId,
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
@@ -1174,7 +1180,12 @@ export const rewriteFromLedgerInput = z.object({
 });
 
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
-export const jobIdInput = z.object({ jobId: rowId });
+export const jobIdInput = z.object({ jobId: rowId, override: z.array(z.string()).optional() });
+
+export const sourceCheckInput = z.union([
+  rowId.transform((sourceId) => ({ sourceId, override: undefined as string[] | undefined })),
+  z.object({ sourceId: rowId, override: z.array(z.string()).optional() }),
+]);
 
 /*
   Editor-facing civic reporting (civic-reporting.ts). The one press behind
@@ -1203,6 +1214,7 @@ export const reportingActionValue = z.enum([
   attached to an unrelated lead.
 */
 export const startReportingInput = z.object({
+  override: z.array(z.string()).optional(),
   action: reportingActionValue,
   leadId: rowId.optional(),
   /** The editor's own words: subject, direction, what to account for separately. */
@@ -1218,6 +1230,7 @@ export const startReportingInput = z.object({
 
 /** `desk.ts` answerReportingFollowUp: a follow-up points at the run it continues. */
 export const reportingFollowUpInput = z.object({
+  override: z.array(z.string()).optional(),
   parentRequestId: rowId,
   /** The targeted work this follow-up asks for. */
   assignment: z.string().trim().max(4_000),
@@ -1263,6 +1276,7 @@ export const reportingObservationsScopeInput = z.object({
 
 /** `desk.ts:2208` setLeadStatus. */
 export const leadStatusInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   status: z.enum(["held", "killed", "new"]),
   /** Unit AK item 4 (migration 0094): the reason a kill states, when the
@@ -1293,6 +1307,7 @@ export const leadStatusRestoreInput = z.object({
 
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */
 export const leadDuplicateResolutionInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   action: z.enum(["not-a-duplicate", "reopen-prior"]),
 });
@@ -1310,6 +1325,7 @@ export const leadDuplicateResolutionInput = z.object({
  * `drafts.dek`, a different row this dialog does not touch).
  */
 export const editLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   headline: z.string().max(LIMITS.leadHeadline),
   why: z.string().max(LIMITS.leadWhy),
@@ -1356,6 +1372,7 @@ export const followUpsInput = z.preprocess(
 
 /** `desk.ts:2791` createAiFollowUp and `desk.ts:2796` updateAiFollowUp. */
 export const aiFollowUpInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: nullableId.optional(),
   articleId: nullableId.optional(),
   investigationId: rowId.optional(),
@@ -1373,6 +1390,7 @@ export const aiFollowUpUpdateInput = aiFollowUpInput.omit({ investigationId: tru
 
 /** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
 export const followUpActionInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   action: z.enum(["pause", "resume", "stop", "done", "run-now"]),
 });
@@ -1471,7 +1489,7 @@ export const artifactIdInput = z.coerce.number().int().positive().max(2_147_483_
  * already accepts it (`dark.ts:1882` threads `opts.modelEffort` into
  * `reasoningEffort`).
  */
-export const darkRunInput = z.object({
+export const darkRunInput = z.object({ override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.darkPaste),
   investigationId: rowId.optional(),
   modelChoice: modelChoiceText.optional(),
@@ -1479,7 +1497,7 @@ export const darkRunInput = z.object({
 });
 
 /** `dark.ts:2067` openDarkInvestigation. */
-export const darkOpenInput = z.object({
+export const darkOpenInput = z.object({ override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
   ordinaryExplanation: z.string().max(1600).optional(),
@@ -1495,7 +1513,7 @@ export const darkOpenInput = z.object({
 /** `dark.ts:2217` / `dark.ts:3617`: a bare id, or the step's dials. */
 export const darkStepInput = z.union([
   rowId,
-  z.object({
+  z.object({ override: z.array(z.string()).optional(),
     id: rowId,
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortLoose.optional(),
@@ -1511,11 +1529,11 @@ export const darkStepInput = z.union([
  */
 export const darkSignalInput = z.preprocess(
   (v) => (typeof v === "number" ? { id: v } : v),
-  z.object({ id: rowId, asTip: z.boolean().optional() }),
+  z.object({ override: z.array(z.string()).optional(), id: rowId, asTip: z.boolean().optional() }),
 );
 
 /** `dark.ts` retryDarkRound (retry only the failed round's owned job). */
-export const darkRetryInput = z.object({
+export const darkRetryInput = z.object({ override: z.array(z.string()).optional(),
   jobId: rowId,
   nextModel: z.boolean().optional().default(false),
 });
@@ -1701,10 +1719,11 @@ export const trashId = rowId;
 
 /** `draft-batch.ts:112` startDraftBatch (`cleanDraftBatchInput` owns the answer). */
 export const draftBatchStartInput = z.looseObject({
+  override: z.array(z.string()).optional(),
   runtime: z.string().max(LIMITS.modelId).catch(""),
   items: z
     .array(z.looseObject({ leadId: rowId, researchScope: researchScopeValue.optional() }))
-    .max(5),
+,
 });
 
 /** `draft-batch.ts:140` getDraftBatch. */
@@ -1983,6 +2002,7 @@ export const weaveIntoStoryInput = z.object({
  * uses, and the section is the `council` default `fileLead` already applies.
  */
 export const addLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.leadPaste),
   why: z.string().max(LIMITS.leadWhy).optional(),
   then: z.enum(["score", "draft", "as-is"]),

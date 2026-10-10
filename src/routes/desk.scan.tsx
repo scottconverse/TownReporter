@@ -5,7 +5,8 @@ import { Busy, DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { MeetingsActivity } from "@/components/meetings-activity";
 import { ScanSourceCoverageList } from "@/components/scan-source-coverage";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, runScan, saveScanSourcePackFn } from "@/lib/news/desk";
+import { deleteScanSourcePackFn, listAcceptedScanSources, listScanSourcePacksFn, listScans, listSources, renameScanSourcePackFn, saveScanSourcePackFn } from "@/lib/news/desk";
+import { runScan } from "@/components/scoped-actions";
 import { editorActionError, editorScanError, scanCountsLine, scanCoverageLine, scanRowLine, parseFailedSources, failedSourcesLine, scanZeroWhy, stalledRunCopy } from "@/lib/news/desk-copy";
 import { parseScanSourceCoverage } from "@/lib/news/scan-source-coverage";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -289,15 +290,15 @@ function ScanPage() {
         />
       ) : null}
       <div className="scan-bar">
-        <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scanning} compact />
+        <ModelPicker scope="scan" value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={scan.isPending} compact />
         {/*
           SG1 / Option A: an install nobody has set up has no town, and this
           press searches one. It says so BEFORE the press, in words, with the
           way to Paper setup -- the server refuses the same action with the
           same sentence if this is somehow reached anyway.
         */}
-        <InkButton disabled={scanning || paperGate.blocked} onClick={() => scan.mutate()}>
-          {scanning ? "Scanning sources…" : "Run scan"}
+        <InkButton disabled={scan.isPending} onClick={() => scan.mutate()}>
+          {scanning ? "Use selected model" : "Run scan"}
         </InkButton>
         <p className="meta">
           {watch} sources on watch

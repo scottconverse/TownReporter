@@ -1,3 +1,4 @@
+import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
 import { createServerFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { deskMiddleware, assertOwner } from "./desk-auth.ts";
@@ -76,12 +77,14 @@ export type SaveDailyScanPolicyInput = {
   everyDaySourceCount: number;
   selectedSourceIds: number[];
   expectedRevision: number;
+  override?: string[];
 };
 type CleanDailyScanPolicyInput = SaveDailyScanPolicyInput & { invalidError?: string };
 export type DailyScanPolicyResult =
   | { ok: true; policy: DailyScanPolicy }
   | {
       ok: false;
+      warning?: EditorWarningResult["warning"];
       error: string;
       code:
         | "forbidden"
@@ -100,6 +103,7 @@ export async function ensureDailyScanPolicySchema(sqlInput?: Sql) {
   const sql = sqlInput ?? await getSql();
   await ensureSchemaOnce(sql, "daily-scan-fixed-source-count", [
     "alter table daily_scan_policies add column if not exists every_day_source_count integer not null default 8",
+    "alter table daily_scan_policies drop constraint if exists daily_scan_policies_source_cap_check",
   ]);
 }
 /** Why a paused row says it is paused: the one reason this code writes. */
@@ -158,6 +162,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const sourceIds = Array.isArray(value.selectedSourceIds) ? value.selectedSourceIds : [];
   const input: CleanDailyScanPolicyInput = {
+    override: Array.isArray(value.override) && value.override.every(k => typeof k === "string") ? value.override : undefined,
     enabled: value.enabled === true,
     localTime: typeof value.localTime === "string" ? value.localTime.trim() : "",
     runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "auto",
@@ -197,7 +202,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
     !input.invalidError &&
     (!Number.isInteger(input.everyDaySourceCount) ||
       input.everyDaySourceCount < 0 ||
-      input.everyDaySourceCount > Math.min(input.sourceCap, input.selectedSourceIds.length))
+      input.everyDaySourceCount > Math.min(Math.max(0,input.sourceCap), input.selectedSourceIds.length))
   ) {
     input.invalidError =
       "The daily source count must be between 0 and the smaller of the selected source count and daily limit.";
@@ -427,11 +432,9 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
       !TIME_RE.test(data.localTime) ||
       !validDailyScanRuntime(data.runtime) ||
       !Number.isInteger(data.sourceCap) ||
-      data.sourceCap < 1 ||
-      data.sourceCap > 12 ||
       !Number.isInteger(data.everyDaySourceCount) ||
       data.everyDaySourceCount < 0 ||
-      data.everyDaySourceCount > data.sourceCap
+      data.everyDaySourceCount > Math.max(0,data.sourceCap)
     )
       return {
         ok: false,
@@ -445,12 +448,7 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
         code: "invalid-config",
         error: "Source selections must be unique source IDs.",
       };
-    if (ids.length > data.sourceCap)
-      return {
-        ok: false,
-        code: "source-limit",
-        error: `You selected ${ids.length} sources; the visible limit is ${data.sourceCap}.`,
-      };
+
     const sql = await getSql();
     const owned = ids.length
       ? await sql.query(
@@ -482,7 +480,9 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
           error: e instanceof Error ? e.message : "The selected runtime is unavailable.",
         };
       }
-    if (!(await persistDailyScanPolicy(sql, context.newsroomId, context.userId, data, ids)))
+    const saved = await saveDailyCapForEditor(context, data, () => persistDailyScanPolicy(sql, context.newsroomId, context.userId, data, ids));
+    if (!saved.ok) return { ...saved, code: "source-limit" };
+    if (!saved.saved)
       return {
         ok: false,
         code: "conflict",
@@ -748,7 +748,7 @@ export type DailyRotationInput = {
  */
 export function planDailySourceRotation(input: DailyRotationInput): DailyRotationPlan {
   const nowMs = input.nowMs ?? Date.now();
-  const budget = Math.max(1, Math.min(CAP, Math.floor(input.cap) || CAP));
+  const budget = Number.isFinite(input.cap) ? Math.max(0, Math.floor(input.cap)) : CAP;
   const everyDayCount =
     input.everyDayCount === undefined
       ? input.selectedSourceIds.length
@@ -927,4 +927,13 @@ export function freshnessOfFromChosen(
           : Number.POSITIVE_INFINITY,
     stalestDeferredDays: stalest,
   };
+}
+
+/** The chosen limit is stored intact after a warned second press. */
+export async function saveDailyCapForEditor(context: { userId: string; newsroomId: number }, data: SaveDailyScanPolicyInput, save: () => Promise<boolean>) {
+  if (data.sourceCap < 1 || data.sourceCap > CAP) {
+    const warning = await editorWarning(context, data.override, "daily-source-cap", `The daily scan limit is ${data.sourceCap} sources; the usual range is 1 to 12. It may cost more.`, { kind: "newsroom", id: context.newsroomId });
+    if (warning) return warning;
+  }
+  return { ok: true as const, saved: await save() };
 }

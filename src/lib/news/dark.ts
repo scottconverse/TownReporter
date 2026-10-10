@@ -1,3 +1,5 @@
+import { editorWarning } from "./editor-override.ts";
+import { z } from "zod";
 import { presentDarkRun, type StoredDarkRunRow } from "./dark-run-presentation.ts";
 export { presentDarkRun } from "./dark-run-presentation.ts";
 import {
@@ -48,7 +50,7 @@ import {
 } from "./dark-gates.ts";
 import { verifyRunSignals } from "./dark-verify.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
-import { assertRate, audit } from "./ops.ts";
+import { assertRate, checkRate, recordDeskRun, audit } from "./ops.ts";
 import {
   checkBaselines,
   ensureInvestigateSchema,
@@ -97,7 +99,7 @@ import {
   type InvestigationActivityInput,
 } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
-import { getPaperConfig, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings.ts";
+import { getPaperConfig, paperSetupWarning } from "./paper-settings.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
@@ -120,6 +122,7 @@ import {
 } from "./dark-dials.ts";
 import {
   enqueueJob,
+  requestJobCancel,
   ensureJobsSchema,
   findOpenJob,
   latestJob,
@@ -2592,7 +2595,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
       this paper's behalf. An install nobody has set up has no town and no
       county to look in, so the run is refused in one plain sentence first.
     */
-    await requirePaperSetUp(owned(context), "start a Dark Desk run");
+    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "start a Dark Desk run");
+    if (setup) return setup;
     /*
       The editor's pick decides which provider is probed, and an unresolvable
       one refuses BEFORE any spend -- the same commit boundary Story and Scan
@@ -2604,7 +2608,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
     const refusal = await darkPreflightRefusal(asked, owned(context), probe);
     if (refusal) return refusal;
     await ensureDarkSchema();
-    await assertRate(context.userId, "dark", owned(context));
+    const rate = await checkRate(context.userId, "dark", owned(context), data.override);
+    if (rate) return rate;
     return executeDarkRun(
       context.userId,
       {
@@ -2632,8 +2637,8 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     try {
       // SG1 / Option A: opening a file is step one of a Dark Desk run.
-      const notSetUp = await paperSetUpRefusal(owned(context), "open an investigation");
-      if (notSetUp) return { ok: false as const, error: notSetUp };
+      const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "open an investigation");
+    if (notSetUp) return notSetUp;
       await ensureDarkSchema();
       const opened = await openInvestigationForEditor(context.userId, data, owned(context));
       await audit(context.userId, "dark", `open inv ${opened.investigationId}`, owned(context));
@@ -2646,11 +2651,12 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
 
 export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
+  .validator((raw: unknown) => z.object({ override: z.array(z.string()).optional() }).parse(raw ?? {}))
+  .handler(async ({ context, data }) => {
     // SG1 / Option A: "Find something to dig into" opens an investigation,
     // which is the start of a Dark Desk run.
-    const notSetUp = await paperSetUpRefusal(owned(context), "start a Dark Desk run");
-    if (notSetUp) return { ok: false as const, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "start a Dark Desk run");
+    if (notSetUp) return notSetUp;
     await ensureDarkSchema();
     const items = await gatherWorthALook(owned(context));
     const sql = await getSql();
@@ -2696,6 +2702,8 @@ export async function startDarkRound(
   id: number,
   modelChoice: string = "auto",
   effortValue?: unknown,
+  override?: string[],
+  deps: { probe?: typeof probeDarkProvider; kick?: boolean } = {},
 ) {
   const asked = storyModelChoice(modelChoice);
   /*
@@ -2705,7 +2713,7 @@ export async function startDarkRound(
     gets pinned on the job -- so a round does not silently change author
     between the press and the queue picking it up.
   */
-  const probe = await probeDarkProvider(asked, owned(context));
+  const probe = await (deps.probe ?? probeDarkProvider)(asked, owned(context));
   const refusal = await darkPreflightRefusal(asked, owned(context), probe);
   if (refusal) return refusal;
   await ensureDarkSchema();
@@ -2730,15 +2738,11 @@ export async function startDarkRound(
     const persisted = effectiveStoryModelChoice(open.model_choice);
     const persistedEffort = savedJobEffort(open);
     if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
-      return {
-        ok: false as const,
-        kind: "model-conflict" as const,
-        error: `This file is already digging with ${modelChoiceLabel(persisted)}${persistedEffort ? ` at ${persistedEffort} effort` : ""}. Watch that round finish before choosing another model or effort.`,
-        modelChoice: persisted,
-        jobId: open.id,
-      };
+      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id };
+
     }
-    return {
+    if (persisted === effectiveChoice && persistedEffort === modelEffort) return {
       ok: true as const,
       pending: true as const,
       jobId: open.id,
@@ -2747,12 +2751,15 @@ export async function startDarkRound(
     };
   }
 
-  await assertRate(context.userId, "dark", owned(context));
+  const rate = await checkRate(context.userId, "dark", owned(context), override, { record: false });
+  if (rate) return rate;
+  if (open) await requestJobCancel(open.id);
   await sql`
     update investigations set status = ${"investigating"}, updated_at = now()
     where id = ${id} and newsroom_id = ${owned(context)}
   `;
   const job = await enqueueJob({
+    kick: deps.kick,
     userId: context.userId,
     newsroomId: owned(context),
     kind: "dark",
@@ -2777,6 +2784,7 @@ export async function startDarkRound(
       skippedRungs: probe.skippedRungs,
     })),
   });
+  await recordDeskRun(context.userId, "dark", owned(context));
   if ("switchReceipt" in probe) {
     await setJobStage(job.id, probe.switchReceipt.stage);
     await setJobFailoverNote(job.id, probe.switchReceipt.note);
@@ -2796,11 +2804,11 @@ export const continueInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: "Keep digging" starts a Dark Desk round, which searches
     // and spends. Refused in one sentence until the paper is set up.
-    const notSetUp = await paperSetUpRefusal(owned(context), "keep digging");
-    if (notSetUp) return { ok: false as const, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "keep digging");
+    if (notSetUp) return notSetUp;
     return typeof data === "number"
       ? startDarkRound(context, data)
-      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort);
+      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort, data.override);
   });
 
 export type DarkRoundRetryDeps = {
@@ -2813,6 +2821,7 @@ export async function retryDarkRoundFor(
   jobId: number,
   nextModel = false,
   deps: DarkRoundRetryDeps = {},
+  override?: string[],
 ) {
   await ensureDarkSchema();
   await ensureJobsSchema();
@@ -2845,8 +2854,8 @@ export async function retryDarkRoundFor(
     if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." };
     choice = planned;
   }
-  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job));
-  if (!result.ok) return { ok: false as const, error: result.error || "Could not restart this round." };
+  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job), override);
+  if (!result.ok) return result;
   return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
 }
 
@@ -2854,9 +2863,9 @@ export const retryDarkRound = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => darkRetryInput.parse(raw))
   .handler(async ({ context, data }) => {
-    const notSetUp = await paperSetUpRefusal(owned(context), "retry this research round");
-    if (notSetUp) return { ok: false as const, error: notSetUp };
-    return retryDarkRoundFor(context, data.jobId, data.nextModel);
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "retry this research round");
+    if (notSetUp) return notSetUp;
+    return retryDarkRoundFor(context, data.jobId, data.nextModel, {}, data.override);
   });
 
 export async function queueInvestigationChallengeFor(
@@ -2865,6 +2874,7 @@ export async function queueInvestigationChallengeFor(
   modelChoice = "auto",
   effortValue?: unknown,
   kick = true,
+  override?: string[],
 ) {
   await ensureDarkSchema();
   const newsroomId = owned(context);
@@ -2895,7 +2905,8 @@ export async function queueInvestigationChallengeFor(
   const modelEffort = validatedModelEffort(asked, effortValue);
   const open = await findOpenJob({ newsroomId, kind: "challenge", subjectId: id });
   if (open) return { ok: true as const, pending: true as const, jobId: open.id };
-  await assertRate(context.userId, "dark", newsroomId);
+  const rate = await checkRate(context.userId, "dark", newsroomId, override, { record: false });
+  if (rate) return rate;
   const job = await enqueueJob({
     userId: context.userId,
     newsroomId,
@@ -2906,22 +2917,24 @@ export async function queueInvestigationChallengeFor(
     resultJson: JSON.stringify({ modelEffort }),
     kick,
   });
+  await recordDeskRun(context.userId, "dark", owned(context));
   return { ok: true as const, pending: true as const, jobId: job.id };
 }
 
 export const challengeInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => {
-    const input = raw as { id?: unknown; modelChoice?: unknown; modelEffort?: unknown };
+    const input = raw as { id?: unknown; modelChoice?: unknown; modelEffort?: unknown; override?: unknown };
     const modelChoice = storyModelChoice(input?.modelChoice);
     return {
+      override: z.array(z.string()).optional().parse(input?.override),
       id: rowId.parse(input?.id),
       modelChoice,
       modelEffort: validatedModelEffort(modelChoice, input?.modelEffort),
     };
   })
   .handler(async ({ context, data }) =>
-    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort),
+    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort, true, data.override),
   );
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
@@ -4180,8 +4193,8 @@ export const queueInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: sending an investigation to the Queue is how a Dark Desk
     // finding becomes a spent draft, so it is refused until setup is done.
-    const notSetUp = await paperSetUpRefusal(owned(context), "send this to the Queue");
-    if (notSetUp) return { ok: false as const, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "send this to the Queue");
+    if (notSetUp) return notSetUp;
     return queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
       preview: data.preview,
@@ -4246,7 +4259,8 @@ export const getTipSubreddit = createServerFn({method:"GET"})
 
 export const scanTipSubreddit = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .handler(async ({ context }) => {
+  .validator((raw: unknown) => z.object({ override: z.array(z.string()).optional() }).parse(raw ?? {}))
+  .handler(async ({ context, data }) => {
     /*
       SG1 / Option A: this sweep fetches a subreddit the paper's own Sources
       named; an install nobody has set up has no sources, so it is refused.
@@ -4254,7 +4268,8 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       (this handler always threw before), and the refusal reaches the editor
       through the same error path with the same one sentence.
     */
-    await requirePaperSetUp(owned(context), "check the tip subreddit");
+    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "check the tip subreddit");
+    if (setup) return setup;
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
     const { enrichRedditPostsWithLocalRedlib, sweepRedditFeeds } = await import("./reddit.server.ts");
@@ -4788,33 +4803,36 @@ export async function startBriefJob(
   id: number,
   modelChoice: string = "auto",
   effortValue?: unknown,
+  override?: string[],
+  deps: { probe?: typeof probeDarkProvider; kick?: boolean } = {},
 ) {
   const asked = storyModelChoice(modelChoice);
-  const probe = await probeDarkProvider(asked, owned(context));
+  const probe = await (deps.probe ?? probeDarkProvider)(asked, owned(context));
   const refusal = await darkPreflightRefusal(asked, owned(context), probe);
   if (refusal) return refusal;
   await ensureDarkSchema();
   const effectiveChoice = probe.ok ? probe.choice : asked;
   const modelEffort = validatedModelEffort(effectiveChoice, effortValue);
 
+  const [file] = await (await getSql()).query("select id from investigations where id=$1 and newsroom_id=$2", [id, owned(context)]);
+  if (!file) return { ok: false as const, error: "Investigation not found" };
   const open = await findOpenJob({ newsroomId: owned(context), kind: "brief", subjectId: id });
   if (open) {
     const persisted = effectiveStoryModelChoice(open.model_choice);
     const persistedEffort = savedJobEffort(open);
     if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
-      return {
-        ok: false as const,
-        kind: "model-conflict" as const,
-        error: `A brief is already being written with ${modelChoiceLabel(persisted)}${persistedEffort ? ` at ${persistedEffort} effort` : ""}. Wait for it to finish before choosing another model or effort.`,
-        modelChoice: persisted,
-        jobId: open.id,
-      };
+      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id };
+
     }
-    return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persisted };
+    if (persisted === effectiveChoice && persistedEffort === modelEffort) return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persisted };
   }
 
-  await assertRate(context.userId, "brief", owned(context));
+  const rate = await checkRate(context.userId, "brief", owned(context), override, { record: false });
+  if (rate) return rate;
+  if (open) await requestJobCancel(open.id);
   const job = await enqueueJob({
+    kick: deps.kick,
     userId: context.userId,
     newsroomId: owned(context),
     kind: "brief",
@@ -4837,6 +4855,7 @@ export async function startBriefJob(
       skippedRungs: probe.skippedRungs,
     })),
   });
+  await recordDeskRun(context.userId, "brief", owned(context));
   if ("switchReceipt" in probe) {
     await setJobStage(job.id, probe.switchReceipt.stage);
     await setJobFailoverNote(job.id, probe.switchReceipt.note);
@@ -4948,5 +4967,5 @@ export const refreshBrief = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startBriefJob(context, data)
-      : startBriefJob(context, data.id, data.modelChoice, data.modelEffort),
+      : startBriefJob(context, data.id, data.modelChoice, data.modelEffort, data.override),
   );

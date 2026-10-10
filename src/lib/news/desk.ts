@@ -1,3 +1,4 @@
+import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
 import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
 import { savedStoryReadiness, type StoryReadiness } from "./story-readiness.ts";
@@ -17,7 +18,7 @@ import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
 import {
   cleanSourceScanPreferenceInput,
-  persistSourceScanPreference,
+  saveSourceScanPreferenceForEditor,
 } from "./source-scan-preferences.server.ts";
 import {
   finishScanCoverage,
@@ -28,7 +29,7 @@ import {
 } from "./scan-source-coverage.ts";
 import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { slugify, parseUrlList } from "@/lib/paper";
-import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
+import { getPaperConfig, getPaperPlace, paperSetupWarning } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
 import { ingestUrl, ingestDocument, withRetry, IngestFetchError } from "./ingest";
@@ -50,7 +51,7 @@ import {
   recordObservation,
   type ObservationKind,
 } from "./source-observations.server.ts";
-import { assertCooldown, assertRate, audit } from "./ops";
+import { checkRate, recordDeskRun, audit } from "./ops";
 import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
@@ -86,7 +87,6 @@ import {
 import { linkDraftToTranscript, loadDraftMeetingEvidence } from "./meeting-draft-transcript-link.ts";
 import { TranscriptViewRefused, transcriptDownloadUrl } from "./meeting-transcript-view.ts";
 import { cleanStoryArea } from "../story-area.ts";
-import { disclosureLine } from "./import-stories.ts";
 import { findDuplicate } from "./import-review.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
 import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
@@ -111,6 +111,7 @@ import {
   draftMeetingReviewInput,
   draftStyleFixInput,
   fileLeadInput,
+  sourceCheckInput,
   aiFollowUpInput,
   aiFollowUpUpdateInput,
   followUpActionInput,
@@ -211,7 +212,6 @@ import {
   tierFromKind,
   resurfacedSummarySentence,
   scanDecisionsSentence,
-  SOURCE_SCAN_PREFERENCE_COPY,
 } from "./desk-copy";
 import { MATCH_LOOKBACK_DAYS, type MatchCandidateLead } from "./lead-match";
 import { fileScanLeads, parseLeadSourceUrls } from "./lead-filing";
@@ -418,10 +418,7 @@ export const saveSourceScanPreference = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     if (data.invalidError) return { ok: false as const, error: data.invalidError };
     const sql = await getSql();
-    const saved = await persistSourceScanPreference(sql, context.newsroomId, context.userId, data);
-    if (!saved)
-      return { ok: false as const, error: SOURCE_SCAN_PREFERENCE_COPY.acceptedOnly };
-    return { ok: true as const };
+    return saveSourceScanPreferenceForEditor(sql, context, data);
   });
 
 /** The read-only inventory screen, using the same facts and judgement as its CSV. */
@@ -941,63 +938,7 @@ export async function insertLeadWithDraft(
 export const fileLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => fileLeadInput.parse(input))
-  .handler(async ({ context, data }) => {
-    const headline = data.headline.trim().slice(0, 180);
-    const why = data.why.trim().slice(0, 800);
-    if (headline.length < 8) {
-      return { ok: false as const, error: "Headline needs a full sentence." };
-    }
-    if (why.length < 8) {
-      return { ok: false as const, error: "Say why this is news." };
-    }
-    const topic = (data.topic || "council").slice(0, 40);
-    let urls: string[] = [];
-    if (data.url?.trim()) {
-      try {
-        urls = sanitizePublicUrls([assertHttpUrl(data.url.trim()).toString()]);
-      } catch {
-        return { ok: false as const, error: "That source URL is not a public http(s) address." };
-      }
-    }
-    /*
-      Unit BW3: the New story dialog's paste tab knows every page the pasted
-      story cites, not only its original link, and the reader sees exactly what
-      the DRAFT carries (`publishLead`, `desk.ts:3659`) -- so a story saved
-      from that tab would publish with an empty Sources section while the page
-      still promised "Sources shown." Dropped here rather than refused, the way
-      the old paste panel dropped them (`sanitizePublicUrls` also de-dupes).
-    */
-    if (data.urls?.length) {
-      urls = sanitizePublicUrls([...urls, ...data.urls]);
-    }
-    return insertLeadWithDraft(context, {
-      headline,
-      why,
-      topic,
-      urls,
-      notesJson: packNotes({ ...parseNotes(null), suppliedUrls: urls }),
-      /*
-        Who wrote it, for the filing screen that asked. Every other caller
-        sends nothing and the paper prints its own AI line
-        (`ai-disclosure.tsx:33`).
-      */
-      disclosure: data.disclosureKey
-        ? disclosureLine(data.disclosureKey, data.disclosureOther ?? "")
-        : "",
-      importedText: data.importedText === true,
-      /*
-        Unit BW5: the drawn New story dialog's paste tab files a story written
-        elsewhere, and the Queue's Imported mark is drawn from `leads.origin`
-        (`desk-leads.tsx:516`). The one-story paste panel this tab replaces was
-        the import path, which wrote `origin = 'import'`
-        (`import-stories.server.ts:402`) -- so the same paste filed from the
-        drawn tab has to carry the same word or the mark the old panel put on
-        the row disappears with the panel. Absent -- every other caller -- files
-        no origin, which is the scanner lead's own answer (`0091`: null).
-      */
-      origin: data.origin,
-    });
-  });
+  .handler(({ context, data }) => fileLeadForEditor(context, data, (input) => insertLeadWithDraft(context, input)));
 
 /**
  * Whether a story about to be filed looks like one the paper already has.
@@ -1440,7 +1381,6 @@ export const runScan = createServerFn({ method: "POST" })
       finishes Paper setup this refuses in one plain sentence rather than
       scanning Longmont's sources on a fresh install's behalf.
     */
-    await requirePaperSetUp(owned(context), "start the scan");
     /*
       Check the model BEFORE spending the scan.
 
@@ -1455,6 +1395,8 @@ export const runScan = createServerFn({ method: "POST" })
       concrete provider the same way a draft does. See `scanPreflight` and
       `commitScanForAuthenticatedEditor`.
     */
+    const setup = await paperSetupWarning(context, data.override, "start the scan");
+    if (setup) return { ...setup, detail: "", retryable: true };
     await ensureSeeds(context.userId, owned(context));
     const modelChoice = storyModelChoice(data.modelChoice);
     const { commitScanForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
@@ -1466,6 +1408,7 @@ export const runScan = createServerFn({ method: "POST" })
       sectionKey: data.sectionKey,
       customSourceIds: data.customSourceIds,
       packId: data.packId,
+      override: data.override,
     });
   });
 
@@ -1506,60 +1449,14 @@ export const runScan = createServerFn({ method: "POST" })
  * else's web server: without it a held-down Retry is a burst at that site, and
  * the editor learns nothing new between one press and the next anyway.
  */
-export async function performCheckOneSource(
+export const performCheckOneSource = createServerOnlyFn(async function performCheckOneSource(
   context: { userId: string; newsroomId?: number },
   sourceId: number,
-  /*
-    The cooldown, in seconds, overridable for the tests that press twice on
-    purpose. Production passes nothing.
-  */
   cooldownSeconds = 30,
-): Promise<
-  | { ok: true; title: string; url: string; characters: number; line: string }
-  | { ok: false; url: string; title: string; error: string; line: string }
-> {
-  const sql = await getSql();
-  const [src] = await sql.query<{
-    id: number;
-    url: string;
-    title: string;
-    status: string;
-    /** SH-B: read so this press's refusal continues the run of blocks rather
-     *  than restarting it at the first step of the backoff. */
-    blocked_at: string | null;
-    blocked_attempts: number | null;
-  }>(
-    "select id,url,title,status,blocked_at,blocked_attempts from sources where id=$1 and newsroom_id=$2",
-    [sourceId, owned(context)],
-  );
-  if (!src) {
-    return {
-      ok: false as const,
-      url: "",
-      title: "",
-      error: "That source is not on this desk.",
-      line: "That source is not on this desk.",
-    };
-  }
-  if (src.status !== "accepted") {
-    const line =
-      src.status === "paused"
-        ? "This source is paused. Resume it first, then check it."
-        : "This source is not on the watch list.";
-    return { ok: false as const, url: src.url, title: src.title, error: line, line };
-  }
-  /*
-    Unit U24b: the pause is checked BEFORE anything is fetched, and comes back
-    as an ordinary refusal rather than a thrown one -- every way this press can
-    do nothing lands on the row through the same `line`, so the editor reads one
-    shape of sentence whatever stopped it.
-  */
-  try {
-    await assertCooldown(context.userId, `check-source:${sourceId}`, cooldownSeconds, owned(context));
-  } catch (err) {
-    const line = err instanceof Error ? err.message : "That was checked a moment ago.";
-    return { ok: false as const, url: src.url, title: src.title, error: line, line };
-  }
+  override?: string[],
+) {
+  return checkSourceForEditor(context, sourceId, override, async (src) => {
+    const sql = await getSql();
   /*
     `withRetry` is the scan's own: one transient timeout is retried there and
     not here, so a source that reads on the second try reads on this press too
@@ -1636,12 +1533,13 @@ export async function performCheckOneSource(
       line: `Still failing: ${editorFetchError(msg, src.url) ?? msg}`,
     };
   }
-}
+  }, cooldownSeconds);
+});
 
 export const checkOneSource = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((sourceId: unknown) => rowId.parse(sourceId))
-  .handler(async ({ context, data: sourceId }) => performCheckOneSource(context, sourceId));
+  .validator((input: unknown) => sourceCheckInput.parse(input))
+  .handler(({ context, data }) => performCheckOneSource(context, data.sourceId, 30, data.override));
 
 /*
   SH-B: the per-host allowance for hostile answers.
@@ -3337,7 +3235,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   `;
   const lead = leads[0];
   if (!lead) throw new Error("Lead not found");
-  if (lead.status === "killed") throw new Error("Restore this lead before drafting.");
+  let overrideReceipt: { allowKilledLead?: boolean; meetingVideoId?: string; meetingArtifactId?: number } = {};
+  try { overrideReceipt = JSON.parse(job.result_json || "{}"); } catch { /* legacy job */ }
+  if (lead.status === "killed" && overrideReceipt.allowKilledLead !== true) throw new Error("Restore this lead before drafting.");
+  if (overrideReceipt.meetingVideoId && overrideReceipt.meetingArtifactId) {
+    lead.meeting_video_id = overrideReceipt.meetingVideoId;
+    lead.meeting_artifact_id = overrideReceipt.meetingArtifactId;
+    lead.meeting_lead_purpose = "transcript-story";
+  }
   const selectedMeetingArtifactId = meetingArtifactIdFromDraftReceipt(
     job.result_json,
     lead.meeting_artifact_id == null ? null : Number(lead.meeting_artifact_id),
@@ -4354,7 +4259,6 @@ export const draftLead = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: drafting spends a model on this paper's behalf, and an
     // un-set-up install has no town to write about. Refused in one sentence.
-    await requirePaperSetUp(owned(context), "draft this story");
     const leadId = typeof data === "number" ? data : data.leadId;
     const modelChoice = storyModelChoice(typeof data === "number" ? "auto" : data.modelChoice);
     const { commitStoryDraftForAuthenticatedEditor } =
@@ -4366,6 +4270,7 @@ export const draftLead = createServerFn({ method: "POST" })
       modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
       meetingArtifactId: typeof data === "number" ? undefined : data.meetingArtifactId,
+      override: typeof data === "number" ? undefined : data.override,
     });
   });
 
@@ -4414,7 +4319,6 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => rewriteFromLedgerInput.parse(input))
   .handler(async ({ context, data }) => {
-    await requirePaperSetUp(owned(context), "rewrite this story");
     const modelChoice = storyModelChoice(data.modelChoice);
     const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
     return commitStoryDraftForAuthenticatedEditor({
@@ -4425,6 +4329,7 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
       researchScope: data.researchScope,
       meetingArtifactId: data.meetingArtifactId,
       reuseLedger: true,
+      override: data.override,
     });
   });
 
@@ -4684,6 +4589,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
     return writeStoryForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       text: data.text,
+      override: data.override,
       documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
@@ -4799,6 +4705,7 @@ export const startReporting = createServerFn({ method: "POST" })
         action: data.action,
         leadId: data.leadId,
         assignment: data.assignment,
+        override: data.override,
         seedUrls: data.seedUrls,
         parentRequestId: data.parentRequestId,
         modelChoice: data.modelChoice,
@@ -4819,6 +4726,7 @@ export const answerReportingFollowUp = createServerFn({ method: "POST" })
       {
         parentRequestId: data.parentRequestId,
         assignment: data.assignment,
+        override: data.override,
         seedUrls: data.seedUrls,
         modelChoice: data.modelChoice,
         modelEffort: data.modelEffort ?? null,
@@ -4910,41 +4818,11 @@ export const pullTodo = createServerFn({ method: "POST" })
   .validator((input: unknown) => pullTodoInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
-      // SG1 / Option A: a Pull searches the web for this paper, so an install
-      // that has not been set up must not start one.
-      const notSetUp = await paperSetUpRefusal(owned(context), "start a Pull");
-      if (notSetUp) return { ok: false as const, error: notSetUp };
-      await assertRate(context.userId, "pull", owned(context));
+      const warning = await paperSetupWarning(context, data.override, "start a Pull");
+      if (warning) return warning;
       await ensureDeskDraftMemoSchema();
       const sql = await getSql();
-      const rows = await sql<{ id: number }>`
-        select id from leads
-        where id = ${data.leadId} and newsroom_id = ${owned(context)} limit 1
-      `;
-      if (!rows[0]) return { ok: false as const, error: "Lead not found" };
-      const query = data.query.trim().slice(0, 240);
-      if (query.length < 4)
-        return { ok: false as const, error: "That line is too thin to search." };
-      /*
-        0.6.74: a claim's Pull reads the claim's own source page rather than
-        searching for it. Only an http(s) URL is honoured; anything else falls
-        back to the search an ordinary Pull runs, and the page is checked by
-        the desk's URL guard at fetch time (`ingestDocument`), never here.
-      */
-      const rawUrl = data.url?.trim() ?? "";
-      const sourceUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl.slice(0, 2_000) : null;
-      const open = await findOpenJob({
-        newsroomId: owned(context),
-        kind: "pull",
-        subjectId: data.leadId,
-      });
-      if (open) {
-        return {
-          ok: false as const,
-          error:
-            "This story already has a Pull running. Its live progress is shown beside the reporting line.",
-        };
-      }
+      return startPullForEditor(context, data, async (query, sourceUrl) => {
       const receipt = newPullReceipt({
         leadId: data.leadId,
         // A claim Pull has no reporting line to strike, so it carries no index.
@@ -4971,6 +4849,7 @@ export const pullTodo = createServerFn({ method: "POST" })
         };
       }
       return { ok: true as const, jobId: job.id };
+      });
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Pull failed";
       return { ok: false as const, error: raw };
@@ -5054,7 +4933,6 @@ export const continuePullJob = createServerFn({ method: "POST" })
   .validator((input: unknown) => jobIdInput.parse(input))
   .handler(async ({ context, data }) => {
     try {
-      await assertRate(context.userId, "pull", owned(context));
       const sql = await getSql();
       const rows = await sql<{
         subject_id: number;
@@ -5077,6 +4955,10 @@ export const continuePullJob = createServerFn({ method: "POST" })
         subjectId: prior.subject_id,
       });
       if (open) return { ok: false as const, error: "This story already has a Pull running." };
+      const setup = await paperSetupWarning(context, data.override, "continue a Pull");
+      if (setup) return setup;
+      const rate = await checkRate(context.userId, "pull", owned(context), data.override, { record: false });
+      if (rate) return rate;
       const resumed: typeof receipt = {
         ...receipt,
         attemptId: crypto.randomUUID(),
@@ -5105,6 +4987,7 @@ export const continuePullJob = createServerFn({ method: "POST" })
             "Another reporting-line Pull won the continue race. Its live progress is shown beside that line.",
         };
       }
+      await recordDeskRun(context.userId, "pull", owned(context));
       return { ok: true as const, jobId: job.id };
     } catch (err) {
       return {
@@ -5142,7 +5025,7 @@ export const setLeadStatus = createServerFn({ method: "POST" })
   .validator((input: unknown) => leadStatusInput.parse(input))
   .handler(async ({ context, data }) => {
     const { setLeadStatusForEditor } = await import("./lead-lifecycle.ts");
-    return setLeadStatusForEditor(await getSql(), owned(context), data);
+    return setLeadStatusForEditor(await getSql(), { userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 /**
@@ -5236,7 +5119,7 @@ export const resolveLeadDuplicate = createServerFn({ method: "POST" })
   .validator((input: unknown) => leadDuplicateResolutionInput.parse(input))
   .handler(async ({ context, data }) => {
     const { resolveLeadDuplicateForEditor } = await import("./lead-lifecycle.ts");
-    return resolveLeadDuplicateForEditor(await getSql(), owned(context), data);
+    return resolveLeadDuplicateForEditor(await getSql(), { userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 export {
@@ -5301,7 +5184,8 @@ export const createAiFollowUp = createServerFn({ method: "POST" })
       search the web for this paper on its own clock. An install that has not
       been set up has no town for it to work, so it is not created at all.
     */
-    await requirePaperSetUp(context.newsroomId ?? 1, "start a follow-up");
+    const warning = await paperSetupWarning(context, data.override, "start a follow-up");
+    if (warning) return warning;
     return _performCreateAiFollowUp(context, data);
   });
 
@@ -5343,23 +5227,24 @@ const RUN_START_REFUSALS: Record<NonNullable<FollowUpRunStart["skipped"]>, strin
 export const followUpAction = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => followUpActionInput.parse(input))
-  .handler(async ({ context, data }): Promise<{ ok: true }> => {
+  .handler(async ({ context, data }) => {
     if (data.action !== "run-now") {
       const result = await _performFollowUpAction(context, data.id, data.action);
       if (!result.ok) throw new Error(result.error);
-      return { ok: true };
+      return { ok: true as const };
     }
     // SG1 / Option A: only the press that STARTS a run spends anything; the
     // other actions are status writes (pause, resume, stop, done) and are not
     // gated, so an editor can always tidy up rows on an un-set-up install.
-    await requirePaperSetUp(context.newsroomId ?? 1, "run this follow-up");
+    const warning = await paperSetupWarning(context, data.override, "run this follow-up");
+    if (warning) return warning;
     const { startFollowUpRun } = await import("./follow-up-scheduler.ts");
     const started = await startFollowUpRun(
       { userId: context.userId, newsroomId: context.newsroomId ?? 1 },
       data.id,
     );
     if (!started.started) throw new Error(RUN_START_REFUSALS[started.skipped ?? "not-found"]);
-    return { ok: true };
+    return { ok: true as const };
   });
 
 /**
