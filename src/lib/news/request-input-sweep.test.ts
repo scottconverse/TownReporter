@@ -419,7 +419,7 @@ const rows: Row[] = [
     fn: "desk.ts:2510 overrideNamedOutlet",
     run: outletInput.parse.bind(outletInput),
     valid: { leadId: 42, outlet: "Longmont Leader" },
-    bad: [{ why: "oversize outlet", value: { leadId: 42, outlet: x(LIMITS.outlet + 1) } }],
+    bad: [{ why: "outlet not text", value: { leadId: 42, outlet: 9 } }],
   },
   {
     fn: "desk.ts:2770 addCorrection",
@@ -677,9 +677,15 @@ const rows: Row[] = [
     run: editorialStartInput.parse.bind(editorialStartInput),
     valid: { subject: "The 2027 budget", askedFor: "800 words on the split", articleSlug: "the-budget-passes", modelChoice: "claude", modelEffort: null, documentIds: ["doc-1"], retryRequestId: 4 },
     bad: [
-      { why: "oversize subject", value: { subject: x(LIMITS.storyText + 1) } },
+      // "oversize subject" and "too many documents" were refusals here until
+      // the audit-override work moved the two caps into the core, as warnings
+      // item 21's override answers (see request-input-override.test.ts). The
+      // schema now passes the full material and the `override` key through so
+      // the warning can fire; what remains below are broken callers, not an
+      // editor's size decision.
+      { why: "subject not text", value: { subject: 7 } },
+      { why: "documentIds not a list of ids", value: { subject: "s", documentIds: [7] } },
       { why: "negative retryRequestId", value: { subject: "s", retryRequestId: -4 } },
-      { why: "too many documents", value: { subject: "s", documentIds: Array.from({ length: LIMITS.documentIds + 1 }, () => "doc") } },
     ],
   },
   {
@@ -1043,6 +1049,7 @@ describe("every swept .validator() calls the schema, not a cast", () => {
     "../ops/dashboard.ts",
   ];
 
+
   /**
    * The schemas a swept validator is allowed to call.
    *
@@ -1138,7 +1145,7 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * same terms.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadStatusRestoreInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkRetryInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanSourceScanPreferenceInput|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findReplacementInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput|ledgerItemStatusInput|claimReviewedInput|rewriteFromLedgerInput|startReportingInput|reportingFollowUpInput|reportingObservationInput|leadReportingPackageInput|reportingObservationsScopeInput|reportingRequestIdInput)/;
+    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadStatusRestoreInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkRetryInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanQueueWindow|cleanSourceWindow|cleanSourceScanPreferenceInput|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|changePublishedStoryInput|outletOverrideInput|liveStoryChangeInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findReplacementInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput|ledgerItemStatusInput|claimReviewedInput|rewriteFromLedgerInput|startReportingInput|reportingFollowUpInput|reportingObservationInput|leadReportingPackageInput|reportingObservationsScopeInput|reportingRequestIdInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

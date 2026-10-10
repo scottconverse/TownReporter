@@ -511,8 +511,15 @@ function DeskHome() {
     leadId: number;
     duplicate?: DuplicateWarning;
   } | null>(null);
+
+  const [pasteWarning, setPasteWarning] = useState<{ key: string; sentence: string } | null>(null);
+  const [pasteOverrides, setPasteOverrides] = useState<string[]>([]);
+  const clearPasteOverride = () => {
+    setPasteWarning(null);
+    setPasteOverrides([]);
+  };
   const pasteStory = useMutation({
-    mutationFn: () => {
+    mutationFn: (override: string[]) => {
       const card = pasteOneStoryCard({
         text: pasteText,
         headline: pasteHeadline,
@@ -544,11 +551,20 @@ function DeskHome() {
         leads: leads.data?.map((l) => ({ id: l.id, headline: l.headline ?? "" })),
         published: published.data?.map((p) => ({ slug: p.slug, headline: p.headline })),
       });
+
+      const data = { text: pasteText, tool: "", stories: [selectionFromCard(card)] };
       return importFinishedStories({
-        data: { text: pasteText, tool: "", stories: [selectionFromCard(card)] },
+        data: override.length > 0 ? { ...data, override } : data,
       }).then((result) => ({ result, duplicate }));
     },
-    onSuccess: ({ result, duplicate }) => {
+    onSuccess: ({ result, duplicate }, override) => {
+
+      if (result.warning) {
+        setPasteWarning(result.warning);
+        setPasteOverrides((previous) => [...new Set([...previous, ...override])]);
+        setPasteNotice(result.warning.sentence);
+        return;
+      }
       if (!result.ok) {
         const line = result.error || "That story was not added. Nothing was changed.";
         /*
@@ -566,6 +582,7 @@ function DeskHome() {
       const first = result.imported[0];
       setPasted({ headline: first?.headline ?? "", leadId: first?.leadId ?? 0, duplicate });
       setPasteNotice("");
+      clearPasteOverride();
       setPasteText("");
       setPasteHeadline("");
       setPasteOther("");
@@ -1654,7 +1671,7 @@ function DeskHome() {
             title="Paste a story I already have"
             subtitle="One finished story. It goes to the Queue as a draft for you to work on there."
             primaryLabel={pasteStory.isPending ? "Adding…" : "Add to Queue"}
-            onPrimary={() => void pasteStory.mutate()}
+            onPrimary={() => void pasteStory.mutate([])}
             primaryDisabled={pasteText.trim().length < 40 || pasteStory.isPending}
             cancelLabel="Close"
             footNote="No screen to check first. One story in, one draft in the Queue."
@@ -1673,7 +1690,10 @@ function DeskHome() {
                     className={areaClass}
                     rows={14}
                     value={pasteText}
-                    onChange={(e) => setPasteText(e.target.value)}
+                    onChange={(e) => {
+                      setPasteText(e.target.value);
+                      clearPasteOverride();
+                    }}
                     maxLength={IMPORT_LIMITS.text}
                     placeholder={
                       "Council votes to bring the rules back for consideration\n\nThe council voted 5-2 on Tuesday. [The packet](https://example.test/packet)"
@@ -1686,7 +1706,10 @@ function DeskHome() {
                     id="paste-one-headline"
                     className={inputClass}
                     value={pasteHeadline}
-                    onChange={(e) => setPasteHeadline(e.target.value)}
+                    onChange={(e) => {
+                      setPasteHeadline(e.target.value);
+                      clearPasteOverride();
+                    }}
                     maxLength={IMPORT_LIMITS.headline}
                     placeholder="Taken from the first line if you leave this empty"
                   />
@@ -1698,7 +1721,10 @@ function DeskHome() {
                     className={inputClass}
                     value={pasteSection}
                     disabled={sectionQuery.sections.length === 0}
-                    onChange={(e) => setPasteSection(e.target.value)}
+                    onChange={(e) => {
+                      setPasteSection(e.target.value);
+                      clearPasteOverride();
+                    }}
                   >
                     <option value={NO_SECTION}>{SECTION_REQUIRED}</option>
                     {sectionQuery.sections.map((s) => (
@@ -1719,7 +1745,10 @@ function DeskHome() {
                     id="paste-one-disclosure"
                     className={inputClass}
                     value={pasteDisclosure}
-                    onChange={(e) => setPasteDisclosure(e.target.value as DisclosureKey)}
+                    onChange={(e) => {
+                      setPasteDisclosure(e.target.value as DisclosureKey);
+                      clearPasteOverride();
+                    }}
                   >
                     {IMPORT_DISCLOSURES.map((d) => (
                       <option key={d.key} value={d.key}>
@@ -1731,7 +1760,10 @@ function DeskHome() {
                     <input
                       className={inputClass}
                       value={pasteOther}
-                      onChange={(e) => setPasteOther(e.target.value)}
+                      onChange={(e) => {
+                        setPasteOther(e.target.value);
+                        clearPasteOverride();
+                      }}
                       placeholder="The line to print under the story"
                       aria-label="The disclosure line to print"
                     />
@@ -1753,6 +1785,21 @@ function DeskHome() {
                 severity the toast it replaced carried.
               */}
               {pasteNotice ? <Notice kind="err">{pasteNotice}</Notice> : null}
+              {}
+              {pasteWarning ? (
+                <div className="composer-source-note">
+                  <InkButton
+                    disabled={pasteStory.isPending}
+                    onClick={() => {
+                      const next = [...new Set([...pasteOverrides, pasteWarning.key])];
+                      setPasteOverrides(next);
+                      pasteStory.mutate(next);
+                    }}
+                  >
+                    {pasteStory.isPending ? "Adding…" : "Import anyway"}
+                  </InkButton>
+                </div>
+              ) : null}
               {pasted ? (
                 /*
                   Unit CA, note 6. This panel is reached by its own hash

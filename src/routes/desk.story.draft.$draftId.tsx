@@ -30,6 +30,7 @@ import {
   publishEditorial,
   saveEditorialDraft,
 } from "@/lib/news/opinion";
+import { changePublishedStory } from "@/lib/news/desk";
 import { useEditorSections } from "@/lib/use-sections";
 
 export const Route = createFileRoute("/desk/story/draft/$draftId")({
@@ -89,6 +90,8 @@ function EditorialPage() {
   */
   const [previewSeen, setPreviewSeen] = useState(false);
   const [confirmingPublish, setConfirmingPublish] = useState(false);
+
+  const [liveWarning, setLiveWarning] = useState<{ key: string; sentence: string } | null>(null);
   /*
     The text as the server last had it. The save line says "Unsaved changes"
     until this matches the boxes again, which is the one question that line
@@ -158,6 +161,34 @@ function EditorialPage() {
     workbench's save. The binding rides the button's own condition and adds no
     announcement of its own; the save already answers through `setMsg`.
   */
+
+
+  const change = useMutation({
+    mutationFn: (override?: string[]) =>
+      changePublishedStory({
+        data: { articleSlug: q.data?.published_slug ?? undefined, dek, topic, body, override },
+      }),
+    onSuccess: async (r) => {
+      if (r && r.ok === false) {
+        if ("warning" in r) {
+          setLiveWarning(r.warning);
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(r.error);
+        return;
+      }
+      setLiveWarning(null);
+      setMsg("Changed. The piece's link is unchanged, and the change is on the public log.");
+      void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
+      void qc.invalidateQueries({ queryKey: ["corrections"] });
+    },
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "change the live piece") ??
+          "That did not change. Try again.",
+      ),
+  });
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -316,8 +347,8 @@ function EditorialPage() {
       lede={
         <>
           Unsigned, as the paper's own position. Edit it here, then print it. A
-          published piece is never edited — a correction runs as a dated note
-          above it.
+          change to a piece already on the paper warns first and is written to
+          the public change log beside it — it is never made silently.
         </>
       }
     >
@@ -357,8 +388,9 @@ function EditorialPage() {
             disabled={onPaper}
           />
         </Field>
+        {/* Audit item 7: editable on a published piece; saved under the warning. */}
         <Field label="Summary">
-          <input value={dek} onChange={(e) => setDek(e.target.value)} disabled={onPaper} />
+          <input value={dek} onChange={(e) => {setLiveWarning(null); setDek(e.target.value);}} />
         </Field>
         {/*
           The drawn save line, in the drawn place: the head of the STORY box,
@@ -378,12 +410,12 @@ function EditorialPage() {
             id="editorial-body"
             rows={24}
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            disabled={onPaper}
+            onChange={(e) => {setLiveWarning(null); setBody(e.target.value);}}
           />
         </Field>
+        {/* Audit item 7: the section is editable on a published piece too. */}
         <Field label="Topic">
-          <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
+          <select value={topic} onChange={(e) => {setLiveWarning(null); setTopic(e.target.value);}}>
             <option value="opinion">opinion</option>
             {TOPICS.filter((t) => t !== "about" && t !== "opinion").map((t) => (
               <option key={t} value={t}>
@@ -447,6 +479,7 @@ function EditorialPage() {
             </ActionButton>
           </>
         ) : (
+          <>
           <p className="note">
             On the paper.{" "}
             <Link
@@ -461,6 +494,26 @@ function EditorialPage() {
               Published
             </Link>
           </p>
+            {/*
+              Audit item 7: the published piece's live edit. Same warn-then-
+              override contract as the reported story; the first press warns,
+              and "Change it anyway" sends the key back.
+            */}
+            <InkButton disabled={change.isPending || !q.data.published_slug} onClick={() => change.mutate(undefined)}>
+              {change.isPending ? "Saving…" : "Save changes"}
+            </InkButton>
+            {liveWarning ? (
+              <div className="note" role="status">
+                <p>{liveWarning.sentence}</p>
+                <InkButton
+                  disabled={change.isPending}
+                  onClick={() => change.mutate([liveWarning.key])}
+                >
+                  {change.isPending ? "Saving…" : "Change it anyway"}
+                </InkButton>
+              </div>
+            ) : null}
+          </>
         )}
         {/*
           Delete stays available after printing. The draft and the printed

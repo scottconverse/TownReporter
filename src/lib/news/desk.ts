@@ -51,6 +51,7 @@ import {
   type ObservationKind,
 } from "./source-observations.server.ts";
 import { assertCooldown, assertRate, audit } from "./ops";
+import { auditOverrides, checkOverride, type OverrideWarning } from "./override.ts";
 import { AUTOMATIC_LADDER, scanSystem, grokChat, parseJsonBlock, probeProvider, providerBudget, type EffectiveProviderChoice, type LocalModelOverride } from "./ai";
 import { unpackStoredDraft } from "./coerce-draft";
 import { stripReporterNotebook } from "./strip-draft";
@@ -152,6 +153,7 @@ import {
   leadReportingPackageInput,
   reportingRequestIdInput,
   reportingObservationsScopeInput,
+  LIMITS,
 } from "./request-input.ts";
 import {
   evidenceNeedsReview,
@@ -1087,8 +1089,16 @@ export const getLead = createServerFn({ method: "GET" })
       from drafts where lead_id = ${id} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
     `;
-    const live = await sql<{ id: number; slug: string; headline: string }>`
-      select id, slug, headline from articles
+
+    const live = await sql<{
+      id: number;
+      slug: string;
+      headline: string;
+      dek: string;
+      body: string;
+      topic: string;
+    }>`
+      select id, slug, headline, dek, body, topic from articles
       where lead_id = ${id} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
     `;
@@ -1247,6 +1257,11 @@ export const getLead = createServerFn({ method: "GET" })
       */
       articleId: live[0]?.id ?? null,
       articleHeadline: live[0]?.headline ?? null,
+      articleDek: live[0]?.dek ?? null,
+      articleTopic: live[0]?.topic ?? null,
+      // Sent whole, like the draft's own body, so the live workbench can seed
+      // the editable boxes from the story the reader is looking at.
+      articleBody: live[0]?.body ?? null,
       openedExtractionByUrl: extractionByUrl,
       job,
       // Draft has no separate run table -- desk_jobs IS the record, so
@@ -4670,7 +4685,7 @@ export const importFinishedStories = createServerFn({ method: "POST" })
     const { performImportFinishedStories } = await import("./import-stories.server.ts");
     return performImportFinishedStories(
       { userId: context.userId, newsroomId: owned(context) },
-      { text: data.text, tool: data.tool, stories: data.stories },
+      { text: data.text, tool: data.tool, stories: data.stories, override: data.override },
     );
   });
 
@@ -5739,65 +5754,73 @@ export async function performOverrideNamedOutlet(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   outletName: string,
-): Promise<{ ok: true; outlet: string } | { ok: false; error: string }> {
-  const outlets = (await getPaperConfig(owned(context))).namedOutlets;
-  const outlet = namedOutlet(outletName, outlets);
-  if (!outlet) {
-    return {
-      ok: false as const,
-      error: `"${outletName}" is not one of the outlets this check knows about, so it cannot be overridden.`,
-    };
-  }
+  input: { override?: string[] } = {},
+): Promise<{ ok: true; outlet: string } | { ok: false; error: string } | OverrideWarning> {
+  const room = owned(context);
+  const name = outletName.trim();
+  if (!name) return { ok: false as const, error: "Name the outlet you are overriding." };
+  const outlets = (await getPaperConfig(room)).namedOutlets;
+  const outlet = namedOutlet(name, outlets);
+
+  const key = `named-outlet:${name}`;
   const decision = await withTransaction(async (sql) => {
     const drafts = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json
-      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      from drafts where lead_id = ${leadId} and newsroom_id = ${room}
       order by updated_at desc, id desc limit 1
     `;
     const row = drafts[0];
     if (!row) return { ok: false as const, error: "Draft this lead before overriding an outlet." };
-    const draft = unpackStoredDraft({ ...row });
-    draft.body = stripReporterNotebook(draft.body);
-    const unresolved = unresolvedNamedOutlets({
-      body: draft.body,
-      sourceUrls: parseUrlList(draft.source_urls),
-      sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
-      outlets,
-    });
-    if (!unresolved.includes(outlet.name)) {
-      return {
-        ok: false as const,
-        error: `${outlet.name} needs no override on this draft — the story does not name it, or its Sources already show it.`,
-      };
-    }
+    const warning = outlet ? null : checkOverride(input, key,
+      `"${name}" is not one of the outlets this check knows about. Override it to record your decision?`);
+    if (warning) return warning;
     // Clicking twice is the same decision. The table is append-only, so the
     // second click must not try to write over the first row.
     await sql`
       insert into named_outlet_overrides (newsroom_id, draft_id, lead_id, outlet, overridden_by)
-      values (${owned(context)}, ${row.id}, ${leadId}, ${outlet.name}, ${context.userId})
+      values (${room}, ${row.id}, ${leadId}, ${outlet ? outlet.name : name}, ${context.userId})
       on conflict (newsroom_id, draft_id, outlet) do nothing
     `;
-    return { ok: true as const, outlet: outlet.name, draftId: Number(row.id) };
+    return {
+      ok: true as const,
+      outlet: outlet ? outlet.name : name,
+      draftId: Number(row.id),
+      /** Whether the name came off the newsroom's own list or was accepted by override. */
+      known: Boolean(outlet),
+    };
   });
-  if (!decision.ok) return { ok: false as const, error: decision.error };
-  /*
-    Audited outside the transaction, where every other publish-path audit sits.
-    `audit` runs on the pooled connection, not the transaction's, and on PGlite
-    there is one connection: writing from inside the transaction deadlocks it.
-  */
-  await audit(context.userId, "override_named_outlet", `Draft ${decision.draftId}`, owned(context), {
-    kind: "drafts",
-    id: decision.draftId,
-  });
+  if (!decision.ok) {
+    // An unknown outlet's first press is a warning, not a refusal.
+    if ("warning" in decision) return decision;
+    return { ok: false as const, error: decision.error };
+  }
+
+  if (decision.known) await audit(context.userId, "override_named_outlet", `Draft ${decision.draftId}`, room, {kind: "drafts", id: decision.draftId});
+  else await auditOverrides({userId: context.userId, newsroomId: room}, [key], {kind: "drafts", id: decision.draftId});
   return { ok: true as const, outlet: decision.outlet };
+}
+
+/**
+ * `overrideNamedOutlet`'s input, read here rather than in `request-input.ts`
+ * (another worker owns that file). The base shape is the same `outletInput`; the
+ * new `override` key is added on top, bounded like every other desk input.
+  */
+export function outletOverrideInput(raw: unknown): {
+  leadId: number;
+  outlet: string;
+  override?: string[];
+} {
+  const base = outletInput.parse(raw);
+  const o = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  return { ...base, override: cleanOverrideKeys(o.override) };
 }
 
 export const overrideNamedOutlet = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((data: unknown) => outletInput.parse(data))
+  .validator((data: unknown) => outletOverrideInput(data))
   .handler(async ({ context, data }) =>
-    performOverrideNamedOutlet(context, data.leadId, data.outlet),
+    performOverrideNamedOutlet(context, data.leadId, data.outlet, { override: data.override }),
   );
 
 export const performPublish = createServerOnlyFn(async function performPublish(
@@ -6395,6 +6418,412 @@ export const updateArticleHeadline = createServerFn({ method: "POST" })
   .validator((raw: unknown) => updateArticleHeadlineInput.parse(raw))
   .handler(async ({ context, data }) => performUpdateArticleHeadline(context, data.articleId, data.headline));
 
+
+export const LIVE_STORY_CHANGE_KEY = "published-live-change";
+
+/** The sentence the desk shows before it lets a live change through. */
+export const LIVE_STORY_CHANGE_SENTENCE =
+  "This story is live. Your change will show on the paper.";
+
+export type LiveStoryChangeInput = {
+  articleId?: number;
+  articleSlug?: string;
+  dek?: string;
+  topic?: string;
+  body?: string;
+  modelChoice?: EffectiveProviderChoice;
+  modelEffort?: ModelEffort | null;
+  override?: string[];
+};
+
+export type LiveStoryChangeResult =
+  | { ok: true; changed: string[] }
+  | { ok: false; error: string }
+  | OverrideWarning;
+
+/** Read the string warning keys carried by an override retry. */
+export function cleanOverrideKeys(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return raw.filter((key): key is string => typeof key === "string");
+}
+
+/** Read the fields for a live-story edit or review. */
+export function liveStoryChangeInput(raw: unknown): LiveStoryChangeInput {
+  const o = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
+  const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+  const id = Number(o.articleId);
+  return {
+    articleId: Number.isFinite(id) && id > 0 ? id : undefined,
+    articleSlug: text(o.articleSlug),
+    dek: text(o.dek),
+    topic: text(o.topic),
+    body: text(o.body),
+    modelChoice: storyModelChoice(o.modelChoice),
+    modelEffort: modelEffort(storyModelChoice(o.modelChoice), o.modelEffort),
+    override: cleanOverrideKeys(o.override),
+  };
+}
+
+/** The change-log line a live edit prints, naming what moved and that a person did it. */
+export function liveChangeNotice(changes: { dek?: string; topic?: string; body?: string }): string {
+  const what = [
+    changes.dek !== undefined ? "the summary" : null,
+    changes.topic !== undefined ? "the section" : null,
+    changes.body !== undefined ? "the story text" : null,
+  ].filter((part): part is string => Boolean(part));
+
+  const recorded =
+    changes.body !== undefined ? " The story text it replaced is kept on the record." : "";
+  return `The paper changed ${what.join(", ")} on this story after it was published. The story's link is unchanged.${recorded}`;
+}
+
+export async function performChangePublishedStory(
+  context: { userId: string; newsroomId?: number },
+  input: LiveStoryChangeInput,
+): Promise<LiveStoryChangeResult> {
+  const room = owned(context);
+  const articleId = Number(input.articleId ?? 0);
+  const slug = String(input.articleSlug ?? "").trim();
+  if (!articleId && !slug) return { ok: false, error: "Which story is this change for?" };
+
+  const sql = await getSql();
+  type LiveArticle = {
+    id: number;
+    dek: string;
+    body: string;
+    topic: string;
+    status: string;
+    lead_id: number | null;
+  };
+  const rows = articleId
+    ? await sql<LiveArticle>`
+        select id, dek, body, topic, status, lead_id from articles
+        where id = ${articleId} and newsroom_id = ${room} limit 1
+      `
+    : await sql<LiveArticle>`
+        select id, dek, body, topic, status, lead_id from articles
+        where slug = ${slug} and newsroom_id = ${room} limit 1
+      `;
+  const article = rows[0];
+  if (!article) return { ok: false, error: "That story is not one of this paper's stories." };
+  if (article.status !== "published") {
+    return {
+      ok: false,
+      error: "That story is not on the paper, so there is nothing live to change.",
+    };
+  }
+  /*
+    A model is already rewriting this row. Two writers on one story is how a
+    live edit loses to whichever write landed first, so the change waits for
+    the job -- the same reason the workbench's own draft refuses one.
+  */
+  if (article.lead_id != null) {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema(sql);
+    const running = await sql<{ id: number }>`
+      select id from desk_jobs
+      where newsroom_id = ${room} and kind = 'draft' and subject_id = ${article.lead_id}
+        and status = 'running' limit 1
+    `;
+    if (running[0]) {
+      return {
+        ok: false,
+        error:
+          "A job is already running for this story. Wait for it to finish, then change the paper.",
+      };
+    }
+  }
+
+  const changes: { dek?: string; topic?: string; body?: string } = {};
+  if (input.dek !== undefined) {
+    const dek = String(input.dek).trim();
+    if (dek !== String(article.dek ?? "").trim()) changes.dek = dek;
+  }
+  if (input.topic !== undefined) {
+    const topic = String(input.topic).trim().slice(0, LIMITS.topic);
+    if (!topic) return { ok: false, error: "Pick a section for this story." };
+    const { resolveSectionKey } = await import("./sections.server.ts");
+    let resolved: string;
+    try {
+      resolved = await resolveSectionKey(room, topic);
+    } catch {
+      return {
+        ok: false,
+        error:
+          "That is not a section this paper files under. Pick one of the paper's own sections.",
+      };
+    }
+    if (resolved !== String(article.topic ?? "").trim()) changes.topic = resolved;
+  }
+  if (input.body !== undefined) {
+    const body = String(input.body).trim();
+    if (!body) {
+      return {
+        ok: false,
+        error: "The story text cannot be blank. Put the corrected story in the box, then save.",
+      };
+    }
+    if (body !== String(article.body ?? "").trim()) changes.body = body;
+  }
+
+  const kinds = Object.keys(changes);
+  // A second press of the same text is not a second decision: it changes
+  // nothing, writes nothing, and does not warn.
+  if (kinds.length === 0) return { ok: true, changed: [] };
+
+  const warning = checkOverride(input, LIVE_STORY_CHANGE_KEY, LIVE_STORY_CHANGE_SENTENCE);
+  if (warning) return warning;
+
+  const notice = liveChangeNotice(changes);
+  try {
+    await withTransaction(async (sql) => {
+      /*
+        The note first, so the history row can carry the correction's id: the
+        two halves of one act are joined, exactly as `performAddCorrection`'s
+        `alsoFixBody` joins them.
+      */
+      const [correction] = await sql<{ id: number }>`
+        insert into corrections (user_id, newsroom_id, article_id, body)
+        values (${context.userId}, ${room}, ${article.id}, ${notice})
+        returning id
+      `;
+      // `!== undefined`, not truthiness: a cleared summary is `""`, which is a
+      // real change and must reach the UPDATE.
+      if (changes.body !== undefined) {
+        const locked = await sql<{ body: string }>`
+          select body from articles
+          where id = ${article.id} and newsroom_id = ${room} for update
+        `;
+        const beforeBody = locked[0]?.body ?? article.body;
+        await sql`update articles set body = ${changes.body} where id = ${article.id} and newsroom_id = ${room}`;
+        await sql`
+          insert into article_body_history
+            (newsroom_id, article_id, old_body, new_body, changed_by, correction_id)
+          values (
+            ${room}, ${article.id}, ${beforeBody}, ${changes.body},
+            ${context.userId}, ${correction.id}
+          )
+        `;
+      }
+      if (changes.dek !== undefined) {
+        await sql`update articles set dek = ${changes.dek} where id = ${article.id} and newsroom_id = ${room}`;
+      }
+      if (changes.topic !== undefined) {
+        await sql`update articles set topic = ${changes.topic} where id = ${article.id} and newsroom_id = ${room}`;
+      }
+    });
+  } catch (err) {
+    /*
+      A story under a legal removal is refused by the database trigger on
+      `articles`/`corrections` (0047). That is the correct refusal; this only
+      turns its exception into the sentence the desk shows.
+    */
+    const message = err instanceof Error ? err.message : "";
+    if (/legal removal|legally removed/i.test(message)) {
+      return {
+        ok: false,
+        error: "This story is covered by a legal removal and cannot be changed.",
+      };
+    }
+    throw err;
+  }
+
+  /*
+    Audited after the transaction, where the headline path's audit sits: `audit`
+    writes on the pooled connection, and on PGlite there is one connection, so
+    writing from inside the transaction deadlocks it.
+  */
+  await audit(
+    context.userId,
+    "edit_published_story",
+    `Article ${article.id}: ${kinds.join(", ")} changed after publishing`,
+    room,
+    { kind: "articles", id: article.id },
+  );
+  await auditOverrides({ userId: context.userId, newsroomId: room }, [LIVE_STORY_CHANGE_KEY], {
+    kind: "articles",
+    id: article.id,
+  });
+  return { ok: true, changed: kinds };
+}
+
+export const changePublishedStory = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((raw: unknown) => liveStoryChangeInput(raw))
+  .handler(async ({ context, data }) => performChangePublishedStory(context, data));
+
+/** Re-check the printed text against retained captures; never fetch new URLs. */
+export const LIVE_STORY_REVERIFY_KEY = "published-live-reverify";
+export const LIVE_STORY_REVERIFY_SENTENCE = LIVE_STORY_CHANGE_SENTENCE;
+
+async function liveWorkArticle(context: { newsroomId?: number }, input: LiveStoryChangeInput) {
+  const sql = await getSql();
+  const rows = await sql.query<{
+    id: number;
+    body: string;
+    status: string;
+    lead_id: number | null;
+    source_urls: string;
+  }>(
+    "select id,body,status,lead_id,source_urls from articles where newsroom_id=$1 and (id=$2 or slug=$3) limit 1",
+    [owned(context), input.articleId ?? 0, input.articleSlug ?? ""],
+  );
+  const article = rows[0];
+  if (!article)
+    return { ok: false as const, error: "That story is not one of this paper's stories." };
+  if (article.status !== "published")
+    return { ok: false as const, error: "That story is not on the paper." };
+  if (!article.body.trim())
+    return { ok: false as const, error: "The story on the paper has no text." };
+  if (article.lead_id != null) {
+    const { ensureJobsSchema } = await import("./jobs.ts");
+    await ensureJobsSchema(sql);
+    const jobs = await sql.query(
+      "select id from desk_jobs where newsroom_id=$1 and subject_id=$2 and status='running' and kind='draft' limit 1",
+      [owned(context), article.lead_id],
+    );
+    if (jobs.length)
+      return {
+        ok: false as const,
+        error: "A job is already running for this story. Wait for it to finish.",
+      };
+  }
+  const removals = await sql.query(
+    "select row_id from legal_removal_targets where newsroom_id=$1 and table_name='articles' and row_id=$2 limit 1",
+    [owned(context), article.id],
+  );
+  if (removals.length)
+    return {
+      ok: false as const,
+      error: "This story is covered by a legal removal and cannot be changed.",
+    };
+  return { ok: true as const, article };
+}
+
+async function liveChatOptions(context: { newsroomId?: number }, input: LiveStoryChangeInput) {
+  const choice = input.modelChoice ?? "auto";
+  const localModel =
+    choice === "local-model"
+      ? (
+          await (
+            await import("./provider-settings.ts")
+          ).resolveLocalModelChoice(owned(context), "story")
+        ).override
+      : undefined;
+  return {
+    newsroomId: owned(context),
+    choice,
+    reasoningEffort: input.modelEffort ?? null,
+    ...(localModel ? { localModel } : {}),
+  };
+}
+
+export async function performReverifyPublishedStory(
+  context: { userId: string; newsroomId?: number },
+  input: LiveStoryChangeInput,
+  deps: { chat?: typeof grokChat } = {},
+) {
+  const loaded = await liveWorkArticle(context, input);
+  if (!loaded.ok) return loaded;
+  const warning = checkOverride(input, LIVE_STORY_REVERIFY_KEY, LIVE_STORY_REVERIFY_SENTENCE);
+  if (warning) return warning;
+  const { article } = loaded;
+  const sql = await getSql();
+  const urls = parseUrlList(article.source_urls);
+  const sources = await sql.query<{ url: string; text: string }>(
+    "select distinct on (url) url,full_text as text from artifact_versions where newsroom_id=$1 and url=any($2::text[]) order by url,captured_at desc,id desc",
+    [owned(context), urls],
+  );
+  const { judgeEvidenceClaims } = await import("./evidence-ai.ts");
+  const claims = article.body
+    .split(/(?<=[.!?])\s+/)
+    .filter((text) => text.trim())
+    .map((text) => ({ text, urls }));
+  const options = await liveChatOptions(context, input);
+  const rows = await judgeEvidenceClaims(claims, sources, (prompt) =>
+    (deps.chat ?? grokChat)(
+      "Check claims only against the supplied retained evidence.",
+      prompt,
+      4000,
+      options,
+    ),
+  );
+  const review = { checkedText: article.body, rows };
+  await audit(context.userId, "reverify_published_story", JSON.stringify(review), owned(context), {
+    kind: "articles",
+    id: article.id,
+  });
+  await auditOverrides(
+    { userId: context.userId, newsroomId: owned(context) },
+    [LIVE_STORY_REVERIFY_KEY],
+    { kind: "articles", id: article.id },
+  );
+  return { ok: true as const, review };
+}
+
+export const reverifyPublishedStory = createServerFn({method: "POST"}).middleware([deskMiddleware])
+  .validator((raw: unknown) => liveStoryChangeInput(raw))
+  .handler(({context, data}) => performReverifyPublishedStory(context, data));
+
+/** Rewrite a live story from its saved ledger and captures, then record the public update. */
+export async function performRewritePublishedStory(
+  context: { userId: string; newsroomId?: number },
+  input: LiveStoryChangeInput,
+  deps: { chat?: typeof grokChat } = {},
+) {
+  const loaded = await liveWorkArticle(context, input);
+  if (!loaded.ok) return loaded;
+  const warning = checkOverride(input, LIVE_STORY_CHANGE_KEY, LIVE_STORY_CHANGE_SENTENCE);
+  if (warning) return warning;
+  const { article } = loaded;
+  const sql = await getSql();
+  const { loadStoredLedgerForRewrite } = await import("./meeting-ledger.server.ts");
+  const ledger =
+    article.lead_id == null
+      ? []
+      : await loadStoredLedgerForRewrite(sql, {
+          newsroomId: owned(context),
+          leadId: article.lead_id,
+        });
+  const sources = await sql.query<{ url: string; full_text: string }>(
+    "select distinct on (url) url,full_text from artifact_versions where newsroom_id=$1 and url=any($2::text[]) order by url,captured_at desc,id desc",
+    [owned(context), parseUrlList(article.source_urls)],
+  );
+  const reply = await (deps.chat ?? grokChat)(
+    "Rewrite the story using only its supplied text, saved meeting ledger and retained captures. Preserve uncertainty and the editor’s ledger decisions. Return JSON {body: string}. Do not invent facts or sources.",
+    JSON.stringify({ body: article.body, ledger, sources }),
+    8000,
+    await liveChatOptions(context, input),
+  );
+  if (!reply.ok)
+    return {
+      ok: false as const,
+      error: reply.error || "The rewrite could not finish. The live story is unchanged.",
+    };
+  const parsed = parseJsonBlock(reply.text ?? "") as { body?: unknown } | null;
+  if (!parsed || typeof parsed.body !== "string" || !parsed.body.trim())
+    return {
+      ok: false as const,
+      error: "The rewrite returned no story text. The live story is unchanged.",
+    };
+  const current = await liveWorkArticle(context, input);
+  if (!current.ok) return current;
+  if (current.article.body !== article.body)
+    return {
+      ok: false as const,
+      error: "The live story changed during the rewrite. Reload it before trying again.",
+    };
+  const result = await performChangePublishedStory(context, { ...input, body: parsed.body });
+  if (result.ok && result.changed.length === 0) {
+    await auditOverrides({userId: context.userId, newsroomId: owned(context)}, [LIVE_STORY_CHANGE_KEY], {kind: "articles", id: article.id});
+  }
+  return result;
+}
+
+export const rewritePublishedStory = createServerFn({method: "POST"}).middleware([deskMiddleware])
+  .validator((raw: unknown) => liveStoryChangeInput(raw))
+  .handler(({context, data}) => performRewritePublishedStory(context, data));
+
 /**
  * Three headlines the story model would write, offered to the editor.
  *
@@ -6673,12 +7102,26 @@ export const resolveMeetingArticleReview = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
-export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
-  .middleware([deskMiddleware])
-  .validator((input: unknown) => draftMeetingReviewInput.parse(input))
-  .handler(async ({ context, data }) => {
-    try {
-      const result = await withTransaction((sql) => recordDraftTranscriptRevisionReview(sql, {
+export async function performDraftMeetingReview(
+  context: { userId: string; newsroomId?: number },
+  data: ReturnType<typeof draftMeetingReviewInput.parse>,
+  deps: { record?: typeof recordDraftTranscriptRevisionReview } = {},
+) {
+  const sql = await getSql();
+  const articles = await sql.query<{ id: number }>(
+    "select id from articles where newsroom_id=$1 and lead_id=$2 and status='published' limit 1",
+    [owned(context), data.leadId],
+  );
+  const article = articles[0];
+  if (article) {
+    const loaded = await liveWorkArticle(context, { articleId: article.id });
+    if (!loaded.ok) return loaded;
+    const warning = checkOverride(data, LIVE_STORY_REVERIFY_KEY, LIVE_STORY_CHANGE_SENTENCE);
+    if (warning) return warning;
+  }
+  try {
+    const result = await withTransaction((sql) =>
+      (deps.record ?? recordDraftTranscriptRevisionReview)(sql, {
         newsroomId: owned(context),
         leadId: data.leadId,
         draftId: data.draftId,
@@ -6687,15 +7130,33 @@ export const resolveDraftMeetingReview = createServerFn({ method: "POST" })
         acceptedArtifactId: data.acceptedArtifactId,
         confirmedSegmentIndexes: data.confirmedSegmentIndexes,
         note: data.note,
-      }));
-      await audit(context.userId, "review", `Meeting draft ${data.draftId} transcript evidence`, owned(context), {
-        kind: "drafts", id: data.draftId,
-      });
-      return { ok: true as const, ...result };
-    } catch (cause) {
-      return { ok: false as const, error: cause instanceof Error ? cause.message : "Could not save the citation review." };
-    }
-  });
+      }),
+    );
+    await audit(
+      context.userId,
+      "review",
+      `Meeting draft ${data.draftId} transcript evidence`,
+      owned(context),
+      { kind: "drafts", id: data.draftId },
+    );
+    if (article)
+      await auditOverrides(
+        { userId: context.userId, newsroomId: owned(context) },
+        [LIVE_STORY_REVERIFY_KEY],
+        { kind: "articles", id: article.id },
+      );
+    return { ok: true as const, ...result };
+  } catch (cause) {
+    return {
+      ok: false as const,
+      error: cause instanceof Error ? cause.message : "Could not save the citation review.",
+    };
+  }
+}
+
+export const resolveDraftMeetingReview = createServerFn({method: "POST"}).middleware([deskMiddleware])
+  .validator((input: unknown) => draftMeetingReviewInput.parse(input))
+  .handler(({context, data}) => performDraftMeetingReview(context, data));
 
 export const listDraftHistory = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { ModelPicker } from "@/components/model-picker";
 import { addCorrection, suggestCorrectionWording } from "@/lib/news/desk";
@@ -6,35 +6,27 @@ import { correctionTemplate } from "@/lib/news/correction-wording";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import { formatShortDate } from "@/lib/paper";
 
-/**
- * The correction dialog, drawn as `dialog-14-correction.png` (the patched
- * capture; v3.1-patch supersedes v3.1 for this one screen only).
- *
- * Unit BH2 decision 4. It is the same act the inline form on Published already
- * performs, in the design's dialog: `addCorrection` posts, `suggestCorrectionWording`
- * offers a note, and the meeting/transcript review travels as `meetingReviewId`
- * exactly as `corrReviewFor` sends it there. "Leave the story text as is" is
- * the default, as it is today.
- *
- * TWO THINGS THIS ADDS TO THE DRAWING, both to keep behavior the drawing did
- * not know about:
- *
- *   - a "The correction" box. The drawing builds the note from the two lines
- *     and previews it, but the note is the thing that prints, permanently, under
- *     the paper's name -- so it stays editable, which is what the inline form
- *     gives the editor today ("Read it, change any of it, then post it").
- *     Untouched, it is the desk's own sentence, from the pure
- *     `correctionTemplate` -- no model, no network.
- *   - the "Also fix the story text" box of printed text, which appears only
- *     when that choice is on. Same as the inline form: seeded from the story's
- *     own body so the editor edits the words that printed.
- *
- * "Post as a plain note" is the drawing's own label for the primary press and is
- * kept verbatim.
- */
+
 
 const STORY_TEXT_AS_IS = { key: "as-is", label: "Leave the story text as is", note: "Default. Only the correction note is posted." };
 const STORY_TEXT_FIX = { key: "also-fix", label: "Also fix the story text", note: "Changes the published text to match" };
+
+/**
+ * One core warning, as `override.ts` answers a first press:
+ * `{ ok: false, warning: { key, sentence } }`. The sentence is shown, and
+ * pressing again sends `override: [key]` -- the same request, now with the
+ * editor's answer attached.
+ */
+type CorrectionWarning = { key: string; sentence: string };
+
+
+function warningOf(res: unknown): CorrectionWarning | null {
+  if (!res || typeof res !== "object" || !("warning" in res)) return null;
+  const raw = (res as { warning?: unknown }).warning;
+  if (!raw || typeof raw !== "object") return null;
+  const { key, sentence } = raw as { key?: unknown; sentence?: unknown };
+  return typeof key === "string" && typeof sentence === "string" ? { key, sentence } : null;
+}
 
 export type CorrectionDialogProps = {
   /** The article this correction belongs to, by slug -- `addCorrection` takes the slug. */
@@ -76,14 +68,35 @@ export function CorrectionDialog({
   const [storyBody, setStoryBody] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [warning, setWarning] = useState<CorrectionWarning | null>(null);
+  const [overrideKeys, setOverrideKeys] = useState<string[]>([]);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
-  const [wording, setWording] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null);
+  const [wording, setWording] = useState<{ kind: "working" | "ok" | "err"; text: string } | null>(null,
+  );
+
+
+  function resetOverride() {
+    setWarning(null);
+    setOverrideKeys([]);
+  }
+
+  useEffect(() => {
+    // Reopening starts clean, even if the component stayed mounted through a
+    // dismissed dialog. Written inline so the hook's dependency is exactly the
+    // `open` flag and not a function that changes every render.
+    if (open) {
+      setWarning(null);
+      setOverrideKeys([]);
+    }
+  }, [open]);
 
   const deskNote = correctionTemplate(wasWrong, isRight) ?? "";
   const effective = note ?? deskNote;
   const shortDate = formatDate ?? ((iso: string | Date | null | undefined) => formatShortDate(iso));
 
   function close() {
+    resetOverride();
+    setError("");
     onOpenChange(false);
   }
 
@@ -126,6 +139,7 @@ export function CorrectionDialog({
           meetingReviewId: reviewId,
           alsoFixBody: fix,
           storyBody: fix ? (storyBody ?? articleBody) : undefined,
+          override: overrideKeys.length ? overrideKeys : undefined,
         },
       });
       if (!res || typeof res !== "object" || !("ok" in res)) {
@@ -133,6 +147,14 @@ export function CorrectionDialog({
         return;
       }
       if (!res.ok) {
+
+        const warned = warningOf(res);
+        if (warned) {
+          setError("");
+          setWarning(warned);
+          setOverrideKeys((keys) => (keys.includes(warned.key) ? keys : [...keys, warned.key]));
+          return;
+        }
         setError("error" in res ? String(res.error) : "Could not post that correction.");
         return;
       }
@@ -142,6 +164,7 @@ export function CorrectionDialog({
       setFix(false);
       setStoryBody(null);
       setWording(null);
+      resetOverride();
       await onPosted?.();
       onOpenChange(false);
     } catch {
@@ -162,9 +185,9 @@ export function CorrectionDialog({
       altLabel="Suggest wording (AI)"
       onAlt={() => void suggest()}
       altDisabled={busy || !wasWrong.trim() || !isRight.trim()}
-      primaryLabel="Post as a plain note"
+      primaryLabel={warning ? "Post anyway" :"Post as a plain note"}
       onPrimary={() => void post()}
-      primaryDisabled={busy || !effective.trim()}
+      primaryDisabled={busy}
       primaryTone="solid"
     >
       <label className="astra-field">
@@ -174,7 +197,9 @@ export function CorrectionDialog({
           value={wasWrong}
           maxLength={400}
           disabled={busy}
-          onChange={(e) => setWasWrong(e.target.value)}
+          onChange={(e) => {
+            resetOverride(); setWasWrong(e.target.value);
+          }}
           placeholder="e.g. The story said Sept. 22; the incident was Sept. 21."
         />
       </label>
@@ -185,7 +210,9 @@ export function CorrectionDialog({
           value={isRight}
           maxLength={400}
           disabled={busy}
-          onChange={(e) => setIsRight(e.target.value)}
+          onChange={(e) => {
+            resetOverride(); setIsRight(e.target.value);
+          }}
           placeholder="What the story should have said"
         />
       </label>
@@ -193,7 +220,9 @@ export function CorrectionDialog({
         scope="story"
         label="Correction wording model"
         value={modelChoice}
-        onChange={setModelChoice}
+        onChange={(choice) => {
+          resetOverride();setModelChoice(choice);
+        }}
         disabled={busy}
       />
       <div className="astra-field">
@@ -205,13 +234,17 @@ export function CorrectionDialog({
             label={STORY_TEXT_AS_IS.label}
             note={STORY_TEXT_AS_IS.note}
             selected={!fix}
-            onSelect={() => setFix(false)}
+            onSelect={() => {
+              resetOverride(); setFix(false);
+            }}
           />
           <ChoiceCard
             label={STORY_TEXT_FIX.label}
             note={STORY_TEXT_FIX.note}
             selected={fix}
-            onSelect={() => setFix(true)}
+            onSelect={() => {
+              resetOverride(); setFix(true);
+            }}
           />
         </div>
       </div>
@@ -222,7 +255,9 @@ export function CorrectionDialog({
             rows={8}
             value={storyBody ?? articleBody}
             disabled={busy}
-            onChange={(e) => setStoryBody(e.target.value)}
+            onChange={(e) => {
+              resetOverride(); setStoryBody(e.target.value);
+            }}
           />
         </label>
       ) : null}
@@ -243,7 +278,9 @@ export function CorrectionDialog({
           rows={4}
           value={effective}
           disabled={busy}
-          onChange={(e) => setNote(e.target.value)}
+          onChange={(e) => {
+            resetOverride(); setNote(e.target.value);
+          }}
           placeholder="What was wrong, and what is right."
         />
       </label>
@@ -262,6 +299,11 @@ export function CorrectionDialog({
           you press Post.
         </p>
       </div>
+      {warning ? (
+        <p className="astra-modal-alert" role="alert">
+          {warning.sentence}
+        </p>
+      ) : null}
       {error ? (
         <p className="astra-modal-alert" role="alert">
           {error}
