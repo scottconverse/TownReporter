@@ -550,7 +550,7 @@ async function theScanHistoryListsTheRun() {
   // Substring, never exact: the row's meta line is "<date> · Scheduled daily
   // scan" and the exact string is that whole sentence.
   // Group 4: each run is one row; its details (including the origin) sit behind "Open".
-  await page.locator("details.r2-scan-details > summary").first().click();
+  await page.locator(".r2-scan-details details > summary").first().click();
   await page.getByText("Scheduled daily scan").waitFor({ timeout: 45_000 });
   step("the scan history lists the scheduled run the tick reserved");
 }
@@ -653,7 +653,7 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
   const latestRow = page.locator(".scan-hist .scan-row").first();
   await latestRow.waitFor({ state: "visible", timeout: 45_000 });
   // Group 4: one row per run (time, fetched, leads filed, status); the origin and the details sit behind "Open".
-  await latestRow.locator("details.r2-scan-details > summary").click();
+  await latestRow.locator(".r2-scan-details details > summary").click();
   const latestMeta = latestRow.locator(".r2-scan-report p").first();
   await latestMeta.waitFor({ state: "visible", timeout: 45_000 });
   const metaText = (await latestMeta.innerText()).replace(/\s+/g, " ").trim();

@@ -250,7 +250,7 @@ async function dailySettingsJourney(context, observePage) {
   // 0.6.64 (Unit AA) item 2: the daily-scan picker offers Automatic now -- a
   // scheduled run walks the writing ladder and the run record names the rung it
   // resolved to. It is the first option and the only addition; the BATCH picker
-  // further down this walk is `scope="forced"` and keeps its own list.
+  // further down this walk also offers Automatic before the explicit providers.
   const expected = [
     "Automatic",
     "Codex Astra",
@@ -569,6 +569,7 @@ async function draftBatchJourney() {
     line.split("—")[0].trim(),
   );
   const expected = [
+    "Automatic",
     "Codex Astra",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
