@@ -35,6 +35,7 @@ export type MeetingAwarenessResult = {
   failed: MeetingCaptureRecord[]; coverageLine: string; failures: string[]; archivePath: string | null;
 };
 export type MeetingAwarenessDeps = {
+  forceEnabled?: boolean;
   listChannelVideos?: typeof listChannelVideos;
   /** Injectable to test the metadata-only preflight without contacting YouTube. */
   captureReadiness?: (videoId: string) => Promise<YoutubeCaptureReadiness>;
@@ -379,7 +380,7 @@ async function runMeetingAwarenessUnlocked(sql: Sql, newsroomId: number, deps: M
   // N-1: the operator enable/disable control. Disabled returns the same no-op
   // result as an unconfigured newsroom, without deleting any configuration.
   const meetingSettings = await sql.query<{ enabled: boolean | null }>("select enabled from meeting_capture_settings where newsroom_id=$1", [newsroomId]);
-  if (meetingSettings.length && meetingSettings[0]!.enabled === false) return EMPTY_RESULT;
+  if (!deps.forceEnabled && meetingSettings.length && meetingSettings[0]!.enabled === false) return EMPTY_RESULT;
   const capRows = await sql.query<{ duration_cap_seconds: number | null; size_cap_bytes: number | null }>(
     "select duration_cap_seconds,size_cap_bytes from meeting_capture_settings where newsroom_id=$1", [newsroomId],
   );

@@ -1,3 +1,5 @@
+import { requestDraftReconciliationFn } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { editorStoryState, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -46,29 +48,7 @@ import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
-import {
-  draftLead,
-  fixDraftStyle,
-  getLead,
-  loadLeadReportingPackage,
-  getDraftHistoryItem,
-  listDraftHistory,
-  listPullJobs,
-  publishLead,
-  pullTodo,
-  resolveDraftMeetingReview,
-  acceptUnreviewedClaims,
-  continuePullJob,
-  overrideNamedOutlet,
-  resolveLeadDuplicate,
-  rewriteFromLedger,
-  saveDraft,
-  saveReportingNotes,
-  setLeadStatus,
-  stopPullJob,
-  suggestHeadlines,
-  updateArticleHeadline,
-} from "@/lib/news/desk";
+import { fixDraftStyle, getLead, loadLeadReportingPackage, getDraftHistoryItem, listDraftHistory, listPullJobs, publishLead, resolveDraftMeetingReview, acceptUnreviewedClaims, overrideNamedOutlet, saveDraft, saveReportingNotes, stopPullJob, suggestHeadlines, updateArticleHeadline } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { failureSummary } from "@/lib/news/pull-outcome";
 import { explainPairMatch } from "@/lib/news/lead-match";
@@ -156,16 +136,7 @@ import { jobProgressView } from "@/lib/news/job-progress";
 */
 import { ReportingPackagePanel } from "@/components/reporting-package-panel";
 import { ReportThisLeadControl } from "@/components/report-this-lead";
-import {
-  assessCheckedDraftResult,
-  assessRefreshedCheckedDraft,
-  draftFieldsMatch,
-  getCheckedDraftResultFn,
-  getDraftReconciliationStatusFn,
-  requestDraftReconciliationFn,
-  type CheckedDraftResult,
-  type EditableDraftFields,
-} from "@/lib/news/draft-reconcile-actions";
+import { assessCheckedDraftResult, assessRefreshedCheckedDraft, draftFieldsMatch, getCheckedDraftResultFn, getDraftReconciliationStatusFn, type CheckedDraftResult, type EditableDraftFields } from "@/lib/news/draft-reconcile-actions";
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
@@ -3093,18 +3064,30 @@ function StoryPage() {
               with the way back. After a reopen it stays, saying the kill was
               undone, because a record that vanishes hides what happened.
             */
+            <>
             <KilledLeadRecord
               lead={leadForRecord}
               reopened={!locked}
               onReopen={locked ? reopenThisLead : undefined}
               formatDate={formatShortDate}
             />
+            {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton> : null}
+            </>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
               No draft yet. Draft with AI writes a first pass from the lead and its sources; you
               edit, then publish.
             </p>
           )}
+      {locked && data.draft ? <div>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
+      </div> : null}
+      {waiting ? <section className="astra-model-research">
+        <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
+        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} compact />
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
+      </section> : null}
       <div className="work-bar astra-story-actions">
         {/*
           THE DRAWN ACTION ROW (unit CW).

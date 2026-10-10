@@ -534,9 +534,9 @@ describe("daily scan rotation plan", () => {
     assert.match(plan.note, /1 quiet source/);
   });
 
-  it("clamps the budget to the schema's cap and says so plainly when the pool is empty", () => {
+  it("uses the saved editor budget and says so plainly when the pool is empty", () => {
     const plan = planDailySourceRotation({ facts: [], selectedSourceIds: [], cap: 99, nowMs: NOW });
-    assert.equal(plan.budget, 12);
+    assert.equal(plan.budget, 99);
     assert.equal(plan.sourceIds.length, 0);
     assert.equal(dailyRotationNote({
       poolSize: 0,

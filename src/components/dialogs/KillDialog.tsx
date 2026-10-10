@@ -1,7 +1,8 @@
+import { setLeadStatus } from "@/components/scoped-actions";
 import { useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { dialogPressProps } from "@/lib/news/dialog-press";
-import { setLeadStatus } from "@/lib/news/desk";
+
 
 /**
  * The Kill dialog, drawn as `dialog-09-kill.png`.

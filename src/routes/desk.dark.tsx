@@ -1,3 +1,4 @@
+import { challengeInvestigation, retryDarkRound } from "@/components/scoped-actions";
 import type { ReactNode } from "react";
 import { darkScreenData, darkScreenText, darkStoredDates } from "@/lib/news/dark-screen-copy";
 import { newestTouchedFile, fullFileQuestion } from "@/lib/news/dark-rail";
@@ -6,30 +7,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Busy, DeskShell, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
+import { fileRedditTip, getInvestigation, getArtifact, getArtifactOcrJob, listInvestigations, listWorthALook, parkInvestigation, queuePacket, closeInvestigation, queueArtifactOcr, reopenParkedInvestigation, getTipSubreddit, investigationActivity, type InvestigationQueuePacket, type InvestigationRow } from "@/lib/news/dark";
 import {
-  continueInvestigation,
-  challengeInvestigation,
-  fileRedditTip,
-  getInvestigation,
-  getArtifact,
-  getArtifactOcrJob,
-  listInvestigations,
-  listWorthALook,
-  openDarkInvestigation,
-  parkInvestigation,
-  queueInvestigation,
-  queuePacket,
-  closeInvestigation,
-  queueArtifactOcr,
   refreshBrief,
-  reopenParkedInvestigation,
-  retryDarkRound,
+  continueInvestigation,
+  openDarkInvestigation,
+  queueInvestigation,
   scanTipSubreddit,
-  getTipSubreddit,
-  investigationActivity,
-  type InvestigationQueuePacket,
-  type InvestigationRow,
-} from "@/lib/news/dark";
+} from "@/components/scoped-actions";
 import { cancelStoryJob } from "@/lib/news/job-progress";
 import type { JobProgressView } from "@/lib/news/job-progress";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -66,7 +51,7 @@ import {
   worthItemOnDeskReason,
 } from "@/lib/news/desk-copy";
 
-type RedditScanResult = Awaited<ReturnType<typeof scanTipSubreddit>>;
+type RedditScanResult = Extract<Awaited<ReturnType<typeof scanTipSubreddit>>, { ok: true }>;
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
@@ -88,7 +73,8 @@ import { DarkFileDialog } from "@/components/dialogs/editor-dialogs";
 import { PageWatchPanel } from "@/components/page-watch-panel";
 import { Dialog } from "@/components/dialog";
 import { FollowUpDialog, type FollowUpDialogInput } from "@/components/follow-up-dialog";
-import { createAiFollowUp, listFollowUpStoryOptions } from "@/lib/news/desk";
+import { listFollowUpStoryOptions } from "@/lib/news/desk";
+import { createAiFollowUp } from "@/components/scoped-actions";
 import { checkPageWatch, createPageWatch } from "@/lib/news/page-watch-actions";
 import {
   darkModelChoice,
@@ -1953,7 +1939,7 @@ function InvestigationWorkspace({
         onChange={onModelChoice}
         effort={modelEffort}
         onEffortChange={onModelEffort}
-        disabled={digging || keepDisabled}
+        disabled={!inv}
         compact
       />
 
@@ -2145,6 +2131,7 @@ function InvestigationWorkspace({
           <InkButton tone="ghost" disabled={keepDisabled || inv?.status === "closed"} pending={digging} pendingLabel="Reading…" onClick={onKeepDigging}>
             Keep investigating
           </InkButton>
+          {digging && inv ? <InkButton tone="ghost" onClick={onKeepDigging}>Use selected model</InkButton> : null}
           <InkButton tone="solid" disabled={keepDisabled || createFileFollowUp.isPending} onClick={() => { setFollowUpNotice(""); setFollowUpOpen(true); }}>
             Start an AI follow-up
           </InkButton>

@@ -89,6 +89,7 @@ function firstSentence(text: string): string {
 export function parseWriteStoryInput(
   rawText: string,
   sections?: readonly TopicSection[],
+  allowShort = false,
 ): WriteStoryParseResult {
   const text = String(rawText ?? "");
   const found = text.match(URL_RE) ?? [];
@@ -113,7 +114,7 @@ export function parseWriteStoryInput(
   }
 
   headline = headline.trim();
-  if (headline.length < 8) {
+  if (!headline.trim() || (!allowShort && headline.length < 8)) {
     return {
       ok: false,
       error: "Paste a link, a bit of text, or the idea — there's not enough here to file yet.",

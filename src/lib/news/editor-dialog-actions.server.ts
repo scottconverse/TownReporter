@@ -1,3 +1,6 @@
+import { editorWarning } from "./editor-override.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
+import { checkRate } from "./ops.ts";
 /**
  * The server half of the editor's new dialogs (Unit BK).
  *
@@ -162,7 +165,7 @@ export type AddLeadResult =
       /** A sentence the dialog shows in the warning style. Never a silent no-op. */
       notice?: string | null;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warning?: { key: string; sentence: string } };
 
 /**
  * "Add a lead": file it, then do whatever "Then" asked for.
@@ -191,6 +194,7 @@ export async function performAddLead(
   context: EditorDialogContext,
   data: {
     paste: string;
+    override?: string[];
     why?: string;
     then: "score" | "draft" | "as-is";
     modelChoice?: string;
@@ -199,7 +203,7 @@ export async function performAddLead(
   deps: EditorDialogDeps,
 ): Promise<AddLeadResult> {
   const paste = data.paste.trim().slice(0, 20_000);
-  if (paste.length < 8) return { ok: false as const, error: "Give the desk a link or a tip." };
+  if (!paste.length) return { ok: false as const, error: "Give the desk a link or a tip." };
 
   const firstLine = paste.split("\n")[0]?.replace(/\s+/g, " ").trim() ?? "";
   /*
@@ -218,7 +222,10 @@ export async function performAddLead(
   const headline = (derived.length >= 8 ? derived : isLink ? firstLine : firstLine || paste.slice(0, 120))
     .trim()
     .slice(0, 180);
-  if (headline.length < 8) return { ok: false as const, error: "Give the desk a link or a tip." };
+  if (headline.length < 8) {
+    const warning = await editorWarning(context, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId });
+    if (warning) return warning;
+  }
 
   const why = (data.why ?? "").trim().slice(0, 800);
   /*
@@ -228,6 +235,12 @@ export async function performAddLead(
     case and answers an empty array.
   */
   const urls = parseSourceLines(paste).map((row) => row.url);
+  if (data.then === "draft") {
+    const setup = await paperSetupWarning(context, data.override, "draft this story");
+    if (setup) return setup;
+    const rate = await checkRate(context.userId, "draft", context.newsroomId, data.override, { record: false });
+    if (rate) return rate;
+  }
   const filed = await deps.insertLead(
     { userId: context.userId, newsroomId: context.newsroomId },
     { headline, why, topic: "council", urls },
@@ -296,10 +309,11 @@ export async function performAddLead(
       {
         context: { userId: context.userId, newsroomId: context.newsroomId },
         leadId,
+        override: data.override,
         modelChoice: resolution.providerId as StoryModelChoice,
         modelEffort: resolution.effort,
       },
-      {},
+      { ratePreflight: true },
     )
     .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Could not start the draft." }));
   if (!started.ok) {

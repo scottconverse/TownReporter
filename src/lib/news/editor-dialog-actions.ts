@@ -63,6 +63,7 @@ export const addLead = createServerFn({ method: "POST" })
       { userId: context.userId, newsroomId: owned(context) },
       {
         paste: data.paste,
+        override: data.override,
         why: data.why,
         then: data.then,
         modelChoice: data.modelChoice,
