@@ -255,15 +255,8 @@ try {
     be able to pick. Scoped to the modal layer, which is where Radix portals the
     dialog (dialog.tsx:147) -- the desk behind it draws its own pickers.
   */
-  await page.waitForFunction(
-    () =>
-      Array.from(
-        document.querySelectorAll('.astra-modal-layer select[aria-label="Model"] option'),
-      ).some((option) => option.textContent.includes("Isolated API fixture")),
-    null,
-    { timeout: 30_000 },
-  );
-  const storyPicker = dialog.getByLabel("Model");
+  const storyPicker = dialog.getByLabel("Model", { exact: true });
+  await storyPicker.locator("option", { hasText: "Isolated API fixture" }).waitFor({ state: "attached", timeout: 30_000 });
   const storyCustomChoice = await storyPicker
     .locator("option", { hasText: "Isolated API fixture" })
     .getAttribute("value");
@@ -339,6 +332,7 @@ try {
     .getAttribute("value");
   assert.equal(dailyCustomChoice, storyCustomChoice);
   await dailyPicker.selectOption(dailyCustomChoice);
+  await dailyPanel.getByLabel(/^Read every day/).fill("0");
   await dailyPanel.getByRole("button", { name: "Save daily scan", exact: true }).click();
   await dailyPanel.getByText("Daily scan settings saved.").waitFor();
   await page.reload();
@@ -384,9 +378,10 @@ try {
     line.split("—")[0].trim(),
   );
   assert.deepEqual(batchNames, [
+    "Automatic",
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",

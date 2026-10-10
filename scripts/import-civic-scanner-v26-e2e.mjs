@@ -530,7 +530,7 @@ async function theHypothesisReachesTheDarkDesk() {
     its own empty box"), read through the control the design draws.
   */
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "+ Start a file", exact: true }).click();
+  await page.getByRole("button", { name: "+ Start a file", exact: true }).first().click();
   const after = page
     .getByRole("dialog", { name: "Start a Dark Desk file", exact: true })
     .getByLabel("The tip or starting point");

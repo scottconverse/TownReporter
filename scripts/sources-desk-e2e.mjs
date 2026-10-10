@@ -122,7 +122,7 @@ async function theScreenRenders() {
   // `AddSourcesDialog` -- one control and one dialog, which is what the drawing
   // draws. Its four tabs are the behaviors BJ2's temporary panel held; the walk
   // drives the first ("One link"), whose fields are Link / Name / What to watch
-  // for and whose primary press is "Add & run first check".
+  // for and whose primary press is "Add source".
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page
     .getByRole("heading", { name: "Add sources to watch", exact: true })
@@ -130,7 +130,7 @@ async function theScreenRenders() {
   await page.getByLabel("Link", { exact: true }).waitFor({ timeout: 30_000 });
   await page.getByLabel("Name", { exact: true }).waitFor({ timeout: 30_000 });
   await page
-    .getByRole("button", { name: "Add & run first check", exact: true })
+    .getByRole("button", { name: "Add source", exact: true })
     .waitFor({ timeout: 30_000 });
   step("+ Add a source opens the dialog with Link, Name and its primary press");
 
@@ -142,7 +142,7 @@ async function addingASourcePersists() {
   // The dialog is still open from the step above.
   await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill(sourceTitle);
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
 
   // The dialog reports what it did in its own sentence, and it says it twice:
   // once into the desk's always-mounted `#desk-announcer` live region, which is
@@ -152,7 +152,7 @@ async function addingASourcePersists() {
   // `p.note` elements carry different text and are filtered out here.)
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 30_000 });
   step("adding a source shows the dialog's own confirmation on the page");
 

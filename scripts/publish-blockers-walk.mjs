@@ -647,9 +647,13 @@ async function everyRowHasItsOwnPress() {
 
 /** 6. An empty list is said in words, and the button comes on. */
 async function nothingIsBlocking() {
-  const text = await page.locator("#publish-blockers").innerText();
-  assert.match(text, /Before you can publish/);
-  assert.match(text, /Nothing is blocking Publish\./);
+  // The clear state is now the publish bar; the blocker list only mounts for blocks.
+  assert.equal(await page.locator("#publish-blockers").count(), 0, "the cleared blocker panel is removed");
+  assert.equal(
+    (await page.locator("#astra-publish-bar .note").innerText()).trim(),
+    "Ready to publish.",
+    "the bar explicitly says the draft is ready",
+  );
   assert.equal(await page.locator("#publish-blockers li.astra-blocker").count(), 0);
   assert.equal(
     await page.locator("#publish-blockers .astra-blocker-act").count(),
@@ -662,7 +666,7 @@ async function nothingIsBlocking() {
     0,
     "and the bar has no reason left to give",
   );
-  step("the list says nothing is blocking and the button comes on");
+  step("the bar says Ready to publish, the blocker list is gone, and the button comes on");
 }
 
 /** 7. The story prints, which is what the three reasons were holding back. */

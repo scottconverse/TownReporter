@@ -171,3 +171,16 @@ test("filter counts overlap on purpose, and each one is what the filter shows", 
     );
   }
 });
+
+test("accepted claims keep the drafts chip Ready with the explicit acceptance reason", () => {
+  const story_readiness = { version: 1, state: "not-ready", openCount: 9, totalCount: 9, reason: "9 claims need review." };
+  const state = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });
+  assert.equal(state.label, "✓ Ready");
+  assert.equal(state.readiness?.reason, "You accepted 9 claims the AI could not confirm.");
+  for (const count of [0, 8]) {
+    const blocked = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 9, unreviewed_claims_accepted_count: count });
+    assert.equal(blocked.readiness?.state, "not-ready");
+  }
+  const running = deskDraftState({ ...quiet, story_readiness, job_status: "running", unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });
+  assert.equal(running.readiness?.state, "checking");
+});

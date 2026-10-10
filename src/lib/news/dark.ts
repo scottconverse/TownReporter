@@ -89,7 +89,6 @@ import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
 import { rankWorthItems, presentWorthItems, signalReviewItems, type WorthSeed } from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { ensureFollowUpsSchema, parseFinding, performListFollowUps } from "./follow-ups.ts";
-import { ensurePageWatchSchema } from "./page-watch.ts";
 import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
 import {
   buildInvestigationActivity,
@@ -1032,6 +1031,7 @@ export const listDarkPromises = createServerFn({ method: "GET" })
 export async function listInvestigationsFor(newsroomId: number) {
   await ensureDarkSchema();
   await ensureFollowUpsSchema();
+  const { ensurePageWatchSchema } = await import("./page-watch.ts");
   await ensurePageWatchSchema();
   const sql = await getSql();
   const rows = await sql<InvestigationRow>`
@@ -1510,7 +1510,8 @@ export const investigationActivity = createServerFn({ method: "GET" })
   .handler(async ({ context, data: id }) => {
     await ensureDarkSchema();
     await ensureInvestigateSchema();
-    await ensurePageWatchSchema();
+    const { ensurePageWatchSchema } = await import("./page-watch.ts");
+  await ensurePageWatchSchema();
     const sql = await getSql();
     const newsroomId = owned(context);
     const [captures, searches, findings, deadEnds, runs, followUps, watchedPages] = await Promise.all([

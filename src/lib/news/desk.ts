@@ -156,6 +156,7 @@ import {
 import {
   evidenceNeedsReview,
   evidenceReviewToken,
+  evidenceConfirmationMatches,
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
@@ -1185,9 +1186,9 @@ export const getLead = createServerFn({ method: "GET" })
     */
     const topicConfirmed =
       evidenceToken &&
-      notes.topicConfirmation?.token === topicConfirmationFingerprint(evidenceToken) &&
-      notes.topicConfirmation.topic === String(drafts[0]?.topic ?? "").trim()
-        ? notes.topicConfirmation.topic
+      evidenceConfirmationMatches(notes.topicConfirmation?.token, drafts[0]) &&
+      notes.topicConfirmation?.topic === String(drafts[0]?.topic ?? "").trim()
+        ? notes.topicConfirmation!.topic
         : null;
     /*
       HOW MANY claims an editor has already accepted for this exact draft
@@ -1206,8 +1207,8 @@ export const getLead = createServerFn({ method: "GET" })
     */
     const unreviewedClaimsAcceptedCount =
       evidenceToken &&
-      notes.unreviewedClaimsConfirmation?.token === topicConfirmationFingerprint(evidenceToken)
-        ? notes.unreviewedClaimsConfirmation.count
+      evidenceConfirmationMatches(notes.unreviewedClaimsConfirmation?.token, drafts[0])
+        ? notes.unreviewedClaimsConfirmation!.count
         : 0;
     /*
       The named-outlet check, run for display only -- performPublish decides.
@@ -4509,11 +4510,11 @@ const DESK_DRAFT_ROWS_SQL = `
     order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
   `;
 
-async function queryDraftRows(context: { newsroomId: number }) {
+export async function queryDraftRows(context: { newsroomId: number }) {
   const { ensureJobsSchema } = await import("./jobs.ts");
   await ensureJobsSchema();
   const sql = await getSql();
-  return sql.query<{
+  const rows = await sql.query<{
     id: number;
     lead_id: number;
     headline: string;
@@ -4544,6 +4545,21 @@ async function queryDraftRows(context: { newsroomId: number }) {
     names_checked_at: string | null;
     names_unresolved: number;
   }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
+  // Read accepted claims from the current evidence gate, just as the story page does.
+  const confirmations = await sql.query<{ lead_id: number; notes_json: string }>(
+    "select id as lead_id, notes_json from leads where newsroom_id=$1 and notes_json like '%unreviewedClaimsConfirmation%'",
+    [owned(context)],
+  );
+  const acceptedByLead = new Map(confirmations.map(row => [row.lead_id, parseNotes(row.notes_json).unreviewedClaimsConfirmation]));
+  return Promise.all(rows.map(async row => {
+    const acceptance = acceptedByLead.get(row.lead_id);
+    if (!acceptance) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
+    const [draft] = await sql.query<DraftRow>("select * from drafts where id=$1 and newsroom_id=$2", [row.id, owned(context)]);
+    const acceptedCount = draft && evidenceConfirmationMatches(acceptance.token, draft) ? acceptance.count : 0;
+    if (!acceptedCount) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
+    const openCount = await unreviewedClaimCount(owned(context), row.lead_id);
+    return { ...row, unreviewed_claims: openCount, unreviewed_claims_accepted_count: acceptedCount };
+  }));
 }
 
 /*
@@ -5975,7 +5991,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
   if (outstandingClaims > 0) {
     const acceptance = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation;
     const acceptedForThisDraft =
-      acceptance?.token === topicConfirmationFingerprint(evidenceReviewToken(row));
+      evidenceConfirmationMatches(acceptance?.token, row);
     const accepted = acceptedForThisDraft && (acceptance?.count ?? 0) >= outstandingClaims;
     if (!accepted) {
       const short = acceptedForThisDraft ? (acceptance?.count ?? 0) : 0;
@@ -6029,7 +6045,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     !confirmSection &&
     (!confirmedTopic ||
       confirmedTopic.topic !== draftTopic ||
-      confirmedTopic.token !== topicConfirmationFingerprint(evidenceReviewToken(row)))
+      !evidenceConfirmationMatches(confirmedTopic.token, row))
   ) {
     return {
       ok: false as const,

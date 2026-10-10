@@ -204,7 +204,7 @@ try {
     Run and the page watches the run it just created.
   */
   await page.goto(`${base}/desk/scan`, { waitUntil: "networkidle" });
-  await page.getByRole("heading", { level: 1, name: "Scan", exact: true }).waitFor({ timeout: 30_000 });
+  await page.getByRole("heading", { level: 1, name: "Scan history", exact: true }).waitFor({ timeout: 30_000 });
   step("opened the Scan desk with an open run in place");
 
   /*

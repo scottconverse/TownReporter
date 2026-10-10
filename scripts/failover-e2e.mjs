@@ -2,7 +2,7 @@
 /**
  * Automatic's ladder, walked end to end in a real browser (0.6.63 Unit Y2).
  *
- * WHAT THIS PROVED FOR THE OLD LADDER. Codex Terra used to be rung 1 and
+ * WHAT THIS PROVED FOR THE OLD LADDER. Codex Sol 6.1 (balanced) used to be rung 1 and
  * Claude Sonnet rung 2. An editor filed a lead, left the picker on Automatic,
  * clicked Draft with AI -- and the first provider's login lapsed mid-run. The
  * desk noticed, moved to the next rung without asking, and landed a draft
@@ -20,7 +20,7 @@
  *
  *   draft 1 -- rung 1's endpoint is DOWN (503 on every route). Automatic's
  *              preflight walks past it, records that rung 2 was skipped
- *              "nothing loaded in LM Studio", and pins Codex Terra BEFORE the job is enqueued. No
+ *              "nothing loaded in LM Studio", and pins Codex Sol 6.1 (balanced) BEFORE the job is enqueued. No
  *              hop happens mid-run: the receipt on the job row says requested
  *              "auto", actual "codex-balanced", names the skipped rung, and
  *              says nothing was switched at preflight time (preflightFailover
@@ -32,7 +32,7 @@
  *              research answer is prose, not JSON, twice (readableReplyOrRetry
  *              re-asks the same rung exactly once), and its write answer is a
  *              provider-shaped 429. The 429 is what hops: ONE rung forward, to
- *              Codex Terra, with the durable note on the finished job. The
+ *              Codex Sol 6.1 (balanced), with the durable note on the finished job. The
  *              prose answers are asserted from the fake's own request log
  *              (exactly two research calls) rather than from the finished
  *              draft, because an unreadable memo leaves `research` null and
@@ -45,7 +45,7 @@
  *              really skipped (model-runtime-receipt.ts:34). The hop itself
  *              rewrites `actualRuntime` to the destination and leaves
  *              `requestedRuntime` at "auto" (jobs.ts's `setJobModelRuntime`,
- *              the phase-less branch), so the finished row names Codex Terra as
+ *              the phase-less branch), so the finished row names Codex Sol 6.1 (balanced) as
  *              what ran while still saying Automatic was asked for. What a
  *              runtime hop does NOT record anywhere is the rung it passed over
  *              on the way (`planAutomaticFailover` returns only
@@ -109,7 +109,7 @@ const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
 // Rung 2's label is "Local model" since 0.6.69 (Unit AL item 4): it names no
 // model of its own, because it runs whatever LM Studio has loaded.
 const LOCAL_LABEL = "Local model";
-const TERRA_LABEL = "Codex Terra";
+const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
 const RUNG_ONE_QUOTA = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
 
 /**
@@ -587,7 +587,7 @@ async function main() {
         `${JSON.stringify(RUNG_ONE_QUOTA)} -- the durable note did not survive to Done.`,
     );
   }
-  step(`draft 2 hopped to Codex Terra with the durable note: "${RUNG_ONE_QUOTA}"`);
+  step(`draft 2 hopped to Codex Sol 6.1 (balanced) with the durable note: "${RUNG_ONE_QUOTA}"`);
 
   // The unreadable case is asserted from the fake's own log, not from the
   // draft: report.ts's research pass explicitly does NOT end the run on an
@@ -624,7 +624,7 @@ async function main() {
         `rung 3 wrote it: ${JSON.stringify(bodyText.slice(0, 300))}`,
     );
   }
-  step("the draft body on the page is Codex Terra's ladder text");
+  step("the draft body on the page is Codex Sol 6.1 (balanced)'s ladder text");
 
   await browser.close();
   stopFakes();

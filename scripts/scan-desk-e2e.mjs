@@ -201,14 +201,14 @@ async function addAcceptedSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("an accepted source is available without fetching it");
 }
@@ -220,14 +220,14 @@ async function addRoutineNoticeFixtureSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(routineNoticeFixtureUrl);
   await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("a resolvable routine-check fixture source is accepted without fetching it");
 }
@@ -250,12 +250,12 @@ async function dailySettingsJourney(context, observePage) {
   // 0.6.64 (Unit AA) item 2: the daily-scan picker offers Automatic now -- a
   // scheduled run walks the writing ladder and the run record names the rung it
   // resolved to. It is the first option and the only addition; the BATCH picker
-  // further down this walk is `scope="forced"` and keeps its own list.
+  // further down this walk also offers Automatic before the explicit providers.
   const expected = [
     "Automatic",
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",
@@ -299,19 +299,21 @@ async function dailySettingsJourney(context, observePage) {
   const freshPanel = page.locator("section", { has: page.getByRole("heading", { name: "Daily scan", exact: true }) });
   await freshPanel.getByText(/Accepted community sources \(1\)/).waitFor();
   await freshPanel.getByRole("checkbox", { name: /Daily settings source/ }).check();
-  const cap = freshPanel.getByLabel("Daily source limit");
+  const cap = freshPanel.getByLabel("Daily priority set");
   await cap.fill("13");
   if (!(await freshPanel.getByRole("button", { name: "Save daily scan" }).isDisabled())) {
     throw new Error("source cap above 12 did not disable Save");
   }
-  await freshPanel.getByText(/selected \/ 13 daily limit/).waitFor();
+  await expect(cap).toHaveValue("13");
+  await freshPanel.getByText(/^1 selected ·/).waitFor();
+  await expect(freshPanel.getByRole("checkbox", { name: /Daily settings source/ })).toBeChecked();
   step("source count and over-cap validation are visible without silently dropping a source");
 
   await cap.fill("1");
   const time = freshPanel.getByLabel("Local time");
   await time.fill("");
   await freshPanel.getByRole("button", { name: "Save daily scan" }).click();
-  await freshPanel.getByText("Choose a valid time, runtime, and source limit from 1 to 12.").waitFor();
+  await freshPanel.getByText("Choose a valid time, runtime, and source limit from 1 to 12, with no more daily sources than the limit.").waitFor();
   step("an invalid local time returns actionable server feedback");
 
   const future = futureDenverTime();
@@ -335,8 +337,8 @@ async function dailySettingsJourney(context, observePage) {
   await other.getByRole("heading", { name: "Daily scan", exact: true }).first().scrollIntoViewIfNeeded();
   const otherPanel = other.locator("section", { has: other.getByRole("heading", { name: "Daily scan", exact: true }) });
   await otherPanel.getByRole("heading", { name: "Daily scan", exact: true }).waitFor();
-  await otherPanel.getByLabel("Daily source limit").fill("3");
-  await persistedPanel.getByLabel("Daily source limit").fill("2");
+  await otherPanel.getByLabel("Daily priority set").fill("3");
+  await persistedPanel.getByLabel("Daily priority set").fill("2");
   await persistedPanel.getByRole("button", { name: "Save daily scan" }).click();
   await persistedPanel.getByText("Daily scan settings saved.").waitFor();
   page = other;
@@ -344,13 +346,13 @@ async function dailySettingsJourney(context, observePage) {
   await otherPanel.getByText("The schedule changed in another window. Refresh and try again.").waitFor();
   await otherPanel.getByRole("button", { name: "Reload latest settings" }).click();
   await otherPanel.getByText("Latest settings reloaded.").waitFor();
-  await expect.poll(() => otherPanel.getByLabel("Daily source limit").inputValue(), { timeout: 10_000 }).toBe("2");
+  await expect.poll(() => otherPanel.getByLabel("Daily priority set").inputValue(), { timeout: 10_000 }).toBe("2");
   step("a stale second tab gets an explicit conflict and reload path");
 
-  await otherPanel.getByLabel("Daily source limit").fill("13");
+  await otherPanel.getByLabel("Daily priority set").fill("13");
   await otherPanel.getByRole("button", { name: "Pause daily scan" }).click();
   await otherPanel.getByText("Daily scan paused. Unsaved edits retained.").waitFor();
-  if ((await otherPanel.getByLabel("Daily source limit").inputValue()) !== "13") throw new Error("pause discarded dirty edits");
+  if ((await otherPanel.getByLabel("Daily priority set").inputValue()) !== "13") throw new Error("pause discarded dirty edits");
   step("pause works with invalid dirty edits and retains them");
 
   mkdirSync(evidenceDir, { recursive: true });
@@ -567,9 +569,10 @@ async function draftBatchJourney() {
     line.split("—")[0].trim(),
   );
   const expected = [
+    "Automatic",
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",
@@ -611,23 +614,15 @@ async function draftBatchJourney() {
     )
     .toBe(true);
   await closeBatchDialog(batch);
-  /*
-    BF5 (redesign p2a) -- this count moved. The old Queue drew its own filter
-    row with a "drafted 2" button; the redesign's filters are the handoff's own
-    list -- "Open · n / Held · n / Killed / ≈ Printed / All"
-    (docs/design/handoff-2026-09-26 README §3), which carries no drafted
-    filter, and the nav items are where a count lives now ("Nav items ... count
-    at the right", same README §"Shell for all desk screens";
-    desk-chrome.tsx:230 counts the drafted leads). The assertion keeps its
-    meaning: after the batch the desk reports two drafted leads instead of
-    retaining its stale pre-batch count of none.
-  */
+  // Filing each of the six leads now creates its blank workbench draft.
+  // The nav counts draft rows, including those four still-blank fixtures;
+  // the two completed batch drafts were asserted separately above.
   await expect
     .poll(
       () => page.getByRole("link", { name: /^Drafts\b/ }).innerText(),
       { timeout: 10_000 },
     )
-    .toMatch(/^Drafts\s*2$/);
+    .toMatch(/^Drafts\s*6$/);
   step("the Batch dialog sends two selected leads to exact Claude Sonnet, saves review warnings, and refreshes the Drafted queue count");
 }
 

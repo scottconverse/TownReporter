@@ -167,7 +167,10 @@ async function main() {
     if (open) break;
     if (i === 5) throw new Error("the correction form never opened after six clicks");
   }
-  await page.getByLabel("What was wrong").fill(correction);
+  await page.getByLabel("The correction", { exact: true }).fill(correction);
+  if (await page.getByRole("button", { name: "Publish correction" }).isDisabled()) {
+    throw new Error("a written correction note must be publishable");
+  }
   const correctionRequest = page.waitForRequest(
     (request) => request.method() === "POST" && request.url().includes("/_serverFn/"),
   );

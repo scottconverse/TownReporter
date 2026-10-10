@@ -184,7 +184,9 @@ describe("Reddit automatic filing window", () => {
     assert.equal(redditPostIsAutoFileEligible({ updated: "not-a-date" }, now), false);
   });
 
-  it("carries feed date and author through scored cards", () => {
+  it("carries feed date and author through scored cards", (t) => {
+    // Keep the dated fixture inside the filing window, regardless of the run date.
+    t.mock.method(Date, "now", () => Date.parse("2026-09-11T12:00:00.000Z"));
     const [card] = classifyRedditPosts([{
       title: "Council vote",
       url: "https://www.reddit.com/r/longmont/comments/date/test/",
