@@ -31,7 +31,7 @@ import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
 import { parseHttpUrl, parseSourceLines, sourceName } from "./source-lines.ts";
-import { ingestUrl, ingestDocument, withRetry, IngestFetchError } from "./ingest";
+import { ingestUrl, ingestDocument, withRetry, IngestFetchError, BlockedAfterRenderError } from "./ingest";
 import { createHostGate } from "./host-gate.ts";
 import {
   BLOCKED_TRIES_PER_HOST_PER_DAY,
@@ -345,6 +345,7 @@ async function querySourceRows(context: { userId: string; newsroomId: number }) 
   const sql = await getSql();
   const rows = await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             last_read_method, last_read_outcome, last_read_route_url, newsletter_url,
              -- 0115 (SH0-1): the failure streak the two scan write sites keep, so
              -- the row can say "Keeps failing" rather than repeating the last
              -- reason for ever. last_ok_at is the only column in this schema
@@ -1576,14 +1577,14 @@ export async function performCheckOneSource(
     await writeSourceTouch(sql, {
       id: sourceId,
       newsroomId: owned(context),
-      touch: touchAfterSuccess(),
+      touch: { ...touchAfterSuccess(), readMethod: bundle.method, readOutcome: bundle.outcome, readRouteUrl: bundle.routeUrl, newsletterUrl: bundle.newsletterUrl },
     });
     return {
       ok: true as const,
       url: src.url,
       title: bundle.titleHint?.trim() || src.title,
       characters: text.length,
-      line: "Read OK now.",
+      line: bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : "Read OK now.",
     };
   } catch (err) {
     const msg = postgresText(err instanceof Error ? err.message : "fetch failed");
@@ -1596,7 +1597,7 @@ export async function performCheckOneSource(
       button from being a burst.
     */
     const failure = classifyRefusal({
-      status: err instanceof IngestFetchError ? err.status : null,
+      status: err instanceof BlockedAfterRenderError ? 403 : err instanceof IngestFetchError ? err.status : null,
       retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
       nowMs: Date.now(),
     });
@@ -1608,6 +1609,14 @@ export async function performCheckOneSource(
           nowMs: Date.now(),
         })
       : touchAfterError(msg);
+    if (err instanceof IngestFetchError) touch.newsletterUrl = err.newsletterUrl;
+    if (err instanceof BlockedAfterRenderError) {
+      touch.last_error = msg;
+      touch.retry_after_note = msg;
+      touch.readMethod = "playwright";
+      touch.readOutcome = err.outcome;
+      touch.newsletterUrl = err.newsletterUrl;
+    }
     if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
     await writeSourceTouch(sql, {
       id: sourceId,
@@ -1944,6 +1953,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
+             last_read_method, last_read_outcome, last_read_route_url, newsletter_url,
              -- SH-B: the wait a site asked for, and the block it put on us. Both
              -- are read here because the pass has to SKIP a parked row, which
              -- is the only thing that makes a recorded "come back at 3:40"
@@ -2381,7 +2391,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         this is its one writer (HIGH-1: literally one, `writeSourceTouch`, on
         all three paths).
       */
-      const readTouch = touchAfterSuccess();
+      const readTouch = { ...touchAfterSuccess(), readMethod: bundle.method, readOutcome: bundle.outcome, readRouteUrl: bundle.routeUrl, newsletterUrl: bundle.newsletterUrl };
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch: readTouch });
       else
         await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch: readTouch });
@@ -2399,7 +2409,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           outcome: "read",
           changedByHash: changed,
         });
-        await recordScanObservation(src.id, verdict.kind, verdict.note);
+        await recordScanObservation(src.id, verdict.kind, [verdict.note, bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null].filter(Boolean).join(" "));
       }
       pendingHashes.push({ id: src.id, hash, text, changed });
       fetchedCount += 1;
@@ -2415,6 +2425,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
         status: "read",
         readAt: new Date().toISOString(),
+        reason: bundle.method === "playwright" ? "Read through a browser." : bundle.method === "feed" ? "Read through its feed." : null,
       });
       await noteSourceProgress();
     } catch (err) {
@@ -2433,7 +2444,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         always had.
       */
       const failure = classifyRefusal({
-        status: err instanceof IngestFetchError ? err.status : null,
+        status: err instanceof BlockedAfterRenderError ? 403 : err instanceof IngestFetchError ? err.status : null,
         retryAfterMs: err instanceof IngestFetchError ? err.retryAfterMs : null,
         nowMs,
       });
@@ -2445,6 +2456,14 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
             nowMs,
           })
         : touchAfterError(msg);
+      if (err instanceof IngestFetchError) touch.newsletterUrl = err.newsletterUrl;
+    if (err instanceof BlockedAfterRenderError) {
+        touch.last_error = msg;
+        touch.retry_after_note = msg;
+        touch.readMethod = "playwright";
+        touch.readOutcome = err.outcome;
+        touch.newsletterUrl = err.newsletterUrl;
+      }
       if (touch.countsAgainstHostCap) await noteHostRefusal(sql, owned(context), sourceHost(src.url));
       if (deps.scheduledCommit) pendingSourceTouches.push({ id: src.id, touch });
       else await writeSourceTouch(sql, { id: src.id, newsroomId: owned(context), touch });
@@ -2468,7 +2487,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       failedSources.push({ id: src.id, title: src.title, url: src.url, error: msg });
       sourceCoverage = updateScanCoverageEntry(sourceCoverage, src.id, {
         status: "blocked",
-        reasonCode: "fetch-failed",
+        reasonCode: err instanceof BlockedAfterRenderError ? "blocked-after-render" : "fetch-failed",
         reason: editorFetchError(msg, src.url) ?? "The source could not be read.",
       });
       failureReceipt.sourcesFailed = failedSources.length;

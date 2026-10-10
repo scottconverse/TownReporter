@@ -1237,6 +1237,7 @@ export function recoveringDraftCopy(): string {
 export function editorFetchError(raw: string | null | undefined, url?: string | null): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (t.startsWith("This public site refused even a normal browser.")) return t;
   const site = socialSiteName(url);
   const code = t.match(/\b(400|401|403|404|410|429)\b/)?.[1];
   if (site) {
