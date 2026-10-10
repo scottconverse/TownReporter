@@ -352,7 +352,9 @@ try {
     went: a held lead is not open work any more (7a), so it leaves the Open list
     the moment it is held and the "Held / Undo" row is on the other segment.
   */
-  const firstRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
+  // The Start-story scene can finish its draft before this scene begins.
+  // Hold a separate open lead: written drafts correctly cannot be held.
+  const firstRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
   await firstRow.getByRole("button", { name: /^Hold/ }).click();
   // Start watching before the press: the confirmation is a transient toast.
   await Promise.all([
@@ -363,7 +365,7 @@ try {
   // half-faded, which is a photograph of sonner rather than of the fix.
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Held ·/ }).click();
-  const heldRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
+  const heldRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
   await heldRow.locator(".today-lead-done").waitFor({ timeout: 15_000 });
   const heldWords = await heldRow.locator(".today-lead-done").innerText();
   // A Held row now carries Release (it moves the lead back to Open and the toast offers Undo).
