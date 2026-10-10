@@ -1,3 +1,4 @@
+import { topicConfirmationFingerprint } from "./notes.ts";
 import { STYLE_AUDIT_KEY } from "./draft-audit-record.ts";
 import type { DraftRow } from "./types.ts";
 export type EvidenceDecision = "keep" | "remove";
@@ -63,9 +64,7 @@ export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boo
  * unanswered list and transcript citations are all still hashed, so an edit
  * that a person could make still takes an acceptance back.
  *
- * A row that has no style record is returned byte for byte, so tokens stored
- * before this change -- recorded confirmations and acceptances -- still match
- * and nothing has to be confirmed again after the upgrade.
+ * A row that has no style record is returned byte for byte.
  */
 function researchJsonWithoutStyleAudit(raw: string | null | undefined): string | null | undefined {
   const text = raw ?? "{}";
@@ -74,9 +73,15 @@ function researchJsonWithoutStyleAudit(raw: string | null | undefined): string |
   const { [STYLE_AUDIT_KEY]: _derived, ...material } = parsed;
   return JSON.stringify(material);
 }
-/** A review applies to the exact evidence the editor saw, not a newer draft. */
+/** Content identifies the evidence; an identical replacement row must keep its acceptance. */
 export function evidenceReviewToken(draft: Partial<DraftRow>): string {
-  return JSON.stringify([draft.id, draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, researchJsonWithoutStyleAudit(draft.research_json), transcriptCitationsFromResearch(draft.research_json)]);
+  return JSON.stringify([draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, researchJsonWithoutStyleAudit(draft.research_json), transcriptCitationsFromResearch(draft.research_json)]);
+}
+/** Keep confirmations already recorded for this row valid across the token upgrade. */
+export function evidenceConfirmationMatches(token: string | undefined, draft: Partial<DraftRow>): boolean {
+  const content = evidenceReviewToken(draft);
+  const legacy = JSON.stringify([draft.id, ...JSON.parse(content)]);
+  return token === topicConfirmationFingerprint(content) || token === topicConfirmationFingerprint(legacy);
 }
 export function reconcileDraftEvidence(draft: Partial<DraftRow>, body: string, decision?: EvidenceDecision) {
   const previous = memo(draft.research_json);
@@ -90,4 +95,18 @@ export function reconcileDraftEvidence(draft: Partial<DraftRow>, body: string, d
     ? Object.fromEntries(Object.entries(previous).filter(([key]) => key !== "reportedDocumentClaims" && key !== "documentEvidenceReview"))
     : previous;
   return { ...(decision === "remove" ? { source_urls: "[]", provenance_json: "[]", found_note: "", unanswered: "[]" } : fields), research_json: JSON.stringify({ ...retainedResearch, evidenceReview: review }) };
+}
+
+/** Keep the same research bytes when a reconcile only repeats its check timestamps. */
+export function retainUnchangedReconcileResearch(previous: string | null | undefined, next: string): string {
+  function material(raw: string | null | undefined) {
+    const value = memo(raw);
+    const { evidenceReconciledAt: _time, nameCheck, ...rest } = value;
+    if (nameCheck && typeof nameCheck === "object" && !Array.isArray(nameCheck)) {
+      const { checkedAt: _checkedAt, ...check } = nameCheck as Record<string, unknown>;
+      rest.nameCheck = check;
+    } else if (nameCheck !== undefined) rest.nameCheck = nameCheck;
+    return JSON.stringify(rest);
+  }
+  return material(previous) === material(next) ? previous ?? next : next;
 }

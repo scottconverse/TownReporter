@@ -10,10 +10,33 @@ export type StoryReadiness = {
 };
 
 /** Every story surface reads the Publish gate's current first reason. */
-export function editorStoryState(blockers: readonly { key: string; sentence: string }[], openCount: number): StoryReadiness {
+export function editorStoryState(blockers: readonly { key: string; sentence: string }[], openCount: number, acceptedCount = 0): StoryReadiness {
   const first = blockers[0];
   return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : "not-ready" : "ready",
-    openCount, totalCount: openCount, reason: first?.sentence ?? "Ready to publish." };
+    openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
+}
+
+/** Acceptance is counted against outstanding claims, never treated as verification. */
+export function acceptedClaimsReason(openCount: number, acceptedCount: number): string | null {
+  return openCount > 0 && acceptedCount > 0 && acceptedCount >= openCount
+    ? `You accepted ${acceptedCount} claim${acceptedCount === 1 ? "" : "s"} the AI could not confirm.` : null;
+}
+
+export function readinessWithAcceptedClaims(readiness: StoryReadiness, openCount: number, acceptedCount: number): StoryReadiness {
+  const reason = acceptedClaimsReason(openCount, acceptedCount);
+  return reason && readiness.state !== "checking"
+    ? { ...readiness, state: "ready", openCount, reason } : readiness;
+}
+
+/** The route's publish filter and readiness share one decision. */
+export function acceptedClaimsPublishState<T extends { key: string; sentence: string }>(input: {
+  blockers: readonly T[]; openCount: number; acceptedCount: number; hasAiJudgments: boolean;
+}) {
+  const covers = input.acceptedCount > 0 && input.acceptedCount >= input.openCount;
+  const blockers = input.blockers.filter(blocker =>
+    blocker.key !== "claims-unreviewed" || !covers);
+  return { blockers, publishEnabled: blockers.length === 0,
+    readiness: editorStoryState(blockers, input.openCount, input.acceptedCount) };
 }
 
 /** Read the filed state once; a missing memo is Ready, without claiming verified facts. */
