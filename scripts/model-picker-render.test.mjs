@@ -12,27 +12,52 @@ function render(props = {}) {
   );
 }
 
-test("Haiku stays selected and reports its unavailable server state before drafting", async () => {
+test("every Claude choice stays selected and warns before drafting when its CLI is signed out", async () => {
   const { chromium } = await import("playwright");
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    for (const ready of [true, false]) {
-      availabilityStub.__setAvailability({ "claude-haiku": ready });
-      const html = renderToStaticMarkup(createElement(ModelPicker, { value: "claude-haiku", onChange() {} }));
+    for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"]) for (const ready of [true, false]) {
+      availabilityStub.__setAvailability({ [choice]: ready });
+      const html = renderToStaticMarkup(createElement(ModelPicker, { value: choice, onChange() {} }));
       await page.setContent(html);
       const select = page.getByLabel("Writing model", { exact: true });
-      assert.equal(await select.inputValue(), "claude-haiku");
-      assert.match(await select.locator("option:checked").innerText(), /Claude Haiku — Fastest/);
+      assert.equal(await select.inputValue(), choice);
+      assert.match(await select.locator("option:checked").innerText(), /Claude/);
       if (!ready) {
         assert.match(await select.locator("option:checked").innerText(), /not set up/);
-        assert.match(await page.locator(".model-picker-help").first().innerText(), /Claude Haiku.*not ready.*Sign in/);
+        assert.match(await page.locator(".model-picker-help").first().innerText(), /Claude.*not ready.*Sign in/);
       }
     }
   } finally {
     availabilityStub.__setAvailability(undefined);
     await browser.close();
   }
+});
+
+test("the primary local picker names its cloud backend before it is chosen", async () => {
+  availabilityStub.__setLocalChoice({ override: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" }, catalog: { servers: [], defaultModel: null } });
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(render());
+    const text = await page.locator('option[value="local-model"]').innerText();
+    assert.match(text, /deepseek-v4\.1-flash:cloud.*cloud.*spends credits/);
+    assert.doesNotMatch(text, /on this computer/);
+  } finally {
+    availabilityStub.__setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null } });
+    await browser.close();
+  }
+});
+
+test("an unreadable Gemini key is disclosed before the draft press", () => {
+  availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
+  try {
+    const html = render({ value: "custom:gemini" });
+    assert.match(html, /cannot be decrypted.*Re-enter it/);
+    assert.match(html, /value="custom:gemini"[^>]*disabled=""[^>]*selected=""/);
+  } finally { availabilityStub.__setConnections([]); }
 });
 
 test("a pending readiness response says checking before an explicit draft press", () => {
@@ -174,7 +199,7 @@ test("an unavailable provider renders as a disabled option labelled 'not set up'
   const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
   // Unit P item 7: the option shows the registry's short half-line, not the
   // 56-character clause that was clipped to "...or anot" in a 191px box.
-  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — on this computer — not set up<\/option>/);
+  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — backend not checked yet — not set up<\/option>/);
   // The option remains marked; provider help belongs to the selected model.
   assert.doesNotMatch(html, /TownReporter cannot reach a local model\. Start LM Studio/);
   assert.doesNotMatch(html, /then click Refresh\. See docs\/local-models\.md\./);

@@ -10,6 +10,17 @@ const NOW = Date.parse("2026-09-26T12:00:00.000Z");
 // ever holds -- and would quietly test `NaN` comparisons.
 const at = (secondsAgo) => NOW - secondsAgo * 1000;
 
+test("the progress card shows the automatic JSON retry while keeping Sol selected", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(render({ job: job({ model: "Codex Sol 6.1 (balanced)", step: "Retrying the draft once — reply with JSON only" }) }));
+    assert.match(await page.locator("body").innerText(), /Retrying the draft once.*JSON only/);
+    assert.match(await page.locator("body").innerText(), /Codex Sol 6\.1 \(balanced\)/);
+  } finally { await browser.close(); }
+});
+
 /** A running draft job, one stage in, as `jobProgressView` would shape it. */
 function job(over = {}) {
   return {

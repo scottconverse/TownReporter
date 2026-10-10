@@ -1,5 +1,6 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
+import { providerErrorDetail, providerResponseDetail } from "./provider-error-detail.ts";
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
@@ -531,8 +532,10 @@ async function probeOpenAi(
     ) {
       return { ok: true, label: provider.label, choice: "configured" };
     }
-    if (!res.ok)
-      return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
+    if (!res.ok) {
+      const detail = await providerResponseDetail(res, provider.apiKey);
+      return { ok: false, error: `${provider.label} readiness check failed (${res.status}).${detail ? `\n\n${detail}` : ""}` };
+    }
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
     if (!Array.isArray(body?.data)) {
       return {
@@ -1168,18 +1171,19 @@ export async function grokChat(
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
+  const responseText = await res.text();
   try {
-    body = (await res.json()) as typeof body;
+    body = JSON.parse(responseText) as typeof body;
   } catch {
     return {
       ok: false,
-      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}`,
+      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}${providerErrorDetail(responseText, llm.apiKey) ? `\n\n${providerErrorDetail(responseText, llm.apiKey)}` : ""}`,
       meta: openAiMeta(),
     };
   }
   if (!res.ok) {
-    // Do not reflect arbitrary remote-provider bodies into a job or the desk.
-    // For the loopback local model, recognize the one actionable structured
+    // Preserve the provider's words, redacting the credential sent to it.
+    // For the loopback local model, recognize the actionable structured
     // failure an editor can fix by choosing a larger-context model or reducing
     // the supplied record. This also replaces the opaque "API error 400" that
     // hid a measured 35k-token request against a 32k context.
@@ -1198,7 +1202,7 @@ export async function grokChat(
       ok: false,
       error: localContextFailure
         ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
-        : `${llm.label} API error ${res.status}`,
+        : `${llm.label} API error ${res.status}${providerErrorDetail(body, llm.apiKey) ? `\n\n${providerErrorDetail(body, llm.apiKey)}` : ""}`,
       meta: openAiMeta(body),
     };
   }
@@ -1653,9 +1657,10 @@ export function unreadableReplyError(label?: string): string {
  * functions are injected, and no model is called here.
  */
 export async function readableReplyOrRetry<T>(input: {
-  attempt: () => Promise<GrokOk | GrokErr>;
+  attempt: (retryInstruction?: string) => Promise<GrokOk | GrokErr>;
   read: (text: string) => T | null;
   label?: string;
+  onRetry?: () => void | Promise<void>;
 }): Promise<
   | { ok: true; value: T; text: string; meta?: ChatResultMetadata; retried: boolean }
   | { ok: false; error: string; meta?: ChatResultMetadata; retried: boolean }
@@ -1665,7 +1670,10 @@ export async function readableReplyOrRetry<T>(input: {
   const value = input.read(first.text);
   if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
 
-  const second = await input.attempt();
+  await input.onRetry?.();
+  const second = await input.attempt(
+    "Your previous reply could not be read as JSON. Reply with JSON only: one complete valid JSON object matching the requested fields. Escape quotes and newlines inside strings. Do not include Markdown fences, commentary, or text outside the JSON object.",
+  );
   if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };
   const recovered = input.read(second.text);
   if (recovered !== null)

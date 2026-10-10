@@ -40,11 +40,11 @@ export function writerIsReady(input: {
   /** `providerAvailability()`'s map, or undefined while it is in flight. */
   availability: Record<string, boolean> | undefined;
   /** The connection behind a `custom:<id>` choice, when the desk has one. */
-  customConnection: { enabled: boolean; modelId: string | null } | null;
+  customConnection: { enabled: boolean; modelId: string | null; readinessError?: string } | null;
 }): boolean {
   if (input.choice === "auto") return true;
   if (isCustomModelChoice(input.choice)) {
-    return Boolean(input.customConnection?.enabled && input.customConnection.modelId);
+    return Boolean(input.customConnection?.enabled && input.customConnection.modelId && !input.customConnection.readinessError);
   }
   return input.availability ? input.availability[input.choice] !== false : true;
 }

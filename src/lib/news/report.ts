@@ -1794,7 +1794,12 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       failure wording is the token that classifier reads.
     */
     const write = await readableReplyOrRetry({
-      attempt: () => chat(reportWriteSystem(paper), built.packet, 2200),
+      attempt: (retryInstruction) => chat(
+        [reportWriteSystem(paper), retryInstruction].filter(Boolean).join("\n\n"),
+        built.packet,
+        2200,
+      ),
+      onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
       read: (text) => {
         const candidate = coerceDraft(text, {
           headline: opts.lead.headline,

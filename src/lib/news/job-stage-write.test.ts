@@ -60,13 +60,15 @@ const stored = (subjectId: number): Promise<DeskJob | null> =>
   latestJob({ newsroomId: NEWSROOM, kind: "draft", subjectId });
 
 describe("a stage boundary on a job that has a stage list", () => {
-  it("keeps both hops of the live Haiku to DeepSeek to Sol failure in order", async () => {
+  for (const label of ["Claude Fable", "Claude Opus", "Claude Sonnet", "Claude Haiku"]) it(`keeps every hop of ${label} to DeepSeek to Sol in order`, async () => {
     const id = freshSubject();
     const job = await enqueueDraft("picker-switch-history", id);
-    await setJobFailoverNote(job.id, "This draft moved to DeepSeek v4.1 Flash because Claude Haiku sign-in lapsed");
+    await setJobFailoverNote(job.id, `This draft moved to DeepSeek v4.1 Flash because ${label} sign-in lapsed`);
     await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash reached its usage limit");
     const note = (await stored(id))!.failover_note;
-    assert.match(note, /Claude Haiku sign-in lapsed.*DeepSeek v4\.1 Flash reached its usage limit.*Codex Sol 6\.1/);
+    assert.ok(note.includes(`${label} sign-in lapsed`));
+    assert.ok(note.indexOf(label) < note.lastIndexOf("DeepSeek v4.1 Flash reached its usage limit"));
+    assert.match(note, /DeepSeek v4\.1 Flash reached its usage limit.*Codex Sol 6\.1/);
   });
   it("updates the waiting line as soon as a draft switches, before the next tick", async () => {
     const id = freshSubject();

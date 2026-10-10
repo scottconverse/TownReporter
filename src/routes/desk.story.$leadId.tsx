@@ -3132,7 +3132,7 @@ function StoryPage() {
         */}
           {draftProblem && (!onPaper || (justPublished && msg !== "On the paper.")) ? (
             <Notice kind={/^(Saved\.|On the paper\.)/.test(msg) ? "ok" : "err"}>
-              {draftProblem}
+              <span style={{ whiteSpace: "pre-wrap" }}>{draftProblem}</span>
               {/*
                 The one error the desk could describe but never act on. A
                 lapsed CLI login used to end at "sign in again", which meant a

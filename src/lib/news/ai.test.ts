@@ -598,7 +598,7 @@ describe("grokChat", () => {
     assert.deepEqual(calls, ["resolve"]);
   });
 
-  it("does not reflect a custom provider error body into the returned job error", async () => {
+  it("shows a custom provider's own error message while redacting its API key", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ error: { message: "bad credential test-only-key" } }), {
@@ -621,7 +621,7 @@ describe("grokChat", () => {
       );
       assert.equal(result.ok, false);
       if (!result.ok) {
-        assert.equal(result.error, "Custom AI API error 400");
+        assert.equal(result.error, "Custom AI API error 400\n\nbad credential [redacted]");
         assert.equal(result.meta?.provider, "openai-compatible");
         assert.equal(result.meta?.model, "manual-model");
       }
@@ -733,14 +733,16 @@ describe("model-picker provider readiness", () => {
     }
   });
 
-  it("uses provider default for the saved Gemini preset instead of sending an invented level", async () => {
+  it("drafts JSON with the exact Gemini 3.5 Flash connection and provider-default effort", async () => {
     const originalFetch = globalThis.fetch;
     let body: Record<string, unknown> | null = null;
-    globalThis.fetch = async (_input, init) => {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-key");
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(JSON.stringify({
-        model: "gemini-2.5-flash",
-        choices: [{ message: { content: "ok" } }],
+        model: "gemini-3.5-flash",
+        choices: [{ message: { content: JSON.stringify({ headline: "City announces meeting", body: "The city announced a public meeting." }) } }],
       }), { status: 200 });
     };
     try {
@@ -751,11 +753,13 @@ describe("model-picker provider readiness", () => {
       }, {
         resolveCustom: async () => ({
           baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-          modelId: "gemini-2.5-flash",
+          modelId: "gemini-3.5-flash",
           apiKey: "test-key",
         }),
       });
       assert.equal(result.ok, true);
+      assert.equal((body as Record<string, unknown> | null)?.model, "gemini-3.5-flash");
+      if (result.ok) assert.equal(parseJsonBlock<{ body: string }>(result.text)?.body, "The city announced a public meeting.");
       assert.equal(body == null ? true : !("reasoning_effort" in body), true);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1497,8 +1501,12 @@ describe("readableReplyOrRetry", () => {
 
   it("retries the same provider once when the first reply cannot be read", async () => {
     let calls = 0;
+    const instructions: (string | undefined)[] = [];
+    let notified = false;
     const reply = await readableReplyOrRetry({
-      attempt: async () => {
+      attempt: async (instruction) => {
+        instructions.push(instruction);
+        if (instruction) assert.equal(notified, true, "notify progress before making the retry call");
         calls += 1;
         return calls === 1
           ? { ok: true as const, text: '{"headline":"Hi" "dek"' }
@@ -1506,11 +1514,14 @@ describe("readableReplyOrRetry", () => {
       },
       read: readObject,
       label: "DeepSeek v4.1 Flash",
+      onRetry: () => { notified = true; },
     });
     assert.equal(calls, 2);
     assert.equal(reply.ok, true);
     assert.deepEqual(reply.ok && reply.value, { headline: "Hi", dek: "There" });
     assert.equal(reply.retried, true);
+    assert.equal(instructions[0], undefined);
+    assert.match(instructions[1]!, /Reply with JSON only/);
   });
 
   it("reports unreadable after two replies the reader cannot use, in the classifier's words", async () => {

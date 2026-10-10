@@ -302,13 +302,11 @@ export function ModelPicker(props: Props) {
     queryKey: ["local-model-choice", localScope],
     queryFn: () => getLocalModelChoice({ data: { scope: localScope } }),
     staleTime: 15_000,
-    enabled: props.value === "local-model",
   });
   const selectedLocalCatalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
     staleTime: 15_000,
-    enabled: props.value === "local-model",
   });
   const builtInOptions =
     props.scope === "opinion"
@@ -425,7 +423,7 @@ export function ModelPicker(props: Props) {
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
     : isCustomModelChoice(shownValue)
       ? selectedUnavailable
-        ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+        ? connections.data?.find((row) => `custom:${row.id}` === shownValue)?.readinessError ?? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
         : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
       : selectedUnavailable
         ? notSetUpHelp(selected)
@@ -436,6 +434,17 @@ export function ModelPicker(props: Props) {
   const exactModel = !noFallback && shownValue === "local-model"
     ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
     : customConnection?.modelId ?? null;
+  const localPick = selectedLocalChoice.data
+    ? selectedLocalChoice.data.override
+    : selectedLocalCatalog.data?.defaultModel;
+  const localBackend = localPick?.id ?? null;
+  const localMetadata = selectedLocalCatalog.data?.servers
+    .find(server => server.baseUrl === localPick?.baseUrl)?.models.find(model => model.id === localBackend);
+  const optionText = (option: ModelChoiceOption) => option.value === "local-model"
+    ? localBackend
+      ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
+      : "Local model — backend not checked yet"
+    : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
@@ -474,7 +483,7 @@ export function ModelPicker(props: Props) {
               disabled={!available}
               title={`${pickerOptionTitle(option)}${available ? "" : " — not set up"}`}
             >
-              {pickerOptionText(option)}
+              {optionText(option)}
               {available ? "" : " — not set up"}
             </option>
           );

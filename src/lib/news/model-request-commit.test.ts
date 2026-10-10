@@ -36,18 +36,18 @@ import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 
-it("refuses an unavailable explicit Haiku pick before enqueueing even when DeepSeek is ready", async () => {
+for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) it(`refuses unavailable explicit ${choice} before enqueueing even when DeepSeek is ready`, async () => {
   const sql = await getSql();
   const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why)
     values(1,'picker-haiku','Picker regression','Why') returning id`;
   const choices: string[] = [];
   let enqueued = false;
   const result = await commitStoryDraftForAuthenticatedEditor({
-    context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: "claude-haiku",
+    context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice,
   }, {
     probeProvider: async (choice) => {
       choices.push(String(choice));
-      return choice === "claude-haiku"
+      return choice?.startsWith("claude-")
         ? { ok: false, error: "Claude Code is signed out. Sign in again." }
         : { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" };
     },
@@ -55,7 +55,7 @@ it("refuses an unavailable explicit Haiku pick before enqueueing even when DeepS
   });
   assert.equal(result.ok, false);
   assert.equal(enqueued, false);
-  assert.deepEqual(choices, ["claude-haiku"]);
+  assert.deepEqual(choices, [choice]);
 });
 
 it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {
