@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PublishBarResult } from "./publish-bar-result.ts";
+import { PublishBarResult, PublishTranscriptNotice } from "./publish-bar-result.ts";
 import { publishPressState } from "../lib/news/publish-blockers.ts";
 
 /**
@@ -17,6 +17,19 @@ import { publishPressState } from "../lib/news/publish-blockers.ts";
 function render(state: ReturnType<typeof publishPressState>) {
   return renderToStaticMarkup(createElement(PublishBarResult, { state }));
 }
+
+describe("Publish transcript file notice", () => {
+  it("shows the database verification sentence before confirmation", () => {
+    const notice = "The original recording file is not on this computer. Every quote was checked against the saved transcript text in the database.";
+    const html = renderToStaticMarkup(createElement(PublishTranscriptNotice, { notice }));
+    assert.ok(html.includes(notice));
+    assert.match(html, /role="status"/);
+  });
+
+  it("draws no notice when the loader has no verified missing-file exception", () => {
+    assert.equal(renderToStaticMarkup(createElement(PublishTranscriptNotice, { notice: null })), "");
+  });
+});
 
 describe("PublishBarResult", () => {
   it("draws nothing when there is nothing to say", () => {
