@@ -26,7 +26,8 @@ export function acceptedClaimsReason(openCount: number, acceptedCount: number): 
 
 export function readinessWithAcceptedClaims(readiness: StoryReadiness, openCount: number, acceptedCount: number): StoryReadiness {
   const reason = acceptedClaimsReason(openCount, acceptedCount);
-  return reason && readiness.state !== "checking"
+  const claimReason = /^(?:\d+ claims need review\.|\d+ (?:headline or first-paragraph )?facts? needs? checking\.)$/.test(readiness.reason);
+  return reason && (readiness.state === "ready" || (claimReason && readiness.openCount === openCount)) && readiness.state !== "checking"
     ? { ...readiness, state: "ready", openCount, reason } : readiness;
 }
 

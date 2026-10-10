@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 /*
   The in-process DOM for tests that have to press something.
 
@@ -170,7 +171,7 @@ function relativeSpecifiers(source) {
 export function transpileToUrl(code, fileName, imports = {}) {
   const output = ts.transpileModule(code, {
     fileName,
-    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
+    compilerOptions: { target: ts.ScriptTarget.ESNext, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
   }).outputText;
   return stubUrl(rewriteSpecifiers(output, fileName, imports));
 }
@@ -199,7 +200,28 @@ function rewriteSpecifiers(output, fileName, imports) {
   ];
   const unresolved = [];
   for (const specifier of specifiers) {
-    const mapped = imports[specifier];
+    let mapped = imports[specifier];
+    if (!mapped && specifier === "@/components/scoped-actions") {
+      // The scoped handles moved transport imports. Keep each existing fixture's
+      // original transport stub and fail if it did not supply a required handle.
+      const scoped = readFileSync(new URL("../src/components/scoped-actions.ts", import.meta.url), "utf8");
+      const ast = ts.createSourceFile("scoped-actions.ts", scoped, ts.ScriptTarget.Latest, true);
+      const origins = new Map();
+      for (const node of ast.statements) {
+        if (!ts.isImportDeclaration(node) || !node.importClause?.namedBindings || !ts.isNamedImports(node.importClause.namedBindings)) continue;
+        for (const binding of node.importClause.namedBindings.elements)
+          origins.set(binding.name.text.replace(/^_/, ""), { source: node.moduleSpecifier.text, name: (binding.propertyName ?? binding.name).text });
+      }
+      const outputAst = ts.createSourceFile(fileName, output, ts.ScriptTarget.Latest, true);
+      const names = outputAst.statements.filter(node => ts.isImportDeclaration(node) && node.moduleSpecifier.text === specifier)
+        .flatMap(node => ts.isNamedImports(node.importClause?.namedBindings) ? node.importClause.namedBindings.elements.map(binding => (binding.propertyName ?? binding.name).text) : []);
+      const exports = names.map(name => {
+        const origin = origins.get(name);
+        if (!origin || !imports[origin.source]) throw new Error(`${fileName}: scoped handle ${name} has no transport fixture for ${origin?.source}`);
+        return `export { ${origin.name} as ${name} } from ${JSON.stringify(imports[origin.source])};`;
+      });
+      mapped = stubUrl(exports.join("\n"));
+    }
     let url = mapped;
     if (!url) {
       if (specifier.startsWith(".")) {

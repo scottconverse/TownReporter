@@ -375,7 +375,7 @@ export async function performPublishEditorial(
   const { slugify } = await import("@/lib/paper");
   const { withEditorialDraftOrNull, opinionPublishWarnings } =
     await import("./opinion-draft.server.ts");
-  const { ensureAuditEventsSchema, auditWithSql } = await import("./ops.ts");
+  const { ensureAuditEventsSchema } = await import("./ops.ts");
 
   /*
       The audit schema is DDL, so it cannot join the transaction below; ensure it
@@ -473,16 +473,8 @@ export async function performPublishEditorial(
         transaction (`auditWithSql`), so a print that rolls back leaves no
         record of an override that never happened.
       */
-    for (const warning of warnings) {
-      await auditWithSql(
-        sql,
-        context.userId,
-        "publish-override",
-        JSON.stringify({ key: warning.key, draftId, editor: context.userId }),
-        owned(context),
-        { kind: "drafts", id: draftId },
-      );
-    }
+    const { recordEditorOverrides } = await import("./editor-override.ts");
+    await recordEditorOverrides({ userId: context.userId, newsroomId: owned(context), sql }, warnings, { kind: "drafts", id: draftId });
 
     return { ok: true as const, slug:printed.slug, articleId:printed.id };
   });

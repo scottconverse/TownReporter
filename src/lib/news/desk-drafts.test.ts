@@ -184,3 +184,11 @@ test("accepted claims keep the drafts chip Ready with the explicit acceptance re
   const running = deskDraftState({ ...quiet, story_readiness, job_status: "running", unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });
   assert.equal(running.readiness?.state, "checking");
 });
+
+test("acceptance never promotes a held item's readiness, even with accepted claims", () => {
+  const story_readiness = { version: 1, state: "not-ready", openCount: 9, totalCount: 9,
+    reason: "Airport future charges: The future charge amount needs checking." };
+  const state = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });
+  assert.equal(state.readiness?.state, "not-ready");
+  assert.equal(state.readiness?.reason, story_readiness.reason);
+});

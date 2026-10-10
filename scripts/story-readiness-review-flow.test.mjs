@@ -15,7 +15,7 @@ globalThis.readinessReact=await import('react');
 test('Story Checks and Writer agree when a draft is absent or legacy claims need review',async()=>{
   const {document,Event}=installDom(); const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root'));
   try {for(const status of ['new','drafted','published']) {
-    globalThis.screenData={lead:{lead:{id:22,headline:'Council votes',topic:'government',status,source_urls:'[]'},draft:status==='new'?null:{id:8,headline:'Council votes',dek:'A plan',body:'Council approved the plan.',topic:'government',research_json:null},namedOutlets:[],outletOverrides:[],uncheckedRecordedClaims:4,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:false,uncheckedExempt:false},sources:[],memory:[]};
+    globalThis.screenData={lead:{lead:{id:22,headline:'Council votes',topic:'government',status,source_urls:'[]'},draft:status==='new'?null:{id:8,headline:'Council votes',dek:'A plan',body:'Council approved the plan.',topic:'government',research_json:null},namedOutlets:[],outletOverrides:[],evidenceToken:'content',uncheckedRecordedClaims:4,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:false,uncheckedExempt:false},sources:[],memory:[]};
     await act(async()=>root.render(h(screen.Route.component,{key:status})));
     const checks=[...document.querySelectorAll('button')].find(b=>/^Checks/.test(b.textContent));assert.ok(checks);
     await act(async()=>checks.dispatchEvent(new Event('click',{bubbles:true})));
@@ -24,10 +24,10 @@ test('Story Checks and Writer agree when a draft is absent or legacy claims need
     if(status!=='new') assert.ok(document.body.textContent.includes(reason));
   }}finally{await act(async()=>root.unmount());}
 });
-test('a zero-claim, unchecked, checkable story reads Not checked yet and blocks Publish; the acknowledgement clears it',async()=>{
+test('a zero-claim, unchecked, checkable story reads Not checked yet and warns before Publish; the acknowledgement clears it',async()=>{
   const {document,Event}=installDom(); const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root'));
   const draft={id:8,headline:'Council votes',dek:'A plan',body:'Council approved the $547.5 million budget.',topic:'government',research_json:null};
-  const base={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]'},draft,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
+  const base={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]'},draft,namedOutlets:[],outletOverrides:[],evidenceToken:'content'},sources:[],memory:[]};
   const draw=async(facts)=>{globalThis.screenData={...base,lead:{...base.lead,...facts}};await act(async()=>root.render(h(screen.Route.component,{key:JSON.stringify(facts)})));};
   const publishButton=()=>[...document.querySelectorAll('button')].find(b=>/^Publish in /.test(b.textContent));
   try {
@@ -39,7 +39,8 @@ test('a zero-claim, unchecked, checkable story reads Not checked yet and blocks 
     assert.ok(chip.textContent.includes('Not checked yet'));
     assert.ok(document.body.textContent.includes('No claims were recorded for this story'));
     assert.ok(document.body.textContent.includes('I checked this story myself'));
-    assert.equal(publishButton().hasAttribute('disabled'),true,'an unchecked story cannot print');
+    assert.equal(publishButton().hasAttribute('disabled'),false,'an unchecked story can open the warning confirmation');
+    assert.ok(document.body.textContent.includes('I checked this story myself'));
 
     /* The editor pressed "I checked this story myself": the loader reports the
        acknowledgement for this version, and the gate clears. */
@@ -62,7 +63,7 @@ test('a saved not-checked memo defers to the current gate: acknowledged or compl
     stays `Not checked yet` forever after the acknowledgement.
   */
   const draft={id:8,headline:'Council votes',dek:'A plan',body:'Council approved the $547.5 million budget.',topic:'government',research_json:JSON.stringify({storyReadiness:{version:1,state:'not-checked',openCount:0,totalCount:0,reason:'No claims were recorded for this story, so nothing has been checked.'}})};
-  const base={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]'},draft,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
+  const base={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]'},draft,namedOutlets:[],outletOverrides:[],evidenceToken:'content'},sources:[],memory:[]};
   const draw=async(facts)=>{globalThis.screenData={...base,lead:{...base.lead,...facts}};await act(async()=>root.render(h(screen.Route.component,{key:JSON.stringify(facts)})));};
   const publishButton=()=>[...document.querySelectorAll('button')].find(b=>/^Publish in /.test(b.textContent));
   try {
@@ -81,9 +82,9 @@ test('a saved not-checked memo defers to the current gate: acknowledged or compl
     assert.ok(!document.body.textContent.includes('No claims were recorded for this story'));
     assert.equal(publishButton().hasAttribute('disabled'),false);
 
-    /* The gate live again outranks the cached state: still unchecked and blocked. */
+    /* The gate live again outranks the cached state: still unchecked and warned. */
     await draw({uncheckedRecordedClaims:0,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:false,uncheckedExempt:false});
     assert.equal(document.querySelector('[data-story-readiness]').dataset.storyReadiness,'not-checked');
-    assert.equal(publishButton().hasAttribute('disabled'),true);
+    assert.equal(publishButton().hasAttribute('disabled'),false,'the unchecked warning keeps Publish available');
   } finally { await act(async()=>root.unmount()); }
 });

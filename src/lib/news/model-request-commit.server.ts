@@ -528,8 +528,7 @@ export async function commitOpinionForAuthenticatedEditor(
     retryRequestId?: number;
     modelChoice: OpinionModelChoice;
     modelEffort?: ModelEffort | null;
-    /** Audit item 21: keys a warned first call returned. */
-    override?: string[];
+
   },
   deps: OpinionCommitDeps = {},
 ) {

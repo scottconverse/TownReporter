@@ -98,6 +98,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
             uncheckedGateTodos: `() => []`,
             uncreditedOutlets: `() => []`,
             publishBlockers: `() => []`,
+            publishConfirmation: `() => ({enabled:true,warnings:[],hard:[],confirmLabel:"Yes, print it"})`,
             publishPressState: `() => ({phase:"idle"})`,
             blockerPressState: `() => ({})`,
             recordedChecks: `() => ({})`,

@@ -234,7 +234,8 @@ describe("readiness and the blocker for the zero-claims gate", () => {
 
   it("adds a warn blocker with the exact sentence and both presses", () => {
     const blockers = publishBlockers({ ...state, uncheckedStory: true });
-    const row = blockers.find((b) => b.key === "claims-unchecked");
+    const row = blockers.find((b) => b.key === "unchecked");
+    assert.equal(row?.kind, "warning");
     assert.ok(row, "the zero-claims gate is a blocker");
     assert.equal(row!.sentence, UNCHECKED_STORY_REASON);
     assert.equal(row!.altAction?.target.kind, "acknowledge-unchecked");
@@ -242,7 +243,7 @@ describe("readiness and the blocker for the zero-claims gate", () => {
 
   it("does not add the blocker when the gate is clear", () => {
     const blockers = publishBlockers({ ...state, uncheckedStory: false });
-    assert.equal(blockers.find((b) => b.key === "claims-unchecked"), undefined);
+    assert.equal(blockers.find((b) => b.key === "unchecked"), undefined);
   });
 
   it("maps the zero-claims blocker to the new not-checked readiness state and chip", () => {

@@ -4582,25 +4582,12 @@ export async function queryDraftRows(context: { newsroomId: number }) {
     names_checked_at: string | null;
     names_unresolved: number;
   }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
-  // Read accepted claims from the current evidence gate, just as the story page does.
-  const confirmations = await sql.query<{ lead_id: number; notes_json: string }>(
-    "select id as lead_id, notes_json from leads where newsroom_id=$1 and notes_json like '%unreviewedClaimsConfirmation%'",
-    [owned(context)],
-  );
-  const acceptedByLead = new Map(
-    confirmations.map((row) => [row.lead_id, parseNotes(row.notes_json).unreviewedClaimsConfirmation]),
-  );
-  return Promise.all(
-    rows.map(async (row) => {
-    const acceptance = acceptedByLead.get(row.lead_id);
-    if (!acceptance) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
-    const [draft] = await sql.query<DraftRow>("select * from drafts where id=$1 and newsroom_id=$2", [row.id, owned(context)]);
-    const acceptedCount = draft && evidenceConfirmationMatches(acceptance.token, draft) ? acceptance.count : 0;
-    if (!acceptedCount) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
-    const openCount = await unreviewedClaimCount(owned(context), row.lead_id);
-    return { ...row, unreviewed_claims: openCount, unreviewed_claims_accepted_count: acceptedCount };
-  }),
-  );
+  const { loadDeskClaimCounts } = await import("./finding-evidence-review.ts");
+  const counts = await loadDeskClaimCounts(sql, owned(context), rows.map(row => row.id));
+  return rows.map(row => ({ ...row,
+    unreviewed_claims: counts.get(row.id)?.outstanding ?? 0,
+    unreviewed_claims_accepted_count: counts.get(row.id)?.accepted ?? 0,
+  }));
 }
 
 /*
@@ -5966,8 +5953,7 @@ export async function performOverrideNamedOutlet(
     return { ok: false as const, error: decision.error };
   }
 
-  if (decision.known) await audit(context.userId, "override_named_outlet", `Draft ${decision.draftId}`, room, {kind: "drafts", id: decision.draftId});
-  else await auditOverrides({userId: context.userId, newsroomId: room}, [key], {kind: "drafts", id: decision.draftId});
+  await auditOverrides({userId: context.userId, newsroomId: room}, [key], {kind: "drafts", id: decision.draftId});
   return { ok: true as const, outlet: decision.outlet };
 }
 
@@ -6147,73 +6133,6 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     const draft = unpackStoredDraft({ ...row });
     draft.body = stripReporterNotebook(draft.body);
     if (!String(draft.headline ?? "").trim()) {
-    Two ways past it, and both are the editor's to choose: judge the claims in
-    the workbench (the blocker's first press, and the one to prefer), or accept
-    them explicitly with a press that records who and when against this exact
-    draft version (`performAcceptUnreviewedClaims`). The accepted COUNT and
-    token are read from `notes_json` -- the same place, and the same
-    fingerprint, as the section confirmation, so the acceptance is for the
-    version the editor was reading and an edit takes it back.
-
-    THREE WAYS IT FAILS CLOSED (units U24, U24b):
-
-      1. The count cannot be read at all. `unreviewedClaimCount` now only
-         swallows the unreadable-findings error and lets infrastructure errors
-         out; a publish that cannot be checked is a publish that does not
-         happen, in a sentence a person can read.
-      2. No acceptance, or one recorded for a different draft version.
-      3. An acceptance given for FEWER claims than are outstanding now. The
-         fingerprint alone cannot see this: a judgment the desk downgrades to
-         unreviewed -- the capture behind it changed, its binding moved -- does
-         not touch the draft row, so the token stands still while the number to
-         answer for grows. "I accepted three" must not print four.
-
-    A disabled button is a suggestion -- a stale tab, a second window or a
-    scripted call all route straight past it -- so the gate is here, and the
-    desk's blocker is the sentence that tells the editor this one exists.
-  */
-  let gate: { outstanding: number; evidenceToken: string; recordedClaims: number };
-  try {
-    gate = await unreviewedClaimsGate(owned(context), leadId, deps);
-  } catch {
-    return { ok: false as const, error: PUBLISH_COULD_NOT_CHECK };
-  }
-  const outstandingClaims = gate.outstanding;
-  /*
-    ── THE CLAIMS NOBODY RECORDED, SO NOBODY CHECKED (UNIT ZC) ────────────────
-
-    A run that recorded NO claims leaves the unreviewed count at zero, so a story
-    nothing has ever been run against -- with a dollar figure, a date or a vote in
-    it -- used to print with no gate at all. This is checked FIRST, on the single
-    review read above: `recordedClaims` counts the run's own output and is
-    independent of the review warnings, so a draft with only flagged grounding
-    specifics and an acceptance covering those warnings is still refused here --
-    the sentence the editor needs is about the check that never ran, not the
-    warnings that have an answer. The rule is `uncheckedStoryNeedsCheck`, the same
-    one the desk's blocker and the readiness chip read, and the sentence is one
-    constant, so the page and this refusal cannot disagree.
-  */
-  {
-    const acknowledged =
-      parseNotes(notesRows[0]?.notes_json).uncheckedStoryConfirmation?.token ===
-      topicConfirmationFingerprint(evidenceReviewToken(row));
-    const decision = uncheckedStoryNeedsCheck({
-      recordedClaims: gate.recordedClaims,
-      evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(row),
-      /* The detector reads the PUBLIC story text (see the loader's copy). */
-      body: stripReporterNotebook(row.body ?? ""),
-      acknowledgedForVersion: acknowledged,
-      exempt: isImportedText(row) || row.form === "editorial",
-    });
-    if (decision.blocked) return { ok: false as const, error: UNCHECKED_STORY_REASON };
-  }
-  if (outstandingClaims > 0) {
-    const acceptance = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation;
-    const acceptedForThisDraft =
-      acceptance?.token === topicConfirmationFingerprint(evidenceReviewToken(row));
-    const accepted = acceptedForThisDraft && (acceptance?.count ?? 0) >= outstandingClaims;
-    if (!accepted) {
-      const short = acceptedForThisDraft ? (acceptance?.count ?? 0) : 0;
       return {
         warnings,
         hard: { key: "headline", sentence: "The headline is empty, so there is nothing to print." },
@@ -6239,9 +6158,10 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     /* The evidence-review READ failing is a warning (unable to read judgments),
        not a wall: an editor may print past it once they say so. */
     let outstandingClaims = 0;
+    let recordedClaims = 0;
     let reviewReadFailed = false;
     try {
-      outstandingClaims = await unreviewedClaimCount(owned(context), leadId, {
+      const gate = await unreviewedClaimsGate(owned(context), leadId, {
         ...deps,
         loadReview:
           deps.loadReview ??
@@ -6250,6 +6170,8 @@ export const performPublish = createServerOnlyFn(async function performPublish(
             return loadFindingEvidenceReview(tx, room, lead);
           }),
       });
+      outstandingClaims = gate.outstanding;
+      recordedClaims = gate.recordedClaims;
     } catch {
       reviewReadFailed = true;
       warnings.push({ key: "evidence-loading", sentence: PUBLISH_COULD_NOT_CHECK });
@@ -6262,6 +6184,14 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         `
       )[0]?.notes_json,
     );
+
+    if (!reviewReadFailed && uncheckedStoryNeedsCheck({
+      recordedClaims,
+      evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(row),
+      body: draft.body,
+      acknowledgedForVersion: evidenceConfirmationMatches(notes.uncheckedStoryConfirmation?.token, row),
+      exempt: isImportedText(row) || row.form === "editorial",
+    }).blocked) warnings.push({ key: "unchecked", sentence: UNCHECKED_STORY_REASON });
 
     if (!draft.dek || !draft.dek.trim()) {
       warnings.push({

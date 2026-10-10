@@ -96,6 +96,7 @@ type FixtureInput = {
   status?: string;
   notes?: unknown;
   research?: unknown;
+  unchecked?: boolean;
   evidenceCheckJob?: "queued" | "running" | null;
 };
 
@@ -121,6 +122,14 @@ async function fixture(input: FixtureInput = {}) {
     "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,$4,$5,$6,$7,'[]','','[]','news','[]','[]',$8) returning id",
     [USER, NEWSROOM, lead.id, headline, dek, body, topic, research],
   );
+  if (!input.unchecked) {
+    const { evidenceReviewToken } = await vite.ssrLoadModule("/src/lib/news/draft-evidence.ts");
+    const { topicConfirmationFingerprint } = await vite.ssrLoadModule("/src/lib/news/notes.ts");
+    const [stored] = await sql.query("select * from drafts where id=$1", [draft.id]);
+    await sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({
+      ...JSON.parse(research), evidenceReviewVersion: topicConfirmationFingerprint(evidenceReviewToken(stored)),
+    }), draft.id]);
+  }
   if (input.evidenceCheckJob) {
     await sql.query(
       "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,status) values($1,$2,'reconcile',$3,$4)",
@@ -147,12 +156,12 @@ async function leadStatus(leadId: number) {
   return row?.status;
 }
 
-type OverrideRow = { detail: string; subject_id: number | null };
+type OverrideRow = { detail: string; subject_id: number | null; user_id: string };
 async function overrideRows(leadId: number): Promise<OverrideRow[]> {
   const sql = await getSql();
   return sql.query<OverrideRow>(
-    "select detail, subject_id from audit_events where newsroom_id=$1 and action='publish-override' and detail like $2 order by id",
-    [NEWSROOM, `%"leadId":${leadId},%`],
+    "select detail, subject_id, user_id from audit_events where newsroom_id=$1 and action='override' and subject_kind='drafts' and subject_id in (select id from drafts where lead_id=$2 and newsroom_id=$1) order by id",
+    [NEWSROOM, leadId],
   );
 }
 
@@ -252,15 +261,11 @@ async function provesWarning(matrix: {
   const rows = await overrideRows(ackRun.leadId);
   assert.deepEqual(keys(rows), [matrix.key], `${matrix.key}: exactly one audit row for the key`);
   const draftId = await draftIdOf(ackRun.leadId);
-  assert.match(rows[0].detail, /"draftId":\d+/, "the audit detail names the draft");
-  assert.match(
-    rows[0].detail,
-    new RegExp(`"editor":"${USER}"`),
-    "the audit detail names the editor",
-  );
-  const parsed = JSON.parse(rows[0].detail) as { key: string; draftId: number; editor: string };
+  assert.match(rows[0].detail, /"target":\{"kind":"drafts","id":\d+\}/, "the audit detail names the draft");
+  assert.equal(rows[0].user_id, USER, "the audit row names the editor");
+  const parsed = JSON.parse(rows[0].detail) as { key: string; target: { kind: string; id: number } };
   assert.equal(parsed.key, matrix.key);
-  assert.equal(parsed.draftId, draftId);
+  assert.deepEqual(parsed.target, { kind: "drafts", id: draftId });
 }
 
 it("refuses an empty dek, then prints it acknowledged with one audit row", async () => {
@@ -827,13 +832,13 @@ it("refuses a warning introduced under the fence and lets a retry acknowledged p
     {
       loadReview: async () => ({ rows: [], claimRows: [], manualClaimRows: [], evidenceToken: "" }),
     },
-    ["dek"],
+    ["dek", "unchecked"],
   );
   assert.equal(published.ok, true, `the acknowledged retry prints: ${refusalOf(published)}`);
   assert.deepEqual(
     keys(await overrideRows(leadId)),
-    ["dek"],
-    "exactly the dek override is audited",
+    ["dek", "unchecked"],
+    "both new warnings are audited",
   );
 });
 
@@ -1008,6 +1013,7 @@ it("allows overriding a named outlet that is not in the known list", async () =>
     { userId: USER, newsroomId: NEWSROOM },
     leadId,
     "  Tiny Mountain Gazette  ",
+    { override: ["named-outlet:Tiny Mountain Gazette"] },
   );
   assert.equal(overridden.ok, true, "an explicitly named unknown outlet can be overridden");
   if (overridden.ok) {
@@ -1015,7 +1021,7 @@ it("allows overriding a named outlet that is not in the known list", async () =>
   }
   const sql = await getSql();
   const [audit] = await sql.query<{ count: number }>(
-    "select count(*)::int as count from audit_events where newsroom_id=$1 and action='override_named_outlet'",
+    "select count(*)::int as count from audit_events where newsroom_id=$1 and action='override'",
     [NEWSROOM],
   );
   assert.ok(Number(audit.count) >= 1, "the outlet override is audited");
@@ -1105,7 +1111,7 @@ it("keeps long structured override records intact and rolls them back with the t
   );
   const rows = await overrideRows(leadId);
   assert.equal(rows.length, 1);
-  assert.deepEqual(JSON.parse(rows[0].detail), { key, draftId, leadId, editor: USER });
+  assert.deepEqual(JSON.parse(rows[0].detail), { key, target: { kind: "drafts", id: draftId } });
   const sql = await getSql();
   const [record] = await sql.query<{
     user_id: string;
@@ -1113,11 +1119,26 @@ it("keeps long structured override records intact and rolls them back with the t
     subject_kind: string;
     subject_id: number;
   }>(
-    "select user_id,created_at,subject_kind,subject_id from audit_events where newsroom_id=$1 and action='publish-override'",
+    "select user_id,created_at,subject_kind,subject_id from audit_events where newsroom_id=$1 and action='override'",
     [NEWSROOM],
   );
   assert.equal(record.user_id, USER);
   assert.ok(record.created_at);
   assert.equal(record.subject_kind, "drafts");
   assert.equal(record.subject_id, draftId);
+});
+
+it("unchecked is a warning: either acknowledgement or Publish anyway prints and records the editor", async () => {
+  const { leadId, draftId } = await fixture({ unchecked: true });
+  const context = { userId: USER, newsroomId: NEWSROOM };
+  const warned = await performPublish(context, leadId, "council");
+  assert.equal(warned.ok, false);
+  assert.deepEqual(warningsOf(warned)?.map(w => w.key), ["unchecked"]);
+  assert.equal(await articleCount(leadId), 0);
+  const printed = await performPublish(context, leadId, "council", undefined, {}, ["unchecked"]);
+  assert.equal(printed.ok, true, refusalOf(printed));
+  const rows = await overrideRows(leadId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].user_id, USER);
+  assert.deepEqual(JSON.parse(rows[0].detail), { key: "unchecked", target: {kind: "drafts", id: draftId} });
 });

@@ -408,3 +408,31 @@ it("reopening the drafts list after a no-op Save uses the recorded acceptance", 
   assert.equal(state.label, "✓ Ready");
   assert.equal(state.readiness?.reason, "You accepted 1 claim the AI could not confirm.");
 });
+
+it("Drafts counts many accepted drafts in one query and agrees with the current evidence review", async () => {
+  const f = await fixture();
+  const context = { userId: f.userId, newsroomId: f.newsroomId };
+  assert.equal((await performAcceptUnreviewedClaims(context, f.leadId, await paneReviewToken(f))).ok, true);
+  const ids = [f.draftId];
+  for (let i=0; i<3; i++) {
+    const [lead] = await f.sql.query("insert into leads(user_id,newsroom_id,headline,why,topic,status,notes_json) select user_id,newsroom_id,headline,why,topic,status,notes_json from leads where id=$1 returning id", [f.leadId]);
+    const [draft] = await f.sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,research_json,unanswered,form) select user_id,newsroom_id,$2,headline,dek,body,topic,source_urls,provenance_json,found_note,research_json,unanswered,form from drafts where id=$1 returning id", [f.draftId,lead.id]);
+    ids.push(Number(draft.id));
+  }
+  const { loadDeskClaimCounts, loadFindingEvidenceReview } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  const { claimsNeedingReview } = await vite.ssrLoadModule("/src/lib/news/evidence-check-state.ts");
+  let queries=0;
+  const countedSql = Object.assign(f.sql.bind(null), f.sql, { query: async (text: string, params: unknown[]) => {
+    queries++; return f.sql.query(text, params);
+  }});
+  const counts = await loadDeskClaimCounts(countedSql, f.newsroomId, ids);
+  assert.equal(queries, 1, "one batch regardless of the number of accepted drafts");
+  assert.equal(counts.size, 4);
+  for (const id of ids) {
+    const [draft] = await f.sql.query("select lead_id from drafts where id=$1", [id]);
+    const review = await loadFindingEvidenceReview(f.sql, f.newsroomId, draft.lead_id);
+    assert.equal(counts.get(id).outstanding, claimsNeedingReview(review.rows,review.claimRows,review.manualClaimRows,review.groundingRows));
+    assert.equal(counts.get(id).accepted, 1);
+  }
+  assert.equal((await loadDeskClaimCounts(countedSql, f.newsroomId+999, ids)).size,0,"newsroom isolation");
+});

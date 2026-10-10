@@ -140,7 +140,7 @@ function overrideAudits(sql: Awaited<ReturnType<typeof getSql>>, newsroomId: num
     subject_kind: string | null;
     subject_id: number | null;
   }>(
-    "select detail, user_id, created_at, subject_kind, subject_id from audit_events where newsroom_id=$1 and action='publish-override' order by id",
+    "select detail, user_id, created_at, subject_kind, subject_id from audit_events where newsroom_id=$1 and action='override' order by id",
     [newsroomId],
   );
 }
@@ -197,7 +197,7 @@ it("refuses a warning, then prints on the acknowledged press and records one ove
   const audits = await overrideAudits(f.sql, f.newsroomId);
   assert.equal(audits.length, 2, "one override row per warning printed over");
   const parsed = audits.map(
-    (a) => JSON.parse(a.detail) as { key: string; draftId: number; editor: string },
+    (a) => JSON.parse(a.detail) as { key: string; target: {kind: string; id: number} },
   );
   assert.deepEqual(
     parsed.map((p) => p.key).sort(),
@@ -209,8 +209,7 @@ it("refuses a warning, then prints on the acknowledged press and records one ove
     assert.ok(a.created_at, "and dated");
     assert.equal(a.subject_kind, "drafts", "the entity is the draft");
     assert.equal(a.subject_id, f.draftId);
-    assert.equal(parsed[i].draftId, f.draftId, "the detail names the draft");
-    assert.equal(parsed[i].editor, f.userId, "and the editor");
+    assert.deepEqual(parsed[i].target, { kind: "drafts", id: f.draftId }, "the detail names the exact target");
   }
 
   const articles = await publishedArticles(f.sql, f.newsroomId);

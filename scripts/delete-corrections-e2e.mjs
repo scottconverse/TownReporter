@@ -1058,7 +1058,7 @@ async function main() {
     this step then inspects for the refreshed findings.
   */
   const keepEvidence = page
-    .getByLabel("Reasons Publish is off")
+    .getByLabel("Publish checks and warnings")
     .getByRole("button", { name: "I checked: keep this evidence" });
   await keepEvidence.click({ noWaitAfter: true });
   await evidenceDecisionHeld;

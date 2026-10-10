@@ -266,6 +266,9 @@ export const suggestHeadlines = async ({ data }) => {
   calls.push({ fn: "suggestHeadlines", data });
   return { ok: true, options: ["A", "B", "C"] };
 };
+export const requestDraftReconciliationFn = async () => ({ ok: true });
+export const addLead = async () => ({ ok: true });
+export const openDarkInvestigation = async () => ({ ok: true });
 export const addSource = async () => ({ ok: true });
 export const addSourcesBulk = async () => ({ ok: true });
 export const fileLead = async () => ({ ok: true });
@@ -389,6 +392,7 @@ const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx",
   ),
   "@/lib/news/dark": stub("export const openDarkInvestigation = async () => ({ ok: false, error: 'not here' });"),
   "@/lib/news/desk": deskUrl,
+  "@/components/scoped-actions": deskUrl,
   "@/lib/news/draft-reconcile-actions": stub(
     "export const requestDraftReconciliationFn = async () => ({ ok: true });",
   ),

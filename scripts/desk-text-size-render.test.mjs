@@ -240,7 +240,9 @@ const { DeskShell } = await import(
     {
       "@tanstack/react-router": routerStub,
       "@tanstack/react-query": reactQueryStub,
-      "@/lib/paper-context-state": paperContextStub,
+      "@/components/warning-consent-host": inlineModule("export function WarningConsentHost() { return null; }"),
+    "@/components/editor-warning-consent": inlineModule("export function deskWarningConsent() { return {}; }"),
+    "@/lib/paper-context-state": paperContextStub,
       "@/lib/auth/gates": authGatesStub,
       "@/lib/auth/client": authClientStub,
       "@/lib/auth/use-current-user": useCurrentUserStub,

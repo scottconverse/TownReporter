@@ -599,15 +599,24 @@ async function currentDraft(sql: Sql, newsroomId: number, leadId: number): Promi
   return draft;
 }
 
+type EvidenceSnapshot = {
+  versions: Array<VersionRow & { text_fingerprint: string }>;
+  captures: CaptureRow[];
+};
+
 async function findingReferenceBinding(
   sql: Sql,
   newsroomId: number,
   finding: StoryFinding,
   lock = false,
+  snapshot?: EvidenceSnapshot,
 ): Promise<string> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
-  const captures = captureIds.length
+  const captures = snapshot
+    ? snapshot.captures.filter(row => captureIds.includes(row.id)).sort((a,b) => a.id-b.id)
+      .map(({ id, version_id, source_url, content_hash }) => ({ id, version_id, source_url, content_hash }))
+    : captureIds.length
     ? await sql.query<{
         id: number;
         version_id: number | null;
@@ -627,7 +636,10 @@ async function findingReferenceBinding(
       ...captures.flatMap((capture) => (capture.version_id == null ? [] : [capture.version_id])),
     ]),
   ];
-  const versions = allVersionIds.length
+  const versions = snapshot
+    ? snapshot.versions.filter(row => allVersionIds.includes(row.id)).sort((a,b) => a.id-b.id)
+      .map(({ id, url, content_hash, text_fingerprint }) => ({ id, url, content_hash, text_fingerprint }))
+    : allVersionIds.length
     ? await sql.query<{
         id: number;
         url: string;
@@ -648,6 +660,7 @@ async function manualClaimBinding(
   newsroomId: number,
   claim: StoredManualClaim,
   lock = false,
+  snapshot?: EvidenceSnapshot,
 ): Promise<string> {
   return JSON.stringify({
     claim: {
@@ -657,7 +670,7 @@ async function manualClaimBinding(
       references: claim.references.map(({ versionId, url, relation }) => ({ versionId, url, relation })),
     },
     captured: JSON.parse(
-      await findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock),
+      await findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock, snapshot),
     ),
   });
 }
@@ -696,16 +709,17 @@ async function resolveFinding(
   key = `finding:${index}`,
   namespace: ReviewNamespace = "findingEvidenceReview",
   evidenceBinding?: string,
+  snapshot?: EvidenceSnapshot,
 ): Promise<FindingEvidenceRow> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
-  const versions = versionIds.length
+  const versions = snapshot ? snapshot.versions.filter(row => versionIds.includes(row.id)) : versionIds.length
     ? await sql.query<VersionRow>(
         "select id,url,title,full_text,content_hash,captured_at,taken_down_at from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
         [newsroomId, versionIds],
       )
     : [];
-  const captures = captureIds.length
+  const captures = snapshot ? snapshot.captures.filter(row => captureIds.includes(row.id)) : captureIds.length
     ? await sql.query<CaptureRow>(
         `select ce.id,ce.version_id,ce.source_url,ce.observed_at,ce.content_hash,
                 av.title,av.full_text,av.content_hash as version_content_hash,
@@ -741,7 +755,7 @@ async function resolveFinding(
           }
         : undefined);
     const url = availableVersion?.url ?? capture?.source_url ?? null;
-    const [newer] = url
+    const [newer] = url && !snapshot
       ? await sql.query<{ id: number; captured_at: string | Date }>(
           `select id,captured_at from artifact_versions
             where newsroom_id=$1 and url=$2 and ($3::int is null or id<>$3)
@@ -776,7 +790,7 @@ async function resolveFinding(
     });
   }
   let judgment = judgmentFor(draft, key, namespace);
-  const currentBinding = evidenceBinding ?? (await findingReferenceBinding(sql, newsroomId, finding));
+  const currentBinding = evidenceBinding ?? (await findingReferenceBinding(sql, newsroomId, finding, false, snapshot));
   const readableVersions = new Set(
     resolved
       .filter((capture) => capture.available && capture.readable)
@@ -818,6 +832,7 @@ async function resolveClaim(
   draft: DraftRow,
   claim: ReportingReviewClaim,
   index: number,
+  snapshot?: EvidenceSnapshot,
 ): Promise<ClaimEvidenceRow> {
   const key = await claimKey(index, claim);
   const resolved = await resolveFinding(
@@ -828,6 +843,8 @@ async function resolveClaim(
     index,
     key,
     "claimEvidenceReview",
+    undefined,
+    snapshot,
   );
   const captures = resolved.captures.map((capture) =>
     (claim.reporting ? claim.reporting.references.some((ref) =>
@@ -916,9 +933,10 @@ async function resolveManualClaim(
   newsroomId: number,
   draft: DraftRow,
   claim: StoredManualClaim,
+  snapshot?: EvidenceSnapshot,
 ): Promise<ManualClaimEvidenceRow> {
   const key = manualClaimKey(claim);
-  const evidenceBinding = await manualClaimBinding(sql, newsroomId, claim);
+  const evidenceBinding = await manualClaimBinding(sql, newsroomId, claim, false, snapshot);
   const resolved = await resolveFinding(
     sql,
     newsroomId,
@@ -928,6 +946,7 @@ async function resolveManualClaim(
     key,
     "claimEvidenceReview",
     evidenceBinding,
+    snapshot,
   );
   const captures = resolved.captures.map((capture) => {
     const reference = claim.references.find((candidate) => candidate.versionId === capture.versionId);
@@ -1018,6 +1037,84 @@ async function manualClaimCaptureOptions(
   }));
 }
 
+/** A desk count uses one bounded snapshot, with the same judgment resolver as Checks.
+ * No review tokens, newer-capture lookups, capture options or per-draft SQL. */
+export async function loadDeskClaimCounts(sql: Sql, newsroomId: number, draftIds: number[]) {
+  const result = new Map<number, { outstanding: number; accepted: number }>();
+  if (!draftIds.length) return result;
+  const [snapshot] = await sql.query<{
+    drafts: Array<DraftRow & { notes_json: string }>;
+    versions: EvidenceSnapshot["versions"];
+    captures: CaptureRow[];
+  }>(`
+    with selected as (
+      select d.*, l.notes_json from drafts d
+      join leads l on l.id=d.lead_id and l.newsroom_id=d.newsroom_id
+      where d.newsroom_id=$1 and d.id=any($2::int[])
+        and l.notes_json like '%unreviewedClaimsConfirmation%'
+    ), material as (
+      select jsonb_build_array(coalesce(nullif(found_note,''),'[]')::jsonb,
+        coalesce(nullif(provenance_json,''),'[]')::jsonb,
+        coalesce(nullif(research_json,''),'{}')::jsonb) as doc from selected
+    ), version_ids as (
+      select distinct (v #>> '{}')::int as id from material,
+      lateral (
+        select jsonb_path_query(doc, '$.**.artifact_version_ids[*]') as v
+        union all select jsonb_path_query(doc, '$.**.version_id')
+        union all select jsonb_path_query(doc, '$.**.versionId')
+      ) refs where jsonb_typeof(v)='number'
+    ), capture_ids as (
+      select distinct (v #>> '{}')::int as id from material,
+      lateral (select jsonb_path_query(doc, '$.**.capture_event_ids[*]') as v) refs
+      where jsonb_typeof(v)='number'
+    ), captures as (
+      select ce.id,ce.version_id,ce.source_url,ce.observed_at,ce.content_hash,
+        av.title,av.full_text,av.content_hash as version_content_hash,
+        av.captured_at as version_captured_at,av.taken_down_at
+      from capture_events ce left join artifact_versions av
+        on av.id=ce.version_id and av.newsroom_id=ce.newsroom_id
+      where ce.newsroom_id=$1 and ce.id in (select id from capture_ids)
+    ), versions as (
+      select av.*,md5(av.full_text) as text_fingerprint from artifact_versions av
+      where av.newsroom_id=$1 and (av.id in (select id from version_ids)
+        or av.id in (select version_id from captures))
+    ) select
+      coalesce((select jsonb_agg(to_jsonb(d)) from selected d),'[]'::jsonb) as drafts,
+      coalesce((select jsonb_agg(to_jsonb(v)) from versions v),'[]'::jsonb) as versions,
+      coalesce((select jsonb_agg(to_jsonb(c)) from captures c),'[]'::jsonb) as captures
+  `, [newsroomId, draftIds]);
+  const { claimsNeedingReview } = await import("./evidence-check-state.ts");
+  const { parseNotes } = await import("./notes.ts");
+  const { evidenceConfirmationMatches } = await import("./draft-evidence.ts");
+  for (const draft of snapshot?.drafts ?? []) {
+    const acceptance = parseNotes(draft.notes_json).unreviewedClaimsConfirmation;
+    if (!acceptance || !evidenceConfirmationMatches(acceptance.token, draft)) continue;
+    // Legacy unhydrated ledgers cannot be promoted from a memo-only count.
+    const memo = objectMemo(draft.research_json);
+    if (memo.civicReporting === true && memo.reportedClaims == null) continue;
+    try {
+      assertReadableStoredFindings(draft.found_note);
+      const review: FindingEvidenceReview = {
+        leadId: draft.lead_id, draftId: draft.id, civicReporting: memo.civicReporting === true,
+        evidenceToken: "", contentToken: "", canonicalDraft: draft,
+        rows: await Promise.all(parseFindings(draft.found_note).map((finding,index) =>
+          resolveFinding(sql, newsroomId, draft, finding, index, undefined, undefined, undefined, snapshot))),
+        claimRows: await Promise.all(storedClaims(draft).map((claim,index) =>
+          resolveClaim(sql, newsroomId, draft, claim, index, snapshot))),
+        manualClaimRows: await Promise.all(storedManualClaims(draft).map(claim =>
+          resolveManualClaim(sql, newsroomId, draft, claim, snapshot))),
+        groundingRows: storedGrounding(draft), manualClaimCaptureOptions: [],
+      };
+      await applyAiReview(sql, newsroomId, draft, review, snapshot);
+      result.set(draft.id, { outstanding: claimsNeedingReview(review.rows, review.claimRows,
+        review.manualClaimRows, review.groundingRows), accepted: acceptance.count });
+    } catch (error) {
+      if (!isUnreadableFindingsError(error)) throw error;
+    }
+  }
+  return result;
+}
+
 export async function loadFindingEvidenceReview(
   sql: Sql,
   newsroomId: number,
@@ -1068,6 +1165,11 @@ export async function loadFindingEvidenceReview(
     groundingRows: storedGrounding(draft),
     manualClaimCaptureOptions: await manualClaimCaptureOptions(sql, newsroomId, draft),
   };
+  return applyAiReview(sql, newsroomId, draft, review);
+}
+
+async function applyAiReview(sql: Sql, newsroomId: number, draft: DraftRow, review: FindingEvidenceReview, snapshot?: EvidenceSnapshot): Promise<FindingEvidenceReview> {
+  const reporting = objectMemo(draft.research_json);
   const ai = reporting.aiEvidenceReview as AiEvidenceReview | undefined;
   if (ai?.checkedText === draft.body && Array.isArray(ai.rows)) {
     for (const row of [...review.rows, ...review.claimRows]) {
@@ -1088,7 +1190,7 @@ export async function loadFindingEvidenceReview(
       let grounded = false;
       for (const capture of matches) {
         if (capture.versionId != null) {
-          const [retained] = await sql.query<{ full_text: string }>(
+          const [retained] = snapshot ? snapshot.versions.filter(version => version.id === capture.versionId && !version.taken_down_at) : await sql.query<{ full_text: string }>(
             "select full_text from artifact_versions where id=$1 and newsroom_id=$2 and taken_down_at is null",
             [capture.versionId, newsroomId],
           );

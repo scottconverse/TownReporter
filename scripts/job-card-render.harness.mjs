@@ -69,6 +69,7 @@ const jobCardStateModule = moduleUrl(
   {
     "../lib/desk/scan-policy-refresh.ts": new URL("../src/lib/desk/scan-policy-refresh.ts", import.meta.url).href,
     "@/lib/news/job-progress": jobProgressStub,
+    "@/components/scoped-actions": jobProgressStub,
     "@tanstack/react-query": reactQueryStub,
   },
 );
@@ -83,6 +84,7 @@ const JobCardModule = moduleUrl(
     "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
     react: REACT_URL,
     "@/lib/news/job-progress": jobProgressStub,
+    "@/components/scoped-actions": jobProgressStub,
     "@tanstack/react-query": reactQueryStub,
     "./job-card-state": jobCardStateModule,
   },

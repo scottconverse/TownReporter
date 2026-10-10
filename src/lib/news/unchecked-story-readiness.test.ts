@@ -44,7 +44,8 @@ describe("ZC0: the zero-claims readiness the desk reaches", () => {
     /* The gate is one boolean the page already has, derived on the page and the
        server from the same rule; the blocker list must read it. */
     const withGate = publishBlockers({ ...ZERO_CLAIM_STATE, uncheckedStory: true });
-    const row = withGate.find((b) => b.key === "claims-unchecked");
+    const row = withGate.find((b) => b.key === "unchecked");
+    assert.equal(row?.kind, "warning");
     assert.ok(row, "a checkable story nobody has checked must be a blocker");
     assert.equal(row!.altAction?.target.kind, "acknowledge-unchecked");
 
@@ -60,7 +61,7 @@ describe("ZC0: the zero-claims readiness the desk reaches", () => {
   it("adds no blocker when the gate is clear", () => {
     const withoutGate = publishBlockers({ ...ZERO_CLAIM_STATE, uncheckedStory: false });
     assert.equal(
-      withoutGate.find((b) => b.key === "claims-unchecked"),
+      withoutGate.find((b) => b.key === "unchecked"),
       undefined,
       "a draft the gate does not apply to is untouched",
     );

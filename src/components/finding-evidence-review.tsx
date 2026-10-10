@@ -1707,7 +1707,7 @@ export function FindingEvidenceReviewPanel({
       {reviewQuery.data && "error" in reviewQuery.data ? (
         <Notice kind="err">
           {reviewQuery.data.error}
-          {reviewQuery.data.code !== "invalid-input" ? (
+          {(!("code" in reviewQuery.data) || reviewQuery.data.code !== "invalid-input") ? (
             <>
               {" "}
               <button

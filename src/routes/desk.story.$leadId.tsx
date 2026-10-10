@@ -52,7 +52,6 @@ import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
-  overrideNamedOutlet,
   changePublishedStory,
   fixDraftStyle,
   getLead,
@@ -61,11 +60,9 @@ import {
   listDraftHistory,
   listPullJobs,
   publishLead,
-  pullTodo,
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
   acknowledgeUncheckedStory,
-  continuePullJob,
   overrideNamedOutlet,
   reverifyPublishedStory,
   rewritePublishedStory,
@@ -1100,7 +1097,9 @@ function StoryPage() {
         },
       }),
     onSuccess: async () => {
+      setAcceptedUnreviewed(false);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      await qc.invalidateQueries({ queryKey: ["finding-evidence-review", id] });
       setMsg("Saved.");
     },
     onError: (error) =>
@@ -1810,7 +1809,7 @@ function StoryPage() {
     setPublishRefusal("");
     setRefusedWarnings([]);
     setAcceptedUnreviewed(false);
-  }, [headline, dek, body, topic]);
+  }, [headline, dek, body, topic, data?.evidenceToken]);
 
   if (isPending) {
     return (
@@ -2091,8 +2090,12 @@ function StoryPage() {
     ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
     : [];
   const hasAiJudgments = Boolean(data.draft?.research_json?.includes('"aiEvidenceReview"'));
-  const legacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
+  const storedLegacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  const legacyReadiness = storedLegacyReadiness.state === "not-checked" && !uncheckedStoryNeedsCheck({
+    recordedClaims: data.uncheckedRecordedClaims, evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked,
+    body: data.draft?.body ?? "", acknowledgedForVersion: data.uncheckedStoryAcknowledged, exempt: data.uncheckedExempt,
+  }).blocked ? { ...storedLegacyReadiness, state: "ready" as const, reason: "Ready to publish." } : storedLegacyReadiness;
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -2230,7 +2233,7 @@ function StoryPage() {
     }),
     draftReadiness,
   );
-  const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
+  const heldPublishNote = heldForDraft.length && blockers.some(blocker => blocker.key === "readiness")
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
     : "";
   const blockerPress = blockerPressState({
@@ -2592,6 +2595,7 @@ function StoryPage() {
       <div className="astra-wb-context">
         <span>Story from lead · {sectionNameNow}</span>
         <StoryReadinessChip readiness={draftReadiness} />
+        {data.draft && draftReadiness.state !== "ready" ? <span className="meta">{draftReadiness.reason}</span> : null}
         {/*
           The fold used to print a count of failures -- "13 provider or page
           failures" -- which is our bookkeeping and told the editor nothing

@@ -175,6 +175,7 @@ export function __reset() { calls.length = 0; mode = "ok"; }
 async function answer(fn, data) {
   calls.push({ fn, data });
   if (mode === "silent") return undefined;
+  if (mode === "warn" && !data.override?.includes("correction-empty")) return { ok: false, warning: { key: "correction-empty", sentence: "This correction note is empty." } };
   if (mode === "refuse") return { ok: false, error: "the desk refused" };
   return fn === "suggestCorrectionWording"
     ? { ok: true, wording: "The story said " + data.wasWrong + ", not what it printed." }
@@ -241,6 +242,7 @@ const dialogPressUrl = moduleUrl(
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
   "@/components/dialog": dialogUrl,
   "@/lib/news/desk": deskStubUrl,
+  "@/components/scoped-actions": deskStubUrl,
   "@/lib/news/dialog-press": dialogPressUrl,
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
 });
@@ -251,6 +253,7 @@ const correctionUrl = moduleUrl(
     "@/components/dialog": dialogUrl,
     "@/components/model-picker": modelPickerStubUrl,
     "@/lib/news/desk": deskStubUrl,
+  "@/components/scoped-actions": deskStubUrl,
     "@/lib/news/correction-wording": moduleUrl(
       await source("src/lib/news/correction-wording.ts"),
       "correction-wording.ts",
@@ -623,8 +626,16 @@ test("the correction dialog defaults to leaving the story text as is", async () 
     3,
     "two lines and the note; the printed text box only appears once asked for",
   );
-  assert.equal(button("Post as a plain note").disabled, true, "an empty note cannot post");
+  assert.equal(button("Post as a plain note").disabled, false, "an empty note can request the policy warning");
   assert.equal(button("Suggest wording (AI)").disabled, true, "nothing to suggest from yet");
+  desk.__reset();
+  desk.__setMode("warn");
+  await page.click(button("Post as a plain note"));
+  assert.match(document.body.textContent, /This correction note is empty/);
+  assert.equal(desk.calls.length, 1);
+  await page.click(button("Post anyway"));
+  assert.deepEqual(desk.calls[1].data.override, ["correction-empty"]);
+  desk.__setMode("ok");
   await page.close();
 });
 
@@ -665,6 +676,7 @@ test("the correction note is the desk's own sentence, and posting sends the call
         meetingReviewId: 31,
         alsoFixBody: false,
         storyBody: undefined,
+        override: undefined,
       },
     },
   ]);

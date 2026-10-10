@@ -103,7 +103,7 @@ export async function ensureDailyScanPolicySchema(sqlInput?: Sql) {
   const sql = sqlInput ?? await getSql();
   await ensureSchemaOnce(sql, "daily-scan-fixed-source-count", [
     "alter table daily_scan_policies add column if not exists every_day_source_count integer not null default 8",
-    "alter table daily_scan_policies drop constraint if exists daily_scan_policies_source_cap_check",
+    "alter table daily_scan_policies add column if not exists source_cap_override integer",
   ]);
 }
 /** Why a paused row says it is paused: the one reason this code writes. */
@@ -224,7 +224,7 @@ export async function persistDailyScanPolicy(
     data.localTime,
     data.runtime,
     data.modelEffort,
-    data.sourceCap,
+    Math.min(CAP, data.sourceCap),
     data.everyDaySourceCount ?? UNSAVED_DAILY_SCAN_POLICY.everyDaySourceCount,
     JSON.stringify(selectedSourceIds),
     userId,
@@ -232,12 +232,12 @@ export async function persistDailyScanPolicy(
   const rows =
     data.expectedRevision === 0
       ? await sql.query(
-          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,every_day_source_count,selected_source_ids,revision,updated_at,configured_by_user_id) values($1,$2,false,null,$3,$4,$5,$6,$7,$8::jsonb,1,now(),$9) on conflict(newsroom_id) do nothing returning revision",
-          params,
+          "insert into daily_scan_policies(newsroom_id,enabled,paused,pause_reason,local_time,runtime,model_effort,source_cap,every_day_source_count,selected_source_ids,revision,updated_at,configured_by_user_id,source_cap_override) values($1,$2,false,null,$3,$4,$5,$6,$7,$8::jsonb,1,now(),$9,$10) on conflict(newsroom_id) do nothing returning revision",
+          [...params, data.sourceCap > CAP ? data.sourceCap : null],
         )
       : await sql.query(
-          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,model_effort=$5,source_cap=$6,every_day_source_count=$7,selected_source_ids=$8::jsonb,configured_by_user_id=$9,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$10 returning revision",
-          [...params, data.expectedRevision],
+          "update daily_scan_policies set enabled=$2,local_time=$3,runtime=$4,model_effort=$5,source_cap=$6,source_cap_override=$11,every_day_source_count=$7,selected_source_ids=$8::jsonb,configured_by_user_id=$9,paused=case when $2 then paused else false end,pause_reason=case when $2 then pause_reason else null end,revision=revision+1,updated_at=now() where newsroom_id=$1 and revision=$10 returning revision",
+          [...params, data.expectedRevision, data.sourceCap > CAP ? data.sourceCap : null],
         );
   return Boolean(rows[0]);
 }
@@ -381,7 +381,7 @@ export async function readDailyScanPolicy(
     timezone: paper.timezone,
     runtime: dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime),
     modelEffort: modelEffort(dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime), p?.model_effort),
-    sourceCap: p?.source_cap ?? UNSAVED_DAILY_SCAN_POLICY.sourceCap,
+    sourceCap: p?.source_cap_override ?? p?.source_cap ?? UNSAVED_DAILY_SCAN_POLICY.sourceCap,
     everyDaySourceCount: p?.every_day_source_count ?? UNSAVED_DAILY_SCAN_POLICY.everyDaySourceCount,
     selectedSourceIds: p?.selected_source_ids ?? [...UNSAVED_DAILY_SCAN_POLICY.selectedSourceIds],
     revision: p?.revision ?? UNSAVED_DAILY_SCAN_POLICY.revision,

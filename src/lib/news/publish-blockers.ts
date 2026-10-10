@@ -417,7 +417,8 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   */
   if (state.uncheckedStory) {
     blockers.push({
-      key: "claims-unchecked",
+      key: "unchecked",
+      kind: "warning",
       sentence: UNCHECKED_STORY_REASON,
       action: { label: "Run the evidence check", target: { kind: "evidence-review" } },
       altAction: { label: "I checked this story myself", target: { kind: "acknowledge-unchecked" } },
