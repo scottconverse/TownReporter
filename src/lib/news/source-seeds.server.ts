@@ -1,5 +1,6 @@
+import type { SourceRow } from "./types.ts";
 import { withTransaction, type Sql } from "../db.ts";
-import { kindFromSourceUrl } from "./desk-copy.ts";
+import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { getPaperConfig, isOnboarded } from "./paper-settings.ts";
 import { parseHttpUrl } from "./source-lines.ts";
@@ -69,15 +70,17 @@ export async function saveAcceptedNewsroomSource(input: {
   title: string;
   kind: string;
   tier: string;
-}) {
+}): Promise<(SourceRow & { alreadyExisted: boolean }) | null> {
   const label = input.title.trim();
   return withTransaction(async (sql) => {
-    await sql`select newsroom_id from paper_settings where newsroom_id=${input.newsroomId} for update`;
-    const existing = await sql<{ id: number; title: string }>`select id,title from sources where newsroom_id=${input.newsroomId} and url=${input.url} order by id limit 1`;
+    await sql`select id from newsrooms where id=${input.newsroomId} for update`;
+    const identity = sourceIdentity(input.url);
+    const matches = await sql<{ id: number; title: string; url: string }>`select id,title,url from sources where newsroom_id=${input.newsroomId} order by id`;
+    const existing = matches.filter(row => identity && sourceIdentity(row.url) === identity);
     const rows = existing[0]
-      ? await sql`update sources set title=${label || existing[0].title},kind=${input.kind},tier=${input.tier},status='accepted' where id=${existing[0].id} and newsroom_id=${input.newsroomId} returning *`
-      : await sql`insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values(${input.userId},${input.newsroomId},${input.url},${label || hostFor(input.url)},${input.kind},${input.tier},'accepted') on conflict(user_id,newsroom_id,url) do update set title=case when ${label}='' then sources.title else excluded.title end,kind=excluded.kind,tier=excluded.tier,status='accepted' returning *`;
-    return rows[0] ?? null;
+      ? await sql<SourceRow>`update sources set title=${label || existing[0].title},status='accepted' where id=${existing[0].id} and newsroom_id=${input.newsroomId} returning *`
+      : await sql<SourceRow>`insert into sources(user_id,newsroom_id,url,title,kind,tier,status) values(${input.userId},${input.newsroomId},${input.url},${label || hostFor(input.url)},${input.kind},${input.tier},'accepted') on conflict(user_id,newsroom_id,url) do update set title=case when ${label}='' then sources.title else excluded.title end,status='accepted' returning *`;
+    return rows[0] ? { ...rows[0], alreadyExisted: Boolean(existing[0]) } : null;
   });
 }
 
@@ -210,9 +213,11 @@ export async function insertProposedNewsroomSource(sql: Sql, input: {
   const replaces = Number.isFinite(input.replacesSourceId) ? Number(input.replacesSourceId) : null;
   const via = storableText(input.via ?? "").trim().slice(0, SECTION_MAX) || null;
 
+  const kind = input.proposedBy === "editor" ? kindFromSourceUrl(input.url) : "discovered";
+  const tier = input.proposedBy === "editor" ? tierFromKind(kind) : "unclassified";
   const rows = await sql<{ id: number }>`
     insert into sources(user_id,newsroom_id,url,title,kind,tier,status,proposed_reason,proposed_by,proposed_scan_run_id,proposed_lead_id,proposed_section,proposed_replaces_source_id,proposed_via)
-    select ${input.userId},${input.newsroomId},${input.url},${title},'discovered','unclassified','proposed',${reason},${by},${scanRunId},${leadId},${section},${replaces},${via}
+    select ${input.userId},${input.newsroomId},${input.url},${title},${kind},${tier},'proposed',${reason},${by},${scanRunId},${leadId},${section},${replaces},${via}
     where not exists (select 1 from sources where newsroom_id=${input.newsroomId} and url=${input.url})
     on conflict(user_id,newsroom_id,url) do nothing
     returning id

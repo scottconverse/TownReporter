@@ -741,6 +741,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
                    created_at, updated_at, started_at, finished_at
             from desk_jobs candidate
             where lane = ${lane}
+              and not coalesce(candidate.cancel_requested, false)
               and (
                 status = 'queued'
                 or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
@@ -826,6 +827,12 @@ export async function reattachDurableJobsOnStartup(): Promise<{ ran: number }> {
 }
 
 export async function executeJob(job: DeskJob): Promise<boolean> {
+  if (await jobCancelRequested(job.id)) {
+    const sql = await getSql();
+    const [cancelled] = await sql<{ status: string; stage: string }>`select status,stage from desk_jobs where id = ${job.id}`;
+    // An explicit Cancel has already settled; a previously stopped run was never claimable.
+    return cancelled?.status === "failed" && cancelled.stage === "Cancelled";
+  }
   const token = mintClaimToken();
   /*
     The stage list is part of the claim, and the row handed to the worker below
@@ -853,6 +860,7 @@ export async function executeJob(job: DeskJob): Promise<boolean> {
           stages_json = ${stages && stages.length ? JSON.stringify(stages) : null},
           stage_index = 0
       where candidate.id = ${job.id}
+        and not coalesce(candidate.cancel_requested, false)
         and (
           candidate.status = ${"queued"}
           or (candidate.status = ${"running"} and candidate.updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
@@ -1567,16 +1575,18 @@ export async function setJobStages(id: number, stages: string[] | null) {
 }
 
 /**
- * The editor pressed Cancel. This asks; it does not take the job away. The
- * worker notices at its next step boundary and stops with
- * `JOB_CANCELLED_REASON`. A worker that has already died never sees the flag,
- * which is why the stalled state offers "Retry on next model" as well.
+ * Cancel is terminal immediately: open-job readers release the draft and the
+ * cleared claim fences any old worker from saving. In-flight work still hears
+ * the cancellation flag at its next boundary.
  */
 export async function requestJobCancel(id: number) {
   await ensureJobsSchema();
   const sql = await getSql();
   await sql`
-    update desk_jobs set cancel_requested = true, updated_at = now() where id = ${id}
+    update desk_jobs
+    set cancel_requested = true, status = 'failed', stage = 'Cancelled',
+        error = ${JOB_CANCELLED_REASON}, finished_at = now(), updated_at = now(), claim_token = null
+    where id = ${id} and status in ('queued', 'running')
   `;
 }
 

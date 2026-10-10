@@ -1,6 +1,6 @@
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
-import { savedStoryReadiness } from "@/lib/news/story-readiness";
+import { editorStoryState, savedStoryReadiness } from "@/lib/news/story-readiness";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -11,12 +11,11 @@ import {
 import {
   blockerPressState,
   publishBlockers,
-  publishGateNote,
   publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
-import { PublishBarDone, PublishBarResult } from "@/components/publish-bar-result";
+import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/components/publish-bar-result";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
@@ -448,8 +447,7 @@ function StoryPage() {
     state, above the loading and not-found returns below, because a hook after
     an early return is a hook that does not run on every render.
   */
-  const [panelEvidence, setPanelEvidence] = useState<EvidenceCheckReport | null>(null);
-  const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence(state), []);
+  const [panelEvidence, setPanelEvidence] = useState<(EvidenceCheckReport & { revision?: string }) | null>(null);
   /*
     Unit BH2 decision 5 and 6, the three dialogs. Each is opened by a press and
     owns nothing else: the record, the two calls and the saved text all stay
@@ -488,6 +486,7 @@ function StoryPage() {
   });
 
   const meetingTranscriptChoices = data?.meetingTranscriptChoices ?? [];
+  const onEvidenceState = useCallback((state: EvidenceCheckReport) => setPanelEvidence({ ...state, revision: data?.evidenceToken }), [data?.evidenceToken]);
   const selectedMeetingArtifactId = selectedMeetingTranscriptArtifactId
     ?? data?.defaultMeetingTranscriptArtifactId
     ?? null;
@@ -586,7 +585,7 @@ function StoryPage() {
   useEffect(() => {
     if (!modelResearchOpen) return;
     const frame = requestAnimationFrame(() => {
-      modelResearchPanel.current?.scrollIntoView({ block: "nearest" });
+      modelResearchPanel.current?.scrollIntoView?.({ block: "nearest" });
       modelResearchPanel.current
         ?.querySelector<HTMLSelectElement>("select")
         ?.focus({ preventScroll: true });
@@ -1839,7 +1838,8 @@ function StoryPage() {
     (`recordedChecks`), which is exactly what it printed before this unit. That
     fallback can only ever under-report, and only for the first paint.
   */
-  const evidenceState: EvidenceCheckState = panelEvidence ?? {
+  const evidenceLoaded = Boolean(panelEvidence?.evidenceToken && panelEvidence.revision === data.evidenceToken);
+  const evidenceState: EvidenceCheckState = (evidenceLoaded ? panelEvidence : null) ?? {
     ran: Boolean(data.draft && recordedChecks(data.draft.research_json).evidenceChecked),
     toReview: 0,
     contradicted: 0,
@@ -1856,9 +1856,13 @@ function StoryPage() {
   const acceptanceCovers =
     data.unreviewedClaimsAcceptedCount > 0 &&
     data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
-  let draftReadiness = data.draft
-    ? savedStoryReadiness(data.draft.research_json, reconcileActive || waiting)
-    : { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
+  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
+    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
+    : [];
+  const hasAiJudgments = Boolean(data.draft?.research_json?.includes('"aiEvidenceReview"'));
+  const legacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
+    { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
@@ -1888,9 +1892,10 @@ function StoryPage() {
     headline,
     dek,
     body,
-    // Missing memos are Ready; saved held items, open facts and active checks still block.
-    readiness: draftReadiness?.state,
-    readinessReason: draftReadiness?.reason,
+    evidenceLoading: Boolean(hasAiJudgments && data.draft && !evidenceLoaded),
+    readiness: hasAiJudgments ? reconcileActive || waiting ? "checking" : heldForDraft.length ? "not-ready" : undefined : legacyReadiness.state,
+    readinessReason: hasAiJudgments ? reconcileActive || waiting ? "The AI is checking this draft." : heldForDraft.length ?
+      `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 70)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.` : undefined : legacyReadiness.reason,
     sectionReady,
     openClaims: openClaims.length,
     namedOutlets: data.namedOutlets,
@@ -1913,7 +1918,7 @@ function StoryPage() {
   });
   // Acceptance clears the Publish gate; it does not resolve the evidence claims.
   const blockers = publishChecks.filter((blocker) =>
-    blocker.key !== "claims-unreviewed" || !acceptanceCovers,
+    blocker.key !== "claims-unreviewed" || hasAiJudgments || !acceptanceCovers,
   );
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
@@ -1931,12 +1936,10 @@ function StoryPage() {
     the mutations report, so it is testable without mounting this route.
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
-  const evidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
-  if (evidenceBlocker) draftReadiness = {
-    state: "not-ready", openCount: evidenceState.toReview,
-    totalCount: Math.max(draftReadiness.totalCount, evidenceState.toReview),
-    reason: evidenceBlocker.sentence,
-  };
+  const legacyEvidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
+  const draftReadiness = data.draft ? hasAiJudgments ? editorStoryState(blockers, evidenceState.toReview) :
+    legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : legacyReadiness :
+    { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const readiness = readinessDot(
     writerIsReady({
       choice: modelChoice,
@@ -1946,10 +1949,6 @@ function StoryPage() {
     }),
     draftReadiness,
   );
-  const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
-  const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
-    ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
-    : [];
   const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
     : "";
@@ -1989,7 +1988,7 @@ function StoryPage() {
   const openEvidenceReview = () => {
     setInspector("checks");
     requestAnimationFrame(() =>
-      document.getElementById("finding-evidence-review")?.scrollIntoView({ block: "start" }),
+      document.getElementById("finding-evidence-review")?.scrollIntoView?.({ block: "start" }),
     );
   };
   /*
@@ -2026,7 +2025,7 @@ function StoryPage() {
     ) as HTMLDetailsElement | null;
     if (more) more.open = true;
     const el = document.querySelector<HTMLElement>("#style-fix-act .btn");
-    el?.scrollIntoView({ block: "center" });
+    el?.scrollIntoView?.({ block: "center" });
     el?.focus();
   };
   /*
@@ -2057,7 +2056,7 @@ function StoryPage() {
   const actOnBlocker = (target: PublishBlockerTarget) => {
     const focus = (selector: string) => {
       const el = document.querySelector<HTMLElement>(selector);
-      el?.scrollIntoView({ block: "center" });
+      el?.scrollIntoView?.({ block: "center" });
       el?.focus();
     };
     switch (target.kind) {
@@ -2076,7 +2075,7 @@ function StoryPage() {
         return;
       case "outlets":
         openStoryDetails();
-        document.getElementById("story-outlets")?.scrollIntoView({ block: "center" });
+        document.getElementById("story-outlets")?.scrollIntoView?.({ block: "center" });
         return;
       case "override-outlet":
         /* The same mutation the mid-form "Override <outlet>" button calls. */
@@ -2084,7 +2083,7 @@ function StoryPage() {
         return;
       case "add-source":
         setInspector("sources");
-        document.getElementById("story-inspector")?.scrollIntoView({ block: "start" });
+        document.getElementById("story-inspector")?.scrollIntoView?.({ block: "start" });
         return;
       case "claims":
       case "running-check":
@@ -2104,7 +2103,7 @@ function StoryPage() {
         acceptUnreviewed.mutate();
         return;
       case "publish-bar":
-        document.getElementById("astra-publish-bar")?.scrollIntoView({ block: "center" });
+        document.getElementById("astra-publish-bar")?.scrollIntoView?.({ block: "center" });
         return;
     }
   };
@@ -2495,6 +2494,8 @@ function StoryPage() {
                   */
                   evidenceRecorded: draftChecks.evidenceChecked,
                   onEvidenceState,
+                  readinessReason: hasAiJudgments ? draftReadiness.reason : undefined,
+                  onDraftChanged: (draft) => { setHeadline(draft.headline); setDek(draft.dek); setBody(draft.body); setTopic(draft.topic); },
                 }}
               />
             ) : (
@@ -2776,7 +2777,7 @@ function StoryPage() {
                 onClick={() => {
                   setInspector("reporting");
                   requestAnimationFrame(() =>
-                    document.getElementById("story-inspector")?.scrollIntoView({ block: "start" }),
+                    document.getElementById("story-inspector")?.scrollIntoView?.({ block: "start" }),
                   );
                   const details = document.getElementById("evidence-review")?.closest("details");
                   if (details) details.open = true;
@@ -3727,6 +3728,7 @@ function StoryPage() {
         <div className="astra-publish-bar" id="astra-publish-bar">
           <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
+            <PublishTranscriptNotice notice={data?.meetingPublishNotice} />
             {canPublish ? (
               confirmingPublish ? (
                 <>
@@ -3810,7 +3812,7 @@ function StoryPage() {
                       document.getElementById("story-topic-select")?.focus();
                       document
                         .getElementById("story-topic")
-                        ?.scrollIntoView({ block: "center" });
+                        ?.scrollIntoView?.({ block: "center" });
                     }}
                   >
                     {sectionReady ? "change" : "pick the section"}
@@ -3842,20 +3844,20 @@ function StoryPage() {
                   */}
                   {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {heldPublishNote || publishGateNote(blockers)}{" "}
+                      {hasAiJudgments ? draftReadiness.reason : heldPublishNote || blockers[0]?.sentence}{" "}
                       <button
                         type="button"
                         className="inline-link"
                         onClick={() => {
                           if (heldPublishNote) {
                             setInspector("reporting");
-                            document.getElementById("inspector-reporting")?.scrollIntoView({ block: "start" });
+                            document.getElementById("inspector-reporting")?.scrollIntoView?.({ block: "start" });
                             return;
                           }
                           setInspector("checks");
                           document
                             .getElementById("publish-blockers")
-                            ?.scrollIntoView({ block: "start" });
+                            ?.scrollIntoView?.({ block: "start" });
                         }}
                       >
                         Review
@@ -3872,7 +3874,7 @@ function StoryPage() {
                       panel below it said "This draft has no recorded name
                       check." `publishBarNote` says which one did not run.
                     */
-                    <span className="note">{draftReadiness.reason}</span>
+                    <span className="note">{hasAiJudgments ? draftReadiness.reason : "Ready to publish."}</span>
                   )}
                 </>
               )

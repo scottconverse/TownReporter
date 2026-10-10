@@ -243,12 +243,8 @@ export async function tickDailyScans(
           A pool read is a larger select but it is the only way the rotation can
           see what is due; it is still one indexed read of a 201-row table.
         */
-        const plan = await dailyScanPlan(tx, p.newsroom_id, p);
+        const plan = await dailyScanPlan(tx, p.newsroom_id, p, true);
         const sources = plan.sources;
-        if (sources.length > p.source_cap)
-          throw new Error(
-            "Scheduled sources exceed the configured limit. Review the selected accepted sources and resume manually.",
-          );
         const [r] = await tx.query<{ id: number }>(
           "insert into daily_scan_reservations(newsroom_id,local_day,status,policy_revision,policy_snapshot,source_snapshot,model_snapshot) values($1,$2,'queued',$3,$4::jsonb,$5::jsonb,$6::jsonb) on conflict(newsroom_id,local_day) do nothing returning id",
           [

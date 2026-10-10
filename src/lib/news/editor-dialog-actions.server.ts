@@ -436,7 +436,7 @@ export async function performSourceKillPattern(
 /* --------------------------------------------------------------- find sources -- */
 
 export type FindSourcesResult =
-  | { ok: true; proposed: number; skipped: number; notice: string | null }
+  | { ok: true; proposed: number; alreadyExisted: number; skipped: number; notice: string | null }
   | { ok: false; error: string };
 
 /**
@@ -484,12 +484,14 @@ export async function performFindSources(
     return {
       ok: true as const,
       proposed: 0,
+      alreadyExisted: 0,
       skipped: 0,
       notice: "The model came back with nothing the desk could use as a source. Try a narrower topic.",
     };
   }
   const sql = await deps.getSql();
   let proposed = 0;
+  let alreadyExisted = 0;
   for (const row of rows) {
     const added = await deps.proposeSource(sql, {
       userId: context.userId,
@@ -500,10 +502,15 @@ export async function performFindSources(
       proposedBy: "editor",
     });
     if (added) proposed += 1;
+    else {
+      const stored = await sql<{url: string}>`select url from sources where newsroom_id=${context.newsroomId}`;
+      if (stored.some(source => sourceIdentity(source.url) === sourceIdentity(row.url))) alreadyExisted += 1;
+    }
   }
   return {
     ok: true as const,
     proposed,
+    alreadyExisted,
     skipped: rows.length - proposed,
     notice:
       proposed === 0

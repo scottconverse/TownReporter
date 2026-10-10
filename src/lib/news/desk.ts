@@ -1,3 +1,5 @@
+import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
+import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
 import type { StoryReadiness } from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
@@ -87,11 +89,10 @@ import { cleanStoryArea } from "../story-area.ts";
 import { disclosureLine } from "./import-stories.ts";
 import { findDuplicate } from "./import-review.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
-import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
+import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import {
   listPublishedMeetingReviews as loadPublishedMeetingReviews,
-  recordPublishedMeetingEvidence,
   resolvePublishedMeetingReview,
   type PublishedMeetingReview,
 } from "./meeting-article-revision.ts";
@@ -219,8 +220,6 @@ import {
   type DupCheckOutcome,
   type DupCheckPrinted,
 } from "./dup-check.ts";
-import { readModelAssignments } from "./model-assignments-store.ts";
-import { resolveJobModel } from "./model-assignments.ts";
 import { postgresText, sanitizeJsonLeaves, storableText } from "./storable-text";
 import {
   annotateScanRowsWithStallStatus,
@@ -483,7 +482,7 @@ async function upsertSource(
     title,
     kind,
     tier,
-  }) as Promise<SourceRow | null>;
+  }) as Promise<(SourceRow & { alreadyExisted: boolean }) | null>;
 }
 
 export const addSource = createServerFn({ method: "POST" })
@@ -511,7 +510,7 @@ export const addSource = createServerFn({ method: "POST" })
       owned(context),
     );
     if (!source) return { ok: false as const, error: "Could not save that source." };
-    return { ok: true as const, source };
+    return { ok: true as const, source, added: source.alreadyExisted ? 0 : 1, alreadyExisted: source.alreadyExisted ? 1 : 0 };
   });
 
 export const addSourcesBulk = createServerFn({ method: "POST" })
@@ -527,6 +526,7 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
       };
     }
     let added = 0;
+    let alreadyExisted = 0;
     const byTier = { A: 0, B: 0, C: 0 };
     for (const row of rows) {
       const source = await upsertSource(
@@ -537,14 +537,15 @@ export const addSourcesBulk = createServerFn({ method: "POST" })
         row.tier,
         owned(context),
       );
-      if (source) {
+      if (source?.alreadyExisted) alreadyExisted += 1;
+      else if (source) {
         added += 1;
         if (row.tier === "A" || row.tier === "B" || row.tier === "C") {
           byTier[row.tier] += 1;
         }
       }
     }
-    return { ok: true as const, added, total: rows.length, byTier };
+    return { ok: true as const, added, alreadyExisted, total: rows.length, byTier };
   });
 
 /**
@@ -1096,6 +1097,9 @@ export const getLead = createServerFn({ method: "GET" })
     const draftMeetingEvidence = drafts[0]
       ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
       : null;
+    const meetingPublishNotice = drafts[0]
+      ? (await loadMeetingPublishEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })).notice
+      : null;
     /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
       panel shows -- the ledger (unread rows first), the checked claims (flagged
@@ -1225,6 +1229,7 @@ export const getLead = createServerFn({ method: "GET" })
         ?? defaultMeetingTranscriptArtifactId(meetingTranscriptChoices),
       draft,
       draftMeetingEvidence,
+      meetingPublishNotice,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -1934,7 +1939,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // the editor's chosen model and the normal manual claim/commit boundaries.
   const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
   const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
-    ? JSON.parse(scanRun.source_snapshot) : undefined;
+    ? (dailyPolicy.acceptedSources ?? JSON.parse(scanRun.source_snapshot)) : undefined;
   const allSources =
     deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
@@ -2127,12 +2132,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // P0-3: which sources failed and why, so the editor sees the set, not a count.
   const failedSources: { id: number; title: string; url: string; error: string }[] = [];
   let fetchedCount = 0;
-  const SCAN_WATCH_CAP = 200;
-  const watchSlice = sources.slice(0, SCAN_WATCH_CAP);
+  const scanDeadline = Date.now() + DAILY_SCAN_TIME_BUDGET_MS;
+  const [priorityPolicy] = await sql<{ selected_source_ids: number[]; every_day_source_count: number }>`
+    select selected_source_ids,every_day_source_count from daily_scan_policies
+    where newsroom_id=${owned(context)}
+  `;
+  const fixedIds = (priorityPolicy?.selected_source_ids ?? []).slice(0, priorityPolicy?.every_day_source_count ?? 8);
+  const watchSlice = dailySources || deps.scheduledSnapshot ? sources : orderAcceptedSources(sources, fixedIds);
   failureReceipt.sourcesAttempted = 0;
   sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
   if (!sourceCoverage.length && sources.length)
-    sourceCoverage = manualScanCoverage(sources, SCAN_WATCH_CAP);
+    sourceCoverage = manualScanCoverage(sources, sources.length);
 
   const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
@@ -2246,7 +2256,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   // One source at a time makes Cancel a boundary the editor can rely on:
   // finish the current fetch, keep its observation, and never start the next.
   // A batch of six could otherwise begin five more reads after the press.
-  for (const src of watchSlice) {
+  readingSources: for (const batch of sourceBatches(watchSlice, Date.now, scanDeadline)) for (const src of batch) {
+    if (Date.now() >= scanDeadline) break readingSources;
     try {
     await throwIfJobCancelled(job.id);
     await deps.scheduledGuard?.();
@@ -2488,11 +2499,21 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     } catch (error) {
       fetchLoopError = error;
-      break;
+      break readingSources;
     }
   }
+  if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
+    ? { ...entry, status: "skipped" as const, reasonCode: "time-budget" as const,
+        reason: "The 90-minute scan reading budget ended before this source was reached." } : entry);
   sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
+  // The final count is a boundary, not a throttled tick. A fast last source
+  // (including a parked one) must not leave the card one source behind.
+  await progressReporterFor(job, { minWriteMs: 0 })(
+    countedStep("Reading sources", attemptedCount, watchSlice.length),
+    spanPct(attemptedCount, watchSlice.length, 5, 55),
+  );
+  await writeLiveRunRow(true);
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
     `sources_selected` still counts it -- it was in scope -- so the receipt
@@ -2500,7 +2521,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
     to come back is not recorded as a fetch that never happened.
   */
-  failureReceipt.sourcesAttempted = Math.max(0, watchSlice.length - skippedThisPass);
+  // Actual fetch attempts are counted at dispatch, including failures.
+  // Watches left at the deadline were never attempted.
 
   const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
@@ -2694,7 +2716,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           leads_created = 0,
           sources_proposed = 0,
           sources_selected = ${sources.length},
-          sources_attempted = ${watchSlice.length},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${sourcesAnalyzed},
           model_batches_used = ${batches.length},
@@ -2890,19 +2912,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     are these the same news story? See ./dup-check.ts for what that decides
     (a chip, and only a chip) and what it deliberately does not.
 
-    The model is the one this newsroom assigned to the `lead-score` job -- the
-    row the Models screen already draws as "Lead scoring & duplicates / Scores
-    leads, spots ≈ printed" -- resolved through the same order every other job
-    uses (`resolveJobModel`: an explicit pick, then the saved rows, then the
-    surface's default, which is Automatic and therefore the ladder's first rung,
-    DeepSeek v4.1 Flash). Nothing here hard-codes a provider, and the answer
-    records which model actually replied rather than which one was meant to.
-
-    The SCHEDULED scan is the one exception, and it is a transport fact rather
-    than a second policy: that lane is pinned to exactly one runtime
-    (`forcedChat`, daily-scan.server.ts), so the check runs on the model the
-    scan itself is already running on. There is no other transport available to
-    hand a per-job assignment to.
+    The duplicate check uses the scan's current pinned provider, reasoning
+    effort and local model snapshot. A separate lead-scoring assignment cannot
+    override the editor's pick. Technical scan failovers are already recorded
+    on the job, so the check follows that same effective runtime.
 
     A failure here is never fatal and never moves a chip on its own: the
     outcome is empty, `fileScanLeads` falls back to the word rule, and the only
@@ -2930,30 +2943,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         passing it back to that same runtime is a no-op rather than a
         re-resolution.
       */
-      const assigned = deps.scheduledCommit
-        ? String(job.model_choice)
-        : (
-            await resolveJobModel({
-              jobKey: "lead-score",
-              explicit: null,
-              assignments: await readModelAssignments(job.newsroom_id).catch(() => []),
-            })
-          ).providerId;
-      const dupChoice = assigned as EffectiveProviderChoice;
-      const dupTimeoutMs = Math.min(batchTimeoutMs(assigned), DUP_CHECK_TIMEOUT_MS);
+      const dupTimeoutMs = Math.min(batchTimeoutMs(effectiveStoryModelChoice(job.model_choice)), DUP_CHECK_TIMEOUT_MS);
       dupCheck = await runDupCheck({
         pairs: collected.pairs,
         skipped: collected.skipped,
-        chat: async (system, user, maxTokens) => {
-          const got = await runChat(system, user, maxTokens, {
-            timeoutMs: dupTimeoutMs,
-            choice: dupChoice,
-            newsroomId: job.newsroom_id,
-          });
-          return got.ok
-            ? { ok: true as const, text: got.text, model: got.meta?.model ?? null }
-            : { ok: false as const, error: got.error };
-        },
+        chat: scanDuplicateChat({
+          modelChoice: job.model_choice,
+          reasoningEffort: effortFromJob(job),
+          newsroomId: job.newsroom_id,
+          localModel: scanLocalModel,
+          timeoutMs: dupTimeoutMs,
+        }, runChat),
       });
     }
   } catch (error) {
@@ -3146,7 +3146,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
           -- did not knock on is not an attempt. The live row above keeps the
           -- full scope on purpose (see scanRunningLine's pin: the scope is not
           -- progress); this is the record of the finished pass.
-          sources_attempted = ${Math.max(0, watchSlice.length - skippedThisPass)},
+          sources_attempted = ${failureReceipt.sourcesAttempted},
           sources_failed = ${failedSources.length},
           sources_analyzed = ${analyzedSourceCount},
           model_batches_used = ${batches.length},
@@ -6120,11 +6120,13 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         newsroomId: owned(context),
         draftId: Number(row.id),
       });
-      const stale = await staleMeetingCitations(sql, {
+      const evidence = await loadMeetingPublishEvidence(sql, {
         newsroomId: owned(context),
         draftId: Number(row.id),
       });
-      if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
+      if (evidence.stale.length) {
+        return { blocked: true as const, error: staleCitationNotice(evidence.stale) };
+      }
 
       /*
         THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.67).
@@ -6198,11 +6200,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${area}
       ) returning id
     `;
-      await recordPublishedMeetingEvidence(sql, {
+      await recordMeetingPublishEvidence(sql, {
         newsroomId: owned(context),
         articleId: printed.id,
         draftId: Number(row.id),
-      });
+      }, evidence);
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
@@ -6219,11 +6221,21 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${storableText(draft.dek).slice(0, 200)}, ${printed.id})
       `;
       }
-      return { blocked: false as const, slug, id: printed.id };
+      return { blocked: false as const, slug, id: printed.id, fileAbsent: evidence.fileAbsent };
     },
   );
 
   if (published.blocked) return { ok: false as const, error: published.error };
+
+  for (const absent of published.fileAbsent) {
+    await audit(
+      context.userId,
+      "publish-transcript-file-absent",
+      `Article ${published.id}: transcript artifact ${absent.artifactId} file absent; ${absent.verifiedCitationCount} citation${absent.verifiedCitationCount === 1 ? "" : "s"} verified against the database`,
+      owned(context),
+      { kind: "articles", id: published.id },
+    );
+  }
 
   /*
     A SECTION THE MODEL DID NOT CHOOSE (0.6.67).

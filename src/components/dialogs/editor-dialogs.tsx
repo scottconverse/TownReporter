@@ -686,25 +686,26 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
       if (request.call === "findSources") {
         const found = await findSources({ data: request.input as FindSourcesStepIn });
         if (!found.ok) return { problem: found.error };
-        const refused = found.skipped
-          ? ` ${found.skipped} ${found.skipped === 1 ? "row was" : "rows were"} refused as unusable, so they are not there.`
+        const refusedCount = found.skipped - found.alreadyExisted;
+        const refused = refusedCount
+          ? ` ${refusedCount} ${refusedCount === 1 ? "row was" : "rows were"} refused as unusable, so they are not there.`
           : "";
         return done(
-          `The AI proposed ${found.proposed} ${found.proposed === 1 ? "source" : "sources"}.${refused} They are in Suggested sources with why, for you to accept or reject.`,
+          `The AI proposed ${found.proposed} new ${found.proposed === 1 ? "source" : "sources"}; ${found.alreadyExisted} already existed.${refused} They are in Suggested sources with why, for you to accept or reject.`,
         );
       }
       if (request.call === "addSource") {
         const added = await addSource({ data: request.input as AddSourceStepIn });
         if (!added.ok) return { problem: added.error };
         return done(
-          `Added ${added.source.title || added.source.url} to the watch list. The desk checks it at the next daily scan.`,
+          `${added.added} new source; ${added.alreadyExisted} already existed. Newly accepted sources are read first in the next scan.`,
         );
       }
       const added = await addSourcesBulk({ data: request.input as BulkSourceStepIn });
       if (!added.ok) return { problem: added.error };
-      const already = preview?.watchedCount ?? 0;
+      const already = added.alreadyExisted;
       return done(
-        `Added ${added.added} of ${added.total}${already ? `; ${already} were already on the watch list` : ""}. The desk checks them at the next daily scan.`,
+        `${added.added} new sources; ${already} already existed (${added.total} submitted). Newly accepted sources are read first in the next scan.`,
       );
     });
 
@@ -720,9 +721,9 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
 
   const foot =
     state.tab === "one"
-      ? "The first check runs now so you can see whether the page can be read."
+      ? "Newly accepted sources are read first in the next scan."
       : state.tab === "list"
-        ? "Duplicates are skipped. Each new source gets a first check now."
+        ? "Existing sources keep their kind and tier. Newly accepted sources are read first in the next scan."
         : state.tab === "file"
           ? "You'll see every row before anything is added."
           : "The AI proposes sources. They land in Suggested sources, with why and who found each, for you to accept or reject.";
@@ -734,7 +735,7 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
       title="Add sources to watch"
       subtitle="Add one page, paste a list, upload a file, or ask the AI to find sources."
       footNote={foot}
-      primaryLabel={state.tab === "one" ? "Add & run first check" : label}
+      primaryLabel={state.tab === "one" ? "Add source" : label}
       onPrimary={onPrimary}
       primaryDisabled={press.busy || problem !== null}
     >

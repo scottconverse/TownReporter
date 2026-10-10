@@ -21,7 +21,9 @@ import { htmlToPlainText } from "./html-text.ts";
  * <nav>/<header>/<footer>/<aside>/<script>/<style>/<noscript>/<form> and
  * anything tagged `role="navigation"` or classed/id'd as nav/menu/footer/
  * header/sidebar/subscribe/cookie-ish, then prefer <main>/<article>, else
- * whatever's left of <body>. If THAT also comes up empty, we return an empty
+ * whatever's left of <body>. List pages also recover that stripped body when
+ * the selected block keeps under 25% of it and repeated short items remain.
+ * If THAT also comes up empty, we return an empty
  * result on purpose — an app-shell/nav-only page should extract to nothing,
  * not to its menu, so callers can treat "near-empty extraction" as the signal
  * to render the page with JS or classify the capture as failed.
@@ -69,7 +71,7 @@ function stripBoilerplate(document: {
   }>;
   querySelector: (sel: string) => { innerHTML?: string } | null;
   body: { innerHTML?: string } | null;
-}): string {
+}, preferMain = true): string {
   for (const sel of KILL_SELECTORS) {
     for (const el of Array.from(document.querySelectorAll(sel))) el.remove();
   }
@@ -87,8 +89,36 @@ function stripBoilerplate(document: {
     if (BOILERPLATE_CLASS_ID.test(cls) || BOILERPLATE_CLASS_ID.test(id)) el.remove();
   }
   const main = document.querySelector("main") ?? document.querySelector("article");
-  const root = main ?? document.body;
+  const root = preferMain ? main ?? document.body : document.body;
   return root?.innerHTML ?? "";
+}
+
+function listPageFallback(html: string, extractedText: string): string | null {
+  // Reader mode can keep a calendar's introductory article and discard every
+  // link-heavy card. Compare against a fresh, boilerplate-stripped body, not
+  // the raw page: a large site menu must never justify replacing an article.
+  const { document } = parseHTML(html);
+  const bodyText = htmlToPlainText(stripBoilerplate(document, false));
+  if (extractedText.length >= bodyText.length * 0.25) return null;
+
+  // Require at least five short sibling items with list/content structure.
+  // Do not count paragraphs or related links inside an individual article.
+  // Cards may themselves be <article>s, so inspect their containing grid.
+  const groups = document.querySelectorAll("body, main, section, div, ul, ol, tbody");
+  for (const group of groups) {
+    if (group.closest("article")) continue;
+    const shapes = new Map<string, number>();
+    for (const item of Array.from(group.children)) {
+      const length = htmlToPlainText(item.innerHTML).length;
+      if (length < 20 || length > 1200) continue;
+      if (!item.matches("li, tr, article") && !item.querySelector("a, h2, h3, h4, time")) continue;
+      const shape = `${item.tagName}:${item.getAttribute("class") ?? ""}`;
+      const count = (shapes.get(shape) ?? 0) + 1;
+      if (count >= 5) return bodyText;
+      shapes.set(shape, count);
+    }
+  }
+  return null;
 }
 
 function expandableMainFallback(html: string, readabilityText: string): string | null {
@@ -163,6 +193,8 @@ export function extractArticleText(html: string, url?: string): ExtractedArticle
       const text = htmlToPlainText(article.content);
       readabilityTitle = article.title ?? null;
       if (!looksLikeMisparse(text)) {
+        const listText = listPageFallback(html, text);
+        if (listText) return { text: listText, title: readabilityTitle, method: "heuristic" };
         const expandableText = expandableMainFallback(html, text);
         if (!expandableText) {
           return { text, title: readabilityTitle, method: "readability" };
@@ -179,7 +211,7 @@ export function extractArticleText(html: string, url?: string): ExtractedArticle
     const innerHtml = stripBoilerplate(document);
     const text = htmlToPlainText(innerHtml);
     if (text.trim().length > 0) {
-      return { text, title: readabilityTitle, method: "heuristic" };
+      return { text: listPageFallback(html, text) ?? text, title: readabilityTitle, method: "heuristic" };
     }
   } catch {
     // Fall through to the empty result below.

@@ -356,8 +356,8 @@ export function DailyScanSettings() {
           />
         </div>
         <Field
-          label="Daily source limit"
-          hint={`${selected.length} selected · ${draft.everyDaySourceCount} read every day · ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} rotate through accepted sources.`}
+          label="Daily priority set"
+          hint={`${selected.length} selected · ${draft.everyDaySourceCount} read every day · ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} age-rotated priority picks. Every accepted source is read within the 90-minute reading budget.`}
         >
           <input
             className={`${inputClass} mt-1 w-32`}
@@ -378,7 +378,7 @@ export function DailyScanSettings() {
         </Field>
         <Field
           label="Read every day"
-          hint={`Choose 0 to ${everyDaySourceLimit} daily sources, bounded by ${selected.length} selected and a daily limit of ${draft.sourceCap}. Read them in saved order. Rotate: ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} of ${draft.sourceCap}.`}
+          hint={`Choose 0 to ${everyDaySourceLimit} daily sources, bounded by ${selected.length} selected and a priority set of ${draft.sourceCap}. Saved order breaks staleness ties. Rotate: ${Math.max(0, draft.sourceCap - draft.everyDaySourceCount)} of ${draft.sourceCap}.`}
         >
           <input
             className={`${inputClass} mt-1 w-32`}
@@ -397,8 +397,8 @@ export function DailyScanSettings() {
             Accepted community sources ({accepted.length})
           </legend>
           <p className="mt-1 text-sm text-muted">
-            Choose accepted sources for the daily set. The rest of the limit rotates through other
-            accepted sources by age.
+            Choose fixed priority sources. All accepted sources are read by age, never-read first;
+            fixed picks come first among equally stale sources.
           </p>
           {accepted.length === 0 ? (
             <p className="mt-3 text-sm text-muted">There are no accepted sources yet.</p>
@@ -459,7 +459,7 @@ export function DailyScanSettings() {
         ) : null}
         {tooManySelected ? (
           <p className="text-sm text-rust" role="alert">
-            {selected.length} sources are selected, but the daily limit is {draft.sourceCap}.
+            {selected.length} sources are selected, but the priority set limit is {draft.sourceCap}.
             Increase the limit or deselect sources; nothing will be silently skipped.
           </p>
         ) : null}
