@@ -287,6 +287,18 @@ export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
   ]);
 }
 
+/** Retained rows keep human dispositions; evidence bindings still invalidate changed records. */
+export function carryReconciledEvidenceJudgments(previous: DraftRow, saved: DraftRow, explicitlyJudged: ReadonlySet<string>): string {
+  const research = objectMemo(saved.research_json);
+  for (const namespace of ["findingEvidenceReview", "claimEvidenceReview"] as const) {
+    const review = storedReview(previous, namespace);
+    if (review.contentToken !== findingEvidenceContentToken(previous)) continue;
+    const judgments = Object.fromEntries(Object.entries(review.judgments ?? {}).filter(([key]) => !explicitlyJudged.has(key)));
+    research[namespace] = { ...review, contentToken: findingEvidenceContentToken(saved), judgments };
+  }
+  return JSON.stringify(research);
+}
+
 function normalizedText(value: string): string {
   return value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
 }
@@ -315,6 +327,11 @@ function storedClaims(draft: DraftRow): ReportingReviewClaim[] {
     return value.rows.map((raw) => {
       const row = raw as ReportingReviewClaim;
       const reporting = row?.reporting;
+      // A reconciliation can append ordinary captured-source claims while
+      // retaining the older reporting ledger and its exact claim identities.
+      if (row && !reporting && typeof row.fact === "string" && row.fact.trim() && row.fact.length <= 400 &&
+          typeof row.url === "string" && row.url.trim() && row.url.length <= 500 &&
+          ["primary", "record", "news"].includes(row.kind)) return row;
       if (!row || typeof row.fact !== "string" || !row.fact.trim() || row.kind !== "record" ||
           typeof row.url !== "string" || !reporting || typeof reporting.id !== "string" ||
           !["VERIFIED", "CONTESTED", "UNVERIFIED"].includes(reporting.status) ||

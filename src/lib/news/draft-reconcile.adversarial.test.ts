@@ -1,3 +1,4 @@
+// guards: an empty or partial evidence pass must not erase unresolved claims and enable Publish.
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,6 +6,11 @@ import { after, before, test } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
 import type { DeskJob } from "./jobs.ts";
 import { NAME_INVENTORY_SYSTEM } from "./name-check-work.ts";
+import { reviewEvidenceCheckState } from "./evidence-check-state.ts";
+import { publishBlockers } from "./publish-blockers.ts";
+import { editorStoryState, savedStoryReadiness, storyReadinessChip } from "./story-readiness.ts";
+import { evidenceCheckRows, judgmentChip } from "./evidence-check-list.ts";
+import type { DraftRow } from "./types.ts";
 
 let vite: ViteDevServer;
 let getSql: typeof import("../db.ts").getSql;
@@ -73,6 +79,121 @@ const reply = JSON.stringify({
   claims: [],
 });
 
+// The six claim texts recorded in the lead-443 walk; retained captures are local fixtures.
+const lead443Facts = [
+  "Boulder County is accepting applications for its Nurturing Futures direct cash assistance program through Monday, Nov. 2, 2026, at 11:59 p.m.",
+  "The program pays families with young children a monthly cash payment they can spend on whatever they need, including food, rent, doctor visits, and childcare, the county says.",
+  "Boulder County Human Services runs the program and works with the company AidKit to handle applications and send payments.",
+  "Current participants will keep receiving $300 a month through December 2026. Starting in January 2027, monthly payments will rise to $600 and continue through December 2027.",
+  "On May 26, 2026, Boulder County Commissioners approved $4.2 million in earned interest from American Rescue Plan Act funds to continue the program and increase payments, according to a county press release.",
+  'It also reports survey results: 76% of participants said they "often worry about monthly bills" when surveyed, and by February 2026 that share had dropped to 44%.',
+];
+
+async function lead443Fixture(version = 1) {
+  const f = await fixture();
+  await attachExactCapture(f);
+  const claims = lead443Facts.map((fact, index) => ({ fact, url: f.url, kind: "record", ...(version === 2 ? {
+    reporting: { id: `claim-${index}`, status: "UNVERIFIED", nextCheck: "Needs a human", item: "", missingSourceIds: [], references: [] },
+  } : {}) }));
+  const aiRows = claims.map((claim) => ({
+    text: claim.fact, urls: [claim.url], verdict: "Needs a human", quote: "", sourceUrl: "",
+    sourceHash: "", locator: "", checkedAt: "2026-10-10T02:20:39.040Z",
+    reason: "The retained passage changed or is unavailable.",
+  }));
+  await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({
+    reportedClaims: { version, rows: claims },
+    aiEvidenceReview: { checkedText: "Original body", rows: aiRows },
+  }), f.draftId]);
+  return { ...f, claims, aiRows };
+}
+
+async function savedDraft(f: Awaited<ReturnType<typeof fixture>>) {
+  const [saved] = await f.sql.query<DraftRow>("select * from drafts where newsroom_id=$1 and lead_id=$2 order by id desc limit 1", [f.newsroomId, f.leadId]);
+  return saved;
+}
+
+test("lead 443 keeps all six claims and dispositions after zero or fewer returned claims", async () => {
+  const { loadFindingEvidenceReview, persistFindingEvidenceJudgment } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  for (const version of [1, 2]) for (const count of [0, 1, 2]) {
+    const f = await lead443Fixture(version);
+    const beforeReview = await loadFindingEvidenceReview(f.sql, f.newsroomId, f.leadId);
+    await persistFindingEvidenceJudgment({ newsroomId: f.newsroomId }, {
+      leadId: f.leadId, draftId: f.draftId, evidenceToken: beforeReview.evidenceToken,
+      findingKey: beforeReview.claimRows[1].key, judgment: "needs-reporting", reason: "Editor needs another record",
+    });
+    const newClaim = { fact: "A newly returned claim also needs a human.", url: f.url, kind: "record" };
+    const response = JSON.stringify({ ...JSON.parse(reply), claims: count === 2 ? [f.claims[0], newClaim] : f.claims.slice(0, count) });
+    await performDraftReconcileWork(f.job, { stage: async () => {}, chat: async () => ({ ok: true, text: response }) });
+    const memo = JSON.parse((await savedDraft(f)).research_json ?? "{}");
+    assert.deepEqual(memo.reportedClaims.rows, count === 2 ? [...f.claims, newClaim] : f.claims);
+    assert.equal(memo.reportedClaims.version, version);
+    assert.deepEqual(memo.aiEvidenceReview.rows.slice(0, 6), f.aiRows);
+    assert.equal(savedStoryReadiness(memo).state, "not-ready");
+    assert.equal(savedStoryReadiness(memo).openCount, count === 2 ? 7 : 6);
+    const afterReview = await loadFindingEvidenceReview(f.sql, f.newsroomId, f.leadId);
+    assert.equal(afterReview.claimRows.length, count === 2 ? 7 : 6);
+    assert.equal(afterReview.claimRows[1].judgment.value, "needs-reporting");
+  }
+});
+
+test("an ungrounded AI verdict clears none of the six retained claims", async () => {
+  const f = await lead443Fixture();
+  const response = JSON.stringify({ ...JSON.parse(reply), claims: f.claims.slice(0, 1), evidence_judgments: {
+    rows: [{ index: 0, verdict: "Supported", quote: "Invented supporting words", sourceUrl: f.url }],
+  } });
+  await performDraftReconcileWork(f.job, { stage: async () => {}, chat: async () => ({ ok: true, text: response }) });
+  const memo = JSON.parse((await savedDraft(f)).research_json ?? "{}");
+  assert.equal(memo.aiEvidenceReview.rows.length, 6);
+  assert.ok(memo.aiEvidenceReview.rows.every((row: { verdict: string }) => row.verdict === "Needs a human"));
+  assert.match(memo.aiEvidenceReview.rows[0].reason, /could not ground/);
+  assert.deepEqual(memo.aiEvidenceReview.rows.slice(1), f.aiRows.slice(1));
+  // A grounded partial answer can clear exactly its own row, never the omitted five.
+  const grounded = await lead443Fixture();
+  await grounded.sql.query("update artifact_versions set full_text=$1 where newsroom_id=$2", [grounded.claims[0].fact, grounded.newsroomId]);
+  const { loadFindingEvidenceReview, persistFindingEvidenceJudgment } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  const priorReview = await loadFindingEvidenceReview(grounded.sql, grounded.newsroomId, grounded.leadId);
+  await persistFindingEvidenceJudgment({ newsroomId: grounded.newsroomId }, {
+    leadId: grounded.leadId, draftId: grounded.draftId, evidenceToken: priorReview.evidenceToken,
+    findingKey: priorReview.claimRows[0].key, judgment: "needs-reporting", reason: "Awaiting an explicit evidence judgment",
+  });
+  const supported = JSON.stringify({ ...JSON.parse(reply), claims: grounded.claims.slice(0, 1), evidence_judgments: {
+    rows: [{ index: 0, verdict: "Supported", quote: grounded.claims[0].fact, sourceUrl: grounded.url }],
+  } });
+  await performDraftReconcileWork(grounded.job, { stage: async () => {}, chat: async () => ({ ok: true, text: supported }) });
+  const supportedMemo = JSON.parse((await savedDraft(grounded)).research_json ?? "{}");
+  assert.equal(supportedMemo.aiEvidenceReview.rows[0].verdict, "Supported");
+  assert.equal((await loadFindingEvidenceReview(grounded.sql, grounded.newsroomId, grounded.leadId)).claimRows[0].judgment.value, "supports");
+  assert.deepEqual(supportedMemo.aiEvidenceReview.rows.slice(1), grounded.aiRows.slice(1));
+  assert.equal(supportedMemo.storyReadiness.openCount, 5);
+  // A later empty response preserves the grounded disposition as well.
+  const current = await savedDraft(grounded);
+  const [nextJob] = await grounded.sql.query<DeskJob>("insert into desk_jobs(user_id,newsroom_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,claim_token) values($1,$2,'reconcile',$3,'local-model','editor','default','running','Queued',$4) returning *", [grounded.userId, grounded.newsroomId, current.id, `${grounded.claim}-next`]);
+  await performDraftReconcileWork(nextJob, { stage: async () => {}, chat: async () => ({ ok: true, text: reply }) });
+  assert.deepEqual(JSON.parse((await savedDraft(grounded)).research_json ?? "{}").aiEvidenceReview.rows, supportedMemo.aiEvidenceReview.rows);
+});
+
+test("zero returned claims keep Checks, the readiness chip and the Publish bar Not ready", async () => {
+  const f = await lead443Fixture();
+  const { loadFindingEvidenceReview } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  const beforeReview = await loadFindingEvidenceReview(f.sql, f.newsroomId, f.leadId);
+  assert.equal(beforeReview.claimRows.length, 6);
+  assert.ok(beforeReview.claimRows.every((row: { judgment: { value: Parameters<typeof judgmentChip>[0] }; captures: Parameters<typeof judgmentChip>[1] }) => judgmentChip(row.judgment.value, row.captures).chip === "Could not check"));
+  await performDraftReconcileWork(f.job, { stage: async () => {}, chat: async () => ({ ok: true, text: reply }) });
+  const review = await loadFindingEvidenceReview(f.sql, f.newsroomId, f.leadId);
+  const state = reviewEvidenceCheckState({ review, recorded: true, openClaims: 0 });
+  assert.equal(review.claimRows.length, 6);
+  assert.equal(state.toReview, 6);
+  const blockers = publishBlockers({ headline: "Checked", dek: "Checked dek", body: "Checked body", sectionReady: true,
+    openClaims: 0, unreviewedClaims: state.toReview, unreviewedAccepted: false, namedOutlets: [],
+    evidenceStale: false, reviewingEvidence: false, reconcileActive: false, publishing: false });
+  const readiness = editorStoryState(blockers, state.toReview);
+  assert.equal(readiness.state, "not-ready");
+  assert.equal(storyReadinessChip(readiness).text, "✕ Not ready");
+  assert.equal(readiness.reason, blockers[0].sentence);
+  assert.ok(blockers.length > 0, "the app disables Publish when blockers are present");
+  assert.equal(evidenceCheckRows({ ...review, openClaims: [], nameCheck: null, styleFindings: [] }).filter((row) => row.ref?.kind === "claim").length, 6);
+});
+
 async function attachExactCapture(f: Awaited<ReturnType<typeof fixture>>) {
   const [capture] = await f.sql.query<{id:number}>("insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text) values($1,$2,$3,'exact','Council record','SUPPORTED RECORD') returning id", [f.userId, f.newsroomId, f.url]);
   await f.sql.query("update drafts set provenance_json=$1 where id=$2", [JSON.stringify([{url:f.url,version_id:capture.id,role:"record"}]), f.draftId]);
@@ -124,7 +245,7 @@ test("successful reconciliation replaces stale pass metadata but keeps exact pro
   assert.equal(saved.form,"brief");
   assert.deepEqual(JSON.parse(saved.unanswered),["Still unknown"]);
   assert.deepEqual(JSON.parse(saved.source_urls),[f.url]);
-  assert.deepEqual(JSON.parse(saved.research_json).reportedClaims.rows,[{fact:"Supported revised claim",url:f.url,kind:"record"}]);
+  assert.deepEqual(JSON.parse(saved.research_json).reportedClaims.rows,[{fact:"Old claim",url:f.url,kind:"record"},{fact:"Supported revised claim",url:f.url,kind:"record"}]);
   assert.match(saved.integrity_notes,/Keep this independent warning/);
   assert.match(saved.integrity_notes,/New remaining uncertainty/);
   assert.doesNotMatch(saved.integrity_notes,/Evidence reconciliation not completed within the available edit pass/);
@@ -143,7 +264,7 @@ test("removes only the stale missing-topic warning when the current topic is con
   assert.doesNotMatch(rows[1].integrity_notes,/No configured Topic key/);
 });
 
-test("a changed body cannot inherit stale claims when the model omits the claims field", async () => {
+test("a changed body retains unresolved claims and findings when the model omits them", async () => {
   const f=await fixture();
   await attachExactCapture(f);
   await f.sql.query("update drafts set found_note=$1,research_json=$2 where id=$3",[
@@ -156,8 +277,9 @@ test("a changed body cannot inherit stale claims when the model omits the claims
   const rows=await f.sql.query<{found_note:string;research_json:string}>("select found_note,research_json from drafts where newsroom_id=$1 and lead_id=$2 order by id",[f.newsroomId,f.leadId]);
   assert.match(rows[0].found_note,/Finding about original body/);
   assert.equal(JSON.parse(rows[0].research_json).writerCheckpoint.evidenceCheckIncomplete,true);
-  assert.equal(rows[1].found_note,"");
-  assert.deepEqual(JSON.parse(rows[1].research_json).reportedClaims,{version:1,rows:[]});
+  assert.match(rows[1].found_note,/Finding about original body/);
+  assert.deepEqual(JSON.parse(rows[1].research_json).reportedClaims,{version:1,rows:[{fact:"Claim about original body",url:f.url,kind:"record"}]});
+  assert.equal(JSON.parse(rows[1].research_json).storyReadiness.state,"not-ready");
   assert.equal("writerCheckpoint" in JSON.parse(rows[1].research_json),false);
 });
 
