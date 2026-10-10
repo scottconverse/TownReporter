@@ -260,6 +260,9 @@ function stripHtml(html: string) {
   return htmlToPlainText(html);
 }
 
+export const HTML_SOURCE_TEXT_LIMIT = 14_000;
+export const STRUCTURED_SOURCE_TEXT_LIMIT = 40_000;
+
 export async function fetchSourceText(
   rawUrl: string,
 ): Promise<{ text: string; titleHint: string }> {
@@ -288,13 +291,20 @@ export async function fetchSourceText(
   const html = await res.text();
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
-  const text = stripHtml(html).slice(0, 14000);
+  const isStructured =
+    mediaType !== "application/xhtml+xml" &&
+    /^(?:text\/xml|application\/(?:xml|json|feed\+json|[^\s/;]+\+xml))$/.test(mediaType);
+  const textLimit = isStructured ? STRUCTURED_SOURCE_TEXT_LIMIT : HTML_SOURCE_TEXT_LIMIT;
+  const text = stripHtml(html).slice(0, textLimit);
   if (typeof window === "undefined") {
     const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
     if (needsRenderedFetch(url, text, html)) {
       const rendered = await fetchRenderedPage(url.toString());
       if (rendered && rendered.text.length > Math.min(text.length, 400)) {
-        return { text: rendered.text.slice(0, 14000), titleHint: rendered.title || titleHint };
+        return {
+          text: rendered.text.slice(0, HTML_SOURCE_TEXT_LIMIT),
+          titleHint: rendered.title || titleHint,
+        };
       }
     }
   }

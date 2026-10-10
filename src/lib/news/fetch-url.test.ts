@@ -39,6 +39,37 @@ it("guards: readable feeds are rejected while binary responses must stay blocked
   }
 });
 
+it("guards: structured story lists are truncated at the HTML page limit", async () => {
+  // guards: scans lose later stories when feeds and sitemaps stop at 14,000 characters.
+  try {
+    for (const ctype of [
+      "application/xml",
+      "application/rss+xml",
+      "application/atom+xml",
+      "text/xml",
+      "application/feed+json",
+      "application/json",
+    ]) {
+      setFetchImplForTests(
+        async () => new Response("x".repeat(30_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/list")).text.length, 30_000, ctype);
+      setFetchImplForTests(
+        async () => new Response("x".repeat(45_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/list")).text.length, 40_000, ctype);
+    }
+    for (const ctype of ["text/html", "application/xhtml+xml"]) {
+      setFetchImplForTests(
+        async () => new Response("x".repeat(30_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/page")).text.length, 14_000, ctype);
+    }
+  } finally {
+    setFetchImplForTests(null);
+  }
+});
+
 describe("isBlockedAddress", () => {
   it("blocks loopback, RFC1918, link-local, CGNAT, multicast, ULA", () => {
     for (const ip of [
