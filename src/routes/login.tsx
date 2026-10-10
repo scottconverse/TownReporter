@@ -134,7 +134,11 @@ function Login() {
     (see `onEmailSignUp`). Every other arrival -- an owner revisiting /login, an
     invited editor, a dev-fallback user -- is claimed, and redirects as before.
   */
-  if (user && !claim.isPending && claimed) return <Navigate to="/desk" />;
+  // Signup publishes the session before finishEmail has seated an invited
+  // editor. Keep this form mounted until that action completes; otherwise
+  // the desk request races the invite acceptance and refuses the new editor.
+  if (user && !claim.isPending && claimed && !invited && !busy)
+    return <Navigate to="/desk" />;
 
   async function finishEmail() {
     await authClient.getSession();
