@@ -2504,6 +2504,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         reason: "The 90-minute scan reading budget ended before this source was reached." } : entry);
   sourceCoverage = finishScanCoverage(sourceCoverage);
   if (fetchLoopError) throw fetchLoopError;
+  // The final count is a boundary, not a throttled tick. A fast last source
+  // (including a parked one) must not leave the card one source behind.
+  await progressReporterFor(job, { minWriteMs: 0 })(
+    countedStep("Reading sources", attemptedCount, watchSlice.length),
+    spanPct(attemptedCount, watchSlice.length, 5, 55),
+  );
+  await writeLiveRunRow(true);
   /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
     `sources_selected` still counts it -- it was in scope -- so the receipt
