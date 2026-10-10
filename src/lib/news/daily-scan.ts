@@ -103,7 +103,6 @@ export async function ensureDailyScanPolicySchema(sqlInput?: Sql) {
   const sql = sqlInput ?? await getSql();
   await ensureSchemaOnce(sql, "daily-scan-fixed-source-count", [
     "alter table daily_scan_policies add column if not exists every_day_source_count integer not null default 8",
-    "alter table daily_scan_policies add column if not exists source_cap_override integer",
   ]);
 }
 /** Why a paused row says it is paused: the one reason this code writes. */
