@@ -31,7 +31,7 @@
 
     node scripts/fb6-desk-feedback-walk.mjs
 
-  Screenshots: `FB6_SHOTS_DIR`, default `../townreporter-coord/fb6/shots`.
+  Screenshots: `FB6_SHOTS_DIR`, default `fb6-evidence/shots` inside the checkout.
 */
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -54,8 +54,8 @@ const base = checkedUrl(`http://127.0.0.1:${PORT_FB6_DESK}`).replace(/\/$/, "");
 const fakeBase = `http://127.0.0.1:${PORT_FB6_FAKE}/v1`;
 
 const OUT_DIR = checkedOutputPath(
-  resolve(process.env.FB6_SHOTS_DIR || "C:/Users/scott/Desktop/Code/townreporter-coord/fb6/shots"),
-  [resolve("C:/Users/scott/Desktop/Code/townreporter-coord"), REPO],
+  resolve(process.env.FB6_SHOTS_DIR || join(REPO, "fb6-evidence", "shots")),
+  [REPO],
   "screenshot directory",
 );
 mkdirSync(OUT_DIR, { recursive: true });
@@ -353,8 +353,11 @@ try {
   */
   const firstRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
   await firstRow.getByRole("button", { name: /^Hold/ }).click();
-  await page.getByRole("button", { name: "Hold, no reason" }).click();
-  await page.getByText(/Held "/).first().waitFor({ timeout: 15_000 });
+  // Start watching before the press: the confirmation is a transient toast.
+  await Promise.all([
+    page.getByText(/Held "/).first().waitFor({ timeout: 15_000 }),
+    page.getByRole("button", { name: "Hold, no reason" }).click(),
+  ]);
   // Let the bar finish arriving: a screenshot taken mid-animation catches it
   // half-faded, which is a photograph of sonner rather than of the fix.
   await page.waitForTimeout(500);
@@ -583,6 +586,7 @@ try {
   for (const line of results) console.log(line);
   console.log(`\nshots: ${OUT_DIR}`);
 } catch (error) {
+  if (page) console.error("Screen at failure:", await page.locator("body").innerText());
   /*
     Printed BEFORE the finally below, which kills the process: a `finally` that
     ends in `process.exit` swallows the error that got there, and a walk that
