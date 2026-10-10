@@ -3,7 +3,7 @@
  * Browser acceptance for the real Story failure that prompted this repair
  * (0.6.63 Unit Y2, on the new Automatic ladder).
  *
- * WHAT THIS PROVED FOR THE OLD LADDER. Codex Terra was rung 1 and Claude
+ * WHAT THIS PROVED FOR THE OLD LADDER. Codex Sol 6.1 (balanced) was rung 1 and Claude
  * Sonnet rung 2. An editor uploaded a real packet, left the writing model on
  * Automatic, and Codex's own readiness probe SUCCEEDED -- so the job was
  * enqueued on Codex -- and then its very first uploaded-document read came
@@ -25,7 +25,7 @@
  * than a model of its own -- via
  * scripts/fakes/fake-lmstudio-endpoint.mjs on port 1234. Rung 3 is
  * scripts/fakes/fake-codex-cli.mjs with FAKE_CODEX_VALID_DRAFT=1, and it is
- * Codex Terra that reads the retained document and writes the story.
+ * Codex Sol 6.1 (balanced) that reads the retained document and writes the story.
  *
  * So the SAME shape is proven against the new ladder, and one thing more: the
  * receipt on the job row names the model Automatic actually pinned (rung 1,
@@ -75,7 +75,7 @@ const DEEPSEEK_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
 
 // Verbatim from src/lib/news/provider-registry.ts and automatic-failover.ts.
 const DEEPSEEK_LABEL = "DeepSeek v4.1 Flash";
-const TERRA_LABEL = "Codex Terra";
+const TERRA_LABEL = "Codex Sol 6.1 (balanced)";
 const SWITCH_NOTE = `This draft moved to ${TERRA_LABEL} because ${DEEPSEEK_LABEL} reached its usage limit`;
 /** The pin, when the operator set one: rung 2 then asks for this exact model. */
 const PINNED_MODEL = (process.env.TOWNREPORTER_QWEN_MODEL || "").trim();
@@ -440,7 +440,7 @@ async function main() {
     true,
     "The running Story job never exposed its durable provider switch",
   );
-  step("the running job showed rung 1 pinned, then the durable switch to Codex Terra");
+  step("the running job showed rung 1 pinned, then the durable switch to Codex Sol 6.1 (balanced)");
 
   // The wire, not just the row: rung 1 was asked to prove itself and then to
   // read the document, and every one of those document reads came back out of
@@ -468,10 +468,10 @@ async function main() {
   assert.match(
     body,
     new RegExp(marker),
-    "Codex Terra's draft did not contain the uploaded document marker",
+    "Codex Sol 6.1 (balanced)'s draft did not contain the uploaded document marker",
   );
   assert.doesNotMatch(await page.locator("body").innerText(), /failed Opinion request/i);
-  step("Codex Terra read the retained upload and its marker reached the finished story");
+  step("Codex Sol 6.1 (balanced) read the retained upload and its marker reached the finished story");
 
   await browser.close();
   stopFakes();

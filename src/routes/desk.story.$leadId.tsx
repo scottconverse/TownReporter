@@ -11,6 +11,7 @@ import {
 import {
   blockerPressState,
   publishBlockers,
+  publishGateNote,
   publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
@@ -3844,7 +3845,7 @@ function StoryPage() {
                   */}
                   {blockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {hasAiJudgments ? draftReadiness.reason : heldPublishNote || blockers[0]?.sentence}{" "}
+                      {hasAiJudgments ? draftReadiness.reason : heldPublishNote || publishGateNote(blockers)}{" "}
                       <button
                         type="button"
                         className="inline-link"

@@ -74,7 +74,7 @@ const RUNG_ONE_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
  * rung reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of
  * its own, because it runs whatever LM Studio has loaded.
  */
-const LADDER_SENTENCE = "DeepSeek v4.1 Flash, Local model, then Codex Terra";
+const LADDER_SENTENCE = "DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced)";
 /** What the closed picker shows for Automatic (label — optionDetail). */
 const AUTOMATIC_OPTION_TEXT = "Automatic — Recommended ladder";
 /** The secret this walk sets on its own server before booting it. */
@@ -287,14 +287,14 @@ async function addAcceptedSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(SOURCE_URL);
   await page.getByLabel("Name", { exact: true }).fill(SOURCE_NAME);
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("an accepted source is on watch, without being fetched");
 }
@@ -339,6 +339,7 @@ async function theOwnerSwitchesTheScanToAutomatic(panel) {
   await panel.getByLabel("Local time").fill("00:00");
   await panel.getByRole("checkbox", { name: /Run once each day/ }).check();
   await panel.getByRole("checkbox", { name: new RegExp(SOURCE_NAME) }).check();
+  await panel.getByLabel(/^Read every day/).fill("1");
   await panel.getByRole("button", { name: "Save daily scan" }).click();
   /*
     An ENABLED policy is validated before it is stored, and Automatic validates
@@ -549,7 +550,7 @@ async function theScanHistoryListsTheRun() {
   // Substring, never exact: the row's meta line is "<date> · Scheduled daily
   // scan" and the exact string is that whole sentence.
   // Group 4: each run is one row; its details (including the origin) sit behind "Open".
-  await page.locator("details.r2-scan-details > summary").first().click();
+  await page.locator(".r2-scan-details details > summary").first().click();
   await page.getByText("Scheduled daily scan").waitFor({ timeout: 45_000 });
   step("the scan history lists the scheduled run the tick reserved");
 }
@@ -652,7 +653,7 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
   const latestRow = page.locator(".scan-hist .scan-row").first();
   await latestRow.waitFor({ state: "visible", timeout: 45_000 });
   // Group 4: one row per run (time, fetched, leads filed, status); the origin and the details sit behind "Open".
-  await latestRow.locator("details.r2-scan-details > summary").click();
+  await latestRow.locator(".r2-scan-details details > summary").click();
   const latestMeta = latestRow.locator(".r2-scan-report p").first();
   await latestMeta.waitFor({ state: "visible", timeout: 45_000 });
   const metaText = (await latestMeta.innerText()).replace(/\s+/g, " ").trim();
@@ -664,7 +665,7 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
     leadsFiledCell === String(manualRun.leads_created),
     `latest manual leads-filed column is ${JSON.stringify(leadsFiledCell)}, receipt says ${manualRun.leads_created}`,
   );
-  const latestCoverage = (await latestRow.locator(".scan-line").innerText()).replace(/\s+/g, " ").trim();
+  const latestCoverage = (await latestRow.locator(".r2-scan-report .scan-line").innerText()).replace(/\s+/g, " ").trim();
   const leadLabel = `${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`;
   must(
     latestCoverage === `1 selected · 1 fetched · 1 analyzed · ${leadLabel} · 1 batch.`,

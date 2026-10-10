@@ -36,8 +36,8 @@ const leadHeadline = `Planning board meets on the Kimbark parcel ${stamp}`;
 const expectedModelNames = [
   "Automatic",
   "Codex Astra",
-  "Codex Sol",
-  "Codex Terra",
+  "Codex Sol 6.1",
+  "Codex Sol 6.1 (balanced)",
   "Codex Luna",
   "Claude Fable",
   "Claude Opus",
@@ -201,7 +201,7 @@ async function main() {
   /*
     Opinion uses the shared native provider registry, opens on Automatic (units
     U29/U29b: an editor who never touches the picker writes with the first ready
-    rung -- DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet) and offers
+    rung -- DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet) and offers
     the DeepSeek rung by name as well.
   */
   const opinionModel = page.getByLabel("Writing model");
@@ -399,7 +399,7 @@ async function main() {
   // preflight suite covers missing-provider guidance.
   await queueModel.selectOption("codex-balanced");
   if ((await queueModel.inputValue()) !== "codex-balanced") {
-    throw new Error("Queue row did not retain the explicit Codex Terra selection");
+    throw new Error("Queue row did not retain the explicit Codex Sol 6.1 (balanced) selection");
   }
   if (
     (await row.locator("[aria-describedby]").getAttribute("aria-describedby")) ===
@@ -505,10 +505,22 @@ async function main() {
   // Group 3: "How hard to dig" is in the panel the header's Settings button opens.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByText("How hard to dig").waitFor({ timeout: 20_000 });
-  await page.getByRole("button", { name: "Change", exact: true }).first().click();
-  await page.getByText(/Dig — how far it chases/).waitFor({ timeout: 10_000 });
-  await page.getByText(/Nerve — how speculative/).waitFor({ timeout: 10_000 });
-  step("the dials open and label themselves in plain words");
+  const depth = page.getByRole("group", { name: "Default file depth", exact: true });
+  const labels = (await depth.getByRole("button").allInnerTexts()).map((s) => s.replace(/\s+/g, " ").trim());
+  const expectedDepths = ["Quick 10 records · 20 minutes", "Standard 30 records · 2 hours", "Deep 100 records · 8 hours"];
+  if (JSON.stringify(labels) !== JSON.stringify(expectedDepths)) {
+    throw new Error(`depth choices differ: ${JSON.stringify(labels)}`);
+  }
+  await depth.getByRole("button", { name: /^Deep/ }).click();
+  await page.getByRole("button", { name: "Save default", exact: true }).click();
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const savedDeep = page.getByRole("group", { name: "Default file depth", exact: true }).getByRole("button", { name: /^Deep/ });
+  await savedDeep.waitFor();
+  if ((await savedDeep.getAttribute("aria-pressed")) !== "true") {
+    throw new Error("the chosen depth did not survive a reload");
+  }
+  step("depth choices state their record and time budgets, and the saved default survives a reload");
 
   if (consoleErrors.length > 0) {
     throw new Error(`console errors during the walk: ${consoleErrors.slice(0, 5).join(" | ")}`);

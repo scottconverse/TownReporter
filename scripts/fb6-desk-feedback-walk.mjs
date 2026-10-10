@@ -31,7 +31,7 @@
 
     node scripts/fb6-desk-feedback-walk.mjs
 
-  Screenshots: `FB6_SHOTS_DIR`, default `../townreporter-coord/fb6/shots`.
+  Screenshots: `FB6_SHOTS_DIR`, default `fb6-evidence/shots` inside the checkout.
 */
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -54,8 +54,8 @@ const base = checkedUrl(`http://127.0.0.1:${PORT_FB6_DESK}`).replace(/\/$/, "");
 const fakeBase = `http://127.0.0.1:${PORT_FB6_FAKE}/v1`;
 
 const OUT_DIR = checkedOutputPath(
-  resolve(process.env.FB6_SHOTS_DIR || "C:/Users/scott/Desktop/Code/townreporter-coord/fb6/shots"),
-  [resolve("C:/Users/scott/Desktop/Code/townreporter-coord"), REPO],
+  resolve(process.env.FB6_SHOTS_DIR || join(REPO, "fb6-evidence", "shots")),
+  [REPO],
   "screenshot directory",
 );
 mkdirSync(OUT_DIR, { recursive: true });
@@ -260,6 +260,7 @@ async function seed(db, { newsroomId, userId }) {
 
 let db = null;
 let browser = null;
+let page = null;
 let failed = false;
 const startedAt = Date.now();
 
@@ -273,7 +274,7 @@ try {
 
   browser = await chromium.launch({ args: ["--disable-external-protocol-requests"] });
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
-  const page = await ctx.newPage();
+  page = await ctx.newPage();
   const consoleErrors = [];
   page.on("pageerror", (e) => consoleErrors.push(String(e).slice(0, 200)));
 
@@ -351,15 +352,20 @@ try {
     went: a held lead is not open work any more (7a), so it leaves the Open list
     the moment it is held and the "Held / Undo" row is on the other segment.
   */
-  const firstRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
+  // The Start-story scene can finish its draft before this scene begins.
+  // Hold a separate open lead: written drafts correctly cannot be held.
+  const firstRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
   await firstRow.getByRole("button", { name: /^Hold/ }).click();
-  await page.getByRole("button", { name: "Hold, no reason" }).click();
-  await page.getByText(/Held "/).first().waitFor({ timeout: 15_000 });
+  // Start watching before the press: the confirmation is a transient toast.
+  await Promise.all([
+    page.getByText(/Held "/).first().waitFor({ timeout: 15_000 }),
+    page.getByRole("button", { name: "Hold, no reason" }).click(),
+  ]);
   // Let the bar finish arriving: a screenshot taken mid-animation catches it
   // half-faded, which is a photograph of sonner rather than of the fix.
   await page.waitForTimeout(500);
   await page.getByRole("button", { name: /^Held ·/ }).click();
-  const heldRow = page.locator(".today-lead").filter({ hasText: "second reading" }).first();
+  const heldRow = page.locator(".today-lead").filter({ hasText: "water district" }).first();
   await heldRow.locator(".today-lead-done").waitFor({ timeout: 15_000 });
   const heldWords = await heldRow.locator(".today-lead-done").innerText();
   // A Held row now carries Release (it moves the lead back to Open and the toast offers Undo).
@@ -583,6 +589,8 @@ try {
   for (const line of results) console.log(line);
   console.log(`\nshots: ${OUT_DIR}`);
 } catch (error) {
+  failed = true;
+  if (page) console.error("Screen at failure:", await page.locator("body").innerText());
   /*
     Printed BEFORE the finally below, which kills the process: a `finally` that
     ends in `process.exit` swallows the error that got there, and a walk that

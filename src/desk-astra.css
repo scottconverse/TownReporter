@@ -7148,8 +7148,7 @@
   text-align: left;
   min-height: 44px;
   padding: 10px 12px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
+  border: 1px solid var(--fg2);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -8338,14 +8337,15 @@
   background: var(--hover);
 }
 
-/* Dismiss. A text "✕", not sonner's SVG, and a real 44px target. */
+/* Dismiss keeps an ink edge and at least 44px after Sonner scales stacked toasts. */
 .desk-ltr .desk-toaster [data-close-button] {
   position: static;
   flex-shrink: 0;
-  width: 44px;
-  height: 44px;
+  width: 50px;
+  height: 50px;
+  min-height: 50px;
   margin: 0;
-  border: 0;
+  border: 1px solid currentColor;
   border-radius: 0;
   background: transparent;
   color: inherit;
@@ -8580,8 +8580,8 @@
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  padding: 0;
-  border: 0;
+  padding: 0 10px;
+  border: 1px solid var(--fg2);
   background: transparent;
   font: inherit;
   text-decoration: underline;

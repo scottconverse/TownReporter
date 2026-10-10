@@ -304,7 +304,8 @@ try {
   await transcriptTab.waitForTimeout(500);
   const transcriptUrl = transcriptTab.url();
   must(
-    transcriptUrl.endsWith(`/desk/transcript/${seedFacts.artifactId}`),
+    new URL(transcriptUrl).pathname === `/desk/transcript/${seedFacts.artifactId}` &&
+      new URL(transcriptUrl).searchParams.get("at") === "0",
     `Open transcript must open the tape at /desk/transcript/${seedFacts.artifactId}, it opened ${transcriptUrl}`,
   );
   step(`Open transcript opens the tape in its own tab: ${new URL(transcriptUrl).pathname}`);

@@ -96,10 +96,7 @@ async function thePickerIsThere() {
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });
   // Group 3: the dig dials are in the panel the header's Settings button opens.
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const disclosure = page.locator("#dark-model-dig");
-  await disclosure.waitFor({ timeout: 30_000 });
-  await disclosure.locator("summary").first().click();
-  const actions = page.locator("#dark-model-dig-actions");
+  const actions = page.getByRole("region", { name: "How hard to dig", exact: true });
   await actions.waitFor({ timeout: 30_000 });
   const picker = actions.getByLabel("Digging model");
   await picker.waitFor({ timeout: 30_000 });
@@ -109,8 +106,8 @@ async function thePickerIsThere() {
   const expected = [
     "Automatic",
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",
@@ -135,7 +132,7 @@ async function thePickerIsThere() {
   // Choosing a model names that provider first and describes technical failover.
   await picker.selectOption("codex-frontier");
   await actions
-    .getByText(/Prefers Codex Sol for this run\. If it has a technical failure/)
+    .getByText(/Prefers Codex Sol 6.1 for this run\. If it has a technical failure/)
     .waitFor({ timeout: 10_000 });
   step("an explicit choice names its preferred provider and technical failover");
 
