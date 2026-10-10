@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { computeProviderAvailability } from "./provider-availability.server.ts";
+import { computeProviderAvailability, getProviderAvailability } from "./provider-availability.server.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 
 const ENV_KEYS = [
@@ -39,6 +39,15 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
  * is correct without needing a browser to render the `<select>`.
  */
 describe("provider availability for the picker", () => {
+  it("reports Haiku's actual signed-out state before a draft press", async () => {
+    const availability = await getProviderAvailability(1, {
+      refreshLocalCatalog: async () => undefined,
+      probeProvider: async (choice) => choice === "claude-haiku"
+        ? { ok: false, error: "Claude Code is signed out" }
+        : { ok: true, choice: "claude-sonnet", label: "Claude Sonnet" },
+    });
+    assert.equal(availability["claude-haiku"], false);
+  });
   it("marks Local model unavailable when LLM_BASE_URL is unset", () => {
     withEnv({}, () => {
       const availability = computeProviderAvailability();

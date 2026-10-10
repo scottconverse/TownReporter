@@ -214,3 +214,20 @@ export function failoverNoteSentence(
 ): string {
   return `This draft moved to ${newLabel} because ${failoverReasonPhrase(previousLabel, reason)}`;
 }
+
+/** Preserve each Story switch, accepting the durable wording from older runs. */
+export function appendStoryFailoverNote(previous: string, next: string): string {
+  const asTrail = (note: string) => {
+    const hop = /^This draft moved to (.+) because (.+)$/.exec(note);
+    return hop ? `${hop[2]} -> ${hop[1]}` : note;
+  };
+  const trail = asTrail(previous);
+  const hop = asTrail(next);
+  if (!trail) return hop;
+  if (trail === hop || trail.endsWith(` -> ${hop}`)) return trail;
+  const boundary = trail.lastIndexOf(" -> ");
+  const destination = boundary >= 0 ? trail.slice(boundary + 4) : "";
+  return destination && hop.startsWith(`${destination} `)
+    ? `${trail.slice(0, boundary)} -> ${hop}`
+    : `${trail} -> ${hop}`;
+}

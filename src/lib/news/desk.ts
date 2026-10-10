@@ -3891,7 +3891,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   */
   const reported = await waitForModel({
     jobId: job.id,
-    label: modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
+    label: () => modelChoiceLabel(effectiveStoryModelChoice(job.model_choice)),
     run: async () => {
       if (!wholeMeetingLead)
         return runReportWithCheckpoint({

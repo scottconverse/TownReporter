@@ -1,5 +1,7 @@
 import { ensureSchemaOnce, getSql, withTransaction } from "../db.ts";
 import type { Sql } from "../db.ts";
+import { appendStoryFailoverNote } from "./automatic-failover.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 
 /**
@@ -619,10 +621,17 @@ export async function setJobStage(id: number, stage: string) {
  * still there after the job is Done and the story view can show it.
  */
 export async function setJobFailoverNote(id: number, note: string) {
-  const sql = await getSql();
-  await sql`
-    update desk_jobs set failover_note = ${note}, updated_at = now() where id = ${id}
-  `;
+  await withTransaction(async (sql) => {
+    const [job] = await sql<{ kind: string; failover_note: string; model_choice: string; step_text: string | null }>`
+      select kind,failover_note,model_choice,step_text from desk_jobs where id=${id} for update
+    `;
+    if (!job) return;
+    const history = job.kind === "draft" ? appendStoryFailoverNote(job.failover_note, note) : note;
+    const step = job.kind === "draft" && job.step_text?.startsWith("Waiting on ")
+      ? `Waiting on ${modelChoiceLabel(job.model_choice)}${job.step_text.match(/ · \d+s$/)?.[0] ?? ""}`
+      : job.step_text;
+    await sql`update desk_jobs set failover_note=${history}, step_text=${step}, updated_at=now() where id=${id}`;
+  });
 }
 
 /**

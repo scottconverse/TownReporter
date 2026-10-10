@@ -94,9 +94,13 @@ async function resolveTechnicalPreflight(
   requested: StoryModelChoice,
   newsroomId: number,
   probe: typeof probeProvider,
+  allowExplicitFailover = true,
 ) {
   const first = await probe(requested, newsroomId);
   if (first.ok) return { probe: first, switchReceipt: null };
+  // An explicit pick must pass its own readiness check. Only a run already
+  // admitted on that provider may fail over after a technical runtime failure.
+  if (requested !== "auto" && !allowExplicitFailover) return { probe: first, switchReceipt: null };
   const plan = await planAutomaticFailover({
     source: requested === "auto" ? "auto" : "editor",
     current: requested,
@@ -200,7 +204,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
+  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false);
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {

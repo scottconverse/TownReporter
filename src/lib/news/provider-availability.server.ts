@@ -1,4 +1,5 @@
-import { PICKER_PROVIDER_IDS, providerEnabled } from "./provider-registry.ts";
+import { PICKER_PROVIDER_IDS, providerEnabled, providerEntry } from "./provider-registry.ts";
+import { probeProvider } from "./ai.ts";
 import { refreshLocalCatalog, type LocalCatalog } from "./local-models.ts";
 
 /** Compute machine readiness; this module is server-only because it reads env. */
@@ -10,13 +11,21 @@ export function computeProviderAvailability(): Record<string, boolean> {
 
 export async function getProviderAvailability(
   newsroomId: number,
+  deps: {
+    probeProvider?: typeof probeProvider;
+    refreshLocalCatalog?: () => Promise<unknown>;
+  } = {},
 ): Promise<Record<string, boolean>> {
-  // `newsroomId` is kept in the signature: this map is drawn per paper, and a
-  // provider that needed a per-newsroom connection (the removed SuperGrok
-  // sign-in was one) is added here. Today every entry is environment-only.
-  void newsroomId;
-  await refreshLocalCatalog();
-  return computeProviderAvailability();
+  await (deps.refreshLocalCatalog ?? refreshLocalCatalog)();
+  const availability = computeProviderAvailability();
+  // The CLI off switch alone cannot tell whether Claude is signed in. Use
+  // the same probe as draft preflight, including its API-key transport.
+  await Promise.all(PICKER_PROVIDER_IDS.filter((id) => providerEntry(id)?.kind === "claude-code")
+    .map(async (id) => {
+      const result = await (deps.probeProvider ?? probeProvider)(id, newsroomId, undefined, "story");
+      availability[id] = result.ok;
+    }));
+  return availability;
 }
 
 export function getLocalModelCatalog(): Promise<LocalCatalog> {
