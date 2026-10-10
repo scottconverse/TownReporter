@@ -65,7 +65,11 @@ export async function writeSourceTouch(
       update sources set last_fetched_at = now(), last_error = null,
         consecutive_failures = 0, failure_streak_started_at = null, last_ok_at = now(),
         -- A read that worked is the end of any wait and any block.
-        retry_after = null, retry_after_note = null, blocked_at = null, blocked_attempts = 0
+        retry_after = null, retry_after_note = null, blocked_at = null, blocked_attempts = 0,
+        last_read_method = ${touch.readMethod ?? "fetch"},
+        last_read_outcome = ${touch.readOutcome ?? "fetched"},
+        last_read_route_url = ${touch.readRouteUrl ?? null},
+        newsletter_url = coalesce(${touch.newsletterUrl ?? null}, newsletter_url)
       where id = ${id} and newsroom_id = ${newsroomId}
     `;
     return;
@@ -80,7 +84,11 @@ export async function writeSourceTouch(
       consecutive_failures = sources.consecutive_failures + 1,
       failure_streak_started_at = coalesce(failure_streak_started_at, now()),
       retry_after = ${touch.retry_after}, retry_after_note = ${touch.retry_after_note},
-      blocked_at = ${touch.blocked_at}, blocked_attempts = ${touch.blocked_attempts}
+      blocked_at = ${touch.blocked_at}, blocked_attempts = ${touch.blocked_attempts},
+      last_read_method = ${touch.readMethod ?? null},
+      last_read_outcome = ${touch.readOutcome ?? "fetch-failed"},
+      last_read_route_url = ${touch.readRouteUrl ?? null},
+      newsletter_url = coalesce(${touch.newsletterUrl ?? null}, newsletter_url)
     where id = ${id} and newsroom_id = ${newsroomId}
   `;
 }

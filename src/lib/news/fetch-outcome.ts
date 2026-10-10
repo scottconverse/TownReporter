@@ -4,6 +4,7 @@ export type FetchOutcome =
   | "removed"
   | "redirected"
   | "fetch-failed"
+  | "blocked-after-render"
   | "parse-failed"
   | "soft-404"
   | "changed"

@@ -732,7 +732,7 @@ function DeskHome() {
             rank: 0,
           };
         }
-        return { s, tone: "fail", label: "Could not check", note: failure, rank: 0 };
+        return { s, tone: "fail", label: s.last_read_outcome === "blocked-after-render" ? "Still refused" : "Could not check", note: failure, rank: 0 };
       }
       if (citedCount.has(s.id)) {
         const n = citedCount.get(s.id) ?? 0;
@@ -740,7 +740,16 @@ function DeskHome() {
           s,
           tone: "changed",
           label: "Changed",
-          note: n > 0 ? `${n} new item${n === 1 ? "" : "s"} filed` : "New items filed",
+          note: [
+            n > 0 ? `${n} new item${n === 1 ? "" : "s"} filed` : "New items filed",
+            s.last_read_method === "playwright"
+              ? "Read through a browser."
+              : s.last_read_method === "feed"
+                ? "Read through its feed."
+                : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
           rank: 1,
         };
       }
@@ -750,7 +759,15 @@ function DeskHome() {
           s,
           tone: "same",
           label: "✓ Checked · no change",
-          note: `Checked ${formatListDateTime(s.last_fetched_at)}`,
+          note: [
+            s.last_read_method === "playwright"
+              ? "Read through a browser."
+              : s.last_read_method === "feed"
+                ? "Read through its feed."
+                : null,
+            `Checked ${formatListDateTime(s.last_fetched_at)}`]
+            .filter(Boolean)
+            .join(" "),
           rank: 2,
         };
       }
