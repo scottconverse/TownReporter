@@ -1155,6 +1155,16 @@ async function main() {
     return input instanceof HTMLSelectElement && !input.disabled;
   });
   step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  await page.getByRole("button", { name: "Publish anyway — I accept these claims are unreviewed", exact: true }).click();
+  await page.waitForFunction(() => {
+    const accept = [...document.querySelectorAll("#publish-blockers button")]
+      .find(button => /I accept these claims/.test(button.textContent ?? ""));
+    const publish = [...document.querySelectorAll("button")]
+      .find(button => /^Publish in /.test(button.textContent ?? ""));
+    return !accept && publish instanceof HTMLButtonElement && !publish.disabled;
+  });
+  step("D33: edit, refreshed evidence, keep evidence and claim acceptance leave Publish available without reload");
+
   /*
     The decision's own refresh re-renders the whole review, and a shut row hides
     its controls from `getByRole` (Playwright matches only what the accessibility
