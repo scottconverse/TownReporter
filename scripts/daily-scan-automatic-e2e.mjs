@@ -665,7 +665,7 @@ async function theOwnerRunsAndSeesTheManualGeneralScan() {
     leadsFiledCell === String(manualRun.leads_created),
     `latest manual leads-filed column is ${JSON.stringify(leadsFiledCell)}, receipt says ${manualRun.leads_created}`,
   );
-  const latestCoverage = (await latestRow.locator(".scan-line").innerText()).replace(/\s+/g, " ").trim();
+  const latestCoverage = (await latestRow.locator(".r2-scan-report .scan-line").innerText()).replace(/\s+/g, " ").trim();
   const leadLabel = `${manualRun.leads_created} lead${manualRun.leads_created === 1 ? "" : "s"}`;
   must(
     latestCoverage === `1 selected · 1 fetched · 1 analyzed · ${leadLabel} · 1 batch.`,

@@ -614,23 +614,15 @@ async function draftBatchJourney() {
     )
     .toBe(true);
   await closeBatchDialog(batch);
-  /*
-    BF5 (redesign p2a) -- this count moved. The old Queue drew its own filter
-    row with a "drafted 2" button; the redesign's filters are the handoff's own
-    list -- "Open · n / Held · n / Killed / ≈ Printed / All"
-    (docs/design/handoff-2026-09-26 README §3), which carries no drafted
-    filter, and the nav items are where a count lives now ("Nav items ... count
-    at the right", same README §"Shell for all desk screens";
-    desk-chrome.tsx:230 counts the drafted leads). The assertion keeps its
-    meaning: after the batch the desk reports two drafted leads instead of
-    retaining its stale pre-batch count of none.
-  */
+  // Filing each of the six leads now creates its blank workbench draft.
+  // The nav counts draft rows, including those four still-blank fixtures;
+  // the two completed batch drafts were asserted separately above.
   await expect
     .poll(
       () => page.getByRole("link", { name: /^Drafts\b/ }).innerText(),
       { timeout: 10_000 },
     )
-    .toMatch(/^Drafts\s*2$/);
+    .toMatch(/^Drafts\s*6$/);
   step("the Batch dialog sends two selected leads to exact Claude Sonnet, saves review warnings, and refreshes the Drafted queue count");
 }
 
