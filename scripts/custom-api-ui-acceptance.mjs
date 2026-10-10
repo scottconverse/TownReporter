@@ -378,6 +378,7 @@ try {
     line.split("—")[0].trim(),
   );
   assert.deepEqual(batchNames, [
+    "Automatic",
     "Codex Astra",
     "Codex Sol 6.1",
     "Codex Sol 6.1 (balanced)",
