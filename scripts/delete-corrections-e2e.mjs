@@ -639,6 +639,16 @@ async function main() {
   // 0.6.67 puts the section on the button itself -- "Publish in <section>" --
   // and that press is the confirmation, so there is no separate Confirm step
   // to take first. See confirm-section-step.mjs.
+  await confirmSectionAndWaitForPublishable(page, { publishable: false });
+  /*
+    The fixture body states a date ("Tuesday"), so it carries a checkable fact:
+    with no claims recorded the zero-claims gate keeps Publish off until an editor
+    says they read it. Exercise that UI here -- press the acknowledgement, then
+    wait for the gate to clear -- rather than seeding a bypass.
+  */
+  const acknowledge = page.getByRole("button", { name: "I checked this story myself" });
+  await acknowledge.waitFor({ state: "visible", timeout: 45_000 });
+  await acknowledge.click();
   await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: /^Publish in / }).click();
   await page.getByRole("button", { name: /^Yes, print it/ }).click();

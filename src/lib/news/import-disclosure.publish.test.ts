@@ -75,13 +75,14 @@ async function importedFixture(disclosureText: string) {
   );
   const [draft] = await sql.query<{ id: number }>(
     `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,disclosure_text)
-     values($1,$2,$3,'Council votes to bring marijuana hospitality rules back','The council asked for a draft ordinance.','The council voted 5-2 on Tuesday to bring the hospitality rules back for consideration.','council',$4,'','[]','reported','[]','[]','{}',$5) returning id`,
+     values($1,$2,$3,'Council votes to bring marijuana hospitality rules back','The council asked for a draft ordinance.','The council voted 5-2 on Tuesday to bring the hospitality rules back for consideration.','council',$4,'','[]','reported','[]','[]',$6,$5) returning id`,
     [
       USER,
       NEWSROOM,
       lead.id,
       JSON.stringify(['https://www.youtube.com/watch?v=abc123']),
       disclosureText,
+      JSON.stringify({ importedText: true }),
     ],
   );
   const confirmed = await performConfirmDraftTopic({ userId: USER, newsroomId: NEWSROOM }, lead.id);

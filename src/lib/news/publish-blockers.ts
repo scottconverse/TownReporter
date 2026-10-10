@@ -26,6 +26,7 @@
 import { editorActionError } from "./desk-copy.ts";
 import { refusedAnswer } from "./refused-answer.ts";
 import type { StoryReadinessState } from "./story-readiness.ts";
+import { UNCHECKED_STORY_REASON } from "./unchecked-story-gate.ts";
 
 /**
  * Where a blocker's button goes. The page turns each of these into a real
@@ -57,6 +58,15 @@ export type PublishBlockerTarget =
    * that reached paper can always be traced to the person who accepted it.
    */
   | { kind: "accept-unreviewed" }
+  /**
+   * Unit ZC: the one-press "I checked this story myself" for a draft whose
+   * evidence check recorded NO claims but which carries a checkable fact and
+   * has no completed check for this version. It writes the same kind of
+   * version-bound record (`leads.notes_json`, against
+   * `evidenceReviewToken(draft)`) and one `audit_events` row, so a story that
+   * printed unchecked can always be traced to the person who read it.
+   */
+  | { kind: "acknowledge-unchecked" }
   | { kind: "publish-bar" };
 
 export type PublishBlockerAction = {
@@ -134,6 +144,13 @@ export type PublishBlockerState = {
    * and brings the block back.
    */
   unreviewedAccepted: boolean;
+  /**
+   * Unit ZC: the draft's evidence check recorded no claims at all, no completed
+   * check covers this version, and the body carries a fact worth checking
+   * (`uncheckedStoryNeedsCheck`). A zero-claim story nobody has checked is not a
+   * clear story -- it is an unchecked one, and this is the flag that says so.
+   */
+  uncheckedStory?: boolean;
   /** Outlets the body names that the draft's sources do not show. */
   namedOutlets: readonly string[];
   /** The story changed after its evidence was checked. */
@@ -378,6 +395,32 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
             : "Publish anyway — I accept these claims are unreviewed",
         target: { kind: "accept-unreviewed" },
       },
+    });
+  }
+
+  /*
+    UNIT ZC -- THE CLAIMS NOBODY RECORDED, SO NOBODY CHECKED.
+
+    The row above fires only when the evidence check RAISED claims. A check that
+    raised none leaves `unreviewedClaims` at 0, so a story nothing has ever been
+    run against -- with a dollar figure, a date or a vote in it -- printed with
+    no gate at all: `○ Evidence check not run` beside an enabled Publish. The
+    flag is decided once (`uncheckedStoryNeedsCheck`) from the review's own
+    output, whether a completed check covers this version, and the body's facts,
+    so the desk's row, the readiness chip and the server's refusal all read one
+    answer.
+
+    Two honest answers again, and the same shape as the row above: run the check
+    (where the evidence pane's own control lives), or say in so many words that
+    the editor read it against their sources. The second press is recorded for
+    this exact draft version and audited.
+  */
+  if (state.uncheckedStory) {
+    blockers.push({
+      key: "claims-unchecked",
+      sentence: UNCHECKED_STORY_REASON,
+      action: { label: "Run the evidence check", target: { kind: "evidence-review" } },
+      altAction: { label: "I checked this story myself", target: { kind: "acknowledge-unchecked" } },
     });
   }
 
@@ -638,6 +681,9 @@ export type BlockerPressState = {
   failureReason: string | null;
 };
 
+/** An idle press fact, for a caller that has not wired a row (unit ZC). */
+const IDLE_PRESS: BlockerPressFacts = { isPending: false, isError: false };
+
 /*
   The words placed before a thrown error's reason, per row. The refusals carry
   their own complete sentence and take no lead-in, which is why the map is read
@@ -645,11 +691,13 @@ export type BlockerPressState = {
 */
 const BLOCKER_FAILED_LEAD: Record<string, string> = {
   "accept-unreviewed": "record that acceptance",
+  "acknowledge-unchecked": "record that check",
   "override-outlet": "record the override",
   "keep-evidence": "save the evidence review",
 };
 const BLOCKER_FAILED_FALLBACK: Record<string, string> = {
   "accept-unreviewed": "Could not record that acceptance.",
+  "acknowledge-unchecked": "Could not record that check.",
   "override-outlet": "Could not record the override.",
   "keep-evidence": "Evidence review could not be saved.",
 };
@@ -664,9 +712,12 @@ export function blockerPressState(input: {
   accept: BlockerPressFacts;
   override: BlockerPressFacts;
   keepEvidence: BlockerPressFacts;
+  /** Unit ZC: the zero-claims acknowledgement press. Optional for older callers. */
+  acknowledge?: BlockerPressFacts;
 }): BlockerPressState {
   const rows = [
     ["accept-unreviewed", input.accept],
+    ["acknowledge-unchecked", input.acknowledge ?? IDLE_PRESS],
     ["override-outlet", input.override],
     ["keep-evidence", input.keepEvidence],
   ] as const;

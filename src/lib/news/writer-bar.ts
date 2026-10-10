@@ -57,7 +57,7 @@ export function writerIsReady(input: {
 export function readinessDot(ready: boolean, story?: { state: string; reason: string } | null): { label: string; tone: WriterTone; reason?: string } {
   if (story) return {
     reason: story.reason,
-    label: (story.state === "ready" || story.state === "verified") ? "● Ready" : story.state === "checking" ? "● Checking" : story.state === "to-check" ? "● To check" : "● Not ready",
+    label: (story.state === "ready" || story.state === "verified") ? "● Ready" : story.state === "checking" ? "● Checking" : story.state === "to-check" ? "● To check" : story.state === "not-checked" ? "● Not checked yet" : "● Not ready",
     tone: (story.state === "ready" || story.state === "verified") ? "ok" : "warn",
   };
   return ready

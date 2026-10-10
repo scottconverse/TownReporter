@@ -4,9 +4,9 @@ import { test } from 'node:test';
 import { act, createElement as h } from 'react';
 import { installDom } from './dom-harness.mjs';
 import { screenModule } from './screen-render-harness.mjs';
-const screen = await screenModule('src/routes/desk.story.$leadId.tsx', {}, ['@/lib/news/desk-drafts','@/lib/news/check-gates','@/lib/news/desk-copy','@/lib/news/story-readiness','@/components/story-readiness-chip','@/lib/news/writer-bar']);
+const screen = await screenModule('src/routes/desk.story.$leadId.tsx', {}, ['@/lib/news/desk-drafts','@/lib/news/check-gates','@/lib/news/desk-copy','@/lib/news/story-readiness','@/components/story-readiness-chip','@/lib/news/writer-bar','@/lib/news/unchecked-story-gate']);
 test('published story model and effort buttons open their settings panel', async () => {
-  globalThis.screenData = {lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'published',source_urls:'[]'},draft:{id:8,headline:'Council votes',dek:'A plan',body:'Council approved the plan.',topic:'government'},namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
+  globalThis.screenData = {lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'published',source_urls:'[]'},draft:{id:8,headline:'Council votes',dek:'A plan',body:'Council approved the plan.',topic:'government'},namedOutlets:[],outletOverrides:[],uncheckedRecordedClaims:0,uncheckedEvidenceChecked:true,uncheckedStoryAcknowledged:false,uncheckedExempt:false},sources:[],memory:[]};
   const {document, Event} = installDom();
   const {createRoot} = await import('react-dom/client');
   const root = createRoot(document.getElementById('root'));

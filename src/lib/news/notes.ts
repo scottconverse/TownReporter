@@ -116,6 +116,21 @@ export type TopicConfirmation = { topic: string; token: string; at: string };
  */
 export type UnreviewedClaimsConfirmation = { count: number; token: string; at: string; by: string };
 
+/**
+ * The zero-claims acknowledgement (unit ZC): a story whose evidence check
+ * recorded no claims, but which carries a checkable fact, printed because a
+ * person said they read it against their sources.
+ *
+ * The same shape and the same identity as `unreviewedClaimsConfirmation`: the
+ * token is `topicConfirmationFingerprint(evidenceReviewToken(draft))`, so the
+ * acknowledgement is for the exact draft version the editor was looking at and
+ * an edit takes it back. It is named explicitly in `parseNotes` below, like the
+ * fields around it, so a field the parser does not name is not silently dropped
+ * on the next read -- which would leave a story refusing to print with no way to
+ * see why.
+ */
+export type UncheckedStoryConfirmation = { token: string; at: string; by: string };
+
 export type ReportingNotes = {
   news: string;
   why: string;
@@ -160,6 +175,12 @@ export type ReportingNotes = {
    * why.
    */
   unreviewedClaimsConfirmation?: UnreviewedClaimsConfirmation;
+  /**
+   * The zero-claims acknowledgement an editor recorded for one exact draft
+   * version (unit ZC). Named explicitly in parseNotes below, like the field
+   * above it and for the same reason.
+   */
+  uncheckedStoryConfirmation?: UncheckedStoryConfirmation;
   /**
    * Why the editor held this lead, when they told the desk.
    *
@@ -352,6 +373,7 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
       ...topicConfirmationFromRaw(o),
       ...unreviewedClaimsConfirmationFromRaw(o),
+      ...uncheckedStoryConfirmationFromRaw(o),
       ...holdFromRaw(o),
       ...meetingFromRaw(o),
     };
@@ -475,6 +497,30 @@ function unreviewedClaimsConfirmationFromRaw(
   return {
     unreviewedClaimsConfirmation: {
       count: Math.floor(count),
+      token: token.slice(0, 64),
+      at: String(r.at ?? "").slice(0, 40),
+      by: String(r.by ?? "").slice(0, 200),
+    },
+  };
+}
+
+/**
+ * The zero-claims acknowledgement, read defensively (unit ZC).
+ *
+ * A record with no token would match every draft version -- the same reason the
+ * two records above are dropped when half-written. `at` and `by` are kept as
+ * written; they are what makes the acknowledgement attributable.
+ */
+function uncheckedStoryConfirmationFromRaw(
+  o: Record<string, unknown>,
+): Pick<ReportingNotes, "uncheckedStoryConfirmation"> {
+  const raw = o.uncheckedStoryConfirmation;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const token = String(r.token ?? "").trim();
+  if (!token) return {};
+  return {
+    uncheckedStoryConfirmation: {
       token: token.slice(0, 64),
       at: String(r.at ?? "").slice(0, 40),
       by: String(r.by ?? "").slice(0, 200),
@@ -936,6 +982,9 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     // the desk then shed would come back as "that press never happened", with
     // no way to tell it apart from one that did.
     unreviewedClaimsConfirmation: work.unreviewedClaimsConfirmation,
+    // Unit ZC, kept for the same reason: the zero-claims acknowledgement is a
+    // gate on publishing, and shedding it would read as a press that never took.
+    uncheckedStoryConfirmation: work.uncheckedStoryConfirmation,
     // Kept for the same reason as the confirmation above: it is the only record
     // of why an editor parked a lead, and a shed reason reads as "never given".
     hold: work.hold,

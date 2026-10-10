@@ -1,6 +1,7 @@
 import type { PackageClaim } from "./civic-reporting.ts";
+import { uncheckedStoryNeedsCheck } from "./unchecked-story-gate.ts";
 
-export type StoryReadinessState = "ready" | "checking" | "verified" | "to-check" | "not-ready";
+export type StoryReadinessState = "ready" | "checking" | "verified" | "to-check" | "not-ready" | "not-checked";
 
 export type StoryReadiness = {
   state: StoryReadinessState;
@@ -13,7 +14,7 @@ export type StoryReadiness = {
 export function editorStoryState(blockers: readonly { key: string; kind?: string; sentence: string }[], openCount: number, acceptedCount = 0,
 ): StoryReadiness {
   const first = blockers[0];
-  return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : "not-ready" : "ready",
+  return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : first.key === "unchecked" || first.key === "claims-unchecked" ? "not-checked" : "not-ready" : "ready",
     openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
 }
 
@@ -81,7 +82,7 @@ export function savedStoryReadiness(raw: unknown, checking = false): StoryReadin
         : {};
     if (
       value.version === 1 &&
-      ["ready", "checking", "verified", "to-check", "not-ready"].includes(String(value.state)) &&
+      ["ready", "checking", "verified", "to-check", "not-ready", "not-checked"].includes(String(value.state)) &&
       typeof value.openCount === "number" &&
       Number.isInteger(value.openCount) &&
       value.openCount >= 0 &&
@@ -117,6 +118,9 @@ export function storyReadinessChip(readiness: StoryReadiness): {
       return { text: "✓ Verified", tone: "ok" };
     case "to-check":
       return { text: `! ${readiness.openCount} to check`, tone: "warn" };
+    case "not-checked":
+      /* Unit ZC: warn like "Not ready", but named for what it is. */
+      return { text: "! Not checked yet", tone: "warn" };
     case "not-ready":
       return { text: "✕ Not ready", tone: "warn" };
   }
@@ -128,6 +132,14 @@ export function storyReadiness(input: {
   claims: readonly Pick<PackageClaim, "text" | "status">[];
   checking?: boolean;
   held?: readonly { headline: string; reason: string }[];
+  /**
+   * Unit ZC: a completed evidence check covers this exact draft version. Read
+   * from the caller's own record; absent means "no completion record", which is
+   * the honest default and the state this gate exists for.
+   */
+  evidenceCheckedCurrentVersion?: boolean;
+  /** Unit ZC: the one-press acknowledgement covers this version. */
+  acknowledgedForVersion?: boolean;
 }): StoryReadiness {
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
   const paragraphs = input.body
@@ -159,6 +171,26 @@ export function storyReadiness(input: {
       totalCount: input.claims.length,
       reason: input.held.map((item) => `${item.headline}: ${item.reason}`).join(" "),
     };
+  /*
+    UNIT ZC -- ZERO CLAIMS IS NOT "VERIFIED" WHEN A CHECKABLE FACT WAS NEVER
+    CHECKED.
+
+    Below, `openCount === 0` reads as "verified": "N of N facts matched". That is
+    true of a story whose check ran and grounded every fact, and it is also true
+    of a story that has NO claims at all because no check ever raised one -- a
+    draft with a dollar figure in it that a person would read as given. The
+    shared rule decides it, once, so this surface and the publish blocker cannot
+    disagree: a zero-claim, unchecked, checkable body is `not-checked`.
+  */
+  const unchecked = uncheckedStoryNeedsCheck({
+    recordedClaims: input.claims.length,
+    evidenceCheckedCurrentVersion: input.evidenceCheckedCurrentVersion === true,
+    body: input.body,
+    acknowledgedForVersion: input.acknowledgedForVersion === true,
+    exempt: false,
+  });
+  if (unchecked.blocked)
+    return { state: "not-checked", openCount, totalCount: input.claims.length, reason: unchecked.reason };
   if (openCount === 0)
     return {
       state: "verified",

@@ -327,7 +327,16 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const editedBody = storableText(edited.body);
     const [saved] = await tx<DraftRow>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_body)
       values(${job.user_id},${job.newsroom_id},${draft.lead_id},${storableText(edited.headline)},${storableText(edited.dek)},${editedBody},${draft.topic},${sourceUrls},${storableText(integrityNotes)},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(sanitizeJsonLeaves(unanswered))},${reconcileResearchJson},${editedBody}) returning *`;
-    const carriedResearchJson = retainUnchangedReconcileResearch(draft.research_json, JSON.stringify(sanitizeJsonLeaves(JSON.parse(carryReconciledEvidenceJudgments(draft, saved, explicitlyJudged)))));
+    const carried = JSON.parse(retainUnchangedReconcileResearch(draft.research_json, JSON.stringify(sanitizeJsonLeaves(JSON.parse(carryReconciledEvidenceJudgments(draft, saved, explicitlyJudged)))))) as Record<string, unknown>;
+    /* Unit ZC: the identity of the draft THIS run saved, over the FINAL carried
+       memo (which may add judgment rows), so a later edit takes the completed
+       check back in the zero-claims case. `evidenceReviewToken` ignores its own
+       stamp (and the derived style record), so writing it does not move the
+       identity it is written to match. */
+    const carriedResearchJson = JSON.stringify({
+      ...carried,
+      evidenceReviewVersion: topicConfirmationFingerprint(evidenceReviewToken({ ...saved, research_json: JSON.stringify(carried) })),
+    });
     await tx`update drafts set research_json=${carriedResearchJson} where id=${saved.id} and newsroom_id=${job.newsroom_id}`;
     // Upgrade existing row-bound confirmations only when the content is unchanged.
     if (evidenceReviewToken(draft) === evidenceReviewToken({ ...saved, research_json: carriedResearchJson })) {
