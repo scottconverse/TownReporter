@@ -33,6 +33,8 @@ let recheckProvisionalMeetings: typeof import("./meeting-capture.ts").recheckPro
 let applyCapturedMeetingTranscript: typeof import("./meeting-capture.ts").applyCapturedMeetingTranscript;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
+let uncheckedStoryGate: typeof import("./desk.ts").uncheckedStoryGate;
+let performAcknowledgeUnchecked: typeof import("./desk.ts").performAcknowledgeUnchecked;
 let performConfirmDraftTopic: typeof import("./desk.ts").performConfirmDraftTopic;
 let closePoolForTests: typeof import("../db.ts").closePoolForTests;
 
@@ -102,6 +104,14 @@ function section5For(caption: ReturnType<typeof capturedCaption>) {
 async function confirmSectionForCurrentDraft(leadId: number) {
   const confirmed = await performConfirmDraftTopic({ userId, newsroomId }, leadId);
   assert.equal(confirmed.ok, true, "the editor's section confirmation must be recorded");
+  // This fixture deliberately supplies zero claims. The editor checks the story
+  // before each publish/race, through the real version-bound acknowledgement.
+  const gate = await uncheckedStoryGate(newsroomId, leadId);
+  if (gate.blocked) {
+    const checked = await performAcknowledgeUnchecked({ userId, newsroomId }, leadId, gate.evidenceToken);
+    assert.equal(checked.ok, true, JSON.stringify(checked));
+    assert.equal((await uncheckedStoryGate(newsroomId, leadId)).blocked, false);
+  }
   return confirmed.ok ? confirmed.topic : "";
 }
 
@@ -161,7 +171,7 @@ if (probe.ok) {
     sql = await db.getSql();
     closePoolForTests = db.closePoolForTests;
     ({ runMeetingAwareness, recheckProvisionalMeetings, applyCapturedMeetingTranscript } = await vite.ssrLoadModule("/src/lib/news/meeting-capture.ts"));
-    ({ performDraftWork, performPublish, performConfirmDraftTopic } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
+    ({ performDraftWork, performPublish, performConfirmDraftTopic, performAcknowledgeUnchecked, uncheckedStoryGate } = await vite.ssrLoadModule("/src/lib/news/desk.ts"));
     await sql.query("insert into newsrooms(id,name) values($1,'Meeting chain')", [newsroomId]);
     await sql.query("insert into newsroom_members(newsroom_id,user_id,role) values($1,$2,'owner')", [newsroomId, userId]);
     await sql.query("insert into meeting_capture_settings(newsroom_id,storage_root,retention_mode,enabled) values($1,$2,'transcript-only',true)", [newsroomId, storageRoot]);
@@ -474,7 +484,7 @@ describe("meeting chain uses real application entrypoints in its own disposable 
     await confirmSectionForCurrentDraft(lead!.id);
     const blockedAAfterB = await performPublish({ userId, newsroomId }, lead!.id);
     assert.equal(blockedAAfterB.ok, false, "a retry after B commits must reach and fail the current-artifact publication guard");
-    if (!blockedAAfterB.ok) assert.match(blockedAAfterB.error, /recording this draft quotes has changed/i);
+    if (!blockedAAfterB.ok) assert.match(blockedAAfterB.warnings?.map(w => w.sentence).join("\n") ?? blockedAAfterB.error, /recording this draft quotes has changed/i);
     const existingArticles = await sql.query<{ n: number }>(
       "select count(*)::int as n from articles where newsroom_id=$1 and lead_id=$2 and status='published'",
       [newsroomId, lead!.id],

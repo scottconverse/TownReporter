@@ -172,7 +172,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     });
   }
   for (const sectionKey of ["foreign-only", "retired", "about", "opinion", "bad/key", "", null, 7]) {
-    it(`rejects unavailable/non-reporting section ${JSON.stringify(sectionKey)} before filing`, async () => {
+    it(`${sectionKey === "about" || sectionKey === "opinion" ? "warns, then files with audited consent for" : "rejects unavailable"} section ${JSON.stringify(sectionKey)} before filing`, async () => {
       const sql = await ensureWriteStorySchema();
       let touched = false;
       const result = await writeStoryForAuthenticatedEditor({
@@ -188,7 +188,19 @@ describe("writeStoryForAuthenticatedEditor", () => {
       });
       assert.equal(result.ok, false);
       assert.equal(touched, false);
-      if (!result.ok) assert.match(result.error, /section/i);
+      if (!result.ok && (sectionKey === "about" || sectionKey === "opinion")) {
+        assert.equal("warning" in result && result.warning?.key, "lead-publication-section");
+        const approved = await writeStoryForAuthenticatedEditor({ context: { userId: "section-editor", newsroomId: 820 }, text: "Write a short local item about upcoming programs.", sectionKey, override: ["lead-publication-section"] }, {
+          getSections: async () => sectionConfig, getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+          probeProvider: async () => ({ ok: true, label: "Claude Frontier", choice: "claude-frontier" }),
+          enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+        });
+        assert.equal(approved.ok,true,JSON.stringify(approved));
+        const [lead] = await sql.query<{topic:string}>("select topic from leads where id=$1",[approved.leadId]);
+        assert.equal(lead.topic,sectionKey);
+        const audits = await sql.query<{detail:string}>("select detail from audit_events where newsroom_id=820 and user_id='section-editor' and action='override'");
+        assert.ok(audits.some(a => JSON.parse(a.detail).key === "lead-publication-section"));
+      } else if (!result.ok) assert.match(result.error, /section/i);
     });
   }
   it("persists the authenticated Write box assignment independently of its scratch evidence", async () => {

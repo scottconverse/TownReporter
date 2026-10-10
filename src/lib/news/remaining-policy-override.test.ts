@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { getSql } from "../db.ts";
-import { saveDailyCapForEditor, planDailySourceRotation, cleanDailyScanPolicyInput, persistDailyScanPolicy } from "./daily-scan.ts";
+import { saveDailyCapForEditor, planDailySourceRotation, cleanDailyScanPolicyInput, persistDailyScanPolicy, readDailyScanPolicy } from "./daily-scan.ts";
 import { commitDraftBatchForAuthenticatedEditor } from "./draft-batch.server.ts";
 import { runManualMeetingForEditor } from "./meeting-policy.server.ts";
 import { runMeetingAwareness } from "./meeting-capture.ts";
@@ -21,9 +21,17 @@ it("daily limit warns then saves 13 and the planner uses the approved budget", a
   assert.equal(first.ok,false); assert.equal("warning" in first && first.warning.key,"daily-source-cap");
   const approved = await saveDailyCapForEditor(context,{...data,override:["daily-source-cap"]},save);
   assert.equal(approved.ok,true);
-  const [row] = await awaitSql.query<{source_cap:number}>("select source_cap from daily_scan_policies where newsroom_id=1");
-  assert.equal(row.source_cap,13); await audited("daily-source-cap");
-  assert.equal(planDailySourceRotation({ facts:[], selectedSourceIds:[],cap:13 }).budget,13);
+  const [row] = await awaitSql.query<{source_cap:number;source_cap_override:number}>("select source_cap,source_cap_override from daily_scan_policies where newsroom_id=1");
+  assert.equal(row.source_cap,12, "the original database range remains valid");
+  assert.equal(row.source_cap_override,13, "the complete approved value is persisted separately");
+  await audited("daily-source-cap");
+  const loaded = await readDailyScanPolicy(1);
+  assert.equal(loaded.sourceCap,13, "the desk reads the approved cap");
+  assert.equal(planDailySourceRotation({ facts:[], selectedSourceIds:[],cap:loaded.sourceCap }).budget,13);
+  assert.equal(await persistDailyScanPolicy(awaitSql,1,context.userId,{...data,sourceCap:8,expectedRevision:1},[]), true);
+  const [reset] = await awaitSql.query<{source_cap_override:number|null}>("select source_cap_override from daily_scan_policies where newsroom_id=1");
+  assert.equal(reset.source_cap_override,null, "returning to a normal cap clears the override");
+  assert.equal((await readDailyScanPolicy(1)).sourceCap,8);
 });
 it("six batch leads warn then all six queue with an audit; missing records still refuse", async () => {
   const sql = await getSql();
