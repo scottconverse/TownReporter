@@ -237,8 +237,8 @@ describe("retryStoryJob's commit paths refuse", () => {
       { leadId, modelChoice: "claude-frontier" },
       { probe: READY_PROBE as never, enqueue: (async () => { throw new Error("must not enqueue before consent"); }) as never },
     );
-    assert.ok(warning && !warning.ok);
-    if (warning && !warning.ok) {
+    assert.ok(warning && "warning" in warning);
+    if (warning && "warning" in warning) {
       assert.equal(warning.error, paperNotFullySetUpSentence());
       assert.equal(warning.warning.key, PAPER_NOT_SET_UP_KEY);
     }
