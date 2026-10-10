@@ -352,14 +352,14 @@ async function theSourcesPageAddsThroughTheDialog() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(secondUrl);
   await page.getByLabel("Name", { exact: true }).fill(secondTitle);
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("adding on the Sources page still adds, through the phase-4 dialog");
 

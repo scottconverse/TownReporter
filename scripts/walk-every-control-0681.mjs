@@ -1078,9 +1078,23 @@ pg = await db();
 step("the in-memory database has stopped migrating");
 
 const browser = await chromium.launch({ args: ["--disable-external-protocol-requests"] });
-const readerCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-const ownerCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-const editorCtx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+// All contexts reach one local server/IP bucket. Pace session reads rather than
+// weakening the production throttle or ignoring its 429 responses.
+let nextSessionRead = 0;
+async function pacedContext(options) {
+  const context = await browser.newContext(options);
+  await context.route("**/api/auth/get-session**", async (route) => {
+    const slot = Math.max(Date.now(), nextSessionRead);
+    nextSessionRead = slot + 450;
+    await new Promise((resolve) => setTimeout(resolve, slot - Date.now()));
+    await route.continue();
+  });
+  return context;
+}
+
+const readerCtx = await pacedContext({ viewport: { width: 1440, height: 1000 } });
+const ownerCtx = await pacedContext({ viewport: { width: 1440, height: 1000 } });
+const editorCtx = await pacedContext({ viewport: { width: 1440, height: 1000 } });
 const owner = await ownerCtx.newPage();
 owner.on("console", (m) => {
   if (m.type() === "error") consoleErrors.push(`desk: ${m.text().slice(0, 300)}`);
@@ -1259,6 +1273,7 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
   ];
   for (const check of states) {
     await owner.goto(`${base}/desk/story/${check.lead}`, { waitUntil: "domcontentloaded" });
+    await owner.getByRole("tab", { name: "Reporting", exact: true }).click();
     await owner.waitForTimeout(2_500);
     const body = await owner.locator("body").innerText();
     const shown = check.re.test(body);
@@ -1281,6 +1296,7 @@ step(`${DESK_SCREENS.length} desk screens: every button pressed, every dialog op
      renders its own sentence, and it is reachable from the screen. This is the
      desk's real control path, not a seeded status. */
   await owner.goto(`${base}/desk/story/${seeded.leadId2}`, { waitUntil: "domcontentloaded" });
+  await owner.getByRole("tab", { name: "Reporting", exact: true }).click();
   await owner.waitForTimeout(1_200);
   const cancel = owner.getByRole("button", { name: /^(Cancel|Stop|Cancel this|Stop this)/ }).first();
   if ((await cancel.count()) > 0) {
@@ -1659,7 +1675,7 @@ step("every form submits and shows its own sentence");
 
 /* ── 8. privacy: cookies, localStorage, and the read table ──────────────── */
 {
-  const privCtx = await browser.newContext();
+  const privCtx = await pacedContext();
   const beacons = [];
   await privCtx.route("**/api/read", async (route) => {
     const req = route.request();

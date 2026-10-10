@@ -103,7 +103,9 @@ async function checkInBrowser() {
 
     // The sign-in page must reach a usable form. This is the blocker.
     await page.goto(BASE + "/login", { waitUntil: "networkidle", timeout: 30_000 });
-    await page.waitForTimeout(1500);
+    // A cold Vite graph can still be compiling after networkidle. Wait for
+    // the usable form we assert below, rather than sampling after a fixed sleep.
+    await page.locator("input").nth(1).waitFor({ state: "visible", timeout: 30_000 });
     const text = await page.locator("body").innerText();
     if (/Opening/i.test(text)) {
       bad('/login is stuck on "Opening…" — the client bundle did not hydrate');

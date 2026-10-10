@@ -1,20 +1,13 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { deskMiddleware } from "./desk-auth.ts";
-import {
-  createPageWatchFor,
-  checkPageWatchFor,
-  listPageWatchesFor,
-  pageWatchDetailFor,
-  setPageWatchStateFor,
-  actOnPageWatchFor,
-  setPageWatchModelFor,
-  readPageWatchCaptureFor,
-} from "./page-watch.ts";
 const id = z.number().int().positive();
 export const listPageWatches = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
-  .handler(({ context }) => listPageWatchesFor(context));
+  .handler(async ({ context }) => {
+    const { listPageWatchesFor } = await import("./page-watch.ts");
+    return listPageWatchesFor(context);
+  });
 export const createPageWatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
@@ -29,26 +22,38 @@ export const createPageWatch = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(({ context, data }) => createPageWatchFor(context, {
-    ...data,
-    modelEffort: data.modelEffort as import("./provider-registry.ts").ModelEffort | null | undefined,
-  }));
+  .handler(async ({ context, data }) => {
+    const { createPageWatchFor } = await import("./page-watch.ts");
+    return createPageWatchFor(context, {
+      ...data,
+      modelEffort: data.modelEffort as import("./provider-registry.ts").ModelEffort | null | undefined,
+    });
+  });
 export const checkPageWatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => id.parse(input))
-  .handler(({ context, data }) => checkPageWatchFor(context, data));
+  .handler(async ({ context, data }) => {
+    const { checkPageWatchFor } = await import("./page-watch.ts");
+    return checkPageWatchFor(context, data);
+  });
 export const pageWatchDetail = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
     z.object({ id, offset: z.number().int().min(0).max(100000).optional() }).parse(input),
   )
-  .handler(({ context, data }) => pageWatchDetailFor(context, data.id, data.offset));
+  .handler(async ({ context, data }) => {
+    const { pageWatchDetailFor } = await import("./page-watch.ts");
+    return pageWatchDetailFor(context, data.id, data.offset);
+  });
 export const setPageWatchState = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
     z.object({ id, state: z.enum(["active", "paused", "stopped"]) }).parse(input),
   )
-  .handler(({ context, data }) => setPageWatchStateFor(context, data.id, data.state));
+  .handler(async ({ context, data }) => {
+    const { setPageWatchStateFor } = await import("./page-watch.ts");
+    return setPageWatchStateFor(context, data.id, data.state);
+  });
 export const actOnPageWatch = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
@@ -62,15 +67,24 @@ export const actOnPageWatch = createServerFn({ method: "POST" })
       })
       .parse(input),
   )
-  .handler(({ context, data }) => actOnPageWatchFor(context, data));
+  .handler(async ({ context, data }) => {
+    const { actOnPageWatchFor } = await import("./page-watch.ts");
+    return actOnPageWatchFor(context, data);
+  });
 
 export const setPageWatchModel = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => z.object({ id, choice: z.string().max(40), effort: z.string().max(20).nullable().optional() }).parse(input))
-  .handler(({ context, data }) => setPageWatchModelFor(context, data.id, data.choice, data.effort as import("./provider-registry.ts").ModelEffort | null | undefined));
+  .handler(async ({ context, data }) => {
+    const { setPageWatchModelFor } = await import("./page-watch.ts");
+    return setPageWatchModelFor(context, data.id, data.choice, data.effort as import("./provider-registry.ts").ModelEffort | null | undefined);
+  });
 export const readPageWatchCapture = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((input: unknown) =>
     z.object({ watchId: id, checkId: id, previous: z.boolean().optional() }).parse(input),
   )
-  .handler(({ context, data }) => readPageWatchCaptureFor(context, data));
+  .handler(async ({ context, data }) => {
+    const { readPageWatchCaptureFor } = await import("./page-watch.ts");
+    return readPageWatchCaptureFor(context, data);
+  });

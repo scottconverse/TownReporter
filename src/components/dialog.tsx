@@ -308,6 +308,7 @@ export function Dialog({
             className="astra-modal"
             role={role}
             aria-label={ariaLabel}
+            {...(ariaLabel ? { "aria-labelledby": undefined } : {})}
             onPointerDownOutside={event => event.preventDefault()}
             onOpenAutoFocus={() => {
               const opener = document.activeElement;

@@ -201,14 +201,14 @@ async function addAcceptedSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(sourceUrl);
   await page.getByLabel("Name", { exact: true }).fill("Daily settings source");
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("an accepted source is available without fetching it");
 }
@@ -220,14 +220,14 @@ async function addRoutineNoticeFixtureSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(routineNoticeFixtureUrl);
   await page.getByLabel("Name", { exact: true }).fill("Routine notice fixture source");
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("a resolvable routine-check fixture source is accepted without fetching it");
 }
@@ -254,8 +254,8 @@ async function dailySettingsJourney(context, observePage) {
   const expected = [
     "Automatic",
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",
@@ -568,8 +568,8 @@ async function draftBatchJourney() {
   );
   const expected = [
     "Codex Astra",
-    "Codex Sol",
-    "Codex Terra",
+    "Codex Sol 6.1",
+    "Codex Sol 6.1 (balanced)",
     "Codex Luna",
     "Claude Fable",
     "Claude Opus",

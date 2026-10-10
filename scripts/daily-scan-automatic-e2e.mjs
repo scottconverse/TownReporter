@@ -74,7 +74,7 @@ const RUNG_ONE_BASE = `http://127.0.0.1:${PORT_FAKE_DEEPSEEK}/v1`;
  * rung reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of
  * its own, because it runs whatever LM Studio has loaded.
  */
-const LADDER_SENTENCE = "DeepSeek v4.1 Flash, Local model, then Codex Terra";
+const LADDER_SENTENCE = "DeepSeek v4.1 Flash, Local model, then Codex Sol 6.1 (balanced)";
 /** What the closed picker shows for Automatic (label — optionDetail). */
 const AUTOMATIC_OPTION_TEXT = "Automatic — Recommended ladder";
 /** The secret this walk sets on its own server before booting it. */
@@ -287,14 +287,14 @@ async function addAcceptedSource() {
   await page.getByRole("button", { name: "+ Add a source", exact: true }).click();
   await page.getByLabel("Link", { exact: true }).fill(SOURCE_URL);
   await page.getByLabel("Name", { exact: true }).fill(SOURCE_NAME);
-  await page.getByRole("button", { name: "Add & run first check", exact: true }).click();
+  await page.getByRole("button", { name: "Add source", exact: true }).click();
   // The dialog's sentence lands in two places: the desk's always-mounted
   // sr-only `#desk-announcer` live region and this page's notice bar. A bare
   // text match resolves to both and fails strict mode, so the walk reads the
   // notice bar itself.
   await page
     .locator("p.note")
-    .filter({ hasText: /Added .+ to the watch list\. The desk checks it at the next daily scan\./ })
+    .filter({ hasText: /^1 new source; 0 already existed\. Newly accepted sources are read first in the next scan\.$/ })
     .waitFor({ timeout: 45_000 });
   step("an accepted source is on watch, without being fetched");
 }

@@ -36,8 +36,8 @@ const leadHeadline = `Planning board meets on the Kimbark parcel ${stamp}`;
 const expectedModelNames = [
   "Automatic",
   "Codex Astra",
-  "Codex Sol",
-  "Codex Terra",
+  "Codex Sol 6.1",
+  "Codex Sol 6.1 (balanced)",
   "Codex Luna",
   "Claude Fable",
   "Claude Opus",
@@ -201,7 +201,7 @@ async function main() {
   /*
     Opinion uses the shared native provider registry, opens on Automatic (units
     U29/U29b: an editor who never touches the picker writes with the first ready
-    rung -- DeepSeek v4.1 Flash, then Codex Sol, then Claude Sonnet) and offers
+    rung -- DeepSeek v4.1 Flash, then Codex Sol 6.1, then Claude Sonnet) and offers
     the DeepSeek rung by name as well.
   */
   const opinionModel = page.getByLabel("Writing model");
@@ -399,7 +399,7 @@ async function main() {
   // preflight suite covers missing-provider guidance.
   await queueModel.selectOption("codex-balanced");
   if ((await queueModel.inputValue()) !== "codex-balanced") {
-    throw new Error("Queue row did not retain the explicit Codex Terra selection");
+    throw new Error("Queue row did not retain the explicit Codex Sol 6.1 (balanced) selection");
   }
   if (
     (await row.locator("[aria-describedby]").getAttribute("aria-describedby")) ===
