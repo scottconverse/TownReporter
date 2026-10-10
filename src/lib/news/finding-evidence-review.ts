@@ -1054,18 +1054,20 @@ export async function loadDeskClaimCounts(sql: Sql, newsroomId: number, draftIds
       where d.newsroom_id=$1 and d.id=any($2::int[])
         and l.notes_json like '%unreviewedClaimsConfirmation%'
     ), material as (
-      select jsonb_build_array(coalesce(nullif(found_note,''),'[]')::jsonb,
-        coalesce(nullif(provenance_json,''),'[]')::jsonb,
-        coalesce(nullif(research_json,''),'{}')::jsonb) as doc from selected
+      select jsonb_build_array(case when found_note is json then found_note::jsonb else '[]'::jsonb end,
+        case when provenance_json is json then provenance_json::jsonb else '[]'::jsonb end,
+        case when research_json is json then research_json::jsonb else '{}'::jsonb end) as doc from selected
     ), version_ids as (
-      select distinct (v #>> '{}')::int as id from material,
+      select distinct case when (v #>> '{}') ~ '^[0-9]+$'
+        and (v #>> '{}')::numeric between 1 and 2147483647 then (v #>> '{}')::int end as id from material,
       lateral (
         select jsonb_path_query(doc, '$.**.artifact_version_ids[*]') as v
         union all select jsonb_path_query(doc, '$.**.version_id')
         union all select jsonb_path_query(doc, '$.**.versionId')
       ) refs where jsonb_typeof(v)='number'
     ), capture_ids as (
-      select distinct (v #>> '{}')::int as id from material,
+      select distinct case when (v #>> '{}') ~ '^[0-9]+$'
+        and (v #>> '{}')::numeric between 1 and 2147483647 then (v #>> '{}')::int end as id from material,
       lateral (select jsonb_path_query(doc, '$.**.capture_event_ids[*]') as v) refs
       where jsonb_typeof(v)='number'
     ), captures as (

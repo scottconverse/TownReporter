@@ -428,6 +428,12 @@ it("Drafts counts many accepted drafts in one query and agrees with the current 
   const counts = await loadDeskClaimCounts(countedSql, f.newsroomId, ids);
   assert.equal(queries, 1, "one batch regardless of the number of accepted drafts");
   assert.equal(counts.size, 4);
+  await f.sql.query("update drafts set found_note=$2 where id=$1", [ids[3], "{broken legacy evidence"]);
+  const partial = await loadDeskClaimCounts(countedSql, f.newsroomId, ids);
+  assert.equal(queries, 2, "a second desk read still uses only one additional query");
+  assert.equal(partial.size, 3, "one corrupt accepted draft cannot break the remaining desk rows");
+  await f.sql.query("update drafts set found_note=(select found_note from drafts where id=$2) where id=$1", [ids[3], ids[0]]);
+
   for (const id of ids) {
     const [draft] = await f.sql.query("select lead_id from drafts where id=$1", [id]);
     const review = await loadFindingEvidenceReview(f.sql, f.newsroomId, draft.lead_id);
