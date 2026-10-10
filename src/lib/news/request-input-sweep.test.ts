@@ -127,6 +127,7 @@ type Row = {
    */
   out?: unknown;
   bad: Bad[];
+  warnable?: Bad[];
   /**
    * `bound` rows do not throw: their store answers a friendly refusal
    * ("Choose between one and five leads.") where a 500 would be worse. The
@@ -852,9 +853,8 @@ const rows: Row[] = [
     fn: "editor-dialog-actions.ts:56 addLead",
     run: addLeadInput.parse.bind(addLeadInput),
     valid: { paste: "https://records.example/minutes", why: "The clerk mentioned it", then: "score" },
+    warnable: [{ why: "oversize paste", value: { paste: x(LIMITS.leadPaste + 1), then: "as-is" } },{ why: "oversize why", value: { paste: "https://a.test/", why: x(LIMITS.leadWhy + 1), then: "as-is" } }],
     bad: [
-      { why: "oversize paste", value: { paste: x(LIMITS.leadPaste + 1), then: "as-is" } },
-      { why: "oversize why", value: { paste: "https://a.test/", why: x(LIMITS.leadWhy + 1), then: "as-is" } },
       // Two of the three endings spend money, so the branch cannot be defaulted.
       { why: "no Then at all", value: { paste: "https://a.test/" } },
       { why: "unknown Then", value: { paste: "https://a.test/", then: "draft-it" } },
@@ -864,8 +864,8 @@ const rows: Row[] = [
     fn: "editor-dialog-actions.ts:73 holdLead",
     run: holdLeadInput.parse.bind(holdLeadInput),
     valid: { id: 5, choice: "record-or-date", note: "Waiting on the minutes" },
+    warnable: [{ why: "oversize note", value: { id: 5, choice: "none", note: x(LIMITS.holdNote + 1) } },],
     bad: [
-      { why: "oversize note", value: { id: 5, choice: "none", note: x(LIMITS.holdNote + 1) } },
       // A label is copy; the stored value has to survive copy changing.
       { why: "a drawn label instead of a key", value: { id: 5, choice: "Waiting on a record or date" } },
       { why: "id as text", value: { id: "5", choice: "none" } },
@@ -899,8 +899,8 @@ const rows: Row[] = [
     fn: "editor-dialog-actions.ts:95 findSources",
     run: findSourcesInput.parse.bind(findSourcesInput),
     valid: { topic: "Longmont water", scope: "records" },
+    warnable: [{ why: "oversize topic", value: { topic: x(LIMITS.leadWhy + 1), scope: "records" } },],
     bad: [
-      { why: "oversize topic", value: { topic: x(LIMITS.leadWhy + 1), scope: "records" } },
       // A free-text scope would reach a prompt template with no branch for it.
       { why: "unknown scope", value: { topic: "water", scope: "the-whole-internet" } },
       { why: "no scope", value: { topic: "water" } },
@@ -922,8 +922,8 @@ const rows: Row[] = [
     fn: "editor-dialog-actions.ts:130 chooseHeadline",
     run: chooseHeadlineInput.parse.bind(chooseHeadlineInput),
     valid: { id: 5, headline: "Council votes 4-3 to delay the budget" },
+    warnable: [{ why: "oversize headline", value: { id: 5, headline: x(LIMITS.leadHeadline + 1) } },],
     bad: [
-      { why: "oversize headline", value: { id: 5, headline: x(LIMITS.leadHeadline + 1) } },
       { why: "no headline", value: { id: 5 } },
     ],
   },
@@ -936,6 +936,10 @@ describe("the 0.6.63 sweep bounds every validator it replaced", () => {
       // rewriting, no dropped field, for input the app can actually produce.
       assert.deepEqual(row.run(row.valid), row.out ?? row.valid, `${row.fn} changed a valid payload`);
 
+      for (const warning of row.warnable ?? []) {
+        assert.deepEqual(row.run(warning.value), warning.value,
+          `${row.fn} must carry ${warning.why} intact to the server warning and override`);
+      }
       for (const bad of row.bad) {
         if (row.bound) {
           // These rows answer friendly text from their store, so the boundary
@@ -1145,7 +1149,7 @@ describe("every swept .validator() calls the schema, not a cast", () => {
    * same terms.
    */
   const SWEPT =
-    /(?:addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadStatusRestoreInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkRetryInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanEditorialPublishRequest|cleanQueueWindow|cleanSourceWindow|cleanSourceScanPreferenceInput|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|changePublishedStoryInput|outletOverrideInput|liveStoryChangeInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findReplacementInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput|ledgerItemStatusInput|claimReviewedInput|rewriteFromLedgerInput|startReportingInput|reportingFollowUpInput|reportingObservationInput|leadReportingPackageInput|reportingObservationsScopeInput|reportingRequestIdInput)/;
+    /(?:acknowledgeUncheckedInput|editorOverrideRequestInput|sourceCheckInput|addSourceInput|bulkSourceInput|sourceStatusInput|suggestedSourceReviewInput|fileLeadInput|packSaveInput|packRenameInput|packDeleteInput|runScanInput|draftLeadInput|writeStoryInput|reportingNotesInput|pullTodoInput|leadIdInput|jobIdInput|leadStatusInput|leadStatusRestoreInput|leadDuplicateResolutionInput|followUpsInput|outletInput|correctionInput|correctionWordingInput|meetingArticleReviewInput|draftMeetingReviewInput|draftEditInput|draftStyleFixInput|draftHistoryInput|slugInput|artifactIdInput|darkRunInput|darkOpenInput|darkStepInput|darkRetryInput|darkSignalInput|redditTipInput|darkCountyInput|evidenceUrl|evidenceCompareInput|legalSelectionInput|legalRemovalInput|legalCaseId|legalBackupInput|editorialStartInput|editorialDraftInput|editorialText|publicSlug|publicTopic|sectionConfigInput|storyDocumentListInput|storyDocumentDownloadInput|trashId|rowId|claimToken|claimEmail|cleanOrRaw|cleanPublishId|cleanEditorialPublishRequest|cleanQueueWindow|cleanSourceWindow|cleanSourceScanPreferenceInput|cleanListWindow|cleanPublishRequest|updateArticleHeadlineInput|changePublishedStoryInput|outletOverrideInput|liveStoryChangeInput|suggestHeadlinesInput|importStructureInput|importStoriesInput|addLeadInput|holdLeadInput|sourceKillPatternInput|findReplacementInput|findSourcesInput|weaveIntoStoryInput|chooseHeadlineInput|opsAction|aiFollowUpInput|aiFollowUpUpdateInput|followUpActionInput|followUpFindingsInput|pasteDuplicateInput|editLeadInput|setupCodeInput|recoveryCodeInput|acceptUnreviewedClaimsInput|ledgerItemStatusInput|claimReviewedInput|rewriteFromLedgerInput|startReportingInput|reportingFollowUpInput|reportingObservationInput|leadReportingPackageInput|reportingObservationsScopeInput|reportingRequestIdInput)/;
 
   /**
    * Kept as they were, by design: each does real work a schema would have to

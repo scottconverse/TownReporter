@@ -204,7 +204,7 @@ export async function performAddLead(
   },
   deps: EditorDialogDeps,
 ): Promise<AddLeadResult> {
-  const paste = data.paste.trim().slice(0, 20_000);
+  const paste = data.paste.trim();
   if (!paste.length) return { ok: false as const, error: "Give the desk a link or a tip." };
 
   const firstLine = paste.split("\n")[0]?.replace(/\s+/g, " ").trim() ?? "";
@@ -222,14 +222,23 @@ export async function performAddLead(
   const isLink = looksLikeUrl(firstLine);
   const derived = isLink ? headlineFromUrl(firstLine).trim() : "";
   const headline = (derived.length >= 8 ? derived : isLink ? firstLine : firstLine || paste.slice(0, 120))
-    .trim()
-    .slice(0, 180);
+    .trim();
   if (headline.length < 8) {
-    const warning = await editorWarning(context, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId });
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId });
     if (warning) return warning;
   }
 
-  const why = (data.why ?? "").trim().slice(0, 800);
+  const why = (data.why ?? "").trim();
+  for (const [key, exceeded, sentence] of [
+    ["lead-paste-length", paste.length > 20_000, "This pasted lead is longer than the usual 20,000 characters."],
+    ["lead-headline-length", headline.length > 180, "This lead headline is longer than the usual 180 characters."],
+    ["lead-note-length", why.length > 800, "This lead note is longer than the usual 800 characters."],
+  ] as const) {
+    if (!exceeded) continue;
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      key, sentence, {kind: "newsroom", id: context.newsroomId});
+    if (warning) return warning;
+  }
   /*
     The URLs come out of `parseSourceLines`, the parser the "Paste a list" tab
     and `addSourcesBulk` already share, so a link written as "https://x, Name"

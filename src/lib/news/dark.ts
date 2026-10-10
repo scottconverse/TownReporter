@@ -4,6 +4,7 @@ import { presentDarkRun, type StoredDarkRunRow } from "./dark-run-presentation.t
 export { presentDarkRun } from "./dark-run-presentation.ts";
 import {
   artifactIdInput,
+  editorOverrideRequestInput,
   darkCountyInput,
   darkOpenInput,
   darkRunInput,
@@ -2651,7 +2652,7 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
 
 export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((raw: unknown) => z.object({ override: z.array(z.string()).optional() }).parse(raw ?? {}))
+  .validator((raw: unknown) => editorOverrideRequestInput.parse(raw ?? {}))
   .handler(async ({ context, data }) => {
     // SG1 / Option A: "Find something to dig into" opens an investigation,
     // which is the start of a Dark Desk run.
@@ -4259,7 +4260,7 @@ export const getTipSubreddit = createServerFn({method:"GET"})
 
 export const scanTipSubreddit = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((raw: unknown) => z.object({ override: z.array(z.string()).optional() }).parse(raw ?? {}))
+  .validator((raw: unknown) => editorOverrideRequestInput.parse(raw ?? {}))
   .handler(async ({ context, data }) => {
     /*
       SG1 / Option A: this sweep fetches a subreddit the paper's own Sources

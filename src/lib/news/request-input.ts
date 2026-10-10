@@ -334,6 +334,7 @@ export const LIMITS = {
 
 
 export const overrideInput = z.array(z.string()).optional();
+export const editorOverrideRequestInput = z.object({ override: overrideInput });
 
 /*
   ---------------------------------------------------------------------------
@@ -2042,8 +2043,8 @@ export const weaveIntoStoryInput = z.object({
  */
 export const addLeadInput = z.object({
   override: z.array(z.string()).optional(),
-  paste: z.string().max(LIMITS.leadPaste),
-  why: z.string().max(LIMITS.leadWhy).optional(),
+  paste: z.string(),
+  why: z.string().optional(),
   then: z.enum(["score", "draft", "as-is"]),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),

@@ -303,6 +303,24 @@ describe("add a lead", () => {
     assert.equal(chatCalls.n, 0);
   });
 
+  it("warns about lead size and preserves every character after attributed consent", async () => {
+    const filed: Array<{headline:string;why:string}> = [];
+    const f = makeDeps({ insertLead: async (_ctx,input) => {filed.push(input);return {ok:true,id:42};} });
+    const paste = "A long headline ".repeat(1300);
+    const why = "A long note ".repeat(80);
+    const input = {paste,why,then:"as-is" as const};
+    const warned = await performAddLead(context,input,f.deps);
+    assert.equal("warning" in warned && warned.warning?.key, "lead-paste-length");
+    assert.equal(filed.length,0);
+    const saved = await performAddLead(context,{...input,override:["lead-paste-length","lead-headline-length","lead-note-length"]},f.deps);
+    assert.equal(saved.ok,true);
+    assert.equal(filed[0].headline,paste.trim());
+    assert.equal(filed[0].why,why.trim());
+    const audit=f.writes().filter(q=>/insert into audit_events/.test(q.text));
+    assert.equal(audit.length,3);
+    assert.ok(audit.every(q=>q.values[0]===context.userId));
+  });
+
   it("files and stops for as-is, with no model call and no notice", async () => {
     const { deps, chatCalls } = makeDeps({});
     const result = await performAddLead(context, { paste: "A neighbor says the vote was 4-3", then: "as-is" }, deps);
