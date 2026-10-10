@@ -60,6 +60,7 @@ jobs:
       run_claim_sources_pull_0674: ${{ steps.pick.outputs.run_claim_sources_pull_0674 }}
       run_first_owner_setup_code: ${{ steps.pick.outputs.run_first_owner_setup_code }}
       run_legal_gone_nav: ${{ steps.pick.outputs.run_legal_gone_nav }}
+      run_dialogs: ${{ steps.pick.outputs.run_dialogs }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -112,6 +113,37 @@ jobs:
           check run_claim_sources_pull_0674 '^(scripts/claim-sources-pull-walk\.mjs)$'
           check run_first_owner_setup_code '^(scripts/first-owner-setup-code-walk\.mjs)$'
           check run_legal_gone_nav '^(scripts/cp-desk-dialogs-walk\.mjs|scripts/desk-clickable-guard-walk\.mjs|scripts/desk-narrow-width-walk\.mjs|scripts/legal-gone-nav-e2e\.mjs|scripts/publish-blockers-walk\.mjs)$'
+          # These isolated dialog flows also gate PRs touching their UI or harness.
+          if [ "$everything" = true ] || git diff --name-only "$BASE" "$HEAD" | grep -Eq '^(src/components/(dialog|desk-chrome|model-picker|follow-up-dialog|reader-controls|unsaved-changes-guard)\.tsx|src/(styles|desk-astra|reader-astra)\.css|scripts/dialog-[^/]+\.mjs|\.github/workflows/ci\.yml)$'; then
+            echo 'run_dialogs=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'run_dialogs=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  dialog-browser:
+    needs: changes
+    if: needs.changes.outputs.run_dialogs == 'true'
+    name: Dialog scrolling and dismissal, in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Dialog actions stay reachable and scrolling keeps work open
+        env:
+          TOWNREPORTER_DIALOG_HEADED: "1"
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24 -nolisten tcp" node --test scripts/dialog-*-browser.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: failure()
+        with:
+          name: dialog-scrollbar-diagnostics
+          path: artifacts/dialog-browser/
+          if-no-files-found: ignore
 
   # Typecheck and lint used to stand in front of the unit suite inside one job,
   # so the suite could not begin until they had both finished -- and a lint
@@ -418,7 +450,7 @@ jobs:
         part: [1, 2, 3, 4]
     services:
       postgres:
-        image: postgres:18
+        image: mirror.gcr.io/library/postgres:18
         env:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: townreporter_ci
@@ -1049,7 +1081,7 @@ jobs:
     timeout-minutes: 20
     services:
       postgres:
-        image: postgres:18
+        image: mirror.gcr.io/library/postgres:18
         env:
           POSTGRES_PASSWORD: ci
           POSTGRES_DB: townreporter_delete_corr

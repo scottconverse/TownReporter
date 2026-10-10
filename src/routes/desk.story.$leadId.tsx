@@ -1,3 +1,4 @@
+import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { editorStoryState, savedStoryReadiness } from "@/lib/news/story-readiness";
 import { StoryBody } from "@/components/story-body";
@@ -3884,7 +3885,7 @@ function StoryPage() {
           </div>
         </div>
       ) : null}
-      <dialog
+      <NativeDialog
         ref={preview}
         className="astra-dialog astra-preview"
         aria-labelledby="story-preview-title"
@@ -3895,7 +3896,7 @@ function StoryPage() {
             Close preview
           </button>
         </div>
-        <article className="astra-dialog-body">
+        <article className="astra-dialog-body" tabIndex={0}>
           <p className="kick">{topic} · Draft for review</p>
           <h1>{headline}</h1>
           <p className="astra-preview-dek">{dek}</p>
@@ -3903,7 +3904,7 @@ function StoryPage() {
             <StoryBody body={body} />
           </div>
         </article>
-      </dialog>
+      </NativeDialog>
       {/*
         Unit BH2 decisions 5 and 6: the three dialogs. They are mounted here, at
         the foot of the page, because each one portals itself to the body -- the

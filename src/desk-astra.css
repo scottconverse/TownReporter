@@ -201,6 +201,10 @@
   z-index: 40;
   overflow: auto;
 }
+.desk-ltr.astra .astra-nav-body { display: contents; }
+.desk-ltr.astra .astra-sidebar[role="dialog"] { overflow: hidden; }
+.desk-ltr.astra .astra-sidebar[role="dialog"] .astra-nav-body { display: block; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.desk-ltr.astra .astra-sidebar[role="dialog"] > :not(.astra-nav-body) { flex-shrink: 0; }
 .desk-ltr.astra .astra-brand {
   display: flex;
   flex-direction: column;
@@ -2120,15 +2124,17 @@
   box-shadow: var(--shadow-dialog);
   padding: 0;
   width: min(640px, calc(100vw - 32px));
-  max-height: 88dvh;
-  overflow: auto;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
   margin: auto;
 }
+.desk-ltr.astra .astra-dialog[open] { display: flex; flex-direction: column; }
 .desk-ltr.astra .astra-dialog::backdrop {
   background: #172c385a;
   backdrop-filter: blur(3px);
 }
 .desk-ltr.astra .astra-dialog-head {
+  flex: none;
   position: sticky;
   top: 0;
   background: var(--surface);
@@ -2146,7 +2152,14 @@
 }
 .desk-ltr.astra .astra-dialog-body {
   padding: 26px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
+.desk-ltr.astra .astra-dialog-foot { flex: none; padding: 16px 26px; }
+.desk-ltr.astra .astra-dialog :is(button, input, select, textarea, .astra-search-result) { min-height: 44px; font-size: max(14px, calc(14px * var(--ts))); }
+.desk-ltr.astra .astra-dialog small { font-size: max(14px, calc(14px * var(--ts))); }
 .desk-ltr.astra .astra-dialog .field {
   display: grid;
   gap: 8px;
@@ -2284,6 +2297,8 @@
   }
   .desk-ltr.astra .astra-sidebar.is-open {
     left: 0;
+    top: 12px;
+    height: calc(100dvh - 24px);
   }
   .desk-ltr.astra .astra-scrim {
     position: fixed;
@@ -2581,7 +2596,7 @@
     transition: left var(--motion-fast);
     border-right: 1px solid var(--line);
   }
-  .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar.is-open { left: 0; }
+  .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar.is-open { left: 0; top: 12px; height: calc(100dvh - 24px); }
   .desk-ltr.astra[data-desk-page="dark"] .astra-sidebar-close {
     display: flex;
     align-self: flex-end;
@@ -3447,6 +3462,55 @@
    buttons and always were one line. */
 .desk-ltr.astra .more-menu .more-block :is(.btn, .document-add-button) {
   white-space: nowrap;
+}
+
+/* Expanded model help must not size the Queue menu by its longest sentence. */
+.desk-ltr.astra .more:has(.queue-draft-controls > details[open]) > .more-menu {
+  position: fixed;
+  inset: 12px 12px auto auto;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 24px));
+  min-width: 0;
+  max-height: calc(100dvh - 24px);
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  z-index: 80;
+}
+.desk-ltr.astra .queue-draft-controls > details { width: 100%; min-width: 0; }
+.desk-ltr.astra .queue-draft-controls .model-picker {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.desk-ltr.astra .queue-draft-controls .model-picker > * { grid-column: 1; min-width: 0; }
+.desk-ltr.astra :is(.more-menu, .row-more-panel, .astra-dialog) :is(a[href], summary) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: max(14px, calc(14px * var(--ts)));
+}
+.desk-ltr.astra :is(.more-menu, .row-more-panel) :is(button, select, input:not([type="checkbox"]):not([type="radio"])) {
+  min-height: 44px;
+  font-size: max(14px, calc(14px * var(--ts)));
+}
+
+/* Top-layer menus escape list clipping and the sidebar's stacking context. */
+.desk-ltr.astra :is(.more-menu, .row-more-panel).viewport-menu {
+  position: fixed !important;
+  right: auto !important;
+  bottom: auto !important;
+  margin: 0 !important;
+  box-sizing: border-box;
+  width: min(420px, calc(100% - 24px));
+  min-width: 0;
+  max-width: calc(100% - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* THE LANE-2 JOB SLOT (JobSlot in desk-chrome.tsx). A dashed outline, so a

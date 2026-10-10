@@ -1,3 +1,4 @@
+import { NativeDialog, DialogScrim } from "@/components/dialog";
 import { ShortcutSheet } from "./shortcut-sheet";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
@@ -27,6 +28,106 @@ import { useDeskJobs } from "@/components/job-card-state";
 import { listFollowUps, listLeads, countDraftsDesk } from "@/lib/news/desk";
 import { listEditorials } from "@/lib/news/opinion";
 import type { JobProgressView } from "@/lib/news/job-progress";
+
+const users = new WeakMap<Document, { count: number; dispose: () => void }>();
+
+/** Keep the desk's disclosure menus in the top layer, within the window. */
+function useViewportMenus() {
+  useEffect(() => {
+    if (!("showPopover" in HTMLElement.prototype)) return;
+    let shared = users.get(document);
+    if (!shared) {
+      const open = new Map<HTMLDetailsElement, HTMLElement>();
+      const place = () => {
+        const width = document.documentElement.clientWidth;
+        const height = window.innerHeight;
+        for (const [menu, panel] of open) {
+          if (!menu.isConnected) { open.delete(menu); continue; }
+          const anchor = menu.querySelector("summary")?.getBoundingClientRect();
+          if (!anchor) continue;
+          const box = panel.getBoundingClientRect();
+          const left = Math.max(12, Math.min(anchor.right - box.width, width - box.width - 12));
+          const below = anchor.bottom + 6;
+          const top = below + box.height <= height - 12 ? below : Math.max(12, anchor.top - box.height - 6);
+          panel.style.setProperty("left", `${left}px`, "important");
+          panel.style.setProperty("top", `${Math.min(top, height - box.height - 12)}px`, "important");
+        }
+      };
+      const observer = new ResizeObserver(place);
+      const toggle = (event: Event) => {
+        const menu = event.target;
+        if (!(menu instanceof HTMLDetailsElement) || !menu.matches(".more,.row-more")) return;
+        const panel = menu.querySelector<HTMLElement>(":scope > .more-menu,:scope > .row-more-panel");
+        if (!panel) return;
+        if (menu.open) {
+          panel.classList.add("viewport-menu");
+          panel.setAttribute("popover", "manual");
+          if (!panel.matches(":popover-open")) panel.showPopover();
+          open.set(menu, panel);
+          observer.observe(panel);
+          place();
+        } else {
+          observer.unobserve(panel);
+          if (panel.matches(":popover-open")) panel.hidePopover();
+          panel.removeAttribute("popover");
+          panel.classList.remove("viewport-menu");
+          panel.style.removeProperty("top");
+          panel.style.removeProperty("left");
+          open.delete(menu);
+        }
+      };
+      document.addEventListener("toggle", toggle, true);
+      window.addEventListener("resize", place);
+      const scroll = (event: Event) => {
+        if (![...open.values()].some(panel => event.target instanceof Node && panel.contains(event.target))) place();
+      };
+      document.addEventListener("scroll", scroll, true);
+      const escape = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return;
+        for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.more[open],details.row-more[open]")) {
+          menu.open = false;
+          menu.querySelector<HTMLElement>("summary")?.focus();
+        }
+      };
+      // Hand focus to a visible menu opener before a press can hide its row.
+      const handoff = (event: Event) => {
+        if (!(event.target instanceof Element)) return;
+        const control = event.target.closest("button,a[href]");
+        const menu = control?.closest<HTMLDetailsElement>("details.more,details.row-more");
+        if (!menu?.open) return;
+        menu.querySelector<HTMLElement>(":scope > summary")?.focus();
+      };
+      const outside = (event: Event) => {
+        for (const menu of open.keys()) if (event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+      };
+      // Raw row menus may keep a confirmation inline. Close them only once a
+      // dialog opens, so that menu's controls cannot cover the new dialog.
+      const dialogs = new MutationObserver(() => {
+        if (document.querySelector('dialog[open],.astra-modal[role="dialog"],.astra-modal[role="alertdialog"]')) {
+          for (const menu of document.querySelectorAll<HTMLDetailsElement>("details.more[open],details.row-more[open]")) menu.open = false;
+        }
+      });
+      dialogs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
+      document.addEventListener("keydown", escape);
+      document.addEventListener("click", handoff, true);
+      document.addEventListener("pointerdown", outside);
+      shared = { count: 0, dispose: () => {
+        observer.disconnect();
+        for (const panel of open.values()) panel.hidePopover();
+        document.removeEventListener("toggle", toggle, true);
+        window.removeEventListener("resize", place);
+        document.removeEventListener("scroll", scroll, true);
+        dialogs.disconnect();
+        document.removeEventListener("keydown", escape);
+        document.removeEventListener("click", handoff, true);
+        document.removeEventListener("pointerdown", outside);
+      } };
+      users.set(document, shared);
+    }
+    shared.count++;
+    return () => { if (--shared.count === 0) { shared.dispose(); users.delete(document); } };
+  }, []);
+}
 
 /*
   THE NAV, IN THE REDESIGN'S ORDER AND THE REDESIGN'S WORDS.
@@ -121,6 +222,7 @@ export function DeskShell({
 }) {
   const { mode, choose } = useDeskMode();
   const { size, choose: chooseSize } = useDeskTextSize();
+  useViewportMenus();
   const [menuOpen, setMenuOpen] = useState(false);
   /*
     The nav's own New-story dialog (Unit BN, item 1). Held here rather than in
@@ -292,10 +394,10 @@ export function DeskShell({
         Skip to desk
       </a>
       {menuOpen && (
-        <button
+        <DialogScrim
           className="astra-scrim"
           aria-label="Close navigation"
-          onClick={() => setMenuOpen(false)}
+          onClose={() => setMenuOpen(false)}
         />
       )}
       <aside
@@ -332,6 +434,7 @@ export function DeskShell({
           shell still owns the one mount below, so both keep opening the same
           three tabs.
         */}
+        <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
         <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
@@ -346,6 +449,7 @@ export function DeskShell({
           pathname={pathname}
           hash={hash}
         />
+        </div>
         <div className="astra-nav-foot">
           <Link to="/" className="astra-foot-paper" title="Public news page">
             View the paper ↗
@@ -663,7 +767,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
     )
     .slice(0, 30);
   return (
-    <dialog
+    <NativeDialog
       ref={dialog}
       className="astra-dialog"
       onClose={onClose}
@@ -675,7 +779,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
           <X size={20} />
         </button>
       </div>
-      <div className="astra-dialog-body">
+      <div className="astra-dialog-body" tabIndex={0}>
         <label className="field">
           <span>Search your newsroom</span>
           <input
@@ -752,7 +856,7 @@ function DeskSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
             !pages.length && <p>No matches. Try a name, topic or part of a headline.</p>}
         </nav>
       </div>
-    </dialog>
+    </NativeDialog>
   );
 }
 
@@ -1008,6 +1112,7 @@ export function DeskMoreMenu({
   /** What this menu acts on, for a screen reader: "More actions for <headline>". */
   ariaLabel?: string;
 }) {
+  useViewportMenus();
   const ref = useRef<HTMLDetailsElement>(null);
   const summary = useRef<HTMLElement>(null);
   /**

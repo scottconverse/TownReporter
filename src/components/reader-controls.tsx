@@ -1,3 +1,4 @@
+import { NativeDialog } from "@/components/dialog";
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowRight, Bookmark, Check, ExternalLink, Moon, Sun, X } from "lucide-react";
@@ -154,10 +155,12 @@ export function ReaderDialog({
   title,
   children,
   close,
+  footer,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
+  footer?: ReactNode;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -170,15 +173,16 @@ export function ReaderDialog({
     };
   }, []);
   return (
-    <dialog ref={ref} className="reader-dialog" onCancel={close}>
+    <NativeDialog ref={ref} className="reader-dialog" onClose={close}>
       <div className="dialoghead">
         <h2>{title}</h2>
         <button type="button" className="iconbtn" aria-label="Close dialog" onClick={close}>
           <X aria-hidden />
         </button>
       </div>
-      {children}
-    </dialog>
+      <div className="reader-dialog-body" tabIndex={0}>{children}</div>
+      {footer ? <div className="reader-dialog-foot">{footer}</div> : null}
+    </NativeDialog>
   );
 }
 export function ReadingButton({ label = false }: { label?: boolean }) {
@@ -201,7 +205,9 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
         )}
       </button>
       {open && (
-        <ReaderDialog title="Make yourself comfortable." close={() => setOpen(false)}>
+        <ReaderDialog title="Make yourself comfortable." close={() => setOpen(false)} footer={
+          <button className="btn primary more" type="button" onClick={() => setOpen(false)}>Done</button>
+        }>
           <p>Your reading preferences stay on this browser.</p>
           <div className="setting">
             <strong>Story text size</strong>
@@ -238,9 +244,6 @@ export function ReadingButton({ label = false }: { label?: boolean }) {
           <div className="reading-sample">
             A clearer view of your community. Read at your own pace.
           </div>
-          <button className="btn primary more" type="button" onClick={() => setOpen(false)}>
-            Done
-          </button>
         </ReaderDialog>
       )}
     </>

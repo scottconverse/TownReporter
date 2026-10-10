@@ -3,6 +3,140 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import { InkButton } from "./desk-chrome";
 
+const pageLocks = new WeakMap<Document, { count: number; restore: () => void }>();
+function lockPage(doc: Document) {
+  let lock = pageLocks.get(doc);
+  if (!lock) {
+    const style = doc.documentElement.style;
+    const overflow = style.getPropertyValue("overflow");
+    const priority = style.getPropertyPriority("overflow");
+    lock = { count: 0, restore: () => {
+      if (overflow) style.setProperty("overflow", overflow, priority);
+      else style.removeProperty("overflow");
+    } };
+    pageLocks.set(doc, lock);
+    style.setProperty("overflow", "hidden");
+  }
+  lock.count++;
+  return () => {
+    if (--lock.count === 0) { lock.restore(); pageLocks.delete(doc); }
+  };
+}
+
+// A scrollbar targets its scroll container, and a drag can synthesize a click
+// on a common ancestor. Neither means the editor clicked the backdrop.
+function useScrimGesture(close: () => void, native = false) {
+  const press = React.useRef<number | null>(null);
+  React.useEffect(() => {
+    const reset = () => { press.current = null; };
+    // A release inside Content never reaches the scrim's handler. Forget that
+    // gesture too, so it cannot be reused by a later drag out of Content.
+    document.addEventListener("pointerdown", reset, true);
+    document.addEventListener("pointerup", reset);
+    document.addEventListener("pointercancel", reset, true);
+    return () => {
+      document.removeEventListener("pointerdown", reset, true);
+      document.removeEventListener("pointerup", reset);
+      document.removeEventListener("pointercancel", reset, true);
+    };
+  }, []);
+  const isScrim = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget || event.button !== 0 || event.ctrlKey) return false;
+    const { clientX: x, clientY: y, currentTarget: el } = event;
+    const viewport = el.ownerDocument.documentElement;
+    if (x < 0 || y < 0 || x >= viewport.clientWidth || y >= viewport.clientHeight) return false;
+    const rect = el.getBoundingClientRect();
+    if (native) return x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom;
+    // clientWidth/Height exclude the scrollbar gutter (including RTL gutters).
+    const left = rect.left + el.clientLeft, top = rect.top + el.clientTop;
+    return x >= left && x < left + el.clientWidth && y >= top && y < top + el.clientHeight;
+  };
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      press.current = isScrim(event) ? event.pointerId : null;
+    },
+    onPointerUp: (event: React.PointerEvent<HTMLElement>) => {
+      const dismiss = press.current === event.pointerId && isScrim(event);
+      press.current = null;
+      // Touch implicitly captures to the down target: check the actual release.
+      if (dismiss && (native || elAtPoint(event) === event.currentTarget)) close();
+    },
+    onPointerCancel: () => { press.current = null; },
+  };
+}
+
+function elAtPoint(event: React.PointerEvent<HTMLElement>) {
+  return event.currentTarget.ownerDocument.elementFromPoint(event.clientX, event.clientY);
+}
+
+/** The navigation scrim follows the same press/release rule as every modal. */
+export function DialogScrim({ onClose, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { onClose: () => void }) {
+  const gesture = useScrimGesture(onClose);
+  React.useEffect(() => lockPage(document), []);
+  return <button {...props} {...gesture} onClick={event => { if (event.detail === 0) onClose(); }} />;
+}
+
+/** Retains native showModal, focus trapping and Escape for search and previews. */
+export const NativeDialog = React.forwardRef<HTMLDialogElement, React.DialogHTMLAttributes<HTMLDialogElement>>(
+  function NativeDialog(props, ref) {
+    const gesture = useScrimGesture(() => local.current?.close(), true);
+    const local = React.useRef<HTMLDialogElement | null>(null);
+    const opener = React.useRef<HTMLElement | null>(null);
+    React.useEffect(() => {
+      const element = local.current;
+      if (!element) return;
+      let release: (() => void) | undefined;
+      const sync = () => {
+        if (element.open && !release) release = lockPage(element.ownerDocument);
+        else if (!element.open && release) { release(); release = undefined; }
+      };
+      sync();
+      const observer = new MutationObserver(sync);
+      observer.observe(element, { attributes: true, attributeFilter: ["open"] });
+      // Native Tab cycling can visit BODY. Intercept the two boundaries so
+      // search and preview keep the editor inside the currently open dialog.
+      const controls = () => Array.from(element.querySelectorAll<HTMLElement>(
+        'a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])',
+      )).filter(node => node.getClientRects().length && !node.closest('[inert]'));
+      const trap = (event: KeyboardEvent) => {
+        if (event.key !== "Tab" || !element.open) return;
+        const all = controls();
+        const first = all[0], last = all.at(-1);
+        const active = element.ownerDocument.activeElement;
+        if (!all.length || !element.contains(active) || (event.shiftKey ? active === first : active === last)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      };
+      const show = element.showModal;
+      element.showModal = () => {
+        if (!element.open) {
+          const active = element.ownerDocument.activeElement;
+          if (active instanceof HTMLElement && active !== element.ownerDocument.body && !element.contains(active)) opener.current = active;
+        }
+        show.call(element);
+        sync();
+      };
+      const restore = () => { if (opener.current?.isConnected) opener.current.focus(); };
+      element.addEventListener("keydown", trap);
+      element.addEventListener("close", restore);
+      return () => {
+        observer.disconnect(); release?.();
+        element.showModal = show;
+        element.removeEventListener("keydown", trap);
+        element.removeEventListener("close", restore);
+      };
+    }, []);
+    return <dialog {...props} {...gesture} ref={element => {
+      local.current = element;
+      // A callback ref may call showModal before effects have installed it.
+      if (element && !element.open && document.activeElement instanceof HTMLElement && !element.contains(document.activeElement)) opener.current = document.activeElement;
+      if (typeof ref === "function") return ref(element);
+      if (ref) ref.current = element;
+    }} />;
+  },
+);
+
 /**
  * The one dialog, and the one card that goes inside it.
  *
@@ -14,11 +148,8 @@ import { InkButton } from "./desk-chrome";
  * on Radix Dialog (focus trap, scroll lock, focus return) with this styling").
  * So the look below is the reference's, to the pixel; the behavior is Radix's.
  *
- * **Nothing uses this yet.** Phase 0 puts it here so that phase 2 has one
- * target when the desk's existing dialogs (the native `<dialog class="astra-
- * dialog">` on /desk/ops and the story screen, and the hand-rolled
- * `role="alertdialog"` in unsaved-changes-guard.tsx) move onto it. Migrating
- * those is deliberately not part of this change.
+ * Shared by the desk's editing and confirmation dialogs. Native search,
+ * preview and reader dialogs retain their top layer through NativeDialog.
  *
  * Why the portal wrapper carries `desk-ltr astra-modal-layer`:
  *
@@ -44,6 +175,8 @@ import { InkButton } from "./desk-chrome";
  * the two strings a caller may need to reword.
  */
 export type DialogProps = {
+  role?: "dialog" | "alertdialog";
+  ariaLabel?: string;
   open: boolean;
   /** Called by Escape, by the close button, by Cancel, and by a click outside. */
   onClose: () => void;
@@ -95,6 +228,8 @@ export type DialogProps = {
 };
 
 export function Dialog({
+  role = "dialog",
+  ariaLabel,
   open,
   onClose,
   title,
@@ -139,6 +274,7 @@ export function Dialog({
   //                    replaced) and its `preventDefault` is what stops the
   //                    FocusScope from falling back to `document.body`.
   const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  const scrimGesture = useScrimGesture(onClose);
 
   return (
     <DialogPrimitive.Root
@@ -166,12 +302,13 @@ export function Dialog({
       {open ? (
       <DialogPrimitive.Portal>
         <div className="desk-ltr astra-modal-layer">
-          {/* The scrim: one scrim, painted here, and the click-outside target
-              Radix uses to dismiss. The wrapper is only the scroll container,
-              so a tall dialog scrolls instead of overflowing the viewport. */}
-          <DialogPrimitive.Overlay className="astra-modal-scrim" />
+          {/* Only a complete scrim gesture dismisses. The body owns scrolling. */}
+          <DialogPrimitive.Overlay className="astra-modal-scrim" {...scrimGesture} />
           <DialogPrimitive.Content
             className="astra-modal"
+            role={role}
+            aria-label={ariaLabel}
+            onPointerDownOutside={event => event.preventDefault()}
             onOpenAutoFocus={() => {
               const opener = document.activeElement;
               returnFocusRef.current =
@@ -200,7 +337,7 @@ export function Dialog({
                 <span aria-hidden="true">✕</span>
               </InkButton>
             </div>
-            <div className="astra-modal-body">{children}</div>
+            <div className="astra-modal-body" tabIndex={0}>{children}</div>
             <div className="astra-modal-foot">
               {footNote ? <span className="astra-modal-note">{footNote}</span> : null}
               <div className="astra-modal-actions">
