@@ -21,7 +21,7 @@ import { readFileSync } from "node:fs";
 import type { Sql } from "../db.ts";
 import { getSql } from "../db.ts";
 import { ensureJobsSchema } from "./jobs.ts";
-import { ensurePaperSettingsSchema, PAPER_NOT_SET_UP_SENTENCE } from "./paper-settings.ts";
+import { ensurePaperSettingsSchema, paperNotFullySetUpSentence, PAPER_NOT_SET_UP_KEY } from "./paper-settings.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
   commitStoryDraftForAuthenticatedEditor,
@@ -86,7 +86,7 @@ async function counts(newsroomId: number) {
   return row!;
 }
 
-describe("commitStoryDraftForAuthenticatedEditor refuses an un-set-up newsroom", () => {
+describe("commitStoryDraftForAuthenticatedEditor warns before an un-set-up newsroom drafts", () => {
   it("returns the one sentence and queues nothing at all", async () => {
     const userId = "sg1b-commit-refusal";
     const leadId = await freshLead(UNSET, userId);
@@ -109,14 +109,14 @@ describe("commitStoryDraftForAuthenticatedEditor refuses an un-set-up newsroom",
 
     assert.equal(result.ok, false, "an un-set-up paper may not start a draft");
     if (result.ok) return;
-    assert.equal(result.error, PAPER_NOT_SET_UP_SENTENCE("draft this story"));
+    assert.equal(result.error, paperNotFullySetUpSentence());
     assert.equal(probeCalls, 0, "no provider may be asked before the refusal");
     assert.equal(rateCalls, 0, "no rate unit may be charged");
     const after = await counts(UNSET);
     assert.deepEqual(after, before_, "nothing was queued, drafted or charged");
   });
 
-  it("FAILS CLOSED: a newsroom with no paper_settings row is refused, not assumed ready", async () => {
+  it("warns when a newsroom has no paper_settings row", async () => {
     const sql = await getSql();
     await sql.query("delete from paper_settings where newsroom_id = $1", [UNSET]);
     const leadId = await freshLead(UNSET, "sg1b-fail-closed");
@@ -125,7 +125,25 @@ describe("commitStoryDraftForAuthenticatedEditor refuses an un-set-up newsroom",
       { probeProvider: READY_PROBE },
     );
     assert.equal(result.ok, false);
-    if (!result.ok) assert.match(result.error, /has not been set up yet/);
+    if (!result.ok) assert.match(result.error, /not fully set up/);
+  });
+
+  it("Draft anyway starts an un-set-up paper's job and records the editor and warning", async () => {
+    const userId = "sg1b-consent-editor";
+    const leadId = await freshLead(UNSET, userId);
+    let queued = 0;
+    const result = await commitStoryDraftForAuthenticatedEditor(
+      { context: { userId, newsroomId: UNSET }, leadId, modelChoice: "claude-frontier", override: [PAPER_NOT_SET_UP_KEY] },
+      { probeProvider: READY_PROBE, assertRate: async () => {}, enqueueJob: async (options) => {
+        queued += 1;
+        return { id: 999991, model_choice: options.modelChoice, research_scope: null, subject_id: options.subjectId } as never;
+      } },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(queued, 1, "explicit consent reaches the queue exactly once");
+    const sql = await getSql();
+    const audit = await sql.query<{user_id: string; detail: string}>("select user_id,detail from audit_events where newsroom_id=$1 and action='override' and user_id=$2", [UNSET, userId]);
+    assert.ok(audit.some(row => JSON.parse(row.detail).key === PAPER_NOT_SET_UP_KEY));
   });
 
   it("ALLOWS the live shape: onboarded with blank name, city and state", async () => {
@@ -164,7 +182,7 @@ describe("the New story 'Write draft' box refuses, and files nothing", () => {
     );
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.equal(result.error, PAPER_NOT_SET_UP_SENTENCE("draft this story"));
+    assert.equal(result.error, paperNotFullySetUpSentence());
     assert.deepEqual(await counts(UNSET), before_, "a refused write files no lead and no draft row");
   });
 
@@ -203,10 +221,10 @@ describe("retryStoryJob's commit paths refuse", () => {
       { probeProvider: READY_PROBE, assertRate: async () => {} },
     );
     assert.equal(result.ok, false);
-    if (!result.ok) assert.equal(result.error, PAPER_NOT_SET_UP_SENTENCE("draft this story"));
+    if (!result.ok) assert.equal(result.error, paperNotFullySetUpSentence());
   });
 
-  it("the reconcile branch: requestDraftReconciliation throws the same sentence", async () => {
+  it("the reconcile branch returns the setup warning without queuing", async () => {
     const userId = "sg1b-retry-reconcile";
     const leadId = await freshLead(UNSET, userId);
     const sql = await getSql();
@@ -214,21 +232,16 @@ describe("retryStoryJob's commit paths refuse", () => {
       "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic) values($1,$2,$3,'Latest','','Latest','council')",
       [userId, UNSET, leadId],
     );
-    await assert.rejects(
-      () =>
-        requestDraftReconciliation(
-          { userId, newsroomId: UNSET },
-          { leadId, modelChoice: "claude-frontier" },
-          { probe: READY_PROBE as never, enqueue: (async () => { throw new Error("must not enqueue"); }) as never },
-        ),
-      (err: unknown) => {
-        assert.equal(
-          (err as Error).message,
-          PAPER_NOT_SET_UP_SENTENCE("check this draft's evidence"),
-        );
-        return true;
-      },
+    const warning = await requestDraftReconciliation(
+      { userId, newsroomId: UNSET },
+      { leadId, modelChoice: "claude-frontier" },
+      { probe: READY_PROBE as never, enqueue: (async () => { throw new Error("must not enqueue before consent"); }) as never },
     );
+    assert.ok(warning && !warning.ok);
+    if (warning && !warning.ok) {
+      assert.equal(warning.error, paperNotFullySetUpSentence());
+      assert.equal(warning.warning.key, PAPER_NOT_SET_UP_KEY);
+    }
   });
 
   it("retryStoryJob really reaches those two functions (source shape)", () => {
@@ -241,7 +254,7 @@ describe("retryStoryJob's commit paths refuse", () => {
   });
 });
 
-describe("Add lead with then: 'draft' refuses the draft but keeps the lead", () => {
+describe("Add lead with then: 'draft' warns before filing or drafting", () => {
   /*
     The dialog's own reads are faked; `commitDraft` is the REAL commit boundary
     against the real database, which is the thing under test. The dialog's rule
@@ -280,24 +293,19 @@ describe("Add lead with then: 'draft' refuses the draft but keeps the lead", () 
     };
   }
 
-  it("files the lead, refuses the draft, and says why in the notice", async () => {
+  it("shows setup warning and writes nothing before consent", async () => {
     const before_ = await counts(UNSET);
     const result = await performAddLead(
       { userId: "sg1b-add-lead", newsroomId: UNSET },
       { paste: "https://records.example/council-budget", then: "draft", modelChoice: "claude-frontier" },
       dialogDeps(),
     );
-    assert.equal(result.ok, true, "the lead is filed either way");
-    if (!result.ok) return;
-    assert.equal(result.then, "draft");
-    assert.match(
-      result.notice ?? "",
-      /has not been set up yet\. Finish Paper setup first/,
-      "the editor is told why the draft did not start",
-    );
-    const after = await counts(UNSET);
-    assert.equal(after.leads, before_.leads + 1, "the lead still lands on the desk");
-    assert.equal(after.jobs, before_.jobs, "no drafting job is queued");
+    assert.equal(result.ok, false, "setup warning must precede any writes");
+    if (!result.ok) {
+      assert.equal(result.error, paperNotFullySetUpSentence());
+      assert.ok("warning" in result);
+    }
+    assert.deepEqual(await counts(UNSET), before_, "no lead or job is written before consent");
   });
 
   it("files the lead and needs no paper setup when 'Then' is not draft", async () => {
