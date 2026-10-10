@@ -17,14 +17,14 @@ it("shows the server sentence and the action's override press", () => {
   assert.doesNotMatch(html, /disabled=/);
 });
 
-it("requires the editor's knowledge note before accepting a no-capture judgment", () => {
+it("offers the editor knowledge note while allowing an attributed no-capture override", () => {
   const props = {
     warning: { key: "capture", sentence: "No capture." },
     actionWord: "Save",
     noteRequired: true,
     onOverride: () => {},
   };
-  assert.match(
+  assert.doesNotMatch(
     renderToStaticMarkup(createElement(OverrideAnyway, { ...props, note: "" })),
     /disabled=/,
   );

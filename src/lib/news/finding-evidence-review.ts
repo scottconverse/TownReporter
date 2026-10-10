@@ -23,6 +23,7 @@ import { auditOverrides, checkOverride, isOverrideWarning, type OverrideWarning 
  */
 export const EVIDENCE_OVERRIDE_KEYS = {
   supportsNoCapture: "evidence:supports-without-capture",
+  contradictsNoReason: "evidence:contradicts-without-reason",
   contradictsNoCapture: "evidence:contradicts-without-capture",
   removeSentence: "evidence:remove-sentence",
   manualClaimLength: "manual-claim:length",
@@ -1542,17 +1543,16 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
         noCapture = true;
         warnings.push(EVIDENCE_OVERRIDE_KEYS.supportsNoCapture);
       }
-      if (!noCapture && input.judgment === "contradicts" && !reason)
-        throw new ReviewError("invalid-input", "A contradiction needs a reason.");
+      if (!noCapture && input.judgment === "contradicts" && !reason) {
+        const warning = checkOverride(input, EVIDENCE_OVERRIDE_KEYS.contradictsNoReason,
+          "This contradiction has no explanation. Save your judgment anyway?");
+        if (warning) return warning;
+        warnings.push(EVIDENCE_OVERRIDE_KEYS.contradictsNoReason);
+      }
       let storedReason = reason;
       if (noCapture) {
         const note = (input.editorNote ?? "").trim();
-        if (!note)
-        throw new ReviewError(
-          "invalid-input",
-            "A judgment with no readable captured record needs your note. Say how you know it, starting with “I know this from outside the captures:”.",
-        );
-        storedReason = note.toLowerCase().startsWith(NO_CAPTURE_EDITOR_NOTE_PREFIX.toLowerCase())
+        storedReason = !note ? "Editor judgment outside the captures; no explanation supplied." : note.toLowerCase().startsWith(NO_CAPTURE_EDITOR_NOTE_PREFIX.toLowerCase())
           ? note
           : `${NO_CAPTURE_EDITOR_NOTE_PREFIX}${note}`;
       }

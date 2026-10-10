@@ -10,9 +10,9 @@ import { createElement, type ReactNode } from "react";
  * rather than JSX so `node --test` can render it with `renderToStaticMarkup`
  * and read both the sentence and the button's word.
  *
- * Some limits (a judgment with no readable capture, audit item 14) also require
+ * Some limits (a judgment with no readable capture, audit item 14) also offer
  * the editor's own note before the override is accepted. `noteRequired` draws
- * that field and holds the button back until it is filled.
+ * that field and records what the editor supplies without blocking the override.
  */
 export function OverrideAnyway({
   warning,
@@ -37,7 +37,7 @@ export function OverrideAnyway({
   onOverride: () => void;
 }): ReactNode {
   const noteId = `override-note-${warning.key}`;
-  const ready = !busy && (!noteRequired || Boolean(note.trim()));
+  const ready = !busy;
   return createElement(
     "div",
     { className: "mt-3 border border-rule bg-paper-2 p-4", role: "alert" },

@@ -150,24 +150,16 @@ describe("evidence judgment overrides (items 13 and 14)", () => {
       "the warned call must not write a judgment",
     );
 
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room, userId: editor },
-          {
-            leadId,
-            draftId: draft!.id,
-            findingKey: "finding:0",
-            judgment: "supports",
-            reason: "",
-            contraryVersionId: null,
-            evidenceToken: review.evidenceToken,
-            override: [SUPPORTS_KEY],
-          },
-        ),
-      /note/i,
-      "an override with no capture still needs the editor's note",
-    );
+    const withoutNote = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: editor }, {
+        leadId, draftId: draft!.id, findingKey: "finding:0", judgment: "supports",
+        reason: "", contraryVersionId: null, evidenceToken: review.evidenceToken,
+        override: [SUPPORTS_KEY],
+      });
+    assert.equal((withoutNote as FindingEvidenceReview).rows[0]!.judgment.noCapture, true);
+    assert.match((withoutNote as FindingEvidenceReview).rows[0]!.judgment.reason, /no explanation supplied/);
+    assert.equal(await overrideAuditCount(sql, editor), 1, "even an unexplained override records the editor");
+    const refreshed = await loadFindingEvidenceReview(sql, room, leadId);
 
     const saved = (await persistFindingEvidenceJudgment(
       { newsroomId: room, userId: editor },
@@ -178,7 +170,7 @@ describe("evidence judgment overrides (items 13 and 14)", () => {
         judgment: "supports",
         reason: "",
         contraryVersionId: null,
-        evidenceToken: review.evidenceToken,
+        evidenceToken: refreshed.evidenceToken,
         override: [SUPPORTS_KEY],
         editorNote: "I was at the meeting and heard the vote.",
       },
@@ -195,12 +187,12 @@ describe("evidence judgment overrides (items 13 and 14)", () => {
     assert.equal(reloaded.rows[0]!.judgment.noCapture, true);
     assert.equal(
       await overrideAuditCount(sql, editor),
-      1,
-      "one override audit row for the accepted key",
+      2,
+      "each explicit override is attributed",
     );
   });
 
-  it("warns then accepts a contradiction with no cited contrary capture, but still needs a reason", async () => {
+  it("warns then accepts a contradiction with no cited contrary capture, and warns about a missing explanation", async () => {
     const sql = await getSql();
     const [cited] = await sql.query<{ id: number }>(
       `insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,captured_at)
@@ -222,23 +214,13 @@ describe("evidence judgment overrides (items 13 and 14)", () => {
     });
     const review = await loadFindingEvidenceReview(sql, room, leadId);
 
-    // A reasonless contradiction is still refused outright.
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room, userId: editor },
-          {
-            leadId,
-            draftId: draft!.id,
-            findingKey: "finding:0",
-            judgment: "contradicts",
-            reason: "",
-            contraryVersionId: cited.id,
-            evidenceToken: review.evidenceToken,
-          },
-        ),
-      /reason/i,
-    );
+    const reasonless = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: editor }, {
+        leadId, draftId: draft!.id, findingKey: "finding:0", judgment: "contradicts",
+        reason: "", contraryVersionId: cited.id, evidenceToken: review.evidenceToken,
+      });
+    assert.equal(warningOf(reasonless).warning.key, "evidence:contradicts-without-reason");
+    assert.equal(await overrideAuditCount(sql, editor), 0, "a warning alone does not write an override");
 
     const warned = await persistFindingEvidenceJudgment(
       { newsroomId: room, userId: editor },
