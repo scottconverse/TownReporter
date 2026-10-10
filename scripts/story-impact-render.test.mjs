@@ -21,6 +21,7 @@ globalThis.screenData = {
 };
 const { Route } = await screenModule("src/routes/desk.story.$leadId.tsx", {}, [
   "@/lib/news/desk-copy",
+  "@/lib/news/story-readiness",
 ]);
 const { MeetingLedgerPanel } = await screenModule("src/components/meeting-ledger-panel.tsx", {}, [
   "@/lib/news/meeting-impact",
