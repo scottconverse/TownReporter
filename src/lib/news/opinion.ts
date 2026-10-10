@@ -195,7 +195,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
       editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
@@ -211,6 +211,7 @@ export const startEditorial = createServerFn({ method: "POST" })
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       documentIds: data.documentIds,
       retryRequestId: data.retryRequestId,
+      override: data.override,
     });
   });
 
@@ -265,7 +266,15 @@ export const getEditorialDraft = createServerFn({ method: "GET" })
       where d.id = ${draftId} and d.newsroom_id = ${owned(context)} and d.form = 'editorial' and d.lead_id is null
       limit 1
     `;
-    return rows[0] ? { ...rows[0], evidenceToken: evidenceReviewToken(rows[0]) } : null;
+    const draft = rows[0];
+    if (!draft) return null;
+    if (draft.published_slug) {
+      const printed = await sql<{headline: string; dek: string; body: string; topic: string}>`
+        select headline,dek,body,topic from articles where slug=${draft.published_slug}
+          and newsroom_id=${owned(context)} and status='published' limit 1`;
+      if (printed[0]) return {...draft, ...printed[0], evidenceToken: evidenceReviewToken(draft)};
+    }
+    return {...draft, evidenceToken: evidenceReviewToken(draft)};
   });
 
 export const saveEditorialDraft = createServerFn({ method: "POST" })

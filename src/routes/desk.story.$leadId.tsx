@@ -47,6 +47,7 @@ import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
+  changePublishedStory,
   draftLead,
   fixDraftStyle,
   getLead,
@@ -60,6 +61,8 @@ import {
   acceptUnreviewedClaims,
   continuePullJob,
   overrideNamedOutlet,
+  reverifyPublishedStory,
+  rewritePublishedStory,
   resolveLeadDuplicate,
   rewriteFromLedger,
   saveDraft,
@@ -409,6 +412,24 @@ function StoryPage() {
   */
   const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
   const [headlineNote, setHeadlineNote] = useState("");
+
+  const [liveWarning, setLiveWarning] = useState<{
+    /** Which live press the warning answers, so the retry runs the same one. */
+    kind: "change" | "reverify" | "rewrite" | "meeting-review";
+    key: string;
+    sentence: string;
+  } | null>(null);
+  /*
+    An unknown outlet's override warns first too (audit item 35). Held with the
+    outlet it was for, so "Override anyway" sends the same name back.
+  */
+  const pendingMeetingReview = useRef<{confirmedSegmentIndexes: number[]; note: string} | null>(null);
+  const [customOutletName, setCustomOutletName] = useState("");
+  const [outletWarning, setOutletWarning] = useState<{
+    outlet: string;
+    key: string;
+    sentence: string;
+  } | null>(null);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [slowWait, setSlowWait] = useState(false);
   /*
@@ -629,9 +650,12 @@ function StoryPage() {
           reader's headline instead of silently reverting it to the draft's.
         */
         setHeadline(data?.articleId && data.articleHeadline ? data.articleHeadline : d.headline);
-        setDek(d.dek);
-        setBody(stripReporterNotebook(d.body ?? ""));
-        setTopic(leadTopicChoice.current ?? d.topic);
+
+        setDek(data?.articleDek != null ? data.articleDek : d.dek);
+        setBody(
+          stripReporterNotebook(data?.articleBody != null ? data.articleBody : (d.body ?? "")),
+        );
+        setTopic(leadTopicChoice.current ?? (data?.articleTopic ? data.articleTopic : d.topic));
         appliedFp.current = fp;
       }
       return;
@@ -839,7 +863,7 @@ function StoryPage() {
   });
 
   const draftMeetingReview = useMutation({
-    mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string }) => {
+    mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string; override?: string[] }) => {
       if (!data?.draft?.id || !data.evidenceToken || !data.draftMeetingEvidence?.currentArtifactId) {
         throw new Error("The current draft or transcript comparison is unavailable. Reload this story first.");
       }
@@ -850,17 +874,21 @@ function StoryPage() {
         acceptedArtifactId: data.draftMeetingEvidence.currentArtifactId,
         confirmedSegmentIndexes: input.confirmedSegmentIndexes,
         note: input.note,
+        override: input.override,
       } });
     },
-    onSuccess: async (res) => {
+    onSuccess: async (res, input) => {
       if (!answered(res)) {
         setMsg(NO_ANSWER);
         return;
       }
       if (!res.ok) {
+        if ("warning" in res) {pendingMeetingReview.current = input; setLiveWarning({kind: "meeting-review", ...res.warning}); return;}
         setMsg(res.error);
         return;
       }
+      setLiveWarning(null);
+      pendingMeetingReview.current = null;
       setMsg("Citation review saved against the current transcript. The draft text and original evidence remain unchanged.");
       await qc.invalidateQueries({ queryKey: ["lead", id] });
     },
@@ -940,14 +968,27 @@ function StoryPage() {
     which draft -- is the paper's record, and the desk shows it back below.
   */
   const overrideOutlet = useMutation({
-    mutationFn: (outlet: string) => overrideNamedOutlet({ data: { leadId: id, outlet } }),
-    onSuccess: async (res) => {
+    mutationFn: (args: { outlet: string; override?: string[] }) =>
+      overrideNamedOutlet({ data: { leadId: id, outlet: args.outlet, override: args.override } }),
+    onSuccess: async (res, args) => {
+
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setOutletWarning({
+            outlet: args.outlet,
+            key: res.warning.key,
+            sentence: res.warning.sentence,
+          });
+          return;
+        }
+        setOutletWarning(null);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
-      setMsg(
-        res.ok
-          ? `Recorded: you overrode the outlet check for ${res.outlet} on this draft.`
-          : res.error,
-      );
+        setMsg(res.error);
+        return;
+      }
+      setOutletWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      if (res?.ok) setMsg(`Recorded: you overrode the outlet check for ${res.outlet} on this draft.`);
     },
     onError: (err) => {
       setMsg(
@@ -1498,6 +1539,94 @@ function StoryPage() {
       );
     },
   });
+
+
+  const saveLiveChange = useMutation({
+    mutationFn: (override?: string[]) =>
+      changePublishedStory({
+        data: { articleId: data?.articleId ?? 0, dek, topic, body, override },
+      }),
+    onSuccess: async (res) => {
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setLiveWarning({ kind: "change", ...res.warning });
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(res.error);
+        return;
+      }
+      setLiveWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      await qc.invalidateQueries({ queryKey: ["paper"] });
+      await qc.invalidateQueries({ queryKey: ["published-desk"] });
+      await qc.invalidateQueries({ queryKey: ["corrections"] });
+      setMsg(
+        res && res.changed.length === 0
+          ? "Nothing on the paper changed."
+          : "Changed. The story's link is unchanged, and the change is on the public log.",
+      );
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "change the live story") ??
+          "Could not change the live story.",
+      );
+    },
+  });
+
+
+  const reverifyLive = useMutation({
+    mutationFn: (override?: string[]) =>
+      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort } }),
+    onSuccess: async (res) => {
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setLiveWarning({ kind: "reverify", ...res.warning });
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(res.error);
+        return;
+      }
+      setLiveWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg(res?.ok ? `Re-checked ${res.review.rows.length} claims on the paper; ${res.review.rows.filter(row => row.verdict !== "Supported").length} need human review. The results are saved in the audit log.` : "Could not re-check the story.");
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "re-check the live story") ??
+          "Could not re-check the live story.",
+      );
+    },
+  });
+
+  const rewriteLive = useMutation({
+    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort}}),
+    onSuccess: async res => {
+      if (!res.ok) {
+        if ("warning" in res) {setLiveWarning({kind: "rewrite", ...res.warning}); return;}
+        setMsg(res.error); return;
+      }
+      setLiveWarning(null);
+      appliedFp.current = "";
+      await qc.invalidateQueries({queryKey: ["lead", id]});
+      await qc.invalidateQueries({queryKey: ["published-desk"]});
+      setMsg(res.changed.length ? "Rewritten on the paper. The change is recorded in its public log." : "Rewrite finished. The text on the paper is unchanged.");
+    },
+    onError: () => setMsg("The rewrite could not finish. Check the live story before trying again."),
+  });
+
+  /** The second press for whichever live warning is showing. */
+  const acceptLiveWarning = useCallback(
+    (key: string) => {
+      if (liveWarning?.kind === "reverify") reverifyLive.mutate([key]);
+      else if (liveWarning?.kind === "meeting-review" && pendingMeetingReview.current) draftMeetingReview.mutate({...pendingMeetingReview.current, override: [key]});
+      else if (liveWarning?.kind === "rewrite") rewriteLive.mutate([key]);
+      else saveLiveChange.mutate([key]);
+    },
+    [liveWarning?.kind, reverifyLive, rewriteLive, draftMeetingReview, saveLiveChange],
+  );
 
   /*
    * Unit AK items 5 and 6: the Compare view's three presses and the Reopen on
@@ -2079,7 +2208,7 @@ function StoryPage() {
         return;
       case "override-outlet":
         /* The same mutation the mid-form "Override <outlet>" button calls. */
-        overrideOutlet.mutate(target.outlet);
+        overrideOutlet.mutate({ outlet: target.outlet });
         return;
       case "add-source":
         setInspector("sources");
@@ -2659,19 +2788,31 @@ function StoryPage() {
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
               draftMeetingEvidence={data.draftMeetingEvidence}
-              onMeetingRedraft={locked || onPaper ? undefined : () => draft.mutate(undefined)}
-              meetingRedrafting={draft.isPending || waiting}
+              onMeetingRedraft={
+                locked
+                  ? undefined
+                  : onPaper
+                    ? () => rewriteLive.mutate(undefined)
+                    : () => draft.mutate(undefined)
+              }
+              meetingRedrafting={draft.isPending || waiting || rewriteLive.isPending}
               evidenceToken={data.evidenceToken}
-              onReverifyMeetingCitations={locked || onPaper || !data.draft ? undefined : (review) => draftMeetingReview.mutate(review)}
-              reverifyingMeetingCitations={draftMeetingReview.isPending}
+              onReverifyMeetingCitations={
+                locked || !data.draft
+                  ? undefined
+                  : (review) => draftMeetingReview.mutate(review)
+              }
+              reverifyingMeetingCitations={draftMeetingReview.isPending || reverifyLive.isPending}
               meetingAccounting={data.meetingAccounting}
               onRewriteFromLedger={
-                locked || onPaper || paperGate.blocked
+                locked || paperGate.blocked
                   ? undefined
+                  : onPaper
+                    ? () => rewriteLive.mutate(undefined)
                   : () => draft.mutate({ fromLedger: true })
               }
               rewritePhase={
-                waiting && pressWasRewrite.current
+                rewriteLive.isPending ? "working" : waiting && pressWasRewrite.current
                   ? "working"
                   : rewriteDone
                     ? "done"
@@ -2935,6 +3076,14 @@ function StoryPage() {
                     {savePublishedHeadline.isPending ? "Saving…" : "Save headline"}
                   </InkButton>
                 ) : null}
+                {onPaper ? (
+                  <InkButton
+                    disabled={saveLiveChange.isPending || !data.articleId}
+                    onClick={() => saveLiveChange.mutate(undefined)}
+                  >
+                    {saveLiveChange.isPending ? "Saving…" : "Save changes"}
+                  </InkButton>
+                ) : null}
                 {/*
                   The scan's own headline, one press away. The model's redrafts
                   can drift from it, and the words the desk read on the lead are
@@ -3023,6 +3172,22 @@ function StoryPage() {
                   {headlineNote}
                 </p>
               ) : null}
+              {onPaper ? <InkButton disabled={reverifyLive.isPending} onClick={() => reverifyLive.mutate(undefined)}>Re-check live evidence</InkButton> : null}
+              {liveWarning ? (
+                <div className="note" role="status">
+                  <p>{liveWarning.sentence}</p>
+                  <InkButton
+                    disabled={saveLiveChange.isPending || reverifyLive.isPending || rewriteLive.isPending}
+                    onClick={() => acceptLiveWarning(liveWarning.key)}
+                  >
+                    {saveLiveChange.isPending || reverifyLive.isPending || rewriteLive.isPending
+                      ? "Saving…"
+                      : liveWarning.kind === "reverify"
+                        ? "Re-check anyway"
+                        : "Change it anyway"}
+                  </InkButton>
+                </div>
+              ) : null}
               {/*
                 The dek, under the drawing's own name for it: SUMMARY.
 
@@ -3038,8 +3203,7 @@ function StoryPage() {
                   rows={2}
                   className="astra-dek"
                   value={dek}
-                  onChange={(e) => setDek(e.target.value)}
-                  disabled={onPaper}
+                  onChange={(e) => {setLiveWarning(null); setDek(e.target.value);}}
                 />
               </Field>
               {/*
@@ -3076,8 +3240,7 @@ function StoryPage() {
                   rows={16}
                   placeholder={manualDraft === "paste" ? "Paste your story here." : manualDraft === "write" ? "Write your story here." : undefined}
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  disabled={onPaper}
+                  onChange={(e) => {setLiveWarning(null); setBody(e.target.value);}}
                 />
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
@@ -3496,7 +3659,7 @@ function StoryPage() {
                         saveTopic.mutate(e.target.value);
                       }
                     }}
-                    disabled={onPaper || locked || saveTopic.isPending}
+                    disabled={locked || saveTopic.isPending}
                   >
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
@@ -3596,6 +3759,31 @@ function StoryPage() {
               */}
               {data.draft ? (
                 <div id="story-outlets">
+                  {!onPaper && !locked ? <div className="note">
+                    <label>Outlet name
+                      <input value={customOutletName} disabled={overrideOutlet.isPending}
+                        onChange={event => {setCustomOutletName(event.target.value); setOutletWarning(null);}} />
+                    </label>
+                    <InkButton disabled={!customOutletName.trim() || overrideOutlet.isPending}
+                      onClick={() => overrideOutlet.mutate({outlet: customOutletName.trim()})}>Override outlet</InkButton>
+                  </div> : null}
+                      {outletWarning ? (
+                        <div role="status">
+                          <p className="note">{outletWarning.sentence}</p>
+                          <InkButton
+                            tone="quiet"
+                            disabled={overrideOutlet.isPending}
+                            onClick={() =>
+                              overrideOutlet.mutate({
+                                outlet: outletWarning.outlet,
+                                override: [outletWarning.key],
+                              })
+                            }
+                          >
+                            {overrideOutlet.isPending ? "Recording…" : "Override anyway"}
+                          </InkButton>
+                        </div>
+                      ) : null}
                   {data.namedOutlets.length > 0 ? (
                     <>
                       <p className="note publish-blocked">
@@ -3615,7 +3803,7 @@ function StoryPage() {
                               key={outlet}
                               tone="quiet"
                               disabled={overrideOutlet.isPending}
-                              onClick={() => overrideOutlet.mutate(outlet)}
+                              onClick={() => overrideOutlet.mutate({ outlet })}
                             >
                               {overrideOutlet.isPending ? "Recording…" : `Override ${outlet}`}
                             </InkButton>
@@ -4529,6 +4717,7 @@ function ReportingNotesPane({
         has no ledger rows, so every other story in the paper is unchanged.
       */}
       <MeetingLedgerPanel
+        liveRewriteEnabled={Boolean(onRewriteFromLedger)}
         leadId={leadId}
         accounting={meetingAccounting}
         transcriptArtifactId={

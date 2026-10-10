@@ -49,6 +49,7 @@ export function MeetingLedgerPanel({
   transcriptArtifactId,
   locked,
   onRewrite,
+  liveRewriteEnabled = false,
   rewritePhase,
   rewriteReason,
 }: {
@@ -60,6 +61,7 @@ export function MeetingLedgerPanel({
   /** On a published story the ledger is read-only, like every other write here. */
   locked: boolean;
   onRewrite: () => void;
+  liveRewriteEnabled?: boolean;
   rewritePhase: ActionPhase;
   rewriteReason?: string | null;
 }) {
@@ -99,8 +101,8 @@ export function MeetingLedgerPanel({
           workingLabel="Rewriting from the ledger…"
           doneLabel="Rewrite started"
           reason={rewriteReason ?? null}
-          disabled={locked}
-          disabledReason={locked ? "This story is published, so its draft is read-only." : null}
+          disabled={locked && !liveRewriteEnabled}
+          disabledReason={locked && !liveRewriteEnabled ? "This story is published, so its draft is read-only." : null}
           onAct={onRewrite}
         >
           Rewrite from ledger

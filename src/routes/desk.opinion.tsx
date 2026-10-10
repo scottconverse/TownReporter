@@ -29,6 +29,7 @@ import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
+import { OverrideAnyway } from "@/components/override-anyway";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
@@ -76,6 +77,8 @@ function OpinionPage() {
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
+  const [startWarning, setStartWarning] = useState<{key: string; sentence: string} | null>(null);
+  const acceptedOverrides = useRef<string[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
   /*
@@ -88,6 +91,7 @@ function OpinionPage() {
   */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
+  useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, retryRequestId]);
   /*
     F3b: F3 stores the first-run default for Opinion's scope too, and this page
     sends whatever the picker shows as an explicit pick -- so on a fresh
@@ -218,13 +222,16 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: () => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, documentIds: documents.map((d) => d.id), retryRequestId } }),
+    mutationFn: (override?: string[]) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, documentIds: documents.map((d) => d.id), retryRequestId, override } }),
     onSuccess: (res) => {
       if (!res?.ok) {
+        if (res && "warning" in res) { setStartWarning(res.warning); return; }
         const raw = res?.error ?? "That did not start.";
         setError(editorDraftError(raw) ?? raw, raw);
         return;
       }
+      setStartWarning(null);
+      acceptedOverrides.current = [];
       setSubject("");
       setAskedFor("");
       setDocuments([]);
@@ -456,10 +463,10 @@ function OpinionPage() {
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="The rail district wants a second tax for the same tracks — or paste a URL"
-              maxLength={20_000_000}
             />
           </label>
           <StoryDocumentUpload
+            allowExtraDocuments
             documents={documents}
             onChange={setDocuments}
             onBusy={setDocumentsBusy}
@@ -475,7 +482,6 @@ function OpinionPage() {
               value={askedFor}
               onChange={(e) => setAskedFor(e.target.value)}
               placeholder="Angle, a document to start from, a length"
-              maxLength={20_000_000}
             />
           </label>
           <ModelPicker
@@ -486,10 +492,15 @@ function OpinionPage() {
             onEffortChange={setModelEffort}
             disabled={start.isPending}
           />
+          {startWarning ? <OverrideAnyway warning={startWarning} actionWord="Write"
+            busy={start.isPending} onOverride={() => {
+              acceptedOverrides.current = [...new Set([...acceptedOverrides.current, startWarning.key])];
+              start.mutate(acceptedOverrides.current);
+            }} /> : null}
           <div className="astra-panel-acts">
             <InkButton
               tone="solid"
-              onClick={() => start.mutate()}
+              onClick={() => start.mutate(undefined)}
               disabled={
                 start.isPending ||
                 ready.isPending ||

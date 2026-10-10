@@ -1,3 +1,5 @@
+import type { FindingEvidenceReview } from "./finding-evidence-review.ts";
+import type { OverrideWarning } from "./override.ts";
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 import { getSql } from "../db.ts";
@@ -124,10 +126,17 @@ it("reviews every complete reporting claim and multiple precise references with 
   await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({ reportedClaims: wrongSource }), f.draft.id]);
   const guarded = await loadFindingEvidenceReview(f.sql, room, leadId);
   assert.equal(guarded.claimRows[0].captures.every((capture) => !capture.available), true);
-  await assert.rejects(persistFindingEvidenceJudgment({ newsroomId: room }, {
+  const warned = await persistFindingEvidenceJudgment({ newsroomId: room, userId: "editor" }, {
     leadId, draftId: f.draft.id, findingKey: guarded.claimRows[0].key, judgment: "supports",
     reason: "", contraryVersionId: null, evidenceToken: guarded.evidenceToken,
-  }), /readable captured record/);
+  });
+  assert.ok("warning" in warned);
+  assert.equal((warned as { warning: { key: string } }).warning.key, "evidence:supports-without-capture");
+  assert.equal(
+    (await loadFindingEvidenceReview(f.sql, room, leadId)).claimRows[0].judgment.value,
+    "unreviewed",
+    "the warned call must not record a judgment",
+  );
   // Same ledger in a follow-up draft cannot inherit the previous editor decision.
   await f.sql.query(`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,research_json,updated_at)
     values('editor',$1,$2,'Follow-up','','New copy','council',$3,now()+interval '1 second')`, [room, leadId, JSON.stringify({ reportedClaims: claims })]);
@@ -253,11 +262,11 @@ describe("finding evidence resolution", () => {
         { versionId: f.cited.id, captureEventId: f.capture.id, available: true },
       ]);
       assert.equal((await loadFindingEvidenceCapture(f.sql, room, leadId, f.draft.id, f.cited.id)).ok, true);
-      const saved = await persistFindingEvidenceJudgment({ newsroomId: room }, {
+      const saved = requireReview(await persistFindingEvidenceJudgment({ newsroomId: room }, {
         leadId, draftId: f.draft.id, findingKey: review.claimRows[0].key,
         judgment: "supports", reason: "Exact captured record supports the claim.",
         contraryVersionId: null, evidenceToken: review.evidenceToken,
-      });
+      }));
       assert.equal(saved.claimRows[0].judgment.value, "supports");
     });
   }
@@ -332,7 +341,7 @@ describe("finding evidence resolution", () => {
   it("round-trips a manual claim with explicit owned records and rejects a stale or foreign selection", async () => {
     const f = await fixture();
     const initial = await loadFindingEvidenceReview(f.sql, room, leadId);
-    const saved = await persistManualClaim(
+    const saved = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -347,7 +356,7 @@ describe("finding evidence resolution", () => {
           { versionId: f.mismatch.id, relation: "contrary" },
         ],
       },
-    );
+    ));
     assert.equal(saved.manualClaimRows.length, 1);
     const manual = saved.manualClaimRows[0];
     assert.equal(manual.captures[0].versionId, f.cited.id);
@@ -355,7 +364,7 @@ describe("finding evidence resolution", () => {
     assert.equal(manual.captures[0].available, true);
     const capture = await loadFindingEvidenceCapture(f.sql, room, leadId, f.draft.id, f.cited.id);
     assert.equal(capture.ok, true);
-    const judged = await persistFindingEvidenceJudgment(
+    const judged = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -366,9 +375,9 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: saved.evidenceToken,
       },
-    );
+    ));
     assert.equal(judged.manualClaimRows[0].judgment.value, "supports");
-    const edited = await persistManualClaim(
+    const edited = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -383,9 +392,9 @@ describe("finding evidence resolution", () => {
           { versionId: f.mismatch.id, relation: "contrary" },
         ],
       },
-    );
+    ));
     assert.equal(edited.manualClaimRows[0].judgment.value, "unreviewed");
-    const relationEdited = await persistManualClaim(
+    const relationEdited = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -400,7 +409,7 @@ describe("finding evidence resolution", () => {
           { versionId: f.mismatch.id, relation: "contrary" },
         ],
       },
-    );
+    ));
     assert.equal(relationEdited.manualClaimRows[0].captures[0].relation, "context");
     assert.equal(relationEdited.manualClaimRows[0].judgment.value, "unreviewed");
     await assert.rejects(
@@ -459,7 +468,7 @@ describe("finding evidence resolution", () => {
     const firstId = "2ff6c441-33fa-474f-a6f7-0cf9295910ef";
     const secondId = "3ff6c441-33fa-474f-a6f7-0cf9295910ef";
     let review = await loadFindingEvidenceReview(f.sql, room, leadId);
-    review = await persistManualClaim(
+    review = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -471,8 +480,8 @@ describe("finding evidence resolution", () => {
         kind: "record",
         references: [{ versionId: f.cited.id, relation: "corroborating" }],
       },
-    );
-    review = await persistManualClaim(
+    ));
+    review = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -484,8 +493,8 @@ describe("finding evidence resolution", () => {
         kind: "record",
         references: [{ versionId: f.cited.id, relation: "corroborating" }],
       },
-    );
-    review = await persistFindingEvidenceJudgment(
+    ));
+    review = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -496,8 +505,8 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: review.evidenceToken,
       },
-    );
-    review = await persistFindingEvidenceJudgment(
+    ));
+    review = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -508,8 +517,8 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: review.evidenceToken,
       },
-    );
-    review = await persistFindingEvidenceJudgment(
+    ));
+    review = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -520,9 +529,9 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: review.evidenceToken,
       },
-    );
+    ));
 
-    const updated = await persistManualClaim(
+    const updated = requireReview(await persistManualClaim(
       { newsroomId: room },
       {
         leadId,
@@ -534,7 +543,7 @@ describe("finding evidence resolution", () => {
         kind: "record",
         references: [{ versionId: f.cited.id, relation: "context" }],
       },
-    );
+    ));
     assert.equal(updated.rows[0].judgment.value, "supports");
     assert.equal(updated.claimRows[0].judgment.value, "supports");
     assert.equal(
@@ -547,7 +556,7 @@ describe("finding evidence resolution", () => {
     );
   });
 
-  it("refuses a seventeenth manual claim", async () => {
+  it("warns then saves and reloads a seventeenth manual claim", async () => {
     const f = await fixture();
     const [draft] = await f.sql.query<{ research_json: string }>(
       "select research_json from drafts where id=$1",
@@ -565,29 +574,26 @@ describe("finding evidence resolution", () => {
     };
     await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify(memo), f.draft.id]);
     const review = await loadFindingEvidenceReview(f.sql, room, leadId);
-    await assert.rejects(
-      () => persistManualClaim(
-        { newsroomId: room },
-        {
-          leadId,
-          draftId: f.draft.id,
-          evidenceToken: review.evidenceToken,
-          action: "upsert",
-          id: null,
-          fact: "Seventeenth manual claim",
-          kind: "record",
-          references: [{ versionId: f.cited.id, relation: "context" }],
-        },
-      ),
-      /at most 16 manual claims/,
-    );
+    const input = {leadId, draftId: f.draft.id, evidenceToken: review.evidenceToken,
+      action: "upsert" as const, id: null, fact: "Seventeenth manual claim", kind: "record" as const,
+      references: [{versionId: f.cited.id, relation: "context" as const}]};
+    const first = await persistManualClaim({newsroomId: room, userId: "editor"}, input);
+    assert.ok("warning" in first);
+    if (!("warning" in first)) throw new Error("Expected count warning");
+    const result = await persistManualClaim({newsroomId: room, userId: "editor"}, {...input, override: [first.warning.key]});
+    assert.ok("manualClaimRows" in result);
+    if ("manualClaimRows" in result) assert.equal(result.manualClaimRows.length, 17);
+    assert.equal((await loadFindingEvidenceReview(f.sql, room, leadId)).manualClaimRows.length, 17);
+    const audit = await f.sql.query("select id from audit_events where newsroom_id=$1 and action='override' and user_id='editor'", [room]);
+    assert.equal(audit.length, 1);
+
   });
 
   it("does not expose or retain a judgment for a claim whose named provenance points to another URL", async () => {
     const f = await fixture();
     const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
     const claim = loaded.claimRows[0];
-    const saved = await persistFindingEvidenceJudgment(
+    const saved = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -598,7 +604,7 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: loaded.evidenceToken,
       },
-    );
+    ));
     assert.equal(saved.claimRows[0].judgment.value, "supports");
     await f.sql.query(
       "update artifact_versions set url='https://city.test/repointed' where id=$1",
@@ -651,10 +657,10 @@ describe("finding evidence resolution", () => {
       { available: false, url: null, title: null, viewHref: null },
     );
     assert.doesNotMatch(JSON.stringify(review.claimRows), /FOREIGN PRIVATE TEXT|other\.test\/private/);
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
+    /* Audit item 14: a support with no readable capture warns rather than
+       refusing; the foreign record still never satisfies it. */
+    const warned = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: "editor" },
           {
             leadId,
             draftId: f.draft.id,
@@ -664,8 +670,11 @@ describe("finding evidence resolution", () => {
             contraryVersionId: null,
             evidenceToken: review.evidenceToken,
           },
-        ),
-      /readable captured record cited by this evidence item/,
+    );
+    assert.ok("warning" in warned);
+    assert.equal(
+      (warned as { warning: { key: string } }).warning.key,
+      "evidence:supports-without-capture",
     );
   });
 
@@ -793,13 +802,7 @@ describe("finding evidence resolution", () => {
   });
 
   it("hands the recorded takedown reason to the owner, and to nobody else", async () => {
-    /*
-      Unit U11b2: `taken_down_reason` was written and never shown. It is now
-      shown in the capture pane -- to the OWNER, whose decision it records, and
-      not to an editor reading the same draft (a reason may name the publisher,
-      a lawyer or a complaint). The boundary is here, in the loader: an
-      editor's read does not carry the note at all, so no page can print it.
-    */
+
     const f = await fixture();
     /* The row as a real takedown leaves it: text purged, marked, with the note. */
     await f.sql.query(
@@ -848,7 +851,7 @@ describe("finding evidence resolution", () => {
     const f = await fixture();
     const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
     const finding = loaded.rows.find((row) => row.captures.some((c) => c.versionId === f.cited.id))!;
-    const saved = await persistFindingEvidenceJudgment(
+    const saved = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -859,7 +862,7 @@ describe("finding evidence resolution", () => {
         contraryVersionId: null,
         evidenceToken: loaded.evidenceToken,
       },
-    );
+    ));
     assert.equal(saved.rows[0]!.judgment.value, "supports", "the judgment is recorded first");
 
     const result = await takeDownCapture(
@@ -883,7 +886,7 @@ describe("finding judgment compare-and-swap", () => {
     const f = await fixture();
     const loaded = await loadFindingEvidenceReview(f.sql, room, leadId);
     const claim = loaded.claimRows[0];
-    const saved = await persistFindingEvidenceJudgment(
+    const saved = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -894,7 +897,7 @@ describe("finding judgment compare-and-swap", () => {
         contraryVersionId: null,
         evidenceToken: loaded.evidenceToken,
       },
-    );
+    ));
     assert.equal(saved.claimRows[0].judgment.value, "supports");
     assert.equal(saved.rows[0].judgment.value, "unreviewed");
     const memo = JSON.parse(
@@ -938,6 +941,7 @@ describe("finding judgment compare-and-swap", () => {
         evidenceToken: initial.evidenceToken,
       },
     );
+    assert.ok("rows" in first);
     assert.equal(first.rows[0].judgment.value, "supports");
     assert.equal(first.contentToken, initial.contentToken);
     assert.notEqual(first.evidenceToken, initial.evidenceToken);
@@ -957,7 +961,7 @@ describe("finding judgment compare-and-swap", () => {
         ),
       /changed/,
     );
-    const second = await persistFindingEvidenceJudgment(
+    const second = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -968,7 +972,7 @@ describe("finding judgment compare-and-swap", () => {
         contraryVersionId: null,
         evidenceToken: first.evidenceToken,
       },
-    );
+    ));
     assert.equal(second.rows[0].judgment.value, "supports");
     assert.equal(second.rows[1].judgment.value, "needs-reporting");
   });
@@ -991,31 +995,32 @@ describe("finding judgment compare-and-swap", () => {
         ),
       /reason/,
     );
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
-          { ...base, reason: "Contrary", contraryVersionId: f.mismatch.id },
-        ),
-      /cited by this finding/,
+    /*
+      Audit item 13: a contrary capture that is not cited (or a foreign record)
+      is now a WARNING, not a refusal. The override records `noCapture` with the
+      editor's own note; nothing else about the newsroom boundary changes.
+    */
+    for (const contraryVersionId of [f.mismatch.id, f.foreign.id]) {
+      const warned = await persistFindingEvidenceJudgment(
+        { newsroomId: room, userId: "editor" },
+        { ...base, reason: "Contrary", contraryVersionId },
     );
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
-          { ...base, reason: "Contrary", contraryVersionId: f.foreign.id },
-        ),
-      /readable captured version/,
+      assert.ok("warning" in warned);
+      assert.equal(
+        (warned as { warning: { key: string } }).warning.key,
+        "evidence:contradicts-without-capture",
     );
-    const saved = await persistFindingEvidenceJudgment(
+    }
+    const saved = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         ...base,
         reason: "The cited passage supplies contrary evidence.",
         contraryVersionId: f.cited.id,
       },
-    );
-    assert.deepEqual(saved.rows[0].judgment, {
+    ));
+    assert.ok("rows" in saved, "a cited readable capture still saves normally");
+    assert.deepEqual((saved as { rows: Array<{ judgment: unknown }> }).rows[0].judgment, {
       value: "contradicts",
       reason: "The cited passage supplies contrary evidence.",
       contraryVersionId: f.cited.id,
@@ -1189,10 +1194,10 @@ describe("finding judgment compare-and-swap", () => {
       f.draft.id,
     ]);
     const review = await loadFindingEvidenceReview(f.sql, room, leadId);
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
+    /* Audit item 14: missing-only evidence warns; the foreign record still
+       never grounds a support, and the warned call writes nothing. */
+    const warned = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: "editor" },
           {
             leadId,
             draftId: f.draft.id,
@@ -1202,8 +1207,11 @@ describe("finding judgment compare-and-swap", () => {
             contraryVersionId: null,
             evidenceToken: review.evidenceToken,
           },
-        ),
-      /readable captured record/,
+    );
+    assert.ok("warning" in warned);
+    assert.equal(
+      (warned as { warning: { key: string } }).warning.key,
+      "evidence:supports-without-capture",
     );
   });
 
@@ -1239,7 +1247,7 @@ describe("finding judgment compare-and-swap", () => {
   it("keeps review across a newer advisory capture but reopens when cited evidence changes", async () => {
     const f = await fixture();
     const initial = await loadFindingEvidenceReview(f.sql, room, leadId);
-    const saved = await persistFindingEvidenceJudgment(
+    const saved = requireReview(await persistFindingEvidenceJudgment(
       { newsroomId: room },
       {
         leadId,
@@ -1250,7 +1258,7 @@ describe("finding judgment compare-and-swap", () => {
         contraryVersionId: null,
         evidenceToken: initial.evidenceToken,
       },
-    );
+    ));
     await f.sql.query(
       `insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text,captured_at)
        values('editor',$1,'https://city.test/agenda','newest','Newest','Later advisory text','2026-09-03')`,
@@ -1336,10 +1344,10 @@ describe("finding judgment compare-and-swap", () => {
     const cited = review.rows[0].captures.find((capture) => capture.versionId === f.cited.id)!;
     assert.equal(cited.available, true);
     assert.equal(cited.readable, false);
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
+    /* Audit item 14: an existing but unreadable capture warns rather than
+       refusing; the editor may still record their own judgment with a note. */
+    const warned = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: "editor" },
           {
             leadId,
             draftId: f.draft.id,
@@ -1349,8 +1357,16 @@ describe("finding judgment compare-and-swap", () => {
             contraryVersionId: null,
             evidenceToken: review.evidenceToken,
           },
-        ),
-      /readable captured record/,
+    );
+    assert.ok("warning" in warned);
+    assert.equal(
+      (warned as { warning: { key: string } }).warning.key,
+      "evidence:supports-without-capture",
     );
   });
 });
+
+function requireReview(value: FindingEvidenceReview | OverrideWarning): FindingEvidenceReview {
+  assert.ok("rows" in value, "expected a saved review");
+  return value;
+}

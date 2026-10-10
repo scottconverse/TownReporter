@@ -110,6 +110,27 @@ function PublishedPage() {
   */
   const [corrFixBySlug, setCorrFixBySlug] = useState<Record<string, boolean>>({});
   const [corrBodyBySlug, setCorrBodyBySlug] = useState<Record<string, string>>({});
+
+  const [corrWarningBySlug, setCorrWarningBySlug] = useState<
+    Record<string, { key: string; sentence: string }>
+  >({});
+  const [corrOverrideBySlug, setCorrOverrideBySlug] = useState<Record<string, string[]>>({});
+
+
+  function clearCorrOverride(slug: string) {
+    setCorrWarningBySlug((previous) => {
+      if (!(slug in previous)) return previous;
+      const next = { ...previous };
+      delete next[slug];
+      return next;
+    });
+    setCorrOverrideBySlug((previous) => {
+      if (!(slug in previous)) return previous;
+      const next = { ...previous };
+      delete next[slug];
+      return next;
+    });
+  }
   // Working / done / failed, and why, for the wording suggestion only.
   const [wordingFor, setWordingFor] = useState<{
     slug: string;
@@ -151,16 +172,17 @@ function PublishedPage() {
       `onSuccess`: the message the editor gets afterwards has to describe the
       post that actually happened, not the one the next render would make.
     */
-    mutationFn: (input: { slug: string; fixing: boolean }) =>
-      addCorrection({
-        data: {
+    mutationFn: (input: { slug: string; fixing: boolean; override?: string[] }) => {
+      const payload = {
           articleSlug: input.slug,
           body: (corrBySlug[input.slug] ?? "").trim(),
           meetingReviewId: corrReviewFor[input.slug],
           alsoFixBody: input.fixing,
           storyBody: input.fixing ? (corrBodyBySlug[input.slug] ?? "") : undefined,
+        override: input.override,
+      };
+      return addCorrection({ data: payload });
         },
-      }),
     onSuccess: (res, input) => {
       const { slug } = input;
       if (res.ok) {
@@ -168,6 +190,7 @@ function PublishedPage() {
         setCorrWrongBySlug((prev) => ({ ...prev, [slug]: "" }));
         setCorrRightBySlug((prev) => ({ ...prev, [slug]: "" }));
         setCorrFixBySlug((prev) => ({ ...prev, [slug]: false }));
+        clearCorrOverride(slug);
         /*
           DELETED, not set to "". An empty string is still a KEY, and the box's
           value is `corrBodyBySlug[slug] ?? p.body` -- `??` only falls through
@@ -195,6 +218,13 @@ function PublishedPage() {
         void qc.invalidateQueries({ queryKey: ["published-desk"] });
         void qc.invalidateQueries({ queryKey: ["corrections"] });
         void qc.invalidateQueries({ queryKey: ["article", slug] });
+      } else if ("warning" in res) {
+
+        setCorrWarningBySlug((previous) => ({ ...previous, [slug]: res.warning }));
+        setCorrOverrideBySlug((previous) => ({
+          ...previous,
+          [slug]: [...new Set([...(previous[slug] ?? []), ...(input.override ?? [])])],
+        }));
       } else {
         setNote({
           kind: "err",
@@ -236,6 +266,8 @@ function PublishedPage() {
     },
     onSuccess: (res, { slug }) => {
       if (res.ok) {
+        // New words, so any approval collected over the old ones is dropped.
+        clearCorrOverride(slug);
         setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
         setWordingFor({
           slug,
@@ -275,6 +307,8 @@ function PublishedPage() {
       }),
     onSuccess: (res, slug) => {
       if (res.ok) {
+        // New words, so any approval collected over the old ones is dropped.
+        clearCorrOverride(slug);
         setCorrBySlug((prev) => ({ ...prev, [slug]: res.wording }));
         setWordingFor({
           slug,
@@ -885,15 +919,32 @@ function PublishedPage() {
                 {corrFor === p.slug ? (
                   <Dialog
                     open
-                    onClose={() => { setCorrFor(null); setWordingFor(null); }}
+                    onClose={() => {
+                      setCorrFor(null);
+                      setWordingFor(null);
+                      clearCorrOverride(p.slug);
+                    }}
                     title="Add a correction"
                     subtitle={p.headline}
                     footNote="Appears on the story and in the public corrections log permanently."
-                    primaryLabel="Publish correction"
-                    primaryDisabled={!(corrBySlug[p.slug] ?? "").trim() || corr.isPending}
+                    primaryLabel={corrWarningBySlug[p.slug] ? "Publish anyway" : "Publish correction"}
+                    primaryDisabled={corr.isPending}
                     pending={corr.isPending}
                     primaryPendingLabel="Publishing…"
-                    onPrimary={() => corr.mutate({ slug: p.slug, fixing: corrFixBySlug[p.slug] === true })}
+                    onPrimary={() => {
+                      const warning = corrWarningBySlug[p.slug];
+
+                      const override = warning
+                        ? [...new Set([...(corrOverrideBySlug[p.slug] ?? []), warning.key])]
+                        : undefined;
+                      if (override)
+                        setCorrOverrideBySlug((previous) => ({ ...previous, [p.slug]: override }));
+                      corr.mutate({
+                        slug: p.slug,
+                        fixing: corrFixBySlug[p.slug] === true,
+                        override,
+                      });
+                    }}
                   >
                     <div className="r2-correction-fields">
                     {/*
@@ -907,9 +958,10 @@ function PublishedPage() {
                       id={`pub-corr-wrong-${p.slug}`}
                       type="text"
                       value={corrWrongBySlug[p.slug] ?? ""}
-                      onChange={(e) =>
-                        setCorrWrongBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        clearCorrOverride(p.slug);
+                        setCorrWrongBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }));
+                      }}
                       placeholder="The fee was $4,200"
                     />
                     <label htmlFor={`pub-corr-right-${p.slug}`}>What is right</label>
@@ -917,9 +969,10 @@ function PublishedPage() {
                       id={`pub-corr-right-${p.slug}`}
                       type="text"
                       value={corrRightBySlug[p.slug] ?? ""}
-                      onChange={(e) =>
-                        setCorrRightBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        clearCorrOverride(p.slug);
+                        setCorrRightBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }));
+                      }}
                       placeholder="The fee is $2,400"
                     />
                     <ModelPicker
@@ -972,9 +1025,10 @@ function PublishedPage() {
                       id={`pub-corr-note-${p.slug}`}
                       rows={3}
                       value={corrBySlug[p.slug] ?? ""}
-                      onChange={(e) =>
-                        setCorrBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
-                      }
+                      onChange={(e) => {
+                        clearCorrOverride(p.slug);
+                        setCorrBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }));
+                      }}
                       placeholder="What was wrong, and what is right."
                     />
                     {/*
@@ -990,6 +1044,7 @@ function PublishedPage() {
                         checked={corrFixBySlug[p.slug] === true}
                         onChange={(e) => {
                           const opened = e.target.checked;
+                          clearCorrOverride(p.slug);
                           setCorrFixBySlug((prev) => ({ ...prev, [p.slug]: opened }));
                           /*
                             Opening the box puts the story's printed text in it,
@@ -1020,9 +1075,10 @@ function PublishedPage() {
                           id={`pub-corr-body-${p.slug}`}
                           rows={10}
                           value={corrBodyBySlug[p.slug] ?? p.body}
-                          onChange={(e) =>
-                            setCorrBodyBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            clearCorrOverride(p.slug);
+                            setCorrBodyBySlug((prev) => ({ ...prev, [p.slug]: e.target.value }));
+                          }}
                         />
                       </>
                     ) : null}
@@ -1030,6 +1086,11 @@ function PublishedPage() {
                       <span className="astra-preview-kick">Preview · the note as readers will see it</span>
                       <p className="astra-preview-body"><b>Correction, {formatShortDate(new Date())}:</b> {(corrBySlug[p.slug] ?? "").trim() || "—"}</p>
                     </div>
+                    {corrWarningBySlug[p.slug] ? (
+                      <p className="astra-modal-alert" role="status">
+                        {corrWarningBySlug[p.slug]!.sentence}
+                      </p>
+                    ) : null}
                     {note?.kind === "err" ? <p role="alert">{note.text}</p> : null}
                     </div>
                   </Dialog>

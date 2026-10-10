@@ -32,6 +32,17 @@ import {
 } from "./meeting-transcript-choice.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 import { paperSetUpRefusal } from "./paper-settings.ts";
+import { auditOverrides, checkOverride } from "./override.ts";
+
+
+export const OPINION_OVERRIDE_KEYS = {
+  documentsOver20: "opinion:documents-over-20",
+  materialOver20Million: "opinion:material-over-20-million",
+} as const;
+
+/** The number of documents Opinion suggests, and the length it suggests for material. */
+export const OPINION_DOCUMENT_WARN = 20;
+export const OPINION_MATERIAL_WARN = 20_000_000;
 
 /*
   SG1b finding 1: enforce "refuse until set up" at the SHARED COMMIT BOUNDARY.
@@ -497,18 +508,41 @@ export async function commitOpinionForAuthenticatedEditor(
     retryRequestId?: number;
     modelChoice: OpinionModelChoice;
     modelEffort?: ModelEffort | null;
+    /** Audit item 21: keys a warned first call returned. */
+    override?: string[];
   },
   deps: OpinionCommitDeps = {},
 ) {
   const refusal = await paperSetupRefusalFor(input.context.newsroomId, "start an editorial");
   if (refusal) return refusal;
-  if ((input.documentIds?.length ?? 0) > 20 || new Set(input.documentIds ?? []).size !== (input.documentIds?.length ?? 0)) {
+  /*
+    A repeated document is a boundary, not a size the editor may step over: the
+    same file cannot be attached twice.
+  */
+  if (new Set(input.documentIds ?? []).size !== (input.documentIds?.length ?? 0)) {
     return { ok: false as const, error: "Choose up to 20 different documents." };
   }
   const sourceText = String(input.subject ?? "").trim();
   const askedFor = String(input.askedFor ?? "").trim();
-  if (sourceText.length > 20_000_000 || askedFor.length > 20_000_000) {
-    return { ok: false as const, error: "Opinion material exceeds 20 million characters. Split it into separate volumes before starting." };
+
+  const overrideKeys: string[] = [];
+  if ((input.documentIds?.length ?? 0) > OPINION_DOCUMENT_WARN) {
+    const warning = checkOverride(
+      input,
+      OPINION_OVERRIDE_KEYS.documentsOver20,
+      `Opinion attaches up to ${OPINION_DOCUMENT_WARN} documents. Start with these anyway?`,
+    );
+    if (warning) return warning;
+    overrideKeys.push(OPINION_OVERRIDE_KEYS.documentsOver20);
+  }
+  if (sourceText.length > OPINION_MATERIAL_WARN || askedFor.length > OPINION_MATERIAL_WARN) {
+    const warning = checkOverride(
+      input,
+      OPINION_OVERRIDE_KEYS.materialOver20Million,
+      "Opinion material is over 20 million characters. Start with it whole anyway?",
+    );
+    if (warning) return warning;
+    overrideKeys.push(OPINION_OVERRIDE_KEYS.materialOver20Million);
   }
   if (sourceText.length < 6 && !input.documentIds?.length && !input.retryRequestId) {
     return { ok: false as const, error: "Give it a subject, a URL, or a sentence to work from." };
@@ -715,6 +749,23 @@ export async function commitOpinionForAuthenticatedEditor(
     // The job is already durable. Reporting the request as failed here would
     // invite a duplicate paid run, so audit is explicitly best-effort.
     console.error("[opinion] queued request but could not write audit event", error);
+  }
+  /*
+    Audit item 21: only AFTER the request and its job are durable, one
+    `override` audit row per accepted key, naming the limit stepped over and the
+    request it was about. A warned-but-not-accepted call returned above.
+  */
+  if (overrideKeys.length) {
+    try {
+      await auditOverrides(
+        { userId: input.context.userId, newsroomId: input.context.newsroomId },
+        overrideKeys,
+        { kind: "editorial", id: requestId },
+      );
+    } catch (error) {
+      // Same stance as the audit above: durable work is not reported as failed.
+      console.error("[opinion] queued request but could not write override audit event", error);
+    }
   }
   return { ok: true as const, requestId, jobId: job.id, modelChoice: effectiveChoice };
 }

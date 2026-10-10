@@ -132,6 +132,8 @@ export type ReportingNotes = {
   editorialAssignment?: EditorialAssignment;
   /** Full imported claims and qualifications, kept separately from editable direction. */
   importedReport?: string;
+
+  importWarning?: string;
   /**
    * A captured meeting, when this lead came from one.
    *
@@ -187,9 +189,12 @@ export type ReportingNotes = {
 };
 
 export function earlierReportingNotes(
-  notes: Pick<ReportingNotes, "importedReport" | "angle">,
+  notes: Pick<ReportingNotes, "importedReport" | "angle" | "importWarning">,
 ): { label: string; text: string }[] {
   return [
+    ...(notes.importWarning?.trim()
+      ? [{ label: "Imported — check the text", text: notes.importWarning }]
+      : []),
     ...(notes.importedReport?.trim() ? [{ label: "Reporting package", text: notes.importedReport }] : []),
     ...(notes.angle?.trim() ? [{ label: "Angle", text: notes.angle }] : []),
   ];
@@ -337,6 +342,11 @@ export function parseNotes(raw: string | null | undefined): ReportingNotes {
         ? { importedReport: o.importedReport }
         : (o.editorialAssignment as { origin?: string; text?: unknown } | undefined)?.origin === "import" && typeof (o.editorialAssignment as { text?: unknown }).text === "string"
           ? { importedReport: (o.editorialAssignment as { text: string }).text }
+          : {}),
+      // Item 38: the desk-only override warning, read back so a reload and the
+      // editor's next save cannot quietly lose it.
+      ...(typeof o.importWarning === "string" && o.importWarning.trim()
+        ? { importWarning: o.importWarning.slice(0, 400) }
           : {}),
       ...(o.researchScope === "supplied" || o.researchScope === "public" ? { researchScope: o.researchScope } : {}),
       ...(Array.isArray(o.suppliedUrls) ? { suppliedUrls: o.suppliedUrls.filter((u): u is string => typeof u === "string").slice(0, 8) } : {}),
@@ -501,7 +511,8 @@ export function notesHaveMemo(n: ReportingNotes): boolean {
 }
 
 export function notesHaveAnything(n: ReportingNotes): boolean {
-  return notesHaveMemo(n) || n.todo.length > 0 || n.found.length > 0 || n.verify.length > 0 || n.opened.length > 0;
+  return ( notesHaveMemo(n) || n.todo.length > 0 || n.found.length > 0 || n.verify.length > 0 || n.opened.length > 0
+  );
 }
 
 /**
@@ -913,6 +924,9 @@ export function packNotes(notes: ReportingNotes, limit = 16000): string {
     suppliedUrls: work.suppliedUrls,
     editorialAssignment: work.editorialAssignment,
     importedReport: work.importedReport,
+    // Item 38: a shed override warning would read as an import that matched the
+    // paste exactly -- the one thing the note exists to contradict.
+    importWarning: work.importWarning,
     meeting: work.meeting,
     transcriptCitations: work.transcriptCitations,
     // Kept, not shed: it is a gate on publishing, and losing it silently would
@@ -948,7 +962,7 @@ export function mergeCompletedReportingNotes(
     const latest = current.todo.find((existing) => existing.t === row.t && existing.src === row.src);
     todo.push(latest ? { ...row, done: latest.done } : row);
   }
-  const unique = <T,>(rows: T[], key: (row: T) => string): T[] =>
+  const unique = <T>(rows: T[], key: (row: T) => string): T[] =>
     [...new Map(rows.map((row) => [key(row), row])).values()];
   // The cap belongs here too: the desk builds this list under the lead lock and
   // writes it as one row, so it must already be what parseNotes will read back.
