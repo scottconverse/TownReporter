@@ -53,3 +53,37 @@ test('a zero-claim, unchecked, checkable story reads Not checked yet and blocks 
     assert.notEqual(document.querySelector('[data-story-readiness]').dataset.storyReadiness,'not-checked');
   } finally { await act(async()=>root.unmount()); }
 });
+test('a saved not-checked memo defers to the current gate: acknowledged or completed reads Ready with no unchecked block',async()=>{
+  const {document,Event}=installDom(); const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root'));
+  /*
+    A reporting pass may have cached `storyReadiness.state = 'not-checked'` in the
+    memo. Once the CURRENT gate is clear (here: the version is acknowledged), that
+    cached state is stale and must not outlive its reason -- otherwise the chip
+    stays `Not checked yet` forever after the acknowledgement.
+  */
+  const draft={id:8,headline:'Council votes',dek:'A plan',body:'Council approved the $547.5 million budget.',topic:'government',research_json:JSON.stringify({storyReadiness:{version:1,state:'not-checked',openCount:0,totalCount:0,reason:'No claims were recorded for this story, so nothing has been checked.'}})};
+  const base={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]'},draft,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
+  const draw=async(facts)=>{globalThis.screenData={...base,lead:{...base.lead,...facts}};await act(async()=>root.render(h(screen.Route.component,{key:JSON.stringify(facts)})));};
+  const publishButton=()=>[...document.querySelectorAll('button')].find(b=>/^Publish in /.test(b.textContent));
+  try {
+    await draw({uncheckedRecordedClaims:0,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:true,uncheckedExempt:false});
+    const checks=[...document.querySelectorAll('button')].find(b=>/^Checks/.test(b.textContent));
+    await act(async()=>checks.dispatchEvent(new Event('click',{bubbles:true})));
+    const chip=document.querySelector('[data-story-readiness]');
+    assert.notEqual(chip.dataset.storyReadiness,'not-checked','the cached state must not outlive its reason');
+    assert.ok(!chip.textContent.includes('Not checked yet'));
+    assert.ok(!document.body.textContent.includes('No claims were recorded for this story'));
+    assert.equal(publishButton().hasAttribute('disabled'),false,'the acknowledged story prints');
+
+    /* And a completed check for this version clears it the same way. */
+    await draw({uncheckedRecordedClaims:0,uncheckedEvidenceChecked:true,uncheckedStoryAcknowledged:false,uncheckedExempt:false});
+    assert.notEqual(document.querySelector('[data-story-readiness]').dataset.storyReadiness,'not-checked');
+    assert.ok(!document.body.textContent.includes('No claims were recorded for this story'));
+    assert.equal(publishButton().hasAttribute('disabled'),false);
+
+    /* The gate live again outranks the cached state: still unchecked and blocked. */
+    await draw({uncheckedRecordedClaims:0,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:false,uncheckedExempt:false});
+    assert.equal(document.querySelector('[data-story-readiness]').dataset.storyReadiness,'not-checked');
+    assert.equal(publishButton().hasAttribute('disabled'),true);
+  } finally { await act(async()=>root.unmount()); }
+});

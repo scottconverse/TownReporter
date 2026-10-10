@@ -2009,13 +2009,26 @@ function StoryPage() {
     ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON }
     : null;
   const legacyEvidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
+  /*
+    Unit ZC: a cached `not-checked` in the saved memo only means the gate was live
+    when a reporting pass last wrote it. Once the CURRENT gate is clear -- the
+    editor acknowledged, a check completed, claims were recorded, or the body has
+    no checkable fact -- that cached state is stale and must not outlive its
+    reason, or the chip would read `Not checked yet` after the acknowledgement. So
+    a saved `not-checked` degrades to the ordinary ready presentation (no invented
+    "facts matched" line for a zero-claim story) until the gate is live again.
+  */
+  const legacyReadinessCurrent =
+    legacyReadiness.state === "not-checked"
+      ? { state: "ready" as const, openCount: 0, totalCount: 0, reason: "Ready to publish." }
+      : legacyReadiness;
   const draftReadiness = data.draft
     ? uncheckedReadiness ??
       (hasAiJudgments
         ? editorStoryState(blockers, evidenceState.toReview)
         : legacyEvidenceBlocker
           ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence }
-          : legacyReadiness)
+          : legacyReadinessCurrent)
     : uncheckedReadiness ?? { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const readiness = readinessDot(
     writerIsReady({
