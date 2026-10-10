@@ -160,12 +160,22 @@ async function loadModule(file, label, imports, chain) {
  * matches prose in a comment that happens to read `from "..."` and a
  * `join(", ")` argument, and those are not imports.
  */
+function moduleSpecifiers(source) {
+  const ast = ts.createSourceFile("fixture.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set();
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly) ||
+        (ts.isExportDeclaration(node) && !node.isTypeOnly)) {
+      if (node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) names.add(node.moduleSpecifier.text);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+               node.arguments[0] && ts.isStringLiteral(node.arguments[0])) names.add(node.arguments[0].text);
+    ts.forEachChild(node, visit);
+  };
+  visit(ast);
+  return [...names];
+}
 function relativeSpecifiers(source) {
-  return [
-    ...new Set(
-      [...source.matchAll(/(?:from|import)\s*"(\.[^"\s]*)"/g)].map((match) => match[1]),
-    ),
-  ];
+  return moduleSpecifiers(source).filter(name => name.startsWith("."));
 }
 
 export function transpileToUrl(code, fileName, imports = {}) {
@@ -189,15 +199,7 @@ export function transpileToUrl(code, fileName, imports = {}) {
  */
 function rewriteSpecifiers(output, fileName, imports) {
   let rewritten = output;
-  const specifiers = [
-    ...new Set(
-      // One word, no whitespace: `from "..."` in a comment and `join(", ")`
-      // are not imports, and a `[^"]+` group collects both.
-      [...output.matchAll(/(?:from|import\()\s*"([^"\s]+)"/g)]
-        .map((match) => match[1])
-        .filter((specifier) => !/^(data|file|node):/.test(specifier)),
-    ),
-  ];
+  const specifiers = moduleSpecifiers(output);
   const unresolved = [];
   for (const specifier of specifiers) {
     let mapped = imports[specifier];

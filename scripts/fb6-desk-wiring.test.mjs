@@ -48,7 +48,7 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
   const stateUrl = moduleUrl(
     await readFile(new URL("../src/components/job-card-state.ts", import.meta.url), "utf8"),
     "job-card-state.ts",
-    { "@/lib/news/job-progress": jobProgress, "@tanstack/react-query": reactQuery,
+    { "@/lib/news/job-progress": jobProgress, "@/components/scoped-actions": jobProgress, "@tanstack/react-query": reactQuery,
       "../lib/desk/scan-policy-refresh.ts": new URL("../src/lib/desk/scan-policy-refresh.ts", import.meta.url).href },
   );
   const cardUrl = moduleUrl(
@@ -57,7 +57,7 @@ test("a running card carries the Cancel the Drafts row needs", async () => {
     {
       "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
       react: React,
-      "@/lib/news/job-progress": jobProgress,
+      "@/lib/news/job-progress": jobProgress, "@/components/scoped-actions": jobProgress,
       "@tanstack/react-query": reactQuery,
       "./job-card-state": stateUrl,
     },

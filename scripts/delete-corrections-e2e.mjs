@@ -1193,8 +1193,9 @@ async function main() {
     .getByRole("button", { name: "Save judgment" })
     .click();
   await reloadedReview
-    .getByText("A contradiction needs cited contrary captured evidence and a reason.")
+    .getByText("This item has no readable cited contrary captured record. Record it as your own judgment, outside the captures?")
     .waitFor();
+  await reloadedReview.getByRole("button", { name: "Save anyway", exact: true }).waitFor();
   await page.getByLabel("Story", { exact: true }).fill(`TEST FIXTURE unsaved body ${stamp}`);
   if (
     !(await reloadedReview
