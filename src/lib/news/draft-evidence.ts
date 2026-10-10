@@ -43,40 +43,47 @@ export function evidenceNeedsReview(draft: Partial<DraftRow>, body: string): boo
   return review?.required === true || (hasEvidence && normalized(body) !== normalized(draft.body ?? ""));
 }
 /**
- * `research_json` without the derived style record in it (unit PUB1).
+ * `research_json` without the derived records that must never be part of the
+ * draft's identity.
  *
- * WHY THE DRAFT'S IDENTITY MUST NOT SEE IT. `evidenceReviewToken` is what a
- * judgment, a section confirmation and "I accept these unreviewed claims" are
- * all recorded against, so it answers "is this the draft version the person
- * was reading?". The style record is NOT part of that answer: it is
- * `auditDraft`'s pure measurement OF the headline, dek and body, and all three
- * are already in the token. It is also written by the ordinary editor save --
- * including the save the Publish press makes before it prints -- so a token
- * that hashes it moves every time a draft is saved, even when not one
- * character of the story changed. That was the live bug: the editor accepted
- * the claims for the draft on screen, pressed Publish, the press saved
- * identical text, the acceptance no longer matched, and the server refused the
- * print in a sentence drawn far from the button.
+ * WHY THE DRAFT'S IDENTITY MUST NOT SEE THEM. `evidenceReviewToken` is what a
+ * judgment, a section confirmation, "I accept these unreviewed claims" and the
+ * zero-claims completion stamp are all recorded against, so it answers "is this
+ * the draft version the person was reading?". Two keys are pure functions of
+ * other fields the token already carries and are dropped here:
  *
- * WHAT IS NOT WEAKENED. This drops one key from `research_json` and nothing
- * else: the body, headline, dek, topic, sources, provenance, findings,
- * unanswered list and transcript citations are all still hashed, so an edit
- * that a person could make still takes an acceptance back.
+ *   - `styleAudit` (unit PUB1): `auditDraft`'s measurement OF the headline, dek
+ *     and body, written by the ordinary editor save -- including the save the
+ *     Publish press makes before it prints -- so hashing it moved every token on
+ *     every save. That was the live bug: the editor accepted the claims for the
+ *     draft on screen, pressed Publish, the press saved identical text, and the
+ *     server refused in words drawn far from the button.
+ *   - `evidenceReviewVersion` (unit ZC): the completion stamp itself, which IS
+ *     this token's fingerprint. Hashing it would make the stamp a function of
+ *     itself -- the stamp could never be written without moving the identity it
+ *     is written to match.
  *
- * A row that has no style record is returned byte for byte, so tokens stored
- * before this change -- recorded confirmations and acceptances -- still match
- * and nothing has to be confirmed again after the upgrade.
+ * WHAT IS NOT WEAKENED. This drops those two keys and nothing else: the body,
+ * headline, dek, topic, sources, provenance, findings, unanswered list and
+ * transcript citations are all still hashed, so an edit a person could make
+ * still takes a confirmation, an acceptance or a completion back.
+ *
+ * A row that has neither key is returned byte for byte, so tokens stored before
+ * either change -- recorded confirmations, acceptances and completions -- still
+ * match and nothing has to be confirmed again after the upgrade.
  */
-function researchJsonWithoutStyleAudit(raw: string | null | undefined): string | null | undefined {
+function researchJsonWithoutDerivedKeys(raw: string | null | undefined): string | null | undefined {
   const text = raw ?? "{}";
   const parsed = memo(text);
-  if (!parsed || !(STYLE_AUDIT_KEY in parsed)) return raw;
-  const { [STYLE_AUDIT_KEY]: _derived, ...material } = parsed;
+  if (!parsed || (!(STYLE_AUDIT_KEY in parsed) && !(EVIDENCE_REVIEW_VERSION_KEY in parsed))) return raw;
+  const { [STYLE_AUDIT_KEY]: _derivedStyle, [EVIDENCE_REVIEW_VERSION_KEY]: _derivedVersion, ...material } = parsed;
   return JSON.stringify(material);
 }
+/** The key a completed evidence check stamps its own draft identity into. */
+export const EVIDENCE_REVIEW_VERSION_KEY = "evidenceReviewVersion";
 /** A review applies to the exact evidence the editor saw, not a newer draft. */
 export function evidenceReviewToken(draft: Partial<DraftRow>): string {
-  return JSON.stringify([draft.id, draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, researchJsonWithoutStyleAudit(draft.research_json), transcriptCitationsFromResearch(draft.research_json)]);
+  return JSON.stringify([draft.id, draft.headline, draft.dek, draft.topic, draft.body, draft.source_urls, draft.provenance_json, draft.found_note, draft.unanswered, researchJsonWithoutDerivedKeys(draft.research_json), transcriptCitationsFromResearch(draft.research_json)]);
 }
 export function reconcileDraftEvidence(draft: Partial<DraftRow>, body: string, decision?: EvidenceDecision) {
   const previous = memo(draft.research_json);

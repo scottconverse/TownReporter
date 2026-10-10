@@ -104,4 +104,30 @@ describe("BeforeYouCanPublish", () => {
     assert.match(html, /Override Longmont Leader/);
     assert.equal(pressed.length, 0, "rendering must not press anything");
   });
+
+  it("prints the zero-claims row with its exact sentence and both presses (unit ZC)", () => {
+    const html = render({ uncheckedStory: true });
+    assert.match(html, /No claims were recorded for this story, so nothing has been checked\./);
+    assert.match(html, /press &#x27;I checked this story myself&#x27;/);
+    assert.match(html, /Run the evidence check/);
+    assert.match(html, /I checked this story myself/);
+  });
+
+  it("draws the acknowledgement press working and failed when its mutation says so (unit ZC)", () => {
+    const blockers = publishBlockers({ ...CLEAN, uncheckedStory: true });
+    const working = renderToStaticMarkup(
+      createElement(BeforeYouCanPublish, { blockers, onAct: () => {}, busyTarget: "acknowledge-unchecked" }),
+    );
+    assert.match(working, /data-phase="working"/);
+    assert.match(working, /aria-busy="true"/);
+    const failed = renderToStaticMarkup(
+      createElement(BeforeYouCanPublish, {
+        blockers,
+        onAct: () => {},
+        failedTarget: "acknowledge-unchecked",
+        failureReason: "The draft changed since this page was drawn.",
+      }),
+    );
+    assert.match(failed, /The draft changed since this page was drawn\./);
+  });
 });

@@ -3,6 +3,7 @@ import { aiEvidenceReadiness, judgeEvidenceClaims, quoteCoversClaim, type AiEvid
 import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
+import { topicConfirmationFingerprint } from "./notes.ts";
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
 import { enqueueJob, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob } from "./jobs.ts";
 import { parseClaims, parseFindings, serializeFindings, REPORT_EDIT_SYSTEM, STORY_FORMS, type ReportChat } from "./report.ts";
@@ -325,7 +326,16 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     const editedBody = storableText(edited.body);
     const [saved] = await tx<DraftRow>`insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json,model_body)
       values(${job.user_id},${job.newsroom_id},${draft.lead_id},${storableText(edited.headline)},${storableText(edited.dek)},${editedBody},${draft.topic},${sourceUrls},${storableText(integrityNotes)},${provenanceJson},${form},${serializeFindings(findings)},${JSON.stringify(sanitizeJsonLeaves(unanswered))},${reconcileResearchJson},${editedBody}) returning *`;
-    const carriedResearchJson = JSON.stringify(sanitizeJsonLeaves(JSON.parse(carryReconciledEvidenceJudgments(draft, saved, explicitlyJudged))));
+    const carried = sanitizeJsonLeaves(JSON.parse(carryReconciledEvidenceJudgments(draft, saved, explicitlyJudged))) as Record<string, unknown>;
+    /* Unit ZC: the identity of the draft THIS run saved, over the FINAL carried
+       memo (which may add judgment rows), so a later edit takes the completed
+       check back in the zero-claims case. `evidenceReviewToken` ignores its own
+       stamp (and the derived style record), so writing it does not move the
+       identity it is written to match. */
+    const carriedResearchJson = JSON.stringify({
+      ...carried,
+      evidenceReviewVersion: topicConfirmationFingerprint(evidenceReviewToken({ ...saved, research_json: JSON.stringify(carried) })),
+    });
     await tx`update drafts set research_json=${carriedResearchJson} where id=${saved.id} and newsroom_id=${job.newsroom_id}`;
     // The Done card's Open button, written in the same statement as the receipt
     // (0099) so a completed reconcile row is never briefly linkless. It points

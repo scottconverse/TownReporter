@@ -4,7 +4,7 @@ import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
 import type { DraftGroundingRow } from "./draft-specifics.ts";
-import { evidenceReviewToken } from "./draft-evidence.ts";
+import { EVIDENCE_REVIEW_VERSION_KEY, evidenceReviewToken } from "./draft-evidence.ts";
 import { sha256 } from "./url-guard.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { ProvenanceItem, StoryClaim } from "./report.ts";
@@ -273,6 +273,14 @@ export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
     judgments about a draft the editor never touched.
   */
   delete research.styleAudit;
+  /*
+    Unit ZC: the completed-check identity stamp is a derived receipt of the draft
+    THIS version is, written by a reconciliation pass and by an edit that moves the
+    draft on. Like the style audit, it carries nothing the editor judges here, and
+    counting it would throw away carried judgments after every reconcile. It is
+    excluded by name so judgments recorded against the content still travel.
+  */
+  delete research[EVIDENCE_REVIEW_VERSION_KEY];
   return JSON.stringify([
     draft.id ?? null,
     draft.headline ?? "",

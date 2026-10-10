@@ -135,6 +135,7 @@ import {
   rowId,
   runScanInput,
   acceptUnreviewedClaimsInput,
+  acknowledgeUncheckedInput,
   slugInput,
   sourceStatusInput,
   suggestedSourceReviewInput,
@@ -156,8 +157,14 @@ import {
 import {
   evidenceNeedsReview,
   evidenceReviewToken,
+  isImportedText,
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
+import {
+  UNCHECKED_STORY_REASON,
+  evidenceCheckCoversCurrentVersion,
+  uncheckedStoryNeedsCheck,
+} from "./unchecked-story-gate.ts";
 import { webSearch } from "./search-web";
 import { absenceClaims } from "./absence-gate";
 import {
@@ -1210,6 +1217,32 @@ export const getLead = createServerFn({ method: "GET" })
         ? notes.unreviewedClaimsConfirmation.count
         : 0;
     /*
+      Unit ZC: the zero-claims gate, decided the same way `performPublish` decides
+      it. `blocked` reads the page's publish blocker; `acknowledged` lets the desk
+      say the acknowledgement is recorded. Both come from the draft's own memo --
+      `evidenceCheckCoversCurrentVersion` reads the completion stamp and the body,
+      so an edit reopens the gate for the page exactly as it does for the server.
+    */
+    const uncheckedStoryAcknowledged =
+      Boolean(evidenceToken) &&
+      notes.uncheckedStoryConfirmation?.token === topicConfirmationFingerprint(evidenceToken);
+    /*
+      Unit ZC: the inputs of the zero-claims gate, so the PAGE can decide it over
+      the CURRENT (possibly unsaved) fields rather than the saved row alone -- an
+      editor who types a dollar figure and has not saved must still see the chip
+      and the block. `recordedClaims` is the run's own output; `evidenceChecked`
+      is whether a completed check covers the SAVED version (the completion stamp
+      is a server identity the client cannot recompute); `acknowledged` is whether
+      the acknowledgement on file names the saved version.
+    */
+    const uncheckedRecordedClaims = drafts[0]
+      ? (await unreviewedClaimsGate(owned(context), id)).recordedClaims
+      : 0;
+    const uncheckedEvidenceChecked = drafts[0] ? evidenceCheckCoversCurrentVersion(drafts[0]) : false;
+    const uncheckedExempt = drafts[0]
+      ? isImportedText(drafts[0]) || drafts[0].form === "editorial"
+      : false;
+    /*
       The named-outlet check, run for display only -- performPublish decides.
 
       Same inputs the publish gate uses, so the desk and the refusal cannot
@@ -1234,6 +1267,10 @@ export const getLead = createServerFn({ method: "GET" })
       evidenceToken,
       topicConfirmed,
       unreviewedClaimsAcceptedCount,
+      uncheckedStoryAcknowledged,
+      uncheckedRecordedClaims,
+      uncheckedEvidenceChecked,
+      uncheckedExempt,
       namedOutlets,
       outletOverrides,
       articleSlug: live[0]?.slug ?? null,
@@ -5462,7 +5499,7 @@ export async function unreviewedClaimsGate(
   newsroomId: number,
   leadId: number,
   deps: UnreviewedClaimDeps = {},
-): Promise<{ outstanding: number; evidenceToken: string }> {
+): Promise<{ outstanding: number; evidenceToken: string; recordedClaims: number }> {
   const { claimsNeedingReview } = await import("./evidence-check-state.ts");
   const load =
     deps.loadReview ??
@@ -5475,7 +5512,7 @@ export async function unreviewedClaimsGate(
     review = await load(newsroomId, leadId);
   } catch (error) {
     const { isUnreadableFindingsError } = await import("./finding-evidence-review.ts");
-    if (isUnreadableFindingsError(error)) return { outstanding: 0, evidenceToken: "" };
+    if (isUnreadableFindingsError(error)) return { outstanding: 0, evidenceToken: "", recordedClaims: 0 };
     throw error;
   }
   return {
@@ -5487,6 +5524,14 @@ export async function unreviewedClaimsGate(
       review.civicReporting ?? false,
     ),
     evidenceToken: review.evidenceToken,
+    /*
+      Unit ZC: the claims the run actually RECORDED -- findings and reported and
+      manual claims, judged or not. The grounding rows are DETECTED specifics
+      (a date or a vote the audit flagged), not claims the check raised; a draft
+      with a flagged specific and no recorded claim is exactly the zero-claims
+      state this gate exists for, so they are deliberately not counted here.
+    */
+    recordedClaims: review.rows.length + review.claimRows.length + review.manualClaimRows.length,
   };
 }
 
@@ -5497,6 +5542,58 @@ export async function unreviewedClaimCount(
   deps: UnreviewedClaimDeps = {},
 ): Promise<number> {
   return (await unreviewedClaimsGate(newsroomId, leadId, deps)).outstanding;
+}
+
+/** The draft a lead's gate reads, in the column order every reader uses. */
+async function latestDraftForLead(newsroomId: number, leadId: number): Promise<DraftRow | undefined> {
+  const [row] = await getSql().then((sql) =>
+    sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered, research_json
+      from drafts where lead_id = ${leadId} and newsroom_id = ${newsroomId}
+      order by updated_at desc, id desc limit 1
+    `);
+  return row;
+}
+
+/**
+ * UNIT ZC -- THE ZERO-RECORDED-CLAIMS GATE, decided once on the server.
+ *
+ * The evidence check's own output (`draft.found_note`, `reportedClaims`,
+ * `manualClaims` through `unreviewedClaimsGate`) counts how many claims the run
+ * raised. When that is zero AND no completed check covers this version AND the
+ * body carries a fact a person would check, the story is unchecked, not clear.
+ * The decision is `uncheckedStoryNeedsCheck`, the same pure function the desk
+ * and the readiness chip use, so the server's refusal and the page agree.
+ *
+ * The acknowledgement is read from `leads.notes_json`, against
+ * `topicConfirmationFingerprint(evidenceReviewToken(draft))`: an edit moves the
+ * token and takes the acknowledgement back, exactly like the section
+ * confirmation and the unreviewed-claims acceptance beside it.
+ */
+export async function uncheckedStoryGate(
+  newsroomId: number,
+  leadId: number,
+  deps: UnreviewedClaimDeps = {},
+): Promise<{ blocked: boolean; reason: string; evidenceToken: string }> {
+  const review = await unreviewedClaimsGate(newsroomId, leadId, deps);
+  const draft = await latestDraftForLead(newsroomId, leadId);
+  if (!draft) return { blocked: false, reason: "", evidenceToken: review.evidenceToken };
+  const identity = topicConfirmationFingerprint(evidenceReviewToken(draft));
+  const [lead] = await getSql().then((sql) =>
+    sql<{ notes_json: string | null }>`
+      select notes_json from leads where id = ${leadId} and newsroom_id = ${newsroomId} limit 1
+    `);
+  const acknowledged = parseNotes(lead?.notes_json).uncheckedStoryConfirmation?.token === identity;
+  const exempt = isImportedText(draft) || draft.form === "editorial";
+  const decision = uncheckedStoryNeedsCheck({
+    recordedClaims: review.recordedClaims,
+    evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(draft),
+    body: stripReporterNotebook(draft.body ?? ""),
+    acknowledgedForVersion: acknowledged,
+    exempt,
+  });
+  return { ...decision, evidenceToken: review.evidenceToken };
 }
 
 /**
@@ -5616,6 +5713,88 @@ export const acceptUnreviewedClaims = createServerFn({ method: "POST" })
   .validator((input: unknown) => acceptUnreviewedClaimsInput.parse(input))
   .handler(async ({ context, data }) =>
     performAcceptUnreviewedClaims(context, data.leadId, data.evidenceToken),
+  );
+
+/**
+ * "I checked this story myself" (unit ZC).
+ *
+ * The second honest answer to the zero-claims gate: the editor read a body with
+ * a checkable fact in it against their own sources. The press carries the DRAFT
+ * identity the page was holding (`data.evidenceToken`); the server compares it
+ * against the locked current draft's `evidenceReviewToken`, so a stale tab
+ * cannot acknowledge a version it never saw, and an edit takes the
+ * acknowledgement back. It writes `leads.notes_json.uncheckedStoryConfirmation`
+ * (who, when, which version) and one `audit_events` row.
+ */
+export async function performAcknowledgeUnchecked(
+  context: { userId: string; newsroomId?: number },
+  leadId: number,
+  evidenceToken: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  /*
+    The gate is computed BEFORE the transaction, where the pooled connection and
+    the review load live (a `getSql()` read inside the PGlite transaction
+    deadlocks it). It only accepts a press when the zero-claims gate is LIVE for
+    this lead: a draft with recorded claims, or with a completed check, or with
+    an already-recorded acknowledgement has nothing to acknowledge.
+  */
+  let gate: { blocked: boolean; reason: string; evidenceToken: string };
+  try {
+    gate = await uncheckedStoryGate(owned(context), leadId);
+  } catch {
+    return { ok: false as const, error: ACCEPT_COULD_NOT_CHECK };
+  }
+  if (!gate.blocked) return { ok: false as const, error: gate.reason || "There is nothing to check here." };
+  const result = await withTransaction(async (sql) => {
+    const rows = await sql<{ notes_json: string | null }>`
+      select notes_json from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)} for update
+    `;
+    if (!rows[0]) return { ok: false as const, error: "Lead not found" };
+    const [row] = await sql<DraftRow>`
+      select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+             provenance_json, form, found_note, unanswered, research_json
+      from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
+      order by updated_at desc, id desc limit 1
+    `;
+    if (!row) return { ok: false as const, error: "There is no draft to acknowledge anything for." };
+    /* The editor's screen carried the draft it was reading. A stale tab must not
+       acknowledge words it never saw. */
+    if (!evidenceToken || evidenceToken !== evidenceReviewToken(row)) {
+      return {
+        ok: false as const,
+        error:
+          "The draft changed since this page was drawn, so nothing was acknowledged. Reload the story and read it again.",
+      };
+    }
+    const notes = parseNotes(rows[0].notes_json);
+    notes.uncheckedStoryConfirmation = {
+      token: topicConfirmationFingerprint(evidenceReviewToken(row)),
+      at: new Date().toISOString(),
+      by: context.userId,
+    };
+    await sql`
+      update leads set notes_json = ${packNotes(notes)}
+      where id = ${leadId} and newsroom_id = ${owned(context)}
+    `;
+    return { ok: true as const };
+  });
+  if (!result.ok) return result;
+  await audit(
+    context.userId,
+    "publish-unchecked-acknowledged",
+    `Lead ${leadId}: editor confirmed they checked this story against their sources`,
+    owned(context),
+    { kind: "leads", id: leadId },
+  );
+  return result;
+}
+
+export const acknowledgeUncheckedStory = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((input: unknown) => acknowledgeUncheckedInput.parse(input))
+  .handler(async ({ context, data }) =>
+    performAcknowledgeUnchecked(context, data.leadId, data.evidenceToken),
   );
 
 /**
@@ -5966,11 +6145,40 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     scripted call all route straight past it -- so the gate is here, and the
     desk's blocker is the sentence that tells the editor this one exists.
   */
-  let outstandingClaims: number;
+  let gate: { outstanding: number; evidenceToken: string; recordedClaims: number };
   try {
-    outstandingClaims = await unreviewedClaimCount(owned(context), leadId, deps);
+    gate = await unreviewedClaimsGate(owned(context), leadId, deps);
   } catch {
     return { ok: false as const, error: PUBLISH_COULD_NOT_CHECK };
+  }
+  const outstandingClaims = gate.outstanding;
+  /*
+    ── THE CLAIMS NOBODY RECORDED, SO NOBODY CHECKED (UNIT ZC) ────────────────
+
+    A run that recorded NO claims leaves the unreviewed count at zero, so a story
+    nothing has ever been run against -- with a dollar figure, a date or a vote in
+    it -- used to print with no gate at all. This is checked FIRST, on the single
+    review read above: `recordedClaims` counts the run's own output and is
+    independent of the review warnings, so a draft with only flagged grounding
+    specifics and an acceptance covering those warnings is still refused here --
+    the sentence the editor needs is about the check that never ran, not the
+    warnings that have an answer. The rule is `uncheckedStoryNeedsCheck`, the same
+    one the desk's blocker and the readiness chip read, and the sentence is one
+    constant, so the page and this refusal cannot disagree.
+  */
+  {
+    const acknowledged =
+      parseNotes(notesRows[0]?.notes_json).uncheckedStoryConfirmation?.token ===
+      topicConfirmationFingerprint(evidenceReviewToken(row));
+    const decision = uncheckedStoryNeedsCheck({
+      recordedClaims: gate.recordedClaims,
+      evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(row),
+      /* The detector reads the PUBLIC story text (see the loader's copy). */
+      body: stripReporterNotebook(row.body ?? ""),
+      acknowledgedForVersion: acknowledged,
+      exempt: isImportedText(row) || row.form === "editorial",
+    });
+    if (decision.blocked) return { ok: false as const, error: UNCHECKED_STORY_REASON };
   }
   if (outstandingClaims > 0) {
     const acceptance = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation;

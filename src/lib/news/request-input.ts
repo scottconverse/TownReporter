@@ -832,6 +832,17 @@ export const acceptUnreviewedClaimsInput = z.object({
   leadId: rowId,
   evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
 });
+/**
+ * Unit ZC: the zero-claims acknowledgement press. It carries the DRAFT identity
+ * the editor's screen was holding (`evidenceReviewToken(draft)`, the page's
+ * `data.evidenceToken`), not the resolved review's own token: the server
+ * compares it against the locked current draft, so a stale tab cannot
+ * acknowledge words it never saw.
+ */
+export const acknowledgeUncheckedInput = z.object({
+  leadId: rowId,
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
+});
 export const claimEmail = z.string().max(LIMITS.email).catch("");
 /**
  * Unit CJ (0.6.80): the first-owner setup code, typed with or without
