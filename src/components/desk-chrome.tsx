@@ -20,6 +20,8 @@ import { useAppearance } from "@/lib/appearance-context";
 */
 import { NewStoryDialog } from "@/components/dialogs";
 import { DeskToaster } from "@/components/desk-toaster";
+import { WarningConsentHost } from "@/components/warning-consent-host";
+import { deskWarningConsent } from "@/components/editor-warning-consent";
 
 import { Plus, Menu, X, ArrowUpRight } from "lucide-react";
 import { jobHeadline } from "@/components/desk-jobs";
@@ -650,6 +652,14 @@ export function DeskShell({
         speak. See `desk-toaster.tsx` for its position and z-index.
       */}
       <DeskToaster />
+      {/*
+        Scott's rule, outside Publish: the one consent surface every scoped
+        press shares. A server handle answers `{ok:false, warning}`, the wrapper
+        (`editor-warning-consent.ts`) opens this, and only the editor's explicit
+        "…anyway" press lets the SAME request run again with `override:[key]`.
+        Mounted here, beside the toaster, so every desk screen gets it once.
+      */}
+      <WarningConsentHost channel={deskWarningConsent()} />
     </div>
   );
 }

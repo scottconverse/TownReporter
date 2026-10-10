@@ -1,3 +1,6 @@
+import { requestDraftReconciliationFn } from "@/components/scoped-actions";
+import { addLead } from "@/components/scoped-actions";
+import { openDarkInvestigation, fileLead, writeStoryFromInput } from "@/components/scoped-actions";
 /**
  * The editor's new dialogs (Unit BK) -- the shells.
  *
@@ -45,27 +48,11 @@ import { ModelPicker as SharedModelPicker } from "@/components/model-picker";
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 import { dialogPressProps } from "@/lib/news/dialog-press";
-import { openDarkInvestigation } from "@/lib/news/dark";
-import {
-  addSource,
-  addSourcesBulk,
-  fileLead,
-  findPasteDuplicate,
-  listSources,
-  saveDraft,
-  suggestHeadlines,
-  writeStoryFromInput,
-} from "@/lib/news/desk";
+
+import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
 import type { DuplicateWarning } from "@/lib/news/import-review";
-import { requestDraftReconciliationFn } from "@/lib/news/draft-reconcile-actions";
-import {
-  addLead,
-  chooseHeadline,
-  findSources,
-  holdLead,
-  sourceKillPattern,
-  weaveIntoStory,
-} from "@/lib/news/editor-dialog-actions";
+
+import { chooseHeadline, findSources, holdLead, sourceKillPattern, weaveIntoStory } from "@/lib/news/editor-dialog-actions";
 import {
   addSourcesLabel,
   previewSources,

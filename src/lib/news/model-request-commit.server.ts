@@ -4,8 +4,8 @@ import { siteUrl } from "../paper.ts";
 import { probeProvider } from "./ai.ts";
 import { assertHttpUrl } from "./url-guard.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
-import { assertRate, audit } from "./ops.ts";
-import { enqueueJob, findOpenJob, kickJobs, setJobFailoverNote, setJobStage } from "./jobs.ts";
+import { assertRate, checkRate, recordDeskRun, audit } from "./ops.ts";
+import { enqueueJob, findOpenJob, kickJobs, requestJobCancel, setJobFailoverNote, setJobStage } from "./jobs.ts";
 import { scanPreflight } from "./preflight.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
@@ -31,7 +31,8 @@ import {
   defaultMeetingTranscriptArtifactId,
 } from "./meeting-transcript-choice.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
-import { paperSetUpRefusal } from "./paper-settings.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
+import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
 
 /*
   SG1b finding 1: enforce "refuse until set up" at the SHARED COMMIT BOUNDARY.
@@ -53,8 +54,8 @@ import { paperSetUpRefusal } from "./paper-settings.ts";
   Nothing is enqueued, no rate unit is charged and no provider is probed before
   this line.
 */
-async function paperSetupRefusalFor(newsroomId: number, action: string) {
-  const refusal = await paperSetUpRefusal(newsroomId, action);
+async function paperSetupRefusalFor(context: AuthenticatedEditorContext, action: string, override?: readonly string[]) {
+  const refusal = await paperSetupWarning(context, override, action);
   if (refusal === null) return null;
   /*
     The same fields the other refusals beside it carry, so a caller that reads
@@ -62,8 +63,7 @@ async function paperSetupRefusalFor(newsroomId: number, action: string) {
     `retryable: true` is honest: press it again once setup is finished.
   */
   return {
-    ok: false as const,
-    error: refusal,
+    ...refusal,
     detail: "",
     retryable: true,
     // Present-and-undefined so the union keeps the shape every caller narrows
@@ -73,6 +73,10 @@ async function paperSetupRefusalFor(newsroomId: number, action: string) {
     jobId: undefined,
     pending: undefined,
   };
+}
+
+function commitWarning(warning: EditorWarningResult, kind?: "model-conflict", modelChoice?: ReturnType<typeof effectiveStoryModelChoice>, jobId?: number) {
+  return { ...warning, kind, modelChoice, jobId, pending: undefined, detail: "", retryable: true };
 }
 
 async function resolveTechnicalPreflight(
@@ -110,6 +114,8 @@ export type AuthenticatedEditorContext = {
 };
 
 export type StoryDraftCommitDeps = {
+  /** Trusted server preflight for a composite file-and-draft action. */
+  ratePreflight?: boolean;
   probeProvider?: typeof probeProvider;
   getSql?: typeof getSql;
   assertRate?: typeof assertRate;
@@ -124,6 +130,7 @@ export type StoryDraftCommitDeps = {
 export async function commitStoryDraftForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
+    override?: string[];
     leadId: number;
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
@@ -139,7 +146,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
   },
   deps: StoryDraftCommitDeps = {},
 ) {
-  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
+  const refusal = await paperSetupRefusalFor(input.context, "draft this story", input.override);
   if (refusal) return refusal;
   const sql = await (deps.getSql ?? getSql)();
   const leads = await sql<{
@@ -153,20 +160,31 @@ export async function commitStoryDraftForAuthenticatedEditor(
   `;
   if (!leads[0]) return { ok: false as const, error: "Lead not found" };
   if (leads[0].status === "killed") {
-    return { ok: false as const, error: "Restore this lead before drafting." };
+    const warning = await editorWarning(input.context, input.override, "lead-killed-draft", "This lead was killed. Drafting it will put it back on the desk.", { kind: "lead", id: input.leadId });
+    if (warning) return commitWarning(warning);
   }
 
   let meetingArtifactId: number | null = null;
+  let meetingVideoId: string | null = null;
   if (leads[0].meeting_lead_purpose === "transcript-story" && leads[0].meeting_video_id) {
     const choices = await loadMeetingTranscriptChoices(sql, input.context.newsroomId, leads[0].meeting_video_id);
     const requestedArtifactId = input.meetingArtifactId ?? defaultMeetingTranscriptArtifactId(choices)
       ?? (leads[0].meeting_artifact_id == null ? null : Number(leads[0].meeting_artifact_id));
     if (requestedArtifactId != null && !choices.some((choice) => choice.artifactId === requestedArtifactId)) {
-      return { ok: false as const, error: meetingTranscriptSelectionRefused };
+      const [artifact] = await sql<{ id: number; video_id: string }>`select id,video_id from meeting_transcript_artifacts where id=${requestedArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
+      if (!artifact) return { ok: false as const, error: "That transcript is not in this newsroom." };
+      const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", meetingTranscriptSelectionRefused, { kind: "lead", id: input.leadId });
+      if (warning) return commitWarning(warning);
+      meetingVideoId = artifact.video_id;
     }
     meetingArtifactId = requestedArtifactId;
   } else if (input.meetingArtifactId != null) {
-    return { ok: false as const, error: noMeetingTranscriptToChoose };
+    const [artifact] = await sql<{ id: number; video_id: string }>`select id,video_id from meeting_transcript_artifacts where id=${input.meetingArtifactId} and newsroom_id=${input.context.newsroomId} and artifact_type='transcript'`;
+    if (!artifact) return { ok: false as const, error: "That transcript is not in this newsroom." };
+    const warning = await editorWarning(input.context, input.override, "transcript-selection-mismatch", noMeetingTranscriptToChoose, { kind: "lead", id: input.leadId });
+    if (warning) return commitWarning(warning);
+    meetingArtifactId = input.meetingArtifactId;
+    meetingVideoId = artifact.video_id;
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
@@ -202,33 +220,29 @@ export async function commitStoryDraftForAuthenticatedEditor(
   });
   if (open) {
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
+    let restart = false;
     if (persistedChoice !== effectiveChoice || (open.research_scope ?? "public") !== researchScope) {
-      return {
-        ok: false as const,
-        kind: "model-conflict" as const,
-        error: `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Open it to watch that run finish before changing the model or drafting scope.`,
-        modelChoice: persistedChoice,
-        jobId: open.id,
-      };
+      const warning = await editorWarning(input.context, input.override, "model-change-running", `This lead is already drafting with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      if (warning) return commitWarning(warning, "model-conflict", persistedChoice, open.id);
+      restart = true;
     }
     if (meetingArtifactId != null) {
       let openArtifactId: number | null = null;
-      try {
-        const receipt = JSON.parse(open.result_json || "{}") as { meetingArtifactId?: unknown };
-        if (Number.isInteger(receipt.meetingArtifactId)) openArtifactId = Number(receipt.meetingArtifactId);
-      } catch { /* an older run has no transcript selection */ }
+      try { openArtifactId = JSON.parse(open.result_json || "{}").meetingArtifactId ?? null; } catch { /* older receipt */ }
       if (openArtifactId !== meetingArtifactId) {
-        return { ok: false as const, error: meetingTranscriptRunConflict };
+        const warning = await editorWarning(input.context, input.override, "transcript-run-conflict", meetingTranscriptRunConflict, { kind: "job", id: open.id });
+        if (warning) return commitWarning(warning);
+        restart = true;
       }
     }
-    return {
-      ok: true as const,
-      pending: true as const,
-      jobId: open.id,
-      modelChoice: persistedChoice,
-    };
+    if (!restart) return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice };
   }
-  await (deps.assertRate ?? assertRate)(input.context.userId, "draft");
+  if (deps.assertRate) await deps.assertRate(input.context.userId, "draft", input.context.newsroomId);
+  else if (!deps.ratePreflight) {
+    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false });
+    if (rate) return commitWarning(rate);
+  }
+  if (open) await requestJobCancel(open.id);
   const job = await (deps.enqueueJob ?? enqueueJob)({
     userId: input.context.userId,
     newsroomId: input.context.newsroomId,
@@ -247,10 +261,13 @@ export async function commitStoryDraftForAuthenticatedEditor(
         skippedRungs: providerProbe.skippedRungs,
         preflightFailover: preflight.switchReceipt,
       }),
+      ...(leads[0].status === "killed" ? { allowKilledLead: true } : {}),
+      ...(meetingVideoId ? { meetingVideoId } : {}),
       ...(input.reuseLedger ? { reuseLedger: true } : {}),
       ...(meetingArtifactId != null ? { meetingArtifactId } : {}),
     }),
   });
+  if (!deps.assertRate) await recordDeskRun(input.context.userId, "draft", input.context.newsroomId);
   if (preflight.switchReceipt) {
     await setJobStage(job.id, preflight.switchReceipt.stage);
     await setJobFailoverNote(job.id, preflight.switchReceipt.note);
@@ -292,6 +309,7 @@ export type ScanCommitDeps = {
 export async function commitScanForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
+    override?: string[];
     modelChoice: StoryModelChoice;
     modelEffort?: ModelEffort | null;
     sectionKey?: string;
@@ -303,7 +321,7 @@ export async function commitScanForAuthenticatedEditor(
   },
   deps: ScanCommitDeps = {},
 ) {
-  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "start the scan");
+  const refusal = await paperSetupRefusalFor(input.context, "start the scan", input.override);
   if (refusal) return refusal;
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "scan"));
   const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe);
@@ -380,30 +398,30 @@ export async function commitScanForAuthenticatedEditor(
     if(Boolean(existing?.policy_snapshot && JSON.parse(existing.policy_snapshot).daily)!==Boolean(input.daily) || existingKey!==(sectionSnapshot?.key??null)) return {ok:false as const,error:"A scan with a different section scope or daily source policy is already running. Wait for it to finish before starting this scan.",detail:"Open the current scan below.",retryable:true};
     const persistedChoice = effectiveStoryModelChoice(open.model_choice);
     if (persistedChoice !== effectiveChoice) {
-      return {
-        ok: false as const,
-        kind: "model-conflict" as const,
-        error: `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Open the scan page to watch that run finish before choosing another model.`,
-        modelChoice: persistedChoice,
-        jobId: open.id,
-      };
+      const warning = await editorWarning(input.context, input.override, "model-change-running", `A scan is already running with ${modelChoiceLabel(persistedChoice)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
+      if (warning) return commitWarning(warning, "model-conflict", persistedChoice, open.id);
+    } else {
+      (deps.kickJobs ?? kickJobs)();
+      return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persistedChoice };
     }
-    (deps.kickJobs ?? kickJobs)();
-    return {
-      ok: true as const,
-      pending: true as const,
-      jobId: open.id,
-      modelChoice: persistedChoice,
-    };
   }
 
-  await (deps.assertRate ?? assertRate)(input.context.userId, "scan");
   const sql = await (deps.getSql ?? getSql)();
   let dailyPlan;
   if (input.daily) {
     const { dailyScanPlan } = await import("./daily-scan-plan.server.ts");
     try { dailyPlan = await dailyScanPlan(sql, input.context.newsroomId, undefined, true); }
     catch (error) { return { ok: false as const, error: error instanceof Error ? error.message : "The daily scan could not be planned.", retryable: true }; }
+  }
+  if (deps.assertRate) await deps.assertRate(input.context.userId, "scan", input.context.newsroomId);
+  else {
+    const rate = await checkRate(input.context.userId, "scan", input.context.newsroomId, input.override, { record: false });
+    if (rate) return commitWarning(rate);
+  }
+  if (open) {
+      await requestJobCancel(open.id);
+      const runSql = await (deps.getSql ?? getSql)();
+      await runSql`update scan_runs set finished_at=now(),error='Stopped for an editor model restart.' where id=${open.subject_id} and newsroom_id=${input.context.newsroomId} and finished_at is null`;
   }
   const runRows = await sql<{ id: number }>`
     insert into scan_runs (user_id, newsroom_id, section_snapshot, source_snapshot, policy_snapshot, source_coverage)
@@ -429,6 +447,7 @@ export async function commitScanForAuthenticatedEditor(
       preflightFailover: preflight.switchReceipt,
     })),
   });
+  if (!deps.assertRate) await recordDeskRun(input.context.userId, "scan", input.context.newsroomId);
   if (preflight.switchReceipt) {
     await setJobStage(job.id, preflight.switchReceipt.stage);
     await setJobFailoverNote(job.id, preflight.switchReceipt.note);
@@ -490,6 +509,7 @@ export async function ensureModelRequestLeadMemoSchema(): Promise<void> {
 export async function commitOpinionForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
+    override?: string[];
     subject: string;
     askedFor?: string;
     articleSlug?: string;
@@ -500,7 +520,7 @@ export async function commitOpinionForAuthenticatedEditor(
   },
   deps: OpinionCommitDeps = {},
 ) {
-  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "start an editorial");
+  const refusal = await paperSetupRefusalFor(input.context, "start an editorial", input.override);
   if (refusal) return refusal;
   if ((input.documentIds?.length ?? 0) > 20 || new Set(input.documentIds ?? []).size !== (input.documentIds?.length ?? 0)) {
     return { ok: false as const, error: "Choose up to 20 different documents." };
@@ -746,6 +766,7 @@ export type WriteStoryCommitDeps = StoryDraftCommitDeps & {
 export async function writeStoryForAuthenticatedEditor(
   input: {
     context: AuthenticatedEditorContext;
+    override?: string[];
     text: string;
     documentIds?: string[];
     researchScope?: "public" | "supplied";
@@ -761,7 +782,7 @@ export async function writeStoryForAuthenticatedEditor(
     the Queue for a draft that can never start -- a dead row the editor never
     asked for. One refusal, one sentence, and nothing written.
   */
-  const refusal = await paperSetupRefusalFor(input.context.newsroomId, "draft this story");
+  const refusal = await paperSetupRefusalFor(input.context, "draft this story", input.override);
   if (refusal) return refusal;
   if ((input.documentIds?.length??0)>20 || new Set(input.documentIds??[]).size!==(input.documentIds?.length??0)) return {ok:false as const,error:"Choose up to 20 different documents."};
   if (input.text.length > 20_000_000) return {ok:false as const,error:"Pasted text exceeds 20 million characters. Attach it in separate volumes."};
@@ -789,6 +810,7 @@ export async function writeStoryForAuthenticatedEditor(
   const parsed = parseWriteStoryInput(
     input.text || (input.documentIds?.length ? "Write a story from the attached documents." : ""),
     sections,
+    true,
   );
   if (!parsed.ok) return { ok: false as const, error: parsed.error };
   const { headline: rawHeadline, why: rawWhy, urls, scratch, editorialAssignment } = parsed.value;
@@ -803,6 +825,10 @@ export async function writeStoryForAuthenticatedEditor(
   */
   const headline = storableText(rawHeadline);
   const why = storableText(rawWhy);
+  if (headline.length < 8) {
+    const warning = await editorWarning(input.context, input.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: input.context.newsroomId });
+    if (warning) return commitWarning(warning);
+  }
   let topic = parsed.value.topic;
   let topicUnchosen = parsed.value.topicUnchosen;
   if (input.sectionKey !== undefined) {
@@ -810,7 +836,11 @@ export async function writeStoryForAuthenticatedEditor(
       if (typeof input.sectionKey !== "string" || !input.sectionKey.trim()) throw new Error("Choose an active reporting section.");
       if (!sections) throw new Error("Could not read this newsroom's sections. Reload and retry.");
       const key = resolvedSectionKey(sections, input.sectionKey);
-      if (key !== input.sectionKey || key === "about" || key === "opinion") throw new Error("Choose an active reporting section.");
+      if (key !== input.sectionKey) throw new Error("Choose an active reporting section.");
+      if (key === "about" || key === "opinion") {
+        const warning = await editorWarning(input.context, input.override, "lead-publication-section", `This lead will be filed into ${key === "about" ? "About" : "Opinion"}.`, { kind: "newsroom", id: input.context.newsroomId });
+        if (warning) return { ...commitWarning(warning), leadId: undefined };
+      }
       topic = key;
       topicUnchosen = false;
     } catch (error) {
@@ -824,6 +854,10 @@ export async function writeStoryForAuthenticatedEditor(
     const {ensureStoryDocuments}=await import('./story-documents.server.ts');await ensureStoryDocuments(sql);
     const available=await sql.query("select id from story_documents where id=any($1) and newsroom_id=$2 and user_id=$3 and lead_id is null and editorial_request_id is null and status='uploaded'",[input.documentIds,input.context.newsroomId,input.context.userId]);
     if(available.length!==input.documentIds.length)return {ok:false as const,error:"One of these uploads is incomplete or already attached. Select it again before writing."};
+  }
+  if (!deps.assertRate) {
+    const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false });
+    if (rate) return commitWarning(rate);
   }
   const notesJson = packNotes(sanitizeJsonLeaves({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" }));
   const urlsJson = JSON.stringify(urls);
@@ -868,8 +902,8 @@ export async function writeStoryForAuthenticatedEditor(
   await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds);
   const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(
-    { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope },
-    deps,
+    { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope, override: input.override },
+    { ...deps, ratePreflight: true },
   );
   return { ...commit, leadId };
 }

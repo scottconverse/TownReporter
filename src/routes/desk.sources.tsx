@@ -10,14 +10,12 @@ import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
   listScans,
-  checkOneSource,
   listSourcesPage,
   replacementCandidates,
   reviewSuggestedSources,
-  runScan,
   setSourceStatus,
-  saveSourceScanPreference,
 } from "@/lib/news/desk";
+import { checkOneSource, runScan, saveSourceScanPreference } from "@/components/scoped-actions";
 import { findReplacement } from "@/lib/news/editor-dialog-actions";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
@@ -1269,6 +1267,7 @@ function SuggestedSources({
                   </td>
                   <td className="td-hl" data-label="Suggested source">
                     <span className="src-t">{s.title}</span>
+                    <SourcePreferenceEditor source={s} />
                     <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
                     <span className="meta-inline block">
                       <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
@@ -1587,7 +1586,7 @@ function WatchRows({
                     {result.line}
                   </span>
                 ) : null}
-                {s.status === "accepted" ? <SourcePreferenceEditor source={s} /> : null}
+                <SourcePreferenceEditor source={s} />
               </div>
               <div className="astra-row-acts">
                 {paused ? (
@@ -1615,6 +1614,7 @@ function WatchRows({
                     >
                       Resume
                     </ActionButton>
+                    <ActionButton tone="quiet" phase={rowActionPhase({ isPending: checking })} workingLabel="Checking…" onAct={() => onCheck(s.id)}>Check now</ActionButton>
                     <RemoveAction
                       label="Remove"
                       armed={confirmRemoveId === s.id}

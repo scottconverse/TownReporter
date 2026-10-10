@@ -2,6 +2,7 @@ import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import type { SourceCadence, SourcePreference } from "./adaptive-source-selection.ts";
 import type { SourcePurpose } from "./source-inventory.ts";
 import { SOURCE_SCAN_PREFERENCE_COPY } from "./desk-copy.ts";
+import { editorWarning } from "./editor-override.ts";
 
 const CREATE_SOURCE_SCAN_PREFERENCES = `create table if not exists source_scan_preferences (
   newsroom_id integer not null references newsrooms(id) on delete cascade,
@@ -33,6 +34,7 @@ export async function loadSourceScanPreferences(
 }
 
 export type SourceScanPreferenceInput = {
+  override?: string[];
   sourceId: number;
   purpose: SourcePurpose | null;
   cadence: SourceCadence | null;
@@ -67,12 +69,14 @@ export function cleanSourceScanPreferenceInput(raw: unknown): CleanSourceScanPre
         ? value.deadline
         : undefined;
   const input: CleanSourceScanPreferenceInput = {
+    override: Array.isArray(value.override) && value.override.every((key) => typeof key === "string") ? value.override : undefined,
     sourceId: typeof value.sourceId === "number" ? value.sourceId : Number.NaN,
     purpose: purpose ?? null,
     cadence: cadence ?? null,
     deadline: deadline ?? null,
   };
   if (
+    (value.override !== undefined && input.override === undefined) ||
     !Number.isInteger(input.sourceId) ||
     input.sourceId < 1 ||
     purpose === undefined ||
@@ -91,10 +95,11 @@ export async function persistSourceScanPreference(
   newsroomId: number,
   userId: string,
   input: SourceScanPreferenceInput,
+  allowUnaccepted = false,
 ): Promise<boolean> {
   const [source] = await sql.query<{ id: number }>(
-    "select id from sources where newsroom_id=$1 and id=$2 and status='accepted'",
-    [newsroomId, input.sourceId],
+    "select id from sources where newsroom_id=$1 and id=$2 and (status='accepted' or $3)",
+    [newsroomId, input.sourceId, allowUnaccepted],
   );
   if (!source) return false;
   if (input.purpose == null && input.cadence == null && input.deadline == null) {
@@ -113,4 +118,16 @@ export async function persistSourceScanPreference(
     [newsroomId, input.sourceId, input.purpose, input.cadence, input.deadline, userId],
   );
   return true;
+}
+
+export async function saveSourceScanPreferenceForEditor(sql: Sql, context: { userId: string; newsroomId: number }, input: SourceScanPreferenceInput) {
+  await ensureSourceScanPreferencesSchema(sql);
+  const [source] = await sql.query<{ status: string }>("select status from sources where newsroom_id=$1 and id=$2", [context.newsroomId, input.sourceId]);
+  if (!source) return { ok: false as const, error: "That source is not on this desk." };
+  if (source.status !== "accepted") {
+    const warning = await editorWarning(context, input.override, "scan-source-not-accepted", "This source is not accepted. Saving its scan preferences will keep its current status.", { kind: "source", id: input.sourceId });
+    if (warning) return warning;
+  }
+  const saved = await persistSourceScanPreference(sql, context.newsroomId, context.userId, input, source.status !== "accepted");
+  return saved ? { ok: true as const } : { ok: false as const, error: "That source is not on this desk." };
 }

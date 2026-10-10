@@ -4,7 +4,8 @@ import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
 import { withClaimedLeadDraftLock } from "./draft-order.server.ts";
-import { enqueueJob, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob } from "./jobs.ts";
+import { enqueueJob, findOpenJob, requestJobCancel, progressReporterFor, setJobFailoverNote, setJobModelRuntime, waitForModel, type DeskJob } from "./jobs.ts";
+import { editorWarning } from "./editor-override.ts";
 import { parseClaims, parseFindings, serializeFindings, REPORT_EDIT_SYSTEM, STORY_FORMS, type ReportChat } from "./report.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { effectiveStoryModelChoice, modelChoiceLabel } from "./model-choice.ts";
@@ -17,7 +18,7 @@ import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { failoverNoteSentence, failoverReasonPhrase, planAutomaticFailover } from "./automatic-failover.ts";
 /* SG1b finding 1: the reconcile commit boundary refuses an un-set-up paper (see the gate inside requestDraftReconciliation). */
-import { requirePaperSetUp } from "./paper-settings.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
 import type { DraftRow } from "./types.ts";
@@ -336,9 +337,9 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
 
 export async function requestDraftReconciliation(
   context: { userId: string; newsroomId: number },
-  input: { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null },
+  input: { leadId: number; modelChoice?: string; modelEffort?: ModelEffort | null; override?: string[] },
   deps: Pick<ReconcileDeps,"enqueue"|"probe"> = {},
-): Promise<DeskJob> {
+) {
   /*
     SG1b finding 1, the reconcile half. `requestDraftReconciliationFn` (the
     desk’s own button) already refuses before it reaches this function, but
@@ -348,7 +349,8 @@ export async function requestDraftReconciliation(
     function’s contract is to throw its refusals ("No saved draft is available
     to reconcile in this newsroom.") and both callers already surface that.
   */
-  await requirePaperSetUp(context.newsroomId, "check this draft's evidence");
+  const setup = await paperSetupWarning(context, input.override, "check this draft's evidence");
+  if (setup) return setup;
   const sql = await getSql();
   const [draft] = await sql<{id:number}>`select d.id from drafts d join leads l on l.id=d.lead_id and l.newsroom_id=d.newsroom_id join newsroom_members m on m.newsroom_id=d.newsroom_id and m.user_id=${context.userId} and m.role in ('owner','editor') where d.lead_id=${input.leadId} and d.newsroom_id=${context.newsroomId} order by d.updated_at desc,d.id desc limit 1`;
   if (!draft) throw new Error("No saved draft is available to reconcile in this newsroom.");
@@ -391,6 +393,13 @@ export async function requestDraftReconciliation(
   */
   if ((choice === "local-model" || providerEntry(choice)?.picksLoadedLocalModel) && !localModel) {
     throw new Error("The selected local model could not be pinned to its exact server and model before enqueueing.");
+  }
+  const open = await findOpenJob({newsroomId:context.newsroomId, kind:"reconcile", subjectId:draft.id});
+  if (open) {
+    if (open.model_choice === choice) return open;
+    const warning = await editorWarning(context, input.override, "model-change-running", `This evidence check is already running. Stop and restart with ${modelChoiceLabel(choice)}.`, {kind:"job",id:open.id});
+    if (warning) return warning;
+    await requestJobCancel(open.id);
   }
   const job = await (deps.enqueue ?? enqueueJob)({userId:context.userId,newsroomId:context.newsroomId,kind:"reconcile",subjectId:draft.id,modelChoice:choice,modelChoiceSource:requested === "auto" ? "auto" : "editor",resultJson:JSON.stringify(initialModelRuntimeReceipt({requestedRuntime:requested,requestedEffort:modelEffort(requested,input.modelEffort),actualRuntime:choice,actualEffort:modelEffort(choice,input.modelEffort),localModel,preflightFailover:preflight}))});
   if (preflight) {

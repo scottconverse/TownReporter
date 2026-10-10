@@ -1,10 +1,11 @@
+import { createAiFollowUp } from "@/components/scoped-actions";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { InkButton } from "@/components/desk-chrome";
 import { announceToDesk } from "@/components/desk-chrome-utils";
 import { FollowUpDialog, type FollowUpDialogInput } from "@/components/follow-up-dialog";
-import { createAiFollowUp, listFollowUpStoryOptions } from "@/lib/news/desk";
+import { listFollowUpStoryOptions } from "@/lib/news/desk";
 
 /**
  * "Start an AI follow-up" -- the button, its dialog, and the write.

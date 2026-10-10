@@ -1,4 +1,8 @@
 import { kindFromSourceUrl, tierFromKind } from "./desk-copy.ts";
+import {
+  editorWarning,
+  type EditorWarningResult,
+} from "./editor-override.ts";
 /*
   CITY-SETUP slice A: a database-backed paper configuration, with today's
   hard-coded constants as the fallback. No UI, no route, no behaviour change
@@ -713,6 +717,71 @@ export async function paperSetUpRefusal(
     if (isPaperNotSetUpError(err)) return (err as Error).message;
     throw err;
   }
+}
+
+/*
+  SCOTT'S RULE (Oct 10, 2026): outside Publish the setup check WARNS, it does
+  not block. A human told the paper is not set up may still act.
+
+  `requirePaperSetUp`/`paperSetUpRefusal` above stay exactly as they are -- the
+  unattended scheduler (`daily-scan.server.ts`) still SKIPS quietly, and any
+  consumer not yet moved to the warning form keeps its old answer. This is the
+  editor-facing form: one sentence, a stable key, and a second press that
+  proceeds because a human decided to.
+
+  THE SENTENCE, literally: "This paper is not fully set up: <what is missing>."
+  The unreadable case keeps its own sentence and its own key, so an editor who
+  overrides the un-set-up paper has not also overridden a broken read.
+
+  WHO MAY OVERRIDE. Anyone signed in. The setup form is owner-only, so an
+  invited editor must be able to proceed rather than be pointed at a screen that
+  will not open for them; the audit row names whoever pressed.
+*/
+export const PAPER_NOT_SET_UP_KEY = "paper-not-set-up";
+export const PAPER_SETUP_UNCHECKABLE_KEY = "paper-setup-uncheckable";
+
+/** What is missing, said once, for the warning sentence. */
+export function paperSetupMissing(): string {
+  return "finish Paper setup (Server > Paper setup)";
+}
+
+/** "This paper is not fully set up: <what is missing>." */
+export function paperNotFullySetUpSentence(): string {
+  return `This paper is not fully set up: ${paperSetupMissing()}.`;
+}
+
+/**
+ * The editor-facing setup guard. Returns null when the paper is set up, a
+ * structured warning when it is not, and -- on the second press, when
+ * `override` names the key -- records the override and returns null so the
+ * action runs.
+ *
+ * `readOnboarded` is a test seam, exactly as on `requirePaperSetUp`.
+ */
+export async function paperSetupWarning(
+  context: { userId: string; newsroomId?: number },
+  override: readonly string[] | undefined,
+  _action: string,
+  readOnboarded: (newsroomId: number) => Promise<boolean> = isOnboarded,
+): Promise<EditorWarningResult | null> {
+  const newsroomId = context.newsroomId ?? 1;
+  let onboarded: boolean;
+  try {
+    onboarded = await readOnboarded(newsroomId);
+  } catch {
+    return editorWarning(
+      context,
+      override,
+      PAPER_SETUP_UNCHECKABLE_KEY,
+      "This paper is not fully set up: its setup status could not be checked.",
+      { kind: "newsroom", id: newsroomId },
+    );
+  }
+  if (onboarded) return null;
+  return editorWarning(context, override, PAPER_NOT_SET_UP_KEY, paperNotFullySetUpSentence(), {
+    kind: "newsroom",
+    id: newsroomId,
+  });
 }
 
 /**
