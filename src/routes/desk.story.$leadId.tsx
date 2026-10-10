@@ -14,7 +14,7 @@ import {
   showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
-import { PublishBarDone, PublishBarResult } from "@/components/publish-bar-result";
+import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/components/publish-bar-result";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
@@ -3727,6 +3727,7 @@ function StoryPage() {
         <div className="astra-publish-bar" id="astra-publish-bar">
           <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
+            <PublishTranscriptNotice notice={data?.meetingPublishNotice} />
             {canPublish ? (
               confirmingPublish ? (
                 <>

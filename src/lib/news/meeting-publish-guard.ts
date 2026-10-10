@@ -1,5 +1,7 @@
+import { stat } from "node:fs/promises";
 import type { Sql } from "../db.ts";
 import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-draft-revision-review.ts";
+import { recordPublishedMeetingEvidence } from "./meeting-article-revision.ts";
 
 /**
  * Whether a meeting draft can still be published against its tape.
@@ -15,6 +17,9 @@ import { acceptedSnapshotMatchesCurrent, draftEvidenceSha256 } from "./meeting-d
  * transcript text: a hash comparison is the same fact the revision machinery
  * already uses, so the guard and the notice cannot disagree about whether the tape
  * moved.
+ *
+ * An unchanged artifact whose original file is absent can still publish when
+ * every cited segment exists in the database and matches the saved citation hash.
  */
 export type StaleCitation = {
   artifactId: number | null;
@@ -32,6 +37,18 @@ export type StaleCitation = {
     | "revised-artifact";
 };
 
+export type MeetingPublishEvidence = {
+  stale: StaleCitation[];
+  fileAbsent: { artifactId: number; verifiedCitationCount: number }[];
+  notice: string | null;
+  publicationLinks: {
+    artifactId: number;
+    artifactSha256: string;
+    videoId: string;
+    citationSnapshot: string;
+  }[];
+};
+
 type GuardRow = {
   draft_id: number;
   id?: number;
@@ -45,6 +62,8 @@ type GuardRow = {
   video_id: string | null;
   linked_sha256: string | null;
   linked_integrity_status: string | null;
+  linked_storage_path: string | null;
+  linked_integrity_detail: string | null;
   current_artifact_id: number | null;
   current_sha256: string | null;
   current_integrity_status: string | null;
@@ -97,7 +116,33 @@ function citationSnapshot(raw: string | null, artifactId: number): SnapshotCitat
   }
 }
 
-export async function staleMeetingCitations(
+/**
+ * Default probe for whether a recorded transcript file still exists on disk.
+ *
+ * Only an explicit ENOENT or ENOTDIR means the file is genuinely absent; any
+ * other error (permissions, transient I/O, unknown codes) fails closed by
+ * reporting the file as present, so the missing-file exception never fires on
+ * a probe that could not actually prove absence.
+ */
+async function defaultRecordingFileExists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code === "ENOENT" || code === "ENOTDIR") return false;
+    return true;
+  }
+}
+
+/**
+ * Shared loader for meeting publish evidence.
+ *
+ * Runs the single guard query and validation loop once, collecting both the
+ * stale citations that block publication and the database-verified absent
+ * recording files that are explicitly tolerated.
+ */
+export async function loadMeetingPublishEvidence(
   sql: Sql,
   input: {
     newsroomId: number;
@@ -105,11 +150,13 @@ export async function staleMeetingCitations(
     /** @deprecated Lead candidates are deliberately ignored; the draft snapshot is authoritative. */
     citations?: { segmentIndex: number; captionSha256: string }[];
   },
-): Promise<StaleCitation[]> {
+  recordingFileExists: (path: string) => Promise<boolean> = defaultRecordingFileExists,
+): Promise<MeetingPublishEvidence> {
   const rows = await sql.query<GuardRow>(
     `select d.id as draft_id,d.id,d.headline,d.dek,d.topic,d.body,d.source_urls,d.provenance_json,d.found_note,d.unanswered,d.research_json,
             l.id as link_id,l.artifact_id, l.citation_snapshot, l.revision_notice,
             linked.video_id, linked.sha256 as linked_sha256, linked.integrity_status as linked_integrity_status,
+            linked.storage_path as linked_storage_path, linked.integrity_detail as linked_integrity_detail,
             (select current.id
                from meeting_transcript_artifacts current
               where current.newsroom_id=d.newsroom_id
@@ -137,16 +184,28 @@ export async function staleMeetingCitations(
     [input.newsroomId, input.draftId],
   );
   if (!rows.length) {
-    return [{ artifactId: null, segmentIndex: -1, recorded: "missing", current: "missing", reason: "missing-draft" }];
+    return {
+      stale: [{ artifactId: null, segmentIndex: -1, recorded: "missing", current: "missing", reason: "missing-draft" }],
+      fileAbsent: [],
+      notice: null,
+      publicationLinks: [],
+    };
   }
 
   const stale: StaleCitation[] = [];
+  const fileAbsent: { artifactId: number; verifiedCitationCount: number }[] = [];
+  const publicationLinks: MeetingPublishEvidence["publicationLinks"] = [];
   const claimsMeetingEvidence = rows.some((row) => draftClaimsMeetingEvidence(row.research_json));
   const linkedRows = rows.filter((row) => row.artifact_id != null && row.is_current !== false);
   if (!linkedRows.length) {
-    return claimsMeetingEvidence
-      ? [{ artifactId: null, segmentIndex: -1, recorded: "missing", current: "missing", reason: "missing-link" }]
-      : [];
+    return {
+      stale: claimsMeetingEvidence
+        ? [{ artifactId: null, segmentIndex: -1, recorded: "missing", current: "missing", reason: "missing-link" }]
+        : [],
+      fileAbsent: [],
+      notice: null,
+      publicationLinks: [],
+    };
   }
 
   for (const row of linkedRows) {
@@ -184,6 +243,35 @@ export async function staleMeetingCitations(
         reason: "invalid-citation-segment",
       });
       continue;
+    }
+    // All cited segments verified above. Permit only an unchanged artifact whose
+    // file reconciliation marked absent, and whose path is still absent now.
+    if (
+      row.linked_integrity_status === "missing" &&
+      row.current_integrity_status === "missing" &&
+      row.linked_integrity_detail === "Recorded transcript file is absent." &&
+      typeof row.linked_storage_path === "string" &&
+      row.linked_storage_path.trim() !== "" &&
+      row.current_artifact_id !== null &&
+      Number(row.current_artifact_id) === artifactId &&
+      row.current_sha256 !== null &&
+      row.current_sha256 === row.linked_sha256 &&
+      !row.revision_notice
+    ) {
+      let filePresent = true;
+      try {
+        filePresent = await recordingFileExists(row.linked_storage_path);
+      } catch {
+        filePresent = true;
+      }
+      if (!filePresent) {
+        fileAbsent.push({ artifactId, verifiedCitationCount: citations.length });
+        publicationLinks.push({
+          artifactId, artifactSha256: row.linked_sha256,
+          videoId: row.video_id!, citationSnapshot: row.citation_snapshot!,
+        });
+        continue;
+      }
     }
     if (row.linked_integrity_status !== "valid") {
       stale.push({
@@ -257,7 +345,13 @@ export async function staleMeetingCitations(
             && Number(current.end_seconds) === Number(citation.acceptedEndSeconds)
             && current.excerpt === citation.excerpt;
         });
-        if (acceptedStillMatches) continue;
+        if (acceptedStillMatches) {
+          publicationLinks.push({
+            artifactId: Number(row.current_artifact_id), artifactSha256: row.current_sha256,
+            videoId: row.video_id!, citationSnapshot: accepted.accepted_citation_snapshot,
+          });
+          continue;
+        }
       }
     }
     if (row.revision_notice || row.current_artifact_id !== artifactId || row.current_sha256 !== row.linked_sha256) {
@@ -270,9 +364,61 @@ export async function staleMeetingCitations(
           reason: "revised-artifact",
         });
       }
+    } else {
+      publicationLinks.push({
+        artifactId, artifactSha256: row.linked_sha256,
+        videoId: row.video_id!, citationSnapshot: row.citation_snapshot!,
+      });
     }
   }
-  return stale;
+  if (stale.length) return { stale, fileAbsent: [], notice: null, publicationLinks: [] };
+  return {
+    stale: [],
+    fileAbsent,
+    publicationLinks,
+    notice: fileAbsent.length
+      ? "The original recording file is not on this computer. Every quote was checked against the saved transcript text in the database."
+      : null,
+  };
+}
+
+/** Copy the verified snapshot inside the same fenced publish transaction. */
+export async function recordMeetingPublishEvidence(
+  sql: Sql,
+  input: { newsroomId: number; articleId: number; draftId: number },
+  evidence: MeetingPublishEvidence,
+): Promise<{ recorded: number }> {
+  if (evidence.stale.length) throw new Error(staleCitationNotice(evidence.stale));
+  if (!evidence.fileAbsent.length) return recordPublishedMeetingEvidence(sql, input);
+  let recorded = 0;
+  for (const link of evidence.publicationLinks) {
+    const rows = await sql.query<{ article_id: number }>(
+      `insert into meeting_article_transcript_links
+         (newsroom_id,article_id,origin_draft_id,artifact_id,artifact_sha256,video_id,citation_snapshot)
+       values ($1,$2,$3,$4,$5,$6,$7)
+       on conflict (newsroom_id,article_id,artifact_id) do nothing returning article_id`,
+      [input.newsroomId,input.articleId,input.draftId,link.artifactId,
+        link.artifactSha256,link.videoId,link.citationSnapshot],
+    );
+    recorded += rows.length;
+  }
+  return { recorded };
+}
+
+/**
+ * Thin wrapper over the shared loader for callers that only care about stale citations.
+ */
+export async function staleMeetingCitations(
+  sql: Sql,
+  input: {
+    newsroomId: number;
+    draftId: number;
+    /** @deprecated Lead candidates are deliberately ignored; the draft snapshot is authoritative. */
+    citations?: { segmentIndex: number; captionSha256: string }[];
+  },
+): Promise<StaleCitation[]> {
+  const evidence = await loadMeetingPublishEvidence(sql, input);
+  return evidence.stale;
 }
 
 /**
@@ -296,4 +442,3 @@ export function staleCitationNotice(stale: StaleCitation[]): string {
     "The draft may no longer quote the tape accurately. Redraft it from the current recording, or compare and confirm every affected citation against the current transcript before publishing.",
   ].join(" ");
 }
-

@@ -89,11 +89,10 @@ import { cleanStoryArea } from "../story-area.ts";
 import { disclosureLine } from "./import-stories.ts";
 import { findDuplicate } from "./import-review.ts";
 import { recordDraftTranscriptRevisionReview } from "./meeting-draft-revision-review.ts";
-import { staleMeetingCitations, staleCitationNotice } from "./meeting-publish-guard.ts";
+import { loadMeetingPublishEvidence, recordMeetingPublishEvidence, staleCitationNotice } from "./meeting-publish-guard.ts";
 import { lockMeetingsForDraftPublish } from "./meeting-revision-lock.ts";
 import {
   listPublishedMeetingReviews as loadPublishedMeetingReviews,
-  recordPublishedMeetingEvidence,
   resolvePublishedMeetingReview,
   type PublishedMeetingReview,
 } from "./meeting-article-revision.ts";
@@ -1098,6 +1097,9 @@ export const getLead = createServerFn({ method: "GET" })
     const draftMeetingEvidence = drafts[0]
       ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
       : null;
+    const meetingPublishNotice = drafts[0]
+      ? (await loadMeetingPublishEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })).notice
+      : null;
     /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
       panel shows -- the ledger (unread rows first), the checked claims (flagged
@@ -1227,6 +1229,7 @@ export const getLead = createServerFn({ method: "GET" })
         ?? defaultMeetingTranscriptArtifactId(meetingTranscriptChoices),
       draft,
       draftMeetingEvidence,
+      meetingPublishNotice,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -6117,11 +6120,13 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         newsroomId: owned(context),
         draftId: Number(row.id),
       });
-      const stale = await staleMeetingCitations(sql, {
+      const evidence = await loadMeetingPublishEvidence(sql, {
         newsroomId: owned(context),
         draftId: Number(row.id),
       });
-      if (stale.length) return { blocked: true as const, error: staleCitationNotice(stale) };
+      if (evidence.stale.length) {
+        return { blocked: true as const, error: staleCitationNotice(evidence.stale) };
+      }
 
       /*
         THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.67).
@@ -6195,11 +6200,11 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${area}
       ) returning id
     `;
-      await recordPublishedMeetingEvidence(sql, {
+      await recordMeetingPublishEvidence(sql, {
         newsroomId: owned(context),
         articleId: printed.id,
         draftId: Number(row.id),
-      });
+      }, evidence);
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
@@ -6216,11 +6221,21 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${storableText(draft.dek).slice(0, 200)}, ${printed.id})
       `;
       }
-      return { blocked: false as const, slug, id: printed.id };
+      return { blocked: false as const, slug, id: printed.id, fileAbsent: evidence.fileAbsent };
     },
   );
 
   if (published.blocked) return { ok: false as const, error: published.error };
+
+  for (const absent of published.fileAbsent) {
+    await audit(
+      context.userId,
+      "publish-transcript-file-absent",
+      `Article ${published.id}: transcript artifact ${absent.artifactId} file absent; ${absent.verifiedCitationCount} citation${absent.verifiedCitationCount === 1 ? "" : "s"} verified against the database`,
+      owned(context),
+      { kind: "articles", id: published.id },
+    );
+  }
 
   /*
     A SECTION THE MODEL DID NOT CHOOSE (0.6.67).

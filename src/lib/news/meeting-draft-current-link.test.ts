@@ -27,7 +27,8 @@ test("redraft keeps A as history while B becomes the only publishable evidence",
       create table meeting_transcript_artifacts (
         id integer primary key, newsroom_id integer not null, video_id text not null,
         artifact_type text not null default 'transcript', sha256 text not null,
-        integrity_status text not null default 'valid', captured_at timestamptz not null
+        integrity_status text not null default 'valid', captured_at timestamptz not null,
+        storage_path text, integrity_detail text
       );
       create table meeting_transcript_segments (
         artifact_id integer not null, segment_index integer not null,
