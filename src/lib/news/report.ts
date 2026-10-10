@@ -1058,6 +1058,14 @@ export async function defaultIngest(
   ocrOptions?: IngestOptions,
 ): Promise<FetchedDoc> {
   try {
+    const { isNewsletterUrl, retainedNewsletterDocument } = await import("./newsletter-scan.server.ts");
+    if (isNewsletterUrl(url)) {
+      const newsroomId = Number(ocrOptions?.newsroomId);
+      const stored = Number.isInteger(newsroomId) && newsroomId > 0
+        ? await retainedNewsletterDocument(url, newsroomId) : null;
+      return { url, title: stored?.title ?? "Newsletter", text: stored?.text ?? "", extras: [],
+        extraction_method: stored?.extractionMethod ?? "newsletter" };
+    }
     const got = await ingestDocument(url, ocrOptions);
     return {
       url,

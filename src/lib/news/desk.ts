@@ -27,6 +27,7 @@ import {
   type ScanSourceCoverageEntry,
 } from "./scan-source-coverage.ts";
 import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
+import { newsletterScanDocs, markNewsletterDocsScanned } from "./newsletter-scan.server.ts";
 import { slugify, parseUrlList } from "@/lib/paper";
 import { getPaperConfig, getPaperPlace, paperSetUpRefusal, requirePaperSetUp } from "./paper-settings";
 import { assertHttpUrl, sha256 } from "./url-guard";
@@ -1978,6 +1979,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     changed: boolean;
   }[] = [];
   const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
+  const pendingNewsletterSignups: { id: number; url: string }[] = [];
   /*
     The scheduled path queues its writes and commits them inside the run
     transaction. It carries the same columns the manual path writes inline --
@@ -2351,6 +2353,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         return fetchUrl(src.url);
       });
       const sourceText = postgresText(bundle.text);
+      if (bundle.newsletterSignupUrl) pendingNewsletterSignups.push({ id: src.id, url: bundle.newsletterSignupUrl });
       const extras: { url: string; text: string }[] = [];
       for (const extra of bundle.extras.slice(0, 4)) {
         await throwIfJobCancelled(job.id);
@@ -2500,6 +2503,16 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     } catch (error) {
       fetchLoopError = error;
       break readingSources;
+    }
+  }
+  const newsletterInputs = new Map<string, number>();
+  const analyzedNewsletterIds = new Set<number>();
+  // Retained mail supplements the website, even when a web fetch was blocked.
+  for (const src of watchSlice) {
+    for (const doc of await newsletterScanDocs(owned(context), src.id, 6, sql)) {
+      fetched.push({ id: src.id, title: doc.title, url: doc.url,
+        text: postgresText(doc.text).slice(0, 4500), extras: doc.extras, changed: true });
+      newsletterInputs.set(doc.url, doc.id);
     }
   }
   if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
@@ -2702,6 +2715,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       continue;
     }
     batchResults.push(parsed);
+    for (const source of batch.sources) {
+      const messageId = newsletterInputs.get(source.url);
+      if (messageId) analyzedNewsletterIds.add(messageId);
+    }
     failureReceipt.sourcesAnalyzed += batch.sources.length;
     // The row moves phase: from "reading sources — k of n" to "reading the
     // pages with a model", which is what the editor watching the history sees.
@@ -2993,6 +3010,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       ending below does too, and it never gets here.
     */
     await writeQueuedSourceWrites(writeSql);
+    for (const signup of pendingNewsletterSignups) {
+      await writeSql`update sources set newsletter_signup_url=${signup.url}
+        where id=${signup.id} and newsroom_id=${owned(context)} and newsletter_signup_url is null`;
+    }
     for (const p of pendingHashes) {
       await writeSql`
         update sources
@@ -3034,6 +3055,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       scanPlace,
       dupCheck,
     );
+
+    await markNewsletterDocsScanned(writeSql, owned(context), [...analyzedNewsletterIds]);
 
     let proposed = 0;
     for (const p of data.proposed_sources) {

@@ -563,6 +563,8 @@ type RedditIngest = {
  * is used further down in this file: server-side only.
  */
 const redditServer = createServerOnlyFn(() => import("./reddit.server.ts"));
+const newsletterArchive = createServerOnlyFn(() => import("./newsletter-scan.server.ts"));
+const newsletterSignup = createServerOnlyFn(() => import("./newsletter-signup.ts"));
 async function ingestRedditIfNeeded(url: URL): Promise<RedditIngest | null> {
   if (typeof window !== "undefined") return null;
   const { isRedditUrl } = await import("./reddit.ts");
@@ -604,6 +606,7 @@ export type IngestResult = {
   text: string;
   titleHint: string;
   extras: string[];
+  newsletterSignupUrl?: string;
   /** Site furniture retained separately, never treated as article body. */
   notices?: string[];
   /** Present when a PDF preview ends before the extracted text does. */
@@ -669,6 +672,15 @@ export async function ingestDocument(
   ocrOptions?: IngestOptions,
   signal?: AbortSignal,
 ): Promise<IngestDocument> {
+  const { isNewsletterUrl, retainedNewsletterDocument } = await newsletterArchive();
+  if (isNewsletterUrl(raw)) {
+    const newsroomId = Number(ocrOptions?.newsroomId);
+    const stored = Number.isInteger(newsroomId) && newsroomId > 0
+      ? await retainedNewsletterDocument(raw, newsroomId) : null;
+    return { ok: Boolean(stored), status: stored ? 200 : 404, outcome: stored ? "fetched" : "not-found",
+      title: stored?.title ?? "Newsletter", text: stored?.text ?? "", extras: [], contentType: "text/plain",
+      needsOcr: false, redirectChain: [], extractionMethod: stored?.extractionMethod ?? "newsletter", pages: [], notices: [] };
+  }
   return clean(await ingestDocumentRaw(raw, ocrOptions, signal));
 }
 
@@ -1003,6 +1015,8 @@ export type IngestUrlOptions = {
 };
 
 export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Promise<IngestResult> {
+  if ((await newsletterArchive()).isNewsletterUrl(raw))
+    throw new Error("Read this newsletter from its captured record in the paper's archive.");
   const url = await assertPublicHttpUrl(raw);
   const yt = await ingestYoutubeIfNeeded(url);
   if (yt) return { text: yt.text, titleHint: yt.title, extras: yt.extras ?? [] };
@@ -1098,5 +1112,6 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
     titleHint: extracted.title || titleHint,
     extras,
     notices: extractSiteNotices(body),
+    newsletterSignupUrl: (await newsletterSignup()).detectedNewsletterSignup(body, url.toString()),
   };
 }

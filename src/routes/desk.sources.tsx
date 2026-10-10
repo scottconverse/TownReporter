@@ -6,6 +6,7 @@ import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
+import { SourceNewsletter } from "@/components/source-newsletter";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
@@ -1588,6 +1589,7 @@ function WatchRows({
                   </span>
                 ) : null}
                 {s.status === "accepted" ? <SourcePreferenceEditor source={s} /> : null}
+                {s.status === "accepted" ? <SourceNewsletter sourceId={s.id} /> : null}
               </div>
               <div className="astra-row-acts">
                 {paused ? (
