@@ -5593,7 +5593,10 @@ export async function uncheckedStoryGate(
     acknowledgedForVersion: acknowledged,
     exempt,
   });
-  return { ...decision, evidenceToken: review.evidenceToken };
+  /* The acknowledgement press carries the DRAFT identity the page holds
+     (`evidenceReviewToken(draft)`), which is what `performAcknowledgeUnchecked`
+     compares against its locked row. */
+  return { ...decision, evidenceToken: evidenceReviewToken(draft) };
 }
 
 /**
