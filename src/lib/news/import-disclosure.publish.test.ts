@@ -92,11 +92,14 @@ async function importedFixture(disclosureText: string) {
 
 it("prints the imported story under the line the editor chose, and needs no AI pass", async () => {
   const { leadId } = await importedFixture(OUTSIDE_AI_LINE);
-  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId);
+  const ctx = { userId: USER, newsroomId: NEWSROOM };
+  const warned = await performPublish(ctx, leadId);
+  assert.ok(!warned.ok && warned.warnings?.some(row => row.key === "unchecked"));
+  const published = await performPublish(ctx, leadId, undefined, undefined, {}, ["unchecked"]);
   assert.equal(
     "error" in published ? published.error : "",
     "",
-    "a well-formed imported story must not be blocked by a gate meant for AI drafts",
+    "a well-formed imported story publishes without an AI pass after the unchecked warning",
   );
   assert.equal(published.ok, true, "an imported story prints on the normal button");
 
@@ -119,7 +122,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
 
 it("leaves the standard disclosure line alone for a story the desk wrote", async () => {
   const { leadId } = await importedFixture("");
-  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId);
+  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, undefined, undefined, {}, ["unchecked"]);
   assert.equal(published.ok, true);
   const sql = await getSql();
   const [article] = await sql.query<{ disclosure_text: string }>(

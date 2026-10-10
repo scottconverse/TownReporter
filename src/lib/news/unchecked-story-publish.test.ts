@@ -132,17 +132,24 @@ it("prints a zero-claims story with no checkable fact, unchanged", async () => {
   assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
 });
 
-it("publishes an imported factual story unchanged, exempt like production marks it", async () => {
+it("warns on a pasted factual story, then publishes anyway and audits unchecked", async () => {
   const f = await fixture();
-  /* An imported/pasted report: its body IS the material an editor read, marked
-     `importedText: true` the way `import-stories.server.ts` writes it. The
-     zero-claims gate does not apply. */
   await f.sql.query("update drafts set research_json=$1 where id=$2", [
     JSON.stringify({ importedText: true }),
     f.draftId,
   ]);
-  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
+  const ctx = { userId: f.userId, newsroomId: f.newsroomId };
+  const refused = await performPublish(ctx, f.leadId, SECTION);
+  assert.equal(refused.ok, false);
+  assert.ok(!refused.ok && refused.warnings?.some(row => row.key === "unchecked"));
+  const { queryDraftRows } = await vite.ssrLoadModule("/src/lib/news/desk.ts");
+  const rows = await queryDraftRows(ctx);
+  const { deskDraftState } = await vite.ssrLoadModule("/src/lib/news/desk-drafts.ts");
+  assert.equal(deskDraftState(rows.find((row: { id: number }) => row.id === f.draftId)).label, "! Not checked yet");
+  const printed = await performPublish(ctx, f.leadId, SECTION, undefined, {}, ["unchecked"]);
   assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
+  const audits = await f.sql.query<{ detail: string }>("select detail from audit_events where newsroom_id=$1 and action='override'", [f.newsroomId]);
+  assert.deepEqual(audits.map(row => JSON.parse(row.detail).key), ["unchecked"]);
 });
 
 it("ignores a date or figure kept only in the private reporter notebook", async () => {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { editorStoryState, storyReadinessChip } from "./story-readiness.ts";
+import { editorStoryState, readinessWithUncheckedStory, savedStoryReadiness, storyReadinessChip } from "./story-readiness.ts";
 import { publishBlockers } from "./publish-blockers.ts";
 import { reviewEvidenceCheckState } from "./evidence-check-state.ts";
 
@@ -65,5 +65,20 @@ describe("ZC0: the zero-claims readiness the desk reaches", () => {
       undefined,
       "a draft the gate does not apply to is untouched",
     );
+  });
+
+  it("shows the pasted calendar/count draft as Not checked yet on the page and list, even with an empty dek", () => {
+    const input = { recordedClaims: 0, evidenceCheckedCurrentVersion: false,
+      body: "On October 10, 2026, the disposable DEV paper completed 2 planned browser checks.",
+      acknowledgedForVersion: false, exempt: false };
+    const filed = readinessWithUncheckedStory(savedStoryReadiness(null), input);
+    const blockers = publishBlockers({ ...ZERO_CLAIM_STATE, body: input.body, dek: "", uncheckedStory: true });
+    const page = editorStoryState(blockers, 0);
+    assert.equal(storyReadinessChip(page).text, "! Not checked yet");
+    assert.equal(page.reason, filed.reason);
+    assert.match(page.reason, /No claims were recorded.*nothing has been checked/);
+    assert.equal(blockers.find(row => row.key === "unchecked")?.kind, "warning");
+    assert.equal(readinessWithUncheckedStory(filed, { ...input, acknowledgedForVersion: true }).state, "ready");
+    assert.equal(readinessWithUncheckedStory(filed, { ...input, evidenceCheckedCurrentVersion: true }).state, "ready");
   });
 });

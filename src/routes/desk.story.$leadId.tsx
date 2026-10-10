@@ -2,7 +2,7 @@ import { requestDraftReconciliationFn } from "@/components/scoped-actions";
 import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
-import { acceptedClaimsPublishState, readinessWithAcceptedClaims, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
 import { UNCHECKED_STORY_REASON, uncheckedStoryNeedsCheck } from "@/lib/news/unchecked-story-gate";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
@@ -2089,13 +2089,13 @@ function StoryPage() {
   const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
     ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
     : [];
-  const hasAiJudgments = Boolean(data.draft?.research_json?.includes('"aiEvidenceReview"'));
+  const hasAiJudgments = liveClaimsOwnReadiness(data.draft?.research_json);
   const storedLegacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
-  const legacyReadiness = storedLegacyReadiness.state === "not-checked" && !uncheckedStoryNeedsCheck({
+  const legacyReadiness = readinessWithUncheckedStory(storedLegacyReadiness, {
     recordedClaims: data.uncheckedRecordedClaims, evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked,
     body: data.draft?.body ?? "", acknowledgedForVersion: data.uncheckedStoryAcknowledged, exempt: data.uncheckedExempt,
-  }).blocked ? { ...storedLegacyReadiness, state: "ready" as const, reason: "Ready to publish." } : storedLegacyReadiness;
+  });
   /*
     Every reason the Publish button is off, in one place (unit CT).
 

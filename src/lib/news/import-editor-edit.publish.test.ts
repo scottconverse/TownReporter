@@ -12,7 +12,7 @@ import { createServer, type ViteDevServer } from "vite";
   the opposite shape -- the pasted text IS the material, and its sources are
   the pages it cites. Fixing a name in it and saving is ordinary desk work.
 
-  So an edited imported story must print on the normal button. The imported
+  An edited imported story prints after acknowledging that no check was recorded. The imported
   half of this file does not hand-build its rows: it runs the real import, on
   the real publish path, so the mark the import puts on the draft and the thing
   publish respects cannot drift apart. The checks that protect readers still
@@ -139,11 +139,14 @@ it("prints an imported story whose body an editor edited, with the edit in it", 
   const leadId = await importOneStory();
   const edited = `${BODY} The ordinance comes back on 13 October.`;
   await editAndSave(leadId, edited);
-  const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId);
+  const ctx = { userId: USER, newsroomId: NEWSROOM };
+  const warnings = await performPublish(ctx, leadId);
+  assert.ok(!warnings.ok && warnings.warnings?.some(row => row.key === "unchecked"));
+  const published = await performPublish(ctx, leadId, undefined, undefined, {}, ["unchecked"]);
   assert.equal(
     "error" in published ? published.error : "",
     "",
-    "an edited imported story must not stop at a review built for model-written drafts",
+    "an edited imported story publishes after the unchecked warning is acknowledged",
   );
   assert.equal(published.ok, true, "the editor's edit prints on the normal button");
   const sql = await getSql();

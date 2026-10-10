@@ -875,12 +875,12 @@ it("refuses a section mismatch even when the stored confirmation matches the dra
 /* ------------------------------------------------------------------------ */
 
 it("refuses unreviewed claims from a readable review, then audits the acknowledgement", async () => {
-  const { leadId } = await fixture({ notes: { todo: [] } });
+  const { leadId } = await fixture({ notes: { todo: [] }, research: {
+    aiEvidenceReview: { checkedText: "The council approved the plan on Tuesday night.", rows: [] },
+    storyReadiness: { version: 1, state: "not-ready", openCount: 3, totalCount: 3, reason: "3 claims need review." },
+  } });
   const review = {
-    rows: [
-      { judgment: { value: "unreviewed" }, captures: [] },
-      { judgment: { value: "unreviewed" }, captures: [] },
-    ] as never,
+    rows: Array.from({ length: 8 }, () => ({ judgment: { value: "unreviewed" }, captures: [] })) as never,
     claimRows: [],
     manualClaimRows: [],
     evidenceToken: "",
@@ -899,6 +899,7 @@ it("refuses unreviewed claims from a readable review, then audits the acknowledg
     warningsOf(refused)?.some((w) => w.key === "claims-unreviewed"),
     `claims-unreviewed must be a current warning: ${JSON.stringify(warningsOf(refused))}`,
   );
+  assert.deepEqual(warningsOf(refused)?.map(w => w.key), ["claims-unreviewed"], "the old three-claim memo must not introduce another warning key");
   assert.equal(await articleCount(leadId), 0);
 
   const published = await performPublish(

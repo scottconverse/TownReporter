@@ -1,7 +1,12 @@
 import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
 import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
-import { savedStoryReadiness, type StoryReadiness } from "./story-readiness.ts";
+import {
+  liveClaimsOwnReadiness,
+  readinessWithUncheckedStory,
+  savedStoryReadiness,
+  type StoryReadiness,
+} from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
@@ -162,7 +167,6 @@ import {
   evidenceNeedsReview,
   evidenceReviewToken,
   evidenceConfirmationMatches,
-  isImportedText,
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import {
@@ -1204,7 +1208,7 @@ export const getLead = createServerFn({ method: "GET" })
       : 0;
     const uncheckedEvidenceChecked = drafts[0] ? evidenceCheckCoversCurrentVersion(drafts[0]) : false;
     const uncheckedExempt = drafts[0]
-      ? isImportedText(drafts[0]) || drafts[0].form === "editorial"
+      ? drafts[0].form === "editorial"
       : false;
     /*
       The named-outlet check, run for display only -- performPublish decides.
@@ -4582,9 +4586,32 @@ export async function queryDraftRows(context: { newsroomId: number }) {
     names_checked_at: string | null;
     names_unresolved: number;
   }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
-  const { loadDeskClaimCounts } = await import("./finding-evidence-review.ts");
+  const { loadDeskClaimCounts, recordedDraftClaimCount, isUnreadableFindingsError } =
+    await import("./finding-evidence-review.ts");
   const counts = await loadDeskClaimCounts(sql, owned(context), rows.map(row => row.id));
+  // One bounded read for current-version identities; do not send story bodies to the list.
+  const drafts = rows.length ? await sql.query<DraftRow & { notes_json: string }>(
+    "select d.*, l.notes_json from drafts d join leads l on l.id=d.lead_id and l.newsroom_id=d.newsroom_id where d.newsroom_id=$1 and d.id=any($2::int[])",
+    [owned(context), rows.map(row => row.id)],
+  ) : [];
+  const readiness = new Map<number, StoryReadiness>();
+  for (const draft of drafts) {
+    let recordedClaims = 0;
+    try {
+      recordedClaims = recordedDraftClaimCount(draft);
+    } catch (error) {
+      if (!isUnreadableFindingsError(error)) throw error;
+    }
+    readiness.set(draft.id, readinessWithUncheckedStory(savedStoryReadiness(draft.research_json), {
+      recordedClaims,
+      evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(draft),
+      body: stripReporterNotebook(draft.body ?? ""),
+      acknowledgedForVersion: evidenceConfirmationMatches(parseNotes(draft.notes_json).uncheckedStoryConfirmation?.token, draft),
+      exempt: draft.form === "editorial",
+    }));
+  }
   return rows.map(row => ({ ...row,
+    story_readiness: { version: 1, ...(readiness.get(row.id) ?? savedStoryReadiness(row.story_readiness)) },
     unreviewed_claims: counts.get(row.id)?.outstanding ?? 0,
     unreviewed_claims_accepted_count: counts.get(row.id)?.accepted ?? 0,
   }));
@@ -5572,7 +5599,7 @@ export async function uncheckedStoryGate(
       select notes_json from leads where id = ${leadId} and newsroom_id = ${newsroomId} limit 1
     `);
   const acknowledged = parseNotes(lead?.notes_json).uncheckedStoryConfirmation?.token === identity;
-  const exempt = isImportedText(draft) || draft.form === "editorial";
+  const exempt = draft.form === "editorial";
   const decision = uncheckedStoryNeedsCheck({
     recordedClaims: review.recordedClaims,
     evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(draft),
@@ -6190,7 +6217,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       evidenceCheckedCurrentVersion: evidenceCheckCoversCurrentVersion(row),
       body: draft.body,
       acknowledgedForVersion: evidenceConfirmationMatches(notes.uncheckedStoryConfirmation?.token, row),
-      exempt: isImportedText(row) || row.form === "editorial",
+      exempt: row.form === "editorial",
     }).blocked) warnings.push({ key: "unchecked", sentence: UNCHECKED_STORY_REASON });
 
     if (!draft.dek || !draft.dek.trim()) {
@@ -6304,15 +6331,17 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       });
     }
 
-    /* The saved readiness memo a person recorded: checking/to-check/not-ready
-       are warnings. It is NOT the live reconcile job -- that is a hard gate
-       below -- so an editor can acknowledge a memo and print. */
+    /* AI readiness is a cached claim tally, already covered by the live
+       claims-unreviewed warning above. The page uses that live review too;
+       adding the old memo under a second key would refuse Publish anyway.
+       Other readiness memos remain warnings, and package holds are recomputed
+       below independently. The live reconcile job remains a hard gate. */
     const readiness = savedStoryReadiness(row.research_json);
-    if (
+    if (!liveClaimsOwnReadiness(row.research_json) && (
       readiness.state === "checking" ||
       readiness.state === "to-check" ||
       readiness.state === "not-ready"
-    ) {
+    )) {
       warnings.push({
         key: "readiness",
         sentence:

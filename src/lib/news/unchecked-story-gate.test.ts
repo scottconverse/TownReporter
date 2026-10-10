@@ -202,7 +202,7 @@ describe("uncheckedStoryNeedsCheck", () => {
     assert.equal(result.blocked, false);
   });
 
-  it("preserves the imported/pasted and opinion exemptions", () => {
+  it("preserves the standalone editorial exemption", () => {
     for (const exempt of [true]) {
       const result = uncheckedStoryNeedsCheck({
         recordedClaims: 0,

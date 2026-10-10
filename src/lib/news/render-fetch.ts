@@ -143,7 +143,12 @@ async function getBrowser(): Promise<ChromiumBrowser | null> {
         browser = await launchChromium(mod, ["--no-sandbox", ...BASE_CHROMIUM_ARGS]);
       }
       return browser;
-    } catch {
+    } catch (err) {
+      console.warn(
+        `[render] Chromium unavailable: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Install the matching browser with npm run playwright:install under the server user; ` +
+        `PLAYWRIGHT_BROWSERS_PATH=${process.env.PLAYWRIGHT_BROWSERS_PATH || "(default user cache)"}.`,
+      );
       browser = null;
       return null;
     } finally {
@@ -235,7 +240,8 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
       // Article consumers still enforce their existing 40-character floor.
       if (looksLikeAppShell(text, html)) return null;
       return { text, title: title || start.hostname, html, finalUrl: page.url() };
-    } catch {
+    } catch (err) {
+      console.warn(`[render] Page read failed for ${start.hostname}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     } finally {
       await page.close().catch(() => undefined);

@@ -265,6 +265,26 @@ it("STILL voids the acceptance when the body is edited (the U24 guard)", async (
   assert.equal(printed.ok, false, "an edited story is not covered by the old acceptance");
 });
 
+it("publishes anyway after accepting claims, editing one word and saving, auditing current warnings", async () => {
+  const f = await fixture();
+  const ctx = { userId: f.userId, newsroomId: f.newsroomId };
+  await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({
+    aiEvidenceReview: { checkedText: (await displayedFields(f)).body, rows: [] },
+    storyReadiness: { version: 1, state: "not-ready", openCount: 2, totalCount: 2, reason: "2 claims need review." },
+  }), f.draftId]);
+  const accepted = await performAcceptUnreviewedClaims(ctx, f.leadId, await paneReviewToken(f));
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  const fields = await displayedFields(f);
+  await saveDraftForEditor(ctx, { leadId: f.leadId, ...fields, body: fields.body.replace("short", "brief") });
+  const printed = await performPublish(ctx, f.leadId, MODEL_DRAFT_SECTIONS, undefined, {}, ["claims-unreviewed", "evidence-stale"]);
+  assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
+  const articles = await f.sql.query("select id from articles where lead_id=$1 and newsroom_id=$2", [f.leadId, f.newsroomId]);
+  assert.equal(articles.length, 1);
+  const audits = await f.sql.query<{ detail: string; user_id: string }>("select detail,user_id from audit_events where newsroom_id=$1 and action='override'", [f.newsroomId]);
+  assert.deepEqual(audits.map(row => JSON.parse(row.detail).key).sort(), ["claims-unreviewed", "evidence-stale"]);
+  assert.ok(audits.every(row => row.user_id === f.userId && JSON.parse(row.detail).target.id === f.draftId));
+});
+
 it("STILL voids the acceptance when the headline, the dek or the section is edited", async () => {
   for (const patch of [
     { headline: "Council adopts the budget, 5-2" },

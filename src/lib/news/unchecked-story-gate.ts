@@ -92,7 +92,7 @@ export type UncheckedStoryDecision = {
 /**
  * The one decision the blocker, the readiness chip and `performPublish` read.
  * `recordedClaims` is the run's output (any recorded claim is the ordinary claims
- * gate's business); `exempt` keeps the imported/pasted and editorial exemptions.
+ * gate's business); `exempt` is reserved for the standalone editorial.
  */
 export function uncheckedStoryNeedsCheck(input: {
   recordedClaims: number;

@@ -13,7 +13,9 @@ export type StoryReadiness = {
 /** Every story surface reads the Publish gate's current first reason. */
 export function editorStoryState(blockers: readonly { key: string; kind?: string; sentence: string }[], openCount: number, acceptedCount = 0,
 ): StoryReadiness {
-  const first = blockers[0];
+  const first = blockers.find(row => row.kind === "hard") ??
+    blockers.find(row => row.key === "evidence-loading" || row.key === "reconcile-running") ??
+    blockers.find(row => row.key === "unchecked") ?? blockers[0];
   return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : first.key === "unchecked" || first.key === "claims-unchecked" ? "not-checked" : "not-ready" : "ready",
     openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
 }
@@ -29,6 +31,25 @@ export function readinessWithAcceptedClaims(readiness: StoryReadiness, openCount
   const claimReason = /^(?:\d+ claims need review\.|\d+ (?:headline or first-paragraph )?facts? needs? checking\.)$/.test(readiness.reason);
   return reason && (readiness.state === "ready" || (claimReason && readiness.openCount === openCount)) && readiness.state !== "checking"
     ? { ...readiness, state: "ready", openCount, reason } : readiness;
+}
+
+/** The live review owns an AI check's claim tally, including after judgments or edits. */
+export function liveClaimsOwnReadiness(raw: string | null | undefined): boolean {
+  try {
+    const memo = JSON.parse(raw ?? "{}");
+    return Boolean(memo?.aiEvidenceReview);
+  } catch {
+    return false;
+  }
+}
+
+/** Apply the current zero-claims decision on both the story page and Drafts. */
+export function readinessWithUncheckedStory(readiness: StoryReadiness, input: Parameters<typeof uncheckedStoryNeedsCheck>[0]): StoryReadiness {
+  const unchecked = uncheckedStoryNeedsCheck(input);
+  if (readiness.state === "checking") return readiness;
+  if (unchecked.blocked) return readiness.state === "ready" || readiness.state === "verified" || readiness.state === "not-checked"
+    ? { ...readiness, state: "not-checked", reason: unchecked.reason } : readiness;
+  return readiness.state === "not-checked" ? { ...readiness, state: "ready", reason: "Ready to publish." } : readiness;
 }
 
 /**

@@ -361,6 +361,12 @@ function assertReadableStoredFindings(raw: unknown): void {
   }
 }
 
+/** Count the same recorded rows as Checks without resolving their captures. */
+export function recordedDraftClaimCount(draft: DraftRow): number {
+  assertReadableStoredFindings(draft.found_note);
+  return parseFindings(draft.found_note).length + storedClaims(draft).length + storedManualClaims(draft).length;
+}
+
 function storedClaims(draft: DraftRow): ReportingReviewClaim[] {
   const claims = objectMemo(draft.research_json).reportedClaims;
   if (claims == null) return [];
