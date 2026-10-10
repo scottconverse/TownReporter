@@ -1,7 +1,14 @@
 import type { Sql } from "../db.ts";
 import { meetingTranscriptChoices } from "./meeting-transcript-choice.ts";
 
-type TranscriptRow = { id: number; video_id: string; source_method: string; title: string | null; published: string | null };
+type TranscriptRow = {
+  id: number;
+  video_id: string;
+  source_method: string;
+  title: string | null;
+  published: string | null;
+  agenda_item_count: number;
+};
 const months = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
 // Upload dates differ across channels. Prefer the meeting date in the title.
@@ -28,14 +35,23 @@ function meetingIdentity(row: Pick<TranscriptRow, "title" | "published">): strin
 
 export async function loadMeetingTranscriptChoices(sql: Sql, newsroomId: number, videoId: string) {
   const captures = await sql.query<{ title: string; published: string }>(
-    "select title,published from meeting_capture_records where newsroom_id=$1 and video_id=$2 limit 1", [newsroomId, videoId],
+    "select title,published from meeting_capture_records where newsroom_id=$1 and video_id=$2 limit 1",
+    [newsroomId, videoId],
   );
   const identity = captures[0] ? meetingIdentity(captures[0]) : null;
   const rows = await sql.query<TranscriptRow>(
-    `select a.id,a.video_id,a.source_method,c.title,c.published from meeting_transcript_artifacts a
+    `select a.id,a.video_id,a.source_method,c.title,c.published,
+       (select count(distinct chunks.item) from meeting_agenda_chunks chunks
+        where chunks.newsroom_id=a.newsroom_id and chunks.video_id=a.video_id and chunks.artifact_id=a.id) as agenda_item_count
+     from meeting_transcript_artifacts a
      left join meeting_capture_records c on c.newsroom_id=a.newsroom_id and c.video_id=a.video_id
      where a.newsroom_id=$1 and a.artifact_type='transcript' and a.source_method in ('textflowkit-json','yt-dlp-captions')
-     order by a.captured_at desc,a.id desc`, [newsroomId],
+     order by a.captured_at desc,a.id desc`,
+    [newsroomId],
   );
-  return meetingTranscriptChoices(rows.filter((row) => row.video_id === videoId || (identity !== null && meetingIdentity(row) === identity)));
+  return meetingTranscriptChoices(
+    rows.filter(
+      (row) => row.video_id === videoId || (identity !== null && meetingIdentity(row) === identity),
+    ),
+  );
 }
