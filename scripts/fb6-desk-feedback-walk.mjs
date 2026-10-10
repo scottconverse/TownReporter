@@ -260,6 +260,7 @@ async function seed(db, { newsroomId, userId }) {
 
 let db = null;
 let browser = null;
+let page = null;
 let failed = false;
 const startedAt = Date.now();
 
@@ -273,7 +274,7 @@ try {
 
   browser = await chromium.launch({ args: ["--disable-external-protocol-requests"] });
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
-  const page = await ctx.newPage();
+  page = await ctx.newPage();
   const consoleErrors = [];
   page.on("pageerror", (e) => consoleErrors.push(String(e).slice(0, 200)));
 
@@ -586,6 +587,7 @@ try {
   for (const line of results) console.log(line);
   console.log(`\nshots: ${OUT_DIR}`);
 } catch (error) {
+  failed = true;
   if (page) console.error("Screen at failure:", await page.locator("body").innerText());
   /*
     Printed BEFORE the finally below, which kills the process: a `finally` that
