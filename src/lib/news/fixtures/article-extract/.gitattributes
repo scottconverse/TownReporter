@@ -1,0 +1,3 @@
+# Preserve saved markup and captured output exactly on Windows and in Linux CI.
+*.html -text
+*.expected.txt -text
