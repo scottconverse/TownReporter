@@ -1330,6 +1330,7 @@ export const aiFollowUpInput = z.object({
   /** `follow-ups.ts:389` takes at most 8, each cut at 500. */
   targets: z.array(z.string().max(LIMITS.aiFollowUpTarget)).max(8).optional(),
   modelChoice: z.string().max(LIMITS.aiFollowUpModel).optional(),
+  modelEffort: modelEffortOrNull.optional(),
 });
 
 /** `desk.ts:2796` updateAiFollowUp. */

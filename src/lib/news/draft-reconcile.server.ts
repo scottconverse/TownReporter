@@ -1,4 +1,5 @@
 import { getSql } from "../db.ts";
+import { aiEvidenceReadiness, judgeEvidenceClaims } from "./evidence-ai.ts";
 import { grokChat, parseJsonBlock, providerBudget } from "./ai.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { evidenceReviewToken, publicEvidenceWasRemoved } from "./draft-evidence.ts";
@@ -149,7 +150,7 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
   const draftToEdit = JSON.stringify({headline:draft.headline,dek:draft.dek,body:draft.body,topic:draft.topic,source_urls:json(draft.source_urls),form:draft.form,found:json(draft.found_note),unanswered:json(draft.unanswered)});
   const documentEvidence = await prepareDocumentReconcileEvidence(documents, draftToEdit, runChat, active.modelChoice, text => stage(text), budget.callMs);
   await stage("Reconciling the draft with the saved evidence");
-  const prompt = `RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and the tightest page/character locator around the supporting passage; never cite an entire document range merely because a name appears somewhere inside it. Never expose private document IDs, download paths or invented URLs in the story or source_urls. A supplied segment establishes what that segment discusses, not that a different policy, benefit, event or action did not exist elsewhere; narrow negative language to the scope of the evidence unless a source affirmatively supports the negative. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty. Return document_claims for selected load-bearing claims supported by uploads as [{"fact":"claim","kind":"primary|record","documentId":"exact private document ID from the evidence label","excerpt":"exact supporting passage"}]. This is a verified passage inventory, not a claim that every sentence was exhaustively inventoried. Do not put an uploaded document in URL-based claims and do not invent a URL.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
+  const prompt = `Also return evidence_judgments:{"rows":[{"index":0,"verdict":"Supported|Not supported|Needs a human","quote":"exact retained words","sourceUrl":"","reason":"one line"}]}. Index the output found rows first, then output claims. Judge every row against the supplied saved evidence, never upgrade submitted to approved, and never invent a quote. RESEARCH QUESTIONS AND UNKNOWNS ARE NOT EVIDENCE. Reconcile only against the saved captures and original document text below. Do not search, fetch, research, or rewrite from outside material. Uploaded documents are valid evidence without public URLs. Cite their filenames and the tightest page/character locator around the supporting passage; never cite an entire document range merely because a name appears somewhere inside it. Never expose private document IDs, download paths or invented URLs in the story or source_urls. A supplied segment establishes what that segment discusses, not that a different policy, benefit, event or action did not exist elsewhere; narrow negative language to the scope of the evidence unless a source affirmatively supports the negative. Remove or qualify unsupported claims and retain unresolved OCR/name uncertainty. Return document_claims for selected load-bearing claims supported by uploads as [{"fact":"claim","kind":"primary|record","documentId":"exact private document ID from the evidence label","excerpt":"exact supporting passage"}]. This is a verified passage inventory, not a claim that every sentence was exhaustively inventoried. Do not put an uploaded document in URL-based claims and do not invent a URL.\n\nDraft JSON to edit:\n${draftToEdit}\n\nSAVED URL-LABELED EVIDENCE:\n${evidence}\n\nRETAINED UPLOADED DOCUMENT EVIDENCE:\n${documentEvidence.text}`;
   const response = await waitForModel({
     jobId: job.id,
     label: () => liveLabel,
@@ -172,6 +173,30 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
     chat: (system, user, maxTokens) => runChat(system, user, maxTokens, active.modelChoice, { timeoutMs: Math.min(budget.callMs, Math.max(6000, budget.wallMs - (Date.now() - nameCheckStarted) - 2000)) }),
   });
   Object.assign(edited, names.draft);
+  let judgmentOffset = 0;
+  const aiEvidenceReview = {
+    checkedText: edited.body,
+    rows: await judgeEvidenceClaims(
+      [
+        ...parseFindings(parsed.found).map((finding) => ({
+          text: finding.text,
+          urls: finding.source_urls,
+          quote: finding.excerpt,
+        })),
+        ...parseClaims(parsed.claims).map((claim) => ({ text: claim.fact, urls: [claim.url] })),
+      ],
+      captures.map((capture) => ({ url: capture.url, text: capture.full_text })),
+      async () => {
+        const answer = parsed.evidence_judgments as { rows?: Record<string, unknown>[] } | undefined;
+        const offset = judgmentOffset;
+        judgmentOffset += 10;
+        const rows = Array.isArray(answer?.rows) ? answer.rows
+          .filter(row => typeof row.index === "number" && row.index >= offset && row.index < offset + 10)
+          .map(row => ({ ...row, index: Number(row.index) - offset })) : [];
+        return { ok: true, text: JSON.stringify({ rows }) };
+      },
+    ),
+  };
   await withClaimedLeadDraftLock(job, draft.lead_id, async tx => {
     const [current] = await tx<DraftRow>`select * from drafts where lead_id=${draft.lead_id} and newsroom_id=${job.newsroom_id} order by updated_at desc,id desc limit 1 for update`;
     if (!current || current.id !== draft.id || String(current.updated_at) !== snapshotUpdated || evidenceReviewToken(current) !== snapshotToken) throw new Error("The draft or its evidence changed while reconciliation was running. The saved draft was preserved.");
@@ -239,6 +264,8 @@ export async function performDraftReconcileWork(job: DeskJob, deps: ReconcileDep
       ...currentResearch,
       ...(documents.length ? {documentEvidenceReview:documentEvidence.receipt,reportedDocumentClaims:{version:1,checkedText:nameCheckText(names.draft),rows:documentClaims}} : {}),
       nameCheck:names.check,
+      aiEvidenceReview,
+      storyReadiness: aiEvidenceReadiness(aiEvidenceReview),
       reportedClaims:{version:1,rows:claims},
       evidenceReconciledAt:new Date().toISOString(),
     }));

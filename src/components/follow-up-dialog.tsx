@@ -4,6 +4,7 @@ import { Dialog, ChoiceCard } from "@/components/dialog";
 import { ModelPicker } from "@/components/model-picker";
 import { scheduleForAgent, type FollowUpSchedule } from "@/lib/news/follow-up-copy";
 import { validateFollowUpDialog } from "@/lib/news/follow-up-dialog-validation";
+import type { ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import type { FollowUpAgentKind } from "@/lib/news/types";
 
@@ -43,6 +44,7 @@ export type FollowUpDialogInput = {
   targets: string[];
   leadId: number | null;
   modelChoice: StoryModelChoice;
+  modelEffort?: ModelEffort | null;
 };
 
 export type FollowUpDialogInitial = {
@@ -53,6 +55,7 @@ export type FollowUpDialogInitial = {
   targets?: string;
   leadId?: number | null;
   modelChoice?: StoryModelChoice;
+  modelEffort?: ModelEffort | null;
   /** Shown when the linked lead is outside the picker's recent window. */
   leadHeadline?: string | null;
 };
@@ -102,6 +105,8 @@ export function FollowUpDialog({
   const [leadId, setLeadId] = useState<string>(initial?.leadId ? String(initial.leadId) : "");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>(initial?.modelChoice ?? "auto");
 
+  const [effort, setEffort] = useState<ModelEffort | null>(initial?.modelEffort ?? null);
+
   const targets = parseTargets(targetsText);
   const overCap = targets.length > MAX_TARGETS;
   const validationIssues = validateFollowUpDialog({ what, agentKind: kind, targets });
@@ -135,6 +140,7 @@ export function FollowUpDialog({
           targets: targets.slice(0, MAX_TARGETS),
           leadId: leadId ? Number(leadId) : null,
           modelChoice,
+          modelEffort: effort,
         });
       }}
       primaryDisabled={primaryDisabled}
@@ -205,7 +211,9 @@ export function FollowUpDialog({
           scope="follow-up"
           label="Model for this follow-up"
           value={modelChoice}
-          onChange={setModelChoice}
+          onChange={(choice) => { setModelChoice(choice); setEffort(null); }}
+          effort={effort}
+          onEffortChange={setEffort}
         />
 
         <div className="fu-choices" role="radiogroup" aria-label="How">

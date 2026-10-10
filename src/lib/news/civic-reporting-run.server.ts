@@ -46,7 +46,7 @@
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getSql, withTransaction, type Sql } from "../db.ts";
-import { reportingStoryReviewClaims } from "./reporting-evidence-adapter.ts";
+import { reportingStoryReviewClaims, retainReportingEvidence } from "./reporting-evidence-adapter.ts";
 import { persistReportingActionLedger } from "./reporting-ledger-adapter.ts";
 import {
   JobCancelledError,
@@ -95,6 +95,7 @@ import { KIND_BUDGETS, modelEffort, PROVIDER_REGISTRY, providerEntry, type Model
 import { readProviderOverrides } from "./provider-settings.ts";
 import { dekRuleProblems, firstSentenceForDek } from "./dek-fallback.ts";
 import { storyReadiness } from "./story-readiness.ts";
+import { judgeEvidenceClaims, quoteDoesNotOverstate } from "./evidence-ai.ts";
 
 // Whole-meeting writing asks for 18,000 tokens, rather than a short pass reply.
 // Reuse the registry long-call allowance; the 913-second rehearsal failed with
@@ -1332,6 +1333,7 @@ export async function fileRunLeads(input: {
           ${"Reported with the civic-scanner method; verify the claims ledger before publication."},
           ${JSON.stringify({ civicReporting: true, requestId: input.request.id, storyId: story.id,
             reportedActions: input.actions ?? [],
+            aiEvidenceReview: story.aiEvidenceReview,
             storyReadiness: {
               version: 1,
               ...readiness,
@@ -1973,6 +1975,8 @@ export async function performReportingWork(
     });
   }
   const allDocuments = further.documents;
+  await throwIfCancelled(job.id);
+  await retainReportingEvidence(sql, { newsroomId: request.newsroom_id, userId: request.user_id }, allDocuments);
   // Preserve the exact records later stages received, including newly found
   // documents. The initial digest alone cannot explain their claim bindings.
   writeWorkspace(workspaceDir, "all-documents.json", JSON.stringify(allDocuments));
@@ -2086,7 +2090,37 @@ export async function performReportingWork(
       throwIfCancelled: () => throwIfCancelled(job.id),
     });
     const rechecked = bindStoryClaimsToEvidence(researched, reconcile, record, allDocuments);
-    stories.push(checkedStoryCaveats(validatePacketSources(rechecked, record), record));
+    const checked = checkedStoryCaveats(validatePacketSources(rechecked, record), record);
+    const sources = allDocuments
+      .filter((doc) => doc.ok)
+      .map((doc) => ({ url: doc.url, text: doc.text }));
+    const tapeUrl = record.identity.videoUrl;
+    if (tapeUrl)
+      sources.push({
+        url: tapeUrl,
+        text: record.segments.map((segment) => segment.text).join(" "),
+      });
+    const rows = await judgeEvidenceClaims(
+      checked.claims.map((claim) => ({
+        text: claim.text,
+        urls: [
+          ...new Set([
+            ...claim.sourceIds.flatMap((id) =>
+              checked.sources.filter((source) => source.id === id).map((source) => source.url),
+            ),
+            ...claimCheckCandidates(claim, record, allDocuments).map((candidate) => candidate.url),
+          ]),
+        ],
+        quote: claim.recordEvidence?.quote || claim.transcriptEvidence?.quote,
+      })),
+      sources,
+      async (prompt) => {
+        await throwIfCancelled(job.id);
+        return chat(methodSystemPrompt(method), prompt, 4000, chatOpts as never);
+      },
+    );
+    checked.aiEvidenceReview = { checkedText: checked.draft, rows };
+    stories.push(checked);
   }
   const held = checkedHeldCaveats(guardCorrectionHolds(writing.held, gather.observations, allDocuments), stories, record);
   for (const list of [unknowns, gaps]) {
@@ -3995,7 +4029,7 @@ function clockLabel(seconds: number): string {
 }
 
 function claimEvidenceCheckPasses(claim: string, candidate: ClaimCheckCandidate, record: WholeRecord): boolean {
-  if (claim.length === 0 || candidate.quote.trim().length < 8) return false;
+  if (claim.length === 0 || candidate.quote.trim().length < 8 || !quoteDoesNotOverstate(claim, candidate.quote)) return false;
   const item: LedgerItem = {
     itemNo: 0,
     kind: candidate.kind === "transcript" ? "reporting" : "document-source",

@@ -91,7 +91,7 @@ export type EvidenceCheckReport = EvidenceCheckState & {
 
 /** One row of any of the review's three stacks, as the two predicates need it. */
 type ReviewableRow = {
-  judgment: { value: FindingJudgment };
+  judgment: { value: FindingJudgment; ai?: { verdict: string } };
   captures: readonly FindingCaptureEvidence[];
 };
 
@@ -137,7 +137,7 @@ export function claimsNeedingReview(
   let count = groundingRows.length;
   for (const row of [...rows, ...claimRows, ...manualClaimRows] as ReviewableRow[]) {
     const chip = judgmentChip(row.judgment.value, row.captures).chip;
-    if (chip === NEEDS_REVIEW_CHIP || (includeCouldNotCheck && chip === COULD_NOT_CHECK_CHIP)) count += 1;
+    if ((row.judgment.ai && row.judgment.ai.verdict !== "Supported") || chip === NEEDS_REVIEW_CHIP || (includeCouldNotCheck && chip === COULD_NOT_CHECK_CHIP)) count += 1;
   }
   return count;
 }

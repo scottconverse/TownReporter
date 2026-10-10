@@ -26,6 +26,10 @@
 import type { OcrImpl, OcrOptions, PdfPage } from "./ingest.ts";
 import { isSelfReferential } from "./claim-hygiene.ts";
 import { isCustomModelChoice } from "./model-choice.ts";
+import { createServerOnlyFn } from "@tanstack/react-start";
+const codexOcrServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
+const claudeOcrServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
+const customOcrServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
 import {
   modelEffort,
   providerEntry,
@@ -250,7 +254,7 @@ async function productionAutomaticPlans(opts: OcrOptions, firstOnly = false): Pr
     const entry = providerEntry(id);
     if (!entry) continue;
     if (entry.kind === "codex") {
-      const { probeCodex } = await import("./ai-codex.server.ts");
+      const { probeCodex } = await codexOcrServer();
       const codex = await probeCodex();
       if (codex.ok) plans.push({ kind: "codex", model: providerModel(entry) });
     } else if (entry.kind === "claude-code") {
@@ -258,7 +262,7 @@ async function productionAutomaticPlans(opts: OcrOptions, firstOnly = false): Pr
       if (apiKey) {
         plans.push({ kind: "anthropic", apiKey, model: providerModel(entry) });
       } else {
-        const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+        const { probeClaudeCode } = await claudeOcrServer();
         const claude = await probeClaudeCode();
         if (claude.ok) plans.push({ kind: "claude-code", model: providerModel(entry) });
       }
@@ -374,7 +378,7 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     try {
       const resolve =
         opts.resolveCustom ??
-        (await import("./custom-ai-connections.server.ts")).resolveCustomAiChoice;
+        (await customOcrServer()).resolveCustomAiChoice;
       const connection = await resolve(newsroomId, provider.slice("custom:".length));
       return {
         kind: "openai",
@@ -399,7 +403,7 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
   if (entry.kind === "claude-code") {
     const apiKey = env("ANTHROPIC_API_KEY");
     if (apiKey) return { kind: "anthropic", apiKey, model: providerModel(entry) };
-    const { probeClaudeCode } = await import("./ai-claude-code.server.ts");
+    const { probeClaudeCode } = await claudeOcrServer();
     const claude = await probeClaudeCode();
     if (claude.ok) return { kind: "claude-code", model: providerModel(entry) };
     return {
@@ -409,7 +413,7 @@ async function resolvePlan(opts: OcrOptions): Promise<Plan | PlanFailure> {
     };
   }
   if (entry.kind === "codex") {
-    const { probeCodex } = await import("./ai-codex.server.ts");
+    const { probeCodex } = await codexOcrServer();
     const codex = await probeCodex(entry.label);
     if (!codex.ok) return { needsOcr: true, reason: codex.error };
     return { kind: "codex", model: providerModel(entry) };
@@ -555,7 +559,7 @@ async function codexTranscribePage(
   reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
-    const { codexChat } = await import("./ai-codex.server.ts");
+    const { codexChat } = await codexOcrServer();
     const result = await codexChat({
       system: TRANSCRIBE_INSTRUCTION,
       user: "Transcribe the attached page image.",
@@ -576,7 +580,7 @@ async function claudeCodeTranscribePage(
   reasoningEffort?: import("./provider-registry.ts").ModelEffort | null,
 ): Promise<string> {
   return withTempImageFile(image, async (filePath) => {
-    const { claudeCodeReadChat } = await import("./ai-claude-code.server.ts");
+    const { claudeCodeReadChat } = await claudeOcrServer();
     const result = await claudeCodeReadChat({
       prompt: TRANSCRIBE_INSTRUCTION,
       filePath,
@@ -961,3 +965,5 @@ export const productionOcr: OcrImpl = async (buf, opts = {}) => {
         : undefined,
   };
 };
+
+

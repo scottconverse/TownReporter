@@ -84,6 +84,7 @@ export type PublishBlocker = {
  * that does nothing.
  */
 export type PublishBlockerState = {
+  evidenceLoading?: boolean;
   headline: string;
   dek: string;
   body: string;
@@ -219,6 +220,8 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  if (state.evidenceLoading) blockers.push({ key: "evidence-loading", sentence: "Loading evidence judgments.",
+    action: { label: "Review the checks", target: { kind: "evidence-review" } } });
   if (!state.sectionReady) {
     blockers.push({
       key: "section",

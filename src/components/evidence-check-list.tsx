@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { evidenceDetailId, type EvidenceListRow } from "../lib/news/evidence-check-list";
 
 /**
@@ -33,6 +33,11 @@ export function EvidenceCheckList({
   onOpenRecord,
   detail,
   footer,
+  onAcceptSupported,
+  onRemoveSentence,
+  onMarkChecked,
+  busy = false,
+  readinessReason,
 }: {
   /** "Ran 8:14 a.m. · Claude Sonnet · checked against 3 captures", or "". */
   ranLine: string;
@@ -52,74 +57,62 @@ export function EvidenceCheckList({
    * belongs to whoever owns the review.
    */
   footer?: ReactNode;
+  onAcceptSupported?: () => void;
+  onRemoveSentence?: (row: EvidenceListRow) => void;
+  onMarkChecked?: (row: EvidenceListRow) => void;
+  busy?: boolean;
+  readinessReason?: string;
 }) {
+  const [spotChecking, setSpotChecking] = useState(false);
+  const supported = rows.filter((row) => row.aiVerdict === "Supported");
+  const exceptions = rows.filter((row) => row.aiVerdict !== "Supported")
+    .sort((a, b) => Number(b.aiVerdict === "Needs a human") - Number(a.aiVerdict === "Needs a human"));
+  const checked = rows.filter((row) => row.aiVerdict).length;
+  function renderRows(items: readonly EvidenceListRow[]) {
+    return <ul className="astra-evidence-list">{items.map((row) => {
+      const body = detail?.(row) ?? null;
+      return <li key={row.key} className="astra-evidence-row">
+        <span className={`astra-evidence-chip is-${row.tone}`}>{row.chip}</span>
+        <p className="astra-evidence-what">{row.what}</p>
+        {row.note ? <p className="astra-evidence-note">{row.note}</p> : null}
+        {row.action?.kind === "open-record" ? (onOpenRecord ?
+          <button type="button" className="btn quiet" onClick={() => onOpenRecord(row.action!.kind === "open-record" ? row.action!.href : "")}>{row.action.label}</button> :
+          <a className="btn quiet" href={row.action.href}>{row.action.label}</a>) : row.action ?
+          <button type="button" className="btn" onClick={onStylePress}>{row.action.label}</button> : null}
+        {row.aiVerdict === "Not supported" ? <div className="astra-evidence-acts">
+          <button type="button" className="btn" disabled={busy || !onRemoveSentence} onClick={() => onRemoveSentence?.(row)}>Remove this sentence from the draft</button>
+          <button type="button" className="btn quiet" disabled={busy || !onMarkChecked} onClick={() => onMarkChecked?.(row)}>Mark checked anyway</button>
+        </div> : null}
+        {body ? <details className="astra-evidence-more" id={evidenceDetailId(row.key)} open={row.aiVerdict === "Needs a human" || row.aiVerdict === "Not supported" || undefined}>
+          <summary>{row.ref?.kind === "style" ? "Style check" : "Record checks and judgment"}</summary>
+          <div className="astra-evidence-more-body">{body}</div>
+        </details> : null}
+      </li>;
+    })}</ul>;
+  }
   return (
     <section className="astra-evidence" aria-label="Evidence check">
       <h2 className="astra-evidence-title">Evidence check</h2>
+      {readinessReason ? <p role="status">{readinessReason}</p> : null}
+      {checked ? <p role="status">AI checked {checked} claims against the record: {supported.length} supported, {checked - supported.length} need you</p> : null}
       {ranLine ? (
         <p className="astra-evidence-ran" role="status">
           {ranLine}
         </p>
       ) : null}
+      {supported.length ? <>
+        <button type="button" className="btn quiet" onClick={() => setSpotChecking(true)}>Spot-check</button>
+        <button type="button" className="btn" disabled={busy || !onAcceptSupported} onClick={onAcceptSupported}>Accept the AI's supported rows</button>
+      </> : null}
       {rows.length === 0 ? (
         <p className="meta">No claims are recorded for this draft yet.</p>
       ) : (
-        <ul className="astra-evidence-list">
-          {rows.map((row) => {
-            const body = detail?.(row) ?? null;
-            return (
-            <li key={row.key} className="astra-evidence-row">
-              <span className={`astra-evidence-chip is-${row.tone}`}>{row.chip}</span>
-              <p className="astra-evidence-what">{row.what}</p>
-              {row.note ? <p className="astra-evidence-note">{row.note}</p> : null}
-              {row.action ? (
-                <div className="astra-evidence-acts">
-                  {/*
-                    The drawn row's one press is the heavy one (2px ink) and the
-                    record link beside it is the light one (1px line), so which
-                    press does the work is legible before either is read. A row
-                    here carries only one of them: the record link when the
-                    claim was checked against something a reader can open.
-                  */}
-                  {row.action.kind === "open-record" ? (
-                    onOpenRecord ? <button type="button" className="btn quiet astra-evidence-act"
-                      onClick={() => onOpenRecord(row.action!.kind === "open-record" ? row.action!.href : "")}>
-                      {row.action.label}
-                    </button> : <a className="btn quiet astra-evidence-act" href={row.action.href}>
-                      {row.action.label}
-                    </a>
-                  ) : (
-                    <button type="button" className="btn astra-evidence-act" onClick={onStylePress}>
-                      {row.action.label}
-                    </button>
-                  )}
-                </div>
-              ) : null}
-              {body ? (
-                /*
-                  The judgment forms live here, not in the page's main column
-                  (unit CW2): the editor opens the row they are judging. Shut by
-                  default, so the list stays the list, and the row's own press
-                  above stays the way to the record.
-                */
-                <details className="astra-evidence-more" id={evidenceDetailId(row.key)}>
-                  {/*
-                    The style row opens into the page's Style check section, not
-                    into a judgment, so its summary says what it opens (unit
-                    CW2). Every other row opens into its own record checks and
-                    judgment controls.
-                  */}
-                  <summary>
-                    {row.ref?.kind === "style" ? "Style check" : "Record checks and judgment"}
-                  </summary>
-                  <div className="astra-evidence-more-body">{body}</div>
-                </details>
-              ) : null}
-            </li>
-            );
-          })}
-        </ul>
+        renderRows(exceptions)
       )}
+      {supported.length ? <details open={spotChecking || undefined} data-ai-supported="true">
+        <summary>Show the {supported.length} claims the AI supported</summary>
+        {renderRows(supported)}
+      </details> : null}
       {compareLabel ? (
         <button type="button" className="btn astra-evidence-compare" onClick={onCompare}>
           {compareLabel}

@@ -416,11 +416,12 @@ export const listFollowUpJobProgress = createServerFn({ method: "GET" })
  * PDF read, a Pull, a transcription and a routine edition could all be running
  * with nothing on any screen that said so.
  *
- * OPEN ROWS COME FIRST, then newest. The `limit` is not a detail: a newsroom
+ * RUNNING ROWS COME FIRST, then queued, then finished, newest within each group.
+ * The `limit` is not a detail: a newsroom
  * with forty finished jobs behind it would otherwise page its own running scan
  * out of the window, and the card the editor is looking for would vanish as the
- * history grew. `order by (status in (...)) desc, id desc` is what makes the
- * window a window on the OPEN work first, newest-first within each group.
+ * history grew. Separate running and queued priorities keep the active job
+ * visible before newer work that has not started.
  *
  * `finished` rows are included, not just open ones, because the card has to be
  * able to show Done and Failed -- a query that only ever returned running jobs
@@ -466,7 +467,7 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
           order by d.updated_at desc, d.id desc limit 1) as draft_id
       from desk_jobs j
       where j.newsroom_id = ${newsroomId}
-      order by (j.status in ('queued', 'running')) desc, j.id desc
+      order by (j.status = 'running') desc, (j.status = 'queued') desc, j.id desc
       limit 30
     `;
     const reportingRequestIds = rows.filter((row) => row.kind === "reporting").map((row) => row.subject_id);
@@ -497,11 +498,8 @@ export const listDeskJobs = createServerFn({ method: "GET" })
   .handler(({ context }): Promise<JobProgressView[]> => readDeskJobs(context.newsroomId ?? 1));
 
 /**
- * The editor pressed Cancel. This only writes the flag: the worker is what
- * stops, at its next boundary, and `executeJob` is what records the reason. A
- * job whose process has already died will never see the flag, which is exactly
- * why the card offers Retry beside this button rather than pretending the press
- * is guaranteed to land.
+ * Cancel records the terminal state immediately and releases the draft lock.
+ * The worker hears the flag at its next boundary and cannot save on its old claim.
  */
 export const cancelStoryJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])

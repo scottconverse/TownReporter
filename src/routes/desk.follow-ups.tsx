@@ -31,6 +31,7 @@ import {
   followUpFilterLabel,
   followUpStoppedNotice,
   followUpTargets,
+  followUpModelEffort,
   isAgentKind,
   isFollowUpSchedule,
   matchesFollowUpFilter,
@@ -285,6 +286,7 @@ function asWireInput(input: FollowUpDialogInput) {
     targets: input.targets,
     leadId: input.leadId,
     modelChoice: input.modelChoice,
+          modelEffort: input.modelEffort,
   };
 }
 
@@ -312,5 +314,6 @@ function initialFor(row: FollowUpRow): FollowUpDialogInitial {
     leadId: row.lead_id,
     leadHeadline: row.lead_headline ?? null,
     modelChoice: storyModelChoice(row.model_choice),
+    modelEffort: followUpModelEffort(row.targets_json),
   };
 }

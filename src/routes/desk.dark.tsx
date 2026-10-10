@@ -1648,6 +1648,7 @@ function InvestigationWorkspace({
         targets: input.targets,
         leadId: input.leadId,
         modelChoice: input.modelChoice,
+          modelEffort: input.modelEffort,
       },
     }),
     onSuccess: (result) => {
