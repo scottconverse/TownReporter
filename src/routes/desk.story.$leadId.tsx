@@ -1,6 +1,7 @@
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { editorStoryState, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { UNCHECKED_STORY_REASON, uncheckedStoryNeedsCheck } from "@/lib/news/unchecked-story-gate";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -58,6 +59,7 @@ import {
   pullTodo,
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
+  acknowledgeUncheckedStory,
   continuePullJob,
   overrideNamedOutlet,
   resolveLeadDuplicate,
@@ -999,6 +1001,48 @@ function StoryPage() {
     },
   });
 
+  /*
+    Unit ZC: "I checked this story myself" -- the one-press acknowledgement of
+    the zero-claims gate. It carries the DRAFT identity the page is holding
+    (`data.evidenceToken`), the same value `performPublish` would confirm the
+    section against, so the server can refuse a press for a version the editor
+    never saw. It is a server round trip like the acceptance above, so it goes
+    through the shared `blockerPressState` and `ActionButton` phase machinery.
+  */
+  const acknowledgeUnchecked = useMutation({
+    /*
+      Unit ZC: the acknowledgement is for the words on screen, so the press saves
+      the CURRENT editor fields first (the same save the Publish press makes),
+      then reads the fresh draft identity the save produced and submits THAT. If
+      the editor types again while the save is in flight, those new unsaved fields
+      stay blocked -- the acknowledgement names the saved version, and the page's
+      `hasUnsavedDraftEdits` gate keeps the chip up.
+    */
+    mutationFn: async () => {
+      await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      const fresh = await getLead({ data: id });
+      return acknowledgeUncheckedStory({
+        data: { leadId: id, evidenceToken: fresh?.evidenceToken ?? "" },
+      });
+    },
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      announceToDesk(
+        res.ok
+          ? "Recorded: you confirmed you checked this story against your sources."
+          : res.error,
+        res.ok ? "ok" : "err",
+      );
+    },
+    onError: (err) => {
+      announceToDesk(
+        editorActionError(err instanceof Error ? err.message : "", "record that check") ??
+          "Could not record that check.",
+        "err",
+      );
+    },
+  });
+
   const reviewEvidence = useMutation({
     mutationFn: (decision: EvidenceDecision) =>
       saveDraft({
@@ -1888,6 +1932,25 @@ function StoryPage() {
     refusal: publishRefusal,
     publishedSlug: justPublished ? publishedSlug : null,
   });
+  /*
+    Unit ZC: the zero-claims gate, decided over the CURRENT fields.
+
+    The loader hands the gate's server facts -- how many claims the run recorded,
+    whether a completed check covers the SAVED version, whether the saved version
+    is acknowledged, and whether this story is exempt. The page recomputes the
+    decision on the text in the boxes, not the saved row, so an editor who types a
+    dollar figure and has not pressed Save still meets the chip and the block. The
+    completion and the acknowledgement are for the SAVED version, so they only
+    count while there are no unsaved edits -- type one character and the gate the
+    editor is answering is no longer the one on file.
+  */
+  const uncheckedStory = uncheckedStoryNeedsCheck({
+    recordedClaims: data.uncheckedRecordedClaims,
+    evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked && !hasUnsavedDraftEdits,
+    body,
+    acknowledgedForVersion: data.uncheckedStoryAcknowledged && !hasUnsavedDraftEdits,
+    exempt: data.uncheckedExempt,
+  }).blocked;
   const publishChecks = publishBlockers({
     headline,
     dek,
@@ -1911,6 +1974,7 @@ function StoryPage() {
     // and its override can say so.
     contradictedClaims: evidenceState.contradicted,
     unreviewedAccepted: false,
+    uncheckedStory,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
@@ -1935,11 +1999,37 @@ function StoryPage() {
     settled answer is the whole of the fix, and it is a pure function of what
     the mutations report, so it is testable without mounting this route.
   */
-  // The resolved Checks state outranks an older saved memo, including published drafts.
+  /*
+    Unit ZC: the zero-claims gate wins the readiness, over the generic
+    not-ready/verified a legacy memo would give, and over the generic
+    claims-unreviewed row for a flagged draft. `not-checked` is its own state, so
+    the chip says what is actually wrong -- a checkable story nobody has checked.
+  */
+  const uncheckedReadiness = uncheckedStory
+    ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON }
+    : null;
   const legacyEvidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
-  const draftReadiness = data.draft ? hasAiJudgments ? editorStoryState(blockers, evidenceState.toReview) :
-    legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : legacyReadiness :
-    { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  /*
+    Unit ZC: a cached `not-checked` in the saved memo only means the gate was live
+    when a reporting pass last wrote it. Once the CURRENT gate is clear -- the
+    editor acknowledged, a check completed, claims were recorded, or the body has
+    no checkable fact -- that cached state is stale and must not outlive its
+    reason, or the chip would read `Not checked yet` after the acknowledgement. So
+    a saved `not-checked` degrades to the ordinary ready presentation (no invented
+    "facts matched" line for a zero-claim story) until the gate is live again.
+  */
+  const legacyReadinessCurrent =
+    legacyReadiness.state === "not-checked"
+      ? { state: "ready" as const, openCount: 0, totalCount: 0, reason: "Ready to publish." }
+      : legacyReadiness;
+  const draftReadiness = data.draft
+    ? uncheckedReadiness ??
+      (hasAiJudgments
+        ? editorStoryState(blockers, evidenceState.toReview)
+        : legacyEvidenceBlocker
+          ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence }
+          : legacyReadinessCurrent)
+    : uncheckedReadiness ?? { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const readiness = readinessDot(
     writerIsReady({
       choice: modelChoice,
@@ -1958,6 +2048,12 @@ function StoryPage() {
       isError: acceptUnreviewed.isError,
       error: acceptUnreviewed.error,
       answer: acceptUnreviewed.data,
+    },
+    acknowledge: {
+      isPending: acknowledgeUnchecked.isPending,
+      isError: acknowledgeUnchecked.isError,
+      error: acknowledgeUnchecked.error,
+      answer: acknowledgeUnchecked.data,
     },
     override: {
       isPending: overrideOutlet.isPending,
@@ -2101,6 +2197,10 @@ function StoryPage() {
           -- and the record names who accepted, when, and which draft version.
         */
         acceptUnreviewed.mutate();
+        return;
+      case "acknowledge-unchecked":
+        /* Unit ZC: "I checked this story myself" for the zero-claims gate. */
+        acknowledgeUnchecked.mutate();
         return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView?.({ block: "center" });

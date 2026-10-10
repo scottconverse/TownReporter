@@ -143,6 +143,9 @@ test("Story, Drafts and Today show one matching chip for all four readiness stat
         status: "UNVERIFIED",
       })),
       checking,
+      /* Unit ZC: the zero-claim "Verified" row has a completed check; the
+         open-claim rows are unaffected by the zero-claims gate. */
+      evidenceCheckedCurrentVersion: openCount === 0 && !checking,
     });
     const row = {
       id: 8,
