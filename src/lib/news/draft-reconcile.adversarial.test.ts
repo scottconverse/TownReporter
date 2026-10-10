@@ -581,3 +581,35 @@ for(const invalid of [{complete:false,quotes:[]},{complete:true,quotes:['FABRICA
   const {prepareDocumentReconcileEvidence}=await vite.ssrLoadModule('/src/lib/news/document-reconcile-evidence.ts');
   await assert.rejects(prepareDocumentReconcileEvidence([{id:'large',filename:'long.md',mime:'text/markdown',status:'read',full_text:'x'.repeat(90000),original_hash:'hash',source_url:null}], 'Draft',async()=>({ok:true,text:JSON.stringify(invalid)}),'local-model',async()=>{},1000),/draft was preserved/i);
 });
+
+test("acceptance survives a no-change evidence reconcile and reopening the new draft", async () => {
+  const f = await lead443Fixture();
+  const response = JSON.stringify({ ...JSON.parse(reply), headline: "Original headline", dek: "Original dek", body: "Original body", claims: [] });
+  const run = async () => {
+    const current = await savedDraft(f);
+    await f.sql.query("update desk_jobs set subject_id=$1, status='running' where id=$2", [current.id, f.job.id]);
+    await performDraftReconcileWork({ ...f.job, subject_id: current.id }, { stage: async () => {}, chat: async () => ({ ok: true, text: response }) });
+  };
+  // Establish the saved check metadata before accepting the outstanding claims.
+  await run();
+  const { loadFindingEvidenceReview } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  const { performAcceptUnreviewedClaims } = await vite.ssrLoadModule("/src/lib/news/desk.ts");
+  const { evidenceReviewToken, evidenceConfirmationMatches } = await vite.ssrLoadModule("/src/lib/news/draft-evidence.ts");
+  const { topicConfirmationFingerprint } = await vite.ssrLoadModule("/src/lib/news/notes.ts");
+  const review = await loadFindingEvidenceReview(f.sql, f.newsroomId, f.leadId);
+  const accepted = await performAcceptUnreviewedClaims({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, review.evidenceToken);
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  const before = await savedDraft(f);
+  const [lead] = await f.sql.query<{notes_json:string}>("select notes_json from leads where id=$1", [f.leadId]);
+  const notes = JSON.parse(lead.notes_json);
+  // Exercise an acceptance recorded by the pre-fix deployment too.
+  notes.unreviewedClaimsConfirmation.token = topicConfirmationFingerprint(JSON.stringify([before.id, ...JSON.parse(evidenceReviewToken(before))]));
+  assert.equal(evidenceConfirmationMatches(notes.unreviewedClaimsConfirmation.token, before), true);
+  await f.sql.query("update leads set notes_json=$1 where id=$2", [JSON.stringify(notes), f.leadId]);
+  await run();
+  const reopened = await savedDraft(f);
+  assert.notEqual(reopened.id, before.id, "reconcile files a replacement row");
+  assert.equal(evidenceReviewToken(reopened), evidenceReviewToken(before), "a no-op reconcile retains the accepted content identity");
+  const [reopenedLead] = await f.sql.query<{notes_json:string}>("select notes_json from leads where id=$1", [f.leadId]);
+  assert.equal(evidenceConfirmationMatches(JSON.parse(reopenedLead.notes_json).unreviewedClaimsConfirmation.token, reopened), true);
+});

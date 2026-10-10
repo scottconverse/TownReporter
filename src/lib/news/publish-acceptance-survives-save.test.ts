@@ -1,3 +1,4 @@
+import { deskDraftState } from "./desk-drafts.ts";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, before, it } from "node:test";
@@ -373,4 +374,37 @@ it("the token is still a pure function of the draft's own text, with the derived
     evidenceReviewToken(withStyle),
     "the findings still move it",
   );
+});
+
+it("a content-identical replacement draft keeps its token; every content edit moves it", () => {
+  const base = { id: 1, headline: "Headline", dek: "Dek", body: "Body", topic: "business",
+    source_urls: "[]", provenance_json: "[]", found_note: "[]", unanswered: "[]", research_json: "{}" };
+  assert.equal(evidenceReviewToken({ ...base, id: 2 }), evidenceReviewToken(base));
+  for (const field of ["headline", "dek", "body", "topic", "source_urls", "provenance_json", "found_note", "unanswered", "research_json"] as const) {
+    assert.notEqual(evidenceReviewToken({ ...base, [field]: "changed" }), evidenceReviewToken(base), field);
+  }
+});
+
+it("source edits after accepting still refuse publication", async () => {
+  const f = await fixture();
+  const accepted = await performAcceptUnreviewedClaims({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, await paneReviewToken(f));
+  assert.equal(accepted.ok, true);
+  await f.sql.query("update drafts set source_urls=$1 where id=$2", [JSON.stringify([f.url, "https://records.example/new-source"]), f.draftId]);
+  const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, MODEL_DRAFT_SECTIONS);
+  assert.equal(printed.ok, false);
+});
+
+it("reopening the drafts list after a no-op Save uses the recorded acceptance", async () => {
+  const f = await fixture();
+  const context = { userId: f.userId, newsroomId: f.newsroomId };
+  assert.equal((await performAcceptUnreviewedClaims(context, f.leadId, await paneReviewToken(f))).ok, true);
+  await saveDraftForEditor(context, { leadId: f.leadId, ...(await displayedFields(f)) });
+  const { queryDraftRows } = await vite.ssrLoadModule("/src/lib/news/desk.ts");
+  const rows = await queryDraftRows(context);
+  const row = rows.find((row: {lead_id:number}) => row.lead_id === f.leadId);
+  assert.equal(row.unreviewed_claims, 1);
+  assert.equal(row.unreviewed_claims_accepted_count, 1);
+  const state = deskDraftState(row);
+  assert.equal(state.label, "✓ Ready");
+  assert.equal(state.readiness?.reason, "You accepted 1 claim the AI could not confirm.");
 });

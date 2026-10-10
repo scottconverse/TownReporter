@@ -1,6 +1,6 @@
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
 import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
-import type { StoryReadiness } from "./story-readiness.ts";
+import { savedStoryReadiness, type StoryReadiness } from "./story-readiness.ts";
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
 import {
   ensureNewsroomSources as ensureSeeds,
@@ -156,6 +156,7 @@ import {
 import {
   evidenceNeedsReview,
   evidenceReviewToken,
+  evidenceConfirmationMatches,
   mayInheritLeadSources,
 } from "./draft-evidence.ts";
 import { webSearch } from "./search-web";
@@ -199,6 +200,7 @@ import {
   namedOutlet,
   namedOutletNotice,
   unresolvedNamedOutlets,
+  type NamedOutlet,
 } from "./outlet-credit";
 import {
   buildScanUserMessage,
@@ -1097,8 +1099,12 @@ export const getLead = createServerFn({ method: "GET" })
     const draftMeetingEvidence = drafts[0]
       ? await loadDraftMeetingEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
       : null;
-    const meetingPublishNotice = drafts[0]
-      ? (await loadMeetingPublishEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })).notice
+    const meetingPublishEvidence = drafts[0]
+      ? await loadMeetingPublishEvidence(sql, { newsroomId: owned(context), draftId: Number(drafts[0].id) })
+      : null;
+    const meetingPublishNotice = meetingPublishEvidence?.notice ?? null;
+    const meetingCitationNotice = meetingPublishEvidence?.stale.length
+      ? staleCitationNotice(meetingPublishEvidence.stale)
       : null;
     /*
       WR1 phase 2: the whole-meeting accounting the story page's Meeting ledger
@@ -1147,16 +1153,21 @@ export const getLead = createServerFn({ method: "GET" })
       }
     }
     const job = await latestJob({ newsroomId: owned(context), kind: "draft", subjectId: id });
-    const activeMeetingArtifactId = job?.status === "queued" || job?.status === "running"
-      ? (() => {
-          try {
-            const receipt = JSON.parse(job.result_json || "{}") as { meetingArtifactId?: unknown };
-            return Number.isInteger(receipt.meetingArtifactId)
+    const activeMeetingArtifactId =
+      job?.status === "queued" || job?.status === "running"
+        ? (() => {
+            try {
+              const receipt = JSON.parse(job.result_json || "{}") as {
+                meetingArtifactId?: unknown;
+              };
+              return Number.isInteger(receipt.meetingArtifactId)
               ? Number(receipt.meetingArtifactId)
               : lead.meeting_artifact_id == null ? null : Number(lead.meeting_artifact_id);
-          } catch { return null; }
-        })()
-      : null;
+            } catch {
+              return null;
+            }
+          })()
+        : null;
     /*
       "Documents opened for this draft" is model-authored (notes.opened, from
       the draft's own notebook) and carries no capture status of its own --
@@ -1185,9 +1196,9 @@ export const getLead = createServerFn({ method: "GET" })
     */
     const topicConfirmed =
       evidenceToken &&
-      notes.topicConfirmation?.token === topicConfirmationFingerprint(evidenceToken) &&
-      notes.topicConfirmation.topic === String(drafts[0]?.topic ?? "").trim()
-        ? notes.topicConfirmation.topic
+      evidenceConfirmationMatches(notes.topicConfirmation?.token, drafts[0]) &&
+      notes.topicConfirmation?.topic === String(drafts[0]?.topic ?? "").trim()
+        ? notes.topicConfirmation!.topic
         : null;
     /*
       HOW MANY claims an editor has already accepted for this exact draft
@@ -1206,8 +1217,8 @@ export const getLead = createServerFn({ method: "GET" })
     */
     const unreviewedClaimsAcceptedCount =
       evidenceToken &&
-      notes.unreviewedClaimsConfirmation?.token === topicConfirmationFingerprint(evidenceToken)
-        ? notes.unreviewedClaimsConfirmation.count
+      evidenceConfirmationMatches(notes.unreviewedClaimsConfirmation?.token, drafts[0])
+        ? notes.unreviewedClaimsConfirmation!.count
         : 0;
     /*
       The named-outlet check, run for display only -- performPublish decides.
@@ -1230,6 +1241,7 @@ export const getLead = createServerFn({ method: "GET" })
       draft,
       draftMeetingEvidence,
       meetingPublishNotice,
+      meetingCitationNotice,
       meetingAccounting,
       evidenceToken,
       topicConfirmed,
@@ -1795,10 +1807,10 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
   };
   let meetingAwareness: import("./meeting-capture.ts").MeetingAwarenessResult | null = null;
   try {
-  const runChat = deps.grokChat ?? grokChat;
-  const probe = deps.probe ?? probeProvider;
-  const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
-  /*
+    const runChat = deps.grokChat ?? grokChat;
+    const probe = deps.probe ?? probeProvider;
+    const setModelChoice = deps.setJobModelChoice ?? setJobModelChoice;
+    /*
     The index-aware reporter, not the raw `setJobStage`: this worker's job row
     carries the stage list written at claim, so each of its sentences -- the
     document reader's, report.ts's, the failover notes -- arrives with the chip
@@ -1810,9 +1822,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     argument is redundant here rather than ignored -- and it is the row, not the
     id, that carries the stage list.
   */
-  const reportStage = progressReporterFor(job);
-  const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
-  /*
+    const reportStage = progressReporterFor(job);
+    const setStage: typeof setJobStage = deps.setJobStage ?? ((_id, stage) => reportStage(stage));
+    /*
     SH-B item 1: one host, one request at a time, a short gap between them.
 
     One gate for the whole pass, so the pacing is shared by every source the
@@ -1822,11 +1834,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     fetch entirely (tests and the offline paths), and in that case there is no
     network to pace.
   */
-  const hostGate = createHostGate();
-  const fetchUrl = deps.ingestUrl ?? ((url: string) => ingestUrl(url, { schedule: hostGate.schedule }));
-  const context = { userId: job.user_id, newsroomId: job.newsroom_id };
-  const paperConfig = await getPaperConfig(owned(context));
-  /*
+    const hostGate = createHostGate();
+    const fetchUrl = deps.ingestUrl ?? ((url: string) => ingestUrl(url, { schedule: hostGate.schedule }));
+    const context = { userId: job.user_id, newsroomId: job.newsroom_id };
+    const paperConfig = await getPaperConfig(owned(context));
+    /*
     U26b: this newsroom's own place, read HERE and not at the point of use.
 
     `fileScanLeads` runs inside `commitResults`, which runs inside
@@ -1837,18 +1849,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     the paper config read, keeps it a plain read on an idle connection. A
     scan is one job; the paper's place does not change under it.
   */
-  const scanPlace = await getPaperPlace(owned(context));
-  await ensureSeeds(context.userId, owned(context));
-  const sql = await getSql();
-  const meetingChannels = paperConfig.youtubeChannels ?? [];
-  /*
+    const scanPlace = await getPaperPlace(owned(context));
+    await ensureSeeds(context.userId, owned(context));
+    const sql = await getSql();
+    const meetingChannels = paperConfig.youtubeChannels ?? [];
+    /*
     FB1: the scan's first arrival, and the honest sentence even when the paper
     has no channels configured -- the worker does look, finds nothing to look
     at, and moves on. Before this the whole kind had no stage list at all, so
     the run that spends the most money on the desk drew no chip row.
   */
-  await reportStage("Checking for meeting material");
-  if (meetingChannels.length > 0) {
+    await reportStage("Checking for meeting material");
+    if (meetingChannels.length > 0) {
     try {
       const { runMeetingAwareness, recheckProvisionalMeetings } = await import("./meeting-capture.ts");
       meetingAwareness = await runMeetingAwareness(sql, owned(context));
@@ -1870,7 +1882,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       };
     }
   }
-  /*
+    /*
     Speech-to-text (unit R) runs AFTER the capture pass, never inside it. A
     meeting that ended at audio because captions were unavailable is exactly the
     one worth transcribing -- but textflowkit is optional and external, so a
@@ -1878,7 +1890,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     failing a scan that otherwise did its job. When it is not installed nothing
     is queued and the coverage line is unchanged.
   */
-  if (meetingAwareness) {
+    if (meetingAwareness) {
     try {
       const { enqueueMissingTranscriptions } = await import("./textflowkit-transcribe.server.ts");
       const speech = await enqueueMissingTranscriptions(sql, { newsroomId: owned(context), userId: job.user_id });
@@ -1889,38 +1901,38 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       meetingAwareness.failures.push(`speech-to-text: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  let runId = job.subject_id;
-  const { getSections } = await import("./sections.server.ts");
-  const sectionConfig = await getSections(owned(context));
-  if (runId > 0) {
+    let runId = job.subject_id;
+    const { getSections } = await import("./sections.server.ts");
+    const sectionConfig = await getSections(owned(context));
+    if (runId > 0) {
     const existing = await sql<{ id: number }>`
       select id from scan_runs where id = ${runId} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!existing[0]) runId = 0;
   }
-  if (runId <= 0) {
+    if (runId <= 0) {
     const runRows = await sql<{ id: number }>`
       insert into scan_runs (user_id, newsroom_id) values (${context.userId}, ${owned(context)}) returning id
     `;
     runId = runRows[0]!.id;
   }
-  failureRunId = runId;
+    failureRunId = runId;
 
-  const [scanRun] = await sql<{
+    const [scanRun] = await sql<{
     section_snapshot: string | null;
     source_snapshot: string | null;
     policy_snapshot: string | null;
     source_coverage: unknown;
   }>`select section_snapshot, source_snapshot, policy_snapshot, source_coverage from scan_runs where id=${runId} and newsroom_id=${owned(context)}`;
-  const parsedSnapshot = scanRun?.section_snapshot ? JSON.parse(scanRun.section_snapshot) : null;
-  const { isCustomScanSnapshot } = await import("./section-types.ts");
-  // P0-1: a Custom scan carries its explicit accepted source set in the
-  // snapshot; a section scan carries a section scope; otherwise General.
-  const customSnapshot = isCustomScanSnapshot(parsedSnapshot) ? parsedSnapshot : null;
-  const sectionSnapshot = customSnapshot
+    const parsedSnapshot = scanRun?.section_snapshot ? JSON.parse(scanRun.section_snapshot) : null;
+    const { isCustomScanSnapshot } = await import("./section-types.ts");
+    // P0-1: a Custom scan carries its explicit accepted source set in the
+    // snapshot; a section scan carries a section scope; otherwise General.
+    const customSnapshot = isCustomScanSnapshot(parsedSnapshot) ? parsedSnapshot : null;
+    const sectionSnapshot = customSnapshot
     ? null
     : (parsedSnapshot as import("./section-types.ts").SectionScanSnapshot | null);
-  /*
+    /*
     The sections this run may file under, as the objects every later step needs.
 
     The prompt is handed the key, the display name and the editor's reporting
@@ -1930,17 +1942,17 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     first entry (`schema.ts`), and that has always been the first configured
     section.
   */
-  const filingSections: { key: string; name: string; brief: string }[] = sectionSnapshot
+    const filingSections: { key: string; name: string; brief: string }[] = sectionSnapshot
     ? [sectionSnapshot]
     : sectionConfig.sections.filter((s) => !s.replacementKey && !["about", "opinion"].includes(s.key));
-  const allowedTopics = filingSections.map((s) => s.key);
-  const topicChoices = filingSections.map((s) => ({ key: s.key, name: s.name, brief: s.brief }));
-  // A manual daily run pins the same source plan as the schedule, while using
-  // the editor's chosen model and the normal manual claim/commit boundaries.
-  const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
-  const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
+    const allowedTopics = filingSections.map((s) => s.key);
+    const topicChoices = filingSections.map((s) => ({ key: s.key, name: s.name, brief: s.brief }));
+    // A manual daily run pins the same source plan as the schedule, while using
+    // the editor's chosen model and the normal manual claim/commit boundaries.
+    const dailyPolicy = scanRun?.policy_snapshot ? JSON.parse(scanRun.policy_snapshot) : null;
+    const dailySources: SourceRow[] | undefined = dailyPolicy?.daily && scanRun?.source_snapshot
     ? (dailyPolicy.acceptedSources ?? JSON.parse(scanRun.source_snapshot)) : undefined;
-  const allSources =
+    const allSources =
     deps.scheduledSnapshot?.sources ?? dailySources ??
     (await sql<SourceRow>`
       select id, url, title, kind, tier, status, last_hash, last_fetched_at, last_error,
@@ -1953,23 +1965,23 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       where newsroom_id = ${owned(context)} and status = 'accepted'
       order by case tier when 'A' then 0 when 'B' then 1 else 2 end, id asc
     `);
-  // Custom scope: only the explicitly selected, still-accepted sources. The
-  // predicate lives in section-types.ts (`selectCustomScanSources`) so the
-  // focused test binds to the code that actually runs here, not a copy.
-  const sources = customSnapshot
+    // Custom scope: only the explicitly selected, still-accepted sources. The
+    // predicate lives in section-types.ts (`selectCustomScanSources`) so the
+    // focused test binds to the code that actually runs here, not a copy.
+    const sources = customSnapshot
     ? selectCustomScanSources(customSnapshot, allSources)
     : selectedScanSources(sectionSnapshot, allSources);
-  failureReceipt.sourcesSelected = sources.length;
-  if (sectionSnapshot && !sources.length)
+    failureReceipt.sourcesSelected = sources.length;
+    if (sectionSnapshot && !sources.length)
     throw new Error(
       "This section no longer has accepted assigned sources. Review Paper setup and start a new scan.",
     );
-  if (customSnapshot && !sources.length)
+    if (customSnapshot && !sources.length)
     throw new Error(
       "None of the selected sources are still accepted. Choose the custom set again and start a new scan.",
     );
 
-  const fetched: {
+    const fetched: {
     id: number;
     title: string;
     url: string;
@@ -1977,15 +1989,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     extras: { url: string; text: string }[];
     changed: boolean;
   }[] = [];
-  const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
-  /*
+    const pendingHashes: { id: number; hash: string; text: string; changed: boolean }[] = [];
+    /*
     The scheduled path queues its writes and commits them inside the run
     transaction. It carries the same columns the manual path writes inline --
     the politeness columns included -- because the two paths are the same
     feature and a row must not depend on which kind of scan touched it. This is
     the mistake `scan-coverage.test.ts` exists to catch.
   */
-  /*
+    /*
     HIGH-1 (A-B8): the queue carries a whole `SourceTouch`, `outcome` included,
     and `writeSourceTouch` branches on that word. It used to carry a loose
     `error` and the scheduled commit read "did we read it?" off `error is null`
@@ -1993,9 +2005,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     a successful read. A touch that has to state its own outcome cannot be
     mistaken for the other kind of touch.
   */
-  const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
-  const pendingDisappeared: { title: string; url: string; error: string }[] = [];
-  /*
+    const pendingSourceTouches: { id: number; touch: SourceTouch }[] = [];
+    const pendingDisappeared: { title: string; url: string; error: string }[] = [];
+    /*
     CIVIC REPORTING / SOURCE OBSERVATIONS (migration 0128).
 
     Every real touch of a source in this pass leaves a dated, append-only
@@ -2018,11 +2030,11 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     happened: the consumer below swallows its own errors (see
     `recordScanObservation`).
   */
-  const pendingObservations: {
+    const pendingObservations: {
     sourceId: number;
     input: { kind: ObservationKind; note: string | null };
   }[] = [];
-  /*
+    /*
     Record one source observation for THIS pass. On the editor-started lane it
     writes now; on the scheduled lane it queues for the run transaction (the
     lane that writes nothing during the loop -- see `writeQueuedSourceWrites`).
@@ -2038,7 +2050,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     a second row for the same source, kind and run, so a retried pass cannot
     double-count one refusal.
   */
-  const recordScanObservation = async (
+    const recordScanObservation = async (
     sourceId: number,
     kind: ObservationKind,
     note: string | null,
@@ -2063,7 +2075,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       /* the touch stands whatever happens to the observation */
     }
   };
-  /*
+    /*
     THE ONE CONSUMER OF THE QUEUED SOURCE WRITES (B8F2).
 
     On the scheduled lane the fetch loop writes nothing to a source row as it
@@ -2084,7 +2096,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `writeSourceTouch` and nothing else: a source row must not depend on which
     path touched it (HIGH-1, A-B8). One rule, three write sites.
   */
-  writeQueuedSourceWrites = async (writeSql: Sql) => {
+    writeQueuedSourceWrites = async (writeSql: Sql) => {
     for (const queued of pendingSourceTouches) {
       await writeSourceTouch(writeSql, {
         id: queued.id,
@@ -2129,39 +2141,42 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     await saveScanSourceCoverage(writeSql, owned(context), runId, finishScanCoverage(sourceCoverage));
   };
-  // P0-3: which sources failed and why, so the editor sees the set, not a count.
-  const failedSources: { id: number; title: string; url: string; error: string }[] = [];
-  let fetchedCount = 0;
-  const scanDeadline = Date.now() + DAILY_SCAN_TIME_BUDGET_MS;
-  const [priorityPolicy] = await sql<{ selected_source_ids: number[]; every_day_source_count: number }>`
+    // P0-3: which sources failed and why, so the editor sees the set, not a count.
+    const failedSources: { id: number; title: string; url: string; error: string }[] = [];
+    let fetchedCount = 0;
+    const scanDeadline = Date.now() + DAILY_SCAN_TIME_BUDGET_MS;
+    const [priorityPolicy] = await sql<{
+      selected_source_ids: number[];
+      every_day_source_count: number;
+    }>`
     select selected_source_ids,every_day_source_count from daily_scan_policies
     where newsroom_id=${owned(context)}
   `;
-  const fixedIds = (priorityPolicy?.selected_source_ids ?? []).slice(0, priorityPolicy?.every_day_source_count ?? 8);
-  const watchSlice = dailySources || deps.scheduledSnapshot ? sources : orderAcceptedSources(sources, fixedIds);
-  failureReceipt.sourcesAttempted = 0;
-  sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
-  if (!sourceCoverage.length && sources.length)
+    const fixedIds = (priorityPolicy?.selected_source_ids ?? []).slice(0, priorityPolicy?.every_day_source_count ?? 8);
+    const watchSlice = dailySources || deps.scheduledSnapshot ? sources : orderAcceptedSources(sources, fixedIds);
+    failureReceipt.sourcesAttempted = 0;
+    sourceCoverage = parseScanSourceCoverage(deps.scheduledSnapshot?.coverage ?? (dailySources ? scanRun?.source_coverage : undefined));
+    if (!sourceCoverage.length && sources.length)
     sourceCoverage = manualScanCoverage(sources, sources.length);
 
-  const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
+    const prevRuns = await sql<Pick<ScanRow, "leads_created" | "sources_fetched">>`
       select leads_created, sources_fetched
       from scan_runs
       where newsroom_id = ${owned(context)} and id <> ${runId}
       order by started_at desc
       limit 1
     `;
-  const reread = previousScanNeedsReread(prevRuns[0] ?? null);
-  // last_hash is newsroom-wide, not evidence that this editorial scope has
-  // evaluated the source. Once section scans share it (including overlapping
-  // jobs), General cannot safely recover that provenance from one prior run.
-  const [scopeHistory] = await sql<{ has_section_scans: boolean }>`
+    const reread = previousScanNeedsReread(prevRuns[0] ?? null);
+    // last_hash is newsroom-wide, not evidence that this editorial scope has
+    // evaluated the source. Once section scans share it (including overlapping
+    // jobs), General cannot safely recover that provenance from one prior run.
+    const [scopeHistory] = await sql<{ has_section_scans: boolean }>`
     select exists(select 1 from scan_runs where newsroom_id = ${owned(context)}
       and section_snapshot is not null) as has_section_scans
   `;
-  const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
+    const expandForScope = sectionSnapshot !== null || scopeHistory.has_section_scans;
 
-  /*
+    /*
     FB1, unit 1: the fetch pass is the scan's longest silence.
 
     Up to two hundred pages, and until this the whole pass
@@ -2174,12 +2189,12 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     card's bar and "Now:" line), and the run-row write below is what the Scan
     and Sources screens poll -- they read `scan_runs`, not `desk_jobs`.
   */
-  let attemptedCount = 0;
-  /** SH-B: rows this pass selected but deliberately did not knock on -- parked
-   *  by a site's "come back later", or held back by the per-host allowance. */
-  let skippedThisPass = 0;
-  let lastLiveWriteAt = 0;
-  /*
+    let attemptedCount = 0;
+    /** SH-B: rows this pass selected but deliberately did not knock on -- parked
+     *  by a site's "come back later", or held back by the per-host allowance. */
+    let skippedThisPass = 0;
+    let lastLiveWriteAt = 0;
+    /*
     THE LIVE RUN ROW.
 
     The owner's complaint was that a working scan read "0 fetched · No sources
@@ -2210,7 +2225,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     A run with no claim token -- the older rows, and anything a test seeds --
     is unfenced here, exactly as before.
   */
-  const writeLiveRunRow = async (force = false) => {
+    const writeLiveRunRow = async (force = false) => {
     const at = Date.now();
     if (!force && at - lastLiveWriteAt < PROGRESS_WRITE_MIN_MS) return;
     lastLiveWriteAt = at;
@@ -2233,7 +2248,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         )
     `.catch(() => undefined);
   };
-  const noteSourceProgress = async () => {
+    const noteSourceProgress = async () => {
     attemptedCount += 1;
     failureReceipt.sourcesCompleted = attemptedCount;
     /*
@@ -2248,15 +2263,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     );
     await writeLiveRunRow();
   };
-  // The scope, before a single page is read: "Running · reading sources — 0 of
-  // 14" is a different sentence from "0 fetched" with no denominator.
-  await writeLiveRunRow(true);
-  await reportStage("Reading the sources");
-  let fetchLoopError: unknown;
-  // One source at a time makes Cancel a boundary the editor can rely on:
-  // finish the current fetch, keep its observation, and never start the next.
-  // A batch of six could otherwise begin five more reads after the press.
-  readingSources: for (const batch of sourceBatches(watchSlice, Date.now, scanDeadline)) for (const src of batch) {
+    // The scope, before a single page is read: "Running · reading sources — 0 of
+    // 14" is a different sentence from "0 fetched" with no denominator.
+    await writeLiveRunRow(true);
+    await reportStage("Reading the sources");
+    let fetchLoopError: unknown;
+    // One source at a time makes Cancel a boundary the editor can rely on:
+    // finish the current fetch, keep its observation, and never start the next.
+    // A batch of six could otherwise begin five more reads after the press.
+    readingSources: for (const batch of sourceBatches(watchSlice, Date.now, scanDeadline)) for (const src of batch) {
     if (Date.now() >= scanDeadline) break readingSources;
     try {
     await throwIfJobCancelled(job.id);
@@ -2502,33 +2517,36 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       break readingSources;
     }
   }
-  if (Date.now() >= scanDeadline) sourceCoverage = sourceCoverage.map(entry => entry.status === "pending"
+    if (Date.now() >= scanDeadline)
+      sourceCoverage = sourceCoverage.map((entry) =>
+        entry.status === "pending"
     ? { ...entry, status: "skipped" as const, reasonCode: "time-budget" as const,
-        reason: "The 90-minute scan reading budget ended before this source was reached." } : entry);
-  sourceCoverage = finishScanCoverage(sourceCoverage);
-  if (fetchLoopError) throw fetchLoopError;
-  // The final count is a boundary, not a throttled tick. A fast last source
-  // (including a parked one) must not leave the card one source behind.
-  await progressReporterFor(job, { minWriteMs: 0 })(
+        reason: "The 90-minute scan reading budget ended before this source was reached." } : entry,
+      );
+    sourceCoverage = finishScanCoverage(sourceCoverage);
+    if (fetchLoopError) throw fetchLoopError;
+    // The final count is a boundary, not a throttled tick. A fast last source
+    // (including a parked one) must not leave the card one source behind.
+    await progressReporterFor(job, { minWriteMs: 0 })(
     countedStep("Reading sources", attemptedCount, watchSlice.length),
     spanPct(attemptedCount, watchSlice.length, 5, 55),
   );
-  await writeLiveRunRow(true);
-  /*
+    await writeLiveRunRow(true);
+    /*
     SH-B: a row the pass deliberately did not knock on is not an attempt.
     `sources_selected` still counts it -- it was in scope -- so the receipt
     reads "14 selected, 12 attempted" exactly the way it already reads when
     `SCAN_WATCH_CAP` cuts the tail, and a source parked by a site that asked us
     to come back is not recorded as a fetch that never happened.
   */
-  // Actual fetch attempts are counted at dispatch, including failures.
-  // Watches left at the deadline were never attempted.
+    // Actual fetch attempts are counted at dispatch, including failures.
+    // Watches left at the deadline were never attempted.
 
-  const memory = await sql<MemoryRow>`
+    const memory = await sql<MemoryRow>`
       select id, entity, last_angle, updated_at from beat_memory
       where newsroom_id = ${owned(context)} order by updated_at desc limit 24
     `;
-  const published = await sql<{
+    const published = await sql<{
     headline: string;
     dek: string | null;
     source_urls: string;
@@ -2540,7 +2558,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
         and published_at >= now() - interval '60 days'
       order by published_at desc nulls last, id desc
       limit 100`;
-  const publishedContext = published.map((row) => {
+    const publishedContext = published.map((row) => {
     let sourceUrls: string[] = [];
     try {
       const parsed = JSON.parse(row.source_urls || "[]");
@@ -2560,15 +2578,15 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     };
   });
 
-  /*
+    /*
     P0-5: bounded batches, not one truncated pass. The old code built a single
     payload against a 48,000-character budget and `break`-ed the moment the
     next source overflowed, so a 100-source scan silently reached the model
     with a fraction of its sources. Each batch now gets its own model call; a
     failed batch does not discard the others. See `scan-batches.ts`.
   */
-  const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
-  const batchSources = ranked.map((f) => {
+    const ranked = [...fetched].sort((a, b) => Number(b.changed) - Number(a.changed));
+    const batchSources = ranked.map((f) => {
     const excerpt = scanSourceExcerpt(
       f.text,
       f.extras,
@@ -2590,39 +2608,39 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       block: `SOURCE: ${f.title}\nURL: ${f.url}\nCHANGED: ${changedLine}\nTEXT:\n${excerpt}`,
     };
   });
-  const batches = buildScanBatches({ sources: batchSources });
+    const batches = buildScanBatches({ sources: batchSources });
 
-  const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
+    const scanOverrides: import("./provider-registry.ts").ProviderOverrides =
     applyJobLocalModelSnapshot(
       job,
       await readProviderOverrides(job.newsroom_id, "scan").catch(() => ({})),
     );
-  const scanLocalModel = scanOverrides["local-model"]?.localModel;
-  const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
-  const batchResults: import("./schema.ts").ParsedScanResult[] = [];
-  let batchesFailed = 0;
-  let lastBatchError: string | null = null;
-  /*
+    const scanLocalModel = scanOverrides["local-model"]?.localModel;
+    const batchTimeoutMs = scanCallTimeoutFor(scanOverrides);
+    const batchResults: import("./schema.ts").ParsedScanResult[] = [];
+    let batchesFailed = 0;
+    let lastBatchError: string | null = null;
+    /*
     The second countable pass. `buildScanBatches` has already split the fetched
     text into bounded batches, so the model phase knows exactly how many calls
     it is going to make -- which is the one place in a scan where a percentage
     is a real fraction of the work rather than a guess.
   */
-  await reportStage("Reading the sources with a model", 55);
-  for (const [batchIndex, batch] of batches.entries()) {
-    await deps.scheduledGuard?.();
-    await reportStage(
+    await reportStage("Reading the sources with a model", 55);
+    for (const [batchIndex, batch] of batches.entries()) {
+      await deps.scheduledGuard?.();
+      await reportStage(
       countedStep("Reading the sources with a model", batchIndex + 1, batches.length),
       spanPct(batchIndex + 1, batches.length, 55, 92),
     );
-    /*
+      /*
       Between batch boundaries is where a scan can be stopped: the batches
       already read are committed, and stopping here leaves the job's real
       reason ("Cancelled by the editor") on the row rather than a half-read
       batch's parse error. `executeJob` maps the throw.
     */
-    await throwIfJobCancelled(job.id);
-    const userMsg = buildScanUserMessage({
+      await throwIfJobCancelled(job.id);
+      const userMsg = buildScanUserMessage({
       topics: topicChoices,
       section: sectionSnapshot,
       city: paperConfig.city,
@@ -2632,7 +2650,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       published: publishedContext,
       payload: batch.payload,
     });
-    /*
+      /*
       The same one-shot technical failover Draft uses (see `failOverAndRetry`),
       except the fetched source text is never re-fetched -- this batch's
       payload is reused verbatim for the retry by `runScanChatWithFailover`.
@@ -2641,74 +2659,74 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       can hop mid-call, and the ticker below would otherwise keep naming a model
       that has already failed for the rest of the batch's wait.
     */
-    let liveLabel = modelChoiceLabel(effectiveStoryModelChoice(job.model_choice));
-    const ai = await waitForModel({
-      jobId: job.id,
-      label: () => liveLabel,
-      run: () => {
-        failureReceipt.modelBatchesUsed += 1;
-        return runScanChatWithFailover({
-          job,
-          newsroomId: job.newsroom_id,
-          localModel: scanOverrides["local-model"]?.localModel,
-          system: scanSystem({
+      let liveLabel = modelChoiceLabel(effectiveStoryModelChoice(job.model_choice));
+      const ai = await waitForModel({
+        jobId: job.id,
+        label: () => liveLabel,
+        run: () => {
+          failureReceipt.modelBatchesUsed += 1;
+          return runScanChatWithFailover({
+            job,
+            newsroomId: job.newsroom_id,
+            localModel: scanOverrides["local-model"]?.localModel,
+            system: scanSystem({
             name: paperConfig.name,
             city: paperConfig.city,
             state: paperConfig.state,
           }),
-          user: userMsg,
-          /*
+            user: userMsg,
+            /*
             A reply this batch cannot read is not a success (Unit Y item 3): the
             helper retries it once on the same rung and then fails over, so the
             batch's parse below is the second half of the contract rather than the
             only reader. Same parser as the line after the call, so the two cannot
             disagree about what "readable" means.
           */
-          read: (text) =>
+            read: (text) =>
             !parseScanResult(parseJsonBlock<unknown>(text), allowedTopics, topicChoices).parseError,
-          maxTokens: 3500,
-          modelEffort: effortFromJob(job),
-          timeoutMs: batchTimeoutMs,
-          grokChat: runChat,
-          probe: (choice) =>
-            probe(
-              choice,
-              job.newsroom_id,
-              undefined,
-              "scan",
-              choice === "local-model" ? scanLocalModel ?? undefined : undefined,
-            ),
-          setModelChoice,
-          setStage,
-          setFailoverNote: setJobFailoverNote,
-          onSwitch: async (receipt) => {
+            maxTokens: 3500,
+            modelEffort: effortFromJob(job),
+            timeoutMs: batchTimeoutMs,
+            grokChat: runChat,
+            probe: (choice) =>
+              probe(
+                choice,
+                job.newsroom_id,
+                undefined,
+                "scan",
+                choice === "local-model" ? (scanLocalModel ?? undefined) : undefined,
+              ),
+            setModelChoice,
+            setStage,
+            setFailoverNote: setJobFailoverNote,
+            onSwitch: async (receipt) => {
             liveLabel = receipt.nextLabel;
             await deps.onModelSwitch?.(receipt);
           },
-        });
-      },
-    });
-    if (!ai.ok) {
+          });
+        },
+      });
+      if (!ai.ok) {
       batchesFailed += 1;
       failureReceipt.modelBatchesFailed = batchesFailed;
       lastBatchError = ai.error;
       continue;
     }
-    const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
-    if (parsed.parseError) {
+      const parsed = parseScanResult(parseJsonBlock<unknown>(ai.text), allowedTopics, topicChoices);
+      if (parsed.parseError) {
       batchesFailed += 1;
       failureReceipt.modelBatchesFailed = batchesFailed;
       lastBatchError = parsed.parseError;
       continue;
     }
-    batchResults.push(parsed);
-    failureReceipt.sourcesAnalyzed += batch.sources.length;
-    // The row moves phase: from "reading sources — k of n" to "reading the
-    // pages with a model", which is what the editor watching the history sees.
-    await writeLiveRunRow(true);
-  }
+      batchResults.push(parsed);
+      failureReceipt.sourcesAnalyzed += batch.sources.length;
+      // The row moves phase: from "reading sources — k of n" to "reading the
+      // pages with a model", which is what the editor watching the history sees.
+      await writeLiveRunRow(true);
+    }
 
-  const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {
+    const recordFailedRun = async (writeSql: Sql, failure: string, sourcesAnalyzed = 0) => {
     await writeSql`
       update scan_runs
       set finished_at = now(),
@@ -2732,7 +2750,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
   };
 
-  /*
+    /*
     The receipt for a pass in which nothing was due, written the way
     `recordFailedRun` is written and for the same reason: this ending never
     reaches `commitResults` either, so without it the run would keep the row it
@@ -2745,7 +2763,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     attempted. `sources_selected` still names the scope, so the row reads
     "1 selected, 0 attempted", which is what a deferred pass is.
   */
-  const recordNoOpRun = async (writeSql: Sql, sentence: string) => {
+    const recordNoOpRun = async (writeSql: Sql, sentence: string) => {
     await writeSql`
       update scan_runs
       set finished_at = now(),
@@ -2769,7 +2787,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `;
   };
 
-  const recordManualFailure = async (failure: string, sourcesAnalyzed = 0) =>
+    const recordManualFailure = async (failure: string, sourcesAnalyzed = 0) =>
     withTransaction(async (writeSql) => {
       if (!(await lockManualScanClaim(writeSql, job))) return false;
       await recordFailedRun(writeSql, failure, sourcesAnalyzed);
@@ -2777,7 +2795,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       return true;
     });
 
-  /*
+    /*
     WAS ANYTHING ATTEMPTED AT ALL?
 
     A pass in which every selected source was deliberately left alone -- every
@@ -2796,13 +2814,13 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     `watchSlice.length` rather than "not zero": a pass with no sources in scope
     at all is its own shape and keeps the ending it always had.
   */
-  const everySourceWasSkipped =
+    const everySourceWasSkipped =
     watchSlice.length > 0 &&
     skippedThisPass === watchSlice.length &&
     fetchedCount === 0 &&
     failedSources.length === 0;
 
-  if (!batchResults.length && everySourceWasSkipped) {
+    if (!batchResults.length && everySourceWasSkipped) {
     /*
       THE RECORDED NO-OP.
 
@@ -2837,7 +2855,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     return;
   }
 
-  if (!batchResults.length) {
+    if (!batchResults.length) {
     const error = lastBatchError ?? (batches.length === 0
       ? `Scan fetched no source text, so no writing pass ran.${failedSources[0] ? ` First source failed: ${failedSources[0].error}` : ""}`
       : "Writing pass returned no usable JSON.");
@@ -2862,9 +2880,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     proposed_sources: merged.proposed_sources,
     parseError: null,
   };
-  const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
+    const analyzedSourceCount = failureReceipt.sourcesAnalyzed;
 
-  /*
+    /*
     The leads this scan may match against.
 
     `fileScanLeads` has always read this itself, inside the commit transaction.
@@ -2874,7 +2892,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     open for as long as the model takes. On the dev desk's single PGlite
     connection that is not a slow query, it is the whole desk.
   */
-  const existingLeadsRaw = await sql<{
+    const existingLeadsRaw = await sql<{
     id: number;
     status: string;
     headline: string;
@@ -2890,7 +2908,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       and status <> 'published'
       and created_at >= now() - (${MATCH_LOOKBACK_DAYS} || ' days')::interval
   `;
-  const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
+    const existingLeads: MatchCandidateLead[] = existingLeadsRaw.map((l) => ({
     id: l.id,
     status: l.status,
     headline: l.headline,
@@ -2903,7 +2921,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     evidence: l.evidence,
   }));
 
-  /*
+    /*
     U28 (2026-09-30): the owner's "double check. worth it."
 
     For the pairs the word rules can only rate BORDERLINE -- the matcher's
@@ -2921,8 +2939,8 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     outcome is empty, `fileScanLeads` falls back to the word rule, and the only
     trace is a log line -- the operator asked for no noise about it.
   */
-  let dupCheck: DupCheckOutcome | null = null;
-  try {
+    let dupCheck: DupCheckOutcome | null = null;
+    try {
     await throwIfJobCancelled(job.id);
     /* A scan that found nothing has no pairs and no reason to read the
      * published list -- the check costs one query and one model call per scan
@@ -2962,9 +2980,9 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     // word rule stands, exactly as it did before this unit (see dup-check.ts).
     console.error("[scan] duplicate check could not run", error);
   }
-  if (dupCheck?.failure) console.error(`[scan] run ${runId}: ${dupCheck.failure}`);
+    if (dupCheck?.failure) console.error(`[scan] run ${runId}: ${dupCheck.failure}`);
 
-  const commitResults = async (writeSql: Sql) => {
+    const commitResults = async (writeSql: Sql) => {
     if (!deps.scheduledCommit && !(await lockManualScanClaim(writeSql, job)))
       throw new Error("Scan job claim was superseded; refusing stale result writes.");
     const openRun = await writeSql<{ id: number }>`
@@ -3170,16 +3188,16 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     return { leadsCreated, dupCheckCleared };
   };
 
-  /*
+    /*
     The last arrival, and the one that spends the most time in the database:
     matching every returned lead against the existing ones, writing the new
     leads, filing the proposed sources and recording the snapshots. It runs
     inside one transaction, so nothing inside it can report -- the chip is what
     the editor has for this stretch.
   */
-  await reportStage("Filing the leads", 95);
-  let committed: { leadsCreated: number; dupCheckCleared: number };
-  try {
+    await reportStage("Filing the leads", 95);
+    let committed: { leadsCreated: number; dupCheckCleared: number };
+    try {
     await deps.beforeScheduledCommit?.();
     committed = deps.scheduledCommit
       ? await deps.scheduledCommit(commitResults)
@@ -3201,7 +3219,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
     }
     throw error;
   }
-  if (!deps.scheduledCommit)
+    if (!deps.scheduledCommit)
     await audit(
       context.userId,
       "scan",
@@ -3387,51 +3405,62 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     };
   }
   const documentReadingEvidence = await storyDocumentReader(
-      owned(context),
-      leadId,
-      initialDocumentChoice,
-      documentAssignment,
-      (message) => setStage(job.id, message),
-      prevNotes.suppliedUrls ?? [],
-      context.userId,
-      researchScope === "supplied",
-      undefined,
-      {
-        modelEffort: effortFromJob(job),
-        source: job.model_choice_source ?? "editor",
-        // Hand-picked batch jobs use the selectable-model ladder. Automatic
-        // batches retain the story ladder that resolved their first rung.
-        ladder: batchSnapshot && !batchWasAutomatic(batchSnapshot) ? FORCED_FAILOVER_LADDER : undefined,
-        localModel: queuedLocalModel ?? undefined,
-        probe: (choice) => probe(choice, owned(context), undefined, "story", choice === "local-model" ? queuedLocalModel ?? undefined : undefined),
-        chat: deps.chat,
-        onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
-          await setJobModelRuntime(job.id, nextChoice, nextEffort);
-          job.model_choice = nextChoice;
-          job.result_json = JSON.stringify({ modelEffort: nextEffort });
-          await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-          const switchNote = failoverNoteSentence(nextLabel, previousLabel, reason);
-          await setFailoverNote(job.id, switchNote);
-          if (batchSnapshot) {
-            if (nextChoice === "auto" || nextChoice === "configured" || (isAutomaticRungId(nextChoice) && !batchWasAutomatic(batchSnapshot)))
+    owned(context),
+    leadId,
+    initialDocumentChoice,
+    documentAssignment,
+    (message) => setStage(job.id, message),
+    prevNotes.suppliedUrls ?? [],
+    context.userId,
+    researchScope === "supplied",
+    undefined,
+    {
+      modelEffort: effortFromJob(job),
+      source: job.model_choice_source ?? "editor",
+      // Hand-picked batch jobs use the selectable-model ladder. Automatic
+      // batches retain the story ladder that resolved their first rung.
+      ladder: batchSnapshot && !batchWasAutomatic(batchSnapshot) ? FORCED_FAILOVER_LADDER : undefined,
+      localModel: queuedLocalModel ?? undefined,
+      probe: (choice) =>
+        probe(
+          choice,
+          owned(context),
+          undefined,
+          "story",
+          choice === "local-model" ? (queuedLocalModel ?? undefined) : undefined,
+        ),
+      chat: deps.chat,
+      onSwitch: async ({ previousLabel, nextLabel, nextChoice, nextEffort, reason }) => {
+        await setJobModelRuntime(job.id, nextChoice, nextEffort);
+        job.model_choice = nextChoice;
+        job.result_json = JSON.stringify({ modelEffort: nextEffort });
+        await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+        const switchNote = failoverNoteSentence(nextLabel, previousLabel, reason);
+        await setFailoverNote(job.id, switchNote);
+        if (batchSnapshot) {
+          if (nextChoice === "auto" || nextChoice === "configured" || (isAutomaticRungId(nextChoice) && !batchWasAutomatic(batchSnapshot)))
               throw new Error("Draft batch fallback did not resolve to a selectable runtime.");
-            const old = batchSnapshot as typeof batchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
-            const { validateForcedRuntime } = await import("./forced-runtime.server.ts");
-            const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
-            const nextSnapshot = isAutomaticRungId(nextChoice)
+          const old = batchSnapshot as typeof batchSnapshot & {
+            requestedRuntime?: string;
+            requestedEffort?: ModelEffort | null;
+          };
+          const { validateForcedRuntime } = await import("./forced-runtime.server.ts");
+          const validateBatchRuntime = deps.validateBatchRuntime ?? validateForcedRuntime;
+          const nextSnapshot = isAutomaticRungId(nextChoice)
               ? await validateForcedRuntime(job.newsroom_id, nextChoice, nextEffort, { automaticRung: true })
               : await validateBatchRuntime(job.newsroom_id, nextChoice, nextEffort);
-            const receipt = {
-              requestedRuntime: old.requestedRuntime ?? old.runtime,
-              requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
-              switchReason: failoverReasonPhrase(previousLabel, reason),
-              switchNote,
-            };
-            batchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, nextSnapshot, receipt);
-          }
-        },
+          const receipt = {
+            requestedRuntime: old.requestedRuntime ?? old.runtime,
+            requestedEffort:
+              old.requestedEffort ?? ("modelEffort" in old ? (old.modelEffort ?? null) : null),
+            switchReason: failoverReasonPhrase(previousLabel, reason),
+            switchNote,
+          };
+          batchSnapshot = await batchServer.persistDraftBatchRuntimeSwitch(job, nextSnapshot, receipt);
+        }
       },
-    );
+    },
+  );
   const retainedNameDocuments = await sql<{
     id: string;
     filename: string;
@@ -3612,11 +3641,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort };
     };
     draftInput.onProviderSwitch = async ({ transport, model, reason }) => {
-      const nextChoice: EffectiveProviderChoice | null = transport === "codex"
-        ? "codex-balanced"
-        : transport === "anthropic" || transport === "claude-code"
-          ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-          : null;
+      const nextChoice: EffectiveProviderChoice | null =
+        transport === "codex"
+          ? "codex-balanced"
+          : transport === "anthropic" || transport === "claude-code"
+            ? /haiku/i.test(model) ? "claude-haiku" : "claude-sonnet"
+            : null;
       if (nextChoice) await persistReportSwitch(nextChoice, reason);
     };
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
@@ -3664,12 +3694,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       } satisfies Required<NonNullable<PerformDraftWorkDeps["batchChatAdapters"]>>;
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       await batchGuard();
-      const switchState: { receipt: null | {
+      const switchState: {
+        receipt: null | {
         requestedRuntime: string;
         requestedEffort: ModelEffort | null;
         switchReason: string;
         switchNote: string;
-      } } = { receipt: null };
+      };
+      } = { receipt: null };
       const run = (snapshot: typeof activeBatchSnapshot) => runForcedChat(
         snapshot,
         system,
@@ -3698,7 +3730,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           };
           switchState.receipt = {
             requestedRuntime: old.requestedRuntime ?? old.runtime,
-            requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
+            requestedEffort:
+              old.requestedEffort ?? ("modelEffort" in old ? (old.modelEffort ?? null) : null),
             switchReason: failoverReasonPhrase(previousLabel, reason),
             switchNote: failoverNoteSentence(nextLabel, previousLabel, reason),
           };
@@ -3707,7 +3740,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       activeBatchSnapshot = attempted.snapshot;
       if (switchState.receipt) {
         const receipt = switchState.receipt;
-        const nextEffort = "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort ?? null : null;
+        const nextEffort =
+          "modelEffort" in activeBatchSnapshot ? (activeBatchSnapshot.modelEffort ?? null) : null;
         await setModelRuntime(job.id, activeBatchSnapshot.modelChoice, nextEffort);
         job.model_choice = activeBatchSnapshot.modelChoice;
         job.result_json = JSON.stringify({ modelEffort: nextEffort });
@@ -3728,11 +3762,12 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
           },
           deps.batchOcrAdapters,
           async ({ transport, model, reason }) => {
-            const nextChoice: EffectiveProviderChoice | null = transport === "codex"
-              ? "codex-balanced"
-              : transport === "anthropic" || transport === "claude-code"
-                ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-                : null;
+            const nextChoice: EffectiveProviderChoice | null =
+              transport === "codex"
+                ? "codex-balanced"
+                : transport === "anthropic" || transport === "claude-code"
+                  ? /haiku/i.test(model) ? "claude-haiku" : "claude-sonnet"
+                  : null;
             if (!nextChoice || nextChoice === activeBatchSnapshot.modelChoice) return;
             const previousLabel = modelChoiceLabel(activeBatchSnapshot.modelChoice);
             const nextSnapshot = await validateBatchRuntime(
@@ -3740,15 +3775,20 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
               nextChoice,
               "modelEffort" in activeBatchSnapshot ? activeBatchSnapshot.modelEffort : null,
             );
-            const old = activeBatchSnapshot as typeof activeBatchSnapshot & { requestedRuntime?: string; requestedEffort?: ModelEffort | null };
+            const old = activeBatchSnapshot as typeof activeBatchSnapshot & {
+            requestedRuntime?: string;
+            requestedEffort?: ModelEffort | null;
+          };
             const receipt = {
               requestedRuntime: old.requestedRuntime ?? old.runtime,
-              requestedEffort: old.requestedEffort ?? ("modelEffort" in old ? old.modelEffort ?? null : null),
+              requestedEffort:
+                old.requestedEffort ?? ("modelEffort" in old ? (old.modelEffort ?? null) : null),
               switchReason: failoverReasonPhrase(previousLabel, reason),
               switchNote: failoverNoteSentence(modelChoiceLabel(nextChoice), previousLabel, reason),
             };
             activeBatchSnapshot = nextSnapshot;
-            const nextEffort = "modelEffort" in nextSnapshot ? nextSnapshot.modelEffort ?? null : null;
+            const nextEffort =
+              "modelEffort" in nextSnapshot ? (nextSnapshot.modelEffort ?? null) : null;
             await setModelRuntime(job.id, nextChoice, nextEffort);
             await setStage(job.id, `Switched to ${modelChoiceLabel(nextChoice)}: ${receipt.switchReason}`);
             await setFailoverNote(job.id, receipt.switchNote);
@@ -4211,25 +4251,26 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         go before the stringify, which is what `sanitizeJsonLeaves` does.
       */
       const completion = JSON.stringify(
-        sanitizeJsonLeaves(
-          {
-            ...buildDraftCompletionReceipt({
-              checkpointDraftId,
-              finalDraftId: Number(savedDraft.id),
-              citationStatus:
-                transcriptLinkCreated ? "complete" : meetingMaterial ? "review-required" : reported.citation_status ??
+        sanitizeJsonLeaves({
+          ...buildDraftCompletionReceipt({
+            checkpointDraftId,
+            finalDraftId: Number(savedDraft.id),
+            citationStatus: transcriptLinkCreated
+              ? "complete"
+              : meetingMaterial
+                ? "review-required"
+                : (reported.citation_status ??
                 (reported.source_urls.length || (reported.documentClaims?.length ?? 0) > 0
                   ? "complete"
-                  : "review-required"),
-              evidenceCheckIncomplete: notes.includes(
+                  : "review-required")),
+            evidenceCheckIncomplete: notes.includes(
                 "Evidence reconciliation not completed within the available edit pass.",
               ),
-              nameCheck: reported.research_memo.nameCheck,
-              styleAudit: styleAuditSummary(styleRecord),
-            }),
-            ...(meetingMaterial ? { meetingArtifactId: meetingMaterial.meeting.artifactId } : {}),
-          },
-        ),
+            nameCheck: reported.research_memo.nameCheck,
+            styleAudit: styleAuditSummary(styleRecord),
+          }),
+          ...(meetingMaterial ? { meetingArtifactId: meetingMaterial.meeting.artifactId } : {}),
+        }),
       );
       await sql`
       update desk_jobs
@@ -4509,11 +4550,11 @@ const DESK_DRAFT_ROWS_SQL = `
     order by greatest(v.updated_at, coalesce(jb.updated_at, v.updated_at)) desc, v.id desc
   `;
 
-async function queryDraftRows(context: { newsroomId: number }) {
+export async function queryDraftRows(context: { newsroomId: number }) {
   const { ensureJobsSchema } = await import("./jobs.ts");
   await ensureJobsSchema();
   const sql = await getSql();
-  return sql.query<{
+  const rows = await sql.query<{
     id: number;
     lead_id: number;
     headline: string;
@@ -4544,6 +4585,25 @@ async function queryDraftRows(context: { newsroomId: number }) {
     names_checked_at: string | null;
     names_unresolved: number;
   }>(DESK_DRAFT_ROWS_SQL, [owned(context)]);
+  // Read accepted claims from the current evidence gate, just as the story page does.
+  const confirmations = await sql.query<{ lead_id: number; notes_json: string }>(
+    "select id as lead_id, notes_json from leads where newsroom_id=$1 and notes_json like '%unreviewedClaimsConfirmation%'",
+    [owned(context)],
+  );
+  const acceptedByLead = new Map(
+    confirmations.map((row) => [row.lead_id, parseNotes(row.notes_json).unreviewedClaimsConfirmation]),
+  );
+  return Promise.all(
+    rows.map(async (row) => {
+    const acceptance = acceptedByLead.get(row.lead_id);
+    if (!acceptance) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
+    const [draft] = await sql.query<DraftRow>("select * from drafts where id=$1 and newsroom_id=$2", [row.id, owned(context)]);
+    const acceptedCount = draft && evidenceConfirmationMatches(acceptance.token, draft) ? acceptance.count : 0;
+    if (!acceptedCount) return { ...row, unreviewed_claims: 0, unreviewed_claims_accepted_count: 0 };
+    const openCount = await unreviewedClaimCount(owned(context), row.lead_id);
+    return { ...row, unreviewed_claims: openCount, unreviewed_claims_accepted_count: acceptedCount };
+  }),
+  );
 }
 
 /*
@@ -5730,10 +5790,13 @@ export async function performNamedOutletReport(
   record of the decision: who accepted the claim, when, for which outlet, on
   which draft. The desk shows it back; the public page never does.
 
-  It refuses to record an override the draft does not need -- an outlet the
-  story never names, or one its Sources already cover. A row saying an editor
-  overrode something is worth less than nothing if it can be created for a
-  claim the editor never saw.
+  It refuses to record an override the draft does not need when the outlet is
+  one this paper TRACKS -- a tracked outlet the story never names, or one its
+  Sources already cover (`namedOutlet` resolves it). An outlet the paper does
+  NOT track cannot be checked that way, so an explicit instruction to override
+  one is recorded rather than refused. A row saying an editor overrode
+  something is worth less than nothing if it can be created for a claim the
+  editor never saw; but refusing the legitimate override is worse.
 */
 export async function performOverrideNamedOutlet(
   context: { userId: string; newsroomId?: number },
@@ -5741,11 +5804,22 @@ export async function performOverrideNamedOutlet(
   outletName: string,
 ): Promise<{ ok: true; outlet: string } | { ok: false; error: string }> {
   const outlets = (await getPaperConfig(owned(context))).namedOutlets;
-  const outlet = namedOutlet(outletName, outlets);
+  /*
+    PR233: the override names an outlet EVEN WHEN THE CHECK DOES NOT KNOW IT.
+    A story can name an outlet that is not on this paper's tracked list -- a
+    wire byline, a partner, a publication added since the list was last edited.
+    The old code refused those, which made the override button useless for
+    exactly the case it exists for. So an unknown name is not a refusal: it is
+    TRUSTED, trimmed, and recorded. A known name is still resolved through
+    `namedOutlet` (which is also how the desk's own list is matched).
+  */
+  const trimmedName = String(outletName ?? "").trim();
+  const known = namedOutlet(trimmedName, outlets);
+  const outlet = known ? known.name : trimmedName;
   if (!outlet) {
     return {
       ok: false as const,
-      error: `"${outletName}" is not one of the outlets this check knows about, so it cannot be overridden.`,
+      error: "Name the outlet you are overriding.",
     };
   }
   const decision = await withTransaction(async (sql) => {
@@ -5759,26 +5833,35 @@ export async function performOverrideNamedOutlet(
     if (!row) return { ok: false as const, error: "Draft this lead before overriding an outlet." };
     const draft = unpackStoredDraft({ ...row });
     draft.body = stripReporterNotebook(draft.body);
-    const unresolved = unresolvedNamedOutlets({
+    /*
+      A KNOWN outlet that the draft does not name (and whose Sources already show)
+      needs no override, and a row saying otherwise is a claim the editor never
+      saw. An UNKNOWN outlet cannot be checked against the list, so the editor's
+      explicit instruction stands -- we do not refuse it. The desk may still show
+      a meaningless override; the alternative is refusing the legitimate one.
+    */
+    if (known) {
+      const unresolved = unresolvedNamedOutlets({
       body: draft.body,
       sourceUrls: parseUrlList(draft.source_urls),
       sourceTitles: await sourceTitlesForDraft(sql, owned(context), draft),
       outlets,
     });
-    if (!unresolved.includes(outlet.name)) {
-      return {
-        ok: false as const,
-        error: `${outlet.name} needs no override on this draft — the story does not name it, or its Sources already show it.`,
-      };
+      if (!unresolved.includes(outlet)) {
+        return {
+          ok: false as const,
+          error: `${outlet} needs no override on this draft — the story does not name it, or its Sources already show it.`,
+        };
+      }
     }
     // Clicking twice is the same decision. The table is append-only, so the
     // second click must not try to write over the first row.
     await sql`
       insert into named_outlet_overrides (newsroom_id, draft_id, lead_id, outlet, overridden_by)
-      values (${owned(context)}, ${row.id}, ${leadId}, ${outlet.name}, ${context.userId})
+      values (${owned(context)}, ${row.id}, ${leadId}, ${outlet}, ${context.userId})
       on conflict (newsroom_id, draft_id, outlet) do nothing
     `;
-    return { ok: true as const, outlet: outlet.name, draftId: Number(row.id) };
+    return { ok: true as const, outlet, draftId: Number(row.id) };
   });
   if (!decision.ok) return { ok: false as const, error: decision.error };
   /*
@@ -5842,146 +5925,195 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     U24b). Production passes nothing.
   */
   deps: UnreviewedClaimDeps = {},
-): Promise<{ ok: true; slug: string } | { ok: false; error: string }> {
+  /*
+    THE KEYS THE EDITOR HAS ACKNOWLEDGED (PR233).
+
+    Every WARNING this gate raises can be overridden by an editor who says so in
+    so many words -- the request carries the warning keys they ticked. The keys
+    are only ever COMPARED against the warnings the server recomputes here, for
+    this exact draft, while holding the publish fence: a key that names no
+    current warning is not an override and is not audited.
+
+    The parameter is the SIXTH, after `deps`, so every older caller -- and every
+    test written against the old shape -- still compiles and behaves.
+
+    An empty list is the ordinary print: every warning refuses. A list that
+    names a current warning lets it through, and writes one audit row per
+    warning let through (see `publish-override.server.ts`).
+  */
+  acknowledgedWarningKeys: readonly string[] = [],
+): Promise<
+  | { ok: true; slug: string }
+  | {
+      ok: false;
+      error: string;
+      warnings?: { key: string; sentence: string }[];
+      /* A hard refusal is NOT a warning: it carries the key of the true
+         impossibility (empty headline/body, no draft, a running check) so the
+         UI can treat it as a wall, not a checkbox. */
+      hard?: string;
+    }
+> {
   const { withCurrentDraftForPublish } = await import("./draft-order.server.ts");
-  const already = await getSql().then(
-    (sql) =>
-      sql<{ slug: string }>`
+  const { acknowledgedWarnings, auditPublishOverrides } =
+    await import("./publish-override.server.ts");
+  const { ensureAuditEventsSchema } = await import("./ops.ts");
+  /*
+    The audit schema is DDL and cannot run inside the publish transaction, so it
+    is ensured here, before any work -- exactly as `audit()` would have done,
+    except that it now happens once for the whole publish rather than per row.
+  */
+  await ensureAuditEventsSchema();
+  const sql = await getSql();
+  const already = await sql<{ slug: string }>`
       select slug from articles
       where lead_id = ${leadId} and newsroom_id = ${owned(context)} and status = 'published'
       limit 1
-    `,
-  );
+    `;
   if (already[0]) return { ok: true as const, slug: already[0].slug };
 
-  const leads = await getSql().then(
-    (sql) =>
-      sql<LeadRow>`
+  const leads = await sql<LeadRow>`
       select id, headline, why, topic, status, source_urls, evidence, newsworthiness, created_at
       from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-    `,
-  );
+    `;
   const lead = leads[0];
   if (!lead) return { ok: false as const, error: "Lead not found" };
-  if (lead.status === "killed") {
-    return { ok: false as const, error: "Killed leads cannot print." };
-  }
-  if (lead.status === "held") {
-    return {
-      ok: false as const,
-      error: "Un-hold this lead before publishing. Working notes stay private until then.",
-    };
-  }
 
   /*
-    FAIL CLOSED ON A CLAIM OF ABSENCE (2026-09-05).
+    THE WARNINGS THIS PRINT WOULD RAISE, AGAINST THE DRAFT AS IT STANDS NOW
+    (PR233).
 
-    The Publish button is disabled in the desk while one of these is unchecked,
-    and a disabled button is a suggestion: a stale tab, a second window, a
-    scripted call or a walkthrough all route straight past it. This is the
-    check that actually holds. A story is allowed to say a document is not
-    there -- once a person has opened the city's own site and confirmed it.
+    Every policy the desk keeps is a WARNING here, not a wall: an editor who
+    says in so many words that they have read it and are printing anyway gets
+    through, and the print leaves a record of who said so and for which draft.
+
+    Two kinds of thing are NOT warnings and are never overridable, because no
+    editor can make them true by acknowledging them:
+
+      - the true IMPOSSIBILITIES (empty headline, empty body after the
+        reporter's notebook is stripped, a draft that does not exist), and
+      - the transient LOCK-LIKE gates the desk cannot print through (an evidence
+        check job that is queued or running).
+
+    The whole list is recomputed INSIDE the publish transaction below, against
+    the draft the fence actually prints -- so a client that acknowledged
+    everything it was shown cannot smuggle a print past a warning that only
+    became true afterwards (a tape that moved, a rewrite under the fence). This
+    pre-fence read exists only to build the refusal sentence a person reads.
   */
-  const notesRows = await getSql().then(
-    (sql) =>
-      sql<{ notes_json: string | null }>`
-      select notes_json from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-    `,
-  );
-  const openClaims = uncheckedGateTodos(parseNotes(notesRows[0]?.notes_json));
-  if (openClaims.length) {
-    return {
-      ok: false as const,
-      error:
-        openClaims.length === 1
-          ? "Confirm the claim of absence first — open the city's own site, check the story is right that the document is not there, then tick it in reporting notes."
-          : `Confirm the ${openClaims.length} claims of absence first — open the city's own site, check the story is right that those documents are not there, then tick them in reporting notes.`,
-    };
-  }
-
-  const drafts = await getSql().then(
-    (sql) =>
-      sql<DraftRow>`
+  const preDraftRows = await sql<DraftRow>`
       select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
              provenance_json, form, found_note, unanswered, research_json, disclosure_text,
              model_topic
       from drafts where lead_id = ${leadId} and newsroom_id = ${owned(context)}
       order by updated_at desc, id desc limit 1
-    `,
-  );
-  const row = drafts[0];
-  if (!row) return { ok: false as const, error: "Draft this lead before publishing." };
-  /*
-    A STORY NEVER PRINTS WITH A HOLE WHERE ITS DEK BELONGS (0.6.80).
-    Nothing upstream requires one -- a pasted story is filed with `dek: ""`
-    (`paste-one-story.ts:178`) and a report's own model can omit the "why it
-    matters" paragraph a dek comes from (`import-review.ts:2111`) -- so this is
-    the one gate every reported story passes through before it prints. The
-    workbench already has a dek field (`desk.story.draft.$draftId.tsx:259`);
-    refusing here, not earlier, lets the editor fill it any time before this
-    click.
-  */
-  if (!row.dek || !row.dek.trim()) {
-    return {
-      ok: false as const,
-      error: "Add a dek, the one-line summary under the headline, before you publish.",
-    };
-  }
-  if (evidenceNeedsReview(row, row.body))
-    return {
-      ok: false as const,
-      error:
-        "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
-    };
-  /*
-    ── THE CLAIMS NOBODY READ (UNIT U24) ──────────────────────────────────────
+    `;
+  const preDraft = preDraftRows[0];
+  const acknowledged = new Set(acknowledgedWarningKeys);
 
-    On the stand-in editorial day a story went to paper with seven claims its
-    own evidence check had raised still chipped `! Needs review`, and nothing
-    anywhere said so. Every other machine-made decision on this story passes a
-    person first; so does this one.
+  const collectWarnings = async (
+    tx: Sql,
+    row: DraftRow,
+    namedOutlets: NamedOutlet[],
+  ): Promise<{
+    warnings: { key: string; sentence: string }[];
+    hard: { key: string; sentence: string } | null;
+    outstandingClaims: number;
+    confirmSection: boolean;
+    draftTopic: string;
+    area: string | null;
+    evidence: Awaited<ReturnType<typeof loadMeetingPublishEvidence>> | null;
+  }> => {
+    const draftTopic = String(row.topic ?? "").trim();
+    const area = cleanStoryArea(areaFromEditor);
+    const editorTopic = String(sectionFromEditor ?? "").trim();
+    const warnings: { key: string; sentence: string }[] = [];
 
-    Two ways past it, and both are the editor's to choose: judge the claims in
-    the workbench (the blocker's first press, and the one to prefer), or accept
-    them explicitly with a press that records who and when against this exact
-    draft version (`performAcceptUnreviewedClaims`). The accepted COUNT and
-    token are read from `notes_json` -- the same place, and the same
-    fingerprint, as the section confirmation, so the acceptance is for the
-    version the editor was reading and an edit takes it back.
-
-    THREE WAYS IT FAILS CLOSED (units U24, U24b):
-
-      1. The count cannot be read at all. `unreviewedClaimCount` now only
-         swallows the unreadable-findings error and lets infrastructure errors
-         out; a publish that cannot be checked is a publish that does not
-         happen, in a sentence a person can read.
-      2. No acceptance, or one recorded for a different draft version.
-      3. An acceptance given for FEWER claims than are outstanding now. The
-         fingerprint alone cannot see this: a judgment the desk downgrades to
-         unreviewed -- the capture behind it changed, its binding moved -- does
-         not touch the draft row, so the token stands still while the number to
-         answer for grows. "I accepted three" must not print four.
-
-    A disabled button is a suggestion -- a stale tab, a second window or a
-    scripted call all route straight past it -- so the gate is here, and the
-    desk's blocker is the sentence that tells the editor this one exists.
-  */
-  let outstandingClaims: number;
-  try {
-    outstandingClaims = await unreviewedClaimCount(owned(context), leadId, deps);
-  } catch {
-    return { ok: false as const, error: PUBLISH_COULD_NOT_CHECK };
-  }
-  if (outstandingClaims > 0) {
-    const acceptance = parseNotes(notesRows[0]?.notes_json).unreviewedClaimsConfirmation;
-    const acceptedForThisDraft =
-      acceptance?.token === topicConfirmationFingerprint(evidenceReviewToken(row));
-    const accepted = acceptedForThisDraft && (acceptance?.count ?? 0) >= outstandingClaims;
-    if (!accepted) {
-      const short = acceptedForThisDraft ? (acceptance?.count ?? 0) : 0;
+    /*
+      THE TRUE IMPOSSIBILITIES. These are checked first and returned as `hard`:
+      the caller refuses them whatever the editor acknowledged, because no
+      acknowledgement can fill a headline or a body.
+    */
+    const draft = unpackStoredDraft({ ...row });
+    draft.body = stripReporterNotebook(draft.body);
+    if (!String(draft.headline ?? "").trim()) {
       return {
-        ok: false as const,
-        error: `${outstandingClaims} claim${
+        warnings,
+        hard: { key: "headline", sentence: "The headline is empty, so there is nothing to print." },
+        outstandingClaims: 0,
+        confirmSection: false,
+        draftTopic,
+        area,
+        evidence: null,
+      };
+    }
+    if (!String(draft.body ?? "").trim()) {
+      return {
+        warnings,
+        hard: { key: "body", sentence: "The story body is empty." },
+        outstandingClaims: 0,
+        confirmSection: false,
+        draftTopic,
+        area,
+        evidence: null,
+      };
+    }
+
+    /* The evidence-review READ failing is a warning (unable to read judgments),
+       not a wall: an editor may print past it once they say so. */
+    let outstandingClaims = 0;
+    let reviewReadFailed = false;
+    try {
+      outstandingClaims = await unreviewedClaimCount(owned(context), leadId, {
+        ...deps,
+        loadReview:
+          deps.loadReview ??
+          (async (room: number, lead: number) => {
+            const { loadFindingEvidenceReview } = await import("./finding-evidence-review.ts");
+            return loadFindingEvidenceReview(tx, room, lead);
+          }),
+      });
+    } catch {
+      reviewReadFailed = true;
+      warnings.push({ key: "evidence-loading", sentence: PUBLISH_COULD_NOT_CHECK });
+    }
+
+    const notes = parseNotes(
+      (
+        await tx<{ notes_json: string | null }>`
+          select notes_json from leads where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+        `
+      )[0]?.notes_json,
+    );
+
+    if (!draft.dek || !draft.dek.trim()) {
+      warnings.push({
+        key: "dek",
+        sentence: "Add a dek, the one-line summary under the headline, before you publish.",
+      });
+    }
+
+    const openClaims = uncheckedGateTodos(notes);
+    if (openClaims.length) {
+      warnings.push({
+        key: "claims",
+        sentence:
+          openClaims.length === 1
+          ? "Confirm the claim of absence first — open the city's own site, check the story is right that the document is not there, then tick it in reporting notes."
+          : `Confirm the ${openClaims.length} claims of absence first — open the city's own site, check the story is right that those documents are not there, then tick them in reporting notes.`,
+    });
+  }
+
+    if (!reviewReadFailed && outstandingClaims > 0) {
+      const acceptance = notes.unreviewedClaimsConfirmation;
+      const acceptedForThisDraft =
+      evidenceConfirmationMatches(acceptance?.token, row);
+      const accepted = acceptedForThisDraft && (acceptance?.count ?? 0) >= outstandingClaims;
+      if (!accepted) {
+        const short = acceptedForThisDraft ? (acceptance?.count ?? 0) : 0;
+        warnings.push({
+          key: "claims-unreviewed",
+          sentence: `${outstandingClaims} claim${
           outstandingClaims === 1 ? "" : "s"
         } from the evidence check ${
           outstandingClaims === 1 ? "has" : "have"
@@ -5992,124 +6124,285 @@ export const performPublish = createServerOnlyFn(async function performPublish(
               } more ${outstandingClaims - short === 1 ? "is" : "are"} outstanding now)`
             : ""
         }. Review them in the workbench, or accept them explicitly to print anyway.`,
-      };
+      });
     }
   }
-  /*
-    THE SECTION IS A CLAIM TOO (0.6.62).
 
-    Every other machine-made decision on this story passes a person before it
-    prints: the claims of absence above, the evidence review before that. The
-    section did not, and two published stories filed under a section nobody
-    chose -- a cat-rescue fundraiser under Budget, a staffing change at LPM
-    under Schools. A reader looking for either in its section would not find it.
+    if (evidenceNeedsReview(row, row.body)) {
+      warnings.push({
+        key: "evidence-stale",
+        sentence:
+          "The story changed after its evidence was gathered. Review the evidence in the workbench before publishing.",
+      });
+    }
 
-    The desk's button is disabled while the section is unconfirmed, and a
-    disabled button is a suggestion: this is the check that holds.
-  */
-  const confirmedTopic = parseNotes(notesRows[0]?.notes_json).topicConfirmation;
-  const draftTopic = String(row.topic ?? "").trim();
-  /* `null` for anything that is not one of the four keys, including absent. */
-  const area = cleanStoryArea(areaFromEditor);
-  const editorTopic = String(sectionFromEditor ?? "").trim();
-  if (editorTopic && editorTopic !== draftTopic) {
-    return {
-      ok: false as const,
-      error: `This story files under "${draftTopic || "no section"}", and the button said "${editorTopic}". Reload the story, check the section, then publish again.`,
-    };
-  }
-  /*
-    The editor's own section, for this version: confirmed by the press that
-    carried it. Recorded inside the publish transaction below, so a print with
-    no confirmation row cannot happen and a confirmation with no print cannot
-    either.
-  */
+    /*
+      THE SECTION. A supplied section that MATCHES the draft is the editor's own
+      confirmation and needs no warning. A supply that does not match, or no
+      supply with no stored confirmation for this version, is a section warning.
+    */
+    const confirmedTopic = notes.topicConfirmation;
   const confirmSection = Boolean(editorTopic) && editorTopic === draftTopic;
-  if (
+  if (editorTopic && editorTopic !== draftTopic) {
+      warnings.push({
+        key: "section",
+        sentence: `This story files under "${draftTopic || "no section"}", and the button said "${editorTopic}". Reload the story, check the section, then publish again.`,
+    });
+  } else if (
     !confirmSection &&
     (!confirmedTopic ||
       confirmedTopic.topic !== draftTopic ||
-      confirmedTopic.token !== topicConfirmationFingerprint(evidenceReviewToken(row)))
+      !evidenceConfirmationMatches(confirmedTopic.token, row))
   ) {
+      warnings.push({
+        key: "section",
+        sentence: `This draft files under "${draftTopic || "no section"}", and no editor has confirmed that for the version being printed. Open the story, check the section, and publish from there.`,
+    });
+  }
+
+    /*
+      Legacy/manual drafts with no sources may fall back to their lead's. This is
+      the same fallback the article print uses below, so the outlet check judges
+      the list the reader will actually see.
+    */
+    if (parseUrlList(draft.source_urls).length === 0 && mayInheritLeadSources(row)) {
+    const inherited = sanitizePublicUrls(
+        parseUrlList(
+      (
+            await tx<{ source_urls: string }>`
+              select source_urls from leads
+              where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+            `
+          )[0]?.source_urls ?? "[]",
+        ),
+      );
+      if (inherited.length > 0) draft.source_urls = JSON.stringify(inherited);
+    }
+
+    const outletRows = await tx<{ outlet: string }>`
+      select outlet from named_outlet_overrides
+    where newsroom_id = ${owned(context)} and draft_id = ${row.id}
+    `;
+    const unresolvedOutlets = unresolvedNamedOutlets({
+      body: draft.body,
+      sourceUrls: parseUrlList(draft.source_urls),
+      sourceTitles: await sourceTitlesForDraft(tx, owned(context), draft),
+      overridden: outletRows.map((r) => r.outlet),
+      outlets: namedOutlets,
+    });
+    for (const outlet of unresolvedOutlets) {
+      warnings.push({
+        key: `outlet:${outlet}`,
+        sentence: namedOutletNotice([outlet]),
+      });
+    }
+
+    /* The saved readiness memo a person recorded: checking/to-check/not-ready
+       are warnings. It is NOT the live reconcile job -- that is a hard gate
+       below -- so an editor can acknowledge a memo and print. */
+    const readiness = savedStoryReadiness(row.research_json);
+    if (
+      readiness.state === "checking" ||
+      readiness.state === "to-check" ||
+      readiness.state === "not-ready"
+    ) {
+      warnings.push({
+        key: "readiness",
+        sentence:
+          readiness.reason ||
+          (readiness.state === "checking"
+            ? "The AI is still checking this story against the meeting record."
+            : "This story is not ready to publish."),
+      });
+    }
+
+    /*
+      ── THE REPORTING PACKAGE'S OWN HELD STORIES (SECTION A, PR233) ──────────
+
+      A civic-reporting run files a package whose `held` list names stories it
+      could not run with: a source gap, a correction the run could not retrieve.
+      The desk shows these as a readiness hold ("not-ready") even when the saved
+      readiness memo says ready -- and the saved memo is not authoritative,
+      because a stale tab can hold a memo written before the hold existed.
+
+      So the server recomputes it here, the SAME way the story page does: the
+      package's draft must be THIS draft, and the hold's `storyId` must be the
+      story this lead was filed as (`storyLeadLinksForRequest`). The held item
+      must be `unverified` -- a hold the run later retrieved is not one. This
+      dedupes with the `readiness` key above: one warning, the stricter reason.
+    */
+    const { loadLeadReportingPackage } = await import("./civic-reporting.server.ts");
+    const { storyLeadLinksForRequest } = await import("./civic-reporting-commit.server.ts");
+    const loaded = await loadLeadReportingPackage(tx, leadId, owned(context));
+    if (loaded && loaded.draftId === Number(row.id)) {
+      const links = await storyLeadLinksForRequest(tx, loaded.requestId, owned(context));
+      const storyId = links.find((link) => link.leadId === leadId)?.storyId;
+      const held = (loaded.pkg.held ?? []).filter(
+        (item) => item.unverified && (!storyId || item.storyId === storyId),
+      );
+      if (held.length) {
+        const summary = held
+          .map(
+            (item) =>
+              `${String(item.headline ?? "")
+                .replace(/\s+/g, " ")
+                .slice(0, 70)}${
+                item.reason ? `: ${String(item.reason).replace(/\s+/g, " ").slice(0, 120)}` : ""
+              }`,
+          )
+          .join("; ");
+        const existing = warnings.find((w) => w.key === "readiness");
+        const sentence = summary || "A story in this reporting package is still held.";
+        if (existing) existing.sentence = sentence;
+        else warnings.push({ key: "readiness", sentence });
+      }
+    }
+
+    /*
+      Held and killed leads are warnings now, not walls (PR233). The status is
+      re-read HERE, from the transaction, not from the outer pooled read: a lead
+      held or killed between the pre-read and this fence must be seen as it now
+      is, or a print that only became improper under the fence would slip past.
+    */
+    const [fencedLead] = await tx<{ status: string | null }>`
+      select to_jsonb(leads)->>'status' as status from leads
+      where id = ${leadId} and newsroom_id = ${owned(context)} for update
+    `;
+    if (fencedLead?.status === "held") {
+      warnings.push({
+        key: "lead-held",
+        sentence:
+          "This lead is held. Publishing anyway will un-hold it and publish it in one press.",
+      });
+    }
+    if (fencedLead?.status === "killed") {
+      warnings.push({
+        key: "lead-killed",
+        sentence:
+          "This lead is killed. Publishing anyway will restore it and publish it in one press.",
+      });
+    }
+
+    /* The meeting tape check belongs INSIDE the fence: the only place a tape
+       that moved after the client looked can be seen. */
+    const evidence = await loadMeetingPublishEvidence(tx, {
+        newsroomId: owned(context),
+        draftId: Number(row.id),
+      });
+    if (evidence.stale.length) {
+      warnings.push({
+        key: "meeting-citation-stale",
+        sentence: staleCitationNotice(evidence.stale),
+      });
+    }
+
+    /* The live evidence check job is a hard gate: nothing can print while a
+       check the editor is waiting on is still queued or running. The job kind
+       is `reconcile` (jobs.ts) and its subject is the DRAFT row. */
+    const [liveCheck] = await tx<{ id: number }>`
+      select id from desk_jobs
+      where newsroom_id = ${owned(context)} and kind = 'reconcile' and subject_id = ${row.id}
+        and status in ('queued','running')
+      limit 1
+    `;
+    if (liveCheck) {
+      return {
+        warnings,
+        hard: {
+          key: "reconcile-running",
+          sentence: "An evidence check is running on this draft. Its answer is not in yet.",
+        },
+        outstandingClaims,
+        confirmSection: false,
+        draftTopic,
+        area,
+        evidence,
+      };
+    }
+
+    return { warnings, hard: null, outstandingClaims, confirmSection, draftTopic, area, evidence };
+  };
+
+  /* A missing draft is a true impossibility: there is nothing to be warned about. */
+  if (!preDraft) return { ok: false as const, error: "Draft this lead before publishing." };
+
+  /*
+    The newsroom's own outlet list, read ONCE here (not inside the transaction:
+    `getPaperConfig` opens the pooled connection, and on PGlite there is one, so
+    reading it inside the fence would deadlock). The fence re-check below uses
+    the same list, so the desk report, the override and this gate cannot
+    disagree about what is outstanding.
+  */
+  const namedOutlets = (await getPaperConfig(owned(context))).namedOutlets;
+  /*
+    A fast early-out so an unacknowledged warning or a true impossibility does
+    not even open the fence. The authoritative decision is the re-check INSIDE
+    the transaction below, against the locked current draft.
+  */
+  const pre = await collectWarnings(sql, preDraft, namedOutlets);
+  if (pre.hard) {
+    return { ok: false as const, error: pre.hard.sentence, hard: pre.hard.key };
+  }
+  const unacknowledged = pre.warnings.filter((w) => !acknowledged.has(w.key));
+  if (unacknowledged.length) {
     return {
       ok: false as const,
-      error: `This draft files under "${draftTopic || "no section"}", and no editor has confirmed that for the version being printed. Open the story, check the section, and publish from there.`,
+      error: unacknowledged[0].sentence,
+      warnings: pre.warnings,
     };
   }
 
-  const draft = unpackStoredDraft({ ...row });
-  draft.body = stripReporterNotebook(draft.body);
-
-  /*
-    Legacy/manual drafts with no sources may fall back to their lead's.
-    Report-backed drafts mark their citation list explicit, including empty;
-    publication must not resurrect uncited discovery URLs for those drafts.
-
-    Belt and braces for UX-005. The insert above now copies the URL into the
-    draft, but every draft created before that fix is still empty, and those
-    are exactly the stories an operator has in flight right now. Publishing
-    one of them would print an article with no sources and no warning.
-  */
-  if (parseUrlList(draft.source_urls).length === 0 && mayInheritLeadSources(row)) {
-    const fromLead = await getSql().then(
-      (sql) =>
-        sql<{ source_urls: string }>`
-        select source_urls from leads
-        where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
-      `,
-    );
-    const inherited = sanitizePublicUrls(parseUrlList(fromLead[0]?.source_urls ?? "[]"));
-    if (inherited.length > 0) draft.source_urls = JSON.stringify(inherited);
-  }
-  let provenanceJson =
-    row.provenance_json && row.provenance_json !== "[]" ? row.provenance_json : "";
-  if (!provenanceJson) {
-    provenanceJson = JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
-  }
-
-  /*
-    THE NAMED-OUTLET CHECK (0.6.62).
-
-    A story that says "the Denver Post reported" is asking the reader to trust
-    a report the paper has not shown them. The Sources list is the only place
-    they can check it, and if the outlet is not there, nothing on the page
-    tells them where the claim came from -- or that anyone at the paper looked.
-
-    It runs here, after the lead-source fallback above, because the list it
-    judges is the list the article will print. An editor clears one outlet at a
-    time with an override recorded in named_outlet_overrides, read back here --
-    per draft, so clearing the Denver Post for this story says nothing about
-    the Longmont Leader, and nothing about the next draft.
-  */
-  const outletSql = await getSql();
-  const overrideRows = await outletSql<{ outlet: string }>`
-    select outlet from named_outlet_overrides
-    where newsroom_id = ${owned(context)} and draft_id = ${row.id}
-  `;
-  const unresolvedOutlets = unresolvedNamedOutlets({
-    body: draft.body,
-    sourceUrls: parseUrlList(draft.source_urls),
-    sourceTitles: await sourceTitlesForDraft(outletSql, owned(context), draft),
-    overridden: overrideRows.map((r) => r.outlet),
-    /*
-      This newsroom's own outlet list, not the shipped one (Unit P item 5).
-      The desk report and the override above read the same list, so the three
-      cannot disagree about what is outstanding.
-    */
-    outlets: (await getPaperConfig(owned(context))).namedOutlets,
-  });
-  if (unresolvedOutlets.length) {
-    return { ok: false as const, error: namedOutletNotice(unresolvedOutlets) };
-  }
-
-  const baseSlug = slugify(draft.headline);
-  let slug = baseSlug;
+  /* The warnings whose keys the editor acknowledged, recomputed under the fence
+     and used for the audit rows -- filled in by the transaction below. */
+  let recordedOverrides: { key: string; sentence: string }[] = [];
 
   const published = await withCurrentDraftForPublish(
-    { newsroomId: owned(context) },
+    {
+      newsroomId: owned(context),
+      /*
+        The publish path owns the held/killed decision (it warns and audits it),
+        so it does not want the helper's own lifecycle throw: a lead held under
+        the fence must come back as a warning the editor can acknowledge, not a
+        bare refusal behind a dialog.
+      */
+      allowLifecycleOverride: true,
+      /* Hand us the CURRENT locked draft: recompute every warning on what will
+         actually print, so a warning that appeared under the fence is refused
+         with a fresh list rather than hidden behind a "draft changed" throw. */
+      useCurrentDraft: true,
+    },
     leadId,
-    row,
-    async (sql) => {
+    preDraft,
+    async (sql, row) => {
+      /*
+        Every value below is derived from `row`, the draft this fence will
+        actually print -- not the pre-read draft. `draft` is the stored story
+        with the reporter's notebook stripped; the topic, area, section
+        confirmation, outstanding-claims tally and provenance are all recomputed
+        here so a rewrite under the fence cannot print yesterday's words.
+      */
+      const draft = unpackStoredDraft({ ...row });
+      draft.body = stripReporterNotebook(draft.body);
+      if (parseUrlList(draft.source_urls).length === 0 && mayInheritLeadSources(row)) {
+        const inherited = sanitizePublicUrls(
+          parseUrlList(
+            (
+              await sql<{ source_urls: string }>`
+                select source_urls from leads
+                where id = ${leadId} and newsroom_id = ${owned(context)} limit 1
+              `
+            )[0]?.source_urls ?? "[]",
+          ),
+        );
+        if (inherited.length > 0) draft.source_urls = JSON.stringify(inherited);
+      }
+      const provenanceJson =
+        row.provenance_json && row.provenance_json !== "[]"
+          ? row.provenance_json
+          : JSON.stringify(provenanceFromUrls(parseUrlList(draft.source_urls)));
+      const baseSlug = slugify(draft.headline);
+      let slug = baseSlug;
+
       /*
         Publication and capture share the same lead -> meeting-record fence.
         Once this lock is held, either this transaction observes the old tape
@@ -6120,13 +6413,45 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         newsroomId: owned(context),
         draftId: Number(row.id),
       });
-      const evidence = await loadMeetingPublishEvidence(sql, {
-        newsroomId: owned(context),
-        draftId: Number(row.id),
-      });
-      if (evidence.stale.length) {
-        return { blocked: true as const, error: staleCitationNotice(evidence.stale) };
+
+      /*
+        NO STALE PREFLIGHT APPROVAL (PR233). Every warning is recomputed here,
+        against the exact draft this fence will print, INSIDE the transaction
+        that prints it. A client that acknowledged the warnings it was shown
+        cannot print past a warning that only became true since -- a tape that
+        moved, a rewrite, a section that stopped being confirmed. If any current
+        warning is unacknowledged, the print is refused and nothing is written.
+      */
+      const fenced = await collectWarnings(sql, row, namedOutlets);
+      if (fenced.hard) {
+        return {
+          blocked: true as const,
+          error: fenced.hard.sentence,
+          hard: fenced.hard.key,
+        };
       }
+      const stillUnacknowledged = fenced.warnings.filter((w) => !acknowledged.has(w.key));
+      if (stillUnacknowledged.length) {
+        return {
+          blocked: true as const,
+          error: stillUnacknowledged[0].sentence,
+          warnings: fenced.warnings,
+        };
+      }
+      const evidence = fenced.evidence;
+      if (!evidence) {
+        return {
+          blocked: true as const,
+          error: "The meeting record for this draft could not be read.",
+        };
+      }
+      /*
+        THE WARNINGS THE EDITOR ACTUALLY OVERRODE: the keys they sent that named
+        a CURRENT warning. A key that names nothing is not an override and is
+        not audited. These are written below, in this same transaction, one row
+        each, so an override cannot outlive a print that never happened.
+      */
+      recordedOverrides = acknowledgedWarnings(fenced.warnings, acknowledgedWarningKeys);
 
       /*
         THE PRESS THAT CARRIED THE SECTION IS THE CONFIRMATION (0.6.67).
@@ -6138,14 +6463,14 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         carries no section; the guarantee the separate button used to provide is
         unchanged, it is just made by the same press that publishes now.
       */
-      if (confirmSection) {
+      if (fenced.confirmSection) {
         const noteRows = await sql<{ notes_json: string | null }>`
           select notes_json from leads
           where id = ${leadId} and newsroom_id = ${owned(context)} for update
         `;
         const printNotes = parseNotes(noteRows[0]?.notes_json);
         printNotes.topicConfirmation = {
-          topic: draftTopic,
+          topic: fenced.draftTopic,
           token: topicConfirmationFingerprint(evidenceReviewToken(row)),
           at: new Date().toISOString(),
         };
@@ -6197,17 +6522,52 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         /* The geography pill this story answers to. NULL is the home town on the
            paper, which is the rule for the whole pre-0098 archive too -- see
            story-area.ts, which owns the four keys. */
-        ${area}
+        ${fenced.area}
       ) returning id
     `;
-      await recordMeetingPublishEvidence(sql, {
+      /*
+        THE TAPE RECORD, FOR A STORY WHOSE CITATIONS WERE OVERRIDDEN (PR233).
+
+        When no citation is stale this is the ordinary path: freeze the verified
+        snapshot in the same transaction. When the editor ACKNOWLEDGED a stale
+        citation, the recording layer would (rightly) refuse to fabricate a
+        "current, verified" snapshot -- so on that path we preserve the ORIGINAL
+        draft link's snapshot with an explicit insert-select, never a new
+        verification. A draft with no current link simply has nothing to
+        preserve: no snapshot is written, and the override is still audited.
+      */
+      if (evidence.stale.length && acknowledged.has("meeting-citation-stale")) {
+        await sql`
+          insert into meeting_article_transcript_links
+            (newsroom_id, article_id, origin_draft_id, artifact_id, artifact_sha256, video_id, citation_snapshot)
+          select l.newsroom_id, ${printed.id}, l.draft_id, l.artifact_id, a.sha256, a.video_id, l.citation_snapshot
+            from meeting_draft_transcript_links l
+            join meeting_transcript_artifacts a on a.id = l.artifact_id
+           where l.newsroom_id = ${owned(context)} and l.draft_id = ${Number(row.id)} and l.is_current = true
+          on conflict (newsroom_id, article_id, artifact_id) do nothing
+        `;
+      } else {
+        await recordMeetingPublishEvidence(sql, {
         newsroomId: owned(context),
         articleId: printed.id,
         draftId: Number(row.id),
       }, evidence);
+      }
       await sql`
       update leads set status = 'published' where id = ${leadId} and newsroom_id = ${owned(context)}
     `;
+      /*
+        ONE AUDIT ROW PER WARNING THE EDITOR OVERRODE (PR233), written in THIS
+        transaction so the record and the print are one act: a refusal below
+        rolls both back, and a print cannot commit without its record.
+      */
+      await auditPublishOverrides(sql, {
+        newsroomId: owned(context),
+        userId: context.userId,
+        leadId,
+        draftId: Number(row.id),
+        warnings: recordedOverrides,
+      });
       /*
         Both halves of a beat-memory row are model-written -- the entity is cut
         out of the draft's headline, the angle is its dek -- and both are `text`
@@ -6221,11 +6581,26 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         values (${context.userId}, ${owned(context)}, ${entity.slice(0, 80)}, ${storableText(draft.dek).slice(0, 200)}, ${printed.id})
       `;
       }
-      return { blocked: false as const, slug, id: printed.id, fileAbsent: evidence.fileAbsent };
+      return {
+        blocked: false as const,
+        slug,
+        id: printed.id,
+        fileAbsent: evidence.fileAbsent,
+        outstandingClaims: fenced.outstandingClaims,
+        draftTopic: fenced.draftTopic,
+        modelTopic: String(row.model_topic ?? "").trim(),
+      };
     },
   );
 
-  if (published.blocked) return { ok: false as const, error: published.error };
+  if (published.blocked) {
+    return {
+      ok: false as const,
+      error: published.error,
+      ...("warnings" in published && published.warnings ? { warnings: published.warnings } : {}),
+      ...("hard" in published && published.hard ? { hard: published.hard } : {}),
+    };
+  }
 
   for (const absent of published.fileAbsent) {
     await audit(
@@ -6245,14 +6620,14 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     audit trail rather than in a table of its own, because it is one line about
     one decision and the trail already carries the who and the when.
   */
-  if (published.id && sectionOverridden(row.model_topic, draftTopic)) {
+  if (published.id && sectionOverridden(published.modelTopic, published.draftTopic)) {
     await audit(
       context.userId,
       "section-override",
       sectionOverrideDetail({
         leadId,
-        modelTopic: String(row.model_topic ?? "").trim(),
-        editorTopic: draftTopic,
+        modelTopic: published.modelTopic,
+        editorTopic: published.draftTopic,
       }),
       owned(context),
       { kind: "articles", id: published.id },
@@ -6266,12 +6641,12 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     The acceptance itself was audited when it was given
     (`accept_unreviewed_claims`); this is the print that used it.
   */
-  if (outstandingClaims > 0) {
+  if (published.outstandingClaims > 0) {
     await audit(
       context.userId,
       "publish-unreviewed-claims",
-      `Article ${published.id}: ${outstandingClaims} unreviewed claim${
-        outstandingClaims === 1 ? "" : "s"
+      `Article ${published.id}: ${published.outstandingClaims} unreviewed claim${
+        published.outstandingClaims === 1 ? "" : "s"
       } accepted before printing`,
       owned(context),
       { kind: "articles", id: published.id },
@@ -6305,7 +6680,14 @@ export const publishLead = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     data.leadId === null
       ? { ok: false as const, error: "There is no such story." }
-      : performPublish(context, data.leadId, data.topic, data.area),
+      : performPublish(
+          context,
+          data.leadId,
+          data.topic,
+          data.area,
+          {},
+          data.acknowledgedWarningKeys ?? [],
+        ),
   );
 
 /**
@@ -6517,8 +6899,7 @@ export async function performSuggestCorrectionWording(
     chat?: typeof grokChat;
   } = {},
 ): Promise<
-  | { ok: true; wording: string; source: "model" | "template" }
-  | { ok: false; error: string }
+  { ok: true; wording: string; source: "model" | "template" } | { ok: false; error: string }
 > {
   const wasWrong = cleanCorrectionLine(input.wasWrong);
   const isRight = cleanCorrectionLine(input.isRight);
@@ -6807,22 +7188,30 @@ export const getDraftHistoryItem = createServerFn({ method: "GET" })
        order by reviewed_at,id
     `;
     return {
-      id: Number(draft.id), headline: draft.headline, dek: draft.dek, body: draft.body, topic: draft.topic,
-      updatedAt: draft.updated_at, transcriptLinks: details,
+      id: Number(draft.id),
+      headline: draft.headline,
+      dek: draft.dek,
+      body: draft.body,
+      topic: draft.topic,
+      updatedAt: draft.updated_at,
+      transcriptLinks: details,
       transcriptReviews: reviews.map((review) => {
         let raw: unknown = null;
         try { raw = JSON.parse(review.accepted_citation_snapshot) as unknown; } catch { /* malformed record is displayed as unavailable */ }
-        const citations = Array.isArray(raw) ? raw.map((value) => {
-          const citation = value && typeof value === "object" ? value as Record<string, unknown> : {};
-          const numberOrNull = (field: unknown) => typeof field === "number" && Number.isFinite(field) ? field : null;
-          return {
+        const citations = Array.isArray(raw)
+          ? raw.map((value) => {
+              const citation =
+                value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+              const numberOrNull = (field: unknown) => typeof field === "number" && Number.isFinite(field) ? field : null;
+              return {
             sourceSegmentIndex: numberOrNull(citation.sourceSegmentIndex),
             acceptedSegmentIndex: numberOrNull(citation.acceptedSegmentIndex),
             acceptedTimestampSeconds: numberOrNull(citation.acceptedTimestampSeconds),
             excerpt: typeof citation.excerpt === "string" ? citation.excerpt : null,
             captionSha256: typeof citation.captionSha256 === "string" ? citation.captionSha256 : null,
           };
-        }) : [];
+            })
+          : [];
         return {
           id: Number(review.id), acceptedArtifactId: Number(review.accepted_artifact_id),
           acceptedArtifactSha256: review.accepted_artifact_sha256, reviewedBy: review.reviewed_by,

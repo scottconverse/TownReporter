@@ -10,10 +10,57 @@ export type StoryReadiness = {
 };
 
 /** Every story surface reads the Publish gate's current first reason. */
-export function editorStoryState(blockers: readonly { key: string; sentence: string }[], openCount: number): StoryReadiness {
+export function editorStoryState(blockers: readonly { key: string; kind?: string; sentence: string }[], openCount: number, acceptedCount = 0,
+): StoryReadiness {
   const first = blockers[0];
   return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : "not-ready" : "ready",
-    openCount, totalCount: openCount, reason: first?.sentence ?? "Ready to publish." };
+    openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
+}
+
+/** Acceptance is counted against outstanding claims, never treated as verification. */
+export function acceptedClaimsReason(openCount: number, acceptedCount: number): string | null {
+  return openCount > 0 && acceptedCount > 0 && acceptedCount >= openCount
+    ? `You accepted ${acceptedCount} claim${acceptedCount === 1 ? "" : "s"} the AI could not confirm.` : null;
+}
+
+export function readinessWithAcceptedClaims(readiness: StoryReadiness, openCount: number, acceptedCount: number): StoryReadiness {
+  const reason = acceptedClaimsReason(openCount, acceptedCount);
+  return reason && readiness.state !== "checking"
+    ? { ...readiness, state: "ready", openCount, reason } : readiness;
+}
+
+/**
+ * The route's publish filter and readiness share one decision.
+ *
+ * ── TWO QUESTIONS, AND UNIT OH SEPARATES THEM ─────────────────────────────
+ *
+ *   - WHICH reasons still stand (`blockers`): acceptance clears the
+ *     `claims-unreviewed` row, and nothing else. A warning is not removed here.
+ *   - IS the button on (`publishEnabled`): only a HARD reason turns it off. A
+ *     warning can report the story "not-ready" (through `editorStoryState`)
+ *     while still leaving the button live -- that is the whole point of the
+ *     unit: an editor may print over a readiness verdict.
+ *
+ * A blocker with NO `kind` (an older caller, or a test that builds a list by
+ * hand) is treated as HARD, so an unknown reason can never silently unlock the
+ * button. That keeps every pre-OH caller's `publishEnabled` exactly what it
+ * was.
+ */
+export function acceptedClaimsPublishState<
+  T extends { key: string; kind?: string; sentence: string },
+>(input: {
+  blockers: readonly T[]; openCount: number; acceptedCount: number; hasAiJudgments: boolean;
+}) {
+  const covers = input.acceptedCount > 0 && input.acceptedCount >= input.openCount;
+  const blockers = input.blockers.filter(
+    (blocker) => blocker.key !== "claims-unreviewed" || !covers,
+  );
+  const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
+  return {
+    blockers,
+    publishEnabled: !hasHard,
+    readiness: editorStoryState(blockers, input.openCount, input.acceptedCount),
+  };
 }
 
 /** Read the filed state once; a missing memo is Ready, without claiming verified facts. */

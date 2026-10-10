@@ -1,6 +1,7 @@
+import { topicConfirmationFingerprint } from "./notes.ts";
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { evidenceNeedsReview, reconcileDraftEvidence, mayInheritLeadSources } from "./draft-evidence.ts";
+import { evidenceNeedsReview, reconcileDraftEvidence, mayInheritLeadSources, retainUnchangedReconcileResearch, evidenceReviewToken, evidenceConfirmationMatches } from "./draft-evidence.ts";
 const original = { body: "Vendor announces testing software.", source_urls: '["https://vendor.example/release"]', provenance_json: '[{"url":"https://vendor.example/release"}]', found_note: 'Vendor raised money.', unanswered: '["Revenue?"]', research_json: '{"news":"Vendor funding"}' };
 const replacement = "The library opens at noon Tuesday.";
 it("explicit report citations stay authoritative through save while legacy manual drafts may inherit", () => {
@@ -39,4 +40,22 @@ it("removing evidence clears private document claim receipts",()=>{
   const removed=reconcileDraftEvidence(draft,"Changed","remove");
   const research=JSON.parse(removed.research_json);
   assert.equal(research.reportedDocumentClaims,undefined); assert.equal(research.documentEvidenceReview,undefined);
+});
+
+it("legacy acceptance matches its content and still rejects edits", () => {
+  const draft = { ...original, id: 12, headline: "Headline", dek: "Dek", topic: "business" };
+  const legacy = topicConfirmationFingerprint(JSON.stringify([draft.id, ...JSON.parse(evidenceReviewToken(draft))]));
+  assert.equal(evidenceConfirmationMatches(legacy, draft), true);
+  for (const edit of [{ body: "Changed" }, { headline: "Changed" }, { dek: "Changed" }, { source_urls: "[]" }]) {
+    assert.equal(evidenceConfirmationMatches(legacy, { ...draft, ...edit }), false);
+  }
+});
+it("a repeated reconcile keeps research bytes only for unchanged check results", () => {
+  const research = { evidenceReconciledAt: "before", nameCheck: { checkedAt: "before", rows: [], complete: true }, reportedClaims: { rows: ["claim"] } };
+  const previous = JSON.stringify(research);
+  const repeated = { ...research, evidenceReconciledAt: "after", nameCheck: { ...research.nameCheck, checkedAt: "after" } };
+  assert.equal(retainUnchangedReconcileResearch(previous, JSON.stringify(repeated)), previous);
+  for (const next of [{ ...repeated, reportedClaims: { rows: ["changed"] } }, { ...repeated, nameCheck: { ...repeated.nameCheck, complete: false } }]) {
+    assert.equal(retainUnchangedReconcileResearch(previous, JSON.stringify(next)), JSON.stringify(next));
+  }
 });

@@ -53,7 +53,8 @@ describe("BeforeYouCanPublish", () => {
     }] as never, [], []);
     const html = render({ unreviewedClaims: openCount });
     assert.doesNotMatch(html, /Nothing is blocking Publish\./);
-    assert.match(html, /1 thing blocks Publish/);
+    assert.match(html, /1 warning before Publish/);
+    assert.doesNotMatch(html, /1 thing blocks Publish/);
     assert.match(html, /Review the claim/);
   });
 
@@ -63,9 +64,10 @@ describe("BeforeYouCanPublish", () => {
       namedOutlets: ["Longmont Leader"],
       openClaims: 1,
     });
-    const rows = html.match(/class="astra-blocker"/g) ?? [];
+    const rows = html.match(/class="astra-blocker[ "]/g) ?? [];
     assert.equal(rows.length, 3, "the owner's story has three reasons, so it gets three rows");
-    assert.match(html, /3 things block Publish\. Each row has the press that clears it\./);
+    assert.match(html, /3 warnings before Publish\. You can resolve them here or choose Publish anyway\./,
+    );
 
     assert.match(html, /No section has been chosen for this story\./);
     assert.match(html, />Pick a section</);
@@ -76,10 +78,12 @@ describe("BeforeYouCanPublish", () => {
     assert.match(html, />Confirm the claim</);
   });
 
-  it("gives the empty dek the server's own sentence, before the press", () => {
+  it("gives the empty dek a plain-words warning, not a claim the desk refuses it", () => {
     const html = render({ dek: "" });
-    assert.match(html, /The desk refuses a story with no dek/);
-    assert.match(html, /Add a dek, the one-line summary under the headline, before you publish\./);
+    assert.match(html, /The dek is empty\./);
+    assert.doesNotMatch(html, /refuse/i,
+      "a warning must not claim a refusal the desk no longer makes",
+    );
     assert.match(html, />Write a dek</);
   });
 
@@ -90,6 +94,14 @@ describe("BeforeYouCanPublish", () => {
     assert.match(html, /I checked: keep this evidence/);
     assert.match(html, /See the running check/);
     assert.match(html, /See the publish bar/);
+  });
+
+  it("says Warning on a judgement call and Blocks Publish on a hard stop", () => {
+    const html = render({ sectionReady: false, headline: "" });
+    assert.match(html, /data-kind="warning"/);
+    assert.match(html, /data-kind="hard"/);
+    assert.match(html, />Warning</);
+    assert.match(html, />Blocks Publish</);
   });
 
   it("hands the press back to the page instead of acting itself", () => {
