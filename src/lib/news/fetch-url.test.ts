@@ -3,9 +3,72 @@ import assert from "node:assert/strict";
 import {
   assertHttpUrl,
   fetchPublicHttp,
+  fetchSourceText,
   isBlockedAddress,
   setFetchImplForTests,
 } from "./fetch-url.ts";
+
+it("guards: readable feeds are rejected while binary responses must stay blocked", async () => {
+  // guards: scans miss outside-government stories when proper feeds are rejected.
+  const body = "Local community reporting and neighborhood stories. ".repeat(10);
+  try {
+    for (const ctype of [
+      "application/rss+xml; charset=UTF-8",
+      "application/atom+xml",
+      "application/rdf+xml",
+      "application/feed+json",
+      "application/vnd.community+xml",
+    ]) {
+      setFetchImplForTests(async () => new Response(body, { headers: { "content-type": ctype } }));
+      assert.equal((await fetchSourceText("https://1.1.1.1/feed")).text, body.trim(), ctype);
+    }
+    for (const ctype of [
+      "application/pdf",
+      "application/zip",
+      "application/octet-stream",
+      "image/png",
+    ]) {
+      setFetchImplForTests(async () => new Response(body, { headers: { "content-type": ctype } }));
+      await assert.rejects(
+        () => fetchSourceText("https://1.1.1.1/feed"),
+        /Unsupported content type/,
+      );
+    }
+  } finally {
+    setFetchImplForTests(null);
+  }
+});
+
+it("guards: structured story lists are truncated at the HTML page limit", async () => {
+  // guards: scans lose later stories when feeds and sitemaps stop at 14,000 characters.
+  try {
+    for (const ctype of [
+      "application/xml",
+      "application/rss+xml",
+      "application/atom+xml",
+      "text/xml",
+      "application/feed+json",
+      "application/json",
+    ]) {
+      setFetchImplForTests(
+        async () => new Response("x".repeat(30_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/list")).text.length, 30_000, ctype);
+      setFetchImplForTests(
+        async () => new Response("x".repeat(45_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/list")).text.length, 40_000, ctype);
+    }
+    for (const ctype of ["text/html", "application/xhtml+xml"]) {
+      setFetchImplForTests(
+        async () => new Response("x".repeat(30_000), { headers: { "content-type": ctype } }),
+      );
+      assert.equal((await fetchSourceText("https://1.1.1.1/page")).text.length, 14_000, ctype);
+    }
+  } finally {
+    setFetchImplForTests(null);
+  }
+});
 
 describe("isBlockedAddress", () => {
   it("blocks loopback, RFC1918, link-local, CGNAT, multicast, ULA", () => {
@@ -171,8 +234,14 @@ describe("assertHttpUrl", () => {
     assert.throws(() => assertHttpUrl("http://[::1]/"), /not fetchable/);
     assert.throws(() => assertHttpUrl("http://10.0.0.5/admin"), /not fetchable/);
     assert.throws(() => assertHttpUrl("http://[::ffff:7f00:1]/"), /not fetchable/);
-    assert.throws(() => assertHttpUrl("http://[::ffff:a9fe:a9fa]/latest/meta-data/"), /not fetchable/);
-    assert.throws(() => assertHttpUrl("http://[::ffff:a9fe:a9fe]/latest/meta-data/"), /not fetchable/);
+    assert.throws(
+      () => assertHttpUrl("http://[::ffff:a9fe:a9fa]/latest/meta-data/"),
+      /not fetchable/,
+    );
+    assert.throws(
+      () => assertHttpUrl("http://[::ffff:a9fe:a9fe]/latest/meta-data/"),
+      /not fetchable/,
+    );
     assert.throws(() => assertHttpUrl("http://[::ffff:127.0.0.1]/"), /not fetchable/);
   });
 
@@ -188,11 +257,7 @@ describe("fetchPublicHttp redirect SSRF", () => {
     const fetched: string[] = [];
     setFetchImplForTests((async (input: RequestInfo | URL) => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       fetched.push(url);
       if (url.startsWith("http://1.1.1.1")) {
         return new Response(null, {
@@ -203,10 +268,7 @@ describe("fetchPublicHttp redirect SSRF", () => {
       return new Response("should-not-fetch-blocked-host", { status: 200 });
     }) as unknown as import("./fetch-url.ts").FetchLike);
     try {
-      await assert.rejects(
-        () => fetchPublicHttp(new URL("http://1.1.1.1/page")),
-        /not fetchable/,
-      );
+      await assert.rejects(() => fetchPublicHttp(new URL("http://1.1.1.1/page")), /not fetchable/);
       assert.equal(fetched.length, 1);
       assert.match(fetched[0]!, /^http:\/\/1\.1\.1\.1/);
     } finally {
@@ -218,11 +280,7 @@ describe("fetchPublicHttp redirect SSRF", () => {
     const original = null;
     setFetchImplForTests((async (input: RequestInfo | URL) => {
       const url =
-        typeof input === "string"
-          ? input
-          : input instanceof URL
-            ? input.toString()
-            : input.url;
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url === "http://1.1.1.1/from") {
         return new Response(null, {
           status: 301,

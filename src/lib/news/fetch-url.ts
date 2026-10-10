@@ -102,7 +102,9 @@ let undiciLoaderOverride: (() => Promise<typeof import("undici")>) | null = null
 
 export class GuardedTransportUnavailableError extends Error {
   constructor(cause: unknown) {
-    super("Guarded HTTP transport is unavailable; refusing an unprotected network request.", { cause });
+    super("Guarded HTTP transport is unavailable; refusing an unprotected network request.", {
+      cause,
+    });
     this.name = "GuardedTransportUnavailableError";
   }
 }
@@ -130,7 +132,7 @@ async function buildGuardedFetch(): Promise<FetchLike> {
     const spec = "undici";
     const undici = undiciLoaderOverride
       ? await undiciLoaderOverride()
-      : (await import(/* @vite-ignore */ spec)) as typeof import("undici");
+      : ((await import(/* @vite-ignore */ spec)) as typeof import("undici"));
     const agent = new undici.Agent({
       connect: { lookup: guardedLookup as unknown as undefined },
       // Hops are re-validated one by one below; keep sockets short-lived so a
@@ -160,7 +162,29 @@ export async function resolveFetch(): Promise<FetchLike> {
     transport = guardedFetchImpl;
   }
   const send: FetchLike = transport ?? ((u, i) => fetch(u, i));
-  return async (url, init) => capFetchResponse(await send(url, init), url);
+  return async (url, init) => {
+    const response = await send(url, init);
+    const ctype = response.headers.get("content-type") ?? "";
+    const mediaType = ctype.split(";", 1)[0].trim().toLowerCase();
+    // The shared body cap has a fixed MIME list. Apply its existing text byte
+    // ceiling to structured feed types too, then restore the original header
+    // for consumers to classify the response. Never bypass the streaming cap.
+    if (/^application\/(?:[^\s/;]+\+xml|feed\+json)$/.test(mediaType)) {
+      const headers = new Headers(response.headers);
+      headers.set("content-type", "application/xml");
+      const capped = await capFetchResponse(
+        new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        }),
+        url,
+      );
+      capped.headers.set("content-type", ctype);
+      return capped;
+    }
+    return capFetchResponse(response, url);
+  };
 }
 
 /** One guarded HTTP hop. A scheduler can own the send and body lifetime.
@@ -236,6 +260,9 @@ function stripHtml(html: string) {
   return htmlToPlainText(html);
 }
 
+export const HTML_SOURCE_TEXT_LIMIT = 14_000;
+export const STRUCTURED_SOURCE_TEXT_LIMIT = 40_000;
+
 export async function fetchSourceText(
   rawUrl: string,
 ): Promise<{ text: string; titleHint: string }> {
@@ -249,13 +276,14 @@ export async function fetchSourceText(
   const res = await fetchPublicHttp(url);
   if (!res.ok) throw new Error(`Fetch failed (${res.status})`);
   const ctype = res.headers.get("content-type") ?? "";
+  const mediaType = ctype.split(";", 1)[0].trim().toLowerCase();
   if (/pdf|octet-stream|zip|image\//i.test(ctype)) {
     throw new Error(`Unsupported content type: ${ctype || "unknown"}`);
   }
   if (
     ctype &&
-    !/text\/html|application\/xhtml|application\/xml|text\/plain|application\/json|text\/xml/i.test(
-      ctype,
+    !/^(?:text\/(?:html|plain|xml)|application\/(?:xhtml|xml|json|feed\+json|[^\s/;]+\+xml))$/.test(
+      mediaType,
     )
   ) {
     throw new Error(`Unsupported content type: ${ctype}`);
@@ -263,13 +291,20 @@ export async function fetchSourceText(
   const html = await res.text();
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const titleHint = titleMatch ? stripHtml(titleMatch[1]).slice(0, 140) : url.hostname;
-  const text = stripHtml(html).slice(0, 14000);
+  const isStructured =
+    mediaType !== "application/xhtml+xml" &&
+    /^(?:text\/xml|application\/(?:xml|json|feed\+json|[^\s/;]+\+xml))$/.test(mediaType);
+  const textLimit = isStructured ? STRUCTURED_SOURCE_TEXT_LIMIT : HTML_SOURCE_TEXT_LIMIT;
+  const text = stripHtml(html).slice(0, textLimit);
   if (typeof window === "undefined") {
     const { needsRenderedFetch, fetchRenderedPage } = await import("./render-fetch.ts");
     if (needsRenderedFetch(url, text, html)) {
       const rendered = await fetchRenderedPage(url.toString());
       if (rendered && rendered.text.length > Math.min(text.length, 400)) {
-        return { text: rendered.text.slice(0, 14000), titleHint: rendered.title || titleHint };
+        return {
+          text: rendered.text.slice(0, HTML_SOURCE_TEXT_LIMIT),
+          titleHint: rendered.title || titleHint,
+        };
       }
     }
   }
