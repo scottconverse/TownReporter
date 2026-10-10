@@ -15,11 +15,13 @@
  * `headline-control.ts` and `draft-evidence.ts` already use.
  */
 import { editorOwnsHeadline } from "./headline-control.ts";
-import { savedStoryReadiness, storyReadinessChip, type StoryReadiness } from "./story-readiness.ts";
+import { readinessWithAcceptedClaims, savedStoryReadiness, storyReadinessChip, type StoryReadiness } from "./story-readiness.ts";
 
 /** The facts about one draft that decide its state, as the query returns them. */
 export type DeskDraftFacts = {
   story_readiness?: unknown;
+  unreviewed_claims?: number;
+  unreviewed_claims_accepted_count?: number;
   /** The newest `desk_jobs` row for this lead, if there is one. */
   job_status: string | null;
   job_stage: string | null;
@@ -119,7 +121,7 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   const base = { needsYou: false, running, failed, yours };
 
   if (facts.story_readiness !== undefined) {
-    const readiness = savedStoryReadiness(facts.story_readiness, running);
+    const readiness = readinessWithAcceptedClaims(savedStoryReadiness(facts.story_readiness, running), facts.unreviewed_claims ?? 0, facts.unreviewed_claims_accepted_count ?? 0);
     const key = running ? "running" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
     return { ...base, key, readiness, label: storyReadinessChip(readiness).text, needsYou: readiness.state === "to-check" };
   }

@@ -1,6 +1,6 @@
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
-import { editorStoryState, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { acceptedClaimsPublishState, readinessWithAcceptedClaims, savedStoryReadiness } from "@/lib/news/story-readiness";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -1854,9 +1854,6 @@ function StoryPage() {
     while the number of claims to answer for grows. "I accepted three" must not
     print four.
   */
-  const acceptanceCovers =
-    data.unreviewedClaimsAcceptedCount > 0 &&
-    data.unreviewedClaimsAcceptedCount >= evidenceState.toReview;
   const filedStoryId = reportingPackage.data?.storyLeads?.find((link) => link.leadId === id)?.storyId;
   const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
     ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
@@ -1918,9 +1915,11 @@ function StoryPage() {
     publishing: publish.isPending,
   });
   // Acceptance clears the Publish gate; it does not resolve the evidence claims.
-  const blockers = publishChecks.filter((blocker) =>
-    blocker.key !== "claims-unreviewed" || hasAiJudgments || !acceptanceCovers,
-  );
+  const acceptedPublishState = acceptedClaimsPublishState({
+    blockers: publishChecks, openCount: evidenceState.toReview,
+    acceptedCount: data.unreviewedClaimsAcceptedCount, hasAiJudgments,
+  });
+  const blockers = acceptedPublishState.blockers;
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
@@ -1937,9 +1936,9 @@ function StoryPage() {
     the mutations report, so it is testable without mounting this route.
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
-  const legacyEvidenceBlocker = publishChecks.find((blocker) => blocker.key === "claims-unreviewed");
-  const draftReadiness = data.draft ? hasAiJudgments ? editorStoryState(blockers, evidenceState.toReview) :
-    legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : legacyReadiness :
+  const legacyEvidenceBlocker = blockers.find((blocker) => blocker.key === "claims-unreviewed");
+  const draftReadiness = data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
+    legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const readiness = readinessDot(
     writerIsReady({
@@ -3761,7 +3760,7 @@ function StoryPage() {
                   <ActionButton
                     tone="primary"
                     phase={publish.isPending ? "working" : "idle"}
-                    disabled={publish.isPending || blockers.length > 0}
+                    disabled={publish.isPending || !acceptedPublishState.publishEnabled}
                     workingLabel="Publishing…"
                     onAct={() => {
                       setConfirmingPublish(false);
@@ -3787,7 +3786,7 @@ function StoryPage() {
                     tone="primary"
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
-                    disabled={publish.isPending || blockers.length > 0}
+                    disabled={publish.isPending || !acceptedPublishState.publishEnabled}
                     onAct={() => setConfirmingPublish(true)}
                   >
                     {`Publish in ${sectionNameNow}`}
@@ -3875,7 +3874,7 @@ function StoryPage() {
                       panel below it said "This draft has no recorded name
                       check." `publishBarNote` says which one did not run.
                     */
-                    <span className="note">{hasAiJudgments ? draftReadiness.reason : "Ready to publish."}</span>
+                    <span className="note">{draftReadiness.reason}</span>
                   )}
                 </>
               )
