@@ -987,14 +987,14 @@ describe("finding judgment compare-and-swap", () => {
       judgment: "contradicts" as const,
       evidenceToken: review.evidenceToken,
     };
-    await assert.rejects(
-      () =>
-        persistFindingEvidenceJudgment(
-          { newsroomId: room },
-          { ...base, reason: "", contraryVersionId: f.cited.id },
-        ),
-      /reason/,
+    const explanationWarning = await persistFindingEvidenceJudgment(
+      { newsroomId: room, userId: "editor" },
+      { ...base, reason: "", contraryVersionId: f.cited.id },
     );
+    assert.ok("warning" in explanationWarning);
+    assert.equal((explanationWarning as { warning: {key:string} }).warning.key, "evidence:contradicts-without-reason");
+    assert.equal((await loadFindingEvidenceReview(f.sql, room, leadId)).rows[0].judgment.value,
+      "unreviewed", "a reason warning does not save before explicit consent");
     /*
       Audit item 13: a contrary capture that is not cited (or a foreign record)
       is now a WARNING, not a refusal. The override records `noCapture` with the

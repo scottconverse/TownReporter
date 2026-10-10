@@ -1949,9 +1949,10 @@ export const modelAssignmentRowsInput = z
 
 /** `editor-dialog-actions.ts` holdLead. */
 export const holdLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   id: publishId,
   choice: z.enum(["record-or-date", "follow-up", "not-now", "none"]),
-  note: z.string().max(LIMITS.holdNote).optional(),
+  note: z.string().optional(),
 });
 
 /**
@@ -1964,7 +1965,8 @@ export const holdLeadInput = z.object({
 export const sourceKillPatternInput = z.object({ sourceId: publishId });
 
 export const findSourcesInput = z.object({
-  topic: z.string().max(LIMITS.leadWhy),
+  override: z.array(z.string()).optional(),
+  topic: z.string(),
   scope: z.enum(["records", "organizations", "everything"]),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
@@ -2054,6 +2056,7 @@ export const addLeadInput = z.object({
  * already takes `{leadId, headline}`; this is only the press that keeps one.
  */
 export const chooseHeadlineInput = z.object({
+  override: z.array(z.string()).optional(),
   id: publishId,
-  headline: z.string().max(LIMITS.leadHeadline),
+  headline: z.string(),
 });

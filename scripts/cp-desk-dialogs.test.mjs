@@ -392,7 +392,7 @@ const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx",
   ),
   "@/lib/news/dark": stub("export const openDarkInvestigation = async () => ({ ok: false, error: 'not here' });"),
   "@/lib/news/desk": deskUrl,
-  "@/components/scoped-actions": deskUrl,
+  "@/components/scoped-actions": stub(`export {addLead, requestDraftReconciliationFn, openDarkInvestigation, fileLead, writeStoryFromInput} from ${JSON.stringify(deskUrl)}; export {chooseHeadline, holdLead, findSources} from ${JSON.stringify(actionsUrl)};`),
   "@/lib/news/draft-reconcile-actions": stub(
     "export const requestDraftReconciliationFn = async () => ({ ok: true });",
   ),
@@ -581,7 +581,7 @@ test("the headline dialog saves the line the editor typed, and hands it to the b
   await page.close();
 });
 
-test("a headline too short to save is refused before the press, not by the desk", async () => {
+test("an empty headline stays disabled while a short headline can request the warning", async () => {
   actions.__reset();
   const page = await mount(
     React.createElement(HeadlineDialog, {
@@ -594,7 +594,7 @@ test("a headline too short to save is refused before the press, not by the desk"
   );
   assert.equal(button("Use this headline").disabled, true, "an empty headline cannot be saved");
   await page.typeInto(field("input"), "Short");
-  assert.equal(button("Use this headline").disabled, true, "under eight characters is still not a headline");
+  assert.equal(button("Use this headline").disabled, false, "a short headline can request explicit consent");
   assert.match(lastLayer().textContent, /Write a headline, or pick one of the suggestions\./);
   await page.typeInto(field("input"), "Long enough to print");
   assert.equal(button("Use this headline").disabled, false);

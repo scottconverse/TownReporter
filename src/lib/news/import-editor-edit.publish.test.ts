@@ -154,7 +154,7 @@ it("prints an imported story whose body an editor edited, with the edit in it", 
   assert.equal(article.body, edited, "the reader gets the version the editor saved");
 });
 
-it("still stops a model-written draft whose body changed after its evidence", async () => {
+it("warns before printing a changed model-written draft and audits Publish anyway", async () => {
   await emptyNewsroom();
   const sql = await getSql();
   const [lead] = await sql.query<{ id: number }>(
@@ -182,10 +182,15 @@ it("still stops a model-written draft whose body changed after its evidence", as
   assert.equal(confirmed.ok, true, "fixture: the section should confirm");
   await editAndSave(lead!.id, `${BODY} The ordinance comes back on 13 October.`);
   const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, lead!.id);
-  assert.equal(published.ok, false, "the evidence review still holds this draft back");
-  assert.match(
-    "error" in published ? published.error : "",
-    /Review the evidence in the workbench/,
-    "and it says so in the same words as before",
-  );
+  assert.equal(published.ok, false, "the first press asks the editor to review current warnings");
+  assert.ok("warnings" in published && Array.isArray(published.warnings));
+  const warnings = (published as {warnings:Array<{key:string;sentence:string}>}).warnings;
+  assert.ok(warnings.some(warning => warning.key === "evidence-stale" && /Review the evidence in the workbench/.test(warning.sentence)));
+  const printed = await performPublish({userId:USER,newsroomId:NEWSROOM}, lead!.id, undefined, undefined, {}, warnings.map(warning=>warning.key));
+  assert.equal(printed.ok, true, "the explicit override prints instead of dead-ending");
+  const [article] = await sql.query<{body:string}>("select body from articles where lead_id=$1", [lead!.id]);
+  assert.equal(article.body, `${BODY} The ordinance comes back on 13 October.`);
+  const audit = await sql.query<{user_id:string;detail:string}>("select user_id,detail from audit_events where action='override' and subject_kind='drafts' and subject_id in (select id from drafts where lead_id=$1)", [lead!.id]);
+  assert.ok(audit.some(row=>row.user_id===USER && JSON.parse(row.detail).key==="evidence-stale"));
+
 });

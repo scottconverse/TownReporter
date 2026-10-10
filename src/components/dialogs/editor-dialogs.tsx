@@ -52,7 +52,8 @@ import { dialogPressProps } from "@/lib/news/dialog-press";
 import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
 import type { DuplicateWarning } from "@/lib/news/import-review";
 
-import { chooseHeadline, findSources, holdLead, sourceKillPattern, weaveIntoStory } from "@/lib/news/editor-dialog-actions";
+import { chooseHeadline, findSources, holdLead } from "@/components/scoped-actions";
+import { sourceKillPattern, weaveIntoStory } from "@/lib/news/editor-dialog-actions";
 import {
   addSourcesLabel,
   previewSources,
@@ -724,7 +725,7 @@ export function AddSourcesDialog({ open, onClose, onDone }: AddSourcesDialogProp
       footNote={foot}
       primaryLabel={state.tab === "one" ? "Add source" : label}
       onPrimary={onPrimary}
-      primaryDisabled={press.busy || problem !== null}
+      primaryDisabled={press.busy || (state.tab === "ai" ? !state.topic.trim() : problem !== null)}
     >
       <AddSourcesBody
         state={state}
@@ -1187,7 +1188,7 @@ export function HeadlineDialog({
       footNote="Nothing changes until you press Use this headline."
       primaryLabel="Use this headline"
       onPrimary={onPrimary}
-      primaryDisabled={press.busy || headlineProblem(state) !== null}
+      primaryDisabled={press.busy || !headlineChoice(state).trim()}
       altLabel="Suggest 3 more"
       onAlt={onSuggested}
       altDisabled={press.busy}

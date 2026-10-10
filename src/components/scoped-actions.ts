@@ -2,7 +2,7 @@ import { requestDraftReconciliationFn as _requestDraftReconciliationFn } from "@
 import { saveDailyScanPolicy as _saveDailyScanPolicy } from "@/lib/news/daily-scan";
 import { startDraftBatch as _startDraftBatch } from "@/lib/news/draft-batch";
 import { retryStoryJob as _retryStoryJob } from "@/lib/news/job-progress";
-import { addLead as _addLead } from "@/lib/news/editor-dialog-actions";
+import { chooseHeadline as _chooseHeadline, holdLead as _holdLead, findSources as _findSources, addLead as _addLead } from "@/lib/news/editor-dialog-actions";
 /**
  * Drop-in scoped server handles that carry the desk's explicit-consent flow.
  *
@@ -154,3 +154,7 @@ export const requestDraftReconciliationFn = wrapScoped(_requestDraftReconciliati
 
 export const startReporting = wrapScoped(_startReporting, "Start this reporting run");
 export const answerReportingFollowUp = wrapScoped(_answerReportingFollowUp, "Run this reporting follow-up");
+
+export const holdLead = wrapScoped(_holdLead, "Hold");
+export const chooseHeadline = wrapScoped(_chooseHeadline, "Use headline");
+export const findSources = wrapScoped(_findSources, "Find sources");

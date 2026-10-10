@@ -1,4 +1,4 @@
-import { editorWarning } from "./editor-override.ts";
+import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
 import { paperSetupWarning } from "./paper-settings.ts";
 import { checkRate } from "./ops.ts";
 /**
@@ -94,6 +94,8 @@ export type EditorDialogDeps = {
   insertLead: InsertLead;
   commitDraft: typeof commitStoryDraftForAuthenticatedEditor;
   now: () => Date;
+  paperSetupWarning?: typeof paperSetupWarning;
+  checkRate?: typeof checkRate;
 };
 
 export type EditorDialogContext = { userId: string; newsroomId: number };
@@ -236,9 +238,9 @@ export async function performAddLead(
   */
   const urls = parseSourceLines(paste).map((row) => row.url);
   if (data.then === "draft") {
-    const setup = await paperSetupWarning(context, data.override, "draft this story");
+    const setup = await (deps.paperSetupWarning ?? paperSetupWarning)(context, data.override, "draft this story");
     if (setup) return setup;
-    const rate = await checkRate(context.userId, "draft", context.newsroomId, data.override, { record: false });
+    const rate = await (deps.checkRate ?? checkRate)(context.userId, "draft", context.newsroomId, data.override, { record: false });
     if (rate) return rate;
   }
   const filed = await deps.insertLead(
@@ -354,7 +356,7 @@ export type HoldLeadResult =
  */
 export async function performHoldLead(
   context: EditorDialogContext,
-  data: { id: number; choice: string; note?: string },
+  data: { id: number; choice: string; note?: string; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<HoldLeadResult> {
   const sql = await deps.getSql();
@@ -368,14 +370,19 @@ export async function performHoldLead(
   const chosen = data.choice === "none" ? undefined : holdChoice(data.choice);
   if (data.choice !== "none" && !chosen) return { ok: false as const, error: "That is not a hold reason." };
 
+  if ((data.note ?? "").trim().length > 1000) {
+    const warning = await editorWarning({ ...context, sql }, data.override, "hold-note-length",
+      "This hold note is longer than the usual 1,000 characters.", { kind: "lead", id: data.id });
+    if (warning) return warning;
+  }
   const notes = parseNotes(lead.notes_json);
   notes.hold = {
     key: data.choice === "none" ? "none" : chosen!.key,
     reason: chosen?.label ?? "",
-    note: (data.note ?? "").trim().slice(0, 1000),
+    note: (data.note ?? "").trim(),
     at: deps.now().toISOString(),
   };
-  const held = await setLeadStatusForEditor(sql, context.newsroomId, { id: data.id, status: "held" }, packNotes(notes));
+  const held = await setLeadStatusForEditor(sql, context, { id: data.id, status: "held", override: data.override }, packNotes(notes));
   if (!held.ok) return held;
   const notice =
     chosen?.key === "follow-up"
@@ -451,7 +458,7 @@ export async function performSourceKillPattern(
 
 export type FindSourcesResult =
   | { ok: true; proposed: number; alreadyExisted: number; skipped: number; notice: string | null }
-  | { ok: false; error: string };
+  | { ok: false; error: string } | EditorWarningResult;
 
 /**
  * "Ask AI to find sources": propose pages, land them in Suggested sources.
@@ -472,11 +479,16 @@ export type FindSourcesResult =
  */
 export async function performFindSources(
   context: EditorDialogContext,
-  data: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null },
+  data: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<FindSourcesResult> {
   const topic = data.topic.trim();
-  if (topic.length < 4) return { ok: false as const, error: "Say what the paper should cover." };
+  if (!topic) return { ok: false as const, error: "Say what the paper should cover." };
+  if (topic.length < 4 || topic.length > 800) {
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      "source-search-topic", "This search topic is outside the usual 4 to 800 characters.", { kind: "newsroom", id: context.newsroomId });
+    if (warning) return warning;
+  }
 
   const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
   const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
@@ -859,7 +871,7 @@ export async function performWeaveIntoStory(
 
 /* ----------------------------------------------------------------- headline -- */
 
-export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false; error: string };
+export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false; error: string } | EditorWarningResult;
 
 /**
  * "Use this headline": write the chosen line onto the draft.
@@ -881,11 +893,16 @@ export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false;
  */
 export async function performChooseHeadline(
   context: EditorDialogContext,
-  data: { id: number; headline: string },
+  data: { id: number; headline: string; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<ChooseHeadlineResult> {
-  const headline = data.headline.trim().slice(0, 180);
-  if (headline.length < 8) return { ok: false as const, error: "A headline needs a full sentence." };
+  const headline = data.headline.trim();
+  if (!headline) return { ok: false as const, error: "The headline is empty." };
+  if (headline.length < 8 || headline.length > 180) {
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      "headline-length", "This headline is outside the usual 8 to 180 characters.", { kind: "lead", id: data.id });
+    if (warning) return warning;
+  }
 
   const sql = await deps.getSql();
   const drafts = await sql<DraftRow>`
@@ -907,6 +924,8 @@ export async function performChooseHeadline(
 export function editorDialogDeps(overrides: Partial<EditorDialogDeps> & Pick<EditorDialogDeps, "insertLead" | "commitDraft">): EditorDialogDeps {
   return {
     getSql,
+    paperSetupWarning,
+    checkRate,
     chat: grokChat,
     readAssignments: readModelAssignments,
     resolveLocalModel: async (newsroomId, scope) =>

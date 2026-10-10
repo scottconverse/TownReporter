@@ -546,7 +546,7 @@ function holdFromRaw(o: Record<string, unknown>): Pick<ReportingNotes, "hold"> {
     hold: {
       key: String(r.key ?? "").slice(0, 40),
       reason: String(r.reason ?? "").slice(0, 200),
-      note: String(r.note ?? "").slice(0, 1000),
+      note: String(r.note ?? ""),
       at: at.slice(0, 40),
     },
   };

@@ -798,9 +798,9 @@ export function headlineSuggestRequest(state: HeadlineState) {
  */
 export function headlineChoice(state: HeadlineState): string {
   const written = state.written.trim();
-  if (written) return written.slice(0, 180);
-  if (state.choice === "keep") return state.current.trim().slice(0, 180);
-  return String(state.choice || "").trim().slice(0, 180);
+  if (written) return written;
+  if (state.choice === "keep") return state.current.trim();
+  return String(state.choice || "").trim();
 }
 
 export function headlineProblem(state: HeadlineState): Problem {
