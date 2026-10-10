@@ -7,9 +7,16 @@ import { storableText } from "./storable-text.ts";
 import { needsRenderedFetch } from "./render-detect.ts";
 import { ingestYoutube, isYoutubeUrl, type YoutubeIngest } from "./youtube.ts";
 import { ingestPrimeGov, PrimeGovPortalError } from "./primegov.ts";
-import { FetchResponseRefusal, limitFor, readBodyCapped } from "./body-limit.ts";
+import { FetchResponseRefusal, limitFor, readBodyCapped, refusedPageHtml } from "./body-limit.ts";
 import { mustNotRetryImmediately, retryAfterFromHeaders } from "./fetch-politeness.ts";
-import type { FetchSchedule } from "./host-gate.ts";
+import { HostGate, type FetchSchedule } from "./host-gate.ts";
+import type { RenderedPage } from "./render-fetch.ts";
+import {
+  BLOCKED_AFTER_RENDER_MESSAGE,
+  isPrivatePage,
+  looksLikeBotWall,
+  publicPageRoutes,
+} from "./refusal-routes.ts";
 import { characterLength, pdfTextPreview } from "./pdf-read.ts";
 
 /** Archive cap. Planner context is sliced at retrieval, never here. */
@@ -59,6 +66,8 @@ export async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (/not fetchable|Invalid URL|Only http/i.test(msg)) throw err;
+    if (err instanceof BlockedAfterRenderError) throw err;
+    if (err instanceof IngestFetchError && err.fallbackAttempted) throw err;
     if (err instanceof IngestFetchError && mustNotRetryImmediately(err.status, err.retryAfterMs))
       throw err;
     await new Promise((r) => setTimeout(r, 400));
@@ -601,6 +610,10 @@ async function ingestRedditSourceIfNeeded(url: URL): Promise<IngestResult | null
 }
 
 export type IngestResult = {
+  method?: "playwright" | "feed";
+  outcome?: FetchOutcome;
+  routeUrl?: string;
+  newsletterUrl?: string;
   text: string;
   titleHint: string;
   extras: string[];
@@ -982,19 +995,130 @@ async function ingestDocumentRaw(
  * it rather than inside it.
  */
 export class IngestFetchError extends Error {
+  readonly newsletterUrl?: string;
+  readonly fallbackAttempted: boolean;
   readonly status: number;
   /** `Retry-After`, already turned into milliseconds from now; null when the
    *  response did not carry a usable one. */
   readonly retryAfterMs: number | null;
-  constructor(status: number, retryAfterMs: number | null) {
+  constructor(status: number, retryAfterMs: number | null, newsletterUrl?: string, fallbackAttempted = false) {
     super(`Fetch failed (${status})`);
     this.name = "IngestFetchError";
     this.status = status;
     this.retryAfterMs = retryAfterMs;
+    this.newsletterUrl = newsletterUrl;
+    this.fallbackAttempted = fallbackAttempted;
   }
 }
 
+export class BlockedAfterRenderError extends IngestFetchError {
+  readonly outcome = "blocked-after-render" as const;
+  constructor(status: number, newsletterUrl?: string) {
+    super(status, null, newsletterUrl, true);
+    this.name = "BlockedAfterRenderError";
+    this.message = BLOCKED_AFTER_RENDER_MESSAGE;
+  }
+}
+
+// Shared across callers without a scan schedule, including the manual Check.
+const fallbackGate = new HostGate();
+
+async function readRefusedPublicPage(
+  url: URL,
+  status: number,
+  rawHtml: string,
+  options: IngestUrlOptions,
+): Promise<IngestResult> {
+  const schedule = options.schedule ?? fallbackGate.schedule;
+  const renderer = options.renderer ?? (await import("./render-fetch.ts")).fetchRenderedPage;
+  let rendered: RenderedPage | null = null;
+  await schedule(async () => {
+    try {
+      rendered = await renderer(url.toString());
+    } catch {
+      /* Try public feeds next. */
+    }
+    return new Response(null);
+  }, url);
+  // The schedule callback assigns the capture after the queued browser read.
+  const page = rendered as RenderedPage | null;
+  const base = page ? await assertPublicHttpUrl(page.finalUrl) : url;
+  const routes = publicPageRoutes(rawHtml, url);
+  const browserRoutes = publicPageRoutes(page?.html ?? "", base);
+  const newsletterCandidate = browserRoutes.newsletterUrl ?? routes.newsletterUrl;
+  let newsletterUrl: string | undefined;
+  if (newsletterCandidate) {
+    try {
+      newsletterUrl = (await assertPublicHttpUrl(newsletterCandidate)).toString();
+    } catch {
+      /* Not public. */
+    }
+  }
+  if (page && !looksLikeBotWall(page.html, page.text) && !isPrivatePage(page.html)) {
+    const article = extractArticleText(page.html, base.toString());
+    if (article.text.trim().length >= 40 && !looksLikeSoft404(article.title ?? "", article.text)) {
+      return {
+        text: article.text.slice(0, 14000),
+        titleHint: article.title || page.title || url.hostname,
+        extras: mergePageExtras(page.html, base),
+        notices: extractSiteNotices(page.html),
+        method: "playwright",
+        outcome: "fetched",
+        routeUrl: base.toString(),
+        newsletterUrl,
+      };
+    }
+  }
+  const feeds = new Set([
+    ...browserRoutes.feeds,
+    ...routes.feeds,
+    ...["/feed", "/rss", "/feed.xml", "/rss.xml", "/atom.xml", "/events.rss"].map((path) =>
+      new URL(path, url).toString(),
+    ),
+  ]);
+  for (const candidate of feeds) {
+    try {
+      const feedUrl = await assertPublicHttpUrl(candidate);
+      const response = await fetchPublicHttp(feedUrl, 4, undefined, schedule);
+      if (!response.ok) continue;
+      const capped = await readBodyCapped(
+        response,
+        limitFor(candidate, response.headers.get("content-type") ?? ""),
+      );
+      if (!capped.ok) continue;
+      const xml = new TextDecoder().decode(capped.bytes);
+      if (!/<(?:rss|feed|rdf:RDF)\b/i.test(xml) || looksLikeBotWall(xml)) continue;
+      const text = parseRssItems(xml)
+        .map((item) => `${item.title}\n${item.link}\n${item.summary}`)
+        .join("\n\n")
+        .slice(0, 14000);
+      if (text.trim().length < 40) continue;
+      return {
+        text: `RSS ${candidate}\n\n${text}`,
+        titleHint: url.hostname,
+        extras: [],
+        method: "feed",
+        outcome: "fetched",
+        routeUrl: candidate,
+        newsletterUrl,
+      };
+    } catch {
+      /* One unavailable public feed does not end discovery. */
+    }
+  }
+  if (page && looksLikeBotWall(page.html, page.text)) {
+    throw new BlockedAfterRenderError(status, newsletterUrl);
+  }
+  const error = new IngestFetchError(status, null, newsletterUrl, true);
+  error.message = page && isPrivatePage(page.html)
+    ? "This page requires a login or paid access. Only public pages can be read."
+    : "The browser could not read this public page, and no readable public feed was found. Try its newsletter or another public route.";
+  throw error;
+}
+
 export type IngestUrlOptions = {
+  /** Test seam; production uses the existing guarded Chromium renderer. */
+  renderer?: (raw: string) => Promise<RenderedPage | null>;
   /** Paces the request against the rest of the pass reading the same host. */
   schedule?: FetchSchedule;
   /** Read once, at the moment the response arrived, so a wait is measured from
@@ -1012,13 +1136,18 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
   if (rd) return rd;
   const path = url.pathname.toLowerCase();
 
-  const res = await fetchPublicHttp(url, 4, undefined, options.schedule);
+  const schedule = options.schedule;
+  const res = await fetchPublicHttp(url, 4, undefined, schedule);
   if (!res.ok) {
     // Read the clock here, not when the error is caught: `Retry-After` is a
     // wait measured from the site's answer, and a scan that handled the error
     // a minute later must not hand the source a minute less of it.
     const now = (options.now ?? Date.now)();
-    throw new IngestFetchError(res.status, retryAfterFromHeaders(res.headers, now));
+    const retryAfterMs = retryAfterFromHeaders(res.headers, now);
+    if (res.status === 401 || res.status === 403 || (res.status === 429 && retryAfterMs == null)) {
+      return readRefusedPublicPage(url, res.status, refusedPageHtml(res), { ...options, schedule });
+    }
+    throw new IngestFetchError(res.status, retryAfterMs);
   }
   const ctype = (res.headers.get("content-type") ?? "").toLowerCase();
   const capped = await readBodyCapped(res, limitFor(url.toString(), ctype));
@@ -1041,6 +1170,10 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
   }
 
   const body = new TextDecoder("utf-8", { fatal: false }).decode(buf);
+  if (looksLikeBotWall(body))
+    return readRefusedPublicPage(url, res.status, body, { ...options, schedule });
+  if (isPrivatePage(body))
+    throw new Error("This page requires a login or paid access. Only public pages can be read.");
   if (
     ctype.includes("xml") ||
     ctype.includes("rss") ||
@@ -1098,5 +1231,6 @@ export async function ingestUrl(raw: string, options: IngestUrlOptions = {}): Pr
     titleHint: extracted.title || titleHint,
     extras,
     notices: extractSiteNotices(body),
+    newsletterUrl: publicPageRoutes(body, url).newsletterUrl,
   };
 }

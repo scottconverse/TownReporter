@@ -1567,6 +1567,27 @@ function WatchRows({
                       : "Never read"}
                   </p>
                 ) : null}
+                {s.last_read_method === "playwright" || s.last_read_method === "feed" ? (
+                  <p className="astra-row-meta">
+                    {s.last_read_outcome === "blocked-after-render"
+                      ? "Still refused after a browser and public feeds."
+                      : s.last_read_method === "feed"
+                        ? "Read through its feed."
+                        : "Read through a browser."}
+                  </p>
+                ) : null}
+                {s.newsletter_url ? (
+                  <p className="astra-row-meta">
+                    <a
+                      href={s.newsletter_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-link"
+                    >
+                      Newsletter available ↗
+                    </a>
+                  </p>
+                ) : null}
                 <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>
