@@ -5,6 +5,9 @@ import {
   latestJob,
   setJobStage,
   setJobStages,
+  setJobFailoverNote,
+  setJobModelRuntime,
+  reportProgress,
   type DeskJob,
 } from "./jobs.ts";
 import { getSql } from "../db.ts";
@@ -57,6 +60,22 @@ const stored = (subjectId: number): Promise<DeskJob | null> =>
   latestJob({ newsroomId: NEWSROOM, kind: "draft", subjectId });
 
 describe("a stage boundary on a job that has a stage list", () => {
+  it("keeps both hops of the live Haiku to DeepSeek to Sol failure in order", async () => {
+    const id = freshSubject();
+    const job = await enqueueDraft("picker-switch-history", id);
+    await setJobFailoverNote(job.id, "This draft moved to DeepSeek v4.1 Flash because Claude Haiku sign-in lapsed");
+    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash reached its usage limit");
+    const note = (await stored(id))!.failover_note;
+    assert.match(note, /Claude Haiku sign-in lapsed.*DeepSeek v4\.1 Flash reached its usage limit.*Codex Sol 6\.1/);
+  });
+  it("updates the waiting line as soon as a draft switches, before the next tick", async () => {
+    const id = freshSubject();
+    const job = await enqueueDraft("picker-progress-switch", id);
+    await reportProgress(job.id, { step: "Waiting on DeepSeek v4.1 Flash · 12s" });
+    await setJobModelRuntime(job.id, "codex-balanced", "medium");
+    await setJobFailoverNote(job.id, "This draft moved to Codex Sol 6.1 (balanced) because DeepSeek v4.1 Flash reached its usage limit");
+    assert.match((await stored(id))!.step_text!, /Waiting on Codex Sol 6\.1/);
+  });
   it("moves the chip row for an arrival and leaves it for a step", async () => {
     const sql = await getSql();
     const id = freshSubject();

@@ -95,6 +95,9 @@ function notSetUpHelp(option: ModelChoiceOption): string {
   if (option.value === "local-model") {
     return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
   }
+  if (option.value.startsWith("claude-")) {
+    return `${option.label} is not ready on this server. Sign in to Claude Code or configure Anthropic API credentials. See docs/setup.md.`;
+  }
   return `${option.label} is not set up on this server. See docs/setup.md.`;
 }
 
@@ -385,7 +388,8 @@ export function ModelPicker(props: Props) {
   const availability = useQuery({
     queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
     queryFn: () => providerAvailability(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
   /*
     The rule itself lives in `lib/news/writer-bar.ts` (unit CW), because the
@@ -410,7 +414,12 @@ export function ModelPicker(props: Props) {
     });
   }
   const selectedUnavailable = !isAvailable(shownValue);
-  const help = noFallback
+  const checkingReadiness = shownValue !== "auto" && !noFallback && !availability.data;
+  const help = checkingReadiness
+    ? availability.isError
+      ? "Could not check this model's readiness. Draft preflight will check it before starting."
+      : "Checking this model's readiness on the server…"
+    : noFallback
     ? "No fallback model is set for this rank."
     : retiredNote
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`

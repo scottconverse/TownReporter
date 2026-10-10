@@ -36,6 +36,55 @@ import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 
+it("refuses an unavailable explicit Haiku pick before enqueueing even when DeepSeek is ready", async () => {
+  const sql = await getSql();
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why)
+    values(1,'picker-haiku','Picker regression','Why') returning id`;
+  const choices: string[] = [];
+  let enqueued = false;
+  const result = await commitStoryDraftForAuthenticatedEditor({
+    context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: "claude-haiku",
+  }, {
+    probeProvider: async (choice) => {
+      choices.push(String(choice));
+      return choice === "claude-haiku"
+        ? { ok: false, error: "Claude Code is signed out. Sign in again." }
+        : { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" };
+    },
+    enqueueJob: async (opts) => { enqueued = true; return enqueueJob({ ...opts, kick: false }); },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(enqueued, false);
+  assert.deepEqual(choices, ["claude-haiku"]);
+});
+
+it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {
+  const sql = await getSql();
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why)
+    values(1,'picker-haiku-ready','Picker regression','Why') returning id`;
+  const result = await commitStoryDraftForAuthenticatedEditor({
+    context: { userId: "picker-haiku-ready", newsroomId: 1 }, leadId: lead.id,
+    modelChoice: "claude-haiku", modelEffort: "medium", researchScope: "public",
+  }, {
+    probeProvider: async (choice) => {
+      assert.equal(choice, "claude-haiku");
+      return { ok: true, choice: "claude-haiku", label: "Claude Haiku" };
+    },
+    enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) assert.fail("Ready Haiku must enqueue");
+  const [job] = await sql<{ model_choice: string; model_choice_source: string; research_scope: string; result_json: string }>`
+    select model_choice,model_choice_source,research_scope,result_json from desk_jobs where id=${result.jobId}`;
+  assert.equal(job.model_choice, "claude-haiku");
+  assert.equal(job.model_choice_source, "editor");
+  assert.equal(job.research_scope, "public");
+  const receipt = JSON.parse(job.result_json);
+  assert.equal(receipt.requestedRuntime, "claude-haiku");
+  assert.equal(receipt.actualRuntime, "claude-haiku");
+  assert.equal(receipt.modelEffort, "medium");
+});
+
 type Counts = {
   jobs: number;
   requests: number;
@@ -321,21 +370,9 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(storyExpired.kind, "provider-auth");
     assert.match(storyExpired.error, /Codex needs you to sign in again/i);
     assert.equal(storyExpired.detail, EXPIRED);
-    /*
-      0.6.63 Unit Y: the fallback ladder is DeepSeek v4.1 Flash -> Qwen 3.6
-      35B -> Codex Terra, and Claude Sonnet left it. An explicit
-      `codex-frontier` pick is not a rung of it, so the walk starts from the
-      ladder's top and probes all three rungs before giving up -- four probes
-      counting the pick itself. The pre-0.6.63 fixture saw three: its ladder
-      was codex-frontier, codex-balanced, claude-sonnet.
-    */
-    assert.equal(storyProbeCalls, 4);
-    assert.deepEqual(storyProbeChoices, [
-      "codex-frontier",
-      "deepseek-flash",
-      "qwen-local",
-      "codex-balanced",
-    ]);
+    // An explicit unavailable Story writer refuses at its own preflight.
+    assert.equal(storyProbeCalls, 1);
+    assert.deepEqual(storyProbeChoices, ["codex-frontier"]);
     assert.equal(storyEnqueueCalls, 0);
     assert.deepEqual(await countsFor(userId), before);
 
