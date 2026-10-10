@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
 import {
   bestMeetingMatch,
   catalogAndExtras,
@@ -17,6 +17,15 @@ import {
   type PrimeGovMeeting,
 } from "./primegov.ts";
 import { setFetchImplForTests } from "./fetch-url.ts";
+
+/** Keep dated catalog fixtures inside the 45-day window, then restore the clock. */
+function pinCatalogClock(t: TestContext) {
+  const originalNow = Date.now;
+  Date.now = () => Date.parse("2026-08-28T12:00:00Z");
+  t.after(() => {
+    Date.now = originalNow;
+  });
+}
 
 /*
   ANOTHER CITY'S PORTAL, for the tests that actually reach the fetch.
@@ -198,7 +207,8 @@ describe("meeting match", () => {
 });
 
 describe("the catalog", () => {
-  it("lists meetings and emits packet extras", () => {
+  it("lists meetings and emits packet extras", (t) => {
+    pinCatalogClock(t);
     const { text, extras } = catalogAndExtras("https://longmont.primegov.com", [avis, council]);
     assert.match(text, /206 S\. Main/);
     assert.match(text, /City Council Regular Session/);
@@ -219,7 +229,8 @@ describe("the catalog", () => {
     assert.equal(minutesGap(withMinutes, new Date("2026-08-26T20:00:00Z")), null);
   });
 
-  it("says the catalog is partial when one of the two lists could not be read", () => {
+  it("says the catalog is partial when one of the two lists could not be read", (t) => {
+    pinCatalogClock(t);
     const { text } = catalogAndExtras("https://city.primegov.com", [council], "archived: the portal answered 503");
     assert.match(text, /PARTIAL/);
     assert.match(text, /archived: the portal answered 503/);
@@ -306,7 +317,8 @@ describe("reading a portal", () => {
   });
 
   // guards: a city error page could be read as an empty record or its meeting date could be shown as its publish date
-  it("rejects portal error bodies and keeps meeting and publish dates separate", async () => {
+  it("rejects portal error bodies and keeps meeting and publish dates separate", async (t) => {
+    pinCatalogClock(t);
     setFetchImplForTests(async () => new Response(JSON.stringify("<html><body>Portal error</body></html>"), {
       status: 200,
       headers: { "content-type": "application/json" },
