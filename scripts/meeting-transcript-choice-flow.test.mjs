@@ -15,13 +15,16 @@ const chooserUrl = await moduleUrl("src/components/meeting-transcript-chooser.ts
 });
 const { defaultMeetingTranscriptArtifactId, meetingArtifactIdFromDraftReceipt } = await import(source);
 const { MeetingTranscriptChooser } = await import(chooserUrl);
-const meetingMaterialUrl = await moduleUrl("src/lib/news/meeting-draft-material.server.ts");
+const meetingMaterialUrl = await moduleUrl("src/lib/news/meeting-draft-material.server.ts", {
+  "./meeting-story-section5-run.ts": stubUrl(`export const runSection5ForArtifact = () => { throw new Error("Already aligned fixture must not retry alignment"); };`),
+});
 const { loadMeetingDraftMaterial } = await import(meetingMaterialUrl);
 
 test("transcripts from two videos of the same meeting default to Whisper and keep the reporter's choice", async () => {
   const db = new PGlite();
   try {
     await db.exec(`create table meeting_capture_records(newsroom_id int,video_id text,title text,published text);
+      create table meeting_agenda_chunks(newsroom_id int,video_id text,artifact_id int,id int,item text,title text,start_seconds int,segment_indexes text);
       create table meeting_transcript_artifacts(id int,newsroom_id int,video_id text,source_method text,artifact_type text,captured_at timestamptz);
       insert into meeting_capture_records values (1,'captions','City Council Regular Session - October 6, 2026','2026-10-07'),
         (1,'whisper','City Council Regular Session - 06 October 2026','2026-10-08'),(1,'other','Water Board - October 6, 2026','2026-10-07');
@@ -31,7 +34,6 @@ test("transcripts from two videos of the same meeting default to Whisper and kee
     const choices = await loadMeetingTranscriptChoices({ query: async (text, params) => (await db.query(text, params)).rows }, 1, "captions");
     assert.equal(choices.length, 2);
     await db.exec(`alter table meeting_transcript_artifacts add column sha256 text default 'hash';
-      create table meeting_agenda_chunks(newsroom_id int,video_id text,artifact_id int,id int,item text,title text,start_seconds int,segment_indexes text);
       create table meeting_transcript_segments(artifact_id int,segment_index int,start_seconds int,excerpt text,caption_sha256 text);
       create table meeting_structured_votes(newsroom_id int,video_id text,item text,established bool,motion text,mover text,seconder text,tally text,result text,source text);
       insert into meeting_agenda_chunks values (1,'whisper',67,1,'1','Item 1',0,'[0]');
@@ -49,10 +51,10 @@ test("transcripts from two videos of the same meeting default to Whisper and kee
   const root = createRoot(mount);
   await React.act(async () => root.render(React.createElement(Screen)));
   assert.equal(mount.querySelector('[role="status"]').textContent, "The reporter will read the Whisper transcript.");
-  const captions = [...mount.querySelectorAll("button")].find((button) => button.textContent === "YouTube captions");
+  const captions = [...mount.querySelectorAll("button")].find((button) => button.textContent.startsWith("YouTube captions"));
   await React.act(async () => captions.dispatchEvent(new window.Event("click", { bubbles: true })));
   assert.equal(mount.querySelector('[role="status"]').textContent, "The reporter will read the YouTube captions.");
-  const whisper = [...mount.querySelectorAll("button")].find((button) => button.textContent === "Whisper transcript");
+  const whisper = [...mount.querySelectorAll("button")].find((button) => button.textContent.startsWith("Whisper transcript"));
   await React.act(async () => whisper.dispatchEvent(new window.Event("click", { bubbles: true })));
   const draft = [...mount.querySelectorAll("button")].find((button) => button.textContent === "Draft with AI");
   await React.act(async () => draft.dispatchEvent(new window.Event("click", { bubbles: true })));
