@@ -535,7 +535,8 @@ function StoryPage() {
   const writerAvailability = useQuery({
     queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
     queryFn: () => providerAvailability(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
   const writerConnections = useQuery({
     queryKey: ["custom-ai-connections"],
@@ -1940,15 +1941,16 @@ function StoryPage() {
   const draftReadiness = data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
-  const readiness = readinessDot(
-    writerIsReady({
-      choice: modelChoice,
-      availability: writerAvailability.data,
-      customConnection:
-        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
-    }),
-    draftReadiness,
-  );
+  const readiness = modelChoice !== "auto" && !writerAvailability.data
+    ? { label: writerAvailability.isError ? "● Readiness unknown" : "● Checking", tone: "warn" as const }
+    : readinessDot(
+      writerIsReady({
+        choice: modelChoice,
+        availability: writerAvailability.data,
+        customConnection:
+          writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
+      }),
+    );
   const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
     : "";

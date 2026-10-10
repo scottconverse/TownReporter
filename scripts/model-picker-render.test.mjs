@@ -5,15 +5,41 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { ModelPicker, availabilityStub, registry, choiceModule } from "./model-picker-render.harness.mjs";
 
 function render(props = {}) {
-  // Undefined (the default) means "the query hasn't answered yet" --
-  // ModelPicker treats that as every provider available, same as a real
-  // slow network response would, so existing tests that don't care about
-  // availability keep seeing every option enabled.
-  availabilityStub.__setAvailability(undefined);
+  // A completed readiness response; unknown readiness is exercised separately.
+  availabilityStub.__setAvailability({});
   return renderToStaticMarkup(
     createElement(ModelPicker, { value: "auto", onChange() {}, ...props }),
   );
 }
+
+test("Haiku stays selected and reports its unavailable server state before drafting", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    for (const ready of [true, false]) {
+      availabilityStub.__setAvailability({ "claude-haiku": ready });
+      const html = renderToStaticMarkup(createElement(ModelPicker, { value: "claude-haiku", onChange() {} }));
+      await page.setContent(html);
+      const select = page.getByLabel("Writing model", { exact: true });
+      assert.equal(await select.inputValue(), "claude-haiku");
+      assert.match(await select.locator("option:checked").innerText(), /Claude Haiku — Fastest/);
+      if (!ready) {
+        assert.match(await select.locator("option:checked").innerText(), /not set up/);
+        assert.match(await page.locator(".model-picker-help").first().innerText(), /Claude Haiku.*not ready.*Sign in/);
+      }
+    }
+  } finally {
+    availabilityStub.__setAvailability(undefined);
+    await browser.close();
+  }
+});
+
+test("a pending readiness response says checking before an explicit draft press", () => {
+  availabilityStub.__setAvailability(undefined);
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "claude-haiku", onChange() {} }));
+  assert.match(html, /Checking this model&#x27;s readiness on the server/);
+});
 
 test("every story picker exposes keyboard-native setup help and real operator links", () => {
   for (const compact of [false, true]) {
