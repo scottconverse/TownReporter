@@ -329,7 +329,11 @@ export const LIMITS = {
    * screen has no way to send more rows than it draws.
    */
   modelAssignments: 60,
+
 } as const;
+
+
+export const overrideInput = z.array(z.string()).optional();
 
 /*
   ---------------------------------------------------------------------------
@@ -471,6 +475,18 @@ export const updateArticleHeadlineInput = z.object({
       typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
     z.string(),
   ),
+});
+
+
+export const changePublishedStoryInput = z.object({
+  articleId: publishId,
+  /** The summary the reader sees under the headline. Blank is a real answer. */
+  dek: z.string().optional(),
+  /** A section key this newsroom files under. */
+  topic: z.string().max(LIMITS.topic).optional(),
+  /** The printed story text, replaced wholesale. Blank is the core's refusal. */
+  body: z.string().optional(),
+  override: overrideInput,
 });
 
 /*
@@ -1401,8 +1417,9 @@ export const followUpFindingsInput = z.preprocess(
   z.object({ limit: z.number().int().positive().max(50).optional() }),
 );
 
-/** `desk.ts:2510` overrideNamedOutlet. */
-export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });
+
+export const outletInput = z.object({ leadId: rowId, outlet: z.string(),
+  override: overrideInput });
 
 /** `desk.ts:2770` addCorrection (`correction-form.tsx:71` caps the body at 2000). */
 export const correctionInput = z.object({
@@ -1416,12 +1433,10 @@ export const correctionInput = z.object({
     sends and what the desk still shows first.
   */
   alsoFixBody: z.boolean().optional(),
-  /**
-   * The story text the paper should carry. Bounded by `LIMITS.storyText`, the
-   * same ceiling the publish path stores a body under, so a story that could be
-   * published can always be corrected.
-   */
-  storyBody: z.string().max(LIMITS.storyText).optional(),
+
+  storyBody: z.string().optional(),
+  /** The warning keys an accepted retry carries back (`override.ts`). */
+  override: overrideInput,
 });
 
 /**
@@ -1461,6 +1476,7 @@ export const draftMeetingReviewInput = z.object({
   acceptedArtifactId: rowId,
   confirmedSegmentIndexes: z.array(segmentIndex).max(LIMITS.segmentIndexes),
   note: z.string().max(LIMITS.reviewNote),
+  override: overrideInput,
 });
 
 /** `desk.ts:2893` getDraftHistoryItem. */
@@ -1609,19 +1625,23 @@ export const captureTakedownInput = z.object({
   versionId: rowId,
   reason: z.string().max(LIMITS.takedownReason),
   removeLink: z.boolean().optional(),
+
+  override: overrideInput,
 });
 
 /* --- opinion.ts (4 rows) ------------------------------------------------- */
 
-/** `opinion.ts:161` startEditorial. */
+
 export const editorialStartInput = z.object({
-  subject: z.string().max(LIMITS.storyText),
-  askedFor: z.string().max(LIMITS.storyText).optional(),
+  subject: z.string(),
+  askedFor: z.string().optional(),
   articleSlug: z.string().max(LIMITS.slug).optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
-  documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
+  documentIds: z.array(idText).optional(),
   retryRequestId: rowId.optional(),
+  /** The warning keys an accepted retry carries back (`override.ts`). */
+  override: overrideInput,
 });
 
 /**
@@ -1863,6 +1883,12 @@ export const importStoriesInput = z.object({
   tool: z.string().max(LIMITS.sourceTitle).catch(""),
   /** Only the ticked cards arrive here; the server re-checks every one. */
   stories: z.array(importStorySelection).max(LIMITS.importStories),
+  /**
+   * Item 38: a card whose text is not word-for-word the report's is a warning
+   * with an "Import anyway" answer, so the retry carries the key it was warned
+   * with. The keys, not the prose; `override.ts` does the asking.
+   */
+  override: overrideInput,
 });
 
 /* --- model-assignments-settings.ts (1 row) ------------------------------- */

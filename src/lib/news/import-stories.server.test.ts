@@ -170,6 +170,23 @@ describe("verifySelections: the paste is the only source of text", () => {
     assert.match(refused[0]!.reason, /Staff expect a vote in November/);
   });
 
+  it("holds the card back with a warning until its key is overridden", () => {
+    const altered = {
+      ...SELECTION,
+      body: `${SELECTION.body}\n\nStaff expect a vote in November.`,
+    };
+    const first = verifySelections(MESSY, [altered]);
+    assert.equal(first.accepted.length, 0);
+    assert.ok(first.warning, "a sentence is offered instead of a flat refusal");
+    assert.equal(first.warning!.key, "s1");
+    assert.match(first.warning!.sentence, /not word-for-word what you pasted/);
+
+    const second = verifySelections(MESSY, [altered], { override: ["s1"] });
+    assert.equal(second.warning, null);
+    assert.equal(second.accepted.length, 1);
+    assert.equal(second.accepted[0]!.overridden, true);
+  });
+
   it("refuses a card with no headline or no text", () => {
     const { accepted, refused } = verifySelections(MESSY, [
       { ...SELECTION, headline: "  " },
@@ -325,8 +342,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.equal(result.error, "");
     assert.deepEqual(result.imported.map((i) => i.hold), [false, true]);
 
-    const leads = await sql.query(
+    const leads = ( await sql.query(
       "select id, headline, status, origin, provenance_json, source_urls from leads where newsroom_id=91 order by id",
+    )
     ) as {
       id: number;
       headline: string;
@@ -349,8 +367,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.equal(provenance.inputSha256, importInputSha256(PASTE));
     assert.match(String(provenance.importedAt), /^\d{4}-\d{2}-\d{2}T/);
 
-    const drafts = await sql.query(
+    const drafts = ( await sql.query(
       "select lead_id, headline, dek, body, topic, source_urls, disclosure_text, research_json from drafts where newsroom_id=91 order by id",
+    )
     ) as {
       lead_id: number;
       headline: string;
@@ -382,8 +401,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     // Nothing publishes: an imported story leaves the desk only via Publish.
     // U18a-1: scoped to this test's newsroom -- `articles` is the real table
     // now, and it also holds the welcome article migrations/0002 seeds.
-    const [published] = await sql.query(
+    const [published] = ( await sql.query(
       "select count(*)::int as n from articles where newsroom_id=91",
+    )
     ) as { n: number }[];
     assert.equal(published!.n, 0);
     assert.equal(seen.length, 1);
@@ -404,8 +424,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
       [{ headline: IDEA_CARD.headline, kind: "idea", hold: false }],
     );
 
-    const leads = await sql.query(
+    const leads = ( await sql.query(
       "select id, headline, why, topic, status, origin, source_urls, notes_json, provenance_json from leads where newsroom_id=95",
+    )
     ) as {
       id: number;
       headline: string;
@@ -439,8 +460,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
 
     // Nothing is drafted: an idea is a lead waiting for an editor, not a story
     // with a body nobody wrote.
-    const [drafts] = await sql.query(
+    const [drafts] = ( await sql.query(
       "select count(*)::int as n from drafts where newsroom_id=95",
+    )
     ) as { n: number }[];
     assert.equal(drafts!.n, 0);
   });
@@ -452,8 +474,9 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
       { text: PASTE, tool: "", stories: [CARD] },
       { capture: async () => ({ captured: 0, failed: 0 }) },
     );
-    const [draft] = await sql.query(
+    const [draft] = ( await sql.query(
       "select provenance_json from drafts where newsroom_id=96",
+    )
     ) as { provenance_json: string }[];
     const rows = JSON.parse(draft!.provenance_json) as {
       title: string;
@@ -484,7 +507,7 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
 
   it("refuses an altered card and files nothing for it", async () => {
     const sql = await ensureSchema();
-    const [before] = await sql.query("select count(*)::int as n from leads") as { n: number }[];
+    const [before] = ( await sql.query("select count(*)::int as n from leads")) as { n: number }[];
     const result = await performImportFinishedStories(
       { userId: "editor", newsroomId: 92 },
       {
@@ -498,13 +521,13 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     assert.equal(result.imported.length, 0);
     assert.equal(result.refused.length, 1);
     assert.match(result.error, /not word-for-word what you pasted/);
-    const [after] = await sql.query("select count(*)::int as n from leads") as { n: number }[];
+    const [after] = ( await sql.query("select count(*)::int as n from leads")) as { n: number }[];
     assert.equal(after!.n, before!.n);
   });
 
   it("refuses an empty paste without writing anything", async () => {
     const sql = await ensureSchema();
-    const [before] = await sql.query("select count(*)::int as n from drafts") as { n: number }[];
+    const [before] = ( await sql.query("select count(*)::int as n from drafts")) as { n: number }[];
     const result = await performImportFinishedStories({ userId: "editor", newsroomId: 93 }, {
       text: "",
       tool: "",
@@ -512,7 +535,7 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
     });
     assert.equal(result.ok, false);
     assert.match(result.error, /no text to import/i);
-    const [after] = await sql.query("select count(*)::int as n from drafts") as { n: number }[];
+    const [after] = ( await sql.query("select count(*)::int as n from drafts")) as { n: number }[];
     assert.equal(after!.n, before!.n);
   });
 });
@@ -520,10 +543,11 @@ describe("performImportFinishedStories: leads and drafts in the Queue", () => {
 describe("captureCitedPages: the existing capture path, best effort", () => {
   it("stores a fetched page against the lead, and leaves no document for a page that would not load", async () => {
     const sql = await ensureSchema();
-    const [lead] = await sql.query(
+    const [lead] = ( await sql.query(
       // U18a-1: `leads` is the real table now, so `why` -- which it declares
       // `not null` -- has to be supplied here.
       "insert into leads (newsroom_id,user_id,headline,why,origin) values (94,'editor','Cited','Fixture','import') returning id",
+    )
     ) as { id: number }[];
     const result = await captureCitedPages(
       { userId: "editor", newsroomId: 94 },
@@ -569,8 +593,9 @@ describe("captureCitedPages: the existing capture path, best effort", () => {
       },
     );
     assert.deepEqual(result, { captured: 1, failed: 1 });
-    const docs = await sql.query(
+    const docs = ( await sql.query(
       "select lead_id, filename, original, full_text, status, source_url from story_documents where newsroom_id=94 order by source_url",
+    )
     ) as {
       lead_id: number | null;
       filename: string;
@@ -647,8 +672,9 @@ describe("a v2.6 card's tier, label and ledger, through the write path", () => {
     assert.equal(result.error, "");
     assert.equal(result.refused.length, 0);
 
-    const leads = await sql.query(
+    const leads = ( await sql.query(
       "select notes_json, provenance_json from leads where newsroom_id=97",
+    )
     ) as { notes_json: string; provenance_json: string }[];
     assert.equal(leads.length, 1);
     const provenance = JSON.parse(leads[0]!.provenance_json) as Record<string, unknown>;
@@ -661,7 +687,7 @@ describe("a v2.6 card's tier, label and ledger, through the write path", () => {
     assert.match(text, /UNVERIFIED/);
     assert.match(text, /S1-A1/);
 
-    const drafts = await sql.query("select body from drafts where newsroom_id=97") as {
+    const drafts = ( await sql.query("select body from drafts where newsroom_id=97")) as {
       body: string;
     }[];
     assert.equal(drafts.length, 1);
@@ -676,9 +702,10 @@ describe("a v2.6 card's tier, label and ledger, through the write path", () => {
       { text: PASTE, tool: "", stories: [{ ...V26_CARD, notes: "", storyId: "", readiness: 0 }] },
       { capture: async () => ({ captured: 0, failed: 0 }) },
     );
-    const [lead] = await sql.query(
+    const [lead] = ( await sql.query(
       "select notes_json from leads where newsroom_id=98",
-    ) as { notes_json: string }[];
+    )
+    ) as { notes_json: string; }[];
     assert.equal(
       JSON.parse(lead!.notes_json).editorialAssignment.text,
       "Confirm the ordinance number against the published text.",
@@ -698,11 +725,105 @@ describe("a v2.6 card's tier, label and ledger, through the write path", () => {
       },
       { capture: async () => ({ captured: 0, failed: 0 }) },
     );
-    const [lead] = await sql.query("select notes_json from leads where newsroom_id=99") as {
+    const [lead] = ( await sql.query("select notes_json from leads where newsroom_id=99")) as {
       notes_json: string;
     }[];
     const text: string = JSON.parse(lead!.notes_json).editorialAssignment.text;
     assert.match(text, /Claims ledger — never published/, "the ledger is still there");
     assert.match(text, /Ask the city clerk for the signed ordinance\./, "and so is the editor's");
+  });
+});
+
+/* --- item 38: a card that is not word-for-word, and the override -------- */
+
+/**
+ * The exact sentence the desk shows once an editor has accepted a card that is
+ * not word-for-word the paste. It is stored on the lead as a desk-only note
+ * (`importWarning`) and is never part of the draft's body.
+ */
+const OVERRIDE_NOTE = "The text differs from the report.";
+
+describe("a card that is not word-for-word: warning, then import on override", () => {
+  it("names the card and writes nothing until the editor overrides the key", async () => {
+    const sql = await ensureSchema();
+    const altered = { ...CARD, body: `${CARD.body}\n\nThe vote was unanimous.` };
+    const [before] = (await sql.query("select count(*)::int as n from leads")) as { n: number }[];
+
+    const first = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 201 },
+      { text: PASTE, tool: "", stories: [altered] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    assert.equal(first.ok, false);
+    assert.equal(first.imported.length, 0);
+    assert.ok(first.warning, "the desk warns rather than refusing outright");
+    assert.equal(first.warning!.key, "s1");
+    assert.match(first.warning!.sentence, /not word-for-word what you pasted/);
+    assert.equal(first.refused.length, 1);
+
+    const [after] = (await sql.query("select count(*)::int as n from leads")) as { n: number }[];
+    assert.equal(after!.n, before!.n, "a warning without an override writes nothing");
+
+    const second = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 201 },
+      { text: PASTE, tool: "", stories: [altered], override: [first.warning!.key] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    assert.equal(second.ok, true);
+    assert.equal(second.error, "");
+    assert.equal(second.imported.length, 1);
+
+    const overrides = (await sql.query(
+      "select action, detail, subject_kind, subject_id from audit_events where newsroom_id=201 and action='override'",
+    )) as { action: string; detail: string; subject_kind: string; subject_id: number }[];
+    assert.equal(overrides.length, 1, "one override audit for the accepted card");
+    assert.equal(overrides[0]!.subject_kind, "lead");
+    assert.equal(overrides[0]!.subject_id, second.imported[0]!.leadId);
+    assert.match(overrides[0]!.detail, /"key":"s1"/);
+  });
+
+  it("persists the desk-only note, never in the public body", async () => {
+    const sql = await ensureSchema();
+    const altered = { ...CARD, body: `${CARD.body}\n\nThe vote was unanimous.` };
+    const result = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 202 },
+      { text: PASTE, tool: "", stories: [altered], override: ["s1"] },
+      { capture: async () => ({ captured: 0, failed: 0 }) },
+    );
+    assert.equal(result.ok, true);
+
+    const [lead] = (await sql.query("select notes_json from leads where id=$1", [
+      result.imported[0]!.leadId,
+    ])) as { notes_json: string }[];
+    const { parseNotes, packNotes } = await import("./notes.ts");
+    const notes = parseNotes(lead!.notes_json);
+    assert.equal(notes.importWarning, OVERRIDE_NOTE);
+    // Persisted across a reload: a packed save comes back with the note.
+    assert.equal(parseNotes(packNotes(notes)).importWarning, OVERRIDE_NOTE);
+
+    const [draft] = (await sql.query("select body from drafts where lead_id=$1", [
+      result.imported[0]!.leadId,
+    ])) as { body: string }[];
+    assert.equal(draft!.body, altered.body, "the body is the paste, byte for byte");
+    assert.equal(draft!.body.includes(OVERRIDE_NOTE), false, "the note is never published text");
+    assert.equal(draft!.body.includes("text differs"), false);
+  });
+
+  it("keeps an empty headline or body refused even with the key overridden", async () => {
+    const sql = await ensureSchema();
+    const [before] = (await sql.query("select count(*)::int as n from leads")) as { n: number }[];
+    const result = await performImportFinishedStories(
+      { userId: "editor", newsroomId: 203 },
+      { text: PASTE, tool: "", stories: [{ ...CARD, body: "" }], override: ["s1"] },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.imported.length, 0);
+    assert.equal(result.warning, undefined);
+    assert.deepEqual(
+      result.refused.map((r) => r.reason),
+      ["This story has no text."],
+    );
+    const [after] = (await sql.query("select count(*)::int as n from leads")) as { n: number }[];
+    assert.equal(after!.n, before!.n);
   });
 });

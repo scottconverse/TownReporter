@@ -66,7 +66,8 @@ const CAPTURED_TEXT =
   "The board approved the recreation room update on a 5-2 vote, with two members absent.";
 const OTHER_CHUNK =
   "Item 7: the recreation room update, approved 5-2 after forty minutes of public comment.";
-const REASON = "The publisher asked us to remove the excerpt; it quoted their subscriber-only article.";
+const REASON =
+  "The publisher asked us to remove the excerpt; it quoted their subscriber-only article.";
 
 type Loaded = {
   loadPublicEvidence: (id: number) => Promise<{
@@ -94,8 +95,9 @@ type Loaded = {
   }) => Promise<{ versionId: number | null; captureEventId: number }>;
   takeDownCapture: (
     context: { userId: string; newsroomId: number; role: string },
-    input: { versionId: number; reason: string; removeLink?: boolean },
-  ) => Promise<{
+    input: { versionId: number; reason: string; removeLink?: boolean; override?: string[] },
+  ) => Promise<
+    | {
     ok: true;
     linkKept: boolean;
     purged: {
@@ -105,7 +107,9 @@ type Loaded = {
       claims: number;
       relationships: number;
     };
-  }>;
+      }
+    | { ok: false; warning: { key: string; sentence: string } }
+  >;
   publicArticle: (row: Record<string, unknown>) => {
     provenance: { url: string; version_id?: number }[];
     findings: unknown[];
@@ -260,7 +264,11 @@ async function seeded(): Promise<{
      values ('takedown-proof', 1, $1, 'Library board approves recreation room update',
        'The board voted 5-2.', 'The board approved the recreation room update.', 'council',
        $2, 'published', now(), $3)`,
-    [slug, JSON.stringify([CAPTURE_URL]), JSON.stringify([{ url: CAPTURE_URL, version_id: versionId }])],
+    [
+      slug,
+      JSON.stringify([CAPTURE_URL]),
+      JSON.stringify([{ url: CAPTURE_URL, version_id: versionId }]),
+    ],
   );
   return { versionId, otherVersionId, slug, copies, otherCopies };
 }
@@ -345,10 +353,22 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
     const after = await storedText(versionId);
     assert.equal(after.version.full_text, "", "the stored text must be purged");
     assert.ok(after.version.taken_down_at, "the capture must be marked with when it came down");
-    assert.equal(after.version.taken_down_reason, REASON, "the desk keeps the reason beside the row");
-    assert.equal(after.version.taken_down_link_kept, true, "the link is kept unless asked otherwise");
+    assert.equal(
+      after.version.taken_down_reason,
+      REASON,
+      "the desk keeps the reason beside the row",
+    );
+    assert.equal(
+      after.version.taken_down_link_kept,
+      true,
+      "the link is kept unless asked otherwise",
+    );
     assert.equal(after.version.url, CAPTURE_URL, "the record must still name the original");
-    assert.equal(after.version.content_hash, "proof-hash-1", "the hash must survive: citations use it");
+    assert.equal(
+      after.version.content_hash,
+      "proof-hash-1",
+      "the hash must survive: citations use it",
+    );
     for (const chunk of after.chunks)
       assert.equal(chunk.excerpt, "", "every stored passage must be emptied");
     for (const blob of after.blobs)
@@ -417,7 +437,11 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
     assert.equal(record!.excerpt, "", "no excerpt survives a takedown");
     assert.equal(record!.excerpt_removed, true, "the public page must print the notice");
     assert.equal(record!.excerpt_removed_link_kept, true);
-    assert.equal(record!.has_original_bytes, false, "the page may not claim bytes it no longer holds");
+    assert.equal(
+      record!.has_original_bytes,
+      false,
+      "the page may not claim bytes it no longer holds",
+    );
     assert.equal(record!.byte_length, null);
     assert.equal(record!.url, CAPTURE_URL, "the notice still names the original");
     const wire = JSON.stringify(record);
@@ -675,7 +699,9 @@ describe("taking down one captured excerpt, on migration-built PostgreSQL", { sk
         "and the capture is still the public record it was",
       );
     } finally {
-      await client.query("delete from legal_removal_targets where case_id = 'takedown-guard-proof'");
+      await client.query(
+        "delete from legal_removal_targets where case_id = 'takedown-guard-proof'",
+      );
       await client.query("delete from legal_removals where id = 'takedown-guard-proof'");
     }
   });

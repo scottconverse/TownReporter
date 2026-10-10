@@ -448,7 +448,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
     assert.equal(opinionExpired.ok, false);
-    if (opinionExpired.ok) assert.fail("expired Opinion OAuth must refuse");
+    if (opinionExpired.ok || !("error" in opinionExpired)) assert.fail("expired Opinion OAuth must refuse");
     assert.match(opinionExpired.error, /Claude Code needs you to sign in again/i);
     assert.deepEqual(opinionCandidates, [
       "claude-frontier",
