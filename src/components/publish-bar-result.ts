@@ -96,6 +96,27 @@ export function PublishBarResult(props: { state: PublishPressState }) {
 }
 
 /**
+ * The publish bar's meeting-transcript notice.
+ *
+ * Says, in the same bar where the press is made, that the original recording
+ * file is not on this computer and that every quote was re-checked against the
+ * saved transcript text. Null when there is nothing to say, so callers do not
+ * have to conditionally mount it.
+ */
+export function PublishTranscriptNotice(props: { notice?: string | null }) {
+  if (!props.notice) return null;
+  return createElement(
+    "span",
+    {
+      className: "note publish-transcript-notice",
+      role: "status",
+      style: { flexBasis: "100%", minWidth: 0, overflowWrap: "anywhere" },
+    },
+    props.notice,
+  );
+}
+
+/**
  * The word the settled control wears. No full stop: it is a button's label,
  * not a sentence -- the banner beside it is the sentence.
  */

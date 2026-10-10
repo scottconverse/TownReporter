@@ -1,6 +1,6 @@
 export type ScanCoverageStatus = "pending" | "read" | "skipped" | "blocked";
 export type ScanCoverageReason =
-  "over-cap" | "waiting" | "host-cap" | "not-reached" | "fetch-failed";
+  "time-budget" | "over-cap" | "waiting" | "host-cap" | "not-reached" | "fetch-failed";
 
 export type ScanSourceCoverageEntry = {
   sourceId: number;
@@ -152,6 +152,7 @@ export function scanCoverageCounts(entries: readonly ScanSourceCoverageEntry[]) 
 
 function isReasonCode(value: unknown): value is ScanCoverageReason {
   return (
+    value === "time-budget" ||
     value === "over-cap" ||
     value === "waiting" ||
     value === "host-cap" ||

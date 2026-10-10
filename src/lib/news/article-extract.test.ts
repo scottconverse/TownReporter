@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { extractArticleText } from "./article-extract.ts";
 
 describe("extractArticleText", () => {
@@ -164,3 +165,59 @@ describe("extractArticleText", () => {
 function htmlLength(html: string): number {
   return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().length;
 }
+
+// Saved public pages from the October 9 research capture, trimmed offline.
+// Scripts/styles are removed; the larger pages also lose image-only markup
+// and unused attributes. Expected text was captured before the extractor edit.
+// Fixture-local attributes preserve its whitespace through Windows/Linux Git.
+const fixture = (name: string) =>
+  readFileSync(new URL(`./fixtures/article-extract/${name}`, import.meta.url), "utf8");
+
+describe("saved list pages", () => {
+  it("guards: Downtown calendar event cards must not disappear behind its introduction", () => {
+    const result = extractArticleText(fixture("chk-downtown-events.html"));
+    assert.ok(result.text.length >= 10_000, `only ${result.text.length} characters survived`);
+    for (const title of [
+      "$3 Beers on Fridays!",
+      "Discovery Days: Art with Ms. Leigh and Henry",
+      "Lunch Bunch",
+      "Friday Afternoon Concert: Mariachi Las Dahlias",
+      "AWW Presents THAT EIGHTIES BAND - Rewind to the 80s Party!",
+    ]) assert.ok(result.text.includes(title), `missing ${title}`);
+    assert.doesNotMatch(result.text, /Privacy Policy|Toggle navigation/i);
+  });
+
+  it("guards: a huge repeated menu must not crowd out one article", () => {
+    const menu = Array.from({ length: 500 }, (_, i) =>
+      `<li><a href="/department-${i}">Department ${i} meetings October 9, 2026</a></li>`,
+    ).join("");
+    const body = "The council approved safer crossings after residents described dangerous intersections. The transportation plan funds two new bus shelters and improvements to the community trail.";
+    const result = extractArticleText(`<html><body><header><nav><ul>${menu}</ul></nav></header><main><article><p>${body}</p></article></main><footer>Privacy policy</footer></body></html>`);
+    assert.equal(result.text, body);
+    assert.equal(result.method, "readability");
+  });
+
+  for (const name of ["lpm-events", "timescall-loc-longmont"]) {
+    it(`guards: ${name} must retain its exact pre-change extraction`, () => {
+      assert.equal(extractArticleText(fixture(`${name}.html`)).text, fixture(`${name}.expected.txt`));
+    });
+  }
+
+  it("guards: index rows outside the intro article must survive without site furniture", () => {
+    const body = "Browse the latest community stories, events and announcements from local organizations throughout the city.";
+    const rows = Array.from({ length: 12 }, (_, i) => `<li><a href="/story-${i}">Community story ${i}: local artists open their studios this weekend</a></li>`).join("");
+    const html = `<html><body><div class="mega-menu">${rows.replaceAll("Community story", "Menu item")}</div><main><article><p>${body}</p></article></main><section><ul>${rows}</ul></section><div class="cookie">Accept cookies</div><footer>Footer links</footer></body></html>`;
+    const result = extractArticleText(html);
+    assert.match(result.text, /Community story 11/);
+    assert.doesNotMatch(result.text, /Menu item|Accept cookies|Footer links/);
+    assert.equal(result.method, "heuristic");
+  });
+
+  it("guards: low retained share alone must not replace a genuine article with one long link", () => {
+    const body = "The council approved safer crossings after residents described dangerous intersections. The plan funds two new bus shelters.";
+    const background = `<section><a href="/background">${"General background about the community. ".repeat(200)}</a></section>`;
+    const result = extractArticleText(`<html><body><main><article><p>${body}</p></article></main>${background}</body></html>`);
+    assert.equal(result.text, body);
+    assert.equal(result.method, "readability");
+  });
+});

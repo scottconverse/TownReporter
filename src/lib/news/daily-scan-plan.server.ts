@@ -1,10 +1,11 @@
+import { orderAcceptedSources } from "./scan-supply.ts";
 import type { Sql } from "../db.ts";
 import { ensureDailyScanPolicySchema, planDailySourceRotation } from "./daily-scan.ts";
 import { loadSourceScanPreferences } from "./source-scan-preferences.server.ts";
 import { scheduledScanCoverage } from "./scan-source-coverage.ts";
 
 /** Both scheduled and editor-started daily scans use this saved policy plan. */
-export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any) {
+export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, allAccepted = false) {
   await ensureDailyScanPolicySchema(sql);
   const p = policy ?? (await sql.query<any>(
     "select * from daily_scan_policies where newsroom_id=$1", [newsroomId],
@@ -26,7 +27,8 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any) 
     preferences,
     cap: p.source_cap,
   });
-  const sources =
+  const prioritySources = rotation.sourceIds.map((id: number) => pool.find((source: any) => source.id === id)).filter(Boolean);
+  const sources = allAccepted ? orderAcceptedSources(pool, (p.selected_source_ids ?? []).slice(0, p.every_day_source_count ?? 8)) :
     rotation.sourceIds.length === pool.length
       ? pool
       : rotation.sourceIds
@@ -34,9 +36,12 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any) 
     .filter(Boolean);
   return {
     sources,
-    coverage: scheduledScanCoverage(pool, rotation.sourceIds, rotation.deferrals),
+    prioritySources,
+    coverage: scheduledScanCoverage(pool, allAccepted ? sources.map((source: any) => source.id) : rotation.sourceIds, allAccepted ? [] : rotation.deferrals),
     policy: {
       daily: true,
+      // The priority snapshot stays compatible; execution carries the complete pinned pool.
+      ...(allAccepted ? { acceptedSources: sources } : {}),
       revision: p.revision,
       sourceCap: p.source_cap,
       everyDaySourceCount: p.every_day_source_count ?? 8,
