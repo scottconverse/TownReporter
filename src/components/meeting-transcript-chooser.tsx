@@ -1,4 +1,8 @@
-import { meetingTranscriptChoiceLabel, meetingTranscriptReadLine } from "@/lib/news/desk-copy";
+import { meetingTranscriptReadLine } from "@/lib/news/desk-copy";
+import {
+  transcriptAlignmentLabel,
+  transcriptAlignmentAction,
+} from "../lib/news/meeting-transcript-alignment-copy.ts";
 import type { MeetingTranscriptChoice } from "@/lib/news/meeting-transcript-choice";
 
 export function MeetingTranscriptChooser({
@@ -29,12 +33,20 @@ export function MeetingTranscriptChooser({
               onClick={() => onSelect(choice.artifactId)}
               style={{ minHeight: 44 }}
             >
-              {meetingTranscriptChoiceLabel(choice.kind)}
+              {transcriptAlignmentLabel(choice)}
             </button>
           ))}
         </div>
       ) : null}
-      <p role="status" className="meta">{meetingTranscriptReadLine(selected.kind)}</p>
+      <p role="status" className="meta">
+        {meetingTranscriptReadLine(selected.kind)}
+      </p>
+      <p className="meta">{transcriptAlignmentLabel(selected)}</p>
+      {(selected.agendaItemCount ?? 0) === 0 ? (
+        <p role="alert" className="meta">
+          {transcriptAlignmentAction(choices)}
+        </p>
+      ) : null}
     </section>
   );
 }

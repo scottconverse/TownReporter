@@ -70,7 +70,14 @@ export type Section5Result = {
  */
 export async function runSection5ForArtifact(
   sql: Sql,
-  input: { newsroomId: number; videoId: string; title: string; artifactId: number; meetingDate?: string; },
+  input: {
+    newsroomId: number;
+    videoId: string;
+    title: string;
+    artifactId: number;
+    meetingDate?: string;
+    alignmentOnly?: boolean;
+  },
   deps: Section5Deps = {},
 ): Promise<Section5Result> {
   const artifactRows = await sql.query<{ id: number; storage_path: string; sha256: string }>(
@@ -98,25 +105,39 @@ export async function runSection5ForArtifact(
   let packetItems: PacketItem[] = [];
   let portalOrigin: string | null = null;
   let portalMeeting: PrimeGovMeeting | null = null;
+  // A draft retry only reads agenda inputs. Bound that read, and never let
+  // a late portal response persist anything after the retry has expired.
+  const lookupAgenda = async () => {
+    const origin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
+    if (!origin) return null;
+    const packet = await packetLookup(input.title, origin);
+    if (!packet?.meeting) return null;
+    const items = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(
+      packet.meeting,
+      origin,
+    );
+    return { origin, meeting: packet.meeting, items };
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    /*
-      The portal to ask comes out of this newsroom's own watch list. It used to
-      be a constant (Longmont's) inside the lookup, so every other city's tape
-      was matched against Longmont's meetings; with no portal configured there
-      is no lookup at all, which is the honest answer and not a fallback.
-    */
-    portalOrigin = await (deps.primeGovOrigin ?? primeGovOriginForNewsroom)(sql, input.newsroomId);
-    if (portalOrigin) {
-      const packet = await packetLookup(input.title, portalOrigin);
-      if (packet?.meeting) {
-        portalMeeting = packet.meeting;
-        // Real item list comes from the compiled agenda document via the parser,
-        // not from documentList template names ("Agenda"/"Packet").
-        packetItems = await (deps.packetItemsForMeeting ?? packetItemsForMeeting)(packet.meeting, portalOrigin);
-      }
+    const lookup = lookupAgenda();
+    const packet = input.alignmentOnly
+      ? await Promise.race([
+          lookup,
+          new Promise<null>((resolve) => {
+            timer = setTimeout(() => resolve(null), 15_000);
+          }),
+        ])
+      : await lookup;
+    if (packet) {
+      portalOrigin = packet.origin;
+      portalMeeting = packet.meeting;
+      packetItems = packet.items;
     }
   } catch {
     packetItems = [];
+  } finally {
+    clearTimeout(timer);
   }
 
   const chunks = chunkByAgendaItem({ segments, packetItems });
@@ -133,10 +154,12 @@ export async function runSection5ForArtifact(
     its host, so a site that publishes under a path is read under that path.
     See ./structured-vote-source.ts.
   */
-  const voteBase = await (deps.structuredVoteBaseUrl ?? structuredVoteBaseUrlForNewsroom)(
-    sql,
-    input.newsroomId,
-  ).catch(() => null);
+  const voteBase = input.alignmentOnly
+    ? null
+    : await (deps.structuredVoteBaseUrl ?? structuredVoteBaseUrlForNewsroom)(
+        sql,
+        input.newsroomId,
+      ).catch(() => null);
   const structured: StructuredVoteFetchResult = voteBase
     ? await (deps.structuredVotesForDate ?? fetchStructuredVotesForDate)(
         input.meetingDate ?? "",
@@ -149,9 +172,12 @@ export async function runSection5ForArtifact(
       }))
     : NO_STRUCTURED_VOTE_SOURCE;
   let voteDocuments: PrimeGovVoteDocuments = { minutes: [], packet: [] };
-  if (portalMeeting && portalOrigin) {
+  if (!input.alignmentOnly && portalMeeting && portalOrigin) {
     try {
-      voteDocuments = await (deps.voteRecordsForMeeting ?? primeGovVoteRecordsForMeeting)(portalMeeting, portalOrigin);
+      voteDocuments = await (deps.voteRecordsForMeeting ?? primeGovVoteRecordsForMeeting)(
+        portalMeeting,
+        portalOrigin,
+      );
     } catch {
       voteDocuments = { minutes: [], packet: [] };
     }
@@ -168,28 +194,34 @@ export async function runSection5ForArtifact(
     const head = record.motion.slice(0, 40).toLowerCase();
     return head.length > 10 && text.includes(head);
   };
-  const votes: StructuredVote[] = chunks.map((chunk) => {
-    const text = chunkText(chunk).toLowerCase();
-    const matched = structured.records.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
-    const minutes = voteDocuments.minutes.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
-    const packet = voteDocuments.packet.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
-    return extractStructuredVote({
-      item: chunk.item,
-      structuredRecord: matched,
-      minutes,
-      packet,
-      transcript: { excerpt: chunkText(chunk), source: "transcript" },
-    });
-  });
+  const votes: StructuredVote[] = input.alignmentOnly
+    ? []
+    : chunks.map((chunk) => {
+        const text = chunkText(chunk).toLowerCase();
+        const matched =
+          structured.records.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
+        const minutes =
+          voteDocuments.minutes.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
+        const packet =
+          voteDocuments.packet.find((record) => recordMatchesChunk(record, chunk, text)) ?? null;
+        return extractStructuredVote({
+          item: chunk.item,
+          structuredRecord: matched,
+          minutes,
+          packet,
+          transcript: { excerpt: chunkText(chunk), source: "transcript" },
+        });
+      });
 
-  await persistSection5(sql, {
-    newsroomId: input.newsroomId,
-    videoId: input.videoId,
-    artifactId: input.artifactId,
-    chunks: alignment.chunks,
-    alignment,
-    votes,
-  });
+  if (!input.alignmentOnly || alignment.aligned)
+    await persistSection5(sql, {
+      newsroomId: input.newsroomId,
+      videoId: input.videoId,
+      artifactId: input.artifactId,
+      chunks: alignment.chunks,
+      alignment,
+      votes,
+    });
 
   let unalignedLead: ReturnType<typeof unalignedMeetingLead> | null = null;
   if (!alignment.aligned) {

@@ -1,4 +1,9 @@
 import { loadMeetingTranscriptChoices } from "./meeting-transcript-choice.server.ts";
+import { runSection5ForArtifact, type Section5Deps } from "./meeting-story-section5-run.ts";
+import {
+  transcriptAlignmentLabel,
+  transcriptAlignmentAction,
+} from "./meeting-transcript-alignment-copy.ts";
 import type { Sql } from "../db.ts";
 import { meetingClock, meetingEvidenceBlock } from "./meeting-draft-input.ts";
 
@@ -65,6 +70,7 @@ export async function loadMeetingDraftMaterial(
     fallbackTitle: string;
     videoUrl?: string;
   },
+  alignmentDeps: Section5Deps = {},
 ): Promise<LoadedMeetingDraftMaterial> {
   const artifacts = await sql.query<{ id: number; video_id: string; sha256: string }>(
     `select id,video_id,sha256 from meeting_transcript_artifacts
@@ -86,11 +92,30 @@ export async function loadMeetingDraftMaterial(
       where newsroom_id=$1 and video_id=$2 limit 1`,
     [input.newsroomId, videoId],
   );
-  const chunks = await sql.query<ChunkRow>(
-    `select item,title,start_seconds,segment_indexes from meeting_agenda_chunks
+  const readChunks = () =>
+    sql.query<ChunkRow>(
+      `select item,title,start_seconds,segment_indexes from meeting_agenda_chunks
       where newsroom_id=$1 and video_id=$2 and artifact_id=$3 order by start_seconds,id`,
-    [input.newsroomId, videoId, input.artifactId],
-  );
+      [input.newsroomId, videoId, input.artifactId],
+    );
+  let chunks = await readChunks();
+  if (!chunks.length && captures[0]?.title?.trim()) {
+    // Use this recording's own identity, never the lead's fallback title or
+    // another recording's agenda. The alignment-only retry has a 15s lookup cap.
+    const alignment = await runSection5ForArtifact(
+      sql,
+      {
+        newsroomId: input.newsroomId,
+        videoId,
+        artifactId: input.artifactId,
+        title: captures[0].title,
+        meetingDate: captures[0].published?.slice(0, 10),
+        alignmentOnly: true,
+      },
+      alignmentDeps,
+    );
+    if (alignment.aligned) chunks = await readChunks();
+  }
   const segments = await sql.query<SegmentRow>(
     `select segment_index,start_seconds,excerpt,caption_sha256
       from meeting_transcript_segments where artifact_id=$1 order by segment_index`,
@@ -119,7 +144,16 @@ export async function loadMeetingDraftMaterial(
         .join("\n"),
     };
   });
-  if (!items.length) throw new Error("The meeting transcript has no aligned agenda-item spans.");
+  if (!items.length) {
+    const choices = await loadMeetingTranscriptChoices(sql, input.newsroomId, input.videoId);
+    const chosen = choices.find((choice) => choice.artifactId === input.artifactId);
+    const name = chosen
+      ? transcriptAlignmentLabel(chosen)
+      : `Transcript ${input.artifactId} (${captures[0]?.published?.slice(0, 10) ?? "date unknown"}) — not aligned to agenda items`;
+    throw new Error(
+      `${name}. ${transcriptAlignmentAction(choices.filter((choice) => choice.artifactId !== input.artifactId))}`,
+    );
+  }
 
   const votes = await sql.query<{
     item: string;
