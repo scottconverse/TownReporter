@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { parseHTML } from "linkedom";
 import { extractArticleText } from "./article-extract.ts";
+import { htmlToPlainText } from "./html-text.ts";
 
 describe("extractArticleText", () => {
   it("keeps meaningful expandable council panels when Readability drops them", () => {
@@ -174,6 +176,90 @@ const fixture = (name: string) =>
   readFileSync(new URL(`./fixtures/article-extract/${name}`, import.meta.url), "utf8");
 
 describe("saved list pages", () => {
+  // Count whole, distinct cards, not date words in chrome or partial cards.
+  const downtownCards = (html: string) => [...new Set(
+    Array.from(parseHTML(html).document.querySelectorAll("a.evcard"))
+      .map((card) => htmlToPlainText(card.innerHTML)),
+  )];
+  const inWindow = (text: string, cards: string[]) =>
+    cards.filter((card) => text.slice(0, 14_000).includes(card)).length;
+
+  it("puts more complete dated Downtown cards inside the unchanged reader window", () => {
+    const html = fixture("chk-downtown-events.html");
+    const cards = downtownCards(html);
+    const result = extractArticleText(html);
+    // Measured on 47e11c69: 116 of 197 distinct cards already fit in this
+    // trimmed saved fixture. A 3x gain here would exceed its entire inventory.
+    assert.ok(inWindow(result.text, cards) > 116);
+    assert.ok(result.text.startsWith(cards.join("\n\n")), "keep every card's text and page order");
+    for (const card of cards) assert.equal(result.text.split(card).length - 1, 1);
+  });
+
+  it("at least triples dated cards in a crowded variant of the saved Downtown page", () => {
+    const html = fixture("chk-downtown-events.html");
+    const { document } = parseHTML(html);
+    // Deliberately synthetic undated link blocks reproduce window crowding;
+    // the saved page and every one of its event cards remain unchanged.
+    const information = document.createElement("section");
+    information.innerHTML = Array.from({ length: 22 }, (_, i) =>
+      `<div class="information"><a href="/info-${i}">Community information ${i}: ${"Learn about downtown businesses and community services. ".repeat(10)}${i === 0 ? " More community information.".repeat(7) : ""}</a></div>`,
+    ).join("");
+    const grid = document.querySelector("a.evcard")!.parentElement!.parentElement!;
+    grid.parentElement!.insertBefore(information, grid);
+    const result = extractArticleText(document.toString());
+    // Before the change, this variant admits exactly two complete dated cards.
+    assert.ok(inWindow(result.text, downtownCards(html)) >= 3 * 2);
+    assert.ok(result.text.slice(0, 14_000).includes("Lunch Bunch"));
+    assert.ok(result.text.includes("Community information 21:"));
+  });
+
+  it("stably prioritizes date and time items, removes exact duplicates, and preserves item text", () => {
+    const undated = ["Marching band community registration", "Sunny community activity information", "Undated community activity information"];
+    const dated = [
+      "Workshop on October 12 with local artists",
+      "Community workshop on Oct. 12 with artists",
+      "Community workshop Monday with artists",
+      "Community workshop Thu. with artists",
+      "Community workshop 10/12 with artists",
+      "Community workshop 6:30 pm with artists",
+      "Community workshop 12pm with artists",
+      "Community workshop at 18:30 with artists",
+      "Community workshop on MAY 12 with artists",
+    ];
+    const nearDuplicate = dated[0].toLowerCase();
+    const item = (text: string) => `<li><a href="/event">${text}</a></li>`;
+    const formatted = "Workshop\n\nTuesday\n\n6:30 pm\n\nOriginal evidence, unchanged.";
+    const html = `<html><body><main><article><p>A community calendar introduces the available activities and helps residents find local workshops and gatherings.</p></article></main>
+      <ul>${item(undated[0])}${dated.slice(0, 5).map(item).join("")}${item(undated[1])}</ul>
+      <section><ul>${item(undated[2])}${dated.slice(5).map(item).join("")}${item(dated[0])}${item(nearDuplicate)}<li><h3>Workshop</h3><div>Tuesday</div><div>6:30 pm</div><p>Original evidence, unchanged.</p></li></ul></section>
+      <footer>Unrelated footer links</footer></body></html>`;
+    const result = extractArticleText(html);
+    assert.equal(result.method, "heuristic");
+    const expected = [...dated, nearDuplicate, formatted, ...undated];
+    assert.ok(result.text.startsWith(expected.join("\n\n")), result.text);
+    assert.equal(result.text.split(dated[0]).length - 1, 1);
+    assert.ok(result.text.includes("A community calendar introduces"));
+    assert.doesNotMatch(result.text, /Unrelated footer links/);
+  });
+
+  it("preserves whole outer cards when nested sibling lists also qualify", () => {
+    const cards = Array.from({ length: 12 }, (_, i) => `<div class="card"><a href="/workshop-${i}"><h2>October workshop ${i}</h2><ul>${Array.from({ length: 6 }, (_, j) => `<li>Community session ${i}/${j} details for participants</li>`).join("")}</ul></a></div>`);
+    const html = `<html><body><main><article><p>This calendar introduces community activities, workshops and sessions for residents who want to learn new skills.</p></article></main><section>${cards.join("")}</section></body></html>`;
+    const result = extractArticleText(html);
+    const expected = cards.map((card) => htmlToPlainText(card));
+    assert.equal(result.method, "heuristic");
+    assert.ok(result.text.startsWith(expected.join("\n\n")), result.text);
+    for (const card of expected) assert.equal(result.text.split(card).length - 1, 1);
+  });
+
+  it("keeps exact saved article and non-recovered calendar text including dates and times", () => {
+    for (const name of ["lpm-events", "timescall-loc-longmont"]) {
+      const result = extractArticleText(fixture(`${name}.html`));
+      assert.equal(result.method, "readability");
+      assert.equal(result.text, fixture(`${name}.expected.txt`));
+    }
+  });
+
   it("guards: Downtown calendar event cards must not disappear behind its introduction", () => {
     const result = extractArticleText(fixture("chk-downtown-events.html"));
     assert.ok(result.text.length >= 10_000, `only ${result.text.length} characters survived`);
