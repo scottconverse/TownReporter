@@ -36,6 +36,7 @@ import { test } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 import { parseHTML } from "linkedom";
 
 /* ------------------------------------------------------------------ the DOM */
@@ -240,6 +241,8 @@ const dialogPressUrl = moduleUrl(
   "dialog-press.ts",
 );
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
+  "../editor-warning-consent.ts": await sharedModuleUrl("src/components/editor-warning-consent.ts"),
+  "../desk-toast.ts": await sharedModuleUrl("src/components/desk-toast.ts"),
   "@/components/dialog": dialogUrl,
   "@/lib/news/desk": deskStubUrl,
   "@/components/scoped-actions": deskStubUrl,
