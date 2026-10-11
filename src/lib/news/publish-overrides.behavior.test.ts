@@ -690,13 +690,28 @@ it("publishes a killed lead once acknowledged, in one transaction, then audits t
   );
   assert.equal(await leadStatus(leadId), "killed", "a refusal must not change the status");
 
+  const sql = await getSql();
+  const editedFields = { headline: "Council votes", dek: "A plan.", body: "The council approved the updated plan for Longmont residents.", topic: "council" };
+  const { cleanPublishRequest } = await vite.ssrLoadModule("/src/lib/news/request-input.ts");
+  const request = cleanPublishRequest({ leadId, draftFields: { ...editedFields, leadId: -1 } });
+  assert.deepEqual(request.draftFields, editedFields, "the publish boundary retains only editable fields");
+  const editWarning = await performPublish(
+    { userId: USER, newsroomId: NEWSROOM }, leadId, "council", undefined, {}, ["lead-killed"], editedFields,
+  );
+  assert.equal(editWarning.ok, false, "the edited version must warn about its stale check");
+  assert.equal(await leadStatus(leadId), "killed");
+  assert.equal(await articleCount(leadId), 0);
+  const [preserved] = await sql.query<{body:string}>("select body from drafts where lead_id=$1", [leadId]);
+  assert.equal(preserved.body, "The council approved the plan on Tuesday night.", "a refused publish rolls back its draft edit");
+
   const published = await performPublish(
     { userId: USER, newsroomId: NEWSROOM },
     leadId,
     "council",
     undefined,
     {},
-    ["lead-killed"],
+    ["lead-killed", "unchecked", "evidence-stale"],
+    request.draftFields,
   );
   assert.equal(published.ok, true, `an acknowledged killed lead prints: ${refusalOf(published)}`);
   assert.equal(await articleCount(leadId), 1);
@@ -705,7 +720,6 @@ it("publishes a killed lead once acknowledged, in one transaction, then audits t
     "published",
     "the killed lead status moved to published atomically",
   );
-  const sql = await getSql();
   const [override] = await sql.query<{ user_id: string; created_at: string; subject_id: number }>(
     "select user_id,created_at,subject_id from audit_events where newsroom_id=$1 and action='override' and detail::jsonb->>'key'='lead-killed'",
     [NEWSROOM],
@@ -713,6 +727,8 @@ it("publishes a killed lead once acknowledged, in one transaction, then audits t
   assert.equal(override.user_id, USER);
   assert.ok(Number.isFinite(Date.parse(String(override.created_at))));
   assert.equal(override.subject_id, await draftIdOf(leadId));
+  const [article] = await sql.query<{body:string}>("select body from articles where lead_id=$1", [leadId]);
+  assert.equal(article.body, "The council approved the updated plan for Longmont residents.");
 });
 
 /* ------------------------------------------------------------------------ */

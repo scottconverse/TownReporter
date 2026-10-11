@@ -413,10 +413,12 @@ export function cleanPublishRequest(raw: unknown): {
   topic?: string;
   area?: string;
   acknowledgedWarningKeys?: string[];
+  draftFields?: { headline: string; dek: string; body: string; topic: string };
 } {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
     const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown;
       acknowledgedWarningKeys?: unknown;
+      draftFields?: unknown;
     };
     const leadId = cleanPublishId(o.leadId);
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
@@ -436,6 +438,7 @@ export function cleanPublishRequest(raw: unknown): {
       ...(topic ? { topic } : {}),
       ...(area ? { area } : {}),
       ...(o.acknowledgedWarningKeys === undefined ? {} : { acknowledgedWarningKeys: acknowledged }),
+      ...(o.draftFields === undefined ? {} : { draftFields: draftEditInput.pick({ headline: true, dek: true, body: true, topic: true }).parse(o.draftFields) }),
     };
   }
   return { leadId: cleanPublishId(raw) };

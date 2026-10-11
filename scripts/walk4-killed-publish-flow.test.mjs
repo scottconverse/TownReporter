@@ -75,6 +75,19 @@ test("walk 4: the warned publish reaches the atomic server even when cached life
     assert.equal(globalThis.draftSaves, 0);
     assert.equal(globalThis.publishRequests.length, 1);
     assert.deepEqual(globalThis.publishRequests[0].acknowledgedWarningKeys, ["lead-killed"]);
+    // Editing a killed draft must also travel to the atomic publish endpoint.
+    await act(async () => root.render(h(screen.Route.component, { key: "edited" })));
+    globalThis.publishRequests = [];
+    const bodyBox = [...document.querySelectorAll("textarea")].find(box => box.value === "Council approved the plan.");
+    assert.ok(bodyBox);
+    const props = bodyBox[Object.keys(bodyBox).find(key => key.startsWith("__reactProps$"))];
+    await act(async () => props.onChange({ target: { value: "Council approved the updated plan." } }));
+    await click(/^Publish in/);
+    await click(/^Restore and publish anyway$/);
+    assert.equal(globalThis.publishError, "");
+    assert.equal(globalThis.draftSaves, 0);
+    assert.equal(globalThis.publishRequests.length, 1);
+    assert.equal(globalThis.publishRequests[0].draftFields.body, "Council approved the updated plan.");
   } finally {
     await act(async () => root.unmount());
   }

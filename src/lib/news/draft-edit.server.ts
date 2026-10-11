@@ -1,4 +1,5 @@
 import { withLeadDraftLock } from "./draft-order.server.ts";
+import type { Sql } from "../db.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
 import { EVIDENCE_REVIEW_VERSION_KEY, evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
 import { headlineSourceAfterEdit } from "./headline-control.ts";
@@ -17,10 +18,13 @@ export type DraftEditInput = { leadId: number; headline: string; dek: string; bo
  * that record describes the body being saved here.
  */
 export async function saveDraftForEditor(context: { userId: string; newsroomId: number }, data: DraftEditInput, style?: DraftStyleRecord | null) {
+  return withLeadDraftLock(context, data.leadId, sql => saveDraftForEditorInTransaction(sql, context, data, style));
+}
+/** The caller already holds the lead fence; publish uses its own transaction. */
+export async function saveDraftForEditorInTransaction(sql: Sql, context: { userId: string; newsroomId: number }, data: DraftEditInput, style?: DraftStyleRecord | null) {
   // Style repair and editor-dialog rewrites share this persistence boundary.
   data = sanitizeJsonLeaves(data);
   style = sanitizeJsonLeaves(style);
-  return withLeadDraftLock(context, data.leadId, async (sql) => {
     const existing = await sql<DraftRow>`
       select * from drafts where lead_id = ${data.leadId} and newsroom_id = ${context.newsroomId}
       order by updated_at desc, id desc limit 1 for update
@@ -113,5 +117,4 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
         values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, 'editor', ${withSourceNote(researchJsonWithStyleAudit(null, styleRecord()))})`;
     }
     return { ok: true as const };
-  });
 }

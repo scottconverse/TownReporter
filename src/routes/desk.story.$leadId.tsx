@@ -1460,18 +1460,15 @@ function StoryPage() {
     mutationFn: async (acknowledgedWarningKeys: string[]) => {
       const notesProblem = await saveNotesQuietly();
       /*
-        An unchanged draft needs no save before the server's atomic publish.
-        The ordinary save refuses killed leads, even for unchanged text. Do
-        not decide whether to skip it from this tab's cached lifecycle status:
-        another control may already have killed the lead. The publish fence
-        recomputes the warnings, restores the lead and audits the override.
-        Changed fields still have to save; silently printing older text would
-        discard the editor's changes.
+        Existing-draft edits travel with the atomic publish, so the ordinary
+        killed-lead edit guard cannot contradict the restore-and-publish dialog.
+        Unchanged fields are omitted; a stale tab must not overwrite a newer
+        saved draft. A first manual draft still needs to be created before print.
       */
       const unchangedSaveIsRedundant =
         savedDraftFields !== null &&
         draftFieldsMatch(savedDraftFields, { headline, dek, body, topic });
-      if (!unchangedSaveIsRedundant) {
+      if (!unchangedSaveIsRedundant && savedDraftFields === null) {
         try {
           await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
         } catch (err) {
@@ -1492,6 +1489,8 @@ function StoryPage() {
                returns as a refusal, so a stale tab cannot print past a warning
                it never saw (unit OH). */
             acknowledgedWarningKeys,
+            ...(!unchangedSaveIsRedundant && savedDraftFields !== null
+              ? { draftFields: { headline, dek, body, topic } } : {}),
           },
         }),
         notesProblem,

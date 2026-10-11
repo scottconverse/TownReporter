@@ -6079,6 +6079,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     warning let through (see `publish-override.server.ts`).
   */
   acknowledgedWarningKeys: readonly string[] = [],
+  draftFieldsFromEditor?: Pick<import("./draft-edit.server.ts").DraftEditInput, "headline" | "dek" | "body" | "topic">,
 ): Promise<
   | { ok: true; slug: string }
   | {
@@ -6489,7 +6490,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     not even open the fence. The authoritative decision is the re-check INSIDE
     the transaction below, against the locked current draft.
   */
-  const pre = await collectWarnings(sql, preDraft, namedOutlets);
+  const pre = await collectWarnings(sql, { ...preDraft, ...draftFieldsFromEditor }, namedOutlets);
   if (pre.hard) {
     return { ok: false as const, error: pre.hard.sentence, hard: pre.hard.key };
   }
@@ -6524,6 +6525,17 @@ export const performPublish = createServerOnlyFn(async function performPublish(
     leadId,
     preDraft,
     async (sql, row) => {
+      // Save edits behind the same lead fence as restore, publication and audit.
+      // A fresh warning rolls the edit back along with the refused publish.
+      if (draftFieldsFromEditor) {
+        await sql.query("savepoint publish_draft_edit");
+        const { saveDraftForEditorInTransaction } = await import("./draft-edit.server.ts");
+        await saveDraftForEditorInTransaction(sql, { userId: context.userId, newsroomId: owned(context) }, { ...draftFieldsFromEditor, leadId });
+        [row] = await sql<DraftRow>`select * from drafts where id = ${row.id} and newsroom_id = ${owned(context)}`;
+      }
+      const rollbackDraftEdit = async () => {
+        if (draftFieldsFromEditor) await sql.query("rollback to savepoint publish_draft_edit");
+      };
       /*
         Every value below is derived from `row`, the draft this fence will
         actually print -- not the pre-read draft. `draft` is the stored story
@@ -6574,6 +6586,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       */
       const fenced = await collectWarnings(sql, row, namedOutlets);
       if (fenced.hard) {
+        await rollbackDraftEdit();
         return {
           blocked: true as const,
           error: fenced.hard.sentence,
@@ -6582,6 +6595,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       }
       const stillUnacknowledged = fenced.warnings.filter((w) => !acknowledged.has(w.key));
       if (stillUnacknowledged.length) {
+        await rollbackDraftEdit();
         return {
           blocked: true as const,
           error: stillUnacknowledged[0].sentence,
@@ -6590,6 +6604,7 @@ export const performPublish = createServerOnlyFn(async function performPublish(
       }
       const evidence = fenced.evidence;
       if (!evidence) {
+        await rollbackDraftEdit();
         return {
           blocked: true as const,
           error: "The meeting record for this draft could not be read.",
@@ -6837,6 +6852,7 @@ export const publishLead = createServerFn({ method: "POST" })
           data.area,
           {},
           data.acknowledgedWarningKeys ?? [],
+          data.draftFields,
         ),
   );
 
