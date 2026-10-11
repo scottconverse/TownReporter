@@ -1762,3 +1762,25 @@ describe("custom provider failure detail", () => {
     } finally { globalThis.fetch = original; }
   });
 });
+
+
+for (const retry of [false, true]) it(`preserves custom provider detail when ${retry ? "the retry" : "the response body"} times out`, async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (retry && calls === 1) return new Response(JSON.stringify({error:{message:"Google says quota exhausted"}}),{status:429});
+    if (retry) throw new DOMException("Operation timed out", "TimeoutError");
+    const response = new Response("body");
+    response.text = async () => { throw new DOMException("The operation was aborted", "AbortError"); };
+    return response;
+  };
+  try {
+    const result=await grokChat("S","U",8,{choice:"custom:9ce9a944-f444-4a69-8927-7c7705c07a35",newsroomId:1,timeoutMs:30000},{resolveCustom:async()=>({name:"Gemini",baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai",modelId:"gemini-3.5-flash",apiKey:"test-key"})});
+    assert.equal(result.ok,false);
+    if(result.ok)return;
+    assert.match(result.error,/Gemini.*timed out after 30 seconds/);
+    if(retry)assert.match(result.error,/Google says quota exhausted/);
+    assert.equal(result.meta?.timedOut,true);
+  }finally{globalThis.fetch=original;}
+});

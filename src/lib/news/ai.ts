@@ -1127,9 +1127,14 @@ export async function grokChat(
     return result;
   };
   const isTimeout = (err: unknown) =>
-    err instanceof Error && (/timeout/i.test(err.name) || /timed?\s*out/i.test(err.message));
+    err instanceof Error && (/timeout|abort/i.test(err.name) || /timed?\s*out/i.test(err.message));
   const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(1, deadline - Date.now());
+  let retryFailureDetail = "";
+  const transportError = (err: unknown) => {
+    const message = isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err);
+    return retryFailureDetail ? `${message}\n\n${retryFailureDetail}` : message;
+  };
   let res: Response;
   try {
     res = await fetch(url, {
@@ -1141,16 +1146,19 @@ export async function grokChat(
   } catch (err) {
     return {
       ok: false,
-      error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err),
+      error: transportError(err),
       meta: openAiMeta(undefined, isTimeout(err)),
     };
   }
   if (res.status === 429 || res.status >= 500) {
-    if (timeoutMs < 30_000) {
-      return { ok: false, error: `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(await res.text(), llm.apiKey)}`, meta: openAiMeta() };
+    let rejectedBody: string;
+    try { rejectedBody = await res.text(); } catch (err) {
+      return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
-    if (remaining() <= 1_000)
-      return { ok: false, error: `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(await res.text(), llm.apiKey)}`, meta: openAiMeta() };
+    retryFailureDetail = `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(rejectedBody, llm.apiKey)}`;
+    if (timeoutMs < 30_000 || remaining() <= 1_000) {
+      return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
+    }
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -1162,7 +1170,7 @@ export async function grokChat(
     } catch (err) {
       return {
         ok: false,
-        error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err),
+        error: transportError(err),
         meta: openAiMeta(undefined, isTimeout(err)),
       };
     }
@@ -1175,7 +1183,7 @@ export async function grokChat(
   };
   let responseText: string;
   try { responseText = await res.text(); } catch (err) {
-    return { ok: false, error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err), meta: openAiMeta(undefined, isTimeout(err)) };
+    return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
   }
   try {
     body = JSON.parse(responseText) as typeof body;
