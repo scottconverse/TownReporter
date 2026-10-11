@@ -9,10 +9,12 @@ import { screenModule } from "./screen-render-harness.mjs";
 const { storyReadiness } = await import(await moduleUrl("src/lib/news/story-readiness.ts"));
 const real = [
   "@/lib/news/desk-drafts",
+  "@/lib/news/draft-item",
   "@/lib/news/check-gates",
   "@/lib/news/desk-copy",
   "@/lib/news/story-readiness",
   "@/components/story-readiness-chip",
+  "@/components/draft-item-boundary",
   "@/components/check-gates",
   "@/components/publish-blockers",
   "@/lib/news/writer-bar",
@@ -203,6 +205,53 @@ test("Story, Drafts and Today show one matching chip for all four readiness stat
       );
     }
   }
+});
+
+test("Today reports an unreadable draft row and keeps the rest of Tonight's edition", () => {
+  const readable = {
+    id: 12,
+    lead_id: 34,
+    headline: "Readable draft remains on Today",
+    body: "Council approved the plan.",
+    dek: "A new plan.",
+    topic: "government",
+    has_body: true,
+    headline_source: "model",
+    model_headline: "Readable draft remains on Today",
+    lead_status: "drafted",
+    job_status: null,
+    job_started_at: null,
+    job_updated_at: null,
+    names_unresolved: 0,
+    evidence_required: false,
+    evidence_decision: null,
+    imported_text: false,
+    story_readiness: {
+      version: 1,
+      state: "ready",
+      openCount: 0,
+      totalCount: 0,
+      reason: "Ready to check.",
+    },
+  };
+  globalThis.screenData = {
+    "drafts-desk": [null, readable],
+    leads: [],
+    sources: [],
+    "published-desk": [],
+    memory: [],
+    investigations: [],
+    "worth-a-look": [],
+    "follow-ups": [],
+    "follow-up-findings": [],
+  };
+
+  const html = render(h(today.Route.component));
+  assert.match(html, /Draft 1: This draft could not be shown:/);
+  assert.match(html, /Cannot read properties of null/);
+  assert.match(html, /Open it from the Queue\./);
+  assert.match(html, /class="today-edition-row"/);
+  assert.match(html, /data-story-readiness="ready"/);
 });
 
 // guards: zero open facts must not hide a held item or block an ordinary pasted story.

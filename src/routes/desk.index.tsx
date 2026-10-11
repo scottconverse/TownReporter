@@ -11,7 +11,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { firstRunSetupState } from "@/lib/news/paper-settings";
 import { FirstRunModelCard } from "@/components/first-run-model";
-import { StoryReadinessChip } from "@/components/story-readiness-chip";
+import {
+  DraftItemBoundary,
+  DraftItemUnavailable,
+  DraftStateChip,
+} from "@/components/draft-item-boundary";
 import { Busy, DeskMoreMenu, InkButton, Score, SecHead } from "@/components/desk-chrome";
 import { useNowMs } from "@/components/desk-jobs";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
@@ -85,8 +89,8 @@ import {
   deskDraftElapsed,
   deskDraftState,
   tonightDrafts,
-  type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { draftItemLabel } from "@/lib/news/draft-item";
 import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
@@ -809,14 +813,33 @@ function DeskHome() {
   const deskJobs = useDeskJobs();
   const draftRows = drafts.data ?? [];
   const nowMs = useNowMs(
-    draftRows.some((r) => r.job_status === "running" || r.job_status === "queued") ||
+    draftRows.some((r) => r?.job_status === "running" || r?.job_status === "queued") ||
       Boolean(deskJobs.data?.some((s) => s.status === "running" || s.status === "queued")),
   );
-  const draftStates: DeskDraftState[] = draftRows.map((row) =>
-    deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
-  );
+  const draftStateResults = draftRows.map((row, index) => {
+    try {
+      const state = deskDraftState(
+        { ...row, story_readiness: row.story_readiness ?? null },
+        deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs),
+      );
+      return { row, index, state, reason: null };
+    } catch (error) {
+      return {
+        row,
+        index,
+        state: null,
+        reason: error instanceof Error ? error.message.split("\n")[0] : "Unreadable draft data",
+      };
+    }
+  });
+  const readableDrafts = draftStateResults.filter((result) => result.state !== null);
+  const draftStates = readableDrafts.map((result) => result.state);
+  const unreadableDrafts = draftStateResults.filter((result) => result.state === null);
   const writingNow = draftStates.filter((s) => s.running).length;
-  const edition = tonightDrafts(draftRows, draftStates);
+  const edition = tonightDrafts(
+    readableDrafts.map((result) => result.row),
+    draftStates,
+  );
   const { readyToCheck, readyToPrint } = edition;
   /*
     Running now: open jobs, every kind, newest first. Open jobs only -- a job
@@ -1398,21 +1421,33 @@ function DeskHome() {
             All drafts
           </Link>
         </div>
-        {tonightRows.length === 0 ? (
+        {tonightRows.length === 0 && unreadableDrafts.length === 0 ? (
           <p className="wire-sum">
             No story is through its checks yet. A draft arrives here once it is written; its chips
             say which checks have run on it.
           </p>
         ) : (
           <div className="today-edition-rows">
-            {tonightRows.map(({ row, state }) => {
-              return (
-                <div className="today-edition-row" key={row.id}>
-                  <div className="today-edition-what">
-                    <span className="today-edition-sec">
-                      {sectionName(row.topic) || "No section"}
-                    </span>
-                    {/*
+            {unreadableDrafts.map(({ row, index, reason }) => (
+              <DraftItemUnavailable
+                key={draftItemLabel(row, index)}
+                item={draftItemLabel(row, index)}
+                reason={reason ?? "Unreadable draft data"}
+              />
+            ))}
+            {tonightRows.map(({ row, state }, index) => (
+              <DraftItemBoundary
+                key={row.id ?? `today-${index}`}
+                item={draftItemLabel(row, index)}
+              >
+                {() => {
+                  return (
+                    <div className="today-edition-row" key={row.id ?? `today-${index}`}>
+                      <div className="today-edition-what">
+                        <span className="today-edition-sec">
+                          {sectionName(row.topic) || "No section"}
+                        </span>
+                        {/*
                       UI1b-3: the headline is a HEADING, not a bare link
                       floating in a div. The design system allows one plain
                       form -- an underlined link inside a sentence, a list
@@ -1420,42 +1455,44 @@ function DeskHome() {
                       and this is the list title of the row. Same shape as the
                       today-card above, which has always wrapped its link in
                       an h3.
-                    */}
-                    <h3 className="hl-head">
-                      <Link
-                        to="/desk/story/$leadId"
-                        params={{ leadId: String(row.lead_id) }}
-                        className="today-edition-hl hl-link"
-                      >
-                        {editorTitle(row.headline)}
-                      </Link>
-                    </h3>
-                  </div>
-                  {/*
+                        */}
+                        <h3 className="hl-head">
+                          <Link
+                            to="/desk/story/$leadId"
+                            params={{ leadId: String(row.lead_id) }}
+                            className="today-edition-hl hl-link"
+                          >
+                            {editorTitle(row.headline)}
+                          </Link>
+                        </h3>
+                      </div>
+                      {/*
                     The checks are their own column, not a tail on the
                     headline: the drawing lines them up down the middle of the
                     panel so two drafts' chips can be compared at a glance.
                   */}
-                  <span className="today-edition-chips">
-                    <StoryReadinessChip readiness={state.readiness!} />
-                  </span>
-                  {/*
+                      <span className="today-edition-chips">
+                        <DraftStateChip state={state} />
+                      </span>
+                      {/*
                     The one next-action button on the row, in the draft's own
                     vocabulary (lib/news/desk-drafts.ts) -- the same word the
                     Drafts screen puts on the same draft.
                   */}
-                  <div className="today-edition-act">
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(row.lead_id) }}
-                      className="btn"
-                    >
-                      {deskDraftAction(state)}
-                    </Link>
-                  </div>
-                </div>
-              );
-            })}
+                      <div className="today-edition-act">
+                        <Link
+                          to="/desk/story/$leadId"
+                          params={{ leadId: String(row.lead_id) }}
+                          className="btn"
+                        >
+                          {deskDraftAction(state)}
+                        </Link>
+                      </div>
+                    </div>
+                  );
+                }}
+              </DraftItemBoundary>
+            ))}
           </div>
         )}
       </section>

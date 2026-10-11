@@ -1,5 +1,8 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { StoryReadinessChip } from "@/components/story-readiness-chip";
+import {
+  DraftItemBoundary,
+  DraftStateChip,
+} from "@/components/draft-item-boundary";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DeskMoreMenu, DeskShell } from "@/components/desk-chrome";
@@ -16,6 +19,7 @@ import {
   type DeskDraftFilter,
   type DeskDraftState,
 } from "@/lib/news/desk-drafts";
+import { draftItemLabel } from "@/lib/news/draft-item";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
@@ -116,7 +120,9 @@ function DraftsPage() {
     read 25 the moment a page appeared.
   */
   const counts = query.data?.counts;
-  const anyRunning = rows.some((row) => row.job_status === "running" || row.job_status === "queued");
+  const anyRunning = rows.some(
+    (row) => row?.job_status === "running" || row?.job_status === "queued",
+  );
   const nowMs = useNowMs(anyRunning);
   /*
     THE ONE JOB QUERY (FB1, unit 3). The list rows carry their own snapshot of
@@ -134,10 +140,7 @@ function DraftsPage() {
 
   // The window has narrowed the list already, so every row that arrives is
   // shown; the elapsed time is read here only for the rows on screen.
-  const shown = rows.map((row) => ({
-    row,
-    state: deskDraftState({ ...row, story_readiness: row.story_readiness ?? null }, deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs)),
-  }));
+  const shown = rows;
 
   const sectionName = (topic: string | null) =>
     (topic && sections.find((s) => s.key === topic)?.name) || topic || "No section";
@@ -150,7 +153,9 @@ function DraftsPage() {
   */
   const metaFor = (row: DraftRow, state: DeskDraftState): string => {
     if (state.failed) {
-      const why = String(row.job_error ?? "").split("\n")[0].trim();
+      const why = String(row.job_error ?? "")
+        .split("\n")[0]
+        .trim();
       const when = formatListDateTime(row.job_updated_at ?? row.updated_at);
       return why ? `${why} · ${when}` : when;
     }
@@ -163,7 +168,9 @@ function DraftsPage() {
     }
     if (state.key === "ready") {
       const checked = row.evidence_checked_at ?? row.names_checked_at;
-      return checked ? `checked ${formatListDateTime(checked)}` : `saved ${formatListDateTime(row.updated_at)}`;
+      return checked
+        ? `checked ${formatListDateTime(checked)}`
+        : `saved ${formatListDateTime(row.updated_at)}`;
     }
     if (state.key === "imported") return `pasted ${formatShortDate(row.updated_at)}`;
     // The draft row is written with the lead, so its timestamp is the filing
@@ -201,7 +208,9 @@ function DraftsPage() {
 
       {query.isError && rows.length === 0 ? (
         <ScreenError
-          message={query.error instanceof Error ? query.error.message : "Could not load the drafts."}
+          message={
+            query.error instanceof Error ? query.error.message : "Could not load the drafts."
+          }
           onRetry={() => void query.refetch()}
           retrying={query.isRefetching}
         />
@@ -215,69 +224,83 @@ function DraftsPage() {
         </p>
       ) : (
         <div>
-          {shown.map(({ row, state }) => {
-            const liveJob = liveJobFor(row.lead_id);
-            const action = deskDraftAction(state);
-            const primary = state.key === "ready" || state.key === "failed";
-            return (
-              <div className="drafts-row" key={row.id}>
-                <span className="drafts-state">
-                    <StoryReadinessChip readiness={state.readiness!} />
-                </span>
-                <div className="drafts-main">
-                  {/* The origin drops out rather than leaving a hanging
+          {shown.map((row, index) => (
+            <DraftItemBoundary
+              key={row?.id ?? `unreadable-${index}`}
+              item={draftItemLabel(row, index)}
+            >
+              {() => {
+                const state = deskDraftState(
+                  { ...row, story_readiness: row.story_readiness ?? null },
+                  deskDraftElapsed(row.job_started_at ?? row.job_updated_at, nowMs),
+                );
+                const liveJob = liveJobFor(row.lead_id);
+                const action = deskDraftAction(state);
+                const primary = state.key === "ready" || state.key === "failed";
+                return (
+                  <div className="drafts-row" key={row.id ?? `draft-${index}`}>
+                    <span className="drafts-state">
+                      <DraftStateChip state={state} />
+                    </span>
+                    <div className="drafts-main">
+                      {/* The origin drops out rather than leaving a hanging
                       separator when there is nothing true to say about it. */}
-                  <span className="drafts-overline">
-                    {[sectionName(row.topic), draftOrigin(row, state)].filter(Boolean).join(" · ")}
-                  </span>
-                  {/* UI1b-3: the row's list title, in a heading. The link was
+                      <span className="drafts-overline">
+                        {[sectionName(row.topic), draftOrigin(row, state)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                      {/* UI1b-3: the row's list title, in a heading. The link was
                       underlined on hover only before this unit -- and even
                       with the underline always on, a link floating on its own
                       is not the plain form the design system allows (README
                       section 6: a sentence, a list title, a heading or a
                       table cell). */}
-                  <h3 className="hl-head">
-                    <Link
-                      to="/desk/story/$leadId"
-                      params={{ leadId: String(row.lead_id) }}
-                      className="drafts-hl hl-link"
-                    >
-                      {editorTitle(row.headline)}
-                    </Link>
-                  </h3>
-                </div>
-                {/* A meta cell with nothing to say still holds its column, so
+                      <h3 className="hl-head">
+                        <Link
+                          to="/desk/story/$leadId"
+                          params={{ leadId: String(row.lead_id) }}
+                          className="drafts-hl hl-link"
+                        >
+                          {editorTitle(row.headline)}
+                        </Link>
+                      </h3>
+                    </div>
+                    {/* A meta cell with nothing to say still holds its column, so
                     the rows below it do not shift by a column. */}
-                <span className="drafts-meta">{metaFor(row, state)}</span>
-                <span className="drafts-side">
-                  <Link
-                    to="/desk/story/$leadId"
-                    params={{ leadId: String(row.lead_id) }}
-                    className={"btn" + (primary ? " solid" : "")}
-                    aria-label={`${action}: ${row.headline}`}
-                  >
-                    {action}
-                  </Link>
-                  <DeskMoreMenu
-                    ariaLabel={`More actions for ${row.headline}`}
-                    items={[
-                      { label: "Open the story workbench", onSelect: () => openWorkbench(row.lead_id) },
-                      {
-                        label: "Hold, kill or delete it in the Queue",
-                        onSelect: () => void navigate({ to: "/desk/queue" }),
-                      },
-                    ]}
-                  />
-                </span>
-                {state.running ? (
-                  <div className="drafts-job">
-                    {/* The drawn compact card, from `useDeskJobs()`. When the
+                    <span className="drafts-meta">{metaFor(row, state)}</span>
+                    <span className="drafts-side">
+                      <Link
+                        to="/desk/story/$leadId"
+                        params={{ leadId: String(row.lead_id) }}
+                        className={"btn" + (primary ? " solid" : "")}
+                        aria-label={`${action}: ${row.headline}`}
+                      >
+                        {action}
+                      </Link>
+                      <DeskMoreMenu
+                        ariaLabel={`More actions for ${row.headline}`}
+                        items={[
+                          {
+                            label: "Open the story workbench",
+                            onSelect: () => openWorkbench(row.lead_id),
+                          },
+                          {
+                            label: "Hold, kill or delete it in the Queue",
+                            onSelect: () => void navigate({ to: "/desk/queue" }),
+                          },
+                        ]}
+                      />
+                    </span>
+                    {state.running ? (
+                      <div className="drafts-job">
+                        {/* The drawn compact card, from `useDeskJobs()`. When the
                         query has not answered yet there is nothing to draw, and
                         the row's own state chip above already says the draft is
                         being written -- a stand-in bar would be the one thing
                         this screen is not allowed to invent. */}
-                    {liveJob ? (
-                      /*
+                        {liveJob ? (
+                          /*
                         FB6, item 6: NOT `compact`. The compact card drops the
                         stage chip row (JobCard.tsx: `!compact && job.stages`),
                         and the whole of the report's finding on this row was
@@ -287,17 +310,19 @@ function DraftsPage() {
                         stages it is working through, the percent, the bar, the
                         step in words, and Cancel.
                       */
-                      <DeskJobCard
-                        job={liveJob}
-                        viewLabel="Open your story"
-                        onNavigate={() => openWorkbench(row.lead_id)}
-                      />
+                          <DeskJobCard
+                            job={liveJob}
+                            viewLabel="Open your story"
+                            onNavigate={() => openWorkbench(row.lead_id)}
+                          />
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
-                ) : null}
-              </div>
-            );
-          })}
+                );
+              }}
+            </DraftItemBoundary>
+          ))}
           {/* The list is windowed, so the footer says how much of it is on the
               screen and offers the next page. Not drawn: the handoff's only
               footer is the Queue's "Load more" (Desk Screens.dc.html:67); the

@@ -123,8 +123,24 @@ test("a lead filed by hand has a draft row and no prose, so it never reads ready
   assert.equal(filed.needsYou, false, "an unwritten lead is not the editor's to fix");
   assert.equal(filed.running, false);
   assert.equal(deskDraftAction(filed), "Start story");
-  // A redraft that has not written anything yet is still a job to watch.
-  assert.equal(deskDraftState({ ...quiet, has_body: false, job_status: "queued" }).key, "running");
+  // A queued redraft still has the producer's empty placeholder body and no
+  // readiness verdict until prose exists. The row chip must handle this shape.
+  const queued = deskDraftState({
+    ...quiet,
+    has_body: false,
+    story_readiness: {
+      version: 1,
+      state: "not-ready",
+      openCount: 0,
+      totalCount: 0,
+      reason: "No draft has been written.",
+    },
+    job_status: "queued",
+    job_stage: "Queued",
+  });
+  assert.equal(queued.key, "running");
+  assert.equal(queued.label, "Queued");
+  assert.equal(queued.readiness, undefined);
   assert.equal(
     deskDraftState({ ...quiet, has_body: false, job_status: "failed" }).key,
     "failed",
