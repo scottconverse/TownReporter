@@ -519,7 +519,10 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
     kind: "gemini-cli",
     model: "gemini-3.1-pro-high",
     envOverrides: {},
-    budget: KIND_BUDGETS["gemini-cli"],
+    // A complete Pro-High story response measured 152.9s with agy. Keep a
+    // 300s call ceiling and reserve so normal research leaves room for it;
+    // Flash retains the shorter shared Gemini CLI budget above.
+    budget: { wallMs: 660_000, callMs: 300_000, reserveMs: 300_000 },
     plannerModel: "gemini-3.1-pro-high",
     enabled: () => true,
     offeredFor: { ...EVERY_SURFACE, ocr: false },

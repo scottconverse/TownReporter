@@ -290,6 +290,17 @@ describe("resolveProvider", () => {
     assert.ok(budget("codex-frontier").wallMs >= 420_000);
   });
 
+  it("reserves a measured full-draft window for Gemini Pro while Flash stays shorter", () => {
+    const budget = providerBudget as unknown as (
+      choice: string,
+    ) => ReturnType<typeof providerBudget>;
+    const pro = budget("gemini-pro");
+    const flash = budget("gemini-flash");
+
+    assert.deepEqual(pro, { wallMs: 660_000, callMs: 300_000, reserveMs: 300_000 });
+    assert.equal(flash.callMs, 150_000);
+  });
+
   it("gives a local model enough wall clock to draft from a long meeting", () => {
     const budget = providerBudget as unknown as (
       choice: string,

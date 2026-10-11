@@ -40,6 +40,41 @@ test("every Claude choice stays selected and warns before drafting when its CLI 
   }
 });
 
+test("both Gemini Pro options show the shared Connections readiness word", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    const cases = [
+      {
+        availability: { "gemini-flash": true, "gemini-pro": false },
+        expected: "Ready",
+      },
+      {
+        availability: {
+          "gemini-flash": false,
+          "gemini-pro": true,
+          reasons: { "gemini-flash": "Gemini program check timed out." },
+        },
+        expected: "Gemini program check timed out.",
+      },
+    ];
+    for (const entry of cases) {
+      availabilityStub.__setAvailability(entry.availability);
+      const html = renderToStaticMarkup(createElement(ModelPicker, { value: "gemini-pro", onChange() {} }));
+      await page.setContent(html);
+      for (const choice of ["gemini-flash", "gemini-pro"]) {
+        const line = await page.locator(`option[value="${choice}"]`).innerText();
+        assert.ok(line.includes(entry.expected), `${choice} should show ${entry.expected}`);
+      }
+      assert.equal(writerBar.geminiReadinessWord(entry.availability), entry.expected);
+    }
+  } finally {
+    availabilityStub.__setAvailability(undefined);
+    await browser.close();
+  }
+});
+
 test("the primary local picker names its cloud backend before it is chosen", async () => {
   availabilityStub.__setLocalChoice({ override: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" }, catalog: { servers: [], defaultModel: null } });
   const { chromium } = await import("playwright");
@@ -386,7 +421,7 @@ test("Gemini Pro plan choices remain selectable with their own setup warning", a
     const page = await browser.newPage();
     for (const choice of ["gemini-flash", "gemini-pro"]) {
       const reason = "The Gemini program is not signed in. Open a terminal on the server and run agy, then sign in with your Google account.";
-      availabilityStub.__setAvailability({ [choice]: false, reasons: { [choice]: reason } });
+      availabilityStub.__setAvailability({ "gemini-flash": false, reasons: { "gemini-flash": reason } });
       await page.setContent(renderToStaticMarkup(createElement(ModelPicker, { value: choice, onChange() {} })));
       const select = page.getByLabel("Writing model", { exact: true });
       await select.selectOption(choice);

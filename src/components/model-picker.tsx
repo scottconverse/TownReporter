@@ -32,7 +32,7 @@ import { USE_LOADED_LOCAL_MODEL, isUseLoadedLocalModelPick } from "@/lib/news/mo
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
-import { writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
+import { geminiReadinessWord, writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
@@ -423,6 +423,13 @@ export function ModelPicker(props: Props) {
       customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
     }) ?? "";
   }
+  function optionStatusSuffix(option: ModelChoiceOption): string {
+    if (providerEntry(option.value)?.kind === "gemini-cli") {
+      const status = geminiReadinessWord(availability.data);
+      return status ? ` · ${status}` : "";
+    }
+    return isAvailable(option.value) ? "" : ` — ${unavailableReason(option)}`;
+  }
   const selectedUnavailable = !isAvailable(shownValue);
   const checkingReadiness = shownValue !== "auto" && !noFallback && !availability.data;
   const help = checkingReadiness
@@ -480,7 +487,7 @@ export function ModelPicker(props: Props) {
           pickerOptionText), so the full sentence goes here as a title: a
           select clips its own text and there is no CSS that can recover it.
         */
-        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? ` — ${unavailableReason(selected)}` : ""}` : undefined}
+        title={selected ? `${pickerOptionTitle(selected)}${optionStatusSuffix(selected)}` : undefined}
         onChange={(event) => {
           if (props.noneOption && event.target.value === "none") {
             props.onClear?.();
@@ -490,15 +497,14 @@ export function ModelPicker(props: Props) {
         }}
       >
         {options.map((option) => {
-          const available = isAvailable(option.value);
           return (
             <option
               key={option.value}
               value={option.value}
-              title={`${pickerOptionTitle(option)}${available ? "" : ` — ${unavailableReason(option)}`}`}
+              title={`${pickerOptionTitle(option)}${optionStatusSuffix(option)}`}
             >
               {optionText(option)}
-              {available ? "" : ` — ${unavailableReason(option)}`}
+              {optionStatusSuffix(option)}
             </option>
           );
         })}
