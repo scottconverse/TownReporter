@@ -19,6 +19,8 @@ import { loadMeetingAccounting, loadStoredLedgerForRewrite } from "./meeting-led
 import type { IngestDocument } from "./ingest.ts";
 import type { ReportChat } from "./report.ts";
 import type { ClaimCheck, LedgerItem, RunStats } from "./meeting-whole.ts";
+import { editorDraftError } from "./desk-copy.ts";
+import { lastDraftLine } from "./writer-bar.ts";
 
 /*
   WR1's DB half, run against the migrated schema -- the tables 0120 adds are
@@ -539,5 +541,43 @@ describe("whole-meeting writer, against the migrated schema", () => {
     assert.ok(chosen, "the packet is found among the meeting's documents");
     assert.match(chosen!.url, /meetingTemplateId=11/, "the compiled URL takes the packet's template id");
     assert.match(chosen!.name, /^Packet - City Council Study Session\.pdf$/, "and the retained name says what it is");
+  });
+
+  it("FC21 stores fractional meeting timestamps as whole seconds and reports a failed unsaved draft plainly", async () => {
+    const sql = await getSql();
+    await persistWholeMeetingAccounting(sql, {
+      newsroomId: NEWSROOM,
+      draftId,
+      leadId,
+      ledger: [{
+        itemNo: 94021,
+        kind: "vote",
+        text: "The motion passes.",
+        startSeconds: 0.763,
+        endSeconds: 1.761,
+        packetPage: null,
+        status: "lead",
+        reason: "The meeting recording states the result.",
+        sourceExcerpt: "The motion passes.",
+      }],
+      claims: [],
+      meetingNotes: "One meeting item.",
+      runStats: { wallMs: 1, modelCalls: 1, inputTokens: 1, outputTokens: 1 },
+    });
+    const [stored] = await sql.query<{ start_seconds: number; end_seconds: number }>(
+      "select start_seconds,end_seconds from meeting_ledger_items where draft_id=$1 and item_no=94021",
+      [draftId],
+    );
+    assert.deepEqual([stored!.start_seconds, stored!.end_seconds], [1, 2]);
+
+    const message = editorDraftError('invalid input syntax for type integer: "0.763"') ?? "";
+    assert.match(message, /meeting draft failed/i);
+    assert.match(message, /not saved/i);
+    assert.doesNotMatch(message, /invalid input syntax|0\.763/i);
+    assert.equal(
+      lastDraftLine({ modelLabel: "Codex Sol 6.1", when: "12:49 p.m.", draftSaved: false }),
+      "",
+      "a model and finish time do not make a draft that was never saved",
+    );
   });
 });

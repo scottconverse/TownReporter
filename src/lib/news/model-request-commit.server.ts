@@ -580,6 +580,7 @@ export async function commitOpinionForAuthenticatedEditor(
     retryRequestId?: number;
     modelChoice: OpinionModelChoice;
     modelEffort?: ModelEffort | null;
+    voiceMode?: "paper" | "neutral";
 
   },
   deps: OpinionCommitDeps = {},
@@ -623,7 +624,8 @@ export async function commitOpinionForAuthenticatedEditor(
   const subject = (sourceText.split(/\r?\n/).find((line) => line.trim())?.trim() || "Editorial from attached documents").slice(0, 400);
 
   const checkReadiness = deps.checkReadiness ?? checkOpinionReadiness;
-  let readiness = await checkReadiness(input.modelChoice, {}, input.context.newsroomId);
+  const readinessOptions = { requireVoice: input.voiceMode !== "neutral" };
+  let readiness = await checkReadiness(input.modelChoice, {}, input.context.newsroomId, readinessOptions);
   let opinionPreflight: null | { requested: string; resolved: string; reason: string; note: string; stage: string } = null;
   if (!readiness.ready) {
     const plan = await planAutomaticFailover({
@@ -632,14 +634,14 @@ export async function commitOpinionForAuthenticatedEditor(
       error: readiness.why,
       ladder: OPINION_AUTOMATIC_LADDER,
       probe: async (choice) => {
-        const candidate = await checkReadiness(choice as OpinionModelChoice, {}, input.context.newsroomId);
+        const candidate = await checkReadiness(choice as OpinionModelChoice, {}, input.context.newsroomId, readinessOptions);
         return candidate.ready
           ? { ok: true as const, choice: candidate.effectiveChoice, label: modelChoiceLabel(candidate.effectiveChoice) }
           : { ok: false as const, error: candidate.why };
       },
     });
     if (!plan) return { ok: false as const, error: readiness.why };
-    readiness = await checkReadiness(plan.next as OpinionModelChoice, {}, input.context.newsroomId);
+    readiness = await checkReadiness(plan.next as OpinionModelChoice, {}, input.context.newsroomId, readinessOptions);
     if (!readiness.ready) return { ok: false as const, error: readiness.why };
     const previousLabel = modelChoiceLabel(input.modelChoice);
     opinionPreflight = {
@@ -721,11 +723,11 @@ export async function commitOpinionForAuthenticatedEditor(
   const rows = await sql<{ id: number }>`
     insert into editorial_requests
       (user_id, newsroom_id, subject, source_text, source_kind, source_ref, asked_for,
-       pointers_json, our_story_json, model_choice)
+       pointers_json, our_story_json, model_choice, voice_mode)
     values (${input.context.userId}, ${input.context.newsroomId}, ${subject}, ${sourceText}, ${sourceKind},
             ${sourceRef}, ${askedFor},
             ${JSON.stringify(pointers)},
-            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice})
+            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice}, ${input.voiceMode === "neutral" ? "neutral" : "paper"})
     returning id
   `;
   const requestId = rows[0]!.id;
