@@ -14,10 +14,13 @@ const { createRoot } = await import("react-dom/client");
 const stub = body => transpileToUrl(body, "stub.tsx");
 const chrome = stub(`import React from "react"; export const InkButton=({children,onClick,disabled})=><button onClick={onClick} disabled={disabled}>{children}</button>;`);
 const bodies = await moduleUrl("src/components/dialogs/editor-dialog-bodies.ts");
+const sonnerStub = stub(`export const shown=[];const record=(message,data)=>{shown.push({message,data});return data.id;};export const toast={warning:record,success:record,error:record,dismiss(){}};`);
+const { shown } = await import(sonnerStub);
 let holdRequest;
 globalThis.lifecycleHoldRequest = data => holdRequest(data);
 // Only transport and unrelated controls are doubled; Hold's shell, body and server action run.
 const { HoldLeadDialog } = await import(await moduleUrl("src/components/dialogs/editor-dialogs.tsx", {
+  "../desk-toast.ts": await moduleUrl("src/components/desk-toast.ts", { sonner: sonnerStub }),
   "@/components/dialog": await moduleUrl("src/components/dialog.tsx", { "./desk-chrome": chrome }),
   "@/components/model-picker": stub("export const ModelPicker=()=>null;"),
   "@/components/first-run-picker-default": stub("export const useFirstRunPickerDefault=()=>\"auto\";"),
@@ -39,7 +42,7 @@ const { HoldLeadDialog } = await import(await moduleUrl("src/components/dialogs/
 }));
 const { MoreLeadMenu } = await import(bodies);
 
-test("Queue Hold refuses published stories and written drafts but allows empty placeholders", async (t) => {
+test("Queue Hold warns, offers Hold anyway, audits the override and keeps saved drafts", async (t) => {
   const db = new PGlite();
   t.after(() => db.close());
   await db.exec(`create table leads(id int, newsroom_id int, status text, headline text, notes_json text);
@@ -51,6 +54,7 @@ test("Queue Hold refuses published stories and written drafts but allows empty p
     insert into drafts values (22,7,'Published prose','{}'),(23,7,'Written prose','{}'),
       (24,7,'','{"importedText":true}'),(25,7,E' \\t\\n','{}');`);
   const sql = async (parts, ...values) => (await db.query(parts.reduce((s, p, i) => s + (i ? `$${i}` : "") + p, ""), values)).rows;
+  sql.query = async (text, params = []) => (await db.query(text, params)).rows;
   holdRequest = data => performHoldLead({ userId: "editor", newsroomId: 7 }, data, { getSql: async () => sql, now: () => new Date() });
   function Queue({ id }) {
     const [more, setMore] = React.useState(false), [open, setOpen] = React.useState(false);
@@ -73,11 +77,20 @@ test("Queue Hold refuses published stories and written drafts but allows empty p
     await click(/^Hold, no reason$/);
     assert.equal((await db.query("select status from leads where id=$1", [id])).rows[0].status, id === 25 ? "held" : "new");
     if (id !== 25) {
-      assert.match(document.querySelector('[role="alert"]')?.textContent ?? "", id === 22 ? /publish/i : /draft/i);
-      await click(/^Cancel$/);
-    } else assert.equal(document.querySelector('[role="dialog"]'), null);
+      assert.match(shown.at(-1).message, id === 22 ? /publish/i : /draft/i);
+      for (let gate = 0; gate < (id === 22 ? 2 : 1); gate++) {
+        assert.equal(shown.at(-1).data.action.label, "Hold anyway");
+        await React.act(async () => {
+          shown.at(-1).data.action.onClick({ preventDefault() {}, currentTarget: { disabled: false } });
+          await new Promise(resolve => setTimeout(resolve, 20));
+        });
+      }
+      assert.equal((await db.query("select status from leads where id=$1", [id])).rows[0].status, "held");
+    }
+    assert.equal(document.querySelector('[role="dialog"]'), null);
+
   }
   assert.deepEqual((await db.query("select status, notes_json from leads order by id")).rows.map(r => [r.status, r.notes_json !== null]),
-    [["new", false], ["new", false], ["new", false], ["held", true]]);
+    [["held", true], ["held", true], ["held", true], ["held", true]]);
   assert.equal((await db.query("select status from articles")).rows[0].status, "published");
 });

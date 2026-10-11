@@ -36,6 +36,7 @@ import { test } from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 import { parseHTML } from "linkedom";
 
 /* ------------------------------------------------------------------ the DOM */
@@ -240,6 +241,8 @@ const dialogPressUrl = moduleUrl(
   "dialog-press.ts",
 );
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
+  "../editor-warning-consent.ts": await sharedModuleUrl("src/components/editor-warning-consent.ts"),
+  "../desk-toast.ts": await sharedModuleUrl("src/components/desk-toast.ts"),
   "@/components/dialog": dialogUrl,
   "@/lib/news/desk": deskStubUrl,
   "@/components/scoped-actions": deskStubUrl,
@@ -521,6 +524,7 @@ test("the happy kill sends the reason, and no link when none was given", async (
       data: {
         id: 7,
         status: "killed",
+        override: undefined,
         killReason: "Matches a story we have already printed.",
         killReasonUrl: undefined,
       },
@@ -544,6 +548,7 @@ test("a link is sent with the reason, and is never sent on its own", async () =>
   assert.deepEqual(desk.calls[0].data, {
     id: 7,
     status: "killed",
+    override: undefined,
     killReason: "Outside our coverage area.",
     killReasonUrl: "https://example.test/notice",
   });
@@ -560,7 +565,7 @@ test("'Kill, no reason' kills without a reason at all", async () => {
   assert.equal(button("Kill, no reason").disabled, false, "no reason is allowed");
   await page.click(button("Kill, no reason"));
   assert.deepEqual(desk.calls, [
-    { fn: "setLeadStatus", data: { id: 7, status: "killed", killReason: undefined, killReasonUrl: undefined } },
+    { fn: "setLeadStatus", data: { id: 7, status: "killed", override: undefined, killReason: undefined, killReasonUrl: undefined } },
   ]);
   await page.close();
 });

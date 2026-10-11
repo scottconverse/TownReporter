@@ -24,14 +24,15 @@ import {
   leadOrigin,
 } from "@/components/desk-chrome-utils";
 import { useDeskMutation } from "@/components/desk-action";
+import { killPress, killUndoPress, restoreStatus, KillReasonChips, KILL_TOAST_MS, type RestoreStatus } from "@/components/fast-kill";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus } from "@/lib/news/desk";
-import { draftLead, runScan, setLeadStatus } from "@/components/scoped-actions";
+import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus, setLeadStatus, restoreKilledLead } from "@/lib/news/desk";
+import { draftLead, runScan } from "@/components/scoped-actions";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 /*
   Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
@@ -341,9 +342,15 @@ function DeskHome() {
     now, so a failure carries whatever the server said and a refusal
     (`{ok:false}`) is reported rather than passing as a success.
   */
+  const undoKill = useDeskMutation({
+    mutationFn: (input: { id: number; status: RestoreStatus }) => restoreKilledLead({ data: input }),
+    ...leadStatusOptimistic(qc),
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Undoing…", done: () => "Undone: the lead is back on the Queue.",
+  });
   const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean }) =>
-      setLeadStatus({ data: { id: input.id, status: input.status } }),
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string }) =>
+      setLeadStatus({ data: { id: input.id, status: input.status, override: input.override, killReason: input.killReason, killReasonUrl: input.killReasonUrl } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take -- see `desk-lead-status.ts` for why
@@ -352,6 +359,7 @@ function DeskHome() {
     */
     ...leadStatusOptimistic(qc),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
     done: (_result, input) =>
       input.release
@@ -374,9 +382,12 @@ function DeskHome() {
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new" });
+              if (input.status === "killed") await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
+              else await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
             },
           },
+    chips: (_result, input) => input.status === "killed" ? <KillReasonChips leadId={input.id} save={(request) => setStatus.mutate({ ...request.data, override: input.override, restore: input.restore })} /> : null,
+    duration: (_result, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
     failedLead: "Could not change that lead. ",
   });
   /*
@@ -1007,15 +1018,12 @@ function DeskHome() {
         if (lead) startDraft.mutate(lead.id);
         break;
       case "hold":
-        // The drawn dialog, not the bare write: H and the row's Hold H are the
-        // same press, and it asks for the reason the desk learns from.
-        if (lead) setHoldLead({ id: lead.id, headline: lead.headline });
+        // H is the row's Hold press, including its explicit warning retry.
+        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
         break;
       case "kill":
-        // Unit BW, item 2: X and the row's Kill button are the same press, so
-        // both open the drawn dialog. The reason the desk learns from is what
-        // this key was missing when it wrote the status outright.
-        if (lead) setKillLead({ id: lead.id, headline: lead.headline });
+        // X is the row's fast Kill, with Undo and optional reason chips.
+        if (lead) setStatus.mutate(killPress(lead.id, restoreStatus(lead.status)));
         break;
       case "undo":
         if (lead) setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
@@ -2167,13 +2175,13 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet"
-                                  onClick={() => setHoldLead({ id: l.id, headline: l.headline })}
+                                  onClick={() => setStatus.mutate({ id: l.id, status: "held" })}
                                 >
                                   Hold <kbd>H</kbd>
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => setKillLead({ id: l.id, headline: l.headline })}
+                                  onClick={() => setStatus.mutate(killPress(l.id, restoreStatus(l.status)))}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>

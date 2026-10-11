@@ -48,6 +48,7 @@ import { test } from "node:test";
 import * as React from "react";
 import ts from "typescript";
 import { parseHTML } from "linkedom";
+import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 
 /* ------------------------------------------------------------------ the DOM */
 
@@ -374,6 +375,8 @@ assert.equal(
 );
 
 const editorDialogsUrl = await load("src/components/dialogs/editor-dialogs.tsx", {
+  "../editor-warning-consent.ts": await sharedModuleUrl("src/components/editor-warning-consent.ts"),
+  "../desk-toast.ts": await sharedModuleUrl("src/components/desk-toast.ts"),
   "@tanstack/react-query": import.meta.resolve("@tanstack/react-query"),
   "@/lib/news/desk-copy": deskCopyUrl,
   "@/components/dialog": dialogUrl,

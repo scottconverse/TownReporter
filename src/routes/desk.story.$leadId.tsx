@@ -1,5 +1,7 @@
+import { useDeskMutation } from "@/components/desk-action";
+import { setLeadStatus } from "@/lib/news/desk";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
-import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -1753,17 +1755,18 @@ function StoryPage() {
     return { ok: true };
   }, [id, afterLeadChange]);
 
+  const storyStatus = useDeskMutation({
+    mutationFn: (input: { id: number; status: "killed" | "new"; killReason?: string; override?: string[] }) => setLeadStatus({ data: input }),
+    warningAction: (input) => input.status === "killed" ? "Kill" : "Reopen",
+    pending: "Saving…", done: (_res, input) => input.status === "killed" ? "The lead moved to Killed." : "The lead is open again.",
+    after: afterLeadChange,
+    failedLead: "Could not change that lead. ",
+  });
   const killAsDuplicateOfPrior = useCallback(async () => {
     const prior = data?.lead.possible_duplicate;
     if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
-    const res = await setLeadStatus({
-      data: { id, status: "killed", killReason: duplicateKillReason(prior.headline) },
-    });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: "The desk refused that kill." };
-    await afterLeadChange();
-    return { ok: true };
-  }, [data, id, afterLeadChange]);
+    return await storyStatus.mutateAsync({ id, status: "killed", killReason: duplicateKillReason(prior.headline) });
+  }, [data, id, storyStatus]);
 
   const reopenPrior = useCallback(async () => {
     const res = await resolveLeadDuplicate({ data: { id, action: "reopen-prior" } });
@@ -1774,12 +1777,8 @@ function StoryPage() {
   }, [id, afterLeadChange]);
 
   const reopenThisLead = useCallback(async () => {
-    const res = await setLeadStatus({ data: { id, status: "new" } });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: "The desk refused that reopen." };
-    await afterLeadChange();
-    return { ok: true };
-  }, [id, afterLeadChange]);
+    return await storyStatus.mutateAsync({ id, status: "new" });
+  }, [id, storyStatus]);
 
   /*
     Unit BH2 decision 6. The two decisions of the comparison, named once. The

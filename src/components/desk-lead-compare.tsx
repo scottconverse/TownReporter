@@ -1,3 +1,4 @@
+import { deskWarning } from "../lib/news/desk-warning.ts";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
@@ -83,7 +84,7 @@ export function LeadComparePanel({
     void press().then(
       (res) => {
         setBusy("");
-        setNote(comparePressNote(which, res, { current, prior }));
+        if (!deskWarning(res)) setNote(comparePressNote(which, res, { current, prior }));
       },
       () => {
         setBusy("");
@@ -282,7 +283,7 @@ export function KilledLeadRecord({
               void onReopen().then(
                 (res) => {
                   setBusy(false);
-                  if (!res?.ok) setError(res?.error || COMPARE_NO_ANSWER);
+                  if (!res?.ok && !deskWarning(res)) setError(res?.error || COMPARE_NO_ANSWER);
                 },
                 () => {
                   setBusy(false);

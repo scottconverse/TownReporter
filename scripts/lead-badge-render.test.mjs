@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
+import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 
 // Render the real LeadRowView component (src/components/desk-leads.tsx) --
 // specifically the "seen again ×N" resurfaced badge added for a killed lead
@@ -283,6 +284,7 @@ const { LeadRowView, LeadSourceEvidenceCount } = await import(
     await readFile(new URL("../src/components/desk-leads.tsx", import.meta.url), "utf8"),
     "desk-leads.tsx",
     {
+      "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/desk-chrome-utils": deskChromeUtils,
@@ -915,6 +917,7 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
     await readFile(new URL("../src/components/desk-lead-compare.tsx", import.meta.url), "utf8"),
     "desk-lead-compare.tsx",
     {
+      "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/states": statesStub,
