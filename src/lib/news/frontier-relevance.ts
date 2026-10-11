@@ -15,7 +15,7 @@ function relevanceWords(value: string): Set<string> {
   );
 }
 
-export function gateFrontierRelevance<T extends { label: string; why: string; status?: string; closed_reason?: string }>(
+export function gateFrontierRelevance<T extends { label: string; why: string; status?: string; closed_reason?: string | null }>(
   item: T,
   context: { subject: string; town: string },
 ): T {
@@ -35,7 +35,7 @@ export function gateFrontierRelevance<T extends { label: string; why: string; st
   return { ...item, status: "closed", closed_reason: OFF_TOPIC_REASON };
 }
 
-export function activeFrontierForSubject<T extends { label: string; why: string; status?: string; closed_reason?: string }>(
+export function activeFrontierForSubject<T extends { label: string; why: string; status?: string; closed_reason?: string | null }>(
   items: readonly T[],
   context: { subject: string; town: string },
 ): T[] {

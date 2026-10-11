@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { createElement as h } from "react";
 import { screenModule } from "./screen-render-harness.mjs";
 import { browserScreen } from "./bug-sweep-browser.harness.mjs";
-import { React, createRoot, h as darkH, window, detail, Route as darkRoute } from "./dark-file-model-flow.harness.mjs";
+import { React, createRoot, h as darkH, detail, Route as darkRoute } from "./dark-file-model-flow.harness.mjs";
 import { composeScanHandoffSummary, nearDuplicate } from "../src/lib/news/desk-copy.ts";
 
 const sourceScreen = await screenModule("src/routes/desk.sources.tsx", {
