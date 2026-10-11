@@ -19,6 +19,7 @@ import {
   planAutomaticFailover,
   automaticFailoverReason,
   looksLikeProviderQuota,
+  looksLikeContentRefusal,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
@@ -61,8 +62,11 @@ export async function runPinnedCallWithFailover<
     const plan = await planAutomaticFailover({source: opts.source, current: snapshot.modelChoice,
       error: result.error, probe: opts.probe, ladder: opts.ladder});
     if (!plan || plan.next === "auto" || visited.has(plan.next)) {
+      const terminalError = snapshot.modelChoice.startsWith("custom:")
+        ? `${result.error} ${looksLikeContentRefusal(result.error) ? "The desk stopped this request without switching models" : "The desk found no ready fallback"}; no draft was created.`
+        : result.error;
       return { result: { ...result, ...(partialText ? { partialText } : {}),
-        error: trail ? `${trail} -> ${result.error}` : result.error }, snapshot };
+        error: trail ? `${trail} -> ${terminalError}` : terminalError }, snapshot };
     }
     const next = await opts.resolve(plan.next);
     const previousLabel = snapshot.modelLabel ?? modelChoiceLabel(snapshot.modelChoice);

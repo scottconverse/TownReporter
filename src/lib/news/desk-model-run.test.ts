@@ -479,3 +479,15 @@ it("keeps Google's message through terminal Story and editor rendering", async (
   const error="Custom provider Gemini (gemini-3.5-flash) API error 429: Google quota exhausted. The desk found no ready fallback; no draft was created.";
   assert.equal(editorDraftError(storyProviderFailure(error)),error);
 });
+
+it("explains the desk outcome when a custom timeout has no ready fallback", async () => {
+  const result = await runPinnedCallWithFailover({
+    snapshot: { modelChoice: "custom:gemini" }, source: "editor", ladder: ["codex-balanced"],
+    run: async () => ({ ok: false, error: "Custom provider Gemini (gemini-3.5-flash) timed out after 150 seconds." }),
+    probe: async () => ({ ok: false, error: "Codex is signed out." }),
+    resolve: async () => assert.fail("no fallback can run"),
+    onSwitch: async () => assert.fail("no hop can be recorded"),
+  });
+  assert.match(result.result.error, /Gemini.*timed out after 150 seconds/);
+  assert.match(result.result.error, /The desk found no ready fallback; no draft was created/);
+});
