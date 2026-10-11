@@ -173,7 +173,7 @@ describe("the refusal the desk gives before any model call", () => {
   it("is the exact sentence the unit asks for when nothing is loaded", () => {
     assert.equal(
       LOCAL_MODEL_NOTHING_LOADED,
-      "Local model: nothing is loaded in LM Studio or Ollama. Load a model there, or pick a model.",
+      "No model is loaded on this computer.",
     );
   });
 

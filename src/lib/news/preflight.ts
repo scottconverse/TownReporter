@@ -146,7 +146,7 @@ export function localServerName(kind: string): string {
  * every model on disk and an editor may load one themselves.
  */
 export const LOCAL_MODEL_NOTHING_LOADED =
-  "Local model: nothing is loaded in LM Studio or Ollama. Load a model there, or pick a model.";
+  "No model is loaded on this computer.";
 
 /**
  * Unit BB item 4's refusal for a hand-picked, on-device model that the server

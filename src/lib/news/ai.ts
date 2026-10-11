@@ -778,9 +778,10 @@ export async function probeProvider(
     const failures: string[] = [];
     const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
-      const result = await probeProvider(rung, newsroomId, adapters);
+      const result = await probeProvider(rung, newsroomId, adapters, scope);
       if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
       if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+      else if (result.error === LOCAL_MODEL_NOTHING_LOADED) skippedRungs.push(result.error);
       else failures.push(result.error);
     }
     const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";
