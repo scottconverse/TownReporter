@@ -113,6 +113,7 @@ import {
   type ProviderKind,
   type ProviderSurface,
 } from "@/lib/news/provider-registry";
+import { customConnectionStatus, geminiReadinessWord } from "@/lib/news/writer-bar";
 
 export const Route = createFileRoute("/desk/models")({
   head: () => ({ meta: [{ title: "Models — TownReporter" }] }),
@@ -1250,52 +1251,50 @@ function ApiKeyConnections({
   const rows = connections.data ?? [];
   return (
     <>
-      {rows.map((row) => (
-        <ConnectionCard
-          key={row.id}
-          title={row.name}
-          how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
-          chip={
-            <ConnectionChip
-              kind={!row.hasApiKey ? "notset" : row.enabled ? "connected" : "off"}
-              label={!row.hasApiKey ? undefined : row.enabled ? undefined : "Turned off"}
-            />
-          }
-          actions={
-            <>
-              <InkButton
-                tone="quiet"
-                disabled={test.isPending || !row.hasApiKey}
-                onClick={() => {
-                  if (
-                    !confirm(
-                      `Testing sends a small prompt to ${row.name} and may incur a charge. Continue?`,
+      {rows.map((row) => {
+        const status = customConnectionStatus(row);
+        return (
+          <ConnectionCard
+            key={row.id}
+            title={row.name}
+            how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
+            chip={<ConnectionChip kind={status.kind} label={status.label} help={status.help} />}
+            actions={
+              <>
+                <InkButton
+                  tone="quiet"
+                  disabled={test.isPending || !row.hasApiKey}
+                  onClick={() => {
+                    if (
+                      !confirm(
+                        `Testing sends a small prompt to ${row.name} and may incur a charge. Continue?`,
+                      )
                     )
-                  )
-                    return;
-                  test.mutate(row);
-                }}
-              >
-                {test.isPending ? "Testing…" : "Test"}
-              </InkButton>
-              <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
-                Settings
-              </InkButton>
-              <InkButton
-                tone="quiet-danger"
-                disabled={remove.isPending}
-                onClick={() => {
-                  if (confirm(`Remove ${row.name}? This cannot be undone.`)) remove.mutate(row);
-                }}
-              >
-                {remove.isPending ? "Removing…" : "Remove"}
-              </InkButton>
-            </>
-          }
-        >
-          <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
-        </ConnectionCard>
-      ))}
+                      return;
+                    test.mutate(row);
+                  }}
+                >
+                  {test.isPending ? "Testing…" : "Test"}
+                </InkButton>
+                <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
+                  Settings
+                </InkButton>
+                <InkButton
+                  tone="quiet-danger"
+                  disabled={remove.isPending}
+                  onClick={() => {
+                    if (confirm(`Remove ${row.name}? This cannot be undone.`)) remove.mutate(row);
+                  }}
+                >
+                  {remove.isPending ? "Removing…" : "Remove"}
+                </InkButton>
+              </>
+            }
+          >
+            <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
+          </ConnectionCard>
+        );
+      })}
 
       {/*
         A provider with nothing configured is a card with one button, not a
@@ -1331,17 +1330,17 @@ function GeminiPlanConnection() {
     queryFn: () => providerAvailability(),
     staleTime: 5 * 60 * 1000,
   });
-  const ready = availability.data?.["gemini-flash"] === true;
-  const reason = availability.data?.reasons?.["gemini-flash"];
-  const message = reason ?? (ready
+  const readinessWord = geminiReadinessWord(availability.data);
+  const ready = readinessWord === "Ready";
+  const message = readinessWord === "Ready"
     ? "The Gemini program is installed and signed in to your Google account. Drafts use your Pro plan, with no API key or API credit."
-    : availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
+    : readinessWord ?? (availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
       : "Could not check the Gemini program. Use Test all connections to check again.");
   return (
     <ConnectionCard
       title="Gemini (Pro plan)"
       how="Uses the Gemini command-line program and your Google sign-in"
-      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={ready ? "Ready" : "Warning"} help={message} />}
+      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={readinessWord ?? (availability.isPending ? "Checking" : "Warning")} help={message} />}
     >
       <p className="text-sm text-muted">{message}</p>
       <ProviderModelRows entries={entriesOfKind("gemini-cli")} />

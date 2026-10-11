@@ -1,12 +1,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  customConnectionStatus,
+  draftFallbackAttribution,
   lastDraftLine,
   lastDraftWhen,
   readinessDot,
   readinessFailureMessage,
+  requestedModelChoice,
   saveState,
   writerIsReady,
+  writerUnavailableReason,
 } from "./writer-bar.ts";
 
 /**
@@ -194,4 +198,51 @@ describe("saveState", () => {
 it("keeps known quota and unknown provider messages visible", () => {
   assert.equal(readinessFailureMessage("custom:x", "My provider", "insufficient_quota"), "My provider hit its usage limit.");
   assert.equal(readinessFailureMessage("codex-frontier", "Codex", "Transport refused the request."), "Codex is not ready: Transport refused the request.");
+});
+
+it("uses the picker key-read failure for the API connection status", () => {
+  const connection = {
+    id: "gemini",
+    name: "Gemini",
+    hasApiKey: true,
+    enabled: true,
+    readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting.",
+  };
+  const pickerReason = writerUnavailableReason({
+    choice: "custom:gemini",
+    label: "Gemini",
+    availability: {},
+    customConnection: { enabled: true, modelId: "gemini-3.5-flash", readinessError: connection.readinessError },
+  });
+  const connectionStatus = customConnectionStatus(connection);
+
+  assert.equal(connectionStatus.kind, "unreachable");
+  assert.equal(connectionStatus.label, pickerReason);
+  assert.equal(connectionStatus.label, "This connection's key cannot be read. Open Models and paste the key again.");
+});
+
+it("names the picked model, actual writer, and first failure after a fallback chain", () => {
+  assert.equal(
+    requestedModelChoice(
+      JSON.stringify({ requestedRuntime: "gemini-pro", actualRuntime: "codex-balanced" }),
+      "codex-balanced",
+    ),
+    "gemini-pro",
+  );
+  assert.equal(
+    draftFallbackAttribution({
+      pickedModel: "Gemini 3.1 Pro (Pro plan)",
+      writerModel: "Codex Sol 6.1 (balanced)",
+      failoverNote: "Gemini request timed out. -> DeepSeek v4.1 Flash -> DeepSeek v4.1 Flash: Provider says: reply was cut off -> Codex Sol 6.1 (balanced)",
+    }),
+    "You picked Gemini 3.1 Pro (Pro plan). Codex Sol 6.1 (balanced) wrote this draft because Gemini 3.1 Pro (Pro plan) timed out.",
+  );
+  assert.equal(
+    draftFallbackAttribution({
+      pickedModel: "Gemini 3.1 Pro (Pro plan)",
+      writerModel: "Gemini 3.1 Pro (Pro plan)",
+      failoverNote: "Gemini request timed out.",
+    }),
+    undefined,
+  );
 });

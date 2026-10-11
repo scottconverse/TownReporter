@@ -132,8 +132,10 @@ import { resolveJobModel } from "@/lib/news/model-assignments";
   module's own note on what "model availability" is about.
 */
 import {
+  draftFallbackAttribution,
   lastDraftLine,
   lastDraftWhen,
+  requestedModelChoice,
   readinessDot,
   saveState,
   writerIsReady,
@@ -631,6 +633,16 @@ function StoryPage() {
         modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
         when: lastDraftWhen(data?.job?.finished_at),
       });
+  const requestedDraftModelChoice = data?.job
+    ? requestedModelChoice(data.job.result_json, data.job.model_choice)
+    : "";
+  const fallbackAttribution = !civicReportingDraft && data?.draft?.body && data?.job?.status === "completed"
+    ? draftFallbackAttribution({
+        pickedModel: storyModelLabel(requestedDraftModelChoice),
+        writerModel: storyModelLabel(data.job.model_choice),
+        failoverNote: data.job.failover_note,
+      })
+    : undefined;
 
   useEffect(() => {
     if (!modelResearchOpen) return;
@@ -764,7 +776,7 @@ function StoryPage() {
 
   useEffect(() => {
     if (!data?.job || modelChoiceTouched.current) return;
-    const remembered = rememberedStoryModelChoice(data.job.model_choice, data.job.model_choice_source);
+    const remembered = rememberedStoryModelChoice(requestedDraftModelChoice || data.job.model_choice, data.job.model_choice_source);
     setModelChoice(remembered);
     try {
       const receipt = JSON.parse(data.job.result_json || "{}") as { modelEffort?: unknown };
@@ -772,7 +784,7 @@ function StoryPage() {
     } catch {
       setModelEffort(defaultModelEffort(remembered));
     }
-  }, [data?.job]);
+  }, [data?.job, requestedDraftModelChoice]);
 
   /*
     0.6.63 (Unit Y item 4): a job row that still holds the retired Grok choice
@@ -3031,6 +3043,11 @@ function StoryPage() {
               Thinking effort
             </button>
             {lastDraft ? <span className="astra-wb-last">{lastDraft}</span> : null}
+            {fallbackAttribution ? (
+              <span className="astra-wb-last" role="status">
+                {fallbackAttribution}
+              </span>
+            ) : null}
             {retiredModelNote ? (
               <p className="note" role="status">
                 {retiredModelNote}

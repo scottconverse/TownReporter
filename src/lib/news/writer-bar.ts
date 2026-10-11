@@ -24,6 +24,48 @@ import { clockLabel } from "./follow-up-copy.ts";
 /** Reasons use the existing availability check, with no extra probes. */
 export type ProviderAvailability = Record<string, boolean> & { reasons?: Record<string, string>; cloudWarnings?: { baseUrl: string; id: string; reason: string }[] };
 
+/** The one shared status word used by both Pro-plan model options and Connections. */
+export function geminiReadinessWord(availability: ProviderAvailability | undefined): string | undefined {
+  if (!availability) return undefined;
+  if (availability["gemini-flash"] === true) return "Ready";
+  if (availability["gemini-flash"] === false) {
+    return availability.reasons?.["gemini-flash"] ?? "Gemini is not ready.";
+  }
+  return undefined;
+}
+
+function availabilityChoice(choice: string): string {
+  return choice.startsWith("gemini-") ? "gemini-flash" : choice;
+}
+
+export function customConnectionReadinessProblem(input: {
+  choice: string;
+  label: string;
+  customConnection: { readinessError?: string } | null;
+}): string | undefined {
+  const message = input.customConnection?.readinessError;
+  return message ? readinessFailureMessage(input.choice, input.label, message) : undefined;
+}
+
+export function customConnectionStatus(input: {
+  id: string;
+  name: string;
+  hasApiKey: boolean;
+  enabled: boolean;
+  readinessError?: string;
+}): { kind: "connected" | "off" | "notset" | "unreachable"; label?: string; help?: string } {
+  if (!input.hasApiKey) return { kind: "notset" };
+  if (!input.enabled) return { kind: "off", label: "Turned off" };
+  const problem = customConnectionReadinessProblem({
+    choice: `custom:${input.id}`,
+    label: input.name,
+    customConnection: input,
+  });
+  return problem
+    ? { kind: "unreachable", label: problem, help: problem }
+    : { kind: "connected" };
+}
+
 export function localCloudReadinessReason(availability: ProviderAvailability | undefined, model?: { baseUrl: string; id: string } | null): string | undefined {
   return model ? availability?.cloudWarnings?.find(row => row.baseUrl.replace(/\/+$/, "") === model.baseUrl.replace(/\/+$/, "") && row.id === model.id)?.reason : undefined;
 }
@@ -45,9 +87,13 @@ export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[
     const warning = localCloudReadinessReason(input.availability, input.localModel);
     if (warning) return warning;
   }
-  const message = isCustomModelChoice(input.choice) ? input.customConnection?.readinessError : undefined;
-  if (message) return readinessFailureMessage(input.choice, input.label, message);
-  const reason = input.availability?.reasons?.[input.choice];
+  const customProblem = customConnectionReadinessProblem({
+    choice: input.choice,
+    label: input.label,
+    customConnection: input.customConnection,
+  });
+  if (customProblem) return customProblem;
+  const reason = input.availability?.reasons?.[availabilityChoice(input.choice)];
   if (reason) return reason;
   if (isCustomModelChoice(input.choice)) return "This custom connection is unavailable or has no model. Manage it on Models, or choose another model.";
   if (input.choice === "local-model") return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
@@ -97,7 +143,42 @@ export function writerIsReady(input: {
   if (isCustomModelChoice(input.choice)) {
     return Boolean(input.customConnection?.enabled && input.customConnection.modelId && !input.customConnection.readinessError);
   }
-  return input.availability ? input.availability[input.choice] !== false : true;
+  return input.availability ? input.availability[availabilityChoice(input.choice)] !== false : true;
+}
+
+/** Recover the editor's original pick after the job's runtime moves to a fallback. */
+export function requestedModelChoice(resultJson: string | null | undefined, persistedChoice: string): string {
+  try {
+    const receipt = JSON.parse(resultJson ?? "{}") as { requestedRuntime?: unknown };
+    return typeof receipt.requestedRuntime === "string" ? receipt.requestedRuntime : persistedChoice;
+  } catch {
+    return persistedChoice;
+  }
+}
+
+/** Explain the first technical failure without mislabeling the model that wrote the saved draft. */
+export function draftFallbackAttribution(input: {
+  pickedModel: string;
+  writerModel: string;
+  failoverNote: string | null | undefined;
+}): string | undefined {
+  const picked = input.pickedModel.trim();
+  const writer = input.writerModel.trim();
+  if (!picked || !writer || picked === writer || !input.failoverNote) return undefined;
+  const match = /timed out|sign-in lapsed|reached its usage limit|usage limit|was unavailable|reply was cut off|sent a reply the desk could not read|could not read/i.exec(input.failoverNote);
+  if (!match) return undefined;
+  const reason = /timed out/i.test(match[0])
+    ? "timed out"
+    : /sign-in lapsed/i.test(match[0])
+      ? "sign-in lapsed"
+      : /usage limit/i.test(match[0])
+        ? "reached its usage limit"
+        : /cut off/i.test(match[0])
+          ? "had its reply cut off"
+          : /unavailable/i.test(match[0])
+            ? "was unavailable"
+            : "sent a reply the desk could not read";
+  return `You picked ${picked}. ${writer} wrote this draft because ${picked} ${reason}.`;
 }
 
 /**
