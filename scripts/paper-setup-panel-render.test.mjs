@@ -163,6 +163,8 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/form-error": formErrorStub,
       "@/components/desk-chrome-utils": utilsStub,
       "@/components/paper-setup-form": formModule,
+      "@/components/JobCard": inlineModule("export const DeskJobCard = () => null;"),
+      "@/components/job-card-state": inlineModule("export const useDeskJobs = () => ({data:[]});"),
       "@/components/newsletter-mailbox": inlineModule("export function NewsletterMailbox() { return null; }"),
       "@/lib/auth/use-current-user": names(["useCurrentUserState"]),
       "@/components/states": names(["ListSkeleton"]),

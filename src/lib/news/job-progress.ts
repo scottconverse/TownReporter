@@ -7,6 +7,7 @@ import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from ".
 import type { ModelEffort } from "./provider-registry.ts";
 import {
   jobStages,
+  queuedJobWaitReason,
   requestJobCancel,
   type DeskJob,
   type JobKind,
@@ -495,6 +496,12 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       ? await sql<{ id: number; lead_id: number | null }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`
       : [];
     const leadByRequest = new Map(reportingLeads.map((request) => [Number(request.id), request.lead_id == null ? null : Number(request.lead_id)]));
+    const active = rows.some(row => row.kind === "draft" && row.status === "queued")
+      ? await sql<DeskJob>`select * from desk_jobs where status = 'running'`
+      : [];
+    for (const row of rows) {
+      if (row.kind === "draft" && row.status === "queued") row.step_text = queuedJobWaitReason(row, active);
+    }
     return rows.map((row) =>
       jobProgressView(
         row,
@@ -558,10 +565,10 @@ export const cancelStoryJob = createServerFn({ method: "POST" })
 export const retryStoryJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => {
-    const raw = input as { jobId?: unknown; nextModel?: unknown; override?: unknown } | null;
+    const raw = input as { jobId?: unknown; nextModel?: unknown; override?: unknown; modelChoice?: unknown } | null;
     const jobId = Number(raw?.jobId);
     if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
-    return { jobId, nextModel: Boolean(raw?.nextModel), override: z.array(z.string()).optional().parse(raw?.override) };
+    return { jobId, modelChoice: raw?.modelChoice === undefined ? undefined : storyModelChoice(z.string().parse(raw.modelChoice)), nextModel: Boolean(raw?.nextModel), override: z.array(z.string()).optional().parse(raw?.override) };
   })
   .handler(async ({ context, data }) => {
     const sql = await getSql();
@@ -575,7 +582,7 @@ export const retryStoryJob = createServerFn({ method: "POST" })
       throw new Error("This job's request is not stored with the job, so it cannot be retried here.");
     }
     const leadId = row.subject_id;
-    let choice = storyModelChoice(row.model_choice);
+    let choice = data.modelChoice ?? storyModelChoice(row.model_choice);
     let label = modelChoiceLabel(effectiveStoryModelChoice(choice));
     if (data.nextModel) {
       const [{ planAutomaticFailover }, { probeProvider }] = await Promise.all([

@@ -474,7 +474,7 @@ export async function commitDraftBatchForAuthenticatedEditor(
       for (const item of checked.items) {
         const receipt = runtimeSnapshot as ForcedRuntimeSnapshot & Partial<BatchRuntimeReceipt>;
         await tx.query(
-          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,failover_note,result_json,draft_batch_id) values($1,$2,'draft',$3,$4,$5,$6,'default','queued',$7,$8,$9,$10)",
+          "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,research_scope,lane,status,stage,failover_note,result_json,draft_batch_id) values($1,$2,'draft',$3,$4,$5,$6,'draft','queued',$7,$8,$9,$10)",
           [
             input.context.newsroomId,
             input.context.userId,
