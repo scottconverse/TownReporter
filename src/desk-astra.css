@@ -4240,14 +4240,14 @@
 }
 /* Large-text filters move below the tabs before their controls get crowded. */
 @media (min-width: 701px) and (max-width: 1279px) {
-  .desk-ltr.astra .queue-controls {
+  .desk-ltr.astra.large .queue-controls {
     flex-wrap: wrap;
   }
-  .desk-ltr.astra .queue-tabs {
+  .desk-ltr.astra.large .queue-tabs {
     flex: 0 1 auto;
     min-width: 0;
   }
-  .desk-ltr.astra .queue-filters {
+  .desk-ltr.astra.large .queue-filters {
     flex-wrap: wrap;
     flex: 1 1 100%;
     justify-content: flex-start;
@@ -4284,6 +4284,24 @@
   }
   .desk-ltr.astra .queue-filters {
     gap: 8px;
+  }
+}
+/* Large text plus a paper with many long section names can make the one-line
+   Queue filter bar wider than the page at 1440px. Put the filters on their own
+   line through the desktop width where the long select still needs room. */
+@media (min-width: 1280px) and (max-width: 1535px) {
+  .desk-ltr.astra.large .queue-controls {
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra.large .queue-tabs {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .desk-ltr.astra.large .queue-filters {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
   }
 }
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of

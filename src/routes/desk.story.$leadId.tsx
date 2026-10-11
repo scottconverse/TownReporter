@@ -637,6 +637,7 @@ function StoryPage() {
     : lastDraftLine({
         modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
         when: lastDraftWhen(data?.job?.finished_at),
+        draftSaved: Boolean(data?.draft) && !draftProblem,
       });
   const requestedDraftModelChoice = data?.job
     ? requestedModelChoice(data.job.result_json, data.job.model_choice)
@@ -3478,6 +3479,10 @@ function StoryPage() {
             />
             {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton> : null}
             </>
+          ) : draftProblem ? (
+            <p className="meta" role="alert" style={{ marginTop: 14 }}>
+              The meeting draft failed and was not saved. Review the error above, then try Draft with AI again.
+            </p>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
               No draft yet. Draft with AI writes a first pass from the lead and its sources; you

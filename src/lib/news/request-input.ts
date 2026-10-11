@@ -1653,6 +1653,7 @@ export const editorialStartInput = z.object({
   articleSlug: z.string().max(LIMITS.slug).optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
+  voiceMode: z.enum(["paper", "neutral"]).optional(),
   documentIds: z.array(idText).optional(),
   retryRequestId: rowId.optional(),
   /** The warning keys an accepted retry carries back (`override.ts`). */

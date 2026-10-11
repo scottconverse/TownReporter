@@ -391,6 +391,53 @@ export async function createInvite(ownerUserId: string, email: string): Promise<
   return token;
 }
 
+export type PendingEditorInvite = {
+  id: number;
+  email: string;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/** List only live invites for the signed-in owner's own newsroom. */
+export async function listPendingEditorInvites(ownerUserId: string): Promise<PendingEditorInvite[]> {
+  const me = await requireEditor(ownerUserId);
+  if (me.role !== "owner") throw new ForbiddenError("Only the owner can see pending invites.");
+  await ensureInviteSchema();
+  const sql = await getSql();
+  const rows = await sql<{
+    id: number;
+    email: string;
+    created_at: string;
+    expires_at: string;
+  }>`
+    select id, email, created_at::text as created_at, expires_at::text as expires_at
+    from editor_invites
+    where newsroom_id=${me.newsroomId} and used_at is null and expires_at > now()
+    order by created_at desc, id desc
+  `;
+  return rows.map((row) => ({
+    id: Number(row.id),
+    email: row.email,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+  }));
+}
+
+/** Revoke one live invite in the owner's newsroom; deleting it invalidates its token hash. */
+export async function cancelPendingEditorInvite(ownerUserId: string, inviteId: number): Promise<boolean> {
+  const me = await requireEditor(ownerUserId);
+  if (me.role !== "owner") throw new ForbiddenError("Only the owner can cancel invites.");
+  await ensureInviteSchema();
+  const sql = await getSql();
+  const rows = await sql<{ id: number }>`
+    delete from editor_invites
+    where id=${inviteId} and newsroom_id=${me.newsroomId}
+      and used_at is null and expires_at > now()
+    returning id
+  `;
+  return rows.length > 0;
+}
+
 export type InviteCheck = { ok: true; email: string } | { ok: false; reason: string };
 
 /** Is this token a live invite? Never reveals whether an ADDRESS was invited. */

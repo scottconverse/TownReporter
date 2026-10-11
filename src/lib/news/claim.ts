@@ -4,6 +4,7 @@ import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "../db.ts";
 import {
   acceptInvite,
+  cancelPendingEditorInvite,
   checkInvite,
   claimOwner,
   createInvite,
@@ -13,6 +14,7 @@ import {
   requireEditor,
   ForbiddenError,
   leaveAsEditor,
+  listPendingEditorInvites,
 } from "./membership";
 import { claimEmail, claimToken, recoveryCodeInput, setupCodeInput } from "./request-input.ts";
 import { burnSetupCode, isSetupCodeRequired, verifySetupCode } from "./setup-code.server.ts";
@@ -194,6 +196,24 @@ export const inviteEditor = createServerFn({ method: "POST" })
       if (err instanceof ForbiddenError) return { ok: false as const, error: err.message };
       throw err;
     }
+  });
+
+export const listMyPendingInvites = createServerFn({ method: "GET" })
+  .middleware([authMiddleware])
+  .handler(async ({ context }) => listPendingEditorInvites(context.userId));
+
+export const cancelMyPendingInvite = createServerFn({ method: "POST" })
+  .middleware([authMiddleware])
+  .validator((value: unknown) => {
+    const id = Number(value);
+    if (!Number.isInteger(id) || id <= 0) throw new Error("A pending invite id is required.");
+    return id;
+  })
+  .handler(async ({ context, data: inviteId }) => {
+    const cancelled = await cancelPendingEditorInvite(context.userId, inviteId);
+    return cancelled
+      ? { ok: true as const }
+      : { ok: false as const, error: "That invite is no longer pending." };
   });
 
 /** Anonymous: is this invite link live? Names only the invited address. */

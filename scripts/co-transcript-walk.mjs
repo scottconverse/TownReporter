@@ -354,10 +354,17 @@ try {
   step("Copy all copies the whole tape as plain text, [h:mm:ss] and all");
 
   /* Download original: the stored bytes, under the stored name. */
-  const [download] = await Promise.all([
+  const [download, originalResponse] = await Promise.all([
     transcriptTab.waitForEvent("download"),
+    transcriptTab.waitForResponse((response) =>
+      response.url().includes("/api/transcript-file") && response.status() === 200,
+    ),
     transcriptTab.getByRole("link", { name: /Download original file/ }).click(),
   ]);
+  must(
+    originalResponse.headers()["content-type"] === "application/xml",
+    `the stored srv3 is XML, the download response type is ${originalResponse.headers()["content-type"]}`,
+  );
   const downloaded = join(WORK, "downloaded.srv3");
   await download.saveAs(downloaded);
   const downloadedBytes = readFileSync(downloaded);

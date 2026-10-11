@@ -1,5 +1,6 @@
-import { readFile, realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { lstat, mkdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /**
  * The editorial voice, kept at arm's length.
@@ -27,9 +28,82 @@ import { isAbsolute, relative, resolve } from "node:path";
  */
 export const VOICE_ENV = "TOWNREPORTER_VOICE_FILE";
 
-export const VOICE_MISSING =
-  `No editorial voice is configured. Set ${VOICE_ENV} in .env to the full path of ` +
-  `the voice file, which must live outside this repository.`;
+export const VOICE_MISSING = "The paper's editorial voice has not been set. Add it on the Opinion screen, or choose Write anyway.";
+
+export type VoiceMode = "paper" | "neutral";
+const NEUTRAL_HOUSE_VOICE = `Write as a neutral local newspaper editorial desk. Use clear, direct language and distinguish verified facts from interpretation. Attribute opinions and evidence to their sources. Do not imply that the paper has a position beyond what the editor explicitly requested. Do not invent facts, quotes, or commitments.`;
+
+function dataRoot(): string {
+  const configured = process.env.TOWNREPORTER_DATA_ROOT?.trim() || process.env.TOWNREPORTER_DATA_DIR?.trim();
+  return configured ? resolve(configured) : join(homedir(), ".townreporter-data");
+}
+
+function voicePath(mode: VoiceMode = "paper"): { path: string; error?: string } {
+  if (mode === "neutral") return { path: join(dataRoot(), "editorial-neutral-voice.txt") };
+  const raw = process.env[VOICE_ENV]?.trim();
+  if (!raw) return { path: join(dataRoot(), "editorial-voice.txt") };
+  if (!isAbsolute(raw)) {
+    return { path: raw, error: `${VOICE_ENV} must be an absolute path outside this repository.` };
+  }
+  return { path: raw };
+}
+
+async function safeVoicePath(path: string): Promise<{ path: string; error?: string }> {
+  if (!isAbsolute(path)) return { path, error: "The voice file path must be absolute." };
+  const missing: string[] = [];
+  let current = resolve(path);
+  let candidate = current;
+  for (;;) {
+    try {
+      candidate = await realpath(current);
+      for (const part of missing) candidate = join(candidate, part);
+      break;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) break;
+      missing.unshift(basename(current));
+      current = parent;
+    }
+  }
+  let repo = process.cwd();
+  try {
+    repo = await realpath(process.cwd());
+  } catch {
+    /* The process working directory normally resolves. */
+  }
+  const rel = relative(repo, candidate);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+    return {
+      path: candidate,
+      error: "The paper's editorial voice must be stored outside this public repository.",
+    };
+  }
+  return { path: candidate };
+}
+
+async function prepareNeutralVoice(): Promise<
+  { ok: true; path: string } | { ok: false; error: string }
+> {
+  const target = voicePath("neutral").path;
+  try {
+    if ((await lstat(target)).isSymbolicLink()) {
+      return { ok: false, error: "The neutral house voice could not be prepared." };
+    }
+  } catch {
+    /* The target has not been written yet. */
+  }
+  const safe = await safeVoicePath(target);
+  if (safe.error) return { ok: false, error: safe.error };
+  try {
+    await mkdir(dirname(safe.path), { recursive: true, mode: 0o700 });
+    const checked = await safeVoicePath(safe.path);
+    if (checked.error) return { ok: false, error: checked.error };
+    await writeFile(checked.path, NEUTRAL_HOUSE_VOICE, { encoding: "utf8", mode: 0o600 });
+    return { ok: true, path: checked.path };
+  } catch {
+    return { ok: false, error: "The neutral house voice could not be prepared." };
+  }
+}
 
 export type VoiceFile = {
   /** Absolute path. The ONLY thing that leaves this module. */
@@ -43,76 +117,63 @@ export type VoiceFile = {
  * Never throws: a missing voice must degrade to "you cannot write an editorial
  * yet", not to a stack trace on the desk.
  */
-export async function findVoiceFile(): Promise<
+export async function findVoiceFile(mode: VoiceMode = "paper"): Promise<
   { ok: true; voice: VoiceFile } | { ok: false; error: string }
 > {
-  const raw = process.env[VOICE_ENV]?.trim();
-  if (!raw) return { ok: false, error: VOICE_MISSING };
-
-  const path = isAbsolute(raw) ? raw : resolve(process.cwd(), raw);
-
-  /*
-    A relative path would resolve against the app's working directory, which is
-    inside the public repo. Refuse rather than quietly read a file from there.
-  */
-  if (!isAbsolute(raw)) {
-    return {
-      ok: false,
-      error: `${VOICE_ENV} must be an absolute path outside this repository. Got a relative path.`,
-    };
-  }
-
-  /*
-    Canonicalise BOTH sides before comparing.
-
-    This was a lexical `startsWith` on the raw strings, which an audit noted
-    could be walked around (ENG-009): an absolute path outside the checkout
-    that is a symlink or a junction back to a file inside it passes the string
-    test, and `stat` follows links — so the "outside this repository" promise
-    was stronger than the check enforcing it.
-
-    `realpath` resolves links on both sides and `relative` then answers the
-    containment question properly, instead of a prefix match that would also
-    treat a sibling directory sharing the repository's name as inside it.
-
-    A path that does not exist yet cannot be canonicalised; that case falls
-    through to the `stat` below, which reports it honestly.
-  */
-  let realCandidate = path;
-  let realRepo = process.cwd();
+  const neutral = mode === "neutral" ? await prepareNeutralVoice() : null;
+  if (neutral && !neutral.ok) return neutral;
+  const target = neutral?.ok ? { path: neutral.path } : voicePath(mode);
+  if (target.error) return { ok: false, error: target.error };
+  const safe = await safeVoicePath(target.path);
+  if (safe.error) return { ok: false, error: safe.error };
   try {
-    realCandidate = await realpath(path);
-  } catch {
-    /* not there yet — stat reports it below */
-  }
-  try {
-    realRepo = await realpath(process.cwd());
-  } catch {
-    /* cwd resolves in practice */
-  }
-
-  const rel = relative(realRepo, realCandidate);
-  const inRepo = rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
-  if (inRepo) {
-    return {
-      ok: false,
-      error:
-        `${VOICE_ENV} resolves to a file inside this repository, which is public. ` +
-        `Move the voice file somewhere outside it and update the path. ` +
-        `A link that points back inside counts as inside.`,
-    };
-  }
-
-  try {
-    const info = await stat(realCandidate);
+    const info = await stat(safe.path);
     if (!info.isFile()) return { ok: false, error: `${VOICE_ENV} does not point at a file.` };
-    if (info.size < 500) {
+    if (mode === "paper" && info.size < 500) {
       return { ok: false, error: `The voice file at ${VOICE_ENV} looks empty or truncated.` };
     }
-    return { ok: true, voice: { path, bytes: info.size } };
+    return { ok: true, voice: { path: safe.path, bytes: info.size } };
   } catch {
-    // The path itself is safe to name — it is a location, not the writing.
-    return { ok: false, error: `Cannot read the voice file at ${path}.` };
+    return { ok: false, error: mode === "paper" ? VOICE_MISSING : "The neutral house voice could not be prepared." };
+  }
+}
+
+/** Read or replace the owner-managed voice without returning its filesystem path. */
+export async function getPaperVoiceText(): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const found = await findVoiceFile();
+  if (!found.ok) {
+    if (found.error === VOICE_MISSING) return { ok: true, text: "" };
+    return found;
+  }
+  try {
+    const text = await readFile(found.voice.path, "utf8");
+    return { ok: true, text };
+  } catch {
+    return { ok: false, error: "The paper's editorial voice could not be read." };
+  }
+}
+
+export async function savePaperVoiceText(text: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const normalized = text.trim();
+  const byteLength = Buffer.byteLength(normalized, "utf8");
+  if (byteLength < 500) return { ok: false, error: "Add at least 500 characters so the voice has enough direction." };
+  if (byteLength > 200_000) return { ok: false, error: "The voice is over 200,000 bytes. Shorten it and save again." };
+  const target = voicePath();
+  if (target.error) return { ok: false, error: target.error };
+  const safe = await safeVoicePath(target.path);
+  if (safe.error) return { ok: false, error: safe.error };
+  let temporary: string | undefined;
+  try {
+    await mkdir(dirname(safe.path), { recursive: true, mode: 0o700 });
+    const checked = await safeVoicePath(safe.path);
+    if (checked.error) return { ok: false, error: checked.error };
+    temporary = `${checked.path}.tmp-${crypto.randomUUID()}`;
+    await writeFile(temporary, normalized, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await rename(temporary, checked.path);
+    return { ok: true };
+  } catch {
+    if (temporary) await unlink(temporary).catch(() => {});
+    return { ok: false, error: "The paper's editorial voice could not be saved." };
   }
 }
 
@@ -122,10 +183,14 @@ export async function findVoiceFile(): Promise<
  * wrapper so a future provider cannot inherit an existing authorization by
  * accident (see the two exports immediately below).
  */
-async function readVoiceText(): Promise<
+async function readVoiceText(mode: VoiceMode = "paper"): Promise<
   { ok: true; text: string } | { ok: false; error: string }
 > {
-  const found = await findVoiceFile();
+  if (mode === "neutral") {
+    const neutral = await prepareNeutralVoice();
+    return neutral.ok ? { ok: true, text: NEUTRAL_HOUSE_VOICE } : neutral;
+  }
+  const found = await findVoiceFile(mode);
   if (!found.ok) return found;
   try {
     // Resolve again at the read boundary. Callers cannot use this helper to
@@ -137,7 +202,7 @@ async function readVoiceText(): Promise<
     }
     return { ok: true, text };
   } catch {
-    return { ok: false, error: `Cannot read the voice file configured by ${VOICE_ENV}.` };
+    return { ok: false, error: "The paper's editorial voice could not be read." };
   }
 }
 
@@ -168,10 +233,10 @@ export async function readVoiceTextForOpenAiCodex(): Promise<
  * Destination-named for the same reason `readVoiceTextForOpenAiCodex`
  * is: so a future provider cannot inherit this authorization accidentally.
  */
-export async function readVoiceTextForLocalModel(): Promise<
+export async function readVoiceTextForLocalModel(mode: VoiceMode = "paper"): Promise<
   { ok: true; text: string } | { ok: false; error: string }
 > {
-  return readVoiceText();
+  return readVoiceText(mode);
 }
 
 /**

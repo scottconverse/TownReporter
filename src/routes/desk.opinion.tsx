@@ -15,11 +15,14 @@ import {
   fileWrittenEditorial,
   getEditorial,
   getFailedEditorialMaterial,
+  getPaperEditorialVoice,
   listEditorials,
   opinionReadiness,
   publishEditorial,
+  savePaperEditorialVoice,
   startEditorial,
 } from "@/lib/news/opinion";
+import { myDesk } from "@/lib/news/claim";
 import { editorDraftError, stalledRunCopy } from "@/lib/news/desk-copy";
 import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
@@ -76,6 +79,8 @@ function OpinionPage() {
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
+  const [paperVoiceText, setPaperVoiceText] = useState("");
+  const [paperVoiceNotice, setPaperVoiceNotice] = useState<{ text: string; kind: "error" | "success" } | null>(null);
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [startWarning, setStartWarning] = useState<{key: string; sentence: string} | null>(null);
   const acceptedOverrides = useRef<string[]>([]);
@@ -91,6 +96,7 @@ function OpinionPage() {
   */
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
+  const startVoiceMode = useRef<"paper" | "neutral">("paper");
   useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, retryRequestId]);
   /*
     F3b: F3 stores the first-run default for Opinion's scope too, and this page
@@ -159,6 +165,28 @@ function OpinionPage() {
     queryKey: ["opinion-ready", modelChoice],
     queryFn: () => opinionReadiness({ data: modelChoice }),
   });
+  const deskIdentity = useQuery({ queryKey: ["my-desk"], queryFn: () => myDesk() });
+  const paperVoice = useQuery({
+    queryKey: ["paper-editorial-voice"],
+    queryFn: () => getPaperEditorialVoice(),
+    enabled: deskIdentity.data?.role === "owner",
+  });
+  useEffect(() => {
+    if (paperVoice.data?.ok) setPaperVoiceText(paperVoice.data.text);
+  }, [paperVoice.data]);
+  const saveVoice = useMutation({
+    mutationFn: (text: string) => savePaperEditorialVoice({ data: text }),
+    onSuccess: (result) => {
+      if (!result.ok) {
+        setPaperVoiceNotice({ text: result.error, kind: "error" });
+        return;
+      }
+      setPaperVoiceNotice({ text: "The paper's editorial voice is saved.", kind: "success" });
+      void qc.invalidateQueries({ queryKey: ["paper-editorial-voice"] });
+      void qc.invalidateQueries({ queryKey: ["opinion-ready"] });
+    },
+    onError: () => setPaperVoiceNotice({ text: "The paper's editorial voice could not be saved.", kind: "error" }),
+  });
 
   const list = useQuery({
     queryKey: ["editorials"],
@@ -222,7 +250,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: (override?: string[]) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, documentIds: documents.map((d) => d.id), retryRequestId, override } }),
+    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         if (res && "warning" in res) { setStartWarning(res.warning); return; }
@@ -336,14 +364,24 @@ function OpinionPage() {
           Check again
         </InkButton>
       </div>
-    ) : ready.data && !ready.data.ready ? (
+    ) : ready.data && !ready.data.modelReady ? (
       <div role="alert" className="border border-rust/35 bg-paper-2 px-3 py-2.5 text-sm text-rust">
-        <b>This desk cannot write yet.</b>
+        <b>No writing model is ready yet.</b>
         <ul className="mt-1 list-disc pl-5">
-          {ready.data.problems.map((problem, index) => (
+          {ready.data.modelProblems.map((problem, index) => (
             <li key={`${index}-${problem}`}>{problem}</li>
           ))}
         </ul>
+      </div>
+    ) : ready.data && !ready.data.voiceReady ? (
+      <div role="status" className="border border-rule bg-paper-2 px-3 py-2.5 text-sm text-ink">
+        The paper's editorial voice has not been saved.{" "}
+        {deskIdentity.data?.role === "owner" ? (
+          <a className="inline-link" href="#paper-editorial-voice">Paper's editorial voice</a>
+        ) : (
+          <span>Ask the owner to set the paper's voice on this screen.</span>
+        )}
+        {" "}You can also choose Write anyway to use a neutral house voice.
       </div>
     ) : null;
 
@@ -419,6 +457,53 @@ function OpinionPage() {
           {notice && notice.kind !== "error" ? notice.text : ""}
         </span>
       </div>
+      {deskIdentity.data?.role === "owner" ? (
+        <section id="paper-editorial-voice" className="mt-8 border border-rule bg-paper-2 p-4">
+          <h2 className="text-lg font-semibold">Paper's editorial voice</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted">
+            Paste the voice the paper uses, or load it from a text file. The desk saves it for future editorials.
+          </p>
+          {paperVoice.isError || (paperVoice.data && !paperVoice.data.ok) ? (
+            <p className="mt-2 text-sm text-rust" role="alert">The saved voice could not be loaded. You can paste a replacement below.</p>
+          ) : null}
+          <label className="mt-3 block text-sm font-medium">
+            Paper's editorial voice
+            <textarea
+              className={inputClass + " mt-1 w-full"}
+              rows={10}
+              value={paperVoiceText}
+              onChange={(event) => setPaperVoiceText(event.target.value)}
+              aria-label="Paper's editorial voice"
+            />
+          </label>
+          <label className="mt-3 block text-sm">
+            Load voice from a text file
+            <input
+              className="mt-1 block min-h-11 max-w-full border border-rule bg-paper px-3 py-2"
+              type="file"
+              accept=".txt,.md,text/plain,text/markdown"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                void file.text().then((text) => {
+                  setPaperVoiceText(text);
+                  setPaperVoiceNotice({ text: "Text file loaded. Save to use this voice.", kind: "success" });
+                });
+              }}
+            />
+          </label>
+          {paperVoiceNotice ? (
+            <p className={paperVoiceNotice.kind === "error" ? "mt-2 text-sm text-rust" : "mt-2 text-sm text-muted"} role={paperVoiceNotice.kind === "error" ? "alert" : "status"}>
+              {paperVoiceNotice.text}
+            </p>
+          ) : null}
+          <div className="mt-3">
+            <InkButton tone="solid" disabled={saveVoice.isPending} onClick={() => saveVoice.mutate(paperVoiceText)}>
+              {saveVoice.isPending ? "Saving…" : "Save paper's voice"}
+            </InkButton>
+          </div>
+        </section>
+      ) : null}
       <div className="astra-2col wide">
         {/*
           CY item 8. The drawing draws the AI intake as a *door*, not as an open
@@ -495,12 +580,15 @@ function OpinionPage() {
           {startWarning ? <OverrideAnyway warning={startWarning} actionWord="Write"
             busy={start.isPending} onOverride={() => {
               acceptedOverrides.current = [...new Set([...acceptedOverrides.current, startWarning.key])];
-              start.mutate(acceptedOverrides.current);
+              start.mutate({ override: acceptedOverrides.current, voiceMode: startVoiceMode.current });
             }} /> : null}
           <div className="astra-panel-acts">
             <InkButton
               tone="solid"
-              onClick={() => start.mutate(undefined)}
+              onClick={() => {
+                startVoiceMode.current = "paper";
+                start.mutate({ voiceMode: "paper" });
+              }}
               disabled={
                 start.isPending ||
                 ready.isPending ||
@@ -517,6 +605,26 @@ function OpinionPage() {
                   ? "Checking…"
                   : "Write an editorial"}
             </InkButton>
+            {ready.data && !ready.data.voiceReady ? (
+              <InkButton
+                tone="quiet"
+                disabled={
+                  start.isPending ||
+                  ready.isPending ||
+                  ready.isFetching ||
+                  ready.isError ||
+                  (subject.trim().length < 6 && documents.length === 0) ||
+                  documentsBusy ||
+                  !ready.data.modelReady
+                }
+                onClick={() => {
+                  startVoiceMode.current = "neutral";
+                  start.mutate({ voiceMode: "neutral" });
+                }}
+              >
+                Write anyway
+              </InkButton>
+            ) : null}
             {/*
               CY item 8: a shut door needs a way back. Card two has had a
               "Cancel" on its own disclosure since it was built; this is the
@@ -526,6 +634,16 @@ function OpinionPage() {
               Cancel
             </InkButton>
           </div>
+          {ready.data && !ready.data.voiceReady ? (
+            <p className="mt-2 text-sm text-muted" role="note">
+              Write an editorial is disabled until a voice is saved.{" "}
+              {deskIdentity.data?.role === "owner" ? (
+                <a className="inline-link" href="#paper-editorial-voice">Set the paper's editorial voice</a>
+              ) : (
+                "Ask the owner to set the paper's editorial voice."
+              )}
+            </p>
+          ) : null}
           </div>
           </div>
         ) : (

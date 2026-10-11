@@ -227,7 +227,8 @@ export function lastDraftWhen(iso: string | null | undefined, now: Date = new Da
  * "Last draft: Codex Sol, ". A draft whose model the desk never recorded is
  * not a draft that was written at an unknown hour.
  */
-export function lastDraftLine(input: { modelLabel: string; when: string }): string {
+export function lastDraftLine(input: { modelLabel: string; when: string; draftSaved?: boolean }): string {
+  if (input.draftSaved === false) return "";
   if (!input.when.trim()) return "";
   const model = input.modelLabel.trim();
   return model ? `Last draft: ${model}, ${input.when}` : `Last draft: ${input.when}`;

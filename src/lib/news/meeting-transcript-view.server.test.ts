@@ -12,6 +12,7 @@ import {
   readTranscriptOriginal,
   resolveTranscriptArtifact,
 } from "./meeting-transcript-view.server.ts";
+import * as transcriptDownloadModule from "./meeting-transcript-view.server.ts";
 import { TranscriptViewRefused, transcriptPlainText } from "./meeting-transcript-view.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "co-transcript-"));
@@ -128,6 +129,21 @@ describe("meeting transcript view", () => {
     assert.equal(original.filename, "transcript-9f.srv3");
     assert.deepEqual(Buffer.from(original.bytes), file.bytes);
     assert.equal(original.storagePath, file.path);
+  });
+
+  it("FC12 downloads the original transcript with its stored name and format type", () => {
+    const helpers = transcriptDownloadModule as unknown as Record<string, unknown>;
+    const mimeType = helpers.transcriptOriginalMimeType;
+    const contentDisposition = helpers.transcriptOriginalContentDisposition;
+    assert.equal(typeof mimeType, "function", "the original format selects a download media type");
+    assert.equal(typeof contentDisposition, "function", "the download preserves its original file name");
+    if (typeof mimeType !== "function" || typeof contentDisposition !== "function") return;
+
+    assert.equal((mimeType as (name: string) => string)("meeting-council.srv3"), "application/xml");
+    assert.equal((mimeType as (name: string) => string)("captions.csv"), "text/csv");
+    const header = (contentDisposition as (name: string) => string)("council résumé.srv3");
+    assert.match(header, /filename="council r_sum_.srv3"/);
+    assert.match(header, /filename\*=UTF-8''council%20r%C3%A9sum%C3%A9.srv3/);
   });
 
   it("refuses to serve bytes that no longer match the hash recorded on the row", async () => {

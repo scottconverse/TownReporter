@@ -505,6 +505,8 @@ export async function persistWholeMeetingAccounting(
     runStats: RunStats;
   },
 ): Promise<void> {
+  const wholeSeconds = (seconds: number | null | undefined): number | null =>
+    seconds == null || !Number.isFinite(seconds) ? null : Math.round(seconds);
   for (const item of input.ledger) {
     await sql`
       insert into meeting_ledger_items
@@ -513,7 +515,7 @@ export async function persistWholeMeetingAccounting(
       values (
         ${input.newsroomId},${input.draftId},${input.leadId},${item.itemNo},
         ${storableText(item.kind).slice(0, 60)},${storableText(item.text)},
-        ${item.startSeconds},${item.endSeconds ?? null},${item.packetPage},
+        ${wholeSeconds(item.startSeconds) ?? 0},${wholeSeconds(item.endSeconds)},${item.packetPage},
         ${item.status},${storableText(item.reason)},
         ${storableText(item.sourceExcerpt)},
         ${storableText(item.voteResult ?? "")},${storableText(item.voteTally ?? "")},
