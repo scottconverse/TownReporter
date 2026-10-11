@@ -60,7 +60,7 @@ test("all rendered AI model pickers use the shared full option list", () => {
       `${scope} must offer the complete shared model list`,
     );
     assert.deepEqual(
-      choices.map(({ label }) => label.split(" — ")[0]),
+      choices.map(({ label }) => label.replace(/\s+[—·]\s+.*$/, "")),
       expected.map(({ label }) => label),
       `${scope} must use the shared model names`,
     );
