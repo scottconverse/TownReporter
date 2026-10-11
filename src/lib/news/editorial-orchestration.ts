@@ -35,6 +35,8 @@ export type WriteEditorialInput = {
   /** The paper this runs in, for the desk note; the Longmont default when absent. */
   paper?: NewsroomIdentity;
   modelChoice?: OpinionModelChoice;
+  /** Which writing voice was chosen when this Opinion request was queued. */
+  voiceMode?: "paper" | "neutral";
   modelEffort?: ModelEffort | null;
   /** Exact local endpoint/model preflighted when this queued request was created. */
   localModel?: LocalModelOverride;
@@ -77,7 +79,7 @@ export type WriteEditorialResult =
 type ChatResult = { ok: true; text: string } | { ok: false; error: string };
 
 export type EditorialOrchestrationRuntime = {
-  findVoiceFile: () => Promise<
+  findVoiceFile: (mode?: "paper" | "neutral") => Promise<
     { ok: true; voice: { path: string; bytes: number } } | { ok: false; error: string }
   >;
   runClaudePair: (context: {
@@ -208,7 +210,7 @@ export async function orchestrateEditorial(
   input: WriteEditorialInput,
   runtime: EditorialOrchestrationRuntime,
 ): Promise<WriteEditorialResult> {
-  const found = await runtime.findVoiceFile();
+  const found = await runtime.findVoiceFile(input.voiceMode);
   if (!found.ok) return { ok: false, error: found.error };
 
   const researchPack = buildEditorialPack({

@@ -4286,6 +4286,24 @@
     gap: 8px;
   }
 }
+/* Large text plus a paper with many long section names can make the one-line
+   Queue filter bar wider than the page at 1440px. Put the filters on their own
+   line through the desktop width where the long select still needs room. */
+@media (min-width: 1280px) and (max-width: 1535px) {
+  .desk-ltr.astra .queue-controls {
+    flex-wrap: wrap;
+  }
+  .desk-ltr.astra .queue-tabs {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+  .desk-ltr.astra .queue-filters {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+}
 /* The filter strip the redesign draws on Queue and Drafts: one bordered row of
    segment choices, the active one filled with ink. `.seg-opt` in styles.css
    sets its own 5px/12px padding and falls to a 40px floor at <=700
