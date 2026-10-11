@@ -29,8 +29,8 @@ import { KillDialog } from "@/components/dialogs/KillDialog";
 import { EditLeadDialog } from "@/components/dialogs/EditLeadDialog";
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import { deleteLead, listLeads, listPublishedDesk, listQueuePage, listScans, restoreKilledLead } from "@/lib/news/desk";
-import { draftLead, fileLead, runScan, setLeadStatus } from "@/components/scoped-actions";
+import { deleteLead, listLeads, listPublishedDesk, listQueuePage, listScans, restoreKilledLead, setLeadStatus } from "@/lib/news/desk";
+import { draftLead, fileLead, runScan } from "@/components/scoped-actions";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
   duplicateKillReason,
@@ -68,6 +68,7 @@ import {
   type KillUndoPress,
   type RestoreStatus,
 } from "@/components/fast-kill";
+import { bulkDeskWarnings, bulkDeskRetry, bulkWarningSentence, deskWarning, withDeskOverride, type BulkDeskWarning } from "@/lib/news/desk-warning";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
@@ -177,6 +178,8 @@ function QueuePage() {
   */
   const saveKillReason = useDeskMutation({
     mutationFn: (request: KillReasonRequest) => setLeadStatus({ data: request.data }),
+    warningAction: "Kill",
+    overrideVariables: (request, keys) => ({ ...request, data: withDeskOverride(request.data, keys) }),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Keeping the reason…",
     done: () => "",
@@ -239,6 +242,7 @@ function QueuePage() {
       status: "held" | "killed" | "new";
       killReason?: string;
       killReasonUrl?: string;
+      override?: string[];
       release?: boolean;
       /*
         Carried by a kill press only, and never sent from here: it is the status
@@ -253,6 +257,7 @@ function QueuePage() {
       status: input.status,
       killReason: input.killReason,
       killReasonUrl: input.killReasonUrl,
+      override: input.override,
     } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
@@ -273,6 +278,7 @@ function QueuePage() {
       A row's own Hold/Kill, which is the same mutation, is never muted.
     */
     muted: () => bulkMuted.current,
+    warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
     done: (_result, input) =>
       input.release
@@ -307,8 +313,8 @@ function QueuePage() {
                 press, not guessed -- and it goes through `undoKill`, the one
                 write that may restore `drafted`; `setStatus` would refuse it.
               */
-              if (input.release) {
-                await setStatus.mutateAsync({ id: input.id, status: "held" as const });
+              if (input.release || input.status === "held") {
+                await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
                 return;
               }
               await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
@@ -322,7 +328,7 @@ function QueuePage() {
     */
     chips: (_result, input) =>
       input.status === "killed" ? (
-        <KillReasonChips leadId={input.id} save={(request) => saveKillReason.mutate(request)} />
+        <KillReasonChips leadId={input.id} save={(request) => saveKillReason.mutate({ ...request, data: withDeskOverride(request.data, input.override ?? []) })} />
       ) : null,
     /*
       And that toast lives longer than an ordinary one, because it is the only
@@ -337,10 +343,15 @@ function QueuePage() {
    * recorded (migration 0094). It rejects on failure so the row can say
    * "That did not save." instead of looking like it worked.
    */
-  const killAsDuplicate = useMutation({
-    mutationFn: (input: { id: number; killReason: string }) =>
-      setLeadStatus({ data: { id: input.id, status: "killed", killReason: input.killReason } }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+  const killAsDuplicate = useDeskMutation({
+    mutationFn: (input: { id: number; killReason: string; override?: string[]; restore?: RestoreStatus }) =>
+      setLeadStatus({ data: { ...input, status: "killed" } }),
+    warningAction: "Kill",
+    after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
+    pending: "Killing…",
+    done: () => "The lead moved to Killed.",
+    undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new")); } }),
+    failedLead: "Could not kill that lead. ",
   });
   const remove = useMutation({
     mutationFn: (id: number) => deleteLead({ data: id }),
@@ -789,7 +800,7 @@ function QueuePage() {
         });
         break;
       case "hold":
-        if (lead) setHoldFor(lead);
+        if (lead) setStatus.mutate({ id: lead.id, status: "held" });
         break;
       case "kill":
         /*
@@ -932,12 +943,11 @@ function QueuePage() {
     invalidation), `Promise.allSettled` collects the results, and the batch is
     reported in one sentence under one id.
   */
+  type BulkPress = { ids: number[]; status: "held" | "killed"; killReason?: string;
+    overrideById?: Record<number, string[]>; completedIds?: number[]; previousFailures?: string[]; restores?: Record<number, RestoreStatus> };
+  const [bulkWarnings, setBulkWarnings] = useState<{ warnings: BulkDeskWarning[]; press: BulkPress } | null>(null);
   const bulkStatus = useMutation({
-    mutationFn: async (input: {
-      ids: number[];
-      status: "held" | "killed";
-      killReason?: string;
-    }) => {
+    mutationFn: async (input: BulkPress) => {
       /*
         The per-item toasts are suppressed for exactly as long as the batch is
         in flight: `setStatus` would otherwise speak once per lead, and this
@@ -947,20 +957,24 @@ function QueuePage() {
       try {
         const settled = await Promise.allSettled(
           input.ids.map((id) =>
-            setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason }),
+            setStatus.mutateAsync({ id, status: input.status, killReason: input.killReason, override: input.overrideById?.[id], restore: input.restores?.[id] }),
           ),
         );
-        return bulkStatusReport({
-          status: input.status,
-          ids: input.ids,
-          settled,
+        const warnings = bulkDeskWarnings(input.ids, settled);
+        const allowed = input.ids.map((id, index) => ({ id, outcome: settled[index] })).filter(({ outcome }) => outcome.status !== "fulfilled" || !deskWarning(outcome.value));
+        const report = bulkStatusReport({
+          status: input.status, ids: allowed.map(item => item.id), settled: allowed.map(item => item.outcome),
           reason: (error) => deskErrorReason(error, input.status === "held" ? "hold that lead" : "kill that lead"),
         });
+        const undoIds = [...new Set([...(input.completedIds ?? []), ...report.undoIds])];
+        return { ...report, done: undoIds.length, undoIds, warnings, failures: [...(input.previousFailures ?? []), ...report.failures] };
       } finally {
         bulkMuted.current = false;
       }
     },
-    onSuccess: (report) => {
+    onSuccess: (report, input) => {
+      setBulkWarnings(report.warnings.length ? { warnings: report.warnings, press: { ...input, completedIds: report.undoIds, previousFailures: report.failures } } : null);
+      if (report.warnings.length && !report.done && !report.failures.length) return;
       const summary = bulkStatusSummary(report);
       deskToast(summary, {
         tone: report.failures.length ? "err" : "ok",
@@ -972,7 +986,9 @@ function QueuePage() {
                 label: BULK_STATUS_UNDO_LABEL,
                 run: async () => {
                   const back = await Promise.allSettled(
-                    report.undoIds.map((id) => setStatus.mutateAsync({ id, status: "new" })),
+                    report.undoIds.map((id) => input.status === "killed"
+                      ? undoKill.mutateAsync(killUndoPress(id, input.restores?.[id] ?? "new"))
+                      : setStatus.mutateAsync({ id, status: "new", override: input.overrideById?.[id] })),
                   );
                   const failed = back.filter((r) => r.status === "rejected").length;
                   if (failed > 0)
@@ -1010,10 +1026,10 @@ function QueuePage() {
     const ids = selectedLeads.map((lead) => lead.id);
     if (ids.length === 0) return;
     if (status === "killed" && reason !== undefined && reason.trim()) {
-      bulkStatus.mutate({ ids, status, killReason: reason.trim() });
+      bulkStatus.mutate({ ids, status, killReason: reason.trim(), restores: Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)])) });
       return;
     }
-    bulkStatus.mutate({ ids, status });
+    bulkStatus.mutate({ ids, status, restores: Object.fromEntries(selectedLeads.map(l => [l.id, restoreStatus(l.status)])) });
   };
   const bulkBusy =
     setStatus.isPending || bulkStatus.isPending || startBatch.isPending || bulkRemove.isPending;
@@ -1338,9 +1354,7 @@ function QueuePage() {
                       leads would be a different record than the desk drew), so
                       that press keeps the immediate hold it has today.
                     */
-                    const only = selectedLeads.length === 1 ? selectedLeads[0] : null;
-                    if (only) setHoldFor(only);
-                    else bulkSetStatus("held");
+                    bulkSetStatus("held");
                   }}
                 >
                   Hold
@@ -1509,6 +1523,13 @@ function QueuePage() {
           </InkButton>
         </div>
       ) : null}
+      {bulkWarnings ? <div className="queue-bulk" role="status">
+        <span>{bulkWarningSentence(bulkWarnings.warnings)}</span>{" "}
+        <InkButton disabled={bulkStatus.isPending} onClick={() => {
+          const { press, warnings } = bulkWarnings;
+          bulkStatus.mutate(bulkDeskRetry(press, warnings));
+        }}>{bulkWarnings.press.status === "killed" ? "Kill all anyway" : "Hold all anyway"}</InkButton>
+      </div> : null}
       {bulkDeleteNotice ? <Notice kind="ok">{bulkDeleteNotice}</Notice> : null}
       {undo != null ? (
         <Notice kind="ok">
@@ -1661,6 +1682,7 @@ function QueuePage() {
                     The state is the screen's because the mutation is.
                   */
                   backPending={setStatus.isPending && setStatus.variables?.id === l.id}
+                  onHold={() => setStatus.mutate({ id: l.id, status: "held" })}
                   onHoldWithReason={() => setHoldFor(l)}
                   onEdit={() => setEditFor(l)}
                   onDarkDesk={() => setDarkFor(l)}
@@ -1702,8 +1724,9 @@ function QueuePage() {
                    whoever reads it next. */
                     dupMatch
                       ? async () => {
-                          await killAsDuplicate.mutateAsync({
+                          return await killAsDuplicate.mutateAsync({
                             id: l.id,
+                            restore: restoreStatus(l.status),
                             killReason: duplicateKillReason(dupMatch.headline),
                           });
                         }

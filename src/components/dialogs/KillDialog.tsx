@@ -1,4 +1,6 @@
-import { setLeadStatus } from "@/components/scoped-actions";
+import { withEditorWarningAction } from "../editor-warning-consent.ts";
+import { askDeskToastOverride } from "../desk-toast.ts";
+import { setLeadStatus } from "@/lib/news/desk";
 import { useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { dialogPressProps } from "@/lib/news/dialog-press";
@@ -90,8 +92,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
     setBusy(withReason ? "primary" : "alt");
     setError("");
     try {
-      const res = await setLeadStatus({
-        data: {
+      const captured = {
           id: leadId,
           status: "killed",
           // The field is optional on the wire, so "Kill, no reason" sends it
@@ -99,8 +100,11 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
           // NULL anyway, and absent is what the schema means by "no reason".
           killReason: withReason && trimmed ? trimmed : undefined,
           killReasonUrl: withReason && url.trim() ? url.trim() : undefined,
-        },
-      });
+      };
+      const res = await withEditorWarningAction(
+        override => setLeadStatus({ data: { ...captured, status: "killed", override } }),
+        { action: "Kill" }, warning => { onOpenChange(false); return askDeskToastOverride(warning); },
+      );
       if (!res || typeof res !== "object" || !("ok" in res)) {
         setError("The desk did not answer. Nothing changed; try again.");
         return;

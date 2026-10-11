@@ -27,8 +27,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
+import * as toastLayer from "@/components/desk-toast";
 import { deskErrorReason, deskToast, type DeskUndo } from "@/components/desk-toast";
 import { refusedAnswer } from "@/lib/news/refused-answer";
+import { deskWarning, withDeskOverride } from "../lib/news/desk-warning.ts";
+
+let warningToastSequence = 0;
 
 /** Where a press is between being pressed and answering. */
 export type DeskPhase = "idle" | "pending" | "done" | "failed";
@@ -209,6 +213,10 @@ export function useDeskAction<Result>(copy: DeskActionCopy<Result>): DeskAction<
 
 export type DeskMutationOptions<Data, Variables> = DeskActionCopy<Data, Variables> & {
   mutationFn: (variables: Variables) => Promise<Data>;
+  /** The original press's verb, used by its explicit second press. */
+  warningAction?: string | ((variables: Variables) => string);
+  /** For transport envelopes whose override belongs inside `data`. */
+  overrideVariables?: (variables: Variables, keys: string[]) => Variables;
   /**
    * The press's own follow-up: the invalidations, the close, the navigate.
    *
@@ -354,11 +362,12 @@ export function useDeskMutation<Data, Variables = void>(
   options: DeskMutationOptions<Data, Variables>,
 ): UseMutationResult<Data, Error, Variables> {
   const optionsRef = useRef(options);
+  const warningIds = useRef(new Map<Variables, string>());
   useEffect(() => {
     optionsRef.current = options;
   });
 
-  return useMutation<Data, Error, Variables>({
+  const mutation = useMutation<Data, Error, Variables>({
     mutationFn: (variables: Variables) => optionsRef.current.mutationFn(variables),
     /*
       THE OPTIMISTIC HALF (FB6). `onMutate` runs before the call and its return
@@ -393,6 +402,26 @@ export function useDeskMutation<Data, Variables = void>(
       finished.
     */
     onSuccess: async (data: Data, variables: Variables, mutationContext: unknown) => {
+      const warning = deskWarning(data);
+      if (warning) {
+        optionsRef.current.rollback?.(contextOf(mutationContext), variables);
+        if (optionsRef.current.muted?.()) return;
+        const id = warningIds.current.get(variables) ?? `desk-warning-${++warningToastSequence}`;
+        warningIds.current.set(variables, id);
+        const action = optionsRef.current.warningAction;
+        const verb = typeof action === "function" ? action(variables) : action ?? "Continue";
+        deskToast(warning.sentence, {
+          tone: "warn", duration: Infinity, id,
+          action: { label: `${verb} anyway`, run: async () => {
+            const retry = optionsRef.current.overrideVariables?.(variables, [warning.key])
+              ?? withDeskOverride(variables, [warning.key]);
+            warningIds.current.delete(variables);
+            warningIds.current.set(retry, id);
+            await mutation.mutateAsync(retry);
+          } },
+        });
+        return;
+      }
       const refusal = deskAnswerFailure(data);
       if (refusal) {
         /*
@@ -403,7 +432,8 @@ export function useDeskMutation<Data, Variables = void>(
         */
         optionsRef.current.rollback?.(contextOf(mutationContext), variables);
         if (!optionsRef.current.muted?.())
-          deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err" });
+          deskToast(deskActionFailure(refusal, optionsRef.current), { tone: "err", id: warningIds.current.get(variables) });
+        warningIds.current.delete(variables);
         return;
       }
       try {
@@ -416,13 +446,19 @@ export function useDeskMutation<Data, Variables = void>(
           callers see the failure; `onError` recognises it and stays quiet.
         */
         const sentence = deskActionFailure(error, optionsRef.current);
-        if (!optionsRef.current.muted?.()) deskToast(sentence, { tone: "err" });
+        if (!optionsRef.current.muted?.()) deskToast(sentence, { tone: "err", id: warningIds.current.get(variables) });
+        warningIds.current.delete(variables);
         throw new DeskFollowUpError(sentence, error);
       }
       if (!optionsRef.current.muted?.()) {
         const { message, undo, chips, duration } = deskActionDone(data, variables, optionsRef.current);
-        if (message) deskToast(message, { tone: "ok", undo, chips, duration });
+        if (message) deskToast(message, { tone: "ok", undo, chips, duration, id: warningIds.current.get(variables) });
+        else {
+          const id = warningIds.current.get(variables);
+          if (id) toastLayer.dismissDeskToast(id);
+        }
       }
+      warningIds.current.delete(variables);
     },
     onError: (error: Error, variables: Variables, mutationContext: unknown) => {
       // A follow-up failure: the call itself took, so the row keeps its new state
@@ -430,9 +466,11 @@ export function useDeskMutation<Data, Variables = void>(
       if (isReportedFollowUpFailure(error)) return;
       optionsRef.current.rollback?.(contextOf(mutationContext), variables);
       if (optionsRef.current.muted?.()) return;
-      deskToast(deskActionFailure(error, optionsRef.current), { tone: "err" });
+      deskToast(deskActionFailure(error, optionsRef.current), { tone: "err", id: warningIds.current.get(variables) });
+      warningIds.current.delete(variables);
     },
   });
+  return mutation;
 }
 
 /*

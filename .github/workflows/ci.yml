@@ -534,6 +534,8 @@ jobs:
             echo "built server did not come up"; tail -n 80 /tmp/flows.log; exit 1;
           }
           node scripts/desk-flows-e2e.mjs
+      - name: Queue and Today Kill anyway, draft preservation and Undo
+        run: node scripts/desk-kill-anyway-walk.mjs
 
   # Directive item 5: an authenticated desk regression that walks Queue, Scan,
   # Sources, Published, Stats, and Server signed-in. The signed-in walk itself is

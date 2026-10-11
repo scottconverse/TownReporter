@@ -1,3 +1,6 @@
+import { holdLead } from "@/lib/news/editor-dialog-actions";
+import { withEditorWarningAction } from "../editor-warning-consent.ts";
+import { askDeskToastOverride } from "../desk-toast.ts";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
 import { addLead } from "@/components/scoped-actions";
 import { openDarkInvestigation, fileLead, writeStoryFromInput } from "@/components/scoped-actions";
@@ -52,7 +55,7 @@ import { dialogPressProps } from "@/lib/news/dialog-press";
 import { addSource, addSourcesBulk, findPasteDuplicate, listSources, saveDraft, suggestHeadlines } from "@/lib/news/desk";
 import type { DuplicateWarning } from "@/lib/news/import-review";
 
-import { chooseHeadline, findSources, holdLead } from "@/components/scoped-actions";
+import { chooseHeadline, findSources } from "@/components/scoped-actions";
 import { sourceKillPattern, weaveIntoStory } from "@/lib/news/editor-dialog-actions";
 import {
   addSourcesLabel,
@@ -1058,9 +1061,11 @@ export function HoldLeadDialog({ leadId, headline, open, onClose, onDone }: Hold
     press.run(async () => {
       setPressed(withReason ? "primary" : "alt");
       try {
-        const answer = await holdLead({
-          data: { id: leadId, ...holdRequest(state, withReason) },
-        });
+        const captured = { id: leadId, ...holdRequest(state, withReason) };
+        const answer = await withEditorWarningAction(
+          override => holdLead({ data: { ...captured, override } }),
+          { action: "Hold" }, warning => { onClose(); return askDeskToastOverride(warning); },
+        );
         if (!answer.ok) return { problem: answer.error };
         return done(
           answer.notice ??

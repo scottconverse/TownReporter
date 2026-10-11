@@ -1,3 +1,4 @@
+import { deskWarning } from "../lib/news/desk-warning.ts";
 import { useRef, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, DeskMoreMenu, InkButton, Score, type DeskMoreItem } from "@/components/desk-chrome";
@@ -80,7 +81,7 @@ export function LeadRowView({
    * shows saving/saved/failed in place, because a press that silently does
    * nothing is what this unit was opened about.
    */
-  onKillAsDuplicate?: () => Promise<void>;
+  onKillAsDuplicate?: () => Promise<unknown>;
   /**
    * Remove the lead entirely.
    *
@@ -304,7 +305,7 @@ export function LeadRowView({
               onClick={() => {
                 setDupKill("saving");
                 void Promise.resolve(onKillAsDuplicate()).then(
-                  () => setDupKill("saved"),
+                  result => setDupKill(deskWarning(result) ? "idle" : (result && typeof result === "object" && "ok" in result && result.ok === false) ? "failed" : "saved"),
                   () => setDupKill("failed"),
                 );
               }}
@@ -321,7 +322,7 @@ export function LeadRowView({
             onClick={() => {
               setDupKill("saving");
               void Promise.resolve(onKillAsDuplicate()).then(
-                () => setDupKill("saved"),
+                result => setDupKill(deskWarning(result) ? "idle" : (result && typeof result === "object" && "ok" in result && result.ok === false) ? "failed" : "saved"),
                 () => setDupKill("failed"),
               );
             }}
