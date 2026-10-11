@@ -38,6 +38,7 @@ const STORY_VALUES = [
   "claude-sonnet",
   "claude-haiku",
   "local-model",
+  "deepseek-flash",
 ] as const;
 
 /**
@@ -63,6 +64,7 @@ describe("model choice contract", () => {
         "Claude Sonnet",
         "Claude Haiku",
         "Local model",
+        "DeepSeek v4.1 Flash",
       ],
     );
   });
@@ -118,28 +120,20 @@ describe("model choice contract", () => {
     assert.match(STORY_MODEL_CHOICES[0].detail, /recommended/i);
   });
 
-  /*
-    UNIT U29 -- OPINION'S PICKER NAMES DEEPSEEK.
-
-    The owner's decision of 2026-09-30 ("use deepseek ... keep the picker
-    regardless") made DeepSeek v4.1 Flash Opinion's first Automatic rung and a
-    nameable choice there. The picker is otherwise the Story list exactly as it
-    was, and this pins both halves: every Story choice is still offered on
-    Opinion, and the ONE addition is the rung -- nothing else moved.
-  */
-  it("offers every Story choice on Opinion, plus the DeepSeek rung by name", () => {
+  /* The shared picker names the same models on every work surface. */
+  it("offers the same named choices on every picker surface", () => {
     const opinionValues = OPINION_MODEL_CHOICES.map((choice) => choice.value);
-    assert.deepEqual(opinionValues, [...STORY_VALUES, "deepseek-flash"]);
-    assert.deepEqual(
-      opinionValues.filter((value) => value !== "deepseek-flash"),
-      STORY_MODEL_CHOICES.map((choice) => choice.value),
-      "Opinion must not lose a single choice Story offers",
-    );
-    // And it is offered on Opinion ONLY: Story's own menu still reaches
-    // DeepSeek the way it always has, through Automatic.
-    assert.ok(!STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
-    assert.ok(!providersFor("dark").some((entry) => entry.id === "deepseek-flash"));
+    assert.deepEqual(opinionValues, STORY_MODEL_CHOICES.map((choice) => choice.value));
+    assert.deepEqual(opinionValues, STORY_VALUES);
+    for (const surface of ["scan", "follow-up", "dark"] as const) {
+      assert.ok(
+        providersFor(surface).some((entry) => entry.id === "deepseek-flash"),
+        `${surface} must offer the shared DeepSeek choice`,
+      );
+    }
+    assert.ok(STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
     assert.ok(!providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
+    assert.ok(!providersFor("ocr").some((entry) => entry.id === "deepseek-flash"));
 
     const deepseek = OPINION_MODEL_CHOICES.find((choice) => choice.value === "deepseek-flash")!;
     assert.equal(deepseek.label, "DeepSeek v4.1 Flash");
@@ -188,9 +182,8 @@ describe("model choice contract", () => {
   it("is selectable as Opinion's assignment in the Models screen", () => {
     assert.ok(jobModelOptions("opinion").some((option) => option.value === "deepseek-flash"));
     assert.ok(isOfferedForJob("opinion", "deepseek-flash"));
-    // A forced job's menu is a different list on purpose: a run that must name
-    // ONE runtime up front may not name a rung.
-    assert.ok(!isOfferedForJob("story-draft", "deepseek-flash"));
+    // Ordinary story writing may name the shared rung; forced OCR still may not.
+    assert.ok(isOfferedForJob("story-draft", "deepseek-flash"));
     assert.ok(!isOfferedForJob("ocr", "deepseek-flash"));
   });
 

@@ -86,6 +86,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
             usePaper: `() => ({city:"Longmont",timezone:"America/Denver"})`,
             useAreaLabels: `() => ({})`,
             useDeskJobs: `() => ({jobs:[], activeJobs:[]})`,
+            resolveJobModel: `() => ({providerId:"auto",effort:null,source:"surface-default",rank:null,notice:null})`,
             usePaperSetupGate: `() => ({blocked:false})`,
             auditDraft: `() => ({findings:[]})`,
             findingsWithIds: `() => []`,

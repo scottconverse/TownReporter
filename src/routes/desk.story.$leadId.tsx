@@ -123,6 +123,8 @@ import { defaultModelEffort, modelEffort as validatedModelEffort, type ModelEffo
 import { providerAvailability } from "@/lib/news/provider-availability";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
+import { getModelAssignmentsFn, MODEL_ASSIGNMENTS_QUERY_KEY } from "@/lib/news/model-assignments-settings";
+import { resolveJobModel } from "@/lib/news/model-assignments";
 /*
   The Writer / Effort bar's own lines (unit CW): the readiness dot, the
   last-draft line and the save line under the Story label. Each is derived,
@@ -292,6 +294,15 @@ function StoryPage() {
     scripted publish gets are the same ground, and neither is a decision nobody
     made.
   */
+  const modelAssignments = useQuery({
+    queryKey: MODEL_ASSIGNMENTS_QUERY_KEY,
+    queryFn: () => getModelAssignmentsFn(),
+    staleTime: 30_000,
+  });
+  const headlineAssignment = resolveJobModel({
+    jobKey: "headlines",
+    assignments: modelAssignments.data?.ok ? modelAssignments.data.assignments : [],
+  });
   const [area, setArea] = useState<string>(HOME_AREA);
   const [scratch, setScratch] = useState("");
   const [storyDirection, setStoryDirection] = useState("");
@@ -1585,7 +1596,14 @@ function StoryPage() {
   */
   const suggest = useMutation({
     mutationFn: () =>
-      suggestHeadlines({ data: { leadId: id, headline: headline.trim() || undefined } }),
+      suggestHeadlines({
+        data: {
+          leadId: id,
+          headline: headline.trim() || undefined,
+          modelChoice: headlineAssignment.providerId,
+          modelEffort: headlineAssignment.effort,
+        },
+      }),
     onSuccess: (res) => {
       if (!answered(res)) {
         setHeadlineNote(NO_ANSWER);
@@ -1598,7 +1616,9 @@ function StoryPage() {
       setHeadlineSuggestions(res.options);
       setHeadlineNote(
         res.options.length
-          ? ""
+          ? res.model
+            ? `Suggested by ${res.model}.`
+            : "Suggestions ready. The provider did not report which model ran."
           : "The story model offered no headlines this time. Your headline is exactly as you left it.",
       );
     },
@@ -4175,6 +4195,8 @@ function StoryPage() {
       <HeadlineDialog
         leadId={id}
         current={headline}
+        defaultModel={headlineAssignment.providerId}
+        defaultEffort={headlineAssignment.effort}
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {
