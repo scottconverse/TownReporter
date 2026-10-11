@@ -133,6 +133,7 @@ import {
   readinessDot,
   saveState,
   writerIsReady,
+  writerUnavailableReason,
 } from "@/lib/news/writer-bar";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
@@ -2235,6 +2236,7 @@ function StoryPage() {
           writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
       }),
       draftReadiness,
+      writerUnavailableReason({ choice: modelChoice, label: modelChoiceLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null }),
     );
   const heldPublishNote = heldForDraft.length && blockers.some(blocker => blocker.key === "readiness")
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`

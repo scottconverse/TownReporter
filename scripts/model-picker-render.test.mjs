@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ModelPicker, availabilityStub, registry, choiceModule } from "./model-picker-render.harness.mjs";
+import { ModelPicker, availabilityStub, registry, choiceModule, writerBar } from "./model-picker-render.harness.mjs";
 
 function render(props = {}) {
   // A completed readiness response; unknown readiness is exercised separately.
@@ -18,15 +18,15 @@ test("every Claude choice stays selected and warns before drafting when its CLI 
   try {
     const page = await browser.newPage();
     for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"]) for (const ready of [true, false]) {
-      availabilityStub.__setAvailability({ [choice]: ready });
+      availabilityStub.__setAvailability(Object.assign({ [choice]: ready }, { reasons: { [choice]: "Claude is signed out on this server. Sign in once: run claude auth login on the server." } }));
       const html = renderToStaticMarkup(createElement(ModelPicker, { value: choice, onChange() {} }));
       await page.setContent(html);
       const select = page.getByLabel("Writing model", { exact: true });
       assert.equal(await select.inputValue(), choice);
       assert.match(await select.locator("option:checked").innerText(), /Claude/);
       if (!ready) {
-        assert.match(await select.locator("option:checked").innerText(), /not set up/);
-        assert.match(await page.locator(".model-picker-help").first().innerText(), /Claude.*not ready.*Sign in/);
+        assert.match(await select.locator("option:checked").innerText(), /Claude is signed out on this server/);
+        assert.match(await page.locator(".model-picker-help").first().innerText(), /Claude is signed out.*Sign in once/);
       }
     }
   } finally {
@@ -55,7 +55,7 @@ test("an unreadable Gemini key is disclosed before the draft press", () => {
   availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
   try {
     const html = render({ value: "custom:gemini" });
-    assert.match(html, /cannot be decrypted.*Re-enter it/);
+    assert.match(html, /This connection&#x27;s key cannot be read.*Open Models and paste the key again/);
     assert.match(html, /value="custom:gemini"[^>]*disabled=""[^>]*selected=""/);
   } finally { availabilityStub.__setConnections([]); }
 });
@@ -194,15 +194,15 @@ test("the owner keeps the local model controls", () => {
   <option> that says so in its own text, and the help line names it too --
   whether or not it is the current selection.
 */
-test("an unavailable provider renders as a disabled option labelled 'not set up'", () => {
+test("an unavailable provider renders as a disabled option with its reason", () => {
   availabilityStub.__setAvailability({ "local-model": false });
   const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
   // Unit P item 7: the option shows the registry's short half-line, not the
   // 56-character clause that was clipped to "...or anot" in a 191px box.
-  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — backend not checked yet — not set up<\/option>/);
+  assert.match(html, /<option[^>]*value="local-model"[^>]* disabled=""[^>]*>Local model — backend not checked yet — TownReporter cannot reach a local model[\s\S]*?<\/option>/);
   // The option remains marked; provider help belongs to the selected model.
-  assert.doesNotMatch(html, /TownReporter cannot reach a local model\. Start LM Studio/);
-  assert.doesNotMatch(html, /then click Refresh\. See docs\/local-models\.md\./);
+  assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
+  assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);
 });
 
 /*
@@ -340,4 +340,35 @@ test("a stored SuperGrok choice on the forced surface falls back to Automatic", 
   matchesRetiredNote(html);
   assert.match(html, /value="auto"[^>]*selected=""/);
   assert.doesNotMatch(html, /value="grok-oauth"/);
+});
+
+for (const [choice, error, sentence] of [
+  ["claude-haiku", "Claude is signed out. Open Claude Code, sign in, then try again.", "Claude is signed out on this server. Sign in once: run claude auth login on the server."],
+  ["claude-sonnet", "Claude Code CLI not found. Install it.", "Claude Code is not installed on this server."],
+  ["custom:broken", "The saved API key cannot be decrypted.", "This connection's key cannot be read. Open Models and paste the key again."],
+]) test(`${choice}: option and readiness line disclose the server reason`, async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  const custom = choice.startsWith("custom:") ? { id: "broken", name: "Custom", enabled: true, modelId: "test", readinessError: error } : null;
+  const availability = Object.assign({ [choice]: false }, { reasons: { [choice]: sentence } });
+  availabilityStub.__setAvailability(availability);
+  availabilityStub.__setConnections(custom ? [custom] : []);
+  try {
+    const page = await browser.newPage();
+    const input = { choice, availability, customConnection: custom, label: "Claude" };
+    const reason = writerBar.writerUnavailableReason?.(input);
+    const dot = writerBar.readinessDot(false, { state: "ready", reason: "Story checked." }, reason);
+    await page.setContent(renderToStaticMarkup(createElement("div", {},
+      createElement(ModelPicker, { value: choice, onChange() {} }),
+      createElement("span", { role: "status" }, dot.label))));
+    const option = page.getByLabel("Writing model", { exact: true }).locator(`option[value="${choice}"]`);
+    assert.ok((await option.innerText()).includes(sentence));
+    assert.equal(await option.isDisabled(), true);
+    assert.ok((await page.getByRole("status").innerText()).includes(sentence));
+    assert.ok((await page.locator(".model-picker-help").first().innerText()).includes(sentence));
+  } finally {
+    availabilityStub.__setConnections([]);
+    availabilityStub.__setAvailability(undefined);
+    await browser.close();
+  }
 });

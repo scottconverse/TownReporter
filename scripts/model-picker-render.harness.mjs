@@ -146,4 +146,5 @@ const { ModelPicker } = await import(
   )
 );
 
-export { ModelPicker, availabilityStub, registry, choiceModule };
+const writerBar = await import(writerBarUrl);
+export { ModelPicker, availabilityStub, registry, choiceModule, writerBar };

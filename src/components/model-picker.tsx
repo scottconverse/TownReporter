@@ -33,7 +33,7 @@ import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availabilit
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
-import { writerIsReady } from "@/lib/news/writer-bar";
+import { writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
@@ -83,23 +83,6 @@ type Props =
   | (PickerControls<DarkModelChoice> & { scope: "dark" })
   | (PickerControls<StoryModelChoice> & { scope: "forced" })
   | (PickerControls<StoryModelChoice> & { scope: "ocr" });
-
-/**
- * What the desk shows when the option the editor has selected -- or the one
- * un-set-up option sitting in the list -- has no server behind it. Same
- * single sentence `preflight.ts`'s `LOCAL_MODEL_UNCONFIGURED` gives a run
- * that gets all the way to spending before refusing, so an editor sees the
- * identical wording whether the picker catches it first or the run does.
- */
-function notSetUpHelp(option: ModelChoiceOption): string {
-  if (option.value === "local-model") {
-    return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
-  }
-  if (option.value.startsWith("claude-")) {
-    return `${option.label} is not ready on this server. Sign in to Claude Code or configure Anthropic API credentials. See docs/setup.md.`;
-  }
-  return `${option.label} is not set up on this server. See docs/setup.md.`;
-}
 
 /**
  * The second, model-level select that appears under the picker only when
@@ -411,6 +394,14 @@ export function ModelPicker(props: Props) {
         : null,
     });
   }
+  function unavailableReason(option: ModelChoiceOption): string {
+    return writerUnavailableReason({
+      choice: option.value,
+      label: option.label,
+      availability: availability.data,
+      customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
+    }) ?? "";
+  }
   const selectedUnavailable = !isAvailable(shownValue);
   const checkingReadiness = shownValue !== "auto" && !noFallback && !availability.data;
   const help = checkingReadiness
@@ -423,10 +414,10 @@ export function ModelPicker(props: Props) {
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
     : isCustomModelChoice(shownValue)
       ? selectedUnavailable
-        ? connections.data?.find((row) => `custom:${row.id}` === shownValue)?.readinessError ?? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+        ? unavailableReason(selected)
         : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
       : selectedUnavailable
-        ? notSetUpHelp(selected)
+        ? unavailableReason(selected)
         : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
@@ -465,7 +456,7 @@ export function ModelPicker(props: Props) {
           pickerOptionText), so the full sentence goes here as a title: a
           select clips its own text and there is no CSS that can recover it.
         */
-        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? " — not set up" : ""}` : undefined}
+        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? ` — ${unavailableReason(selected)}` : ""}` : undefined}
         onChange={(event) => {
           if (props.noneOption && event.target.value === "none") {
             props.onClear?.();
@@ -481,10 +472,10 @@ export function ModelPicker(props: Props) {
               key={option.value}
               value={option.value}
               disabled={!available}
-              title={`${pickerOptionTitle(option)}${available ? "" : " — not set up"}`}
+              title={`${pickerOptionTitle(option)}${available ? "" : ` — ${unavailableReason(option)}`}`}
             >
               {optionText(option)}
-              {available ? "" : " — not set up"}
+              {available ? "" : ` — ${unavailableReason(option)}`}
             </option>
           );
         })}

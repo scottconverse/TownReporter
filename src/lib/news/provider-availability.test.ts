@@ -47,6 +47,15 @@ describe("provider availability for the picker", () => {
         : { ok: true, choice: "claude-sonnet", label: "Claude Sonnet" },
     });
     assert.equal(availability["claude-haiku"], false);
+    assert.equal(availability.reasons?.["claude-haiku"], "Claude is signed out on this server. Sign in once: run claude auth login on the server.");
+  });
+  it("retains the missing CLI reason from the existing probe", async () => {
+    const availability = await getProviderAvailability(1, {
+      refreshLocalCatalog: async () => undefined,
+      probeProvider: async () => ({ ok: false, error: "Claude Code CLI not found. Install it." }),
+    });
+    assert.equal(availability["claude-sonnet"], false);
+    assert.equal(availability.reasons?.["claude-sonnet"], "Claude Code is not installed on this server.");
   });
   it("marks Local model unavailable when LLM_BASE_URL is unset", () => {
     withEnv({}, () => {

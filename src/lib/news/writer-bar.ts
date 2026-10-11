@@ -21,6 +21,30 @@
 import { isCustomModelChoice } from "./model-choice.ts";
 import { clockLabel } from "./follow-up-copy.ts";
 
+/** Reasons use the existing availability check, with no extra probes. */
+export type ProviderAvailability = Record<string, boolean> & { reasons?: Record<string, string> };
+
+export function readinessFailureMessage(choice: string, name: string, message: string): string {
+  if (choice.startsWith("claude-")) {
+    if (/CLI not found|not installed/i.test(message)) return "Claude Code is not installed on this server.";
+    if (/signed out|not logged|sign in|session expired/i.test(message)) return "Claude is signed out on this server. Sign in once: run claude auth login on the server.";
+  }
+  if (isCustomModelChoice(choice) && /key.*(?:decrypt|cannot be read)|decrypt.*key/i.test(message)) return "This connection's key cannot be read. Open Models and paste the key again.";
+  if (/usage limit|out of quota|quota.*(?:exceeded|exhausted)|insufficient_quota/i.test(message)) return `${name} hit its usage limit.`;
+  return `${name} is not ready: ${message}`;
+}
+
+export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[0] & { label: string }): string | undefined {
+  if (writerIsReady(input)) return undefined;
+  const message = isCustomModelChoice(input.choice) ? input.customConnection?.readinessError : undefined;
+  if (message) return readinessFailureMessage(input.choice, input.label, message);
+  const reason = input.availability?.reasons?.[input.choice];
+  if (reason) return reason;
+  if (isCustomModelChoice(input.choice)) return "This custom connection is unavailable or has no model. Manage it on Models, or choose another model.";
+  if (input.choice === "local-model") return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
+  return readinessFailureMessage(input.choice, input.label, "This provider is not configured on this server.");
+}
+
 /** The three colors these lines are allowed to be, in the desk's own names. */
 export type WriterTone = "ok" | "warn" | "mut";
 
@@ -38,7 +62,7 @@ export type WriterTone = "ok" | "warn" | "mut";
 export function writerIsReady(input: {
   choice: string;
   /** `providerAvailability()`'s map, or undefined while it is in flight. */
-  availability: Record<string, boolean> | undefined;
+  availability: ProviderAvailability | undefined;
   /** The connection behind a `custom:<id>` choice, when the desk has one. */
   customConnection: { enabled: boolean; modelId: string | null; readinessError?: string } | null;
 }): boolean {
@@ -50,11 +74,11 @@ export function writerIsReady(input: {
 }
 
 /**
- * The dot. The drawn word when the writer can run, and the picker's own
- * "not set up" when it cannot -- the same two words that picker already puts
- * on an option it cannot reach, in the desk's warn color.
+ * Show an unavailable writer's reason before story readiness so a checked
+ * story cannot mask a model that cannot run.
  */
-export function readinessDot(ready: boolean, story?: { state: string; reason: string } | null): { label: string; tone: WriterTone; reason?: string } {
+export function readinessDot(ready: boolean, story?: { state: string; reason: string } | null, unavailableReason?: string): { label: string; tone: WriterTone; reason?: string } {
+  if (!ready && unavailableReason) return { label: `● ${unavailableReason}`, tone: "warn", reason: unavailableReason };
   if (story) return {
     reason: story.reason,
     label: (story.state === "ready" || story.state === "verified") ? "● Ready" : story.state === "checking" ? "● Checking" : story.state === "to-check" ? "● To check" : story.state === "not-checked" ? "● Not checked yet" : "● Not ready",
@@ -62,7 +86,7 @@ export function readinessDot(ready: boolean, story?: { state: string; reason: st
   };
   return ready
     ? { label: "● Ready", tone: "ok" }
-    : { label: "● Not set up", tone: "warn" };
+    : { label: "● Not ready", tone: "warn" };
 }
 
 /**
