@@ -4,7 +4,9 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { checkedUrl, checkedOutputPath } from "./browser-guard.mjs";
-const base = checkedUrl(process.env.LOCAL_MODELS_BASE_URL || "http://127.0.0.1:8099").replace(
+import { startLocalModelsFixtureServer } from "./local-models-page.harness.mjs";
+const fixture = process.argv.includes("--fixture");
+const base = checkedUrl(process.env.LOCAL_MODELS_BASE_URL || (fixture ? "http://127.0.0.1:3488" : "http://127.0.0.1:8099")).replace(
   /\/$/,
   "",
 );
@@ -14,10 +16,12 @@ const out = checkedOutputPath(
   "screenshots",
 );
 mkdirSync(out, { recursive: true });
-const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-page.setDefaultTimeout(45000);
+const stop = fixture ? await startLocalModelsFixtureServer(base, out) : null;
+let browser;
 try {
+  browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  page.setDefaultTimeout(45000);
   await page.goto(base + "/login");
   await page.getByRole("heading", { name: /Create the desk|Editor sign-in/ }).waitFor();
   const fresh = await page.getByLabel("Name", { exact: true }).count();
@@ -121,5 +125,6 @@ try {
     "PASS: Models page named choice, badge, sentinel save, reload and loaded model; four screenshots.",
   );
 } finally {
-  await browser.close();
+  await browser?.close();
+  await stop?.();
 }

@@ -349,6 +349,18 @@ jobs:
         env:
           SECURITY_HEADERS_BASE_URL: http://127.0.0.1:3000
         run: node scripts/security-headers-e2e.mjs
+      - name: Set the local model from the Models page and reload
+        env:
+          LOCAL_MODELS_BASE_URL: http://127.0.0.1:3488
+          LOCAL_MODELS_OUT_DIR: artifacts/release-h-local-ci
+        run: node scripts/local-models-page-e2e.mjs --fixture
+      - name: Preserve local model setup screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: local-model-setup-screenshots
+          path: artifacts/release-h-local-ci/
+          if-no-files-found: ignore
       - name: Walk the rendered desk and reader design matrix
         env:
           UIWALK_BASE_URL: http://127.0.0.1:3491
