@@ -174,11 +174,11 @@ test("a non-owner sees the local model choice read-only, with the owner-only lin
     assert.match(html, /Only the owner can change model connections\./);
     // The label is still drawn, and the read-only branch names the choice
     // itself (the stub's catalog is empty and no pick is stored).
-    assert.match(html, /On-device model/);
+    assert.match(html, /Local model/);
     assert.match(html, /No local model is chosen for this desk\./);
     // No way to change it: no model list and no Refresh button for an editor.
     assert.doesNotMatch(html, /Choose a model…/);
-    assert.doesNotMatch(html, /Use whatever is loaded/);
+    assert.doesNotMatch(html, /Use whatever model is loaded/);
     assert.doesNotMatch(html, /model-picker-refresh/);
   } finally {
     availabilityStub.__setRole("owner");

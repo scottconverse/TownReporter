@@ -304,6 +304,7 @@ export async function readProviderOverrides(
  */
 export type LocalModelChoice = {
   override: { baseUrl: string; id: string } | null;
+  storedPick?: { baseUrl: string; id: string } | null;
   /**
    * Unit BB: where `override` came from, so the picker can say so in words
    * and `probeProvider` can tell "Use whatever is loaded" (which refuses with
@@ -614,12 +615,18 @@ export async function saveLocalModel(
   return { ok: true };
 }
 
+/** Saved mode alongside the actual model a run resolves now. */
+export async function readDeskLocalModelChoice(newsroomId: number, scope?: LocalModelScope): Promise<LocalModelChoice> {
+  const resolved = await resolveLocalModelChoice(newsroomId, scope);
+  return { ...resolved, storedPick: await rawStoredLocalModel(newsroomId, scope) };
+}
+
 export const getLocalModelChoice = createServerFn({ method: "GET" })
   .middleware([authMiddleware])
   .validator((raw: unknown) => cleanModelScope((raw as { scope?: unknown } | null)?.scope))
   .handler(async ({ context, data }): Promise<LocalModelChoice> => {
     const me = await requireEditor(context.userId);
-    return resolveLocalModelChoice(me.newsroomId, data);
+    return readDeskLocalModelChoice(me.newsroomId, data);
   });
 
 export const saveLocalModelFn = createServerFn({ method: "POST" })
