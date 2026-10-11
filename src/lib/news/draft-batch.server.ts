@@ -200,7 +200,7 @@ type CommitDeps = {
   assertRate?: typeof assertRate;
   afterSelectionLocked?: () => Promise<void>;
 };
-type LeadState = { id: number; status: string; notes_json: string | null };
+type LeadState = { id: number; status: string; notes_json: string | null; has_draft: boolean };
 const isIneligible = (status: string) =>
   status === "held" || status === "killed" || status === "published";
 
@@ -226,7 +226,7 @@ async function inspectSelection(
   }
   const requested = [...input.items].sort((a, b) => a.leadId - b.leadId);
   const leads = await sql.query<LeadState>(
-    "select id,status,notes_json from leads where newsroom_id=$1 and id=any($2::int[]) order by id" +
+    "select l.id,l.status,l.notes_json, exists(select 1 from drafts d where d.lead_id=l.id and d.newsroom_id=l.newsroom_id and length(trim(d.body)) > 0) as has_draft from leads l where l.newsroom_id=$1 and l.id=any($2::int[]) order by l.id" +
       (lock ? " for update" : ""),
     [input.context.newsroomId, requested.map((item) => item.leadId)],
   );
@@ -237,6 +237,14 @@ async function inspectSelection(
   const items: ResolvedItem[] = [];
   for (const item of input.items) {
     const lead = leadById.get(item.leadId)!;
+    if (lead.has_draft) {
+      return {
+        ok: false,
+        code: "existing-draft",
+        error: "This lead already has a draft. Open it to continue or redraft it there.",
+        leadId: item.leadId,
+      };
+    }
     if (isIneligible(lead.status)) {
       const key = lead.status === "killed" ? "lead-killed-draft" : `batch-lead-${lead.status}`;
       const warning = await editorWarning({ ...input.context, sql }, input.override, key, `This selected lead is ${lead.status}. Drafting will keep its saved work.`, { kind: "lead", id: item.leadId });

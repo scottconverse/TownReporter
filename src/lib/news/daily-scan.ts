@@ -47,7 +47,13 @@ export type DailyScanPolicy = {
   nextRunAt: string | null;
   openRun: null | { runId: number; jobId: number; localDay: string; status: "queued" | "running" };
   /** Latest scan receipt, including manual scans, for both summary screens. */
-  lastScan?: { sources_fetched: number; leads_created: number } | null;
+  lastScan?: {
+    id: number;
+    sources_selected: number;
+    sources_fetched: number;
+    leads_created: number;
+    execution_origin: "manual" | "scheduled";
+  } | null;
   lastRun: null | {
     runId: number;
     jobId: number | null;
@@ -348,8 +354,8 @@ export async function readDailyScanPolicy(
     "select r.*,j.status as job_status,j.error as job_error from daily_scan_reservations r left join desk_jobs j on j.id=r.desk_job_id where r.newsroom_id=$1 order by r.local_day desc limit 1",
     [newsroomId],
   );
-  const [lastScan] = await sql.query<{ sources_fetched: number; leads_created: number }>(
-    "select sources_fetched, leads_created from scan_runs where newsroom_id=$1 order by started_at desc, id desc limit 1",
+  const [lastScan] = await sql.query<NonNullable<DailyScanPolicy["lastScan"]>>(
+    "select id, sources_selected, sources_fetched, leads_created, execution_origin from scan_runs where newsroom_id=$1 order by started_at desc, id desc limit 1",
     [newsroomId],
   );
   const enabled = p?.enabled === true,

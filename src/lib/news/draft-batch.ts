@@ -57,6 +57,7 @@ export type DraftBatchFailure = {
     | "invalid-input"
     | "not-found"
     | "ineligible"
+    | "existing-draft"
     | "already-running"
     | "runtime-unavailable"
     | "rate-limited"

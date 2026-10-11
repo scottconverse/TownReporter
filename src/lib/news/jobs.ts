@@ -119,6 +119,9 @@ export type DeskJob = {
   beat_at?: string | null;
   cancel_requested?: boolean | null;
   result_href?: string | null;
+  /** Read-only queue receipt calculated by the progress query, not stored. */
+  queue_position?: number | null;
+  queue_length?: number | null;
 };
 
 /**

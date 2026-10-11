@@ -146,6 +146,7 @@ import {
   type DarkRunStopReason,
   type DarkRunUsageSnapshot,
 } from "./dark-run-budget.ts";
+import { darkRunOutcome } from "./dark-run-outcome.ts";
 
 const DARK_SYNTHESIS_PACK_CAP = 28_000;
 const DARK_SYNTHESIS_CONTEXT_CAP = 14_000;
@@ -3619,6 +3620,9 @@ export async function performDarkRound(job: DeskJob) {
       owned(context),
     );
 
+    if (darkRunOutcome(stopReason) === "failed") {
+      throw new Error(synth.error || "Could not finish the case file synthesis.");
+    }
     if (synth.error && !loop.paused) await markInvestigationPaused(context.userId, id, synth.error);
   } catch (err) {
     const error = asDarkError(err);

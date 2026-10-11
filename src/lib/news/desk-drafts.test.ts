@@ -43,9 +43,22 @@ test("a job still writing prints its own stage text and how long it has been at 
 
 test("a queued job with no stage yet still prints words, never an empty chip", () => {
   const state = deskDraftState({ ...quiet, job_status: "queued", job_stage: "" });
-  assert.equal(state.key, "running");
-  assert.equal(state.label, "Working…");
-  assert.equal(deskDraftState({ ...quiet, job_status: "queued" }).label, "Working…");
+  assert.equal(state.key, "queued");
+  assert.equal(state.label, "Queued");
+  assert.equal(state.running, false);
+  assert.equal(state.queued, true);
+  assert.equal(deskDraftState({ ...quiet, job_status: "queued" }).label, "Queued");
+});
+
+test("Today counts every story that needs an editor check, including saved not-checked and open claims", () => {
+  const notChecked = deskDraftState({ ...quiet, story_readiness: {
+    version: 1, state: "not-checked", openCount: 0, totalCount: 0, reason: "No check saved yet.",
+  } });
+  const claims = deskDraftState({ ...quiet, story_readiness: {
+    version: 1, state: "not-ready", openCount: 9, totalCount: 9, reason: "9 claims need review.",
+  }, unreviewed_claims: 9, unreviewed_claims_accepted_count: 0 });
+  assert.equal(notChecked.needsYou, true);
+  assert.equal(claims.needsYou, true);
 });
 
 test("a failed job outranks every other fact about the row", () => {
@@ -138,7 +151,7 @@ test("a lead filed by hand has a draft row and no prose, so it never reads ready
     job_status: "queued",
     job_stage: "Queued",
   });
-  assert.equal(queued.key, "running");
+  assert.equal(queued.key, "queued");
   assert.equal(queued.label, "Queued");
   assert.equal(queued.readiness, undefined);
   assert.equal(

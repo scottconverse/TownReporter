@@ -6,6 +6,13 @@ import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { DeskJobCard } from "@/components/JobCard";
 import { useEditorSections } from "@/lib/use-sections";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
+import { splitDeskJobs } from "@/lib/desk/desk-job-groups";
+import {
+  todayDarkDeskWaitingCopy,
+  todayDarkDeskWaitingCount,
+  todayLeadCaption,
+  todayScanStatus,
+} from "@/lib/desk/today-count-copy";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +54,6 @@ import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dial
 import { KillDialog } from "@/components/dialogs/KillDialog";
 import {
   cardResultLine,
-  isAgentKind,
   matchesFollowUpFilter,
   parseFinding,
 } from "@/lib/news/follow-up-copy";
@@ -660,20 +666,9 @@ function DeskHome() {
   const invs = investigations.data ?? [];
   const onDesk = invs.filter((r) => pileForStatus(r.status) === "desk");
   const inbox = (worth.data ?? []).filter((item) => !worthItemOnDesk(item, invs));
-  /*
-    CY item 3. "Waiting on an AI follow-up": a live agent that has not reported
-    yet. `matchesFollowUpFilter(row, "active")` is the Follow-ups screen's own
-    definition of live, and `last_state !== "found"` is the whole difference
-    between this pile and the findings list above it. It reads the one
-    `followUps` query the rail's count above also reads -- see that query's own
-    note -- so the two numbers on this page cannot disagree.
-  */
-  const waitingOnFollowUp = (followUps.data ?? []).filter(
-    (row) =>
-      isAgentKind(row.agent_kind) &&
-      matchesFollowUpFilter(row, "active") &&
-      row.last_state !== "found",
-  ).length;
+  // The Today card opens Dark Desk, so its count comes from the same
+  // investigation rows and waiting rule as Dark Desk's own Waiting pile.
+  const waitingOnFollowUp = todayDarkDeskWaitingCount(invs);
   const printed = published.data ?? [];
 
   /*
@@ -858,11 +853,11 @@ function DeskHome() {
     stopped job's story is looked at.
   */
   const allDeskJobs = deskJobs.data ?? [];
-  const liveJobs = allDeskJobs
-    .filter((row) => row.status === "queued" || row.status === "running")
-    .slice(0, 3);
+  const jobGroups = splitDeskJobs(allDeskJobs);
+  const liveJobs = jobGroups.running;
+  const queuedJobs = jobGroups.queued;
   const readyDarkJob = allDeskJobs
-    .filter((row) => row.kind === "dark" && row.status === "completed")
+    .filter((row) => row.kind === "dark" && (row.status === "completed" || row.status === "failed"))
     .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0] ?? null;
   /*
     THE SCAN'S OWN CARD (FB6, item 3). The open scan, if there is one, read from
@@ -1380,15 +1375,60 @@ function DeskHome() {
         </section>
       ) : null}
 
+      {queuedJobs.length > 0 ? (
+        <section aria-label="Queued work">
+          <SecHead
+            title={`Queued · ${queuedJobs.length}`}
+            sub="Waiting for a worker to start. These jobs are not running yet."
+            aside={
+              <Link to="/desk/ops" className="np-link">
+                Work queue
+              </Link>
+            }
+          />
+          <div className="today-running">
+            {queuedJobs.map((job) => {
+              const open = openJob(job, navigate);
+              return (
+                <DeskJobCard
+                  key={job.id}
+                  job={job}
+                  compact={job.kind !== "dark"}
+                  cancelLabel={job.kind === "dark" ? "Stop" : "Cancel"}
+                  viewLabel={open?.label}
+                  onNavigate={open ? open.go : undefined}
+                />
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+
       {readyDarkJob ? (
-        <section aria-label="Ready to decide">
-          <SecHead title="Ready to decide" sub="The case file is ready for your review." />
+        <section aria-label={readyDarkJob.status === "failed" ? "Last Dark Desk run stopped" : "Ready to decide"}>
+          <SecHead
+            title={readyDarkJob.status === "failed" ? "Last Dark Desk run stopped" : "Ready to decide"}
+            sub={readyDarkJob.status === "failed"
+              ? "This run did not finish. No new case file is ready; any earlier case file remains saved."
+              : "The case file is ready for your review."}
+          />
           <div className="today-running">
             <DeskJobCard
-              job={readyDarkJob}
+              job={readyDarkJob.status === "failed"
+                ? { ...readyDarkJob, error: "Could not finish the case file. Any earlier case file remains saved." }
+                : readyDarkJob}
               cancelLabel="Stop"
               onNavigate={(job) => openJob(job, navigate)?.go()}
             />
+            {readyDarkJob.status === "failed" && readyDarkJob.error ? (
+              <details className="meta">
+                <summary>Details</summary>
+                <p>{readyDarkJob.error}</p>
+              </details>
+            ) : null}
+            {readyDarkJob.status === "failed" ? (
+              <Link to="/desk/dark" className="inline-link">Open the saved case file</Link>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -1944,10 +1984,11 @@ function DeskHome() {
                 <div className="today-leads-head">
                   <div className="today-leads-title">
                     <h2>New leads</h2>
-                    <span>
-                      {last ? `${formatListDateTime(last.started_at)} scan · best first` : "Best first"}
-                    </span>
+                    <span>{todayLeadCaption()}</span>
                   </div>
+                  {todayScanStatus(scanning) ? (
+                    <p className="meta" role="status">{todayScanStatus(scanning)}</p>
+                  ) : null}
                   <div className="today-segs" role="group" aria-label="Which leads to show">
                     <button
                       type="button"
@@ -2385,8 +2426,8 @@ function DeskHome() {
               </div>
               <div className="dd-pile">
                 <span className="dd-pile-text">
-                  <span className="dd-pile-label">Waiting on an AI follow-up</span>
-                  <span className="dd-pile-note">AI watching for a statement or record</span>
+                  <span className="dd-pile-label">{todayDarkDeskWaitingCopy().label}</span>
+                  <span className="dd-pile-note">{todayDarkDeskWaitingCopy().note}</span>
                 </span>
                 <span className="dd-pile-count">{waitingOnFollowUp}</span>
               </div>

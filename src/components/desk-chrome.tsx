@@ -10,6 +10,7 @@ import { chipLabel, createEditorCopy, editorTitle, openLeads, pileForStatus, sen
 import { isAgentKind, matchesFollowUpFilter } from "@/lib/news/follow-up-copy";
 import { deskShellClassName } from "@/components/desk-chrome-utils";
 import { DESK_NAV, SEARCH_PAGES, navItemIsActive } from "@/lib/desk-nav";
+import { splitDeskJobs } from "@/lib/desk/desk-job-groups";
 import { useAppearance } from "@/lib/appearance-context";
 /*
   The drawn New-story dialog (Unit BN, item 1). `editor-dialogs.tsx` imports
@@ -322,9 +323,7 @@ export function DeskShell({
     queryKey: ["investigations"],
     queryFn: () => listInvestigations(),
   });
-  const running = (jobs.data ?? []).filter(
-    (j) => j.status === "running" || j.status === "queued",
-  );
+  const jobGroups = splitDeskJobs(jobs.data ?? []);
   const allLeads = leads.data ?? [];
   /*
     THE FIVE DRAWN COUNTS, each one the number its own screen prints:
@@ -437,7 +436,7 @@ export function DeskShell({
           three tabs.
         */}
         <div className="astra-nav-body" tabIndex={mobile && menuOpen ? 0 : undefined}>
-        <RunningBox jobs={running} onNavigate={() => setMenuOpen(false)} />
+        <RunningBox runningJobs={jobGroups.running} queuedJobs={jobGroups.queued} onNavigate={() => setMenuOpen(false)} />
         {/*
           BF3, defect 3: the drawing has no "Find anything" box in the nav, so
           the drawn nav is brand, running work, the section list and the
@@ -684,19 +683,23 @@ export function DeskShell({
  * does; the cards inside it carry their own press.
  */
 function RunningBox({
-  jobs,
+  runningJobs,
+  queuedJobs,
   onNavigate,
 }: {
-  jobs: JobProgressView[];
+  runningJobs: JobProgressView[];
+  queuedJobs: JobProgressView[];
   onNavigate: () => void;
 }) {
-  if (!jobs.length) return null;
+  if (!runningJobs.length && !queuedJobs.length) return null;
   return (
     <div className="astra-running">
-      <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
-        <span className="astra-running-dot" aria-hidden /> Running · {jobs.length}
-      </Link>
-      {jobs.slice(0, 3).map((job) => (
+      {runningJobs.length ? (
+        <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
+          <span className="astra-running-dot" aria-hidden /> Running · {runningJobs.length}
+        </Link>
+      ) : null}
+      {runningJobs.map((job) => (
         <div className="astra-running-job" key={job.id}>
           {/*
             ONE TITLE, AND THE CARD IS WHAT CARRIES IT (FB1b, item 1).
@@ -728,6 +731,18 @@ function RunningBox({
           />
         </div>
       ))}
+      {queuedJobs.length ? (
+        <div className="astra-running-queued">
+          <Link to="/desk" className="astra-running-head" onClick={onNavigate}>
+            Queued · {queuedJobs.length}
+          </Link>
+          {queuedJobs.map((job) => (
+            <div className="astra-running-job" key={job.id}>
+              <DeskJobCard job={job} compact title={jobHeadline(job)} viewLabel="Open" failoverNote={false} />
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

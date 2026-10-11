@@ -192,9 +192,10 @@ export async function startFollowUpRun(
   if (row.status !== "active" && row.status !== "paused") {
     return { started: false, skipped: "not-active" };
   }
-  if (await jobOpen(context.newsroomId, "draft")) {
-    return { started: false, skipped: "draft-running" };
-  }
+  // A manual Run now press records the editor's request immediately. The job
+  // claim rule in jobs.ts holds follow-up work behind queued or running drafts,
+  // so refusing here only hid the request and made a queue wait look like a
+  // block. Scheduled ticks retain their lighter rule in tickFollowUpsFor.
   if (await jobOpen(context.newsroomId, "follow-up")) {
     return { started: false, skipped: "follow-up-running" };
   }

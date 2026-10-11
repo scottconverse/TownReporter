@@ -771,13 +771,13 @@ function SourcesPage() {
               <dt>Runs</dt>
               <dd>{dailyScheduleLabel(scanPolicy)}</dd>
             </dl>
-            {dailyScanCounts(scanPolicy).map((row) => (
+            {dailyScanCounts(scanPolicy, scans.data?.rows?.[0] ?? null).map((row) => (
               <dl className="astra-kv ruled" key={row.label}>
                 <dt>{row.label}</dt>
                 <dd>{row.value}</dd>
               </dl>
             ))}
-            <p className="astra-note">Read and filed counts are from the latest scan.</p>
+            <p className="astra-note">Saved daily settings describe the scheduled plan. Run counts name the latest scan separately.</p>
 
             <dl className="astra-kv ruled">
               <dt>Model</dt>

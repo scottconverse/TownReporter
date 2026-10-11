@@ -1284,7 +1284,8 @@ const CSV_COLUMNS = [
   "path",
   "ref_class",
   "device",
-  "loads",
+  "page_loads",
+  "beacon_loads",
   "visits",
   "recirc",
   "left_early",
@@ -1296,11 +1297,12 @@ const CSV_COLUMNS = [
 ] as const;
 
 /**
- * The rows behind the page, as plain CSV. Flat `read_hourly` rows for the
- * selected range and nothing derived -- an editor who wants to argue with a
- * number on the page can do the arithmetic themselves. `hour_start` is printed
- * in the database session's timezone (`to_char`, the same calendar the heatmap
- * and the day boundary use), to the hour.
+ * The rows behind the page, as plain CSV. The legacy site counter is exported
+ * on one daily row per day, beside (and separate from) beacon page loads and
+ * visits. Summing `page_loads` and `visits` therefore reproduces the two top
+ * numbers on Stats; `beacon_loads` remains available for read-depth analysis.
+ * `hour_start` uses the database session's calendar, to the hour for beacon
+ * rows and midnight for the daily site counter.
  *
  * Deliberately not a route: the client asks for the text over the desk's
  * authenticated server function and saves it with an object URL, so there is
@@ -1314,13 +1316,27 @@ export async function exportReadingCsv(userId: string, range: ReadingRange): Pro
   const sql = await getSql();
   const days = readingRangeDays(range);
   const rows = await sql.query<Record<string, string | number | null>>(
-    `select to_char(hour_start, 'YYYY-MM-DD HH24:00') as hour_start,
-            path, ref_class, device, loads, visits, recirc, left_early, active_seconds,
-            depth_25, depth_50, depth_75, depth_100
-     from read_hourly
-     where newsroom_id = $1 and hour_start >= date_trunc('day', now()) - $2::interval
+    `select hour_start, path, ref_class, device, page_loads, beacon_loads, visits, recirc,
+            left_early, active_seconds, depth_25, depth_50, depth_75, depth_100
+     from (
+       select to_char(hour_start, 'YYYY-MM-DD HH24:00') as hour_start,
+              path, ref_class, device, 0::bigint as page_loads, loads as beacon_loads,
+              visits, recirc, left_early, active_seconds, depth_25, depth_50, depth_75, depth_100
+       from read_hourly
+       where newsroom_id = $1 and hour_start >= date_trunc('day', now()) - $2::interval
+       union all
+       select to_char(day::timestamp, 'YYYY-MM-DD HH24:00') as hour_start,
+              'All site pages' as path, 'site counter' as ref_class, 'all' as device,
+              sum(count)::bigint as page_loads, 0::bigint as beacon_loads,
+              0::bigint as visits, 0::bigint as recirc, 0::bigint as left_early,
+              0::bigint as active_seconds, 0::bigint as depth_25, 0::bigint as depth_50,
+              0::bigint as depth_75, 0::bigint as depth_100
+       from page_views
+       where newsroom_id = $1 and target = $3 and day >= current_date - $4::int
+       group by day
+     ) exported
      order by hour_start asc, path asc, ref_class asc, device asc`,
-    [newsroomId, sinceInterval(days)],
+    [newsroomId, sinceInterval(days), SITE_TARGET, days - 1],
   );
   const [todayRow] = await sql.query<{ today: string }>(
     `select to_char(current_date, 'YYYY-MM-DD') as today`,

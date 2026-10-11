@@ -11,12 +11,12 @@ import { refreshFinishedScanPolicy } from "../lib/desk/scan-policy-refresh.ts";
   `reader-controls.tsx`, `appearance-context.ts` + `appearance-provider.tsx`).
 */
 
-export type JobCardState = "running" | "done" | "failed";
+export type JobCardState = "queued" | "running" | "done" | "failed";
 
-/** `queued` is a running job that has not started: same treatment, no clock. */
 export function jobCardState(job: Pick<JobProgressView, "status">): JobCardState {
   if (job.status === "completed") return "done";
   if (job.status === "failed") return "failed";
+  if (job.status === "queued") return "queued";
   return "running";
 }
 

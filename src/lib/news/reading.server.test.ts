@@ -837,7 +837,8 @@ describe("the read-back behind /desk/stats", () => {
       "path",
       "ref_class",
       "device",
-      "loads",
+      "page_loads",
+      "beacon_loads",
       "visits",
       "recirc",
       "left_early",
@@ -847,10 +848,17 @@ describe("the read-back behind /desk/stats", () => {
       "depth_75",
       "depth_100",
     ]);
-    assert.equal(lines.length, 5, "four rows in range, and no header-only file");
+    assert.equal(lines.length, 6, "four beacon rows and the daily page counter, plus the header");
     for (const line of lines.slice(1)) {
-      assert.equal(line.split(",").length, 13, "every row has every column");
+      assert.equal(line.split(",").length, 14, "every row has every column");
     }
+    const exportedRows = lines.slice(1).map((line) => line.split(","));
+    assert.equal(exportedRows.reduce((sum, row) => sum + Number(row[4] || 0), 0), 40,
+      "page_loads sums to the screen's page-load counter");
+    assert.equal(exportedRows.reduce((sum, row) => sum + Number(row[6] || 0), 0), 15,
+      "visits sum to the screen's visit count");
+    assert.equal(exportedRows.reduce((sum, row) => sum + Number(row[5] || 0), 0), 20,
+      "beacon loads remain visible as a separate metric");
     assert.ok(csv.includes(`/articles/${slugA}`));
     assert.ok(csv.includes("depth_100"));
     assert.ok(!csv.includes("99999"), "another paper's reading is not in this editor's export");
