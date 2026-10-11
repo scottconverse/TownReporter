@@ -720,6 +720,17 @@ export async function probeProvider(
   scope?: "story" | "scan" | "follow-up" | "opinion" | "dark" | "ocr" | "forced",
   exactLocalModel?: LocalModelOverride,
 ): Promise<ProviderProbe> {
+  // The legacy internal Local rung must honor the writing desk's saved pick.
+  // Unconfigured callers keep the existing LM Studio rung behavior.
+  if (choice === "qwen-local" && scope && newsroomId !== undefined) {
+    const { readDeskLocalModelChoice } = await import("./provider-settings.ts");
+    if ((await readDeskLocalModelChoice(newsroomId, scope)).storedPick) {
+      const picked = await probeProvider("local-model", newsroomId, adapters, scope, exactLocalModel);
+      return !picked.ok && picked.error === LOCAL_MODEL_NOTHING_LOADED
+        ? { ...picked, skippedRungs: [LOCAL_MODEL_NOTHING_LOADED] }
+        : picked;
+    }
+  }
   if (choice && isCustomModelChoice(choice)) {
     const resolved = await resolveCustomProvider(choice, newsroomId, adapters?.resolveCustom);
     if (!resolved.ok) return resolved;
@@ -785,9 +796,10 @@ export async function probeProvider(
     const failures: string[] = [];
     const skippedRungs: string[] = [];
     for (const rung of AUTOMATIC_LADDER) {
-      const result = await probeProvider(rung, newsroomId, adapters);
+      const result = await probeProvider(rung, newsroomId, adapters, scope);
       if (result.ok) return skippedRungs.length ? { ...result, skippedRungs } : result;
       if (result.skippedRungs?.length) skippedRungs.push(...result.skippedRungs);
+      else if (result.error === LOCAL_MODEL_NOTHING_LOADED) skippedRungs.push(result.error);
       else failures.push(result.error);
     }
     const skippedNote = skippedRungs.length ? ` Skipped: ${skippedRungs.join("; ")}.` : "";

@@ -232,6 +232,35 @@ describe("Unit BB: local model picker load state", () => {
     });
   });
 
+  it("Automatic keeps the saved writing sentinel and records the no-loaded hop without cloud calls", async () => {
+    await storeRawScopedChoice("story", "*", "*");
+    const keys = ["TOWNREPORTER_DEEPSEEK", "TOWNREPORTER_CODEX", "TOWNREPORTER_CLAUDE_CODE"];
+    const old = keys.map(key => process.env[key]);
+    keys.forEach(key => { process.env[key] = "0"; });
+    const servers: FakeServers = { lmStudio: [], ollama: { ids: CLOUD_IDS, running: [] }, log: [] };
+    try {
+      await withFetch(fakeFetch(servers), async () => {
+        const result = await probeProvider("auto", NEWSROOM_ID, undefined, "story");
+        assert.equal(result.ok, false);
+        assert.ok(result.skippedRungs?.includes("No model is loaded on this computer."));
+        assert.equal(wroteChatCall(servers.log), false);
+      });
+      resetLocalCatalogCacheForTests();
+      const loaded: FakeServers = {lmStudio: [], ollama: {ids: [...CLOUD_IDS, "gemma4:12b"], running: ["gemma4:12b"]}, log: []};
+      await withFetch(fakeFetch(loaded), async () => {
+        const result = await probeProvider("auto", NEWSROOM_ID, undefined, "story");
+        assert.equal(result.ok, true);
+        if (result.ok) {
+          assert.equal(result.choice, "local-model");
+          assert.deepEqual(result.localModel, {baseUrl: OLLAMA_BASE, id: "gemma4:12b"});
+        }
+        assert.equal(wroteChatCall(loaded.log), false);
+      });
+    } finally {
+      keys.forEach((key,index) => { if(old[index] === undefined) delete process.env[key]; else process.env[key] = old[index]; });
+    }
+  });
+
   it("refuses a hand-picked model that is on disk but not loaded, before the call", async () => {
     await storeRawScopedChoice("story", LM_BASE, "qwen3.6-35b-a3b");
     const servers = lmStudioHalfLoaded("halo-brain-35b", "qwen3.6-35b-a3b");

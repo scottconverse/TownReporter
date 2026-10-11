@@ -124,11 +124,15 @@ export function announceOnly() {}`,
   "desk-chrome-utils-stub.ts",
 );
 
-const { ModelPicker } = await import(
+const { ModelPicker, LocalModelSelect } = await import(
   moduleUrl(
     await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
     "model-picker.tsx",
     {
+      "@/lib/news/desk-local-model": moduleUrl(
+        await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
+        "desk-local-model.ts",
+      ),
       "@/lib/news/model-choice": choices,
       "@/lib/news/writer-bar": writerBarUrl,
       "@/lib/news/provider-registry": registryUrl,
@@ -147,4 +151,4 @@ const { ModelPicker } = await import(
 );
 
 const writerBar = await import(writerBarUrl);
-export { ModelPicker, availabilityStub, registry, choiceModule, writerBar };
+export { ModelPicker, LocalModelSelect, availabilityStub, registry, choiceModule, writerBar };
