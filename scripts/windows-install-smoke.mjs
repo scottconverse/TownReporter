@@ -238,7 +238,7 @@ async function main() {
     // This manual fixture has never run an evidence check. Its warning must be
     // visible before the editor explicitly consents to print the unchecked story.
     await page.getByLabel("Warnings you are publishing over")
-      .getByText(/No claims were recorded for this story/).waitFor();
+      .getByText(/The automatic evidence check has not recorded claim judgments for this draft/).waitFor();
     assert.equal(await page.getByText("On the paper", { exact: true }).count(), 0);
     await page.getByRole("button", { name: /^Publish anyway in / }).click();
     await page.getByText("On the paper").waitFor();

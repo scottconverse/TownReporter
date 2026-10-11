@@ -76,7 +76,7 @@ describe("ZC0: the zero-claims readiness the desk reaches", () => {
     const page = editorStoryState(blockers, 0);
     assert.equal(storyReadinessChip(page).text, "! Not checked yet");
     assert.equal(page.reason, filed.reason);
-    assert.match(page.reason, /No claims were recorded.*nothing has been checked/);
+    assert.match(page.reason, /automatic evidence check has not recorded claim judgments/);
     assert.equal(blockers.find(row => row.key === "unchecked")?.kind, "warning");
     assert.equal(readinessWithUncheckedStory(filed, { ...input, acknowledgedForVersion: true }).state, "ready");
     assert.equal(readinessWithUncheckedStory(filed, { ...input, evidenceCheckedCurrentVersion: true }).state, "ready");

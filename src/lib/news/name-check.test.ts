@@ -1,11 +1,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkStoryNames, maskUnverifiedMeetingIdentity, polishMaskedMeetingIdentities, replaceName, validateNameEvidence } from "./name-check-work.ts";
-import { nameCheckText, readNameCheck } from "./name-check.ts";
+import { nameCheckText, readNameCheck, selectedDocumentClaimsForDraft } from "./name-check.ts";
 
 const person = { name: "Eugene May", role: "Longmont City Attorney", context: "City Attorney Eugene May spoke." };
 const doc = { url: "https://longmontcolorado.gov/city-attorney/staff/", title: "City Attorney staff", text: "Eugene Mei, City Attorney for Longmont", extras: [], version_id: 42 };
 const candidate = { name: person.name, status: "corrected", spelling: "Eugene Mei", url: doc.url, excerpt: doc.text, authority: "official-directory", samePerson: true, reason: "The written city roster identifies the same Longmont city attorney." };
+test("selected uploaded passages are shown only for the exact checked draft and valid passage records", () => {
+  const draft = { headline: "Council votes", dek: "Budget plan", body: "The council passed the plan." };
+  const record = {
+    reportedDocumentClaims: {
+      version: 1,
+      checkedText: nameCheckText(draft),
+      rows: [{ fact: "The vote", kind: "minutes", filename: "minutes.pdf", locator: "page 1", excerpt: "The council passed the plan." }, { fact: "incomplete" }],
+    },
+  };
+  assert.equal(selectedDocumentClaimsForDraft(JSON.stringify(record), draft).length, 1);
+  assert.deepEqual(selectedDocumentClaimsForDraft(JSON.stringify(record), { ...draft, body: "Edited after the pass." }), []);
+  assert.deepEqual(selectedDocumentClaimsForDraft("{broken", draft), []);
+});
 test("an invented roster quotation is replaced with an exact saved passage before editor review", async () => {
   const mayor={name:"Brian Bagley",role:"former Mayor of Longmont",context:""};
   const source={...doc,url:"https://longmontcolorado.gov/government/mayors-of-longmont",title:"Mayors of Longmont",text:"Mayors of Longmont\n\nBrian Bagley\n\n2017 - 2021"};

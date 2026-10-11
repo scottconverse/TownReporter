@@ -2,7 +2,7 @@ import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import type { PackageClaim } from "./civic-reporting.ts";
 import { uncheckedStoryNeedsCheck } from "./unchecked-story-gate.ts";
 
-export type StoryReadinessState = "ready" | "checking" | "verified" | "to-check" | "not-ready" | "not-checked";
+export type StoryReadinessState = "ready" | "queued" | "checking" | "verified" | "to-check" | "not-ready" | "not-checked";
 
 export type StoryReadiness = {
   state: StoryReadinessState;
@@ -106,7 +106,7 @@ export function savedStoryReadiness(raw: unknown, checking = false): StoryReadin
         : {};
     if (
       value.version === 1 &&
-      ["ready", "checking", "verified", "to-check", "not-ready", "not-checked"].includes(String(value.state)) &&
+      ["ready", "queued", "checking", "verified", "to-check", "not-ready", "not-checked"].includes(String(value.state)) &&
       typeof value.openCount === "number" &&
       Number.isInteger(value.openCount) &&
       value.openCount >= 0 &&
@@ -134,6 +134,8 @@ export function storyReadinessChip(readiness: StoryReadiness): {
   tone: "ok" | "warn" | "quiet";
 } {
   switch (readiness.state) {
+    case "queued":
+      return { text: "Queued", tone: "quiet" };
     case "checking":
       return { text: "… Checking facts", tone: "quiet" };
     case "ready":
