@@ -1,13 +1,13 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
-import { providerErrorDetail, providerResponseDetail } from "./provider-error-detail.ts";
+import { providerErrorDetail, providerResponseDetail, providerHttpError } from "./provider-error-detail.ts";
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
 
 export type { ChatResultMetadata } from "./ai-result-metadata.ts";
 export type GrokOk = { ok: true; text: string; meta?: ChatResultMetadata };
-export type GrokErr = { ok: false; error: string; meta?: ChatResultMetadata };
+export type GrokErr = { ok: false; error: string; partialText?: string; meta?: ChatResultMetadata };
 
 import {
   isCustomModelChoice,
@@ -1155,7 +1155,7 @@ export async function grokChat(
     try { rejectedBody = await res.text(); } catch (err) {
       return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
-    retryFailureDetail = `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(rejectedBody, llm.apiKey)}`;
+    retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
     if (timeoutMs < 30_000 || remaining() <= 1_000) {
       return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
     }
@@ -1190,7 +1190,7 @@ export async function grokChat(
   } catch {
     return {
       ok: false,
-      error: res.ok ? `${failureLabel} returned an unreadable response` : `${failureLabel} API error ${res.status}${providerErrorDetail(responseText, llm.apiKey) ? `\n\n${providerErrorDetail(responseText, llm.apiKey)}` : ""}`,
+      error: res.ok ? `${failureLabel} returned an unreadable response` : providerHttpError(failureLabel, res.status, responseText, llm.apiKey),
       meta: openAiMeta(),
     };
   }
@@ -1215,7 +1215,7 @@ export async function grokChat(
       ok: false,
       error: localContextFailure
         ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
-        : `${failureLabel} API error ${res.status}${providerErrorDetail(body, llm.apiKey) ? `\n\n${providerErrorDetail(body, llm.apiKey)}` : ""}`,
+        : providerHttpError(failureLabel, res.status, body, llm.apiKey),
       meta: openAiMeta(body),
     };
   }
@@ -1676,11 +1676,11 @@ export async function readableReplyOrRetry<T>(input: {
   label?: string;
   onRetry?: () => void | Promise<void>;
 }): Promise<
-  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; retried: boolean }
-  | { ok: false; error: string; meta?: ChatResultMetadata; retried: boolean }
+  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; partialText?: string; retried: boolean }
+  | { ok: false; error: string; meta?: ChatResultMetadata; partialText?: string; retried: boolean }
 > {
   const first = await input.attempt();
-  if (!first.ok) return { ok: false, error: first.error, meta: first.meta, retried: false };
+  if (!first.ok) return { ok: false, error: first.error, partialText: first.partialText, meta: first.meta, retried: false };
   const value = input.read(first.text);
   if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
 
@@ -1688,7 +1688,7 @@ export async function readableReplyOrRetry<T>(input: {
   const second = await input.attempt(
     "Your previous reply could not be read as JSON. Reply with JSON only: one complete valid JSON object matching the requested fields. Escape quotes and newlines inside strings. Do not include Markdown fences, commentary, or text outside the JSON object.",
   );
-  if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };
+  if (!second.ok) return { ok: false, error: second.error, partialText: second.partialText, meta: second.meta, retried: true };
   const recovered = input.read(second.text);
   if (recovered !== null)
     return { ok: true, value: recovered, text: second.text, meta: second.meta, retried: true };

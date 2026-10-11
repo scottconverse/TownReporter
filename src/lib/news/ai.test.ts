@@ -621,7 +621,7 @@ describe("grokChat", () => {
       );
       assert.equal(result.ok, false);
       if (!result.ok) {
-        assert.equal(result.error, "Custom provider Custom AI (manual-model) API error 400\n\nbad credential [redacted]");
+        assert.equal(result.error, "Custom AI (manual-model): Provider says: bad credential [redacted] (400)");
         assert.equal(result.meta?.provider, "openai-compatible");
         assert.equal(result.meta?.model, "manual-model");
       }

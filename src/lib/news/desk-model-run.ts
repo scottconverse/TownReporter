@@ -19,7 +19,6 @@ import {
   planAutomaticFailover,
   automaticFailoverReason,
   looksLikeProviderQuota,
-  looksLikeContentRefusal,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
@@ -32,7 +31,7 @@ export type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice
  * every completed research/checkpoint outside this helper and pass the exact
  * same call payload to `run`, so fallback cannot repeat earlier work. */
 export async function runPinnedCallWithFailover<
-  TSnapshot extends { modelChoice: string },
+  TSnapshot extends { modelChoice: string; modelLabel?: string },
   TResult extends { ok: boolean; error?: string },
 >(opts: {
   snapshot: TSnapshot;
@@ -49,34 +48,30 @@ export async function runPinnedCallWithFailover<
     error: string;
   }) => Promise<void>;
 }): Promise<{ result: TResult; snapshot: TSnapshot }> {
-  const first = await opts.run(opts.snapshot);
-  if (first.ok || !first.error) return { result: first, snapshot: opts.snapshot };
-  const plan = await planAutomaticFailover({
-    source: opts.source,
-    current: opts.snapshot.modelChoice,
-    error: first.error,
-    probe: opts.probe,
-    ladder: opts.ladder,
-  });
-  if (!plan || plan.next === "auto") {
-    const result = opts.snapshot.modelChoice.startsWith("custom:")
-      ? { ...first, error: `${first.error} ${looksLikeContentRefusal(first.error) ? "The desk stopped this request without switching models" : "The desk found no ready fallback"}; no draft was created.` }
-      : first;
-    return { result, snapshot: opts.snapshot };
+  let snapshot = opts.snapshot;
+  let partialText: string | undefined;
+  const visited = new Set<string>();
+  let trail = "";
+  while (!visited.has(snapshot.modelChoice)) {
+    visited.add(snapshot.modelChoice);
+    const attempt = await opts.run(snapshot);
+    const result = attempt as TResult & { partialText?: string };
+    partialText = result.partialText ?? partialText;
+    if (result.ok || !result.error) return { result, snapshot };
+    const plan = await planAutomaticFailover({source: opts.source, current: snapshot.modelChoice,
+      error: result.error, probe: opts.probe, ladder: opts.ladder});
+    if (!plan || plan.next === "auto" || visited.has(plan.next)) {
+      return { result: { ...result, ...(partialText ? { partialText } : {}),
+        error: trail ? `${trail} -> ${result.error}` : result.error }, snapshot };
+    }
+    const next = await opts.resolve(plan.next);
+    const previousLabel = snapshot.modelLabel ?? modelChoiceLabel(snapshot.modelChoice);
+    const error = /reply was cut off/.test(result.error) ? `${previousLabel}: reply was cut off` : result.error;
+    await opts.onSwitch({previousLabel, nextLabel: plan.label, nextChoice: plan.next, reason: plan.reason, error});
+    trail = trail ? `${trail} -> ${error}` : error;
+    snapshot = next;
   }
-  const next = await opts.resolve(plan.next);
-  await opts.onSwitch({
-    previousLabel: modelChoiceLabel(opts.snapshot.modelChoice),
-    nextLabel: plan.label,
-    nextChoice: plan.next,
-    reason: plan.reason,
-    error: first.error,
-  });
-  const second = await opts.run(next);
-  const result = !second.ok && opts.snapshot.modelChoice.startsWith("custom:")
-    ? { ...second, error: `${first.error} -> ${plan.label}: ${second.error ?? "failed"}` }
-    : second;
-  return { result, snapshot: next };
+  throw new Error("The writing model ladder repeated a model.");
 }
 
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared

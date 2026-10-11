@@ -1,3 +1,4 @@
+import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 /**
  * Every reason Publish is off, in one place (unit CT, 0.6.81).
  *
@@ -241,6 +242,7 @@ export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
  */
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
+  if (draftLooksCutOff(state.body ?? "")) blockers.push({key:"draft-cut-off",kind:"warning",sentence:CUT_OFF_WARNING,action:{label:"Read the draft",target:{kind:"body"}}});
 
   if (empty(state.headline)) {
     blockers.push({

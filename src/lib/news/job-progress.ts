@@ -248,7 +248,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
       whose kind never reports a step -- still has a sentence to show rather
       than an empty line under the bar.
     */
-    step: row.step_text || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
+    step: (row.step_text?.startsWith("Waiting on Custom API connection") ? row.step_text.replace("Custom API connection", model) : row.step_text) || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
     startedAt: ms(row.started_at),
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
@@ -272,8 +272,12 @@ export function jobProgressView(
   headline: string | null = null,
 ): JobProgressView {
   const kind = row.kind;
+  let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
+  if (row.model_choice.startsWith("custom:")) {
+    try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
+  }
   return {
-    ...progressShape(row, modelChoiceLabel(effectiveStoryModelChoice(row.model_choice))),
+    ...progressShape(row, model),
     leadId,
     title: TITLES[kind] ?? row.kind,
     // Non-story kinds carry no headline, whatever the caller passed: their
@@ -471,6 +475,15 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       order by (j.status = 'running') desc, (j.status = 'queued') desc, j.id desc
       limit 30
     `;
+    if (rows.some(row => row.model_choice.startsWith("custom:"))) {
+      const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
+      await ensureCustomAiConnectionsSchema();
+      const connections = await sql<{id:string;name:string;model_id:string|null}>`select id,name,model_id from custom_ai_connections where newsroom_id=${newsroomId}`;
+      for (const row of rows) {
+        const connection = connections.find(value => `custom:${value.id}` === row.model_choice);
+        if (connection) row.result_json = JSON.stringify({...JSON.parse(row.result_json ?? "{}"),customModelLabel:modelChoiceLabel(row.model_choice,"story",{name:connection.name,modelId:connection.model_id})});
+      }
+    }
     const reportingRequestIds = rows.filter((row) => row.kind === "reporting").map((row) => row.subject_id);
     const reportingLeads = reportingRequestIds.length
       ? await sql<{ id: number; lead_id: number | null }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`

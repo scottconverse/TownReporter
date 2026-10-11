@@ -1,3 +1,4 @@
+import { runDraftReply } from "./draft-reply.ts";
 import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
 import { DAILY_SCAN_TIME_BUDGET_MS, orderAcceptedSources, sourceBatches } from "./scan-supply.ts";
@@ -3619,6 +3620,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
   };
   if (!batchSnapshot) {
     let activeReportSnapshot = {
+      modelLabel: (() => { try { return JSON.parse(job.result_json ?? "{}").customModelLabel as string | undefined; } catch { return undefined; } })(),
       modelChoice: effectiveStoryModelChoice(job.model_choice),
       modelEffort: draftInput.modelEffort,
     };
@@ -3640,7 +3642,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         modelEffort: nextEffort,
         ...(selectedMeetingArtifactId != null ? { meetingArtifactId: selectedMeetingArtifactId } : {}),
       });
-      activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort };
+      activeReportSnapshot = { modelChoice: nextChoice, modelEffort: nextEffort, modelLabel:nextLabel };
     };
     draftInput.onProviderSwitch = async ({ transport, model, reason }) => {
       const nextChoice: EffectiveProviderChoice | null =
@@ -3665,10 +3667,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeReportSnapshot,
         source: job.model_choice_source ?? "editor",
-        run,
+        run: options?.draftReply ? snapshot => runDraftReply(() => run(snapshot), options.minimumWords) : run,
         probe: (choice) => probe(choice, job.newsroom_id),
         resolve: async (choice) => ({
           modelChoice: choice,
+          modelLabel:modelChoiceLabel(choice),
           modelEffort:
             activeReportSnapshot.modelEffort == null
               ? null
@@ -3715,7 +3718,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeBatchSnapshot,
         source: batchWasAutomatic(activeBatchSnapshot) ? "auto" : "editor",
-        run,
+        run: options?.draftReply ? snapshot => runDraftReply(() => run(snapshot), options.minimumWords) : run,
         probe: (choice) => probe(choice, job.newsroom_id),
         ladder: batchWasAutomatic(activeBatchSnapshot) ? AUTOMATIC_LADDER : FORCED_FAILOVER_LADDER,
         resolve: (choice) => {

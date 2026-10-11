@@ -485,12 +485,19 @@ export async function enqueueJob(opts: {
     row the winner created — so every caller gets the same job, which is what
     they all wanted. Audit finding ENG-004.
   */
+  let resultJson = opts.resultJson ?? "{}";
+  if (opts.modelChoice?.startsWith("custom:")) {
+    const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
+    await ensureCustomAiConnectionsSchema();
+    const connection = (await sql<{name:string;model_id:string | null}>`select name,model_id from custom_ai_connections where id=${opts.modelChoice.slice(7)} and newsroom_id=${newsroomId}`)[0];
+    if (connection) resultJson = JSON.stringify({...JSON.parse(resultJson),customModelLabel:modelChoiceLabel(opts.modelChoice,"story",{name:connection.name,modelId:connection.model_id})});
+  }
   const lane = laneForKind(opts.kind);
   const created = await sql<DeskJob>`
     insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage, result_json)
-    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${opts.resultJson ?? "{}"})
+    values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${resultJson})
     on conflict do nothing
-    returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+    returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
               stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
               created_at, updated_at, started_at, finished_at
   `;
@@ -511,9 +518,9 @@ export async function enqueueJob(opts: {
     // intent is that concurrent enqueues always coalesce, never error.
     const retry = await sql<DeskJob>`
       insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, lane, status, stage, result_json)
-      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${opts.resultJson ?? "{}"})
+      values (${newsroomId}, ${opts.userId}, ${opts.kind}, ${opts.subjectId}, ${opts.modelChoice ?? "auto"}, ${opts.modelChoiceSource ?? "editor"}, ${opts.researchScope ?? "public"}, ${lane}, ${"queued"}, ${"Queued"}, ${resultJson})
       on conflict do nothing
-      returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error,
+      returning id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
               stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
               created_at, updated_at, started_at, finished_at
     `;

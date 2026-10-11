@@ -1,3 +1,4 @@
+import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import type { PackageClaim } from "./civic-reporting.ts";
 import { uncheckedStoryNeedsCheck } from "./unchecked-story-gate.ts";
 
@@ -15,7 +16,7 @@ export function editorStoryState(blockers: readonly { key: string; kind?: string
 ): StoryReadiness {
   const first = blockers.find(row => row.kind === "hard") ??
     blockers.find(row => row.key === "evidence-loading" || row.key === "reconcile-running") ??
-    blockers.find(row => row.key === "unchecked") ?? blockers[0];
+    blockers.find(row => row.key === "draft-cut-off") ?? blockers.find(row => row.key === "unchecked") ?? blockers[0];
   return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : first.key === "unchecked" || first.key === "claims-unchecked" ? "not-checked" : "not-ready" : "ready",
     openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
 }
@@ -163,6 +164,7 @@ export function storyReadiness(input: {
   /** Unit ZC: the one-press acknowledgement covers this version. */
   acknowledgedForVersion?: boolean;
 }): StoryReadiness {
+  if (draftLooksCutOff(input.body)) return {state:"not-ready",openCount:0,totalCount:input.claims.length,reason:CUT_OFF_WARNING};
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
   const paragraphs = input.body
     .split(/\r?\n\s*\r?\n/)

@@ -283,8 +283,8 @@ export function shouldHydrateDarkModel(
   );
 }
 
-export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story"): string {
-  if (isCustomModelChoice(value)) return "Custom API connection";
+export function modelChoiceLabel(value: unknown, scope: ProviderSurface = "story", connection?: { name: string; modelId: string | null } | null): string {
+  if (isCustomModelChoice(value)) return connection ? `${connection.name} \u2014 ${connection.modelId ?? "no model"}` : "Custom API connection";
   if (value === "configured") return providerEntry("configured")?.label ?? "Configured gateway";
   for (const surface of [scope, "story", "scan", "follow-up", "opinion", "dark", "ocr", "forced"] as const) {
     const match = modelChoicesFor(surface).find((choice) => choice.value === value);

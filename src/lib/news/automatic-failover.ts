@@ -52,7 +52,7 @@ export type AutomaticFailoverInput = {
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
-export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable";
+export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable" | "cutoff";
 
 export type AutomaticFailoverPlan = {
   next: StoryModelChoice;
@@ -133,6 +133,7 @@ export function automaticFailoverReason(
   detail: string | null | undefined,
 ): AutomaticFailoverReason | null {
   if (looksLikeContentRefusal(detail)) return null;
+  if (/reply was cut off/i.test(detail ?? "")) return "cutoff";
   if (looksLikeUnreadableReply(detail)) return "unreadable";
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
@@ -197,6 +198,7 @@ export function failoverReasonPhrase(
   previousLabel: string,
   reason: AutomaticFailoverReason,
 ): string {
+  if (reason === "cutoff") return `${previousLabel}: reply was cut off`;
   if (reason === "timeout") return `${previousLabel} timed out`;
   if (reason === "auth") return `${previousLabel} sign-in lapsed`;
   if (reason === "quota") return `${previousLabel} reached its usage limit`;
