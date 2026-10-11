@@ -279,7 +279,7 @@ export function jobProgressView(
   let cutOff = false;
   try { cutOff = JSON.parse(row.result_json ?? "{}").draftCutOff === true; } catch { /* Legacy receipt. */ }
   let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
-  if (row.model_choice.startsWith("custom:")) {
+  if (typeof row.model_choice === "string" && row.model_choice.startsWith("custom:")) {
     try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
   }
   return {
@@ -481,7 +481,7 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       order by (j.status = 'running') desc, (j.status = 'queued') desc, j.id desc
       limit 30
     `;
-    if (rows.some(row => row.model_choice.startsWith("custom:"))) {
+    if (rows.some(row => typeof row.model_choice === "string" && row.model_choice.startsWith("custom:"))) {
       const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
       await ensureCustomAiConnectionsSchema();
       const connections = await sql<{id:string;name:string;model_id:string|null}>`select id,name,model_id from custom_ai_connections where newsroom_id=${newsroomId}`;

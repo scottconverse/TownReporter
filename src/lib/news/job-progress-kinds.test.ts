@@ -46,6 +46,12 @@ describe("reporting result navigation", () => {
 });
 
 describe("Dark Desk job effort", () => {
+  it("renders a legacy job without a saved model choice as Automatic", () => {
+    for (const model_choice of [undefined, null]) {
+      const legacyJob = { id: 711, kind: "dark", status: "running", model_choice } as unknown as DeskJob;
+      assert.equal(jobProgressView(legacyJob, 0, null).model, "Automatic");
+    }
+  });
   it("keeps the saved effort on the card view", () => {
     const darkJob = {
       id: 712,
