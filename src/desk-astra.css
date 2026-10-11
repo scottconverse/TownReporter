@@ -291,6 +291,11 @@
   background: var(--bg);
   box-shadow: inset 4px 0 0 var(--sel);
   font-weight: 700;
+  /* The foreground switches with the palette. Animating only this fill left
+     the selected label nearly invisible on its light-theme background during
+     the first frame after choosing dark mode. Keep the current-page colors in
+     lockstep; the quiet hover transition remains on unselected links. */
+  transition: none;
 }
 .desk-ltr.astra .astra-nav-count {
   font-size: calc(14px * var(--ts));
