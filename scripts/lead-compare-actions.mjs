@@ -21,7 +21,7 @@ async function seedPair(pool, { userId, newsroomId, stamp, prefix, status }) {
   const currentHeadline = `TEST FIXTURE — ${prefix} current story ${stamp}`;
   const prior = await pool.query(
     `insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,newsworthiness)
-     values($1,$2,$3,'The earlier public record is attached.','community','new','[]',8)
+     values($1,$2,$3,'The earlier public record is attached.','council','new','[]',8)
      returning id`,
     [userId, newsroomId, priorHeadline],
   );
@@ -30,7 +30,7 @@ async function seedPair(pool, { userId, newsroomId, stamp, prefix, status }) {
     `insert into leads(
        user_id,newsroom_id,headline,why,topic,status,source_urls,newsworthiness,
        possible_duplicate_of,dup_kind,killed_at,kill_reason
-     ) values($1,$2,$3,'The current record needs duplicate review.','community',$4,'[]',8,$5,'possible',$6,$7)
+     ) values($1,$2,$3,'The current record needs duplicate review.','council',$4,'[]',8,$5,'possible',$6,$7)
      returning id`,
     [
       userId,
@@ -45,7 +45,7 @@ async function seedPair(pool, { userId, newsroomId, stamp, prefix, status }) {
   const currentId = current.rows[0].id;
   await pool.query(
     `insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls)
-     values($1,$2,$3,$4,'Saved for the warning path.','TEST FIXTURE saved draft prose.','community','[]')`,
+     values($1,$2,$3,$4,'Saved for the warning path.','TEST FIXTURE saved draft prose.','council','[]')`,
     [userId, newsroomId, currentId, currentHeadline],
   );
   return { priorId, priorHeadline, currentId, currentHeadline };

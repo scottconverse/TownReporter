@@ -39,7 +39,7 @@ import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
-import { verifyLeadCompareActions } from "./lead-compare-actions-e2e.mjs";
+import { verifyLeadCompareActions } from "./lead-compare-actions.mjs";
 import {
   SERVER_FN_HEADER,
   awaitServerFnCall,
