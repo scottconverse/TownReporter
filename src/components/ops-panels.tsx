@@ -1,3 +1,5 @@
+import { DeskJobCard } from "@/components/JobCard";
+import { useDeskJobs } from "@/components/job-card-state";
 /*
   The editors behind the Server screen's cards (unit CX2).
 
@@ -211,6 +213,7 @@ export function ReadOnlyCard({ title, children }: { title: string; children: Rea
  * that lies about its state.
  */
 export function HealthPanel() {
+  const jobs = useDeskJobs();
   const [showLogs, setShowLogs] = useState(false);
   const [showActions, setShowActions] = useState(false);
   const [confirming, setConfirming] = useState<OpsActionId | null>(null);
@@ -302,6 +305,7 @@ export function HealthPanel() {
         )}
       </section>
 
+      {jobs.data?.filter(job => job.kind === "draft" && job.status === "queued").map(job => <DeskJobCard key={job.id} job={job} title={job.headline ?? job.title} />)}
       <div className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"

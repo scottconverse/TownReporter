@@ -87,6 +87,7 @@ const JobCardModule = moduleUrl(
     "@/components/scoped-actions": jobProgressStub,
     "@tanstack/react-query": reactQueryStub,
     "./job-card-state": jobCardStateModule,
+    "@/components/model-picker": inlineModule("export const ModelPicker = () => null;"),
   },
 );
 const { JobCard } = await import(JobCardModule);
