@@ -174,7 +174,7 @@ test("FB18: recording a manual check changes the Checks panel and removes the re
   await page.locator('[aria-label="Evidence check"] [role="status"]').filter({ hasText: "Manual check recorded." }).waitFor();
   const visible = await page.locator("body").innerText();
   assert.match(visible, /You confirmed that you checked this story against your sources\./);
-  assert.doesNotMatch(visible, /No claims were recorded.*nothing has been checked|press .*I checked this story myself/i);
+  assert.doesNotMatch(visible, /Not checked yet|I checked this story myself/i);
   assert.equal(await page.getByRole("button", { name: "I checked this story myself" }).count(), 0);
 });
 

@@ -1353,20 +1353,9 @@ async function main() {
   await page.goto(`${base}/desk/story/${findingFixture.legacyLeadId}`, {
     waitUntil: "networkidle",
   });
-  /*
-    Unit CO part 2 (61eec4f6) replaced this panel's empty-state line: the old
-    `No recorded findings for this draft.` became one sentence about findings
-    AND transcript citations, because a meeting draft has no URL-receipt claims
-    at all and an empty panel read as a broken one. The pin here still held the
-    retired words -- measured, 2026-09-28: `grep -rn "No recorded findings for
-    this draft."` finds them in this walk and nowhere in `src/`, and the CI walk
-    sat on them for the full 45s with the panel on screen
-    (src/components/finding-evidence-review.tsx:531-537 renders the new copy).
-  */
+  /* Match the empty state's meaning without pinning the whole sentence. */
   await page
-    .getByText(
-      "This draft has no recorded findings and no transcript citations, so there is nothing to review here. This review does not inventory every claim in the story.",
-    )
+    .getByText(/This draft has no recorded findings and no transcript citations/i)
     .waitFor();
   await page.goto(`${base}/desk/story/${findingFixture.malformedLeadId}`, {
     waitUntil: "networkidle",

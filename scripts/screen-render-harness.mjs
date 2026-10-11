@@ -34,7 +34,14 @@ export async function screenModule(path, overrides = {}, real = []) {
  * filled with "the check already completed", so a test that is not about this gate
  * keeps the readiness it had before; a test that is about it sets the facts.
  */
-const ALWAYS_REAL = ["@/lib/news/unchecked-story-gate", "@/lib/news/writer-bar"];
+const ALWAYS_REAL = [
+  "@/lib/news/unchecked-story-gate",
+  "@/lib/news/writer-bar",
+  // The story route reads selected uploaded passages from this pure module.
+  // Keeping the real array-returning selector prevents a default null stub
+  // from breaking route fixtures that do not need to override name handling.
+  "@/lib/news/name-check",
+];
 
 export async function screenModuleUrl(path, overrides = {}, real = []) {
   const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
