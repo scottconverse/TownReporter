@@ -11,7 +11,8 @@ import { providerHttpError } from "./provider-error-detail.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 
 import { runDraftReply } from "./draft-reply.ts";
-import { runPinnedCallWithFailover } from "./desk-model-run.ts";
+import { editorDraftError } from "./desk-copy.ts";
+import { storyProviderFailure, runPinnedCallWithFailover } from "./desk-model-run.ts";
 
 import { writingModelLines } from "../desk/ops-rows.ts";
 
@@ -36,7 +37,7 @@ test("part G: HTTP errors retain short provider words and redact credentials", a
   try {
     const result = await grokChat("System","User",10,{choice:"custom:9ce9a944-f444-4a69-8927-7c7705c07a35",newsroomId:1},{resolveCustom:async()=>({name:"Gemini",modelId:"gemini-3.5-flash",apiKey:"secret-key",baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai"})});
     assert.equal(result.ok,false);
-    if(!result.ok) {assert.match(result.error,/Gemini.*Google says: You exceeded/);assert.doesNotMatch(result.error,/secret-key|API error/);}
+    if(!result.ok) {assert.match(result.error,/Gemini.*Google says: You exceeded/);assert.doesNotMatch(result.error,/secret-key|API error/);assert.equal(editorDraftError(storyProviderFailure(result.error)),result.error);}
   } finally {globalThis.fetch=originalFetch;}
 
 });

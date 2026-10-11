@@ -91,7 +91,7 @@ export async function runPinnedCallWithFailover<
  * Story job. Deliberately avoid the renderer's quota trigger words here while
  * preserving the reset detail when the provider supplied one. */
 export function storyProviderFailure(error: string): string {
-  if (error.startsWith("Custom provider ")) return error;
+  if (error.startsWith("Custom provider ") || /: (?:Google|Provider) says:/.test(error)) return error;
   if (!looksLikeProviderQuota(error) || automaticFailoverReason(error) !== "quota") return error;
   const reset = error
     .match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]
