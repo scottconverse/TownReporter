@@ -303,6 +303,11 @@
   color: var(--fg2);
   font-variant-numeric: tabular-nums;
 }
+.desk-ltr.astra .invite-copy-message {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
 .desk-ltr.astra .astra-nav-bottom {
   margin-top: auto;
   padding-top: 22px;
