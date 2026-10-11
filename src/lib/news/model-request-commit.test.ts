@@ -167,6 +167,7 @@ async function ensureCommitBoundarySchema() {
       finished_at timestamptz
     )
   `);
+  await sql.query("alter table editorial_requests add column if not exists voice_mode text not null default 'paper'");
   await sql.query(`
     create table if not exists leads (
       id serial primary key,
@@ -222,7 +223,16 @@ async function ensureCommitBoundarySchema() {
 
 describe("authenticated Codex commit boundary", () => {
   const readyOpinionDeps = {
-    checkReadiness: async () => ({ ready: true, why: "", problems: [], effectiveChoice: "auto" as const }),
+    checkReadiness: async () => ({
+      ready: true,
+      modelReady: true,
+      voiceReady: true,
+      voiceProblem: null,
+      modelProblems: [],
+      why: "",
+      problems: [],
+      effectiveChoice: "auto" as const,
+    }),
     ensureEditorialRequestSchema: async () => undefined,
     assertRate: async () => undefined,
     enqueueJob: (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
@@ -587,6 +597,10 @@ describe("authenticated Codex commit boundary", () => {
       {
         checkReadiness: async () => ({
           ready: true,
+          modelReady: true,
+          voiceReady: true,
+          voiceProblem: null,
+          modelProblems: [],
           why: "",
           problems: [],
           effectiveChoice: "auto" as const,
@@ -700,6 +714,10 @@ describe("authenticated Codex commit boundary", () => {
         {
           checkReadiness: async () => ({
             ready: true,
+            modelReady: true,
+            voiceReady: true,
+            voiceProblem: null,
+            modelProblems: [],
             why: "",
             problems: [],
             effectiveChoice: "auto" as const,
