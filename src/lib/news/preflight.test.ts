@@ -171,6 +171,7 @@ describe("scan preflight", () => {
     assert.equal(p.ok, false);
     if (p.ok) return;
     assert.equal(p.kind, "unknown");
+    assert.match(p.guidance, /provider's own message is below[^\n]*\n\nsome new failure nobody has seen/);
     assert.equal(p.retryable, false, "unknown is not assumed retryable");
   });
 

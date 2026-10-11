@@ -360,6 +360,10 @@ export type SourceOutcome = "read" | "wait" | "blocked" | "failed" | "skipped";
  * `scan-coverage.test.ts` exists to prevent.
  */
 export type SourceTouch = {
+  readMethod?: string | null;
+  readOutcome?: string | null;
+  readRouteUrl?: string | null;
+  newsletterUrl?: string | null;
   /** What happened, and the only thing the write may branch on. */
   outcome: SourceOutcome;
   /** When the desk may ask again; null means "ask whenever the pass comes". */

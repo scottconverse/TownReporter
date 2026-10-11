@@ -1,10 +1,11 @@
+import { captureAudioAgain } from "@/components/scoped-actions";
 import { useState } from "react";
 import { agendaTitle, meetingAudioIntegrityNotice, meetingYoutubeBlockedLine } from "@/lib/news/desk-copy";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, SecHead } from "@/components/desk-chrome";
 import { listMeetingActivity, type MeetingActivityRow } from "@/lib/news/meeting-activity";
 import { meetingStatusLabel } from "@/lib/news/meeting-activity-label";
-import { captureAudioAgain } from "@/lib/news/meeting-manual-run";
+
 import { PAPER, formatListDate, formatListDateTime } from "@/lib/paper";
 import { isYoutubeRateLimit } from "@/lib/news/meeting-capture-retry";
 

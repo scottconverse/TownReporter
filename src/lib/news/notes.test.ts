@@ -4,6 +4,7 @@ import {
   selectExcerpt,
   addHumanLine,
   applyTodoPatch,
+  earlierReportingNotes,
   keepHumanTodos,
   machineTodosFrom,
   mergeDraftEvidenceIntoNotes,
@@ -236,6 +237,40 @@ describe("packNotes", () => {
     })) as unknown as typeof notes.todo;
     const packed = packNotes(notes, 600);
     assert.doesNotThrow(() => JSON.parse(packed));
+  });
+
+  /**
+   * Item 38: an imported story whose text was accepted despite differing from
+   * the paste must carry the desk-only sentence that says so, and it has to
+   * survive the round trip an editor's ordinary save puts the notes through.
+   */
+  it("keeps the imported report and the override warning through a packed save", () => {
+    const report = "Claim | evidence | page | qualification.\n".repeat(160);
+    const warning = "The text differs from the report.";
+    const notes = parseNotes(
+      JSON.stringify({
+        importedReport: report,
+        editorialAssignment: { origin: "import", text: report },
+        importWarning: warning,
+      })
+    );
+    assert.equal(notes.importedReport, report, "the imported report survives the import origin");
+    assert.equal(notes.importWarning, warning, "the override warning is read back");
+    const reloaded = parseNotes(packNotes(notes));
+    assert.equal(reloaded.importedReport, report);
+    assert.equal(reloaded.importWarning, warning);
+  });
+
+  it("shows the override warning as a desk-only earlier note", () => {
+    const entries = earlierReportingNotes({
+      importedReport: "",
+      angle: "",
+      importWarning: "The text differs from the report.",
+    });
+    assert.ok(
+      entries.some((entry) => entry.text === "The text differs from the report."),
+      "the warning is one of the entries the story page draws",
+    );
   });
 
   /**

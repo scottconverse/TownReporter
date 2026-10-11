@@ -1,3 +1,4 @@
+import { startReporting } from "@/components/scoped-actions";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
@@ -6,7 +7,7 @@ import { Field } from "@/components/desk-chrome";
 import { ModelPicker } from "@/components/model-picker";
 import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
-import { startReporting } from "@/lib/news/desk";
+
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 

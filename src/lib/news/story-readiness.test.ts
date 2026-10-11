@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { storyReadiness } from "./story-readiness.ts";
+import { storyReadiness, readinessWithUncheckedStory, savedStoryReadiness, storyReadinessChip, editorStoryState } from "./story-readiness.ts";
 
 // guards: the editor could be shown a ready story with four open facts or an unchecked lead fact.
 it("keeps the editor's readiness state within the record-check thresholds", () => {
@@ -33,4 +33,35 @@ it("maps open facts to their own paragraphs before explaining not-ready", () => 
   assert.equal(result.state, "not-ready");
   assert.equal(result.openCount, 6);
   assert.equal(result.reason, "6 facts need checking.");
+});
+
+it("an empty story never inherits ready from its memo, acknowledgement, or zero claims", () => {
+  for (const body of ["", " \n\t"]) {
+    const readiness = readinessWithUncheckedStory(savedStoryReadiness(null), {
+      body,
+      recordedClaims: 0,
+      evidenceCheckedCurrentVersion: true,
+      acknowledgedForVersion: true,
+      exempt: true,
+    });
+    assert.equal(readiness.state, "not-ready");
+    assert.equal(readiness.reason, "No draft yet.");
+    assert.equal(storyReadinessChip(readiness).text, "No draft yet");
+    assert.equal(storyReadiness({ headline: "A headline", body, claims: [] }).state, "not-ready");
+  }
+  assert.equal(
+    readinessWithUncheckedStory(savedStoryReadiness(null, true), {
+      body: "",
+      recordedClaims: 0,
+      evidenceCheckedCurrentVersion: false,
+      acknowledgedForVersion: false,
+      exempt: false,
+    }).state,
+    "checking",
+  );
+  assert.equal(
+    editorStoryState([{ key: "body", kind: "hard", sentence: "The story body is empty." }], 0)
+      .reason,
+    "No draft yet.",
+  );
 });

@@ -457,3 +457,37 @@ describe("Story provider failure and stage failover", () => {
     assert.doesNotMatch(result.error, /Opinion request/);
   });
 });
+
+
+for (const message of ["Custom provider Gemini (gemini-3.5-flash) timed out after 150 seconds.", "Custom provider Gemini (gemini-3.5-flash) API error 429: Google quota exhausted"]) it(`records provider detail and the next hop: ${message}`, async () => {
+  let hop: unknown;
+  const result = await runPinnedCallWithFailover({
+    snapshot:{modelChoice:"custom:gemini"}, source:"editor",
+    run: async snapshot => snapshot.modelChoice === "custom:gemini" ? {ok:false,error:message} : {ok:true,text:"draft"},
+    probe: async () => ({ok:true,choice:"codex-balanced",label:"Codex Sol 6.1 (balanced)"}),
+    resolve: async () => ({modelChoice:"codex-balanced"}),
+    onSwitch: async receipt => { hop = receipt; },
+  });
+  assert.equal(result.result.ok,true);
+  assert.match(JSON.stringify(hop),/Codex Sol 6.1/);
+  assert.ok(JSON.stringify(hop).includes(message));
+});
+
+
+it("keeps Google's message through terminal Story and editor rendering", async () => {
+  const {editorDraftError}=await import("./desk-copy.ts");
+  const error="Custom provider Gemini (gemini-3.5-flash) API error 429: Google quota exhausted. The desk found no ready fallback; no draft was created.";
+  assert.equal(editorDraftError(storyProviderFailure(error)),error);
+});
+
+it("explains the desk outcome when a custom timeout has no ready fallback", async () => {
+  const result = await runPinnedCallWithFailover({
+    snapshot: { modelChoice: "custom:gemini" }, source: "editor", ladder: ["codex-balanced"],
+    run: async () => ({ ok: false, error: "Custom provider Gemini (gemini-3.5-flash) timed out after 150 seconds." }),
+    probe: async () => ({ ok: false, error: "Codex is signed out." }),
+    resolve: async () => assert.fail("no fallback can run"),
+    onSwitch: async () => assert.fail("no hop can be recorded"),
+  });
+  assert.match(result.result.error, /Gemini.*timed out after 150 seconds/);
+  assert.match(result.result.error, /The desk found no ready fallback; no draft was created/);
+});

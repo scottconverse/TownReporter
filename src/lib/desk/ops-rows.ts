@@ -1,3 +1,5 @@
+import type { ProviderAvailability } from "../news/writer-bar.ts";
+import { localModelOptionText } from "../news/model-choice.ts";
 import { dailyScanCounts } from "./daily-scan-counts.ts";
 /*
   What each Server card's drawn rows SAY, given what the desk has read.
@@ -481,6 +483,8 @@ export type OpsModelRead = {
   times: ProviderTimeSetting[];
   statuses: ProviderStatus[];
   catalog: LocalCatalog;
+  availability?: ProviderAvailability;
+  localModel?: {id:string; baseUrl:string} | null;
 };
 
 /**
@@ -636,6 +640,10 @@ function rungWords(
  * draws no chip rather than inventing one.
  */
 function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undefined {
+  if (read.availability) {
+    const ready = read.availability[entry.id === "qwen-local" ? "local-model" : entry.id] !== false;
+    return {source:"words",tone: ready ? "ready" : "slow",label: ready ? "Ready" : "Not ready",help: read.availability.reasons?.[entry.id === "qwen-local" ? "local-model" : entry.id] ?? ""};
+  }
   const login = LOGIN_FOR_KIND[entry.kind];
   const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
   if (status) return { source: "status", status };
@@ -662,6 +670,11 @@ export function writingModelLines(read?: OpsModelRead): OpsModelLine[] {
   const lines: OpsModelLine[] = [];
   const add = (entry: ProviderEntry, n: string, note: string) => {
     const chip = read ? rungChip(entry, read) : undefined;
+    if ((entry.id === "local-model" || entry.id === "qwen-local") && read?.availability) {
+      const model = read.localModel ?? read.catalog.defaultModel;
+      const metadata = read.catalog.servers.find(server => server.baseUrl === model?.baseUrl)?.models.find(row => row.id === model?.id);
+      note = model ? localModelOptionText({id:model.id,loaded:metadata?.loaded ?? null,cloud:metadata?.cloud}) : "Backend not checked yet";
+    }
     lines.push(chip ? { n, name: entry.label, note, chip } : { n, name: entry.label, note });
   };
   for (const id of automaticLadder()) {

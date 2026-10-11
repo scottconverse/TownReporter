@@ -172,7 +172,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     });
   }
   for (const sectionKey of ["foreign-only", "retired", "about", "opinion", "bad/key", "", null, 7]) {
-    it(`rejects unavailable/non-reporting section ${JSON.stringify(sectionKey)} before filing`, async () => {
+    it(`${sectionKey === "about" || sectionKey === "opinion" ? "warns, then files with audited consent for" : "rejects unavailable"} section ${JSON.stringify(sectionKey)} before filing`, async () => {
       const sql = await ensureWriteStorySchema();
       let touched = false;
       const result = await writeStoryForAuthenticatedEditor({
@@ -188,7 +188,19 @@ describe("writeStoryForAuthenticatedEditor", () => {
       });
       assert.equal(result.ok, false);
       assert.equal(touched, false);
-      if (!result.ok) assert.match(result.error, /section/i);
+      if (!result.ok && (sectionKey === "about" || sectionKey === "opinion")) {
+        assert.equal("warning" in result && result.warning?.key, "lead-publication-section");
+        const approved = await writeStoryForAuthenticatedEditor({ context: { userId: "section-editor", newsroomId: 820 }, text: "Write a short local item about upcoming programs.", sectionKey, override: ["lead-publication-section"] }, {
+          getSections: async () => sectionConfig, getSql: async () => sql, audit: async () => {}, assertRate: async () => {},
+          probeProvider: async () => ({ ok: true, label: "Claude Frontier", choice: "claude-frontier" }),
+          enqueueJob: opts => enqueueJob({ ...opts, kick: false }),
+        });
+        assert.equal(approved.ok,true,JSON.stringify(approved));
+        const [lead] = await sql.query<{topic:string}>("select topic from leads where id=$1",[approved.leadId]);
+        assert.equal(lead.topic,sectionKey);
+        const audits = await sql.query<{detail:string}>("select detail from audit_events where newsroom_id=820 and user_id='section-editor' and action='override'");
+        assert.ok(audits.some(a => JSON.parse(a.detail).key === "lead-publication-section"));
+      } else if (!result.ok) assert.match(result.error, /section/i);
     });
   }
   it("persists the authenticated Write box assignment independently of its scratch evidence", async () => {
@@ -251,7 +263,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     assert.equal(Number(count), 0);
   });
 
-  it("files a lead with the pasted text kept as scratch, then probes readiness before enqueuing", async () => {
+  it("probes readiness once, then files a lead with pasted text kept as scratch and enqueues", async () => {
     const sql = await ensureWriteStorySchema();
     const userId = `write-story-file-${Date.now()}-${Math.random()}`;
     let probeCalls = 0;
@@ -302,7 +314,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     assert.deepEqual(JSON.parse(draft.source_urls), ["https://example.org/agenda"]);
   });
 
-  it("refuses the commit step, but keeps the filed lead, when the provider is not ready", async () => {
+  it("warns before filing any story when the provider is not ready", async () => {
     await ensureWriteStorySchema();
     const userId = `write-story-noprovider-${Date.now()}-${Math.random()}`;
     const NOT_INSTALLED = "Codex CLI not found on PATH.";
@@ -318,16 +330,21 @@ describe("writeStoryForAuthenticatedEditor", () => {
       },
     );
     assert.equal(res.ok, false);
-    if (res.ok) return assert.fail("a missing provider must refuse the draft");
-    if (!("leadId" in res)) return assert.fail("the failed draft must retain its filed lead");
-    assert.ok(res.leadId, "the lead is filed before the provider is asked");
-    assert.match(res.error, /Codex is not installed/i);
+    if (res.ok) return assert.fail("an unavailable provider must warn before drafting");
+    assert.equal("leadId" in res ? res.leadId : undefined, undefined, "waiting for consent must not file a lead");
+    assert.ok("warning" in res);
+    assert.equal(res.warning.key, "writer-not-ready");
+    assert.match(res.error, /Codex.*not found.*If you draft anyway/i);
 
     const sql = await getSql();
     const [{ count }] = await sql<{ count: number }>`
-      select count(*) as count from leads where id = ${res.leadId}
+      select count(*) as count from leads where user_id = ${userId}
     `;
-    assert.equal(Number(count), 1);
+    assert.equal(Number(count), 0);
+    const [{ drafts }] = await sql<{ drafts: number }>`
+      select count(*) as drafts from drafts where user_id = ${userId}
+    `;
+    assert.equal(Number(drafts), 0);
   });
 
   it("lets this newsroom's own section name and brief decide the beat", async () => {

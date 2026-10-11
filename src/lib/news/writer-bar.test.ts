@@ -4,6 +4,7 @@ import {
   lastDraftLine,
   lastDraftWhen,
   readinessDot,
+  readinessFailureMessage,
   saveState,
   writerIsReady,
 } from "./writer-bar.ts";
@@ -99,7 +100,7 @@ describe("readinessDot", () => {
     panel all use one phrase for one problem.
   */
   it("uses the picker's own words when the writer is not set up", () => {
-    assert.deepEqual(readinessDot(false), { label: "● Not set up", tone: "warn" });
+    assert.deepEqual(readinessDot(false), { label: "● Not ready", tone: "warn" });
   });
 });
 
@@ -188,4 +189,9 @@ describe("saveState", () => {
       tone: "ok",
     });
   });
+});
+
+it("keeps known quota and unknown provider messages visible", () => {
+  assert.equal(readinessFailureMessage("custom:x", "My provider", "insufficient_quota"), "My provider hit its usage limit.");
+  assert.equal(readinessFailureMessage("codex-frontier", "Codex", "Transport refused the request."), "Codex is not ready: Transport refused the request.");
 });

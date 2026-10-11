@@ -10,6 +10,8 @@ let getSql: typeof import("../db.ts").getSql;
 let performDraftWork: typeof import("./desk.ts").performDraftWork;
 let performPublish: typeof import("./desk.ts").performPublish;
 let performConfirmDraftTopic: typeof import("./desk.ts").performConfirmDraftTopic;
+let performAcknowledgeUnchecked: typeof import("./desk.ts").performAcknowledgeUnchecked;
+let uncheckedStoryGate: typeof import("./desk.ts").uncheckedStoryGate;
 
 before(async () => {
   vite = await createServer({
@@ -18,7 +20,7 @@ before(async () => {
     resolve: { alias: { "@": join(process.cwd(), "src") } },
   });
   ({ getSql } = await vite.ssrLoadModule("/src/lib/db.ts"));
-  ({ performDraftWork, performPublish, performConfirmDraftTopic } = await vite.ssrLoadModule(
+  ({ performDraftWork, performPublish, performConfirmDraftTopic, performAcknowledgeUnchecked, uncheckedStoryGate } = await vite.ssrLoadModule(
     "/src/lib/news/desk.ts",
   ));
 });
@@ -253,6 +255,12 @@ it("legacy manual drafts still inherit their lead citations at publication", asy
   // 0.6.80 (CK): publishing refuses an empty dek, so the legacy draft carries one.
   await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,research_json) values($1,$2,$3,'Manual draft','The council meets Tuesday.','The meeting is Tuesday.','council','[]','{}')", [userId, job.newsroom_id, leadId]);
   await confirmSection(userId, job.newsroom_id, leadId);
+  /* The manual body states a checkable date, so the zero-claims gate requires an
+     editor to have read it: acknowledge through the real press with this version's
+     token, then the normal section-and-publish flow runs. */
+  const gate = await uncheckedStoryGate(job.newsroom_id, leadId);
+  const acknowledged = await performAcknowledgeUnchecked({ userId, newsroomId: job.newsroom_id }, leadId, gate.evidenceToken);
+  assert.equal(acknowledged.ok, true, acknowledged.ok ? "" : acknowledged.error);
   const published = await performPublish({ userId, newsroomId: job.newsroom_id }, leadId);
   assert.equal(published.ok, true);
   const [article] = await sql.query<{ source_urls: string }>("select source_urls from articles where lead_id=$1 and newsroom_id=$2", [leadId, job.newsroom_id]);

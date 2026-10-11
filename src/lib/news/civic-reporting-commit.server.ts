@@ -34,7 +34,7 @@ import { assertRate } from "./ops.ts";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { probeProvider, type LocalModelOverride } from "./ai.ts";
 import { scanPreflight } from "./preflight.ts";
-import { paperSetUpRefusal } from "./paper-settings.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
 import { enqueueJob, kickJobs } from "./jobs.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
@@ -174,6 +174,7 @@ const LEAD_ACTION_LABELS: Record<string, string> = {
 };
 
 export type StartReportingInput = {
+  override?: string[];
   action: string;
   leadId?: number;
   assignment: string;
@@ -192,6 +193,7 @@ export type StartReportingResult =
   | { ok: true; requestId: number; jobId: number; modelChoice: EffectiveStoryModelChoice; modelLabel: string }
   | {
       ok: false;
+      warning?: { key: string; sentence: string };
       error: string;
       detail?: string;
       retryable?: boolean;
@@ -217,12 +219,11 @@ type ReportingStartDependencies = {
 
 type FollowUpDependencies = Pick<ReportingStartDependencies, "probe" | "kick">;
 
-async function paperSetupRefusalFor(newsroomId: number, action: string) {
-  const refusal = await paperSetUpRefusal(newsroomId, action);
-  if (refusal === null) return null;
-  return { ok: false as const, error: refusal, detail: "", retryable: true, kind: undefined };
+async function paperSetupRefusalFor(context: AuthenticatedEditor, action: string, override?: string[]) {
+  const refusal = await paperSetupWarning(context, override, action);
+  if (!refusal) return null;
+  return { ...refusal, detail: "", retryable: true, kind: undefined };
 }
-
 /**
  * Resolve and pin the model for a reporting run.
  *
@@ -388,7 +389,7 @@ export async function startReportingForAuthenticatedEditor(
    */
   deps: ReportingStartDependencies = {},
 ): Promise<StartReportingResult> {
-  const refusal = await paperSetupRefusalFor(context.newsroomId, "start a reporting run");
+  const refusal = await paperSetupRefusalFor(context, "start a reporting run", input.override);
   if (refusal) return refusal;
 
   const sql = await getSql();
@@ -511,7 +512,7 @@ export async function startReportingForAuthenticatedEditor(
   const submission = await withTransaction(async (tx) => {
     /*
       Serialize on the newsroom's own settings row: it exists for every
-      newsroom, it is the same row `paperSetUpRefusal` already reads on this
+      newsroom, it is the same row `paperSetupWarning` already reads on this
       path, and locking it needs no advisory-lock support and no new schema.
       Direct assignments have no lead row to lock, so this is the one point
       that covers both lead-anchored and direct submissions.
@@ -590,6 +591,7 @@ export async function answerReportingFollowUp(
   context: AuthenticatedEditor,
   input: {
     parentRequestId: number;
+    override?: string[];
     assignment: string;
     seedUrls?: string;
     modelChoice?: string;
@@ -629,6 +631,7 @@ export async function answerReportingFollowUp(
     : parseSeedUrls(parent.seed_urls).join("\n");
 
   return startReportingForAuthenticatedEditor(context, {
+    override: input.override,
     action: parent.lead_id ? "develop-lead" : "report-issue",
     leadId: parent.lead_id ?? undefined,
     assignment: input.assignment,

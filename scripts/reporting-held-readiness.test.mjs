@@ -19,5 +19,5 @@ test("names the held item consistently and clears readiness when no items remain
   assert.equal(readinessDot(true, readiness).tone, "warn");
   assert.match(publishGateNote(blockers), /Airport future charges/);
   assert.match(await page.locator("body").innerText(), /Airport future charges/);
-  assert.equal(storyReadiness({ ...input, held: [] }).state, "verified");
+  assert.equal(storyReadiness({ ...input, held: [], evidenceCheckedCurrentVersion: true }).state, "verified");
 });

@@ -477,3 +477,9 @@ describe("evidenceCheckRows", () => {
     assert.equal(row!.what, "A finding recorded for this draft.");
   });
 });
+
+it("labels a support or contradiction based on the editor’s knowledge as having no capture", () => {
+  for (const judgment of ["supports", "contradicts"] as const) {
+    assert.deepEqual(judgmentChip(judgment, [], true), {chip: "editor's judgment, no capture", tone: "ink"});
+  }
+});

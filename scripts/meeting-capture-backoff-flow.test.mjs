@@ -99,9 +99,9 @@ test("a blocked meeting waits longer between retries and shows its next try", as
       youtube_retry_at: null,
     });
     globalThis.__restoreMeetingRetries = () => restoreYoutubeCaptureRetries(sql, now, deps.scheduleYoutubeRetry, 9);
-    const noop = transpileToUrl("export const tickAllDueMonitors=async()=>{}; export const drainQueuedJobs=async()=>{}; export const reattachDurableJobsOnStartup=async()=>{}; export const tickDailyScans=async()=>{}; export const tickRoutineNoticeEditions=async()=>{}; export const tickStatsReports=async()=>{}; export const foldSmallPlaces=async()=>{}; export const pruneLocationDaily=async()=>{}; export const tickFollowUps=async()=>{};", "startup-stubs.js");
+    const noop = transpileToUrl("export const tickNewsletterMailboxes=async()=>{}; export const tickAllDueMonitors=async()=>{}; export const drainQueuedJobs=async()=>{}; export const reattachDurableJobsOnStartup=async()=>{}; export const tickDailyScans=async()=>{}; export const tickRoutineNoticeEditions=async()=>{}; export const tickStatsReports=async()=>{}; export const foldSmallPlaces=async()=>{}; export const pruneLocationDaily=async()=>{}; export const tickFollowUps=async()=>{};", "startup-stubs.js");
     const schedulerUrl = await moduleUrl("src/lib/news/unattended-scheduler.ts", {
-      ...Object.fromEntries(["monitors-cron", "jobs", "daily-scan.server", "routine-notice-worker.server", "stats-reports.server", "reading.server", "follow-up-scheduler"].map((name) => [`./${name}.ts`, noop])),
+      ...Object.fromEntries(["monitors-cron", "jobs", "daily-scan.server", "routine-notice-worker.server", "stats-reports.server", "reading.server", "follow-up-scheduler", "newsletter-poll.server"].map((name) => [`./${name}.ts`, noop])),
       "../db.ts": transpileToUrl("export const getSql=async()=>({});", "startup-db.js"),
       "./meeting-capture.ts": transpileToUrl("export const restoreYoutubeCaptureRetries=()=>globalThis.__restoreMeetingRetries(); export const tickYoutubeCaptureRetries=async()=>{};", "startup-meeting.js"),
     });

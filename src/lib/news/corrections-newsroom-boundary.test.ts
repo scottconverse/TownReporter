@@ -1,8 +1,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { getSql } from "../db.ts";
-import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
-import { performAddCorrection } from "./corrections.ts";
+import { ROUTINE_EDITION_UPDATE_PREFIX, correctionIsAutomatic } from "./correction-origin.ts";
+import { CORRECTION_ROUTINE_PREFIX_KEY, performAddCorrection } from "./corrections.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 
 // U18a-1: this file needs the migrated schema. scripts/run-tests-safe.mjs
@@ -96,7 +96,10 @@ describe("corrections stay inside the editor's newsroom", () => {
         { userId: editorA, newsroomId: newsroomA },
         { articleSlug: slug, body: "The date in this story was incorrect." },
       );
-      assert.deepEqual(result, { ok: false, error: "That published story is not available in this newsroom." });
+      assert.deepEqual(result, {
+        ok: false,
+        error: "That published story is not available in this newsroom.",
+      });
     }
 
     const general = await performAddCorrection(
@@ -110,8 +113,16 @@ describe("corrections stay inside the editor's newsroom", () => {
       order by id asc
     `;
     assert.equal(corrections.length, 2, "only the own-story and general correction may be written");
-    assert.notEqual(corrections[0]!.article_id, null, "the own correction must attach to its published article");
-    assert.equal(corrections[1]!.article_id, null, "a no-slug general correction remains permitted");
+    assert.notEqual(
+      corrections[0]!.article_id,
+      null,
+      "the own correction must attach to its published article",
+    );
+    assert.equal(
+      corrections[1]!.article_id,
+      null,
+      "a no-slug general correction remains permitted",
+    );
     const audits = await sql<{ id: number }>`
       select id from audit_events where user_id = ${editorA} and newsroom_id = ${newsroomA} and action = 'correction'
     `;
@@ -119,18 +130,9 @@ describe("corrections stay inside the editor's newsroom", () => {
   });
 });
 
-/*
-  A different boundary, in the same write path: what the desk lets an editor
-  put in the box. The `corrections` table has no column saying who wrote a row,
-  so `/corrections` and the story page decide it from the row's opening words
-  (src/lib/news/correction-origin.ts). An editor who typed those words would
-  wear the machine's byline, so `performAddCorrection` refuses the marker --
-  the row's opening, not any mention of the phrase -- before it opens a
-  transaction. Exercised here rather than in the form because this is the
-  function every caller goes through.
-*/
+
 describe("an editor's correction cannot wear the machine's marker", () => {
-  it("refuses the marker, writes nothing, and still accepts a note that merely mentions it", async () => {
+  it("asks before the marker, stores the editor's own words once accepted, and still accepts a note that merely mentions it", async () => {
     const sql = await ensureFixtureTables();
     const stamp = `${Date.now()}-${Math.random()}`;
     const newsroom = 820_003;
@@ -142,18 +144,29 @@ describe("an editor's correction cannot wear the machine's marker", () => {
       values (${newsroom}, ${editor}, ${slug}, ${"Own published story"}, 'Body', 'council', 'published')
     `;
 
-    const marker = await performAddCorrection(
+    const body = `${ROUTINE_EDITION_UPDATE_PREFIX}\n\nThe concert moved.`;
+    const asked = await performAddCorrection(
       { userId: editor, newsroomId: newsroom },
-      { articleSlug: slug, body: `${ROUTINE_EDITION_UPDATE_PREFIX}\n\nThe concert moved.` },
+      { articleSlug: slug, body },
     );
-    assert.deepEqual(marker, {
-      ok: false,
-      error:
-        "Start the correction with your own words. That opening line is how the desk marks a correction it wrote by itself, so a person cannot use it.",
-    });
+    assert.equal(asked.ok, false);
+    assert.ok("warning" in asked, "the marker is a question, not a wall");
+    if (asked.ok || !("warning" in asked)) throw new Error("expected a warning");
+    assert.equal(asked.warning.key, CORRECTION_ROUTINE_PREFIX_KEY);
+    const beforeWrite = await sql<{ id: number }>`
+      select id from corrections where user_id = ${editor} and newsroom_id = ${newsroom}
+    `;
+    assert.equal(beforeWrite.length, 0, "the first call must not have reached the table");
+
+    const posted = await performAddCorrection(
+      { userId: editor, newsroomId: newsroom },
+      { articleSlug: slug, body, override: [CORRECTION_ROUTINE_PREFIX_KEY] },
+    );
+    assert.deepEqual(posted, { ok: true });
 
     // The prefix is the row's OPENING. A correction that talks about a routine
-    // update in its own words is an ordinary correction and posts.
+    // update in its own words is an ordinary correction and posts with no
+    // warning at all.
     const mentions = await performAddCorrection(
       { userId: editor, newsroomId: newsroom },
       {
@@ -165,12 +178,23 @@ describe("an editor's correction cannot wear the machine's marker", () => {
 
     const written = await sql<{ body: string }>`
       select body from corrections where user_id = ${editor} and newsroom_id = ${newsroom}
+      order by id asc
     `;
-    assert.equal(written.length, 1, "the refused marker must not have reached the table");
+    assert.equal(written.length, 2, "the accepted marker and the ordinary mention both posted");
+    assert.equal(
+      correctionIsAutomatic(written[0]!.body),
+      false,
+      "the row a person wrote must not be read as automatic",
+    );
     assert.ok(!written[0]!.body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX));
-    const audits = await sql<{ id: number }>`
+    assert.equal(written[0]!.body, "The concert moved.");
+    const overrides = await sql<{ id: number }>`
+      select id from audit_events where user_id = ${editor} and newsroom_id = ${newsroom} and action = 'override'
+    `;
+    assert.equal(overrides.length, 1, "the accepted warning is one audited override");
+    const correctionsAudit = await sql<{ id: number }>`
       select id from audit_events where user_id = ${editor} and newsroom_id = ${newsroom} and action = 'correction'
     `;
-    assert.equal(audits.length, 1, "a refused correction must not write an audit event");
+    assert.equal(correctionsAudit.length, 2, "both posts are the desk's ordinary correction audit");
   });
 });

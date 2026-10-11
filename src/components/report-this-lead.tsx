@@ -1,3 +1,4 @@
+import { startReporting } from "@/components/scoped-actions";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ActionButton } from "@/components/action-button";
@@ -5,7 +6,7 @@ import { Field } from "@/components/desk-chrome";
 import { ModelPicker } from "@/components/model-picker";
 import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
-import { loadLeadReportingPackage, startReporting } from "@/lib/news/desk";
+import { loadLeadReportingPackage } from "@/lib/news/desk";
 import { reportingNotice, reportingRunState } from "@/lib/news/reporting-package-view";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { usePaper } from "@/lib/paper-context-state";

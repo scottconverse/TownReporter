@@ -1,10 +1,7 @@
+import { retryStoryJob } from "@/components/scoped-actions";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  cancelStoryJob,
-  retryStoryJob,
-  type JobProgressView,
-} from "@/lib/news/job-progress";
+import { cancelStoryJob, type JobProgressView } from "@/lib/news/job-progress";
 import { jobCardState, useDeskJobs } from "./job-card-state";
 
 /*

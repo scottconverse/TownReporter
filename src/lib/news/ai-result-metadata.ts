@@ -24,4 +24,4 @@ export type ChatResultMetadata = {
 
 export type ChatResult =
   | { ok: true; text: string; meta?: ChatResultMetadata }
-  | { ok: false; error: string; meta?: ChatResultMetadata };
+  | { ok: false; error: string; partialText?: string; meta?: ChatResultMetadata };

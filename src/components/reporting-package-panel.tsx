@@ -1,3 +1,4 @@
+import { answerReportingFollowUp } from "@/components/scoped-actions";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePaper } from "@/lib/paper-context-state";
@@ -8,12 +9,7 @@ import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
 import type { CurrentReportingDocumentChecks } from "@/lib/news/reporting-document-check";
 import { assertHttpUrl } from "@/lib/news/url-guard";
-import {
-  answerReportingFollowUp,
-  loadLeadReportingPackage,
-  listReportingObservations,
-  saveReportingCorrection,
-} from "@/lib/news/desk";
+import { loadLeadReportingPackage, listReportingObservations, saveReportingCorrection } from "@/lib/news/desk";
 import {
   SCORE_COMPONENTS,
   actionEvidenceLine,

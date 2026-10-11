@@ -18,6 +18,7 @@ import {
   preferStoryUrls,
   provenanceFromUrls,
   reportAndDraft,
+  reportWriteSystem,
   resolvePublicFindings,
   stripAiFiller,
   stripModelCitationMarkers,
@@ -28,6 +29,40 @@ import {
 import type { LeadRow } from "./types.ts";
 import { describeTextChanges, retrieveRelevantChunks, scoreExcerpt } from "./retrieve.ts";
 import { rankWorthItems } from "./worth-a-look.ts";
+
+for (const recovered of [true, false]) it(`retries an unreadable Sol draft with JSON-only instructions and progress (${recovered ? "recovers" : "stops after one retry"})`, async () => {
+  const paper = { name: "Test Paper", city: "Longmont", state: "Colorado" };
+  const url = "https://city.example/meeting";
+  const lead = { id: 63, headline: "City announces meeting", why: "Residents can attend.", topic: "government", status: "new", source_urls: JSON.stringify([url]), evidence: "", newsworthiness: 1, created_at: "2026-10-10" } as LeadRow;
+  const draft = { headline: lead.headline, dek: lead.why, body: "The city announced a public meeting for residents.", topic: lead.topic, source_urls: [url], unanswered: [] };
+  const stages: string[] = [];
+  const calls: { system: string; model: unknown }[] = [];
+  const result = await reportAndDraft({ userId: "retry-json", lead, urls: [url], memory: [], researchScope: "supplied", modelChoice: "codex-balanced" }, {
+    paper: async () => paper,
+    ingest: async () => ({ url, title: "Meeting notice", text: draft.body, extras: [] }),
+    capture: async () => ({ version_id: 1, capture_event_id: 2 }),
+    hydrate: async () => [],
+    onStage: (stage) => { stages.push(stage); },
+    chat: async (system, _user, _maxTokens, model) => {
+      if (system.startsWith(reportWriteSystem(paper))) {
+        calls.push({ system, model });
+        if (calls.length === 2) {
+          assert.match(stages.at(-1)!, /Retrying the draft once.*JSON only/);
+          assert.match(system, /Reply with JSON only/);
+        }
+        return { ok: true, text: calls.length === 1 || !recovered ? "Unreadable draft reply" : JSON.stringify(draft) };
+      }
+      if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
+      if (system.includes('"fetch_urls"')) return { ok: true, text: JSON.stringify({ news: lead.headline, form: "brief" }) };
+      return { ok: true, text: JSON.stringify(draft) };
+    },
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map(call => call.model), ["codex-balanced", "codex-balanced"]);
+  assert.equal(stages.filter(stage => stage.includes("Retrying the draft once")).length, 1);
+  if (recovered) assert.ok(!("error" in result));
+  else assert.match((result as { error: string }).error, /unreadable JSON/);
+});
 
 it("supplies the configured topic key to writing and reconciliation as authoritative metadata", async () => {
   const sourceUrl = "https://schools.example/notices/benefits";

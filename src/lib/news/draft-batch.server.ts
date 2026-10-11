@@ -1,5 +1,6 @@
+import { editorWarning } from "./editor-override.ts";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
-import { assertRate } from "./ops.ts";
+import { assertRate, checkRate, ensureDeskRateSchema, ensureAuditEventsSchema } from "./ops.ts";
 import { parseNotes } from "./notes.ts";
 import { kickJobs } from "./jobs.ts";
 import {
@@ -203,17 +204,18 @@ type LeadState = { id: number; status: string; notes_json: string | null };
 const isIneligible = (status: string) =>
   status === "held" || status === "killed" || status === "published";
 
-type ResolvedItem = { leadId: number; researchScope: "public" | "supplied" };
+type ResolvedItem = { leadId: number; researchScope: "public" | "supplied"; allowKilledLead?: boolean };
 
 async function inspectSelection(
   sql: Sql,
   input: {
     context: AuthenticatedEditorContext;
     items: DraftBatchStartItem[];
+    override?: string[];
   },
   runtimeSnapshot: ForcedRuntimeSnapshot,
   lock: boolean,
-): Promise<{ ok: true; items: ResolvedItem[] } | DraftBatchFailure> {
+): Promise<{ ok: true; items: ResolvedItem[]; cancelJobIds: number[] } | DraftBatchFailure> {
   const [member] = await sql.query(
     "select 1 from newsroom_members where newsroom_id=$1 and user_id=$2 and role in ('owner','editor')" +
       (lock ? " for share" : ""),
@@ -236,30 +238,26 @@ async function inspectSelection(
   for (const item of input.items) {
     const lead = leadById.get(item.leadId)!;
     if (isIneligible(lead.status)) {
-      return {
-        ok: false,
-        code: "ineligible",
-        error: "This lead is not eligible for batch drafting.",
-        leadId: item.leadId,
-      };
+      const key = lead.status === "killed" ? "lead-killed-draft" : `batch-lead-${lead.status}`;
+      const warning = await editorWarning({ ...input.context, sql }, input.override, key, `This selected lead is ${lead.status}. Drafting will keep its saved work.`, { kind: "lead", id: item.leadId });
+      if (warning) return { ...warning, code: "ineligible", leadId: item.leadId };
+
     }
     const scope = item.researchScope ?? parseNotes(lead.notes_json).researchScope ?? "public";
-    items.push({ leadId: item.leadId, researchScope: scope });
+    items.push({ leadId: item.leadId, researchScope: scope, allowKilledLead: lead.status === "killed" });
   }
-  const [open] = await sql.query<{ id: number; subject_id: number }>(
-    "select id,subject_id from desk_jobs where newsroom_id=$1 and kind='draft' and subject_id=any($2::int[]) and status in ('queued','running') order by id limit 1",
-    [input.context.newsroomId, input.items.map((item) => item.leadId)],
+  const open = await sql.query<{ id: number; subject_id: number; model_choice: string }>(
+    "select id,subject_id,model_choice from desk_jobs where newsroom_id=$1 and kind='draft' and subject_id=any($2::int[]) and status in ('queued','running') order by id",
+    [input.context.newsroomId, input.items.map(item => item.leadId)],
   );
-  if (open) {
-    return {
-      ok: false,
-      code: "already-running",
-      error: "A selected lead is already drafting.",
-      leadId: Number(open.subject_id),
-      jobId: Number(open.id),
-    };
+  const identical = open.find(job => job.model_choice === runtimeSnapshot.modelChoice);
+  if (identical) return { ok: false, code: "already-running", error: "A selected lead is already drafting with this model.", leadId: identical.subject_id, jobId: identical.id };
+  if (open.length) {
+    const warning = await editorWarning({ ...input.context, sql }, input.override, "model-change-running", `${open.length} selected leads are already drafting. Stop and restart with ${modelChoiceLabel(runtimeSnapshot.modelChoice)}.`, { kind: "job", id: open[0].id });
+    if (warning) return { ...warning, code: "already-running", jobId: open[0].id, leadId: open[0].subject_id };
   }
-  return { ok: true, items };
+  return { ok: true, items, cancelJobIds: open.map(job => job.id) };
+
 }
 
 async function batchView(
@@ -422,13 +420,12 @@ export async function commitDraftBatchForAuthenticatedEditor(
     context: AuthenticatedEditorContext;
     items: DraftBatchStartItem[];
     runtimeSnapshot: unknown;
+    override?: string[];
   },
   deps: CommitDeps = {},
 ): Promise<DraftBatchResult> {
   const ids = new Set(input.items.map((item) => item.leadId));
   if (
-    input.items.length < 1 ||
-    input.items.length > 5 ||
     ids.size !== input.items.length ||
     input.items.some(
       (item) =>
@@ -447,23 +444,21 @@ export async function commitDraftBatchForAuthenticatedEditor(
   }
   const sql = await getSql();
   await ensureDraftBatchSchema(sql);
+  await ensureAuditEventsSchema(sql);
   const preflight = await inspectSelection(sql, input, runtimeSnapshot, false);
   if (!preflight.ok) return preflight;
+  if (input.items.length < 1 || input.items.length > 5) {
+    const warning = await editorWarning(input.context, input.override, "draft-batch-size", `You selected ${input.items.length} leads; a usual batch has 1 to 5. It may cost more.`, { kind: "newsroom", id: input.context.newsroomId });
+    if (warning) return { ...warning, code: "invalid-input" };
+  }
   if (deps.accountRate !== false) {
-    try {
-      for (const _item of input.items) {
-        await (deps.assertRate ?? assertRate)(
-          input.context.userId,
-          "draft",
-          input.context.newsroomId,
-        );
-      }
-    } catch (error) {
-      return {
-        ok: false,
-        code: "rate-limited",
-        error: error instanceof Error ? error.message : "Draft rate limit reached.",
-      };
+    if (deps.assertRate) {
+      try { for (const _item of input.items) await deps.assertRate(input.context.userId, "draft", input.context.newsroomId); }
+      catch(error) { return { ok: false, code: "rate-limited", error: String(error) }; }
+    } else {
+      const warning = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { amount: input.items.length, record: false });
+      if (warning) return { ...warning, code: "rate-limited" };
+      await ensureDeskRateSchema();
     }
   }
   try {
@@ -471,6 +466,7 @@ export async function commitDraftBatchForAuthenticatedEditor(
       const checked = await inspectSelection(tx, input, runtimeSnapshot, true);
       if (!checked.ok) return checked;
       await deps.afterSelectionLocked?.();
+      for (const jobId of checked.cancelJobIds) await tx.query("update desk_jobs set cancel_requested=true,status='failed',stage='Cancelled',error='Stopped by the editor for a model restart.',finished_at=now(),updated_at=now(),claim_token=null where id=$1 and newsroom_id=$2 and status in ('queued','running')", [jobId, input.context.newsroomId]);
       const [batch] = await tx.query<{ id: number }>(
         "insert into draft_batches(newsroom_id,user_id,runtime_snapshot) values($1,$2,$3::jsonb) returning id",
         [input.context.newsroomId, input.context.userId, JSON.stringify(runtimeSnapshot)],
@@ -488,10 +484,13 @@ export async function commitDraftBatchForAuthenticatedEditor(
             item.researchScope,
             receipt.switchReason ? `Switched to ${modelChoiceLabel(runtimeSnapshot.modelChoice)}: ${receipt.switchReason}` : "Queued",
             receipt.switchNote ?? "",
-            JSON.stringify({ modelEffort: "modelEffort" in runtimeSnapshot ? runtimeSnapshot.modelEffort ?? null : null, preflightFailover: receipt.switchReason ? receipt : null }),
+            JSON.stringify({ ...(item.allowKilledLead ? { allowKilledLead: true } : {}), modelEffort: "modelEffort" in runtimeSnapshot ? runtimeSnapshot.modelEffort ?? null : null, preflightFailover: receipt.switchReason ? receipt : null }),
             batch.id,
           ],
         );
+      }
+      if (deps.accountRate !== false && !deps.assertRate) {
+        for (const _item of checked.items) await tx.query("insert into desk_rate(user_id,action,newsroom_id) values($1,'draft',$2)", [input.context.userId, input.context.newsroomId]);
       }
       return { ok: true as const, batchId: Number(batch.id) };
     });

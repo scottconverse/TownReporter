@@ -1,3 +1,4 @@
+import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 /**
  * Every reason Publish is off, in one place (unit CT, 0.6.81).
  *
@@ -26,6 +27,7 @@
 import { editorActionError } from "./desk-copy.ts";
 import { refusedAnswer } from "./refused-answer.ts";
 import type { StoryReadinessState } from "./story-readiness.ts";
+import { UNCHECKED_STORY_REASON } from "./unchecked-story-gate.ts";
 
 /**
  * Where a blocker's button goes. The page turns each of these into a real
@@ -57,6 +59,15 @@ export type PublishBlockerTarget =
    * that reached paper can always be traced to the person who accepted it.
    */
   | { kind: "accept-unreviewed" }
+  /**
+   * Unit ZC: the one-press "I checked this story myself" for a draft whose
+   * evidence check recorded NO claims but which carries a checkable fact and
+   * has no completed check for this version. It writes the same kind of
+   * version-bound record (`leads.notes_json`, against
+   * `evidenceReviewToken(draft)`) and one `audit_events` row, so a story that
+   * printed unchecked can always be traced to the person who read it.
+   */
+  | { kind: "acknowledge-unchecked" }
   | { kind: "publish-bar" };
 
 export type PublishBlockerAction = {
@@ -67,6 +78,25 @@ export type PublishBlockerAction = {
 export type PublishBlocker = {
   /** Stable across renders, so a re-render does not lose the row's place. */
   key: string;
+  /**
+   * ── WHICH KIND OF REASON THIS IS (unit OH) ────────────────────────────────
+   *
+   * `"hard"` -- the desk itself refuses this, so there is nothing for a person
+   * to weigh: an empty headline or body, a press already in flight, a check
+   * already running or saving, or a lead this page cannot even find. These are
+   * the ONLY reasons that turn the Publish button off.
+   *
+   * `"warning"` -- a judgement call the editor is paid to make: an unnamed
+   * source for a named outlet, an unreviewed or contradicted claim, a stale
+   * evidence check, an AI readiness verdict, a held or killed draft, a missing
+   * dek or section. A warning is DRAWN in the confirm dialog and the editor
+   * prints over it; it never disables the button by itself.
+   *
+   * The six hard keys are exactly: `headline`, `body`, `publishing`,
+   * `reconcile-running`, `evidence-review-saving`, `lead-not-found`. Everything
+   * else is a warning.
+   */
+  kind: "warning" | "hard";
   sentence: string;
   action: PublishBlockerAction;
   /**
@@ -115,6 +145,13 @@ export type PublishBlockerState = {
    * and brings the block back.
    */
   unreviewedAccepted: boolean;
+  /**
+   * Unit ZC: the draft's evidence check recorded no claims at all, no completed
+   * check covers this version, and the body carries a fact worth checking
+   * (`uncheckedStoryNeedsCheck`). A zero-claim story nobody has checked is not a
+   * clear story -- it is an unchecked one, and this is the flag that says so.
+   */
+  uncheckedStory?: boolean;
   /** Outlets the body names that the draft's sources do not show. */
   namedOutlets: readonly string[];
   /** The story changed after its evidence was checked. */
@@ -125,6 +162,19 @@ export type PublishBlockerState = {
   reconcileActive: boolean;
   /** The publish request is in flight. */
   publishing: boolean;
+  /**
+   * The lead's own status, when the page knows it (unit OH). `"held"` and
+   * `"killed"` are WARNINGS now: a held or killed draft keeps its publish bar,
+   * and the way back is one press -- un-hold (or restore) and publish in the
+   * same press. Anything else, or absent, adds neither row.
+   */
+  leadStatus?: string;
+  /**
+   * The desk's own sentence about a meeting citation that no longer matches the
+   * record (unit OH). A warning: the editor may print, having read it. Absent
+   * or blank adds no row.
+   */
+  meetingCitationNotice?: string;
 };
 
 function empty(text: string): boolean {
@@ -156,11 +206,28 @@ function empty(text: string): boolean {
  * only once there is a draft to prepare, and the pane says the one next step
  * instead (see the route's no-draft pane).
  *
+ * ── WHAT CHANGED (unit OH) ────────────────────────────────────────────────────
+ *
+ * A KILLED OR HELD DRAFT NOW KEEPS ITS PUBLISH BAR. The owner changed the rule
+ * on purpose: the way back from a killed or held lead is one press -- un-hold
+ * (or restore) and publish in the same press -- and a page that hides the bar
+ * leaves the editor nowhere to make it. The list of reasons over a bar that
+ * exists is the work, not a dead end. (The old rule hid the list on a killed
+ * lead because the bar was gone; with the bar back, hiding the list too would
+ * be the same contradiction reversed.)
+ *
+ * What still hides the list is having NO DRAFT: four prep tasks are a checklist
+ * for a story that does not exist, and the page says the one next step instead.
+ *
  * `hasDraft` is required rather than defaulted: a caller that forgets it would
  * get the old behaviour back silently, which is exactly the bug.
  */
 export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
-  if (status === "killed") return false;
+  /* `status` is kept in the signature on purpose: the argument is still asked
+     for at every call site, so a future rule that reads it does not have to
+     change every caller, and the desk never decides this on the draft alone by
+     accident. */
+  void status;
   return hasDraft;
 }
 
@@ -175,10 +242,12 @@ export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
  */
 export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   const blockers: PublishBlocker[] = [];
+  if (draftLooksCutOff(state.body ?? "")) blockers.push({key:"draft-cut-off",kind:"warning",sentence:CUT_OFF_WARNING,action:{label:"Read the draft",target:{kind:"body"}}});
 
   if (empty(state.headline)) {
     blockers.push({
       key: "headline",
+      kind: "hard",
       sentence: "The headline is empty, so there is nothing to print.",
       action: { label: "Write the headline", target: { kind: "headline" } },
     });
@@ -187,6 +256,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   if (empty(state.body)) {
     blockers.push({
       key: "body",
+      kind: "hard",
       sentence: "The story body is empty.",
       action: { label: "Write the story", target: { kind: "body" } },
     });
@@ -194,14 +264,18 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
 
   if (empty(state.dek)) {
     /*
-      Release 0.6.80 (unit CK): `performPublish` refuses a lead-bound draft
-      with an empty dek. The sentence is the server's own instruction, so the
-      page says it before the press instead of after it.
+      A missing dek is a WARNING (unit OH). The desk once refused a lead-bound
+      draft with no dek (`performPublish`, release 0.6.80), and the row borrowed
+      the server's refusal verbatim -- "The desk refuses a story with no dek."
+      That is a lie now that the editor may print over the warning: the row says
+      what is missing in plain words, and the confirm dialog names the section
+      the press files under. The server's own gate, if it still stands, refuses
+      the press and says so at the bar, which is where a refusal belongs.
     */
     blockers.push({
       key: "dek",
-      sentence:
-        'The dek is empty. The desk refuses a story with no dek: "Add a dek, the one-line summary under the headline, before you publish."',
+      kind: "warning",
+      sentence: "The dek is empty. It is the one-line summary under the headline.",
       action: { label: "Write a dek", target: { kind: "dek" } },
     });
   }
@@ -213,6 +287,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   ) {
     blockers.push({
       key: "readiness",
+      kind: "warning",
       sentence: state.readinessReason || (state.readiness === "checking"
         ? "The AI is still checking this story against the meeting record."
         : "This story is not ready to publish."),
@@ -220,11 +295,15 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
-  if (state.evidenceLoading) blockers.push({ key: "evidence-loading", sentence: "Loading evidence judgments.",
-    action: { label: "Review the checks", target: { kind: "evidence-review" } } });
+  if (state.evidenceLoading) blockers.push({ key: "evidence-loading",
+      kind: "warning",
+      sentence: "Loading evidence judgments.",
+    action: { label: "Review the checks", target: { kind: "evidence-review" } },
+    });
   if (!state.sectionReady) {
     blockers.push({
       key: "section",
+      kind: "warning",
       sentence: "No section has been chosen for this story.",
       action: { label: "Pick a section", target: { kind: "section" } },
     });
@@ -241,6 +320,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     const name = outlet.trim();
     blockers.push({
       key: `outlet:${name}`,
+      kind: "warning",
       sentence: `The body names ${name} and this draft's Sources do not show it.`,
       action: {
         label: `Override ${name}`,
@@ -254,6 +334,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     const one = state.openClaims === 1;
     blockers.push({
       key: "claims",
+      kind: "warning",
       sentence: one
         ? "A claim of absence has not been confirmed."
         : `${state.openClaims} claims of absence have not been confirmed.`,
@@ -303,6 +384,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
           : `The evidence check raised ${them}, and the record contradicts ${m} of them.`;
     blockers.push({
       key: "claims-unreviewed",
+      kind: "warning",
       sentence: `${n} claim${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} review${contradicted}. ${tail}`,
       action: {
         label: n === 1 ? "Review the claim" : "Review the claims",
@@ -318,9 +400,37 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     });
   }
 
+  /*
+    UNIT ZC -- THE CLAIMS NOBODY RECORDED, SO NOBODY CHECKED.
+
+    The row above fires only when the evidence check RAISED claims. A check that
+    raised none leaves `unreviewedClaims` at 0, so a story nothing has ever been
+    run against -- with a dollar figure, a date or a vote in it -- printed with
+    no gate at all: `○ Evidence check not run` beside an enabled Publish. The
+    flag is decided once (`uncheckedStoryNeedsCheck`) from the review's own
+    output, whether a completed check covers this version, and the body's facts,
+    so the desk's row, the readiness chip and the server's refusal all read one
+    answer.
+
+    Two honest answers again, and the same shape as the row above: run the check
+    (where the evidence pane's own control lives), or say in so many words that
+    the editor read it against their sources. The second press is recorded for
+    this exact draft version and audited.
+  */
+  if (state.uncheckedStory) {
+    blockers.push({
+      key: "unchecked",
+      kind: "warning",
+      sentence: UNCHECKED_STORY_REASON,
+      action: { label: "Run the evidence check", target: { kind: "evidence-review" } },
+      altAction: { label: "I checked this story myself", target: { kind: "acknowledge-unchecked" } },
+    });
+  }
+
   if (state.evidenceStale) {
     blockers.push({
       key: "evidence-stale",
+      kind: "warning",
       sentence: "The story changed after its evidence was checked, so the check no longer covers this text.",
       action: {
         label: "I checked: keep this evidence",
@@ -333,6 +443,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   if (state.reconcileActive) {
     blockers.push({
       key: "reconcile-running",
+      kind: "hard",
       sentence: "An evidence check is running on this draft. Its answer is not in yet.",
       action: { label: "See the running check", target: { kind: "running-check" } },
     });
@@ -341,6 +452,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   if (state.reviewingEvidence) {
     blockers.push({
       key: "evidence-review-saving",
+      kind: "hard",
       sentence: "Your evidence decision is still saving.",
       action: { label: "See the evidence review", target: { kind: "evidence-review" } },
     });
@@ -349,8 +461,69 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
   if (state.publishing) {
     blockers.push({
       key: "publishing",
+      kind: "hard",
       sentence: "This publish is already running.",
       action: { label: "See the publish bar", target: { kind: "publish-bar" } },
+    });
+  }
+
+  /*
+    ── THE LEAD THIS PAGE CANNOT FIND (unit OH, hard) ────────────────────────
+    A lead-row that is gone -- deleted, killed out from under an open tab, or
+    never filed on this desk -- cannot be printed by any press, because the
+    server has nothing to print. `leadStatus: "missing"` is the page's own word
+    for it (see `publishLead`, which refuses "There is no such story."). It is
+    the sixth hard key, and the one that is not about the draft's own text.
+  */
+  if (state.leadStatus === "missing") {
+    blockers.push({
+      key: "lead-not-found",
+      kind: "hard",
+      sentence: "This lead is no longer on the desk, so there is nothing to print.",
+      action: { label: "Back to the queue", target: { kind: "publish-bar" } },
+    });
+  }
+
+  /*
+    ── A HELD OR KILLED DRAFT KEEPS ITS BAR (unit OH, warnings) ──────────────
+    The owner changed the rule: a held or killed draft keeps its publish bar,
+    and the way back is ONE press -- un-hold (or restore) and publish in the
+    same press. So each says exactly that, in words naming the single press,
+    rather than sending the editor to a second control. Both are warnings: the
+    press is real, and the server does the restore inside the publish
+    transaction, so nothing here refuses on the editor's behalf.
+  */
+  if (state.leadStatus === "held") {
+    blockers.push({
+      key: "lead-held",
+      kind: "warning",
+      sentence: "This draft is on hold. This press un-holds it and publishes it in the same press.",
+      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+    });
+  }
+
+  if (state.leadStatus === "killed") {
+    blockers.push({
+      key: "lead-killed",
+      kind: "warning",
+      sentence: "This draft is killed. This press restores it and publishes it in the same press.",
+      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+    });
+  }
+
+  /*
+    ── A MEETING CITATION THAT NO LONGER MATCHES (unit OH, warning) ──────────
+    `data.lead.meetingCitationNotice` (see the route) is the desk's own sentence
+    for a citation that has drifted from the record. It is a warning: the story
+    may still go out, and the editor sees in the confirm dialog exactly what
+    they are printing over.
+  */
+  if (state.meetingCitationNotice?.trim()) {
+    blockers.push({
+      key: "meeting-citation-stale",
+      kind: "warning",
+      sentence: state.meetingCitationNotice.trim(),
+      action: { label: "Review the citation", target: { kind: "evidence-review" } },
     });
   }
 
@@ -366,9 +539,12 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
  * same press: the list at the top of the Checks tab.
  */
 export function publishBlockedSummary(blockers: readonly PublishBlocker[]): string {
-  const n = blockers.length;
-  if (n === 0) return "";
-  return n === 1 ? "1 thing blocks Publish" : `${n} things block Publish`;
+  const hard = blockers.filter((blocker) => blocker.kind === "hard").length;
+  const warnings = blockers.length - hard;
+  const parts: string[] = [];
+  if (hard) parts.push(hard === 1 ? "1 thing blocks Publish" : `${hard} things block Publish`);
+  if (warnings) parts.push(`${warnings} warning${warnings === 1 ? "" : "s"} before Publish`);
+  return parts.join("; ");
 }
 
 /**
@@ -387,6 +563,49 @@ export function publishBlockedSummary(blockers: readonly PublishBlocker[]): stri
 export function publishGateNote(blockers: readonly PublishBlocker[]): string {
   const first = blockers[0];
   return first?.key === "readiness" ? first.sentence : first ? `${first.action.label} to publish.` : "";
+}
+
+/**
+ * ── THE CONFIRM PRESS, DECIDED (unit OH) ──────────────────────────────────────
+ *
+ * The pure half of the override: given every reason Publish is off and the
+ * section the press files under, what does the confirm dialog show?
+ *
+ *   - `enabled` -- the button is off exactly when a HARD reason is present. A
+ *     list of warnings keeps it on; that is the whole unit.
+ *   - `warnings` -- the warning-kind reasons only, in list order, so a hard
+ *     reason is never drawn as a sentence to accept.
+ *   - `acknowledgedWarningKeys` -- the keys of the warnings THIS decision draws.
+ *     The page snapshots exactly these at the moment of the confirm press, so a
+ *     warning that arrives while the dialog is open is not silently accepted.
+ *   - `confirmLabel` -- "Publish anyway in <section>" when there is anything to
+ *     overrule, the desk's own unchanged "Yes, print it in <section>" when
+ *     there is not.
+ *
+ * A blocker with NO `kind` (an older caller, or a hand-built list) is treated as
+ * HARD, so an unknown reason can never silently unlock the button -- the same
+ * compatibility rule `acceptedClaimsPublishState` keeps.
+ */
+export type PublishConfirmation = {
+  enabled: boolean;
+  warnings: PublishBlocker[];
+  acknowledgedWarningKeys: string[];
+  confirmLabel: string;
+};
+
+export function publishConfirmation(
+  blockers: readonly PublishBlocker[],
+  sectionName: string,
+): PublishConfirmation {
+  const warnings = blockers.filter((blocker) => blocker.kind === "warning");
+  const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
+  return {
+    enabled: !hasHard,
+    warnings,
+    acknowledgedWarningKeys: warnings.map((warning) => warning.key),
+    confirmLabel:
+      warnings.length > 0 ? `Publish anyway in ${sectionName}` : `Yes, print it in ${sectionName}`,
+  };
 }
 
 /**
@@ -465,6 +684,9 @@ export type BlockerPressState = {
   failureReason: string | null;
 };
 
+/** An idle press fact, for a caller that has not wired a row (unit ZC). */
+const IDLE_PRESS: BlockerPressFacts = { isPending: false, isError: false };
+
 /*
   The words placed before a thrown error's reason, per row. The refusals carry
   their own complete sentence and take no lead-in, which is why the map is read
@@ -472,11 +694,13 @@ export type BlockerPressState = {
 */
 const BLOCKER_FAILED_LEAD: Record<string, string> = {
   "accept-unreviewed": "record that acceptance",
+  "acknowledge-unchecked": "record that check",
   "override-outlet": "record the override",
   "keep-evidence": "save the evidence review",
 };
 const BLOCKER_FAILED_FALLBACK: Record<string, string> = {
   "accept-unreviewed": "Could not record that acceptance.",
+  "acknowledge-unchecked": "Could not record that check.",
   "override-outlet": "Could not record the override.",
   "keep-evidence": "Evidence review could not be saved.",
 };
@@ -491,9 +715,12 @@ export function blockerPressState(input: {
   accept: BlockerPressFacts;
   override: BlockerPressFacts;
   keepEvidence: BlockerPressFacts;
+  /** Unit ZC: the zero-claims acknowledgement press. Optional for older callers. */
+  acknowledge?: BlockerPressFacts;
 }): BlockerPressState {
   const rows = [
     ["accept-unreviewed", input.accept],
+    ["acknowledge-unchecked", input.acknowledge ?? IDLE_PRESS],
     ["override-outlet", input.override],
     ["keep-evidence", input.keepEvidence],
   ] as const;

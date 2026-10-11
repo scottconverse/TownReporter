@@ -3,6 +3,7 @@ import { withTransaction } from "../db.ts";
 import { assertOwner, deskMiddleware } from "./desk-auth.ts";
 import { ForbiddenError } from "./membership.ts";
 import { auditWithSql, ensureAuditEventsSchema } from "./ops.ts";
+import { auditOverrides, checkOverride, type OverrideWarning } from "./override.ts";
 import { captureTakedownInput } from "./request-input.ts";
 
 /**
@@ -112,6 +113,12 @@ export const TAKEDOWN_ACTION = "evidence-capture-takedown";
 /** `audit_events.subject_kind`: the row the takedown acted on. */
 export const TAKEDOWN_SUBJECT_KIND = "artifact_versions";
 
+
+export const TAKEDOWN_BLANK_REASON_KEY = "takedown-blank-reason";
+
+const TAKEDOWN_BLANK_REASON_WARNING =
+  "This takedown has no reason recorded. The reason is the audit record of why the publisher's excerpt came down.";
+
 export type TakeDownCaptureInput = {
   versionId: number;
   /** The editor's short plain-text reason. Never shown to a reader. */
@@ -122,6 +129,18 @@ export type TakeDownCaptureInput = {
    * "keep".
    */
   removeLink?: boolean;
+  /**
+   * Warning keys this caller has already accepted. Absent on the first call,
+   * which is what draws the blank-reason warning.
+   */
+  override?: string[];
+};
+
+export type TakedownRefusal = {
+  ok: false;
+  code:
+    "forbidden" | "invalid-input" | "not-found" | "already-taken-down" | "legal-removal" | "error";
+  error: string;
 };
 
 export type TakeDownCaptureResult =
@@ -140,17 +159,8 @@ export type TakeDownCaptureResult =
         relationships: number;
       };
     }
-  | {
-      ok: false;
-      code:
-        | "forbidden"
-        | "invalid-input"
-        | "not-found"
-        | "already-taken-down"
-        | "legal-removal"
-        | "error";
-      error: string;
-    };
+  | TakedownRefusal
+  | OverrideWarning;
 
 class TakedownError extends Error {
   readonly code: "invalid-input" | "not-found" | "already-taken-down";
@@ -196,11 +206,10 @@ export function legalGuardRefusal(error: unknown): boolean {
  * proof shows the guard actually blocks the write, and the unit test shows
  * which sentence the owner then reads.
  */
-export function takedownFailure(error: unknown): Extract<TakeDownCaptureResult, { ok: false }> {
+export function takedownFailure(error: unknown): TakedownRefusal {
   if (error instanceof ForbiddenError)
     return { ok: false, code: "forbidden", error: error.message };
-  if (error instanceof TakedownError)
-    return { ok: false, code: error.code, error: error.message };
+  if (error instanceof TakedownError) return { ok: false, code: error.code, error: error.message };
   if (legalGuardRefusal(error))
     return {
       ok: false,
@@ -251,13 +260,23 @@ function cleanReason(raw: string): string {
 export async function takeDownCapture(
   context: { userId: string; newsroomId: number; role: string },
   input: TakeDownCaptureInput,
-): Promise<Extract<TakeDownCaptureResult, { ok: true }>> {
+): Promise<Extract<TakeDownCaptureResult, { ok: true }> | OverrideWarning> {
   // The same guard the legal-removal routes use, first, before any work.
   assertOwner(context.role);
   if (!Number.isInteger(input.versionId) || input.versionId < 1)
     throw new TakedownError("invalid-input", "Choose a captured record to take down.");
+  /*
+    The keys this call triggered AND the owner accepted. Audited after the
+    takedown commits, so a warned-but-refused request leaves no override row.
+  */
+  const accepted: string[] = [];
   const reason = cleanReason(input.reason);
-  if (!reason) throw new TakedownError("invalid-input", "Give a short reason for the takedown.");
+
+  if (!reason) {
+    const warning = checkOverride(input, TAKEDOWN_BLANK_REASON_KEY, TAKEDOWN_BLANK_REASON_WARNING);
+    if (warning) return warning;
+    accepted.push(TAKEDOWN_BLANK_REASON_KEY);
+  }
   if (reason.length > TAKEDOWN_REASON_MAX)
     throw new TakedownError(
       "invalid-input",
@@ -272,7 +291,7 @@ export async function takeDownCapture(
   */
   await ensureAuditEventsSchema();
   const linkKept = input.removeLink !== true;
-  return withTransaction(async (tx) => {
+  const result = await withTransaction(async (tx) => {
     const [capture] = await tx<{
       id: number;
       taken_down_at: string | null;
@@ -356,16 +375,14 @@ export async function takeDownCapture(
       },
     };
   });
+
+  if (accepted.length > 0) {
+    await auditOverrides(context, accepted, { kind: TAKEDOWN_SUBJECT_KIND, id: input.versionId });
+  }
+  return result;
 }
 
-/**
- * The desk's press. Validated at the boundary (a schema in
- * `request-input.ts`, like every other wire input in this newsroom), then
- * `takeDownCapture`, then a shape the page can render without a try/catch.
- *
- * The fallback sentence is deliberately vague: a database error's own text can
- * carry a statement or a row, and this one is rendered in the desk.
- */
+
 export const takeDownEvidenceCapture = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((data: unknown) => captureTakedownInput.parse(data))

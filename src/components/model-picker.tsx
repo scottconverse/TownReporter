@@ -33,7 +33,7 @@ import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availabilit
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import { getCustomAiConnectionsFn } from "@/lib/news/custom-ai-settings";
 import { myDesk } from "@/lib/news/claim";
-import { writerIsReady } from "@/lib/news/writer-bar";
+import { writerIsReady, writerUnavailableReason } from "@/lib/news/writer-bar";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId } from "react";
 import { announceToDesk } from "@/components/desk-chrome-utils";
@@ -83,20 +83,6 @@ type Props =
   | (PickerControls<DarkModelChoice> & { scope: "dark" })
   | (PickerControls<StoryModelChoice> & { scope: "forced" })
   | (PickerControls<StoryModelChoice> & { scope: "ocr" });
-
-/**
- * What the desk shows when the option the editor has selected -- or the one
- * un-set-up option sitting in the list -- has no server behind it. Same
- * single sentence `preflight.ts`'s `LOCAL_MODEL_UNCONFIGURED` gives a run
- * that gets all the way to spending before refusing, so an editor sees the
- * identical wording whether the picker catches it first or the run does.
- */
-function notSetUpHelp(option: ModelChoiceOption): string {
-  if (option.value === "local-model") {
-    return "TownReporter cannot reach a local model. Start LM Studio's local server or Ollama, then click Refresh. See docs/local-models.md.";
-  }
-  return `${option.label} is not set up on this server. See docs/setup.md.`;
-}
 
 /**
  * The second, model-level select that appears under the picker only when
@@ -299,13 +285,11 @@ export function ModelPicker(props: Props) {
     queryKey: ["local-model-choice", localScope],
     queryFn: () => getLocalModelChoice({ data: { scope: localScope } }),
     staleTime: 15_000,
-    enabled: props.value === "local-model",
   });
   const selectedLocalCatalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
     staleTime: 15_000,
-    enabled: props.value === "local-model",
   });
   const builtInOptions =
     props.scope === "opinion"
@@ -385,7 +369,8 @@ export function ModelPicker(props: Props) {
   const availability = useQuery({
     queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
     queryFn: () => providerAvailability(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
   /*
     The rule itself lives in `lib/news/writer-bar.ts` (unit CW), because the
@@ -396,8 +381,7 @@ export function ModelPicker(props: Props) {
 
     Undecided (still loading, or the query failed) counts as available so the
     picker never locks up over a slow network call -- the preflight check on
-    the actual run is the backstop that refuses before spending anything either
-    way (see commitStoryDraftForAuthenticatedEditor).
+    the actual run warns before spending anything (see commitStoryDraftForAuthenticatedEditor).
   */
   function isAvailable(value: string): boolean {
     if (value === "none") return true;
@@ -409,17 +393,30 @@ export function ModelPicker(props: Props) {
         : null,
     });
   }
+  function unavailableReason(option: ModelChoiceOption): string {
+    return writerUnavailableReason({
+      choice: option.value,
+      label: option.label,
+      availability: availability.data,
+      customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
+    }) ?? "";
+  }
   const selectedUnavailable = !isAvailable(shownValue);
-  const help = noFallback
+  const checkingReadiness = shownValue !== "auto" && !noFallback && !availability.data;
+  const help = checkingReadiness
+    ? availability.isError
+      ? "Could not check this model's readiness. Draft preflight will check it before starting."
+      : "Checking this model's readiness on the server…"
+    : noFallback
     ? "No fallback model is set for this rank."
     : retiredNote
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
     : isCustomModelChoice(shownValue)
       ? selectedUnavailable
-        ? "This custom connection is unavailable or has no model. Manage it on Server, or choose another model."
+        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
         : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
       : selectedUnavailable
-        ? notSetUpHelp(selected)
+        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
         : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
@@ -427,6 +424,17 @@ export function ModelPicker(props: Props) {
   const exactModel = !noFallback && shownValue === "local-model"
     ? selectedLocalChoice.data?.override?.id ?? selectedLocalCatalog.data?.defaultModel?.id ?? null
     : customConnection?.modelId ?? null;
+  const localPick = selectedLocalChoice.data
+    ? selectedLocalChoice.data.override
+    : selectedLocalCatalog.data?.defaultModel;
+  const localBackend = localPick?.id ?? null;
+  const localMetadata = selectedLocalCatalog.data?.servers
+    .find(server => server.baseUrl === localPick?.baseUrl)?.models.find(model => model.id === localBackend);
+  const optionText = (option: ModelChoiceOption) => option.value === "local-model"
+    ? localBackend
+      ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
+      : "Local model — backend not checked yet"
+    : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
@@ -447,7 +455,7 @@ export function ModelPicker(props: Props) {
           pickerOptionText), so the full sentence goes here as a title: a
           select clips its own text and there is no CSS that can recover it.
         */
-        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? " — not set up" : ""}` : undefined}
+        title={selected ? `${pickerOptionTitle(selected)}${selectedUnavailable ? ` — ${unavailableReason(selected)}` : ""}` : undefined}
         onChange={(event) => {
           if (props.noneOption && event.target.value === "none") {
             props.onClear?.();
@@ -462,11 +470,10 @@ export function ModelPicker(props: Props) {
             <option
               key={option.value}
               value={option.value}
-              disabled={!available}
-              title={`${pickerOptionTitle(option)}${available ? "" : " — not set up"}`}
+              title={`${pickerOptionTitle(option)}${available ? "" : ` — ${unavailableReason(option)}`}`}
             >
-              {pickerOptionText(option)}
-              {available ? "" : " — not set up"}
+              {optionText(option)}
+              {available ? "" : ` — ${unavailableReason(option)}`}
             </option>
           );
         })}

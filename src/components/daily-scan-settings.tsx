@@ -1,3 +1,4 @@
+import { saveDailyScanPolicy } from "@/components/scoped-actions";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
@@ -6,14 +7,7 @@ import { announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton } from "@/components/states";
 import { myDesk } from "@/lib/news/claim";
 import { listSources } from "@/lib/news/desk";
-import {
-  getDailyScanPolicy,
-  pauseDailyScan,
-  resumeDailyScan,
-  saveDailyScanPolicy,
-  type DailyScanPolicy,
-  type DailyScanRuntime,
-} from "@/lib/news/daily-scan";
+import { getDailyScanPolicy, pauseDailyScan, resumeDailyScan, type DailyScanPolicy, type DailyScanRuntime } from "@/lib/news/daily-scan";
 import { ModelPicker } from "@/components/model-picker";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
@@ -362,8 +356,7 @@ export function DailyScanSettings() {
           <input
             className={`${inputClass} mt-1 w-32`}
             type="number"
-            min={1}
-            max={12}
+            min={0}
             step={1}
             value={draft.sourceCap}
             onChange={(event) => {
@@ -476,10 +469,7 @@ export function DailyScanSettings() {
               reloadLatest.isPending ||
               pause.isPending ||
               resume.isPending ||
-              tooManySelected ||
               unavailableSelected.length > 0 ||
-              draft.sourceCap > 12 ||
-              draft.sourceCap < 1 ||
               !Number.isInteger(draft.everyDaySourceCount) ||
               draft.everyDaySourceCount < 0 ||
               tooManyEveryDaySources

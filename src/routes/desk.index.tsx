@@ -1,3 +1,4 @@
+import { writeStoryFromInput } from "@/components/scoped-actions";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { editorTitle } from "@/lib/news/desk-copy";
 import { TodayInProgress } from "@/components/today-in-progress";
@@ -29,22 +30,8 @@ import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
 import { formatAge, parseUrlList } from "@/lib/paper";
 import { DeskShell } from "@/components/desk-chrome";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import {
-  draftLead,
-  importFinishedStories,
-  listDraftsDesk,
-  listFollowUpFindings,
-  listFollowUps,
-  listLeads,
-  listMemory,
-  listPublishedDesk,
-  listScans,
-  listSources,
-  runScan,
-  setLeadStatus,
-  setSourceStatus,
-  writeStoryFromInput,
-} from "@/lib/news/desk";
+import { importFinishedStories, listDraftsDesk, listFollowUpFindings, listFollowUps, listLeads, listMemory, listPublishedDesk, listScans, listSources, setSourceStatus } from "@/lib/news/desk";
+import { draftLead, runScan, setLeadStatus } from "@/components/scoped-actions";
 import { AddLeadButton, HoldLeadDialog, NewStoryDialog } from "@/components/dialogs";
 /*
   Unit BW, item 2: the drawn Kill dialog (phase 2b, `dialog-09-kill.png`) is
@@ -511,8 +498,15 @@ function DeskHome() {
     leadId: number;
     duplicate?: DuplicateWarning;
   } | null>(null);
+
+  const [pasteWarning, setPasteWarning] = useState<{ key: string; sentence: string } | null>(null);
+  const [pasteOverrides, setPasteOverrides] = useState<string[]>([]);
+  const clearPasteOverride = () => {
+    setPasteWarning(null);
+    setPasteOverrides([]);
+  };
   const pasteStory = useMutation({
-    mutationFn: () => {
+    mutationFn: (override: string[]) => {
       const card = pasteOneStoryCard({
         text: pasteText,
         headline: pasteHeadline,
@@ -544,11 +538,20 @@ function DeskHome() {
         leads: leads.data?.map((l) => ({ id: l.id, headline: l.headline ?? "" })),
         published: published.data?.map((p) => ({ slug: p.slug, headline: p.headline })),
       });
+
+      const data = { text: pasteText, tool: "", stories: [selectionFromCard(card)] };
       return importFinishedStories({
-        data: { text: pasteText, tool: "", stories: [selectionFromCard(card)] },
+        data: override.length > 0 ? { ...data, override } : data,
       }).then((result) => ({ result, duplicate }));
     },
-    onSuccess: ({ result, duplicate }) => {
+    onSuccess: ({ result, duplicate }, override) => {
+
+      if (result.warning) {
+        setPasteWarning(result.warning);
+        setPasteOverrides((previous) => [...new Set([...previous, ...override])]);
+        setPasteNotice(result.warning.sentence);
+        return;
+      }
       if (!result.ok) {
         const line = result.error || "That story was not added. Nothing was changed.";
         /*
@@ -566,6 +569,7 @@ function DeskHome() {
       const first = result.imported[0];
       setPasted({ headline: first?.headline ?? "", leadId: first?.leadId ?? 0, duplicate });
       setPasteNotice("");
+      clearPasteOverride();
       setPasteText("");
       setPasteHeadline("");
       setPasteOther("");
@@ -728,7 +732,7 @@ function DeskHome() {
             rank: 0,
           };
         }
-        return { s, tone: "fail", label: "Could not check", note: failure, rank: 0 };
+        return { s, tone: "fail", label: s.last_read_outcome === "blocked-after-render" ? "Still refused" : "Could not check", note: failure, rank: 0 };
       }
       if (citedCount.has(s.id)) {
         const n = citedCount.get(s.id) ?? 0;
@@ -736,7 +740,16 @@ function DeskHome() {
           s,
           tone: "changed",
           label: "Changed",
-          note: n > 0 ? `${n} new item${n === 1 ? "" : "s"} filed` : "New items filed",
+          note: [
+            n > 0 ? `${n} new item${n === 1 ? "" : "s"} filed` : "New items filed",
+            s.last_read_method === "playwright"
+              ? "Read through a browser."
+              : s.last_read_method === "feed"
+                ? "Read through its feed."
+                : null,
+          ]
+            .filter(Boolean)
+            .join(" "),
           rank: 1,
         };
       }
@@ -746,7 +759,15 @@ function DeskHome() {
           s,
           tone: "same",
           label: "✓ Checked · no change",
-          note: `Checked ${formatListDateTime(s.last_fetched_at)}`,
+          note: [
+            s.last_read_method === "playwright"
+              ? "Read through a browser."
+              : s.last_read_method === "feed"
+                ? "Read through its feed."
+                : null,
+            `Checked ${formatListDateTime(s.last_fetched_at)}`]
+            .filter(Boolean)
+            .join(" "),
           rank: 2,
         };
       }
@@ -1468,7 +1489,7 @@ function DeskHome() {
             primaryDisabled={
               writeStory.isPending ||
               uploadingDocuments ||
-              (storyInput.length < 8 && !storyDocuments.length)
+              (storyInput.trim().length === 0 && !storyDocuments.length)
             }
             cancelLabel="Close"
             closeLabel="Close the composer"
@@ -1526,7 +1547,7 @@ function DeskHome() {
                       if (
                         !writeStory.isPending &&
                         !uploadingDocuments &&
-                        (storyInput.length >= 8 || storyDocuments.length)
+                        (storyInput.trim().length > 0 || storyDocuments.length)
                       )
                         writeStory.mutate();
                     }
@@ -1654,7 +1675,7 @@ function DeskHome() {
             title="Paste a story I already have"
             subtitle="One finished story. It goes to the Queue as a draft for you to work on there."
             primaryLabel={pasteStory.isPending ? "Adding…" : "Add to Queue"}
-            onPrimary={() => void pasteStory.mutate()}
+            onPrimary={() => void pasteStory.mutate([])}
             primaryDisabled={pasteText.trim().length < 40 || pasteStory.isPending}
             cancelLabel="Close"
             footNote="No screen to check first. One story in, one draft in the Queue."
@@ -1673,7 +1694,10 @@ function DeskHome() {
                     className={areaClass}
                     rows={14}
                     value={pasteText}
-                    onChange={(e) => setPasteText(e.target.value)}
+                    onChange={(e) => {
+                      setPasteText(e.target.value);
+                      clearPasteOverride();
+                    }}
                     maxLength={IMPORT_LIMITS.text}
                     placeholder={
                       "Council votes to bring the rules back for consideration\n\nThe council voted 5-2 on Tuesday. [The packet](https://example.test/packet)"
@@ -1686,7 +1710,10 @@ function DeskHome() {
                     id="paste-one-headline"
                     className={inputClass}
                     value={pasteHeadline}
-                    onChange={(e) => setPasteHeadline(e.target.value)}
+                    onChange={(e) => {
+                      setPasteHeadline(e.target.value);
+                      clearPasteOverride();
+                    }}
                     maxLength={IMPORT_LIMITS.headline}
                     placeholder="Taken from the first line if you leave this empty"
                   />
@@ -1698,7 +1725,10 @@ function DeskHome() {
                     className={inputClass}
                     value={pasteSection}
                     disabled={sectionQuery.sections.length === 0}
-                    onChange={(e) => setPasteSection(e.target.value)}
+                    onChange={(e) => {
+                      setPasteSection(e.target.value);
+                      clearPasteOverride();
+                    }}
                   >
                     <option value={NO_SECTION}>{SECTION_REQUIRED}</option>
                     {sectionQuery.sections.map((s) => (
@@ -1719,7 +1749,10 @@ function DeskHome() {
                     id="paste-one-disclosure"
                     className={inputClass}
                     value={pasteDisclosure}
-                    onChange={(e) => setPasteDisclosure(e.target.value as DisclosureKey)}
+                    onChange={(e) => {
+                      setPasteDisclosure(e.target.value as DisclosureKey);
+                      clearPasteOverride();
+                    }}
                   >
                     {IMPORT_DISCLOSURES.map((d) => (
                       <option key={d.key} value={d.key}>
@@ -1731,7 +1764,10 @@ function DeskHome() {
                     <input
                       className={inputClass}
                       value={pasteOther}
-                      onChange={(e) => setPasteOther(e.target.value)}
+                      onChange={(e) => {
+                        setPasteOther(e.target.value);
+                        clearPasteOverride();
+                      }}
                       placeholder="The line to print under the story"
                       aria-label="The disclosure line to print"
                     />
@@ -1753,6 +1789,21 @@ function DeskHome() {
                 severity the toast it replaced carried.
               */}
               {pasteNotice ? <Notice kind="err">{pasteNotice}</Notice> : null}
+              {}
+              {pasteWarning ? (
+                <div className="composer-source-note">
+                  <InkButton
+                    disabled={pasteStory.isPending}
+                    onClick={() => {
+                      const next = [...new Set([...pasteOverrides, pasteWarning.key])];
+                      setPasteOverrides(next);
+                      pasteStory.mutate(next);
+                    }}
+                  >
+                    {pasteStory.isPending ? "Adding…" : "Import anyway"}
+                  </InkButton>
+                </div>
+              ) : null}
               {pasted ? (
                 /*
                   Unit CA, note 6. This panel is reached by its own hash

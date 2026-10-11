@@ -123,10 +123,12 @@ it("refuses a killed lead and an already-published lead, in a plain sentence, wi
   const ctx = { userId: "editor-81", newsroomId: 81 };
 
   const killedResult = await updateLeadForEditor(ctx, editLeadInput.parse({ id: killedId, headline: "A new headline attempt", why: "Trying anyway", topic: "council" }));
-  assert.deepEqual(killedResult, { ok: false, error: "This lead was killed. Restore it before editing." });
+  assert.equal(killedResult.ok, false);
+  assert.equal("warning" in killedResult && killedResult.warning?.key, "lead-edit-killed");
 
   const publishedResult = await updateLeadForEditor(ctx, editLeadInput.parse({ id: publishedId, headline: "A new headline attempt", why: "Trying anyway", topic: "council" }));
-  assert.deepEqual(publishedResult, { ok: false, error: "This lead is already published. Edit the published story instead." });
+  assert.equal(publishedResult.ok, false);
+  assert.equal("warning" in publishedResult && publishedResult.warning?.key, "lead-edit-published");
 
   const [killed] = await sql<LeadRow>`select * from leads where id = ${killedId}`;
   assert.equal(killed.headline, "A lead the editor already killed");

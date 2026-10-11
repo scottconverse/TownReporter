@@ -1,3 +1,4 @@
+import { updateAiFollowUp } from "@/components/scoped-actions";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
@@ -13,13 +14,8 @@ import {
 } from "@/components/follow-up-dialog";
 import { jobForFollowUp, useFollowUpJobs } from "@/components/follow-up-jobs";
 import { ScreenError } from "@/components/states";
-import {
-  createAiFollowUp,
-  followUpAction,
-  listFollowUps,
-  listFollowUpStoryOptions,
-  updateAiFollowUp,
-} from "@/lib/news/desk";
+import { listFollowUps, listFollowUpStoryOptions } from "@/lib/news/desk";
+import { createAiFollowUp, followUpAction } from "@/components/scoped-actions";
 import { cancelStoryJob } from "@/lib/news/job-progress";
 import {
   listFollowUpWatchNotices,

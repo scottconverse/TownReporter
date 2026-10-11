@@ -129,8 +129,20 @@ async function fixture(newsroomId: number, body: string, sourceUrls: string[] = 
     [USER, newsroomId, JSON.stringify(sourceUrls)],
   );
   const [draft] = await sql.query<{ id: number }>(
-    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Skate park opens','The park opened.', $4,'council',$5,'', '[]','news','[]','[]','{}') returning id",
-    [USER, newsroomId, lead.id, body, JSON.stringify(sourceUrls)],
+    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Skate park opens','The park opened.', $4,'council',$5,'', '[]','news','[]','[]',$6) returning id",
+    [
+      USER,
+      newsroomId,
+      lead.id,
+      body,
+      JSON.stringify(sourceUrls),
+      /* A completed evidence check for this body, so the zero-claims gate stays
+         out of the way and these tests exercise the named-outlet list only. */
+      JSON.stringify({
+        aiEvidenceReview: { checkedText: body, rows: [] },
+        evidenceReconciledAt: "2026-10-10T02:20:39.040Z",
+      }),
+    ],
   );
   const confirmed = await performConfirmDraftTopic({ userId: USER, newsroomId }, lead.id);
   assert.equal(confirmed.ok, true, "fixture: the section should confirm");

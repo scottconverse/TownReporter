@@ -15,7 +15,7 @@ export function ScanSourceCoverageList(props: {
 }) {
   const [expanded, setExpanded] = useState(false);
   const detailEntries = props.entries.filter(
-    (entry) => entry.status === "skipped" || entry.status === "blocked",
+    (entry) => entry.status === "skipped" || entry.status === "blocked" || (entry.status === "read" && entry.reason != null),
   );
   if (!props.entries.length || props.entries.some((entry) => entry.status === "pending")) return null;
   const asOfMs = Date.parse(props.asOf);
@@ -31,7 +31,7 @@ export function ScanSourceCoverageList(props: {
             aria-controls={props.listId}
             onClick={() => setExpanded(!expanded)}
           >
-            Skipped and blocked sources ({detailEntries.length})
+            Source routes and gaps ({detailEntries.length})
           </button>
           {expanded ? (
             <ul className="mt-2 grid gap-2" id={props.listId}>

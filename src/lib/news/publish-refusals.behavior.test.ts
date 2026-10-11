@@ -76,6 +76,8 @@ async function fixture(notes: { todo: unknown[] }, topic = "council") {
     "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the plan','The plan passed.','The council approved the plan on Tuesday night.',$4,'[]','','[]','news','[]','[]','{}') returning id",
     [USER, NEWSROOM, lead.id, topic],
   );
+  // These tests isolate absence and section warnings; the evidence check is complete.
+  await sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({ evidenceReconciledAt: "2026-10-10T00:00:00Z", aiEvidenceReview: { checkedText: "The council approved the plan on Tuesday night.", rows: [] } }), draft.id]);
   return { leadId: lead.id, draftId: draft.id };
 }
 
@@ -88,11 +90,24 @@ async function articleCount(leadId: number) {
   return Number(row.count);
 }
 
-function refusalOf(result: { ok: true; slug: string } | { ok: false; error: string }) {
-  return "error" in result ? result.error : "";
+function refusalOf(result: Awaited<ReturnType<typeof performPublish>>) {
+  return !result.ok ? result.warnings?.map(w => w.sentence).join("\n") ?? result.error : "";
+}
+async function consentAndPrint(leadId: number, initial: Awaited<ReturnType<typeof performPublish>>, section?: string) {
+  assert.equal(initial.ok, false);
+  if (initial.ok) throw new Error("expected warnings before consent");
+  assert.ok(initial.warnings?.length);
+  assert.equal(await articleCount(leadId), 0, "warnings alone never write an article");
+  const keys = initial.warnings!.map(w => w.key);
+  const result = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, section, undefined, {}, keys);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(await articleCount(leadId), 1);
+  const sql = await getSql();
+  const audits = await sql.query<{user_id: string; detail: string}>("select user_id,detail from audit_events where newsroom_id=$1 and action='override'", [NEWSROOM]);
+  for (const key of keys) assert.ok(audits.some(a => a.user_id === USER && JSON.parse(a.detail).key === key), `audit for ${key}`);
 }
 
-it("refuses to print a draft with one unchecked claim of absence, and writes nothing", async () => {
+it("warns about one unchecked absence claim, writes nothing until consent, then audits and prints", async () => {
   const { leadId } = await fixture({ todo: [gateTodo(CLAIM_ONE, false)] });
   const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId);
   assert.equal(published.ok, false, "an unconfirmed claim of absence must not print");
@@ -106,6 +121,7 @@ it("refuses to print a draft with one unchecked claim of absence, and writes not
     0,
     "a refused publish must not leave an article behind",
   );
+  await consentAndPrint(leadId, published);
 });
 
 it("counts the claims of absence when more than one is unchecked", async () => {
@@ -116,6 +132,7 @@ it("counts the claims of absence when more than one is unchecked", async () => {
   assert.equal(published.ok, false, "two unconfirmed claims must not print");
   assert.match(refusalOf(published), /Confirm the 2 claims of absence first/);
   assert.equal(await articleCount(leadId), 0);
+  await consentAndPrint(leadId, published);
 });
 
 it("prints the same draft once the claim of absence is ticked, and counts a ticked claim as confirmed", async () => {
@@ -131,7 +148,7 @@ it("prints the same draft once the claim of absence is ticked, and counts a tick
   assert.equal(await articleCount(leadId), 1, "the print has to reach the paper");
 });
 
-it("still refuses while one of two claims is unchecked, even after the other is ticked", async () => {
+it("still warns about the remaining absence claim and allows audited consent", async () => {
   const { leadId } = await fixture({
     todo: [gateTodo(CLAIM_ONE, true), gateTodo(CLAIM_TWO, false)],
   });
@@ -139,9 +156,10 @@ it("still refuses while one of two claims is unchecked, even after the other is 
   assert.equal(published.ok, false, "ticking one claim must not clear the other");
   assert.match(refusalOf(published), /Confirm the claim of absence first/);
   assert.equal(await articleCount(leadId), 0);
+  await consentAndPrint(leadId, published);
 });
 
-it("refuses when the button names a section the draft does not file under", async () => {
+it("warns when the button names a different section and allows audited consent", async () => {
   const { leadId } = await fixture({ todo: [] }, "council");
   const published = await performPublish(
     { userId: USER, newsroomId: NEWSROOM },
@@ -156,6 +174,7 @@ it("refuses when the button names a section the draft does not file under", asyn
   );
   assert.match(refusalOf(published), /"budget"/);
   assert.equal(await articleCount(leadId), 0, "a refused publish must not leave an article behind");
+  await consentAndPrint(leadId, published, "budget");
 });
 
 it("prints when the button names the draft's own section", async () => {

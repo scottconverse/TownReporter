@@ -5,8 +5,18 @@ import {
   automaticFailoverReason,
   failoverReasonPhrase,
   failoverNoteSentence,
+  appendStoryFailoverNote,
 } from "./automatic-failover.ts";
 import { unreadableReplyError } from "./ai.ts";
+
+it("appends a third Story hop without dropping earlier reasons or duplicating a retried receipt", () => {
+  const first = failoverNoteSentence("DeepSeek v4.1 Flash", "Claude Haiku", "auth");
+  const second = failoverNoteSentence("Codex Sol 6.1", "DeepSeek v4.1 Flash", "quota");
+  const third = failoverNoteSentence("Claude Sonnet", "Codex Sol 6.1", "timeout");
+  const history = appendStoryFailoverNote(appendStoryFailoverNote(first, second), third);
+  assert.equal(history, "Claude Haiku sign-in lapsed -> DeepSeek v4.1 Flash reached its usage limit -> Codex Sol 6.1 timed out -> Claude Sonnet");
+  assert.equal(appendStoryFailoverNote(history, third), history);
+});
 
 /**
  * Live case 2026-09-02, job 41: Automatic pinned to Claude Opus, and Claude

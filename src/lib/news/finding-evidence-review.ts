@@ -4,7 +4,7 @@ import { getSql, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
 import { parseFindings, type StoryFinding } from "./findings.ts";
 import type { DraftGroundingRow } from "./draft-specifics.ts";
-import { evidenceReviewToken } from "./draft-evidence.ts";
+import { EVIDENCE_REVIEW_VERSION_KEY, evidenceReviewToken } from "./draft-evidence.ts";
 import { sha256 } from "./url-guard.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import type { ProvenanceItem, StoryClaim } from "./report.ts";
@@ -14,6 +14,36 @@ import type { ReportingPackage } from "./civic-reporting.ts";
 import type { CurrentReportingDocumentCheck } from "./reporting-document-check.ts";
 import { reportingDocumentClaimIdentity } from "./reporting-document-check.ts";
 import type { AiEvidenceReview, AiEvidenceJudgment } from "./evidence-ai.ts";
+import { auditOverrides, checkOverride, isOverrideWarning, type OverrideWarning } from "./override.ts";
+
+/**
+ * Audit items 13, 14, 15, 16, 17: the keys a warned evidence decision must
+ * carry back on its second call. The UI never hardcodes them -- it sends the
+ * key it was given -- so this is the server's own vocabulary.
+ */
+export const EVIDENCE_OVERRIDE_KEYS = {
+  supportsNoCapture: "evidence:supports-without-capture",
+  contradictsNoReason: "evidence:contradicts-without-reason",
+  contradictsNoCapture: "evidence:contradicts-without-capture",
+  removeSentence: "evidence:remove-sentence",
+  manualClaimLength: "manual-claim:length",
+  manualClaimReferences: "manual-claim:references",
+  manualClaimDuplicateReference: "manual-claim:duplicate-reference",
+  manualClaimReferenceUrl: "manual-claim:reference-url",
+  manualClaimCount: "manual-claim:count",
+} as const;
+
+/**
+ * The prefix the editor's own note carries, so the record says what it is.
+ * The LABEL printed beside such a judgment ("editor's judgment, no capture")
+ * lives in `finding-evidence-display.ts`, next to the other judgment copy.
+ */
+export const NO_CAPTURE_EDITOR_NOTE_PREFIX = "I know this from outside the captures: ";
+
+
+export const MANUAL_CLAIM_FACT_WARN = 400;
+export const MANUAL_CLAIM_REFERENCES_WARN = 6;
+export const MANUAL_CLAIM_REFERENCE_URL_WARN = 500;
 
 export type FindingJudgment =
   "unreviewed" | "supports" | "does-not-support" | "contradicts" | "needs-reporting";
@@ -53,6 +83,8 @@ export type FindingEvidenceRow = {
     value: FindingJudgment;
     reason: string;
     contraryVersionId: number | null;
+
+    noCapture?: boolean;
     ai?: AiEvidenceJudgment;
     acceptedBy?: string;
     acceptedAt?: string;
@@ -128,7 +160,8 @@ export type FindingEvidenceResult =
       ok: false;
       code: "forbidden" | "not-found" | "conflict" | "invalid-input";
       error: string;
-    };
+    }
+  | OverrideWarning;
 
 export type FindingEvidenceCaptureResult =
   | {
@@ -169,6 +202,8 @@ export type SaveManualClaimInput =
       fact: string;
       kind: StoryClaim["kind"];
       references: Array<{ versionId: number; relation: ManualClaimReferenceRelation }>;
+      /** Audit items 16 and 17: keys the warned first call returned. */
+      override?: string[];
     }
   | {
       leadId: number;
@@ -179,6 +214,7 @@ export type SaveManualClaimInput =
       fact?: never;
       kind?: never;
       references?: never;
+      override?: never;
     };
 
 class ReviewError extends Error {
@@ -273,6 +309,14 @@ export function findingEvidenceContentToken(draft: Partial<DraftRow>): string {
     judgments about a draft the editor never touched.
   */
   delete research.styleAudit;
+  /*
+    Unit ZC: the completed-check identity stamp is a derived receipt of the draft
+    THIS version is, written by a reconciliation pass and by an edit that moves the
+    draft on. Like the style audit, it carries nothing the editor judges here, and
+    counting it would throw away carried judgments after every reconcile. It is
+    excluded by name so judgments recorded against the content still travel.
+  */
+  delete research[EVIDENCE_REVIEW_VERSION_KEY];
   return JSON.stringify([
     draft.id ?? null,
     draft.headline ?? "",
@@ -315,6 +359,12 @@ function assertReadableStoredFindings(raw: unknown): void {
       "Stored findings are incomplete or unreadable. Review the original material or generate a replacement before recording judgments.",
     );
   }
+}
+
+/** Count the same recorded rows as Checks without resolving their captures. */
+export function recordedDraftClaimCount(draft: DraftRow): number {
+  assertReadableStoredFindings(draft.found_note);
+  return parseFindings(draft.found_note).length + storedClaims(draft).length + storedManualClaims(draft).length;
 }
 
 function storedClaims(draft: DraftRow): ReportingReviewClaim[] {
@@ -370,7 +420,7 @@ function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
   if (!claims || typeof claims !== "object" || Array.isArray(claims))
     throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
   const value = claims as Partial<StoredManualClaims>;
-  if (value.version !== 1 || !Array.isArray(value.rows) || value.rows.length > 16)
+  if (value.version !== 1 || !Array.isArray(value.rows))
     throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
   return value.rows.map((claim) => {
     if (
@@ -378,11 +428,8 @@ function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
       !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(claim.id) ||
       typeof claim.fact !== "string" ||
       !claim.fact.trim() ||
-      claim.fact.length > 400 ||
       !["primary", "record", "news"].includes(claim.kind) ||
-      !Array.isArray(claim.references) ||
-      claim.references.length === 0 ||
-      claim.references.length > 6
+      !Array.isArray(claim.references)
     )
       throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
     const references = claim.references.map((reference) => {
@@ -392,7 +439,6 @@ function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
         reference.versionId < 1 ||
         typeof reference.url !== "string" ||
         !reference.url.trim() ||
-        reference.url.length > 500 ||
         !["corroborating", "contrary", "context"].includes(reference.relation)
       )
         throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
@@ -402,8 +448,6 @@ function storedManualClaims(draft: DraftRow): StoredManualClaim[] {
         relation: reference.relation,
       } as StoredManualClaimReference;
     });
-    if (new Set(references.map((reference) => reference.versionId)).size !== references.length)
-      throw new ReviewError("invalid-input", "Stored manual claims are incomplete or unreadable.");
     return { id: claim.id, fact: claim.fact, kind: claim.kind, references };
   });
 }
@@ -530,6 +574,7 @@ function judgmentFor(draft: DraftRow, key: string, namespace: ReviewNamespace): 
         contraryVersionId: Number.isInteger(judgment.contraryVersionId)
           ? judgment.contraryVersionId
           : null,
+        ...(judgment.noCapture === true ? { noCapture: true } : {}),
         evidenceBinding:
           typeof judgment.evidenceBinding === "string" ? judgment.evidenceBinding : undefined,
       }
@@ -561,15 +606,24 @@ async function currentDraft(sql: Sql, newsroomId: number, leadId: number): Promi
   return draft;
 }
 
+type EvidenceSnapshot = {
+  versions: Array<VersionRow & { text_fingerprint: string }>;
+  captures: CaptureRow[];
+};
+
 async function findingReferenceBinding(
   sql: Sql,
   newsroomId: number,
   finding: StoryFinding,
   lock = false,
+  snapshot?: EvidenceSnapshot,
 ): Promise<string> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
-  const captures = captureIds.length
+  const captures = snapshot
+    ? snapshot.captures.filter(row => captureIds.includes(row.id)).sort((a,b) => a.id-b.id)
+      .map(({ id, version_id, source_url, content_hash }) => ({ id, version_id, source_url, content_hash }))
+    : captureIds.length
     ? await sql.query<{
         id: number;
         version_id: number | null;
@@ -589,7 +643,10 @@ async function findingReferenceBinding(
       ...captures.flatMap((capture) => (capture.version_id == null ? [] : [capture.version_id])),
     ]),
   ];
-  const versions = allVersionIds.length
+  const versions = snapshot
+    ? snapshot.versions.filter(row => allVersionIds.includes(row.id)).sort((a,b) => a.id-b.id)
+      .map(({ id, url, content_hash, text_fingerprint }) => ({ id, url, content_hash, text_fingerprint }))
+    : allVersionIds.length
     ? await sql.query<{
         id: number;
         url: string;
@@ -610,6 +667,7 @@ async function manualClaimBinding(
   newsroomId: number,
   claim: StoredManualClaim,
   lock = false,
+  snapshot?: EvidenceSnapshot,
 ): Promise<string> {
   return JSON.stringify({
     claim: {
@@ -619,7 +677,7 @@ async function manualClaimBinding(
       references: claim.references.map(({ versionId, url, relation }) => ({ versionId, url, relation })),
     },
     captured: JSON.parse(
-      await findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock),
+      await findingReferenceBinding(sql, newsroomId, referenceForManualClaim(claim), lock, snapshot),
     ),
   });
 }
@@ -658,16 +716,17 @@ async function resolveFinding(
   key = `finding:${index}`,
   namespace: ReviewNamespace = "findingEvidenceReview",
   evidenceBinding?: string,
+  snapshot?: EvidenceSnapshot,
 ): Promise<FindingEvidenceRow> {
   const versionIds = [...new Set(finding.artifact_version_ids)];
   const captureIds = [...new Set(finding.capture_event_ids)];
-  const versions = versionIds.length
+  const versions = snapshot ? snapshot.versions.filter(row => versionIds.includes(row.id)) : versionIds.length
     ? await sql.query<VersionRow>(
         "select id,url,title,full_text,content_hash,captured_at,taken_down_at from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
         [newsroomId, versionIds],
       )
     : [];
-  const captures = captureIds.length
+  const captures = snapshot ? snapshot.captures.filter(row => captureIds.includes(row.id)) : captureIds.length
     ? await sql.query<CaptureRow>(
         `select ce.id,ce.version_id,ce.source_url,ce.observed_at,ce.content_hash,
                 av.title,av.full_text,av.content_hash as version_content_hash,
@@ -703,7 +762,7 @@ async function resolveFinding(
           }
         : undefined);
     const url = availableVersion?.url ?? capture?.source_url ?? null;
-    const [newer] = url
+    const [newer] = url && !snapshot
       ? await sql.query<{ id: number; captured_at: string | Date }>(
           `select id,captured_at from artifact_versions
             where newsroom_id=$1 and url=$2 and ($3::int is null or id<>$3)
@@ -738,20 +797,23 @@ async function resolveFinding(
     });
   }
   let judgment = judgmentFor(draft, key, namespace);
-  const currentBinding = evidenceBinding ?? (await findingReferenceBinding(sql, newsroomId, finding));
+  const currentBinding = evidenceBinding ?? (await findingReferenceBinding(sql, newsroomId, finding, false, snapshot));
   const readableVersions = new Set(
     resolved
       .filter((capture) => capture.available && capture.readable)
       .map((capture) => capture.versionId),
   );
-  if (
-    (judgment.value !== "unreviewed" && judgment.evidenceBinding !== currentBinding) ||
-    (judgment.value === "supports" && readableVersions.size === 0) ||
-    (judgment.value === "contradicts" &&
+
+  const bindingMoved = judgment.value !== "unreviewed" && judgment.evidenceBinding !== currentBinding;
+  const supportsUnreadable =
+    judgment.value === "supports" && !judgment.noCapture && readableVersions.size === 0;
+  const contradictsUnreadable =
+    judgment.value === "contradicts" &&
+    !judgment.noCapture &&
       (!judgment.reason ||
         judgment.contraryVersionId == null ||
-        !readableVersions.has(judgment.contraryVersionId)))
-  )
+      !readableVersions.has(judgment.contraryVersionId));
+  if (bindingMoved || supportsUnreadable || contradictsUnreadable)
     judgment = { value: "unreviewed", reason: "", contraryVersionId: null };
   return {
     key,
@@ -766,6 +828,7 @@ async function resolveFinding(
       value: judgment.value,
       reason: judgment.reason,
       contraryVersionId: judgment.contraryVersionId,
+      ...(judgment.noCapture ? { noCapture: true } : {}),
     },
   };
 }
@@ -776,6 +839,7 @@ async function resolveClaim(
   draft: DraftRow,
   claim: ReportingReviewClaim,
   index: number,
+  snapshot?: EvidenceSnapshot,
 ): Promise<ClaimEvidenceRow> {
   const key = await claimKey(index, claim);
   const resolved = await resolveFinding(
@@ -786,6 +850,8 @@ async function resolveClaim(
     index,
     key,
     "claimEvidenceReview",
+    undefined,
+    snapshot,
   );
   const captures = resolved.captures.map((capture) =>
     (claim.reporting ? claim.reporting.references.some((ref) =>
@@ -809,8 +875,11 @@ async function resolveClaim(
     captures.filter((capture) => capture.available && capture.readable).map((capture) => capture.versionId),
   );
   const judgment =
-    (resolved.judgment.value === "supports" && readableVersionIds.size === 0) ||
+    (resolved.judgment.value === "supports" &&
+      !resolved.judgment.noCapture &&
+      readableVersionIds.size === 0) ||
     (resolved.judgment.value === "contradicts" &&
+      !resolved.judgment.noCapture &&
       (!resolved.judgment.reason ||
         resolved.judgment.contraryVersionId == null ||
         !readableVersionIds.has(resolved.judgment.contraryVersionId)))
@@ -871,9 +940,10 @@ async function resolveManualClaim(
   newsroomId: number,
   draft: DraftRow,
   claim: StoredManualClaim,
+  snapshot?: EvidenceSnapshot,
 ): Promise<ManualClaimEvidenceRow> {
   const key = manualClaimKey(claim);
-  const evidenceBinding = await manualClaimBinding(sql, newsroomId, claim);
+  const evidenceBinding = await manualClaimBinding(sql, newsroomId, claim, false, snapshot);
   const resolved = await resolveFinding(
     sql,
     newsroomId,
@@ -883,6 +953,7 @@ async function resolveManualClaim(
     key,
     "claimEvidenceReview",
     evidenceBinding,
+    snapshot,
   );
   const captures = resolved.captures.map((capture) => {
     const reference = claim.references.find((candidate) => candidate.versionId === capture.versionId);
@@ -908,8 +979,11 @@ async function resolveManualClaim(
     captures.filter((capture) => capture.available && capture.readable).map((capture) => capture.versionId),
   );
   let judgment =
-    (resolved.judgment.value === "supports" && readableVersions.size === 0) ||
+    (resolved.judgment.value === "supports" &&
+      !resolved.judgment.noCapture &&
+      readableVersions.size === 0) ||
     (resolved.judgment.value === "contradicts" &&
+      !resolved.judgment.noCapture &&
       (!resolved.judgment.reason ||
         resolved.judgment.contraryVersionId == null ||
         !readableVersions.has(resolved.judgment.contraryVersionId)))
@@ -970,6 +1044,86 @@ async function manualClaimCaptureOptions(
   }));
 }
 
+/** A desk count uses one bounded snapshot, with the same judgment resolver as Checks.
+ * No review tokens, newer-capture lookups, capture options or per-draft SQL. */
+export async function loadDeskClaimCounts(sql: Sql, newsroomId: number, draftIds: number[]) {
+  const result = new Map<number, { outstanding: number; accepted: number }>();
+  if (!draftIds.length) return result;
+  const [snapshot] = await sql.query<{
+    drafts: Array<DraftRow & { notes_json: string }>;
+    versions: EvidenceSnapshot["versions"];
+    captures: CaptureRow[];
+  }>(`
+    with selected as (
+      select d.*, l.notes_json from drafts d
+      join leads l on l.id=d.lead_id and l.newsroom_id=d.newsroom_id
+      where d.newsroom_id=$1 and d.id=any($2::int[])
+        and l.notes_json like '%unreviewedClaimsConfirmation%'
+    ), material as (
+      select jsonb_build_array(case when found_note is json then found_note::jsonb else '[]'::jsonb end,
+        case when provenance_json is json then provenance_json::jsonb else '[]'::jsonb end,
+        case when research_json is json then research_json::jsonb else '{}'::jsonb end) as doc from selected
+    ), version_ids as (
+      select distinct case when (v #>> '{}') ~ '^[0-9]+$'
+        and (v #>> '{}')::numeric between 1 and 2147483647 then (v #>> '{}')::int end as id from material,
+      lateral (
+        select jsonb_path_query(doc, '$.**.artifact_version_ids[*]') as v
+        union all select jsonb_path_query(doc, '$.**.version_id')
+        union all select jsonb_path_query(doc, '$.**.versionId')
+      ) refs where jsonb_typeof(v)='number'
+    ), capture_ids as (
+      select distinct case when (v #>> '{}') ~ '^[0-9]+$'
+        and (v #>> '{}')::numeric between 1 and 2147483647 then (v #>> '{}')::int end as id from material,
+      lateral (select jsonb_path_query(doc, '$.**.capture_event_ids[*]') as v) refs
+      where jsonb_typeof(v)='number'
+    ), captures as (
+      select ce.id,ce.version_id,ce.source_url,ce.observed_at,ce.content_hash,
+        av.title,av.full_text,av.content_hash as version_content_hash,
+        av.captured_at as version_captured_at,av.taken_down_at
+      from capture_events ce left join artifact_versions av
+        on av.id=ce.version_id and av.newsroom_id=ce.newsroom_id
+      where ce.newsroom_id=$1 and ce.id in (select id from capture_ids)
+    ), versions as (
+      select av.*,md5(av.full_text) as text_fingerprint from artifact_versions av
+      where av.newsroom_id=$1 and (av.id in (select id from version_ids)
+        or av.id in (select version_id from captures))
+    ) select
+      coalesce((select jsonb_agg(to_jsonb(d)) from selected d),'[]'::jsonb) as drafts,
+      coalesce((select jsonb_agg(to_jsonb(v)) from versions v),'[]'::jsonb) as versions,
+      coalesce((select jsonb_agg(to_jsonb(c)) from captures c),'[]'::jsonb) as captures
+  `, [newsroomId, draftIds]);
+  const { claimsNeedingReview } = await import("./evidence-check-state.ts");
+  const { parseNotes } = await import("./notes.ts");
+  const { evidenceConfirmationMatches } = await import("./draft-evidence.ts");
+  for (const draft of snapshot?.drafts ?? []) {
+    const acceptance = parseNotes(draft.notes_json).unreviewedClaimsConfirmation;
+    if (!acceptance || !evidenceConfirmationMatches(acceptance.token, draft)) continue;
+    // Legacy unhydrated ledgers cannot be promoted from a memo-only count.
+    const memo = objectMemo(draft.research_json);
+    if (memo.civicReporting === true && memo.reportedClaims == null) continue;
+    try {
+      assertReadableStoredFindings(draft.found_note);
+      const review: FindingEvidenceReview = {
+        leadId: draft.lead_id, draftId: draft.id, civicReporting: memo.civicReporting === true,
+        evidenceToken: "", contentToken: "", canonicalDraft: draft,
+        rows: await Promise.all(parseFindings(draft.found_note).map((finding,index) =>
+          resolveFinding(sql, newsroomId, draft, finding, index, undefined, undefined, undefined, snapshot))),
+        claimRows: await Promise.all(storedClaims(draft).map((claim,index) =>
+          resolveClaim(sql, newsroomId, draft, claim, index, snapshot))),
+        manualClaimRows: await Promise.all(storedManualClaims(draft).map(claim =>
+          resolveManualClaim(sql, newsroomId, draft, claim, snapshot))),
+        groundingRows: storedGrounding(draft), manualClaimCaptureOptions: [],
+      };
+      await applyAiReview(sql, newsroomId, draft, review, snapshot);
+      result.set(draft.id, { outstanding: claimsNeedingReview(review.rows, review.claimRows,
+        review.manualClaimRows, review.groundingRows), accepted: acceptance.count });
+    } catch (error) {
+      if (!isUnreadableFindingsError(error)) throw error;
+    }
+  }
+  return result;
+}
+
 export async function loadFindingEvidenceReview(
   sql: Sql,
   newsroomId: number,
@@ -1020,6 +1174,11 @@ export async function loadFindingEvidenceReview(
     groundingRows: storedGrounding(draft),
     manualClaimCaptureOptions: await manualClaimCaptureOptions(sql, newsroomId, draft),
   };
+  return applyAiReview(sql, newsroomId, draft, review);
+}
+
+async function applyAiReview(sql: Sql, newsroomId: number, draft: DraftRow, review: FindingEvidenceReview, snapshot?: EvidenceSnapshot): Promise<FindingEvidenceReview> {
+  const reporting = objectMemo(draft.research_json);
   const ai = reporting.aiEvidenceReview as AiEvidenceReview | undefined;
   if (ai?.checkedText === draft.body && Array.isArray(ai.rows)) {
     for (const row of [...review.rows, ...review.claimRows]) {
@@ -1040,7 +1199,7 @@ export async function loadFindingEvidenceReview(
       let grounded = false;
       for (const capture of matches) {
         if (capture.versionId != null) {
-          const [retained] = await sql.query<{ full_text: string }>(
+          const [retained] = snapshot ? snapshot.versions.filter(version => version.id === capture.versionId && !version.taken_down_at) : await sql.query<{ full_text: string }>(
             "select full_text from artifact_versions where id=$1 and newsroom_id=$2 and taken_down_at is null",
             [capture.versionId, newsroomId],
           );
@@ -1158,17 +1317,34 @@ export type SaveFindingJudgmentInput = {
   reason: string;
   contraryVersionId: number | null;
   evidenceToken: string;
+  /** Audit items 13/14: keys a warned first call returned. */
+  override?: string[];
+  /** The editor's own note, required when recording a judgment with no capture. */
+  editorNote?: string;
 };
 
 type AiEvidenceDecisionInput = { leadId: number; draftId: number; evidenceToken: string;
-  action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string };
+  action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string;
+  /** Audit item 15: the key a warned `remove-sentence` call returned. */
+  override?: string[] };
+
+
+function removeTextOccurrence(body: string, text: string): string {
+  const needle = text.trim();
+  if (!needle) return body;
+  const index = body.toLowerCase().indexOf(needle.toLowerCase());
+  if (index < 0) return body;
+  const before = body.slice(0, index).replace(/\s+$/, "");
+  const after = body.slice(index + needle.length).replace(/^\s+/, "");
+  return before && after ? `${before} ${after}` : before || after;
+}
 
 /** One atomic save, fenced to the draft and retained evidence the editor saw. */
 export const persistAiEvidenceDecision = createServerOnlyFn(async function persistAiEvidenceDecision(
   context: { newsroomId: number; userId: string }, input: AiEvidenceDecisionInput,
-): Promise<FindingEvidenceReview> {
+): Promise<FindingEvidenceReview | OverrideWarning> {
   const { withLeadDraftLock } = await import("./draft-order.server.ts");
-  await withLeadDraftLock(context, input.leadId, async (sql) => {
+  const outcome = await withLeadDraftLock<OverrideWarning | { warnings: string[] }>(context, input.leadId, async (sql) => {
     const draft = await currentDraft(sql, context.newsroomId, input.leadId);
     const findings = parseFindings(draft.found_note), claims = storedClaims(draft), manual = storedManualClaims(draft);
     if (draft.id !== input.draftId || input.evidenceToken !== await fullReviewToken(sql, context.newsroomId, draft, findings, claims, manual, true))
@@ -1181,14 +1357,35 @@ export const persistAiEvidenceDecision = createServerOnlyFn(async function persi
     const memo = objectMemo(draft.research_json);
     const [editor] = await sql.query<{ name: string }>('select name from "user" where id=$1', [context.userId]);
     const acceptedBy = editor?.name || context.userId, acceptedAt = new Date().toISOString();
+    const warnings: string[] = [];
     if (input.action === "remove-sentence") {
       const row = rows[0], text = "finding" in row ? row.finding.text : row.claim.fact;
       const sentences = draft.body.split(/(?<=[.!?])\s+/);
       const exact = sentences.findIndex((sentence) => normalizedText(sentence) === normalizedText(text));
-      if (exact < 0 || sentences.length < 2)
-        throw new ReviewError("invalid-input", "That claim is not a whole removable sentence. Edit the draft or mark it checked.");
-      sentences.splice(exact, 1);
-      draft.body = sentences.join(" ");
+      let removalIndex = exact;
+      if (exact < 0) {
+
+        const warning = checkOverride(
+          input,
+          EVIDENCE_OVERRIDE_KEYS.removeSentence,
+          "This claim is not a whole sentence in the draft, so it cannot be removed exactly. Remove it anyway as a coherent edit?",
+        );
+        if (warning) return warning;
+        warnings.push(EVIDENCE_OVERRIDE_KEYS.removeSentence);
+        removalIndex = sentences.findIndex((sentence) =>
+          normalizedText(sentence).includes(normalizedText(text)),
+        );
+      }
+      const nextBody =
+        removalIndex >= 0
+          ? sentences.filter((_, index) => index !== removalIndex).join(" ")
+          : removeTextOccurrence(draft.body, text);
+      if (!nextBody.trim())
+        throw new ReviewError(
+          "invalid-input",
+          "Removing this claim would leave the draft with no body. Edit the draft or mark it checked.",
+        );
+      draft.body = nextBody;
       draft.found_note = JSON.stringify(findings.filter((finding) => finding.text !== text));
       const reported = memo.reportedClaims as { rows?: ReportingReviewClaim[] } | undefined;
       if (reported?.rows) reported.rows = reported.rows.filter((claim) => claim.fact !== text);
@@ -1213,7 +1410,19 @@ export const persistAiEvidenceDecision = createServerOnlyFn(async function persi
     }
     await sql.query("update drafts set body=$1,found_note=$2,research_json=$3,updated_at=now() where id=$4 and newsroom_id=$5",
       [draft.body, draft.found_note, JSON.stringify(memo), draft.id, context.newsroomId]);
+    return { warnings: input.action === "remove-sentence" ? warnings : [] };
   });
+  if (isOverrideWarning(outcome)) return outcome;
+  /*
+    Only after the mutation committed: one `override` audit row per accepted
+    key. A warned-but-not-accepted call returned above and writes nothing.
+  */
+  if (outcome.warnings.length)
+    await auditOverrides(
+      { userId: context.userId, newsroomId: context.newsroomId },
+      outcome.warnings,
+      { kind: "draft", id: input.draftId },
+    );
   return loadFindingEvidenceReview(await getSql(), context.newsroomId, input.leadId);
 });
 
@@ -1224,16 +1433,19 @@ export const decideAiEvidence = createServerFn({ method: "POST" }).middleware([d
       !["accept-supported", "mark-checked", "remove-sentence"].includes(input.action)) throw new Error("Invalid evidence decision.");
     return input;
   }).handler(async ({ context, data }): Promise<FindingEvidenceResult> => {
-    try { return { ok: true, review: await persistAiEvidenceDecision(context, data) }; }
+    try {
+      const result = await persistAiEvidenceDecision(context, data);
+      return isOverrideWarning(result) ? result : { ok: true, review: result };
+    }
     catch (error) { return { ok: false, code: error instanceof ReviewError ? error.code : "invalid-input",
       error: error instanceof Error ? error.message : "The evidence decision could not be saved." }; }
   });
 
 export const persistFindingEvidenceJudgment = createServerOnlyFn(
   async function persistFindingEvidenceJudgment(
-    context: { newsroomId: number },
+    context: { newsroomId: number; userId?: string },
     input: SaveFindingJudgmentInput,
-  ): Promise<FindingEvidenceReview> {
+  ): Promise<FindingEvidenceReview | OverrideWarning> {
     if (!JUDGMENTS.has(input.judgment))
       throw new ReviewError("invalid-input", "Choose a valid evidence judgment.");
     if (input.reason.length > 2000)
@@ -1242,13 +1454,13 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
         "The evidence-review reason must be 2,000 characters or fewer.",
       );
     const reason = input.reason.trim();
-    if (input.judgment === "contradicts" && (!reason || !input.contraryVersionId))
-      throw new ReviewError(
-        "invalid-input",
-        "A contradiction needs cited contrary captured evidence and a reason.",
-      );
+    /*
+      Audit item 13: a contradiction still needs a REASON (its own substance),
+      but a cited contrary capture is now a warn/override limit, so it is not
+      refused here.
+    */
     const { withLeadDraftLock } = await import("./draft-order.server.ts");
-    await withLeadDraftLock(context, input.leadId, async (sql) => {
+    const outcome = await withLeadDraftLock<OverrideWarning | { warnings: string[] }>(context, input.leadId, async (sql) => {
       const draft = await currentDraft(sql, context.newsroomId, input.leadId);
       const contentToken = findingEvidenceContentToken(draft);
       assertReadableStoredFindings(draft.found_note);
@@ -1312,22 +1524,46 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
           .filter((capture) => capture.available && capture.readable && (!isManualClaim || ("relation" in capture && capture.relation === "contrary")) && capture.versionId != null)
           .map((capture) => capture.versionId!),
       );
-      if (input.judgment === "contradicts" && !(isManualClaim ? contraryVersionIds : citedVersionIds).has(input.contraryVersionId!))
-        throw new ReviewError(
-          "invalid-input",
+
+      const warnings: string[] = [];
+      let noCapture = false;
+      if (input.judgment === "contradicts" && !(isManualClaim ? contraryVersionIds : citedVersionIds).has(input.contraryVersionId!)) {
+        const warning = checkOverride(
+          input,
+          EVIDENCE_OVERRIDE_KEYS.contradictsNoCapture,
           isManualClaim
-            ? "The contrary evidence must be a readable record explicitly marked contrary for this manual claim."
-            : isClaim
-            ? "The contrary evidence must be a readable captured version cited by this claim."
-            : "The contrary evidence must be a readable captured version cited by this finding.",
+            ? "This manual claim has no readable record explicitly marked contrary. Record it as your own judgment, outside the captures?"
+            : "This item has no readable cited contrary captured record. Record it as your own judgment, outside the captures?",
         );
-      if (input.judgment === "supports" && (isManualClaim ? supportVersionIds : citedVersionIds).size === 0)
-        throw new ReviewError(
-          "invalid-input",
+        if (warning) return warning;
+        noCapture = true;
+        warnings.push(EVIDENCE_OVERRIDE_KEYS.contradictsNoCapture);
+      }
+      if (input.judgment === "supports" && (isManualClaim ? supportVersionIds : citedVersionIds).size === 0) {
+        const warning = checkOverride(
+          input,
+          EVIDENCE_OVERRIDE_KEYS.supportsNoCapture,
           isManualClaim
-            ? "Supporting evidence requires a readable record explicitly marked corroborating for this manual claim."
-            : "Supporting evidence requires a readable captured record cited by this evidence item.",
+            ? "This manual claim has no readable corroborating record. Save it as your own judgment, outside the captures?"
+            : "This item has no readable cited captured record. Save it as your own judgment, outside the captures?",
         );
+        if (warning) return warning;
+        noCapture = true;
+        warnings.push(EVIDENCE_OVERRIDE_KEYS.supportsNoCapture);
+      }
+      if (!noCapture && input.judgment === "contradicts" && !reason) {
+        const warning = checkOverride(input, EVIDENCE_OVERRIDE_KEYS.contradictsNoReason,
+          "This contradiction has no explanation. Save your judgment anyway?");
+        if (warning) return warning;
+        warnings.push(EVIDENCE_OVERRIDE_KEYS.contradictsNoReason);
+      }
+      let storedReason = reason;
+      if (noCapture) {
+        const note = (input.editorNote ?? "").trim();
+        storedReason = !note ? "Editor judgment outside the captures; no explanation supplied." : note.toLowerCase().startsWith(NO_CAPTURE_EDITOR_NOTE_PREFIX.toLowerCase())
+          ? note
+          : `${NO_CAPTURE_EDITOR_NOTE_PREFIX}${note}`;
+      }
       const memo = objectMemo(draft.research_json);
       const previous = storedReview(draft, namespace);
       const judgments =
@@ -1337,16 +1573,25 @@ export const persistFindingEvidenceJudgment = createServerOnlyFn(
         : await findingReferenceBinding(sql, context.newsroomId, reference, true);
       judgments[input.findingKey] = {
         value: input.judgment,
-        reason,
-        contraryVersionId: input.judgment === "contradicts" ? input.contraryVersionId : null,
+        reason: storedReason,
+        contraryVersionId: input.judgment === "contradicts" && !noCapture ? input.contraryVersionId : null,
         evidenceBinding,
+        ...(noCapture ? { noCapture: true } : {}),
       };
       memo[namespace] = { contentToken, judgments };
       await sql.query(
         "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
         [JSON.stringify(memo), draft.id, context.newsroomId],
       );
+      return { warnings };
     });
+    if (isOverrideWarning(outcome)) return outcome;
+    if (outcome.warnings.length)
+      await auditOverrides(
+        { userId: context.userId ?? "", newsroomId: context.newsroomId },
+        outcome.warnings,
+        { kind: "draft", id: input.draftId },
+      );
     const sql = await getSql();
     return loadFindingEvidenceReview(sql, context.newsroomId, input.leadId);
   },
@@ -1357,35 +1602,29 @@ async function resolvedManualReferences(
   newsroomId: number,
   references: Array<{ versionId: number; relation: ManualClaimReferenceRelation }>,
 ): Promise<StoredManualClaimReference[]> {
-  if (references.length === 0 || references.length > 6)
-    throw new ReviewError("invalid-input", "Choose from one to six already captured records.");
-  if (new Set(references.map((reference) => reference.versionId)).size !== references.length)
-    throw new ReviewError("invalid-input", "Choose each captured record only once.");
+
   if (references.some((reference) => !Number.isInteger(reference.versionId) || reference.versionId < 1))
     throw new ReviewError("invalid-input", "Choose valid captured records.");
   if (references.some((reference) => !MANUAL_CLAIM_RELATIONS.has(reference.relation)))
     throw new ReviewError("invalid-input", "Choose a valid relationship for every captured record.");
+  const uniqueIds = [...new Set(references.map((reference) => reference.versionId))];
   const versions = await sql.query<{ id: number; url: string }>(
     "select id,url from artifact_versions where newsroom_id=$1 and id=any($2::int[])",
-    [newsroomId, references.map((reference) => reference.versionId)],
+    [newsroomId, uniqueIds],
   );
-  if (versions.length !== references.length)
+  if (versions.length !== uniqueIds.length)
     throw new ReviewError("invalid-input", "Every selected captured record must still belong to this newsroom.");
   const urls = new Map(versions.map((version) => [version.id, version.url]));
-  return references.map((reference) => {
-    if (!urls.get(reference.versionId) || urls.get(reference.versionId)!.length > 500)
-      throw new ReviewError("invalid-input", "A selected captured record has an invalid URL.");
-    return { ...reference, url: urls.get(reference.versionId)! };
-  });
+  return references.map((reference) => ({ ...reference, url: urls.get(reference.versionId)! }));
 }
 
 export const persistManualClaim = createServerOnlyFn(
   async function persistManualClaim(
-    context: { newsroomId: number },
+    context: { newsroomId: number; userId?: string },
     input: SaveManualClaimInput,
-  ): Promise<FindingEvidenceReview> {
+  ): Promise<FindingEvidenceReview | OverrideWarning> {
     const { withLeadDraftLock } = await import("./draft-order.server.ts");
-    await withLeadDraftLock(context, input.leadId, async (sql) => {
+    const outcome = await withLeadDraftLock<OverrideWarning | { warnings: string[] }>(context, input.leadId, async (sql) => {
       const draft = await currentDraft(sql, context.newsroomId, input.leadId);
       assertReadableStoredFindings(draft.found_note);
       const findings = parseFindings(draft.found_note);
@@ -1406,24 +1645,72 @@ export const persistManualClaim = createServerOnlyFn(
         if (index < 0) throw new ReviewError("conflict", "That manual claim is no longer current.");
         manualClaims.splice(index, 1);
       } else {
+        if (!input.fact.trim() || !["primary", "record", "news"].includes(input.kind))
+          throw new ReviewError("invalid-input", "Provide a claim and a valid kind.");
+        /*
+          Audit item 16: an over-length claim warns and is then stored WHOLE
+          under override, with the complete claim retained.
+        */
+        const warnings: string[] = [];
+        if (input.fact.length > MANUAL_CLAIM_FACT_WARN) {
+          const warning = checkOverride(
+            input,
+            EVIDENCE_OVERRIDE_KEYS.manualClaimLength,
+            `This claim is longer than ${MANUAL_CLAIM_FACT_WARN} characters. Save it anyway?`,
+          );
+          if (warning) return warning;
+          warnings.push(EVIDENCE_OVERRIDE_KEYS.manualClaimLength);
+        }
+        /*
+          Audit item 17: the reference count, a repeated record and an over-long
+          address warn. The newsroom boundary itself stays hard, below.
+        */
+        if (input.references.length === 0 || input.references.length > MANUAL_CLAIM_REFERENCES_WARN) {
+          const warning = checkOverride(
+            input,
+            EVIDENCE_OVERRIDE_KEYS.manualClaimReferences,
+            input.references.length === 0 ? "This claim has no captured record. Save it as an editor’s claim?" : `A manual claim usually cites up to ${MANUAL_CLAIM_REFERENCES_WARN} captured records. Save it with this many anyway?`,
+          );
+          if (warning) return warning;
+          warnings.push(EVIDENCE_OVERRIDE_KEYS.manualClaimReferences);
+        }
         if (
-          !input.fact.trim() ||
-          input.fact.length > 400 ||
-          !["primary", "record", "news"].includes(input.kind)
-        ) throw new ReviewError("invalid-input", "Provide a claim of 400 characters or fewer and a valid kind.");
+          input.references.length > 0 &&
+          new Set(input.references.map((reference) => reference.versionId)).size !== input.references.length
+        ) {
+          const warning = checkOverride(
+            input,
+            EVIDENCE_OVERRIDE_KEYS.manualClaimDuplicateReference,
+            "The same captured record is chosen more than once. Save it anyway?",
+          );
+          if (warning) return warning;
+          warnings.push(EVIDENCE_OVERRIDE_KEYS.manualClaimDuplicateReference);
+        }
         const references = await resolvedManualReferences(sql, context.newsroomId, input.references);
+        if (references.some((reference) => reference.url.length > MANUAL_CLAIM_REFERENCE_URL_WARN)) {
+          const warning = checkOverride(
+            input,
+            EVIDENCE_OVERRIDE_KEYS.manualClaimReferenceUrl,
+            "A chosen captured record has an unusually long address. Save it anyway?",
+          );
+          if (warning) return warning;
+          warnings.push(EVIDENCE_OVERRIDE_KEYS.manualClaimReferenceUrl);
+        }
         const id = input.id ?? globalThis.crypto.randomUUID();
         if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))
           throw new ReviewError("invalid-input", "Invalid manual claim identifier.");
         const next: StoredManualClaim = { id, fact: input.fact, kind: input.kind, references };
         const index = manualClaims.findIndex((claim) => claim.id === id);
         if (index < 0) {
-          if (manualClaims.length >= 16)
-            throw new ReviewError("invalid-input", "This draft can hold at most 16 manual claims.");
+          if (manualClaims.length >= 16) {
+            const warning = checkOverride(input, EVIDENCE_OVERRIDE_KEYS.manualClaimCount,
+              "This draft already has 16 manual claims. Add another claim?");
+            if (warning) return warning;
+            warnings.push(EVIDENCE_OVERRIDE_KEYS.manualClaimCount);
+          }
           manualClaims.push(next);
         } else {
           manualClaims[index] = next;
-        }
       }
       memo.manualClaims = { version: 1, rows: manualClaims } satisfies StoredManualClaims;
       if (input.id) {
@@ -1437,7 +1724,22 @@ export const persistManualClaim = createServerOnlyFn(
         "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
         [JSON.stringify(memo), draft.id, context.newsroomId],
       );
+        return { warnings };
+      }
+      memo.manualClaims = { version: 1, rows: manualClaims } satisfies StoredManualClaims;
+      await sql.query(
+        "update drafts set research_json=$1,updated_at=now() where id=$2 and newsroom_id=$3",
+        [JSON.stringify(memo), draft.id, context.newsroomId],
+      );
+      return { warnings: [] };
     });
+    if (isOverrideWarning(outcome)) return outcome;
+    if (outcome.warnings.length)
+      await auditOverrides(
+        { userId: context.userId ?? "", newsroomId: context.newsroomId },
+        outcome.warnings,
+        { kind: "draft", id: input.draftId },
+      );
     return loadFindingEvidenceReview(await getSql(), context.newsroomId, input.leadId);
   },
 );
@@ -1465,7 +1767,14 @@ function cleanSaveInput(raw: unknown): SaveFindingJudgmentInput {
           ? value.contraryVersionId
           : Number.NaN,
     evidenceToken: typeof value.evidenceToken === "string" ? value.evidenceToken : "",
+    override: cleanOverride(value.override),
+    editorNote: typeof value.editorNote === "string" ? value.editorNote : "",
   };
+}
+
+/** The override keys a client sends back, kept to plain strings. */
+function cleanOverride(raw: unknown): string[] {
+  return Array.isArray(raw) ? raw.filter((key): key is string => typeof key === "string") : [];
 }
 
 function cleanCaptureInput(raw: unknown) {
@@ -1493,6 +1802,7 @@ function cleanManualClaimInput(raw: unknown): SaveManualClaimInput {
     id: value.id === null ? null : typeof value.id === "string" ? value.id : null,
     fact: typeof value.fact === "string" ? value.fact : "",
     kind: typeof value.kind === "string" ? value.kind as StoryClaim["kind"] : "news",
+    override: cleanOverride(value.override),
     references: Array.isArray(value.references)
       ? value.references.map((reference) => {
           const item = reference && typeof reference === "object" ? reference as Record<string, unknown> : {};
@@ -1556,10 +1866,8 @@ export const saveFindingEvidenceJudgment = createServerFn({ method: "POST" })
         !data.findingKey
       )
         throw new ReviewError("invalid-input", "Invalid evidence judgment.");
-      return {
-        ok: true,
-        review: await persistFindingEvidenceJudgment(context, data),
-      };
+      const result = await persistFindingEvidenceJudgment(context, data);
+      return isOverrideWarning(result) ? result : { ok: true, review: result };
     } catch (error) {
       return {
         ok: false,
@@ -1579,7 +1887,8 @@ export const saveManualClaim = createServerFn({ method: "POST" })
         !Number.isInteger(data.draftId) || data.draftId < 1 ||
         !data.evidenceToken
       ) throw new ReviewError("invalid-input", "Invalid manual claim.");
-      return { ok: true, review: await persistManualClaim(context, data) };
+      const result = await persistManualClaim(context, data);
+      return isOverrideWarning(result) ? result : { ok: true, review: result };
     } catch (error) {
       return {
         ok: false,

@@ -8,6 +8,10 @@ export type SourceRow = {
   last_hash: string | null;
   last_fetched_at: string | null;
   last_error: string | null;
+  last_read_method?: string | null;
+  last_read_outcome?: string | null;
+  last_read_route_url?: string | null;
+  newsletter_url?: string | null;
   /*
     The failure streak (migration 0115, unit SH0-1): how many scans in a row
     could not read this source, when that run of failures began, and when it

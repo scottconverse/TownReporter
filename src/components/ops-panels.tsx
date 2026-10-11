@@ -40,6 +40,7 @@ import { TRASH_DAYS, listTrash, purgeTrashItem, restoreTrashItem } from "@/lib/n
 import { inviteEditor, myDesk, myRecoveryCodesStatus, regenerateRecoveryCodes } from "@/lib/news/claim";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { PaperSetupForm } from "@/components/paper-setup-form";
+import { NewsletterMailbox } from "@/components/newsletter-mailbox";
 import { firstRunSetupState, getPaperConfigForEditor } from "@/lib/news/paper-settings";
 /*
   The six settings panels the cards own -- SectionsSetup, NamedOutletsSetup,
@@ -1021,6 +1022,8 @@ export function PaperSetupPanel() {
         />
       )}
       {me.data?.role === "owner" ? <DarkDeskCounty /> : null}
+      {/* Paper setup: the paper's own mailbox, owner-set like the rest of this card. */}
+      {me.data?.role === "owner" ? <NewsletterMailbox /> : null}
     </section>
   );
 }

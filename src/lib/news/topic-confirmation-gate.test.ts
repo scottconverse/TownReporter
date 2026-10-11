@@ -52,8 +52,9 @@ async function fixture(topic = "council", topicUnchosen = false) {
     "insert into leads(user_id,newsroom_id,headline,why,topic,status,source_urls,evidence,newsworthiness,notes_json,topic_unchosen) values($1,$2,'Council approves the plan','Why',$3,'new','[]','',1,'{}',$4) returning id",
     [USER, NEWSROOM, topic, topicUnchosen],
   );
+  /* The body states no checkable fact, so it avoids the unrelated zero-claims gate. */
   const [draft] = await sql.query<{ id: number }>(
-    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the plan','The plan passed.','The council approved the plan on Tuesday.',$4,'[]','','[]','news','[]','[]','{}') returning id",
+    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the plan','The plan passed.','The plan awaits consideration.',$4,'[]','','[]','news','[]','[]','{}') returning id",
     [USER, NEWSROOM, lead.id, topic],
   );
   return { leadId: lead.id, draftId: draft.id };

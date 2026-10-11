@@ -58,9 +58,8 @@ import { getRoutineNoticeAutomation } from "@/lib/news/routine-notice-automation
 import { getRoutineNoticePolicy } from "@/lib/news/routine-notice-policy";
 import { getYouTubeKeyStateFn } from "@/lib/news/youtube-data-settings";
 import { getOpsHealth } from "@/lib/ops/dashboard";
-import { getProviderTimeSettings } from "@/lib/news/provider-settings";
-import { getProviderStatuses } from "@/lib/news/provider-login";
-import { localModelCatalog } from "@/lib/news/provider-availability";
+import { getLocalModelChoice, getProviderTimeSettings } from "@/lib/news/provider-settings";
+import { providerAvailability, PROVIDER_AVAILABILITY_QUERY_KEY, localModelCatalog } from "@/lib/news/provider-availability";
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
@@ -273,22 +272,9 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
     queryFn: () => getProviderTimeSettings(),
     enabled: isOwner,
   });
-  /*
-    The two reads behind the ladder's readiness chips. Both are the reads the
-    Models screen already makes under these same keys, so the chip on a rung
-    here and the card on that screen are one answer: `getProviderStatuses` for
-    the two command-line logins (owner-only) and `localModelCatalog` for what
-    is answering on this machine (any editor may read it; only the owner's
-    ladder uses it). Polled at the Models screen's own 60s, because a sign-in
-    that lapses or a server that stops answering is exactly what this column is
-    for.
-  */
-  const statuses = useQuery({
-    queryKey: ["provider-statuses"],
-    queryFn: () => getProviderStatuses(),
-    enabled: isOwner,
-    refetchInterval: isOwner ? 60_000 : false,
-  });
+  // Share the picker's readiness and selected local backend reads.
+  const availability = useQuery({queryKey: PROVIDER_AVAILABILITY_QUERY_KEY, queryFn: () => providerAvailability(), enabled:isOwner, refetchInterval:60_000});
+  const localChoice = useQuery({queryKey:["local-model-choice","story"],queryFn:()=>getLocalModelChoice({data:{scope:"story"}}),enabled:isOwner});
   const catalog = useQuery({
     queryKey: ["local-model-catalog"],
     queryFn: () => localModelCatalog(),
@@ -324,17 +310,20 @@ function useCardBodies(isOwner: boolean): Record<OpsCardKey, CardBody> {
   const ladder = ((): CardBody => {
     if (!isOwner) return { state: "ladder", lines: writingModelLines() };
     if (times.isError) return { state: "error", message: messageOf(times.error) };
-    if (statuses.isError) return { state: "error", message: messageOf(statuses.error) };
+    if (availability.isError) return { state:"error",message:messageOf(availability.error)};
+    if (localChoice.isError) return { state:"error",message:messageOf(localChoice.error)};
     if (catalog.isError) return { state: "error", message: messageOf(catalog.error) };
-    if (times.data === undefined || statuses.data === undefined || catalog.data === undefined) {
+    if (times.data === undefined || catalog.data === undefined || availability.data === undefined || localChoice.data === undefined) {
       return { state: "loading" };
     }
     return {
       state: "ladder",
       lines: writingModelLines({
         times: times.data,
-        statuses: statuses.data,
+        statuses: [],
         catalog: catalog.data,
+        availability:availability.data,
+        localModel:localChoice.data.override,
       }),
     };
   })();

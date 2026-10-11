@@ -1,3 +1,5 @@
+import { runManualMeetingForEditor } from "./meeting-policy.server.ts";
+import { z } from "zod";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 
 /* N-5: an in-flight manual meeting pass can be stopped. One controller per newsroom. */
@@ -12,7 +14,7 @@ export function isMeetingPassRunning(newsroomId: number): boolean { return runni
 import { authMiddleware } from "../auth/middleware.ts";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { requireEditor, ForbiddenError } from "./membership.ts";
-import { paperSetUpRefusal } from "./paper-settings.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
 import type { MeetingAwarenessResult } from "./meeting-capture.ts";
 
 /*
@@ -61,7 +63,7 @@ export type MeetingManualRunResult =
       coverageLine: string;
       forced: boolean;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warning?: { key: string; sentence: string } };
 
 /**
  * The shared meeting pass. It runs the SAME meeting step the scheduler runs
@@ -74,14 +76,14 @@ export type MeetingManualRunResult =
  */
 export async function runMeetingPassWritesRow(
   sql: Sql,
-  input: { newsroomId: number; userId: string; runId: number; signal?: AbortSignal },
+  input: { newsroomId: number; userId: string; runId: number; signal?: AbortSignal; forceEnabled?: boolean },
 ): Promise<MeetingAwarenessResult> {
   let awareness: MeetingAwarenessResult;
   const failures: string[] = [];
   try {
     // Loaded through the server-only boundary above: see the note at the top.
     const { runMeetingAwareness, recheckProvisionalMeetings, captureMeetingCaptions } = await loadMeetingEngine();
-    awareness = await runMeetingAwareness(sql, input.newsroomId, { captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
+    awareness = await runMeetingAwareness(sql, input.newsroomId, { forceEnabled: input.forceEnabled, captureMeeting: (ci) => captureMeetingCaptions({ ...ci, signal: input.signal }) });
     const recheck = await recheckProvisionalMeetings(sql, input.newsroomId);
     if (recheck.failures.length) {
       awareness.failures.push(...recheck.failures);
@@ -143,24 +145,19 @@ async function ownedNewsroomId(userId: string): Promise<number> {
  */
 export const runMeetingsNow = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .handler(async ({ context }): Promise<MeetingManualRunResult> => {
+  .validator((raw: unknown) => z.object({ override: z.array(z.string()).optional() }).parse(raw ?? {}))
+  .handler(async ({ context, data }): Promise<MeetingManualRunResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     /*
       SG1 / Option A: a meeting pass reads the paper's own YouTube channels,
       which on an install nobody has set up fall back to the shipped Longmont
       channels. Refused in one plain sentence, the same as the scan.
     */
-    const notSetUp = await paperSetUpRefusal(newsroomId, "run meeting capture");
-    if (notSetUp) return { ok: false, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ userId: context.userId, newsroomId }, data.override, "run meeting capture");
+    if (notSetUp) return notSetUp;
     const sql = await getSql();
 
-    const settings = await sql.query<{ enabled: boolean | null }>(
-      "select enabled from meeting_capture_settings where newsroom_id=$1", [newsroomId],
-    );
-    if (!settings.length || settings[0]!.enabled !== true) {
-      return { ok: false, error: "Meeting capture is turned off. Enable it in Server settings before running." };
-    }
-
+    return runManualMeetingForEditor({ userId: context.userId, newsroomId, role: "owner" }, data.override, isMeetingPassRunning(newsroomId), async (forceEnabled) => {
     const rows = await sql.query<{ id: number }>(
       `insert into scan_runs(user_id,newsroom_id,execution_origin,daily_reservation_id,forced_recapture)
        values($1,$2,'manual',null,false) returning id`,
@@ -171,7 +168,7 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
     const controller = new AbortController();
     runningPasses.set(newsroomId, controller);
     try {
-      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, userId: context.userId, runId, signal: controller.signal });
+      const awareness = await runMeetingPassWritesRow(sql, { newsroomId, userId: context.userId, runId, signal: controller.signal, forceEnabled });
       return {
         ok: true, scanRunId: runId,
         found: awareness.found.length,
@@ -188,6 +185,7 @@ export const runMeetingsNow = createServerFn({ method: "POST" })
     } finally {
       runningPasses.delete(newsroomId);
     }
+    });
   });
 
 /** N-5: stop an in-flight manual meeting pass. Records that it was stopped. */
@@ -228,9 +226,10 @@ export const resumeStoppedMeetingsNow = createServerFn({ method: "POST" })
  */
 export const forceRecaptureMeeting = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((raw: unknown): { videoId: string; channelUrl: string; title: string; published: string } => {
+  .validator((raw: unknown): { videoId: string; channelUrl: string; title: string; published: string; override?: string[] } => {
     const d = (raw ?? {}) as Record<string, unknown>;
     return {
+      override: z.array(z.string()).optional().parse(d.override),
       videoId: String(d.videoId ?? "").trim(),
       channelUrl: String(d.channelUrl ?? "").trim(),
       title: String(d.title ?? "").trim(),
@@ -240,8 +239,8 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
   .handler(async ({ context, data }): Promise<MeetingManualRunResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     // SG1 / Option A: same reason as runMeetingsNow above.
-    const notSetUp = await paperSetUpRefusal(newsroomId, "re-capture that meeting");
-    if (notSetUp) return { ok: false, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ userId: context.userId, newsroomId }, data.override, "re-capture that meeting");
+    if (notSetUp) return notSetUp;
     if (!/^[\w-]{11}$/.test(data.videoId)) {
       return { ok: false, error: "A valid YouTube video id is required." };
     }
@@ -286,20 +285,20 @@ export const forceRecaptureMeeting = createServerFn({ method: "POST" })
     }
   });
 
-export type AudioRecaptureResult = { ok: true; artifactId: number } | { ok: false; error: string };
+export type AudioRecaptureResult = { ok: true; artifactId: number } | { ok: false; error: string; warning?: { key: string; sentence: string } };
 
 /** Replace audio that failed its recorded hash while preserving the old artifact. */
 export const captureAudioAgain = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((raw: unknown): { videoId: string } => {
+  .validator((raw: unknown): { videoId: string; override?: string[] } => {
     const d = (raw ?? {}) as Record<string, unknown>;
-    return { videoId: String(d.videoId ?? "").trim() };
+    return { videoId: String(d.videoId ?? "").trim(), override: z.array(z.string()).optional().parse(d.override) };
   })
   .handler(async ({ context, data }): Promise<AudioRecaptureResult> => {
     const newsroomId = await ownedNewsroomId(context.userId);
     if (!/^[\w-]{11}$/.test(data.videoId)) return { ok: false, error: "A valid YouTube video id is required." };
-    const notSetUp = await paperSetUpRefusal(newsroomId, "capture meeting audio again");
-    if (notSetUp) return { ok: false, error: notSetUp };
+    const notSetUp = await paperSetupWarning({ userId: context.userId, newsroomId }, data.override, "capture meeting audio again");
+    if (notSetUp) return notSetUp;
 
     const sql = await getSql();
     const meeting = (await sql.query<{

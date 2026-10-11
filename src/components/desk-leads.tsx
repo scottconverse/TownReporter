@@ -250,13 +250,11 @@ export function LeadRowView({
     app edited a lead, and a press that only said so would have been a row
     that does nothing. `EditLeadDialog` + `updateLead` (desk.ts) are that
     something now, so it is back, first in the drawing's own order --
-    `MORE_LEAD_ITEMS[0]`. It is left off a closed lead (killed or published)
-    the same way Hold and Kill are below: `updateLeadForEditor` refuses both
-    with a plain sentence, and a control the desk would only refuse is not
-    offered.
+    `MORE_LEAD_ITEMS[0]`. Killed and published leads keep these controls;
+    the server explains their saved state and asks for an explicit override.
   */
   const items: DeskMoreItem[] = [];
-  if (!closed && onEdit) items.push({ label: "Edit the lead", onSelect: onEdit });
+  if (onEdit) items.push({ label: "Edit the lead", onSelect: onEdit });
   if (onHoldWithReason) items.push({ label: "Hold with a reason", onSelect: onHoldWithReason });
   /*
     BN2 item 3: the drawn "Merge with a printed story" -- and the one row of the
@@ -364,9 +362,9 @@ export function LeadRowView({
     second pair of words for the same press is what BF3 took out. They stay for
     a screen that has no dialog to open.
   */
-  if (!closed && !held && onHold) items.push({ label: "Hold", onSelect: onHold });
-  if (!closed && onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
-  if (!closed && onDraft) {
+  if (onHold) items.push({ label: "Hold", onSelect: onHold });
+  if (onKill) items.push({ label: "Kill", danger: true, onSelect: onKill });
+  if (onDraft) {
     items.push({
       label: "Draft with a chosen model",
       content: (

@@ -11,6 +11,7 @@ import {
 } from "./evidence.ts";
 import {
   TAKEDOWN_ACTION,
+  TAKEDOWN_BLANK_REASON_KEY,
   TAKEDOWN_REASON_MAX,
   TAKEDOWN_SUBJECT_KIND,
   takeDownCapture,
@@ -76,9 +77,15 @@ async function ensureArticlesSchema() {
       unanswered text not null default '[]'
     )
   `);
-  await sql.query(`alter table articles add column if not exists provenance_json text not null default '[]'`);
-  await sql.query(`alter table articles add column if not exists found_note text not null default ''`);
-  await sql.query(`alter table articles add column if not exists newsroom_id integer not null default 1`);
+  await sql.query(
+    `alter table articles add column if not exists provenance_json text not null default '[]'`,
+  );
+  await sql.query(
+    `alter table articles add column if not exists found_note text not null default ''`,
+  );
+  await sql.query(
+    `alter table articles add column if not exists newsroom_id integer not null default 1`,
+  );
 }
 
 type Seeded = {
@@ -229,12 +236,24 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
       /owner/i,
     );
     const state = await purgeState(seeded.versionId);
-    assert.equal(state.version.full_text, seeded.text, "a refused takedown must not empty the text");
+    assert.equal(
+      state.version.full_text,
+      seeded.text,
+      "a refused takedown must not empty the text",
+    );
     assert.equal(state.version.taken_down_at, null, "a refused takedown must not mark the capture");
-    assert.equal(state.chunks[0]?.excerpt, seeded.text, "a refused takedown must not empty a chunk");
+    assert.equal(
+      state.chunks[0]?.excerpt,
+      seeded.text,
+      "a refused takedown must not empty a chunk",
+    );
     assert.deepEqual(state.audit, [], "a refused takedown must not write an audit row");
     const record = await loadPublicEvidence(seeded.versionId);
-    assert.equal(record?.excerpt_removed, false, "a refused takedown must leave the excerpt public");
+    assert.equal(
+      record?.excerpt_removed,
+      false,
+      "a refused takedown must leave the excerpt public",
+    );
     assert.match(record?.excerpt ?? "", /recreation room update/);
   });
 
@@ -276,7 +295,11 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     const copies = await workingCopyState(seeded.workingCopies);
     assert.equal(copies.artifact.full_text, "", "the Dark Desk's copy of the page must be emptied");
     assert.equal(copies.claim.excerpt, "", "a claim's recorded passage must be emptied");
-    assert.equal(copies.relationship.excerpt, "", "a relationship's recorded passage must be emptied");
+    assert.equal(
+      copies.relationship.excerpt,
+      "",
+      "a relationship's recorded passage must be emptied",
+    );
     /* The desk's own note of what the record says is a working note, not the
        stored capture, and stays (the manual says so in the same words). */
     assert.equal(copies.claim.evidence, "claim note purged-1");
@@ -291,7 +314,11 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     assert.equal(untouched.claim.excerpt, "claim excerpt purged-2");
     assert.equal(untouched.relationship.excerpt, "relationship excerpt purged-2");
     const otherState = await purgeState(seeded.otherVersionId);
-    assert.equal(otherState.version.full_text, seeded.otherText, "the other capture's text must stay");
+    assert.equal(
+      otherState.version.full_text,
+      seeded.otherText,
+      "the other capture's text must stay",
+    );
     assert.equal(otherState.version.taken_down_at, null, "the other capture must not be marked");
 
     assert.equal(state.audit.length, 1, "a takedown writes exactly one audit row");
@@ -314,8 +341,16 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     assert.ok(record, "the capture must still resolve: a published citation points at it");
     assert.equal(record!.excerpt, "", "no excerpt survives a takedown");
     assert.equal(record!.excerpt_removed, true, "the page must print the notice");
-    assert.equal(record!.excerpt_removed_link_kept, true, "the link is kept unless asked otherwise");
-    assert.equal(record!.has_original_bytes, false, "the page may not claim bytes it no longer holds");
+    assert.equal(
+      record!.excerpt_removed_link_kept,
+      true,
+      "the link is kept unless asked otherwise",
+    );
+    assert.equal(
+      record!.has_original_bytes,
+      false,
+      "the page may not claim bytes it no longer holds",
+    );
     assert.equal(record!.byte_length, null);
     const wire = JSON.stringify(record);
     assert.ok(!wire.includes(seeded.reason), "the takedown reason must never reach a reader");
@@ -335,7 +370,9 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
       select provenance_json, source_urls from articles where user_id = 'takedown-test' and slug like ${`slug-purged-${seeded.versionId}`}
     `;
     assert.ok(article, "the citing story must still be there");
-    const cited = (JSON.parse(article!.provenance_json) as { url: string; version_id: number }[])[0]!;
+    const cited = (
+      JSON.parse(article!.provenance_json) as { url: string; version_id: number }[]
+    )[0]!;
     assert.equal(cited.version_id, seeded.versionId);
     const citedRecord = await loadPublicEvidence(cited.version_id);
     assert.equal(citedRecord?.excerpt_removed, true, "the citation must land on the notice");
@@ -354,7 +391,7 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     assert.equal(record!.url, seeded.url, "the address itself stays on the record");
   });
 
-  it("refuses a second takedown, a blank reason and an oversize reason", async () => {
+  it("refuses a second takedown, a missing capture and an oversize reason", async () => {
     const seeded = await seedCapture("refusals");
     await takeDownCapture(owner, { versionId: seeded.versionId, reason: seeded.reason });
     await assert.rejects(
@@ -365,11 +402,7 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
       () => takeDownCapture(owner, { versionId: seeded.versionId + 1_000_000, reason: "x" }),
       /not in this newsroom/i,
     );
-    const other = await seedCapture("blank");
-    await assert.rejects(
-      () => takeDownCapture(owner, { versionId: other.versionId, reason: "   " }),
-      /reason/i,
-    );
+    const other = await seedCapture("oversize");
     await assert.rejects(
       () =>
         takeDownCapture(owner, {
@@ -381,7 +414,59 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     const state = await purgeState(other.versionId);
     assert.equal(state.version.full_text, other.text, "a refused takedown must not purge the text");
     const copies = await workingCopyState(other.workingCopies);
-    assert.equal(copies.artifact.full_text, "artifact text blank-1");
+    assert.equal(copies.artifact.full_text, "artifact text oversize-1");
+  });
+
+
+  it("asks before taking down a capture with no reason, then does it on the second call", async () => {
+    const seeded = await seedCapture("blank-reason");
+    const asking = await takeDownCapture(owner, { versionId: seeded.versionId, reason: "   " });
+    assert.equal(asking.ok, false);
+    assert.ok("warning" in asking, "the first call is a warning, not a refusal");
+    if (asking.ok || !("warning" in asking)) throw new Error("expected a warning");
+    assert.equal(asking.warning.key, TAKEDOWN_BLANK_REASON_KEY);
+    assert.ok(asking.warning.sentence.length > 0, "the desk is given a sentence to draw");
+
+    const untouched = await purgeState(seeded.versionId);
+    assert.equal(untouched.version.full_text, seeded.text, "asking purges nothing");
+    assert.equal(untouched.version.taken_down_at, null, "asking marks nothing");
+    assert.deepEqual(untouched.audit, [], "asking records no takedown row");
+
+    const done = await takeDownCapture(owner, {
+      versionId: seeded.versionId,
+      reason: "   ",
+      override: [TAKEDOWN_BLANK_REASON_KEY],
+    });
+    assert.equal(done.ok, true);
+    assert.equal(done.linkKept, true);
+
+    const state = await purgeState(seeded.versionId);
+    assert.equal(state.version.full_text, "", "the second call purges the text");
+    assert.ok(state.version.taken_down_at, "and marks the capture");
+    assert.equal(state.audit.length, 1, "the takedown still writes its own audit row");
+
+    const sql = await getSql();
+    const [reason] = await sql<{ taken_down_reason: string | null }>`
+      select taken_down_reason from artifact_versions where id = ${seeded.versionId}
+    `;
+    assert.equal(reason!.taken_down_reason, "", "an empty reason is stored as the empty string");
+
+    const overrides = await sql<{
+      user_id: string;
+      detail: string;
+      subject_kind: string | null;
+      subject_id: number | null;
+    }>`
+      select user_id, detail, subject_kind, subject_id from audit_events
+      where action = 'override' and subject_kind = ${TAKEDOWN_SUBJECT_KIND} and subject_id = ${seeded.versionId}
+      order by id asc
+    `;
+    assert.equal(overrides.length, 1, "the accepted warning is one override row");
+    assert.equal(overrides[0]!.user_id, owner.userId);
+    assert.equal(
+      (JSON.parse(overrides[0]!.detail) as { key: string }).key,
+      TAKEDOWN_BLANK_REASON_KEY,
+    );
   });
 
   it("compares nothing once either side's excerpt has been taken down", async () => {
@@ -421,7 +506,10 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
       { url: "https://records.example.test/no-capture", version_id: null },
     ];
 
-    const before = markRemovedCaptures(items, await removedCapturesFor([seeded.versionId, seeded.otherVersionId]));
+    const before = markRemovedCaptures(
+      items,
+      await removedCapturesFor([seeded.versionId, seeded.otherVersionId]),
+    );
     assert.deepEqual(before, items, "nothing is marked while the capture is readable");
 
     await takeDownCapture(owner, {
@@ -463,7 +551,10 @@ describe("taking down one captured excerpt", { timeout: 60000 }, () => {
     /* Anything else says nothing about the database it came from. */
     const other = takedownFailure(new Error('relation "artifact_versions" does not exist'));
     assert.equal(other.code, "error");
-    assert.ok(!other.error.includes("artifact_versions"), "a database error's text is not rendered");
+    assert.ok(
+      !other.error.includes("artifact_versions"),
+      "a database error's text is not rendered",
+    );
     assert.match(other.error, /Nothing was removed/);
   });
 });

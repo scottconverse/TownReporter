@@ -1,6 +1,7 @@
+import { updateLead } from "@/components/scoped-actions";
 import { useState } from "react";
 import { Dialog } from "@/components/dialog";
-import { updateLead } from "@/lib/news/desk";
+
 import { parseUrlList, TOPICS } from "@/lib/paper";
 
 /**
@@ -82,7 +83,7 @@ export function EditLeadDialog({
 
   const trimmedHeadline = headline.trim();
   const trimmedWhy = why.trim();
-  const canSave = trimmedHeadline.length >= 8 && trimmedWhy.length >= 8 && !busy;
+  const canSave = trimmedHeadline.length > 0 && !busy;
 
   async function save() {
     setBusy(true);

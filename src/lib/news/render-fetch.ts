@@ -12,10 +12,12 @@ export type RenderedPage = {
 };
 
 type ChromiumBrowser = {
+  version?: () => string;
   isConnected?: () => boolean;
   newContext: (opts: {
     userAgent: string;
     javaScriptEnabled: boolean;
+    viewport?: { width: number; height: number };
     proxy?: { server: string };
   }) => Promise<{
     newPage: () => Promise<{
@@ -34,7 +36,7 @@ type ChromiumBrowser = {
 };
 
 const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 TownReporter/1.0";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
 
 let browser: ChromiumBrowser | null = null;
 let launching: Promise<ChromiumBrowser | null> | null = null;
@@ -141,7 +143,12 @@ async function getBrowser(): Promise<ChromiumBrowser | null> {
         browser = await launchChromium(mod, ["--no-sandbox", ...BASE_CHROMIUM_ARGS]);
       }
       return browser;
-    } catch {
+    } catch (err) {
+      console.warn(
+        `[render] Chromium unavailable: ${err instanceof Error ? err.message : String(err)}. ` +
+        `Install the matching browser with npm run playwright:install under the server user; ` +
+        `PLAYWRIGHT_BROWSERS_PATH=${process.env.PLAYWRIGHT_BROWSERS_PATH || "(default user cache)"}.`,
+      );
       browser = null;
       return null;
     } finally {
@@ -175,7 +182,13 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
   return withSlot(async () => {
     let ctx: Awaited<ReturnType<ChromiumBrowser["newContext"]>>;
     try {
-      ctx = await br.newContext(await guardedContext({ userAgent: UA, javaScriptEnabled: true }));
+      ctx = await br.newContext({
+        ...(await guardedContext({
+          userAgent: br.version ? UA.replace("145.0.0.0", br.version()) : UA,
+          javaScriptEnabled: true,
+        })),
+        viewport: { width: 1366, height: 768 },
+      });
     } catch (err) {
       // A dead browser fails right here. Drop it so the next caller relaunches
       // instead of inheriting the corpse.
@@ -223,10 +236,12 @@ export async function fetchRenderedPage(raw: string): Promise<RenderedPage | nul
         const { htmlToPlainText } = await import("./html-text.ts");
         text = htmlToPlainText(html);
       }
-      if (text.length < 40) return null;
+      // Keep short refusals for public-feed and newsletter discovery.
+      // Article consumers still enforce their existing 40-character floor.
       if (looksLikeAppShell(text, html)) return null;
       return { text, title: title || start.hostname, html, finalUrl: page.url() };
-    } catch {
+    } catch (err) {
+      console.warn(`[render] Page read failed for ${start.hostname}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     } finally {
       await page.close().catch(() => undefined);

@@ -220,7 +220,9 @@ export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflig
   return {
     ok: false,
     kind,
-    guidance,
+    // Some callers render only guidance. Keep the promised provider message
+    // in that visible sentence too, rather than relying on an optional detail UI.
+    guidance: kind === "unknown" ? `${guidance}\n\n${detail || "The provider returned no error message."}` : guidance,
     // The provider's raw text is redundant with LOCAL_MODEL_UNCONFIGURED
     // (which already says everything relevant); dropping it here is what
     // stops a caller that renders `${guidance}\n\n${detail}` from doubling

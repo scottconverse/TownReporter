@@ -76,6 +76,23 @@ async function fixture(
     JSON.stringify(sourceUrls),
     draft.id,
   ]);
+  /*
+    A completed evidence check for the version under test, so the zero-claims
+    gate stays out of the way and the named-outlet gate is the only variable.
+    The identity is the draft's own (`evidenceReviewToken`), written the way a
+    reconciliation pass writes it.
+  */
+  const { evidenceReviewToken } = await vite.ssrLoadModule("/src/lib/news/draft-evidence.ts");
+  const { topicConfirmationFingerprint } = await vite.ssrLoadModule("/src/lib/news/notes.ts");
+  const [row] = await sql.query<import("./types.ts").DraftRow>(
+    `select id, lead_id, headline, dek, body, topic, source_urls, integrity_notes, updated_at,
+            provenance_json, form, found_note, unanswered, research_json from drafts where id=$1`,
+    [draft.id],
+  );
+  await sql.query("update drafts set research_json=$1 where id=$2", [
+    JSON.stringify({ evidenceReviewVersion: topicConfirmationFingerprint(evidenceReviewToken(row!)) }),
+    draft.id,
+  ]);
   const confirmed = await performConfirmDraftTopic({ userId: USER, newsroomId: NEWSROOM }, lead.id);
   assert.equal(confirmed.ok, true, "fixture: the section should confirm");
   return { leadId: lead.id, draftId: draft.id };

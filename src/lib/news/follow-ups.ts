@@ -17,6 +17,8 @@ import {
   type FollowUpFinding,
 } from "./follow-up-copy.ts";
 import type { FollowUpRow, FollowUpState, FollowUpStatus } from "./types.ts";
+import { editorWarning, editorWarningResult, type EditorWarning } from "./editor-override.ts";
+import { assertHttpUrl } from "./url-guard.ts";
 
 /*
   The vocabulary -- the agent kinds, the schedules, the finding, the card state
@@ -319,7 +321,7 @@ const MAX_TARGETS = 8;
  */
 type NormalizedAiFollowUp =
   | { ok: true; what: string; targets: string[]; modelChoice: string; effort: ModelEffort | null }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warning?: EditorWarning };
 
 /**
  * The validation both the create and the edit path perform, in one place: two
@@ -340,10 +342,15 @@ function normalizeAiFollowUp(input: CreateAiFollowUpInput): NormalizedAiFollowUp
     if (!/^https?:\/\//i.test(target)) {
       return { ok: false as const, error: "Links to look at must start with http:// or https://" };
     }
+    try {
+      assertHttpUrl(target);
+    } catch {
+      return { ok: false as const, error: "That source URL is not a public http(s) address." };
+    }
     targets.push(target.slice(0, 500));
   }
-  if (input.agentKind !== "search" && targets.length === 0) {
-    return { ok: false as const, error: "Add at least one link to check." };
+  if (input.agentKind !== "search" && targets.length === 0 && !input.override?.includes("follow-up-missing-link")) {
+    return editorWarningResult("follow-up-missing-link", "This follow-up has no link to check.");
   }
   const modelChoice = (input.modelChoice ?? "auto").trim().slice(0, 120) || "auto";
   return { ok: true as const, what, targets, modelChoice, effort: input.modelEffort == null ? null : modelEffort(modelChoice, input.modelEffort) };
@@ -352,7 +359,7 @@ function normalizeAiFollowUp(input: CreateAiFollowUpInput): NormalizedAiFollowUp
 export async function performCreateAiFollowUp(
   context: { userId: string; newsroomId?: number },
   input: CreateAiFollowUpInput,
-): Promise<{ ok: true; id: number } | { ok: false; error: string }> {
+): Promise<{ ok: true; id: number } | { ok: false; error: string; warning?: EditorWarning }> {
   await ensureFollowUpsSchema();
   const checked = normalizeAiFollowUp(input);
   if (!checked.ok) return checked;
@@ -367,6 +374,10 @@ export async function performCreateAiFollowUp(
       select id from investigations where id = ${investigationId} and newsroom_id = ${owned(context)} limit 1
     `;
     if (!file[0]) return { ok: false as const, error: "Choose a Dark Desk file in this newsroom." };
+  }
+  if (input.agentKind !== "search" && targets.length === 0) {
+    const warning = await editorWarning(context, input.override, "follow-up-missing-link", "This follow-up has no link to check.", { kind: "newsroom", id: owned(context) });
+    if (warning) return warning;
   }
   const rows = await sql<{ id: number }>`
     insert into follow_ups
@@ -416,12 +427,18 @@ export async function performCreateAiFollowUp(
 export async function performUpdateAiFollowUp(
   context: { userId: string; newsroomId?: number },
   input: CreateAiFollowUpInput & { id: number },
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; warning?: EditorWarning }> {
   await ensureFollowUpsSchema();
+  const sql = await getSql();
+  const [existing] = await sql<{ id: number }>`select id from follow_ups where id=${input.id} and newsroom_id=${owned(context)} and agent_kind is not null`;
+  if (!existing) return { ok: false as const, error: "That follow-up is gone." };
   const checked = normalizeAiFollowUp(input);
   if (!checked.ok) return checked;
   const { what, targets, modelChoice, effort } = checked;
-  const sql = await getSql();
+  if (input.agentKind !== "search" && targets.length === 0) {
+    const warning = await editorWarning(context, input.override, "follow-up-missing-link", "This follow-up has no link to check.", { kind: "follow-up", id: input.id });
+    if (warning) return warning;
+  }
   const next = nextRunAt(input.schedule)?.toISOString() ?? null;
   const [before] = await sql<{ lead_id: number | null; last_state: FollowUpState | null; finding_json: string | null }>`
     select lead_id, last_state, finding_json from follow_ups

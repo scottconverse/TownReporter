@@ -36,15 +36,19 @@ test("queues the exact latest authorized draft version", async () => {
   await sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic) values('editor',88101,$1,'Old','','Old','council')",[lead.id]);
   const [latest] = await sql.query<{id:number}>("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic) values('editor',88101,$1,'Latest','','Latest','council') returning id",[lead.id]);
   const job = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'local-model'},{probe:async()=>({ok:true as const,label:'Local',choice:'local-model',localModel:{baseUrl:'http://127.0.0.1:1234/v1',id:'test-model'}}),enqueue: opts => enqueueJob({...opts,kick:false})});
+  if ("warning" in job) assert.fail(job.warning.sentence);
   assert.equal(job.kind,'reconcile');
   assert.equal(job.subject_id,latest.id);
-  let codexChoice = "";
-  const codexJob = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'codex-balanced'},{
-    probe:async()=>({ok:true as const,label:'Codex',choice:'codex-balanced'}),
-    enqueue: async opts => { codexChoice=String(opts.modelChoice); return {...job,id:job.id+1,model_choice:String(opts.modelChoice)}; },
-  });
-  assert.equal(codexChoice,'codex-balanced');
+  await sql.query("update desk_jobs set claim_token='old-reconcile-claim' where id=$1",[job.id]);
+  const codexDeps = {probe:async()=>({ok:true as const,label:'Codex',choice:'codex-balanced' as const}),enqueue: (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({...opts,kick:false})};
+  const warning = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'codex-balanced'},codexDeps);
+  assert.equal("warning" in warning && warning.warning.key,"model-change-running");
+  const [untouched] = await sql.query<{status:string}>("select status from desk_jobs where id=$1",[job.id]); assert.equal(untouched.status,"queued");
+  const codexJob = await requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'codex-balanced',override:["model-change-running"]},codexDeps);
+  if ("warning" in codexJob) assert.fail(codexJob.warning.sentence);
   assert.equal(codexJob.model_choice,'codex-balanced');
+  const [cancelled] = await sql.query<{status:string;claim_token:string|null}>("select status,claim_token from desk_jobs where id=$1",[job.id]);assert.equal(cancelled.status,"failed");assert.equal(cancelled.claim_token,null);
+  const audit = await sql.query<{detail:string;created_at:unknown}>("select detail,created_at from audit_events where user_id='editor' and action='override'");assert.ok(audit.some(row => JSON.parse(row.detail).key === "model-change-running" && row.created_at));
   await assert.rejects(requestDraftReconciliation({userId:'editor',newsroomId:88101},{leadId:lead.id,modelChoice:'not-a-provider'},{probe:async()=>({ok:true as const,label:'unused',choice:'local-model'}),enqueue:async()=>job}),/selected model is not available/i);
   await sql.query("delete from desk_jobs where newsroom_id=88101");
   await sql.query("delete from drafts where newsroom_id=88101");

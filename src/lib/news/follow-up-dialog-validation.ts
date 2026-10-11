@@ -20,8 +20,6 @@ export function validateFollowUpDialog(input: {
   const badTarget = input.targets.find((target) => !/^https?:\/\//i.test(target));
   if (badTarget) {
     issues.push({ field: "targets", message: "Links to look at must start with http:// or https://" });
-  } else if (input.agentKind !== "search" && input.targets.length === 0) {
-    issues.push({ field: "targets", message: "Add at least one link to check." });
   }
 
   return issues;

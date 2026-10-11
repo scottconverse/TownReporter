@@ -1,6 +1,8 @@
 import { withTransaction } from "../db.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import type { LeadRow } from "./types.ts";
+import { editorWarning, type EditorWarning } from "./editor-override.ts";
+import { ensureAuditEventsSchema } from "./ops.ts";
 
 export type LeadEditInput = {
   id: number;
@@ -8,11 +10,13 @@ export type LeadEditInput = {
   why: string;
   topic: string;
   urls?: string[];
+  /** The keys the editor has already approved this press (Scott's rule). */
+  override?: string[];
 };
 
 export type LeadEditResult =
   | { ok: true; id: number; message?: string }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warning?: EditorWarning };
 
 /**
  * "Edit the lead" (design review note 2, 0.6.80): change the title, notes or
@@ -26,11 +30,17 @@ export type LeadEditResult =
  * providers that need a bundler), so the behavior lives here where a test can
  * reach it.
  *
- * Refuses a killed or already-published lead: a killed lead is done, and a
- * published lead's headline/section live on the printed `articles` row (see
- * `updateArticleHeadline`), not on the lead that started it -- editing the
- * lead after publication would change nothing the reader sees and would read
- * to the editor as though it had.
+ * Refuses an EMPTY headline (hard: there is nothing to save) and a lead that
+ * cannot be found (hard: it is gone). Everything else -- a short headline, a
+ * missing why, a killed or already-published lead -- WARNS and lets the
+ * editor's second press (naming the key in `override`) go through, per Scott's
+ * rule (Oct 10, 2026): outside the Publish path the desk warns, never blocks.
+ * The two hard cases keep their old sentence and carry no warning key.
+ *
+ * A killed lead and a published lead both warn because the editor deserves the
+ * reason -- a killed lead is done, and a published lead's headline/section now
+ * live on the printed `articles` row (see `updateArticleHeadline`) -- but a
+ * person who has read that can still choose to edit the lead row underneath.
  *
  * Also carries the edit to the companion draft `insertLeadWithDraft`
  * (`desk.ts:451`) filed at the same time as the lead -- see the comment
@@ -43,30 +53,69 @@ export async function updateLeadForEditor(
 ): Promise<LeadEditResult> {
   const headline = data.headline.trim().slice(0, 180);
   const why = data.why.trim().slice(0, 800);
-  if (headline.length < 8) {
+  // HARD: an empty headline has nothing to save -- no key, no override.
+  if (!headline) {
     return { ok: false, error: "Headline needs a full sentence." };
   }
+  if (headline.length < 8) {
+    const shortHeadline = await editorWarning(
+      context,
+      data.override,
+      "lead-edit-headline-short",
+      "Headline needs a full sentence.",
+      { kind: "lead", id: data.id },
+    );
+    if (shortHeadline) return shortHeadline;
+  }
   if (why.length < 8) {
-    return { ok: false, error: "Say why this is news." };
+    // NOTE: this warning is the one place an EMPTY why is allowed through (a
+    // lead may carry no note). Only an empty headline and a gone record stay
+    // hard, per the task; a missing why is a warning.
+    const whyWarning = await editorWarning(
+      context,
+      data.override,
+      "lead-edit-why",
+      "Say why this is news.",
+      { kind: "lead", id: data.id },
+    );
+    if (whyWarning) return whyWarning;
   }
   const topic = (data.topic || "council").trim().slice(0, 40) || "council";
   const urls = sanitizePublicUrls(data.urls ?? []);
   const urlsJson = JSON.stringify(urls);
 
+  // The override audit rides the transaction, so its schema has to exist before
+  // the transaction opens (DDL cannot run inside it).
+  await ensureAuditEventsSchema();
   return withTransaction(async (sql) => {
     const rows = await sql<Pick<LeadRow, "id" | "status">>`
       select id, status from leads where id = ${data.id} and newsroom_id = ${context.newsroomId} limit 1 for update
     `;
     const lead = rows[0];
+    // HARD: a record that is gone is never overridden.
     if (!lead) {
       return { ok: false, error: "Lead not found." };
     }
-    if (lead.status === "killed") {
-      return { ok: false, error: "This lead was killed. Restore it before editing." };
-    }
-    if (lead.status === "published") {
-      return { ok: false, error: "This lead is already published. Edit the published story instead." };
-    }
+    const killed = lead.status === "killed"
+      ? await editorWarning(
+          { ...context, sql },
+          data.override,
+          "lead-edit-killed",
+          "This lead was killed. Saving this edit will keep it killed.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (killed) return killed;
+    const published = lead.status === "published"
+      ? await editorWarning(
+          { ...context, sql },
+          data.override,
+          "lead-edit-published",
+          "This lead has a published story. This edit changes the lead, while the published story keeps its current text.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (published) return published;
 
     await sql`
       update leads set headline = ${headline}, why = ${why}, topic = ${topic},

@@ -99,6 +99,10 @@ function darkDeskMonitorPlugin(): Plugin {
         if (ticking) return;
         ticking = true;
         try {
+          try {
+            const newsletters = await server.ssrLoadModule("/src/lib/news/newsletter-poll.server.ts");
+            await newsletters.tickNewsletterMailboxes();
+          } catch { console.error("[townreporter] newsletter mailbox check could not run."); }
           const retries = await server.ssrLoadModule("/src/lib/news/meeting-capture.ts");
           await retries.tickYoutubeCaptureRetries();
           const mod = (await server.ssrLoadModule("/src/lib/news/monitors-cron.ts")) as {

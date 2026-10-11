@@ -1,11 +1,25 @@
 import { withTransaction } from "../db.ts";
 import { ROUTINE_EDITION_UPDATE_PREFIX } from "./correction-origin.ts";
 import { audit } from "./ops.ts";
+import { auditOverrides, checkOverride, type OverrideWarning } from "./override.ts";
 import { completePublishedMeetingReviewWithCorrection } from "./meeting-article-revision.ts";
 import { bodyEditRecord } from "./correction-wording.ts";
 import { LIMITS } from "./request-input.ts";
 
 export type CorrectionContext = { userId: string; newsroomId: number };
+
+/** The warning key for a correction under the desk's 8-character floor. */
+export const CORRECTION_SHORT_KEY = "correction-short";
+/** The warning key for a correction that opens with the machine's byline marker. */
+export const CORRECTION_ROUTINE_PREFIX_KEY = "correction-routine-prefix";
+/** The warning key for a story fix longer than the column can hold. */
+export const STORY_TEXT_TOO_LONG_KEY = "story-text-too-long";
+
+const CORRECTION_SHORT_WARNING =
+  "This correction is shorter than the desk's 8-character floor, so it may not tell a reader what the story got wrong.";
+const CORRECTION_ROUTINE_PREFIX_WARNING =
+  "That opening line is the marker the desk writes on corrections it makes by itself. Posting it anyway keeps your own words and drops that opening, so no reader reads it as automatic.";
+const STORY_TEXT_TOO_LONG_WARNING = "That story text is longer than the desk can save.";
 
 /**
  * The server-side correction write, kept outside the route wrapper so its
@@ -35,34 +49,37 @@ export async function performAddCorrection(
     alsoFixBody?: boolean;
     /** The body the story should carry. Only read when `alsoFixBody` is true. */
     storyBody?: string;
+    /**
+     * Warning keys this caller has already accepted (audit items 8-11). Absent
+     * on the first call, which is what draws the warning; the second call names
+     * the key the warning carried.
+     */
+    override?: string[];
   },
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const body = input.body.trim();
-  if (body.length < 8) return { ok: false, error: "Write the correction." };
-  /*
-    An editor may not write the machine's byline.
+): Promise<{ ok: true } | { ok: false; error: string } | OverrideWarning> {
 
-    `/corrections` and the story page mark a correction as automatic when it
-    opens with `correction-origin.ts`'s prefix, which is the only signal the
-    `corrections` table carries -- there is no column for it. An editor who
-    typed that sentence into the box would therefore be handed the label, and
-    a reader would be told a person did not write a row a person wrote. The
-    desk's own correction form is the only caller, so this is a rule about
-    what the desk accepts, not a security boundary; it is enforced here, in
-    the write every caller goes through, rather than in the form, so a second
-    caller cannot miss it.
+  const accepted: string[] = [];
 
-    It is checked before the transaction, with the length rule, so the refusal
-    costs a sentence and no database work. `startsWith` and not `includes`:
-    the marker is the row's OPENING, so a correction that discusses a routine
-    update in its own words ("A reader asked about the routine edition
-    update:") is an ordinary correction and stays allowed.
-  */
+  let body = input.body.trim();
   if (body.startsWith(ROUTINE_EDITION_UPDATE_PREFIX)) {
-    return {
-      ok: false,
-      error: "Start the correction with your own words. That opening line is how the desk marks a correction it wrote by itself, so a person cannot use it.",
-    };
+    const warning = checkOverride(
+      input,
+      CORRECTION_ROUTINE_PREFIX_KEY,
+      CORRECTION_ROUTINE_PREFIX_WARNING,
+    );
+    if (warning) return warning;
+    accepted.push(CORRECTION_ROUTINE_PREFIX_KEY);
+    body = body.slice(ROUTINE_EDITION_UPDATE_PREFIX.length).trim();
+  }
+  /*
+    AUDIT ITEM 8: the house floor (8 characters) is a QUESTION now, not a wall.
+    It is asked on the words that will actually be stored, after the machine's
+    marker has been removed, because that is the correction a reader sees.
+  */
+  if (body.length < 8) {
+    const warning = checkOverride(input, CORRECTION_SHORT_KEY, CORRECTION_SHORT_WARNING);
+    if (warning) return warning;
+    accepted.push(CORRECTION_SHORT_KEY);
   }
   /*
     The body is checked before the transaction so a fix with nothing in it is
@@ -82,13 +99,27 @@ export async function performAddCorrection(
   }
   if (fixing) {
     if (!input.articleSlug) {
-      return { ok: false, error: "To fix the story text, choose the published story it belongs to." };
+      return {
+        ok: false,
+        error: "To fix the story text, choose the published story it belongs to.",
+      };
     }
+    /*
+      KEEP (audit item 11). An empty story body is not a question: the desk will
+      not print a story with no words in it, and no override makes one. This is
+      the one correction refusal the audit left as a refusal.
+    */
     if (!nextBody) {
-      return { ok: false, error: "The story text cannot be blank. Put the corrected story in the box, then post." };
+      return {
+        ok: false,
+        error: "The story text cannot be blank. Put the corrected story in the box, then post.",
+      };
     }
+
     if (nextBody.length > LIMITS.storyText) {
-      return { ok: false, error: "That story text is too long to save." };
+      const warning = checkOverride(input, STORY_TEXT_TOO_LONG_KEY, STORY_TEXT_TOO_LONG_WARNING);
+      if (warning) return warning;
+      accepted.push(STORY_TEXT_TOO_LONG_KEY);
     }
   }
   const saved = await withTransaction(async (sql) => {
@@ -129,7 +160,11 @@ export async function performAddCorrection(
               and status = 'published'
             limit 1
           `;
-      if (!rows[0]) return { ok: false as const, error: "That published story is not available in this newsroom." };
+      if (!rows[0])
+        return {
+          ok: false as const,
+          error: "That published story is not available in this newsroom.",
+        };
       articleId = rows[0].id;
       /*
         The record is built inside the transaction, off the row that is about to
@@ -140,7 +175,8 @@ export async function performAddCorrection(
       if (fixing && !edit) {
         return {
           ok: false as const,
-          error: "The story text you typed is the same as the story text on the paper, so nothing was changed.",
+          error:
+            "The story text you typed is the same as the story text on the paper, so nothing was changed.",
         };
       }
       const [correction] = await sql<{ id: number }>`
@@ -171,7 +207,12 @@ export async function performAddCorrection(
           reviewerId: context.userId,
         });
       }
-      return { ok: true as const, fixedBody: Boolean(edit), correctionId: correction.id, articleId };
+      return {
+        ok: true as const,
+        fixedBody: Boolean(edit),
+        correctionId: correction.id,
+        articleId,
+      };
     }
     const [correction] = await sql<{ id: number }>`
       insert into corrections (user_id, newsroom_id, article_id, body)
@@ -196,6 +237,16 @@ export async function performAddCorrection(
       `Article ${saved.articleId}: story text changed with correction ${saved.correctionId}`,
       context.newsroomId,
       { kind: "articles", id: saved.articleId },
+    );
+  }
+
+  if (accepted.length > 0) {
+    await auditOverrides(
+      context,
+      accepted,
+      saved.articleId != null
+        ? { kind: "articles", id: saved.articleId }
+        : { kind: "corrections", id: saved.correctionId },
     );
   }
   return { ok: true };

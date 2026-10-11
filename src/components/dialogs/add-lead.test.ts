@@ -61,7 +61,7 @@ describe("Add a lead dialog", () => {
 
   it("refuses a press with nothing to file, and accepts a real tip", () => {
     assert.match(addLeadProblem(state({})) ?? "", /Paste a URL, or describe what you heard/);
-    assert.match(addLeadProblem(state({ paste: "http://" })) ?? "", /Paste a URL, or describe what you heard/);
+    assert.equal(addLeadProblem(state({ paste: "Short" })), null);
     assert.equal(addLeadProblem(state({ paste: "A neighbor says the vote was 4-3" })), null);
   });
 

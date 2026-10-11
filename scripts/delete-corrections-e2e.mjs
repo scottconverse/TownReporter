@@ -639,6 +639,16 @@ async function main() {
   // 0.6.67 puts the section on the button itself -- "Publish in <section>" --
   // and that press is the confirmation, so there is no separate Confirm step
   // to take first. See confirm-section-step.mjs.
+  await confirmSectionAndWaitForPublishable(page, { publishable: false });
+  /*
+    The fixture body states a date ("Tuesday"), so it carries a checkable fact:
+    with no claims recorded the zero-claims gate keeps Publish off until an editor
+    says they read it. Exercise that UI here -- press the acknowledgement, then
+    wait for the gate to clear -- rather than seeding a bypass.
+  */
+  const acknowledge = page.getByRole("button", { name: "I checked this story myself" });
+  await acknowledge.waitFor({ state: "visible", timeout: 45_000 });
+  await acknowledge.click();
   await confirmSectionAndWaitForPublishable(page);
   await page.getByRole("button", { name: /^Publish in / }).click();
   await page.getByRole("button", { name: /^Yes, print it/ }).click();
@@ -1048,7 +1058,7 @@ async function main() {
     this step then inspects for the refreshed findings.
   */
   const keepEvidence = page
-    .getByLabel("Reasons Publish is off")
+    .getByLabel("Publish checks and warnings")
     .getByRole("button", { name: "I checked: keep this evidence" });
   await keepEvidence.click({ noWaitAfter: true });
   await evidenceDecisionHeld;
@@ -1145,6 +1155,16 @@ async function main() {
     return input instanceof HTMLSelectElement && !input.disabled;
   });
   step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  await page.getByRole("button", { name: "Publish anyway — I accept these claims are unreviewed", exact: true }).click();
+  await page.waitForFunction(() => {
+    const accept = [...document.querySelectorAll("#publish-blockers button")]
+      .find(button => /I accept these claims/.test(button.textContent ?? ""));
+    const publish = [...document.querySelectorAll("button")]
+      .find(button => /^Publish in /.test(button.textContent ?? ""));
+    return !accept && publish instanceof HTMLButtonElement && !publish.disabled;
+  });
+  step("D33: edit, refreshed evidence, keep evidence and claim acceptance leave Publish available without reload");
+
   /*
     The decision's own refresh re-renders the whole review, and a shut row hides
     its controls from `getByRole` (Playwright matches only what the accessibility
@@ -1183,8 +1203,9 @@ async function main() {
     .getByRole("button", { name: "Save judgment" })
     .click();
   await reloadedReview
-    .getByText("A contradiction needs cited contrary captured evidence and a reason.")
+    .getByText("This item has no readable cited contrary captured record. Record it as your own judgment, outside the captures?")
     .waitFor();
+  await reloadedReview.getByRole("button", { name: "Save anyway", exact: true }).waitFor();
   await page.getByLabel("Story", { exact: true }).fill(`TEST FIXTURE unsaved body ${stamp}`);
   if (
     !(await reloadedReview

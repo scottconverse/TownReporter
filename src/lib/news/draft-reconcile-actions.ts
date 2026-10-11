@@ -1,8 +1,8 @@
+import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, STORY_MODEL_CHOICES, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
-import { paperSetUpRefusal } from "./paper-settings.ts";
 
 export type DraftReconcileState = "idle" | "queued" | "running" | "completed" | "failed";
 
@@ -18,7 +18,7 @@ export type DraftReconcileStatus = {
 };
 
 export type DraftReconcileRequestResult =
-  { ok: true; pending: true; jobId: number; modelChoice: string } | { ok: false; error: string };
+  { ok: true; pending: true; jobId: number; modelChoice: string } | { ok: false; error: string; warning?: { key: string; sentence: string } };
 
 function positiveId(raw: unknown, label: string): number {
   const id = Number(raw);
@@ -26,7 +26,7 @@ function positiveId(raw: unknown, label: string): number {
   return id;
 }
 
-function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelChoice; modelEffort: ModelEffort | null } {
+function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelChoice; modelEffort: ModelEffort | null; override?: string[] } {
   if (!raw || typeof raw !== "object") throw new Error("Reconciliation request is invalid.");
   const value = raw as Record<string, unknown>;
   const modelChoice = String(value.modelChoice ?? "").trim();
@@ -35,6 +35,7 @@ function requestInput(raw: unknown): { leadId: number; modelChoice: StoryModelCh
     throw new Error("Choose an available model before checking the draft.");
   }
   return {
+    override: z.array(z.string()).optional().parse(value.override),
     leadId: positiveId(value.leadId, "Lead"),
     modelChoice: modelChoice as StoryModelChoice,
     modelEffort: modelEffort(modelChoice, value.modelEffort),
@@ -93,16 +94,12 @@ export const requestDraftReconciliationFn = createServerFn({ method: "POST" })
     try {
       // SG1 / Option A: the evidence check spends a model and searches the web
       // for this paper, so an install that has not been set up must not start one.
-      const notSetUp = await paperSetUpRefusal(
-        context.newsroomId ?? 1,
-        "check this draft's evidence",
-      );
-      if (notSetUp) return { ok: false, error: notSetUp };
       const { requestDraftReconciliation } = await import("./draft-reconcile.server.ts");
       const job = await requestDraftReconciliation(
         { userId: context.userId, newsroomId: context.newsroomId },
         data,
       );
+      if ("warning" in job) return job;
       return {
         ok: true,
         pending: true,

@@ -19,6 +19,7 @@ import {
   planAutomaticFailover,
   automaticFailoverReason,
   looksLikeProviderQuota,
+  looksLikeContentRefusal,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
@@ -31,7 +32,7 @@ export type DraftInput = Omit<Parameters<typeof reportAndDraft>[0], "modelChoice
  * every completed research/checkpoint outside this helper and pass the exact
  * same call payload to `run`, so fallback cannot repeat earlier work. */
 export async function runPinnedCallWithFailover<
-  TSnapshot extends { modelChoice: string },
+  TSnapshot extends { modelChoice: string; modelLabel?: string },
   TResult extends { ok: boolean; error?: string },
 >(opts: {
   snapshot: TSnapshot;
@@ -39,32 +40,52 @@ export async function runPinnedCallWithFailover<
   run: (snapshot: TSnapshot) => Promise<TResult>;
   probe: typeof probeProvider;
   ladder?: readonly string[];
+  /** Draft writing keeps trying ready rungs until one produces a readable draft. */
+  exhaustLadder?: boolean;
   resolve: (choice: Exclude<ReturnType<typeof import("./model-choice.ts").storyModelChoice>, "auto">) => Promise<TSnapshot>;
   onSwitch: (input: {
     previousLabel: string;
     nextLabel: string;
     nextChoice: string;
     reason: import("./automatic-failover.ts").AutomaticFailoverReason;
+    error: string;
   }) => Promise<void>;
 }): Promise<{ result: TResult; snapshot: TSnapshot }> {
-  const first = await opts.run(opts.snapshot);
-  if (first.ok || !first.error) return { result: first, snapshot: opts.snapshot };
-  const plan = await planAutomaticFailover({
-    source: opts.source,
-    current: opts.snapshot.modelChoice,
-    error: first.error,
-    probe: opts.probe,
-    ladder: opts.ladder,
-  });
-  if (!plan || plan.next === "auto") return { result: first, snapshot: opts.snapshot };
-  const next = await opts.resolve(plan.next);
-  await opts.onSwitch({
-    previousLabel: modelChoiceLabel(opts.snapshot.modelChoice),
-    nextLabel: plan.label,
-    nextChoice: plan.next,
-    reason: plan.reason,
-  });
-  return { result: await opts.run(next), snapshot: next };
+  let snapshot = opts.snapshot;
+  let partialText: string | undefined;
+  const visited = new Set<string>();
+  let trail = "";
+  let cutOffSeen = false;
+  while (!visited.has(snapshot.modelChoice)) {
+    visited.add(snapshot.modelChoice);
+    const attempt = await opts.run(snapshot);
+    const result = attempt as TResult & { partialText?: string };
+    partialText = result.partialText ?? partialText;
+    if (result.ok || !result.error) return { result, snapshot };
+    cutOffSeen ||= /reply was cut off/i.test(result.error);
+    // Ordinary non-writing calls retain one hop; writers exhaust ready rungs.
+    if (visited.size > 1 && !cutOffSeen && !opts.exhaustLadder) {
+      const error = opts.snapshot.modelChoice.startsWith("custom:")
+        ? `${trail} -> ${modelChoiceLabel(snapshot.modelChoice)}: ${result.error}` : result.error;
+      return {result: {...result,error},snapshot};
+    }
+    const plan = await planAutomaticFailover({source: opts.source, current: snapshot.modelChoice,
+      error: result.error, probe: opts.probe, ladder: opts.ladder});
+    if (!plan || plan.next === "auto" || visited.has(plan.next)) {
+      const terminalError = snapshot.modelChoice.startsWith("custom:")
+        ? `${result.error} ${looksLikeContentRefusal(result.error) ? "The desk stopped this request without switching models" : "The desk found no ready fallback"}; no draft was created.`
+        : result.error;
+      return { result: { ...result, ...(partialText ? { partialText } : {}),
+        error: trail ? `${trail} -> ${terminalError}` : terminalError }, snapshot };
+    }
+    const next = await opts.resolve(plan.next);
+    const previousLabel = snapshot.modelLabel ?? modelChoiceLabel(snapshot.modelChoice);
+    const error = result.error === "reply was cut off" ? `${previousLabel}: reply was cut off` : result.error;
+    await opts.onSwitch({previousLabel, nextLabel: plan.label, nextChoice: plan.next, reason: plan.reason, error});
+    trail = trail ? `${trail} -> ${error}` : error;
+    snapshot = next;
+  }
+  throw new Error("The writing model ladder repeated a model.");
 }
 
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared
@@ -72,6 +93,7 @@ export async function runPinnedCallWithFailover<
  * Story job. Deliberately avoid the renderer's quota trigger words here while
  * preserving the reset detail when the provider supplied one. */
 export function storyProviderFailure(error: string): string {
+  if (error.startsWith("Custom provider ") || /: (?:Google|Provider) says:/.test(error)) return error;
   if (!looksLikeProviderQuota(error) || automaticFailoverReason(error) !== "quota") return error;
   const reset = error
     .match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]

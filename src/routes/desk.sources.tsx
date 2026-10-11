@@ -6,18 +6,17 @@ import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
 import { AddSourcesDialog, SourceKillPattern } from "@/components/dialogs/editor-dialogs";
+import { SourceNewsletter } from "@/components/source-newsletter";
 import { ListSkeleton, ScreenError } from "@/components/states";
 import {
   listLeads,
   listScans,
-  checkOneSource,
   listSourcesPage,
   replacementCandidates,
   reviewSuggestedSources,
-  runScan,
   setSourceStatus,
-  saveSourceScanPreference,
 } from "@/lib/news/desk";
+import { checkOneSource, runScan, saveSourceScanPreference } from "@/components/scoped-actions";
 import { findReplacement } from "@/lib/news/editor-dialog-actions";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
 import { badSourceKillsBySource } from "@/lib/news/editor-dialog-logic";
@@ -1269,6 +1268,7 @@ function SuggestedSources({
                   </td>
                   <td className="td-hl" data-label="Suggested source">
                     <span className="src-t">{s.title}</span>
+                    <SourcePreferenceEditor source={s} />
                     <span className="meta-inline block">Kind: {s.kind || "unclassified"} · Tier: {s.tier || "unclassified"}. Kind describes the source; Tier describes its evidence level.</span>
                     <span className="meta-inline block">
                       <a href={s.url} target="_blank" rel="noreferrer" className="inline-link">
@@ -1567,6 +1567,27 @@ function WatchRows({
                       : "Never read"}
                   </p>
                 ) : null}
+                {s.last_read_method === "playwright" || s.last_read_method === "feed" ? (
+                  <p className="astra-row-meta">
+                    {s.last_read_outcome === "blocked-after-render"
+                      ? "Still refused after a browser and public feeds."
+                      : s.last_read_method === "feed"
+                        ? "Read through its feed."
+                        : "Read through a browser."}
+                  </p>
+                ) : null}
+                {s.newsletter_url ? (
+                  <p className="astra-row-meta">
+                    <a
+                      href={s.newsletter_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-link"
+                    >
+                      Newsletter available ↗
+                    </a>
+                  </p>
+                ) : null}
                 <p className="astra-row-meta">Kind describes the source; Tier describes its evidence level.</p>
                 {s.review_note?.trim() ? (
                   <p className="astra-row-meta">Source review: {s.review_note}</p>
@@ -1587,7 +1608,8 @@ function WatchRows({
                     {result.line}
                   </span>
                 ) : null}
-                {s.status === "accepted" ? <SourcePreferenceEditor source={s} /> : null}
+                <SourcePreferenceEditor source={s} />
+                {s.status === "accepted" ? <SourceNewsletter sourceId={s.id} /> : null}
               </div>
               <div className="astra-row-acts">
                 {paused ? (
@@ -1615,6 +1637,7 @@ function WatchRows({
                     >
                       Resume
                     </ActionButton>
+                    <ActionButton tone="quiet" phase={rowActionPhase({ isPending: checking })} workingLabel="Checking…" onAct={() => onCheck(s.id)}>Check now</ActionButton>
                     <RemoveAction
                       label="Remove"
                       armed={confirmRemoveId === s.id}

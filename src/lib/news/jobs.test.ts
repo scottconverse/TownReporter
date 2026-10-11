@@ -310,14 +310,14 @@ describe("desk jobs", () => {
     const timeoutNote = "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus timed out";
     await setJobFailoverNote(created.id, timeoutNote);
     const foundAfterTimeout = await findOpenJob({ newsroomId, kind: "draft", subjectId: 616163 });
-    assert.equal(foundAfterTimeout?.failover_note, timeoutNote);
+    assert.equal(foundAfterTimeout?.failover_note, "Claude Opus timed out -> Codex Sol 6.1 (balanced)");
     const latestAfterTimeout = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
-    assert.equal(latestAfterTimeout?.failover_note, timeoutNote);
+    assert.equal(latestAfterTimeout?.failover_note, "Claude Opus timed out -> Codex Sol 6.1 (balanced)");
 
     const authNote = "This draft moved to Codex Sol 6.1 (balanced) because Claude Opus sign-in lapsed";
     await setJobFailoverNote(created.id, authNote);
     const latestAfterAuth = await latestJob({ newsroomId, kind: "draft", subjectId: 616163 });
-    assert.equal(latestAfterAuth?.failover_note, authNote);
+    assert.equal(latestAfterAuth?.failover_note, "Claude Opus timed out -> Codex Sol 6.1 (balanced) -> Claude Opus sign-in lapsed -> Codex Sol 6.1 (balanced)");
   });
 
   it("keeps completed fake model work as an unpublished draft on a cold database read", async () => {

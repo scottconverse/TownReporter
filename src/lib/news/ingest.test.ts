@@ -487,11 +487,11 @@ describe("withRetry", () => {
 describe("politeness: a refusal aimed at us is not hammered", () => {
   const url = "https://example.com/news";
 
-  it("asks a 429ing host exactly once", async () => {
+  it("honors Retry-After without repeating a 429 plain fetch", async () => {
     let calls = 0;
     setFetchImplForTests(async () => {
       calls += 1;
-      return new Response("Too many requests", { status: 429 });
+      return new Response("Too many requests", { status: 429, headers: { "retry-after": "120" } });
     });
     try {
       await assert.rejects(
@@ -520,7 +520,7 @@ describe("politeness: a refusal aimed at us is not hammered", () => {
     }
   });
 
-  it("asks a 403ing host exactly once too", async () => {
+  it("does not repeat a 403 plain fetch while trying public alternatives", async () => {
     let calls = 0;
     setFetchImplForTests(async () => {
       calls += 1;
@@ -528,10 +528,12 @@ describe("politeness: a refusal aimed at us is not hammered", () => {
     });
     try {
       await assert.rejects(
-        () => withRetry(() => ingestUrl(url)),
-        /Fetch failed \(403\)/,
+        () => withRetry(() => ingestUrl(url, { renderer: async () => null, schedule: (send) => send() })),
+        /The browser could not read this public page/,
       );
-      assert.equal(calls, 1);
+      assert.equal(calls, 7,
+        "one main request plus the six public feed routes, never a repeated browser attempt",
+      );
     } finally {
       setFetchImplForTests(null);
     }

@@ -151,13 +151,7 @@ async function fixture(options: { status?: string; slug?: string } = {}) {
   const sql = await getSql();
   const [article] = await sql.query<{ id: number }>(
     "insert into articles(newsroom_id,user_id,slug,headline,status,topic,body) values($1,$2,$3,'The council approves the fee',$4,'council',$5) returning id",
-    [
-      NEWSROOM,
-      USER,
-      options.slug ?? SLUG,
-      options.status ?? "published",
-      PRINTED_BODY,
-    ],
+    [NEWSROOM, USER, options.slug ?? SLUG, options.status ?? "published", PRINTED_BODY],
   );
   return { articleId: article.id };
 }
@@ -266,7 +260,7 @@ it("refuses a fix it cannot make, without writing either half", async () => {
   );
   assert.equal(unchanged.ok, false);
   assert.match(
-    unchanged.ok === false ? unchanged.error : "",
+    unchanged.ok === false && "error" in unchanged ? unchanged.error : "",
     /same as the story text/i,
     "an unchanged fix is refused in a sentence an editor can act on",
   );
@@ -276,7 +270,7 @@ it("refuses a fix it cannot make, without writing either half", async () => {
     { articleSlug: SLUG, body: NOTE, alsoFixBody: true, storyBody: "   " },
   );
   assert.equal(blank.ok, false);
-  assert.match(blank.ok === false ? blank.error : "", /cannot be blank/i);
+  assert.match(blank.ok === false && "error" in blank ? blank.error : "", /cannot be blank/i);
 
   const noStory = await performAddCorrection(
     { userId: USER, newsroomId: NEWSROOM },
@@ -310,12 +304,17 @@ it("fills the box from the editor's two lines when the story is not there, with 
 
   const result = await performSuggestCorrectionWording(
     { userId: USER, newsroomId: NEWSROOM },
-    { articleSlug: "a-story-that-is-not-here", wasWrong: "the fee was $4,200", isRight: "the fee is $2,400" },
+    {
+      articleSlug: "a-story-that-is-not-here",
+      wasWrong: "the fee was $4,200",
+      isRight: "the fee is $2,400",
+    },
   );
   assert.deepEqual(result, {
     ok: true,
     source: "template",
-    wording: "An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.",
+    wording:
+      "An earlier version of this story said the fee was $4,200. In fact, the fee is $2,400.",
   });
   assert.equal(await chatCalls(), before, "the note the desk writes itself costs no model call");
 });
@@ -364,7 +363,11 @@ it("suggests the wording through the provider picker, and says so plainly when t
   const { requests } = await fakeLog();
   const chat = requests.filter((entry) => entry.path.endsWith("/chat/completions"));
   assert.equal(chat.length, before + 1, "the suggestion is exactly one call");
-  assert.equal(chat[chat.length - 1].class, "correction", "the stub saw the correction writer's ask");
+  assert.equal(
+    chat[chat.length - 1].class,
+    "correction",
+    "the stub saw the correction writer's ask",
+  );
 
   /*
     The owner's real failure: the rung is up, it answers its readiness probe, and
@@ -394,7 +397,12 @@ it("sends the exact saved local endpoint and model for correction wording", asyn
   let call: { choice?: string; localModel?: typeof selected | null } | undefined;
   const result = await performSuggestCorrectionWording(
     { userId: USER, newsroomId: NEWSROOM },
-    { articleSlug: SLUG, wasWrong: "the fee was $4,200", isRight: "the fee is $2,400", modelChoice: "local-model" },
+    {
+      articleSlug: SLUG,
+      wasWrong: "the fee was $4,200",
+      isRight: "the fee is $2,400",
+      modelChoice: "local-model",
+    },
     {
       resolveLocalModel: async (newsroomId, scope) => {
         assert.equal(newsroomId, NEWSROOM);
@@ -403,7 +411,10 @@ it("sends the exact saved local endpoint and model for correction wording", asyn
       },
       chat: async (_system, _user, _maxTokens, options) => {
         call = options;
-        return { ok: true as const, text: "Correction needed: the story said the fee was $4,200. The truth: the fee is $2,400." };
+        return {
+          ok: true as const,
+          text: "Correction needed: the story said the fee was $4,200. The truth: the fee is $2,400.",
+        };
       },
     },
   );

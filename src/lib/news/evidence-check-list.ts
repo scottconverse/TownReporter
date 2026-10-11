@@ -169,7 +169,9 @@ export function claimNeedsReview(
 export function judgmentChip(
   judgment: FindingJudgment,
   captures: readonly FindingCaptureEvidence[],
+  noCapture = false,
 ): { chip: string; tone: EvidenceChipTone } {
+  if (noCapture) return { chip: "editor's judgment, no capture", tone: "ink" };
   switch (judgment) {
     case "supports":
       return { chip: "✓ Supported", tone: "ok" };
@@ -337,7 +339,7 @@ export function evidenceCheckRows(input: {
   const list: EvidenceListRow[] = [];
 
   for (const row of input.rows) {
-    const { chip, tone } = judgmentChip(row.judgment.value, row.captures);
+    const { chip, tone } = judgmentChip(row.judgment.value, row.captures, row.judgment.noCapture);
     list.push({
       key: `finding:${row.key}`,
       aiVerdict: row.judgment.ai?.verdict,
@@ -365,7 +367,7 @@ export function evidenceCheckRows(input: {
     );
     const judged = transcriptSupported
       ? { chip: "✓ Supported", tone: "ok" as const }
-      : judgmentChip(row.judgment.value, row.captures);
+      : judgmentChip(row.judgment.value, row.captures, row.judgment.noCapture);
     const transcriptSeconds = recordSeconds !== undefined && Number.isFinite(recordSeconds)
       ? Math.floor(recordSeconds)
       : null;
@@ -400,7 +402,7 @@ export function evidenceCheckRows(input: {
   }
 
   for (const row of input.manualClaimRows) {
-    const { chip, tone } = judgmentChip(row.judgment.value, row.captures);
+    const { chip, tone } = judgmentChip(row.judgment.value, row.captures, row.judgment.noCapture);
     list.push({
       key: `manual:${row.key}`,
       chip,

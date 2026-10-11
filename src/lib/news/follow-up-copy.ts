@@ -222,6 +222,7 @@ export function findingNoteLine(finding: FollowUpFinding): string {
 
 /** Validated in ./follow-ups.ts; the shape is here so the dialog can build one. */
 export type CreateAiFollowUpInput = {
+  override?: string[];
   leadId?: number | null;
   articleId?: number | null;
   investigationId?: number;

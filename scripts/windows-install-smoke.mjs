@@ -235,7 +235,12 @@ async function main() {
     // and the press is the confirmation. See confirm-section-step.mjs.
     await confirmSectionAndWaitForPublishable(page);
     await page.getByRole("button", { name: /^Publish in / }).click();
-    await page.getByRole("button", { name: /^Yes, print it/ }).click();
+    // This manual fixture has never run an evidence check. Its warning must be
+    // visible before the editor explicitly consents to print the unchecked story.
+    await page.getByLabel("Warnings you are publishing over")
+      .getByText(/No claims were recorded for this story/).waitFor();
+    assert.equal(await page.getByText("On the paper", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: /^Publish anyway in / }).click();
     await page.getByText("On the paper").waitFor();
     await page.getByRole("link", { name: "Read it on the paper" }).click();
     await page.waitForURL(/\/articles\//);

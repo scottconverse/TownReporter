@@ -533,12 +533,12 @@ describe("grokChat", () => {
     }
   });
 
-  it("uses the OpenAI-compatible call budget for an explicit custom connection", () => {
+  it("gives a custom connection enough time for research, writing and name checks", () => {
     const budget = providerBudget("custom:9ce9a944-f444-4a69-8927-7c7705c07a35");
     assert.deepEqual(budget, {
-      wallMs: 38_000,
-      callMs: 20_000,
-      reserveMs: 12_000,
+      wallMs: 420_000,
+      callMs: 150_000,
+      reserveMs: 170_000,
     });
   });
 
@@ -598,7 +598,7 @@ describe("grokChat", () => {
     assert.deepEqual(calls, ["resolve"]);
   });
 
-  it("does not reflect a custom provider error body into the returned job error", async () => {
+  it("shows a custom provider's own error message while redacting its API key", async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async () =>
       new Response(JSON.stringify({ error: { message: "bad credential test-only-key" } }), {
@@ -621,7 +621,7 @@ describe("grokChat", () => {
       );
       assert.equal(result.ok, false);
       if (!result.ok) {
-        assert.equal(result.error, "Custom AI API error 400");
+        assert.equal(result.error, "Custom AI (manual-model): Provider says: bad credential [redacted] (400)");
         assert.equal(result.meta?.provider, "openai-compatible");
         assert.equal(result.meta?.model, "manual-model");
       }
@@ -733,14 +733,16 @@ describe("model-picker provider readiness", () => {
     }
   });
 
-  it("uses provider default for the saved Gemini preset instead of sending an invented level", async () => {
+  it("drafts JSON with the exact Gemini 3.5 Flash connection and provider-default effort", async () => {
     const originalFetch = globalThis.fetch;
     let body: Record<string, unknown> | null = null;
-    globalThis.fetch = async (_input, init) => {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(String(url), "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+      assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test-key");
       body = JSON.parse(String(init?.body)) as Record<string, unknown>;
       return new Response(JSON.stringify({
-        model: "gemini-2.5-flash",
-        choices: [{ message: { content: "ok" } }],
+        model: "gemini-3.5-flash",
+        choices: [{ message: { content: JSON.stringify({ headline: "City announces meeting", body: "The city announced a public meeting." }) } }],
       }), { status: 200 });
     };
     try {
@@ -751,11 +753,13 @@ describe("model-picker provider readiness", () => {
       }, {
         resolveCustom: async () => ({
           baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
-          modelId: "gemini-2.5-flash",
+          modelId: "gemini-3.5-flash",
           apiKey: "test-key",
         }),
       });
       assert.equal(result.ok, true);
+      assert.equal((body as Record<string, unknown> | null)?.model, "gemini-3.5-flash");
+      if (result.ok) assert.equal(parseJsonBlock<{ body: string }>(result.text)?.body, "The city announced a public meeting.");
       assert.equal(body == null ? true : !("reasoning_effort" in body), true);
     } finally {
       globalThis.fetch = originalFetch;
@@ -1497,8 +1501,12 @@ describe("readableReplyOrRetry", () => {
 
   it("retries the same provider once when the first reply cannot be read", async () => {
     let calls = 0;
+    const instructions: (string | undefined)[] = [];
+    let notified = false;
     const reply = await readableReplyOrRetry({
-      attempt: async () => {
+      attempt: async (instruction) => {
+        instructions.push(instruction);
+        if (instruction) assert.equal(notified, true, "notify progress before making the retry call");
         calls += 1;
         return calls === 1
           ? { ok: true as const, text: '{"headline":"Hi" "dek"' }
@@ -1506,11 +1514,14 @@ describe("readableReplyOrRetry", () => {
       },
       read: readObject,
       label: "DeepSeek v4.1 Flash",
+      onRetry: () => { notified = true; },
     });
     assert.equal(calls, 2);
     assert.equal(reply.ok, true);
     assert.deepEqual(reply.ok && reply.value, { headline: "Hi", dek: "There" });
     assert.equal(reply.retried, true);
+    assert.equal(instructions[0], undefined);
+    assert.match(instructions[1]!, /Reply with JSON only/);
   });
 
   it("reports unreadable after two replies the reader cannot use, in the classifier's words", async () => {
@@ -1730,4 +1741,46 @@ describe("the DeepSeek rung's writing call", () => {
       "the rung's Off default is sent explicitly, or Ollama re-enables thinking",
     );
   });
+});
+
+
+describe("custom provider failure detail", () => {
+  for (const mode of ["timeout", "quota", "body-error"] as const) it(`names Gemini and preserves ${mode}`, async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => {
+      if (mode === "timeout") throw new DOMException("Timed out", "TimeoutError");
+      return new Response(JSON.stringify({error:{message:"Google provider says quota exhausted"}}), {status: mode === "quota" ? 429 : 200});
+    };
+    try {
+      const result = await grokChat("system", "user", 8, { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 1, timeoutMs: 500 }, {
+        resolveCustom: async () => ({name:"Gemini",baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai",modelId:"gemini-3.5-flash",apiKey:"test-key"}),
+      });
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.match(result.error, /Gemini/);
+      assert.match(result.error, mode === "timeout" ? /timed out after 0.5 seconds/ : /Google provider says quota exhausted/);
+    } finally { globalThis.fetch = original; }
+  });
+});
+
+
+for (const retry of [false, true]) it(`preserves custom provider detail when ${retry ? "the retry" : "the response body"} times out`, async () => {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    if (retry && calls === 1) return new Response(JSON.stringify({error:{message:"Google says quota exhausted"}}),{status:429});
+    if (retry) throw new DOMException("Operation timed out", "TimeoutError");
+    const response = new Response("body");
+    response.text = async () => { throw new DOMException("The operation was aborted", "AbortError"); };
+    return response;
+  };
+  try {
+    const result=await grokChat("S","U",8,{choice:"custom:9ce9a944-f444-4a69-8927-7c7705c07a35",newsroomId:1,timeoutMs:30000},{resolveCustom:async()=>({name:"Gemini",baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai",modelId:"gemini-3.5-flash",apiKey:"test-key"})});
+    assert.equal(result.ok,false);
+    if(result.ok)return;
+    assert.match(result.error,/Gemini.*timed out after 30 seconds/);
+    if(retry)assert.match(result.error,/Google says quota exhausted/);
+    assert.equal(result.meta?.timedOut,true);
+  }finally{globalThis.fetch=original;}
 });

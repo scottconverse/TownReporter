@@ -237,6 +237,8 @@ const copyUrl = moduleUrl(
 );
 
 const DESK_CHROME_IMPORTS = {
+  "@/components/warning-consent-host": inlineModule("export function WarningConsentHost() { return null; }"),
+  "@/components/editor-warning-consent": inlineModule("export const deskWarningConsent = {subscribe:()=>()=>{}, current:()=>null};"),
   "@tanstack/react-router": routerStub,
   "@tanstack/react-query": reactQueryStub,
   "@/lib/paper-context-state": paperContextStub,

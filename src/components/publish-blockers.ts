@@ -52,8 +52,18 @@ export function BeforeYouCanPublish(props: {
   const row = (blocker: PublishBlocker) =>
     createElement(
       "li",
-      { className: "astra-blocker", key: blocker.key, "data-blocker": blocker.key },
-      createElement("span", { className: "astra-blocker-chip" }, "Blocks Publish"),
+      { className: "astra-blocker" + (blocker.kind === "warning" ? " is-warning" : " is-hard"), key: blocker.key, "data-blocker": blocker.key,
+        "data-kind": blocker.kind,
+      },
+      /*
+        Unit OH: the chip says which kind of reason this is. A warning is a
+        judgement the editor may overrule ("Warning"), a hard reason is the desk
+        itself refusing ("Blocks Publish"). The word changes with the kind, so a
+        row is never read as a wall when it is a question.
+      */
+      createElement("span", { className: "astra-blocker-chip" },
+        blocker.kind === "warning" ? "Warning" : "Blocks Publish",
+      ),
       createElement("span", { className: "astra-blocker-what" }, blocker.sentence),
       createElement(
         "span",
@@ -116,11 +126,15 @@ export function BeforeYouCanPublish(props: {
       createElement(
         "p",
         { className: "meta", key: "count" },
-        `${publishBlockedSummary(blockers)}. Each row has the press that clears it.`,
+        `${publishBlockedSummary(blockers)}. ${blockers.some((blocker) => blocker.kind === "hard") ? "Each row has the press that clears it." : "You can resolve them here or choose Publish anyway."}`,
       ),
       createElement(
         "ul",
-        { className: "astra-blocker-list", key: "list", "aria-label": "Reasons Publish is off" },
+        {
+          className: "astra-blocker-list",
+          key: "list",
+          "aria-label": "Publish checks and warnings",
+        },
         ...blockers.map(row),
       ),
     );

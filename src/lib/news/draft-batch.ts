@@ -4,7 +4,7 @@ import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
 import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
-import { paperSetUpRefusal } from "./paper-settings.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
 
 export type DraftBatchRuntime = Exclude<StoryModelChoice, AutomaticRungId>;
 export type DraftBatchStoredRuntime =
@@ -63,6 +63,7 @@ export type DraftBatchFailure = {
     /** SG1 / Option A: this install has not completed Paper setup yet. */
     | "not-set-up";
   error: string;
+  warning?: { key: string; sentence: string };
   leadId?: number;
   jobId?: number;
 };
@@ -94,7 +95,7 @@ const runtimes = new Set<string>([...PICKER_PROVIDER_IDS, "auto"]);
 
 export function cleanDraftBatchInput(
   value: unknown,
-): { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null } | DraftBatchFailure {
+): { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null; override?: string[] } | DraftBatchFailure {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
   }
@@ -114,7 +115,7 @@ export function cleanDraftBatchInput(
       error: "Choose Automatic, a named Codex, Claude, Local, or saved Custom AI model for this batch.",
     };
   }
-  if (!Array.isArray(row.items) || row.items.length < 1 || row.items.length > 5) {
+  if (!Array.isArray(row.items)) {
     return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
   }
   const items: DraftBatchStartItem[] = [];
@@ -150,7 +151,8 @@ export function cleanDraftBatchInput(
   if (row.modelEffort !== undefined && effort !== row.modelEffort) {
     return { ok: false, code: "invalid-input", error: "Choose an effort supported by this model." };
   }
-  return { ok: true, items, runtime, modelEffort: effort };
+  if (row.override !== undefined && (!Array.isArray(row.override) || !row.override.every(k => typeof k === "string"))) return { ok: false, code: "invalid-input", error: "Override keys are invalid." };
+  return { ok: true, items, runtime, modelEffort: effort, override: row.override as string[] | undefined };
 }
 
 export const startDraftBatch = createServerFn({ method: "POST" })
@@ -167,8 +169,8 @@ export const startDraftBatch = createServerFn({ method: "POST" })
       on this paper's behalf. An install that has not been set up has no town to
       write about, so the batch is refused before anything is reserved.
     */
-    const notSetUp = await paperSetUpRefusal(context.newsroomId ?? 1, "start a batch draft");
-    if (notSetUp) return { ok: false as const, code: "not-set-up" as const, error: notSetUp };
+    const notSetUp = await paperSetupWarning(context, input.override, "start a batch draft");
+    if (notSetUp) return { ...notSetUp, code: "not-set-up" as const };
     const server = await import("./draft-batch.server.ts");
     const editorContext = { userId: context.userId, newsroomId: context.newsroomId };
     if (!(await server.isCurrentBatchEditor(editorContext))) {
@@ -187,6 +189,7 @@ export const startDraftBatch = createServerFn({ method: "POST" })
     return server.commitDraftBatchForAuthenticatedEditor({
       context: editorContext,
       items: input.items,
+      override: input.override,
       runtimeSnapshot,
     });
   });

@@ -57,11 +57,13 @@ export function StoryDocumentUpload({
   onChange,
   onBusy,
   disabled = false,
+  allowExtraDocuments = false,
 }: {
   documents: StoryUpload[];
   onChange: (docs: StoryUpload[]) => void;
   onBusy: (busy: boolean) => void;
   disabled?: boolean;
+  allowExtraDocuments?: boolean;
 }) {
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
@@ -73,7 +75,7 @@ export function StoryDocumentUpload({
   async function upload(files: File[]) {
     if (disabled || uploadLock.current || !files.length) return;
     setFailed(false);
-    if (documents.length + files.length > 20) {
+    if (!allowExtraDocuments && documents.length + files.length > 20) {
       setFailed(true);
       setStatus("Choose up to 20 documents per story.");
       return;

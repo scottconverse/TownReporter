@@ -35,6 +35,7 @@ import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { storyModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { audit } from "./ops.ts";
+import { auditOverrides, checkOverride } from "./override.ts";
 import { provenanceFromCitations, provenanceFromUrls } from "./findings.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import { ingestDocument } from "./ingest.ts";
@@ -56,6 +57,9 @@ import {
 
 /** `leads.origin` for a story read out of a report the editor pasted. */
 export const IMPORT_ORIGIN = "import";
+
+
+export const IMPORT_OVERRIDE_NOTE = "The text differs from the report.";
 
 /** How many cited pages one import fetches in the background. */
 const CAPTURE_LIMIT = 12;
@@ -234,6 +238,8 @@ export type ImportPayload = {
   text: string;
   tool: string;
   stories: ImportSelection[];
+
+  override?: string[];
 };
 
 export type ImportResult = {
@@ -242,6 +248,12 @@ export type ImportResult = {
   imported: { leadId: number; headline: string; hold: boolean; kind: ImportKind }[];
   /** Cards refused because the text they carried is not what the editor pasted. */
   refused: { headline: string; reason: string }[];
+  /**
+   * Set on the first call for a card whose text is not word-for-word the paste:
+   * nothing is written, and the review screen shows `sentence` with an "Import
+   * anyway" press that retries with `{ override: [key] }`.
+   */
+  warning?: { key: string; sentence: string };
 };
 
 /** What the paste is, for the lead's provenance. Null when the paste is empty. */
@@ -250,24 +262,28 @@ export function importInputSha256(text: string): string {
 }
 
 /**
- * Check every card against the paste as written, before anything is stored.
- *
- * A body paragraph that is not in the paste means the card is carrying text
- * the editor never pasted -- the one thing this feature must never do. The
- * whole card is refused rather than trimmed: a story missing a paragraph is a
- * story an editor would publish without knowing what was cut.
- *
- * The wording names what the card is, because the refusal is read by the
- * editor who just ticked it: an idea with nothing under it is missing a
- * description, not a story's text.
+ * One card the verifier is willing to file, with the key the review screen
+ * needs to retry it and whether it was accepted only because its warning was
+ * overridden (item 38).
  */
+export type VerifiedSelection = ImportSelection & { key: string; overridden: boolean };
+
+/** The stable key of the card at `index`, which both calls recompute the same way. */
+export function selectionKey(index: number): string {
+  return `s${index + 1}`;
+}
+
+
 export function verifySelections(
   text: string,
   selections: ImportSelection[],
-): { accepted: ImportSelection[]; refused: { headline: string; reason: string }[] } {
-  const accepted: ImportSelection[] = [];
+  input: { override?: string[] } = {},
+): { accepted: VerifiedSelection[]; refused: { headline: string; reason: string }[];
+  warning: { key: string; sentence: string } | null; } {
+  const accepted: VerifiedSelection[] = [];
   const refused: { headline: string; reason: string }[] = [];
-  for (const selection of selections) {
+  let warning: { key: string; sentence: string } | null = null;
+  selections.forEach ((selection, index) => {const key = selectionKey(index);
     const headline = String(selection.headline ?? "").trim();
     const idea = selection.kind === "idea";
     const paragraphs = splitParagraphs(selection.body);
@@ -276,14 +292,14 @@ export function verifySelections(
         headline: idea ? "An idea with no headline" : "A story with no headline",
         reason: "Give it a headline first.",
       });
-      continue;
+      return;
     }
     if (paragraphs.length === 0) {
       refused.push({
         headline,
         reason: idea ? "This idea has no description." : "This story has no text.",
       });
-      continue;
+      return;
     }
     const outside = paragraphs.filter((p) => !containsVerbatimEither(text, p));
     const dekOutside =
@@ -292,15 +308,22 @@ export function verifySelections(
         : "";
     if (outside.length > 0 || dekOutside) {
       const sample = (outside[0] ?? dekOutside).slice(0, 120);
+      const sentence = `Part of this ${idea ? "idea" : "story"} is not word-for-word what you pasted: “${sample}”.`;
+      const gate = checkOverride({ override: input.override }, key, sentence);
+      if (gate) {
       refused.push({
         headline,
-        reason: `Part of this ${idea ? "idea" : "story"} is not word-for-word what you pasted: “${sample}”. Nothing was imported for it.`,
+        reason: sentence,
       });
-      continue;
+        warning ||= gate.warning;
+        return;
     }
-    accepted.push({ ...selection, headline });
+    accepted.push({ ...selection, headline, key, overridden: true });
+      return;
   }
-  return { accepted, refused };
+    accepted.push({ ...selection, headline, key, overridden: false });
+  });
+  return { accepted, refused, warning };
 }
 
 /** A source URL that is safe to print, or "" -- never half a URL. */
@@ -338,7 +361,11 @@ export async function performImportFinishedStories(
   const text = String(payload.text ?? "");
   if (!text.trim()) return { ...empty, error: "There is no text to import." };
 
-  const { accepted, refused } = verifySelections(text, payload.stories ?? []);
+  const { accepted, refused, warning } = verifySelections(text, payload.stories ?? [], {
+    override: payload.override,
+  });
+
+  if (warning) return { ...empty, refused, error: warning.sentence, warning };
   if (accepted.length === 0) {
     return {
       ...empty,
@@ -459,14 +486,29 @@ export async function performImportFinishedStories(
       reportNotes && nextStep && !reportNotes.includes(nextStep)
         ? `${reportNotes}\n\nNext step: ${nextStep}`
         : reportNotes || nextStep;
+
+    const notesJson: Record<string, unknown> = {};
     if (editorNotes) {
+      notesJson.importedReport = editorNotes;
+      notesJson.editorialAssignment = { origin: "import", text: editorNotes };
+    }
+    if (story.overridden) notesJson.importWarning = IMPORT_OVERRIDE_NOTE;
+    if (Object.keys(notesJson).length > 0) {
       await sql`
         update leads
-        set notes_json = ${JSON.stringify({ importedReport: editorNotes, editorialAssignment: { origin: "import", text: editorNotes } })}
+        set notes_json = ${JSON.stringify(notesJson)}
         where id = ${leadId} and newsroom_id = ${context.newsroomId}
       `;
     }
     await audit(context.userId, "lead", `imported ${leadId}`, context.newsroomId);
+    /*
+      Audit the override only after the card was actually filed: a warning the
+      editor accepted and the desk then failed to import is not an override that
+      happened, and recording it would claim a decision the row cannot support.
+    */
+    if (story.overridden) {
+      await auditOverrides(context, [story.key], { kind: "lead", id: leadId });
+    }
     imported.push({ leadId, headline: story.headline, hold: story.hold, kind: story.kind });
     for (const url of urls.slice(0, CAPTURE_LIMIT)) {
       captures.push({ url, headline: story.headline, leadId });

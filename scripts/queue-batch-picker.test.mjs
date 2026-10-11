@@ -84,3 +84,14 @@ test("a previous batch does not choose the model or effort for a new batch", () 
   for (const effect of effects) effect();
   assert.deepEqual(values, ["auto", null]);
 });
+
+test("batch and bulk selection keep held, killed and published leads for explicit server warnings", () => {
+  const wanted = new Set(["batchEligible", "bulkDraftable"]);
+  const declarations = page.body.statements.filter(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => ts.isIdentifier(declaration.name) && wanted.has(declaration.name.text)));
+  const body = ts.transpileModule(declarations.map(node => node.getText(ast)).join("\n"), {compilerOptions:{module:ts.ModuleKind.ESNext}}).outputText;
+  const run = new Function("batchPool", "selectedLeads", body + "return { batchEligible, bulkDraftable };");
+  const leads = ["new", "held", "killed", "published"].map((status, index) => ({id:index+1,status}));
+  const result = run({data:leads},leads);
+  assert.deepEqual(result.batchEligible,leads);
+  assert.deepEqual(result.bulkDraftable,leads);
+});

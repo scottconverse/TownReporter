@@ -26,6 +26,16 @@ export async function screenModule(path, overrides = {}, real = []) {
   return import(await screenModuleUrl(path, overrides, real));
 }
 
+/**
+ * The zero-claims gate (`@/lib/news/unchecked-story-gate`) is a pure, model-free,
+ * deterministic dependency of the story route, so it is loaded REAL by every
+ * story-route render -- never stubbed to a null-returning fake, which the page's
+ * `.blocked` read would crash on. A fixture that omits the gate's loader facts is
+ * filled with "the check already completed", so a test that is not about this gate
+ * keeps the readiness it had before; a test that is about it sets the facts.
+ */
+const ALWAYS_REAL = ["@/lib/news/unchecked-story-gate", "@/lib/news/writer-bar"];
+
 export async function screenModuleUrl(path, overrides = {}, real = []) {
   const source = await readFile(new URL(`../${path}`, import.meta.url), "utf8");
   const ast = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
@@ -35,7 +45,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
     if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) continue;
     const name = node.moduleSpecifier.text;
     if (name === "react") continue;
-    if (real.includes(name)) {
+    if (real.includes(name) || ALWAYS_REAL.includes(name)) {
       const file =
         name.replace("@/", "src/") +
         (name.endsWith(".ts") || name.endsWith(".tsx")
@@ -66,7 +76,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
           const key = (e.propertyName ?? e.name).text;
           const defaults = {
             createFileRoute: `() => options => ({...options, useParams: () => ({leadId:"22"})})`,
-            useQuery: `({queryKey}) => ({data: globalThis.screenData[queryKey[0]], isPending:false, isError:false})`,
+            useQuery: `({queryKey}) => ({data: (() => { const d = globalThis.screenData[queryKey[0]]; return d && typeof d === "object" && !Array.isArray(d) ? { uncheckedRecordedClaims: 0, uncheckedEvidenceChecked: true, uncheckedStoryAcknowledged: false, uncheckedExempt: false, ...d } : d; })(), isPending:false, isError:false})`,
             useMutation: `() => ({mutate(){}, isPending:false})`,
             useQueryClient: `() => ({invalidateQueries(){}})`,
             useLocation: `() => ({hash:""})`,
@@ -80,6 +90,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
             auditDraft: `() => ({findings:[]})`,
             findingsWithIds: `() => []`,
             parseNotes: `() => ({todo:[],todos:[],sources:[],opened:[],found:[],verify:[],unanswered:[]})`,
+            draftFieldsMatch: `(a,b) => a.headline===b.headline && a.dek===b.dek && a.body===b.body && a.topic===b.topic`,
             earlierReportingNotes: `() => []`,
             mergeDraftEvidenceIntoNotes: `(notes) => notes`,
             parseUrlList: `() => []`,
@@ -87,6 +98,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
             uncheckedGateTodos: `() => []`,
             uncreditedOutlets: `() => []`,
             publishBlockers: `() => []`,
+            publishConfirmation: `() => ({enabled:true,warnings:[],hard:[],confirmLabel:"Yes, print it"})`,
             publishPressState: `() => ({phase:"idle"})`,
             blockerPressState: `() => ({})`,
             recordedChecks: `() => ({})`,

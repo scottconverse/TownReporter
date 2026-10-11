@@ -493,18 +493,26 @@ async function theHeadlineDialogSavesTheTypedLine() {
   assert.match(text, /Nothing changes until you press Use this headline\./, "and the drawn foot note");
 
   const save = dialog().getByRole("button", { name: "Use this headline", exact: true });
-  /*
-    Live from the start, and that is right: the standing choice is "Keep mine",
-    so a press with nothing typed keeps the line the story already has. What the
-    editor must not be able to do is save a fragment -- the drawn rule is the
-    same eight characters the desk checks server-side.
-  */
   assert.equal(await save.isEnabled(), true, "the standing Keep-mine choice can be saved");
   const typed = dialog().getByLabel("Or write a new one");
+  const beforeWarning = (await draftRow("headline")).headline;
   await typed.fill("Olson");
-  assert.equal(await save.isEnabled(), false, "a five-character fragment is refused before the desk sees it");
-  const refusal = await dialog().innerText();
-  assert.match(refusal, /Write a headline, or pick one of the suggestions\./, "and it says why");
+  assert.equal(await save.isEnabled(), true, "a short headline can request an override warning");
+  await save.click();
+  const warning = page.getByRole("alertdialog", {name:"Use headline",exact:true});
+  await warning.getByText("This headline is outside the usual 8 to 180 characters.").waitFor();
+  assert.equal((await draftRow("headline")).headline,beforeWarning,"the first warning writes nothing");
+  await warning.getByRole("button",{name:"Use headline anyway",exact:true}).click();
+  await waitForTruth("the explicit override to save the short headline",async()=>
+    (await draftRow("headline")).headline === "Olson" ? true : null);
+  await waitForTruth("the headline dialog to close after the override",async()=>
+    (await page.locator(".astra-modal").count()) === 0 ? true : null);
+  const audit = await (await db()).query("select user_id,detail from audit_events where action='override' and subject_kind='lead' and subject_id=$1",[currentLeadId]);
+  assert.ok(audit.rows.some(row=>row.user_id && JSON.parse(row.detail).key === "headline-length"),
+    "the override records the editor, warning key and lead");
+  step("a short headline warns without writing, then saves and records the editor after Use headline anyway");
+  await press.click();
+  await dialog().waitFor();
   await typed.fill(NEW_HEADLINE);
   assert.equal(await save.isEnabled(), true, "the typed line is enough to save");
   const sizes = await smallestSizesInTheDialog();

@@ -306,13 +306,13 @@ it("honors an explicit short assignment over the research angle and carries dati
   const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
   const deps = dependencies(log);
   const passes: { system: string; user: string }[] = [];
-  const longBody = Array.from({length: 400}, (_, i) => `word${i}`).join(" ");
+  const longBody = Array.from({length: 400}, (_, i) => `word${i}`).join(" ") + ".";
   deps.chat = async (system, user) => {
     if (system === NAME_INVENTORY_SYSTEM) return { ok: true, text: JSON.stringify({ complete: true, people: [] }) };
     passes.push({ system, user });
     return { ok: true, text: JSON.stringify(system.includes('"fetch_urls"')
       ? { news: "Fundraising promotion", angle: "Membership prices", form: "reported", unknowns: ["Donation match year unknown; banner may be stale"] }
-      : { headline: lead.headline, dek: "Programs", body: passes.length === 2 ? longBody : "The library has upcoming programs, according to its events page.", topic: "community", source_urls: [supplied], form: "reported", unanswered: [] }) };
+      : { headline: lead.headline, dek: "Programs", body: passes.length === 2 ? longBody : "The library has upcoming programs, according to its events page. Residents can consult the calendar for times, locations and registration details.", topic: "community", source_urls: [supplied], form: "reported", unanswered: [] }) };
   };
   const result = await reportAndDraft({ userId: "assignment", lead, urls: [supplied], memory: [], editorialAssignment: parsedInput.value.editorialAssignment, extraEvidence: "Donation match ends December 31 (year missing)", modelChoice: "claude-frontier" }, deps);
   assert.ok(!("error" in result));
@@ -335,7 +335,7 @@ it("keeps a useful overlong draft with an honest form and visible length warning
     calls++;
     return { ok: true, text: JSON.stringify(system.includes('"fetch_urls"')
       ? { news: lead.headline, form: "reported" }
-      : { headline: lead.headline, body: Array.from({length: 400}, (_, i) => `word${i}`).join(" "), topic: "community", source_urls: [supplied], form: "reported" }) };
+      : { headline: lead.headline, body: Array.from({length: 400}, (_, i) => `word${i}`).join(" ") + ".", topic: "community", source_urls: [supplied], form: "reported" }) };
   };
   const result = await reportAndDraft({ userId: "assignment", lead, urls: [supplied], memory: [], editorialAssignment: { origin: "write-box", text: "Write a brief about library programs.", requestedForm: "brief" }, modelChoice: "claude-frontier" }, deps);
   assert.ok(!("error" in result));

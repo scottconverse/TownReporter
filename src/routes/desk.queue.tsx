@@ -1,3 +1,4 @@
+import { startDraftBatch } from "@/components/scoped-actions";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
@@ -18,7 +19,7 @@ import {
   NewStoryButton,
   NewStoryDialog,
 } from "@/components/dialogs";
-import { announceOnly, announceToDesk } from "@/components/desk-chrome-utils";
+import { announceOnly } from "@/components/desk-chrome-utils";
 /*
   Unit BW, item 2: the drawn Kill dialog, imported from its own module rather
   than through the `@/components/dialogs` barrel, which re-exports
@@ -28,18 +29,8 @@ import { KillDialog } from "@/components/dialogs/KillDialog";
 import { EditLeadDialog } from "@/components/dialogs/EditLeadDialog";
 import { AddFollowUpButton } from "@/components/add-follow-up-button";
 import { ListSkeleton, Notice, ScreenError } from "@/components/states";
-import {
-  deleteLead,
-  draftLead,
-  fileLead,
-  listLeads,
-  listPublishedDesk,
-  listQueuePage,
-  listScans,
-  restoreKilledLead,
-  runScan,
-  setLeadStatus,
-} from "@/lib/news/desk";
+import { deleteLead, listLeads, listPublishedDesk, listQueuePage, listScans, restoreKilledLead } from "@/lib/news/desk";
+import { draftLead, fileLead, runScan, setLeadStatus } from "@/components/scoped-actions";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
   duplicateKillReason,
@@ -80,13 +71,7 @@ import {
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { myDesk } from "@/lib/news/claim";
-import {
-  dismissDraftBatch,
-  getDraftBatch,
-  startDraftBatch,
-  visibleDraftBatchItems,
-  type DraftBatchRuntime,
-} from "@/lib/news/draft-batch";
+import { dismissDraftBatch, getDraftBatch, visibleDraftBatchItems, type DraftBatchRuntime } from "@/lib/news/draft-batch";
 
 export const Route = createFileRoute("/desk/queue")({ component: QueuePage });
 
@@ -117,18 +102,6 @@ function bulkSelectLabel(filter: QueueFilter): string {
  * starting point. When no source exists the starting point stays empty so the
  * editor can supply one; a story-screen path is not a public source.
  */
-/**
- * Is this lead one the Queue's row presses refuse?
- *
- * Hold, Kill and Edit all refuse a lead that has left the working set -- the
- * server says so and the row does not offer them (`desk-leads.tsx` gates the
- * menu on the same three) -- so the KEYS must not offer them either. A key that
- * opens a dialog the desk would only refuse is worse than a key that does
- * nothing, because it costs a press to find out.
- */
-function closedOrHeld(lead: LeadRow): boolean {
-  return lead.status === "held" || lead.status === "killed" || lead.status === "published";
-}
 
 function darkPrefill(lead: LeadRow) {
   const source = parseUrlList(lead.source_urls)[0];
@@ -782,8 +755,8 @@ function QueuePage() {
       S   queues a draft for the selected lead, exactly as Today's S does --
           the README's "S starts a story". The row's own visible "Start story"
           is a LINK to the workbench, so Enter is that press and S is the one
-          that spends the model call. A held or killed lead cannot be drafted
-          (the backend's rule), so S says so instead of refusing at the wire.
+          that spends the model call. The server returns policy warnings through
+          the same consent flow used by the visible draft control.
       U   puts a held or killed lead back. On an open lead there is nothing to
           undo, and a status write that changed nothing would be a press with no
           outcome -- so it says so rather than firing.
@@ -804,10 +777,6 @@ function QueuePage() {
         break;
       case "start":
         if (!lead) break;
-        if (lead.status === "held" || lead.status === "killed" || lead.status === "published") {
-          announceToDesk(`"${lead.headline}" cannot be drafted from ${lead.status}.`, "err");
-          break;
-        }
         setDraftNotices((notices) => {
           const next = { ...notices };
           delete next[lead.id];
@@ -820,7 +789,7 @@ function QueuePage() {
         });
         break;
       case "hold":
-        if (lead && !closedOrHeld(lead)) setHoldFor(lead);
+        if (lead) setHoldFor(lead);
         break;
       case "kill":
         /*
@@ -831,7 +800,7 @@ function QueuePage() {
           once, with the Undo and the reason chips on the toast. The dialog is
           still there for a written reason, in the row's More ▾ menu.
         */
-        if (lead && !closedOrHeld(lead)) setStatus.mutate(killLead(lead));
+        if (lead) setStatus.mutate(killLead(lead));
         break;
       case "undo":
         if (lead && lead.status === "held") {
@@ -879,17 +848,14 @@ function QueuePage() {
     queryFn: () => listLeads(),
     enabled: panel === "batch",
   });
-  const batchEligible = (batchPool.data ?? []).filter(
-    (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
-  );
+  const batchEligible = batchPool.data ?? [];
   const batchPoolPending = panel === "batch" && batchPool.isPending;
   /*
     The list the batch dialog is about to queue: the bulk bar's selection,
     held still while the dialog is open so that adding suggested focus to it
     cannot change what the press behind it would have done. Every entry is a
-    lead the backend will accept -- a held, killed or printed lead cannot be
-    drafted, which is the backend's rule, so it is filtered here rather than
-    failing at the press.
+    lead still on this desk. Saved lifecycle state is warned about by the
+    server and does not remove an editor's selection.
   */
   const selectedBatchLeads = batchLeadIds.filter((leadId) =>
     batchEligible.some((lead) => lead.id === leadId),
@@ -955,9 +921,7 @@ function QueuePage() {
     bar, and every press in the bar is a press the row itself already offers.
   */
   const selectedLeads = leads.filter((lead) => selectedDeleteLeads.includes(lead.id));
-  const bulkDraftable = selectedLeads.filter(
-    (lead) => lead.status !== "held" && lead.status !== "killed" && lead.status !== "published",
-  );
+  const bulkDraftable = selectedLeads;
   /*
     M7 of the batch-6 pre-merge audit. This loop used to be
     `for (const lead of selectedLeads) setStatus.mutate({id, status})`, so a
@@ -1316,7 +1280,7 @@ function QueuePage() {
                 */}
                 <InkButton
                   disabled={
-                    startBatch.isPending || bulkDraftable.length === 0 || bulkDraftable.length > 5
+                    startBatch.isPending || bulkDraftable.length === 0
                   }
                   ariaLabel={
                     bulkDraftable.length === 0
@@ -1919,7 +1883,7 @@ function QueuePage() {
         open={panel === "batch"}
         onClose={closePanel}
         title="Draft the selected leads"
-        subtitle="Choose up to five eligible queue leads and one writing runtime. Each lead keeps its own stored research scope. This queues drafts for editor review; it does not publish anything."
+        subtitle="Choose leads and one writing runtime. A usual batch has one to five leads; a larger batch asks for your approval. Each lead keeps its own stored research scope."
         primaryLabel={
           batchQueuedNow
             ? "Batch started"
@@ -1929,8 +1893,6 @@ function QueuePage() {
         }
         primaryDisabled={
           newsroomId === null ||
-          selectedBatchLeads.length === 0 ||
-          selectedBatchLeads.length > 5 ||
           startBatch.isPending ||
           batchQueuedNow ||
           /*
@@ -1986,7 +1948,6 @@ function QueuePage() {
               disabled={
                 startBatch.isPending ||
                 focusAddable.length === 0 ||
-                selectedBatchLeads.length >= 5 ||
                 batchQueuedNow
               }
               onClick={() =>
@@ -2000,7 +1961,7 @@ function QueuePage() {
                 )
               }
             >
-              Add suggested focus ({Math.min(focusAddable.length, 5 - selectedBatchLeads.length)})
+              Add suggested focus ({Math.min(focusAddable.length, Math.max(0, 5 - selectedBatchLeads.length))})
             </InkButton>
           </div>
           <ModelPicker
@@ -2016,7 +1977,7 @@ function QueuePage() {
             disabled={startBatch.isPending}
             compact
           />
-          <p className="meta">{selectedBatchLeads.length} of 5 selected</p>
+          <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
           {/*
             BF5: name the leads the press below will draft. Until the batch
             moved into this dialog the panel's own checkboxes showed which

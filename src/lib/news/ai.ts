@@ -1,12 +1,13 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
+import { providerErrorDetail, providerResponseDetail, providerHttpError } from "./provider-error-detail.ts";
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
 
 export type { ChatResultMetadata } from "./ai-result-metadata.ts";
 export type GrokOk = { ok: true; text: string; meta?: ChatResultMetadata };
-export type GrokErr = { ok: false; error: string; meta?: ChatResultMetadata };
+export type GrokErr = { ok: false; error: string; partialText?: string; meta?: ChatResultMetadata };
 
 import {
   isCustomModelChoice,
@@ -31,7 +32,7 @@ import {
   type ModelEffort,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
-import { normalizeProviderModelId } from "./provider-model-id.ts";
+import { isGeminiOpenAiEndpoint, normalizeProviderModelId } from "./provider-model-id.ts";
 import type { LocalCatalog } from "./local-models.ts";
 import {
   LOCAL_MODEL_NOTHING_LOADED,
@@ -131,6 +132,7 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     baseUrl: string;
     modelId: string;
     apiKey: string | null;
+    name?: string;
   }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
@@ -476,7 +478,7 @@ async function resolveCustomProvider(
         baseUrl: trimSlash(connection.baseUrl),
         model: connection.modelId,
         apiKey: connection.apiKey || "not-needed",
-        label: "Custom AI",
+        label: connection.name?.trim() || "Custom AI",
       },
     };
   } catch (err) {
@@ -531,8 +533,10 @@ async function probeOpenAi(
     ) {
       return { ok: true, label: provider.label, choice: "configured" };
     }
-    if (!res.ok)
-      return { ok: false, error: `${provider.label} readiness check failed (${res.status}).` };
+    if (!res.ok) {
+      const detail = await providerResponseDetail(res, provider.apiKey);
+      return { ok: false, error: `${provider.label} readiness check failed (${res.status}).${detail ? `\n\n${detail}` : ""}` };
+    }
     const body = (await res.json().catch(() => null)) as { data?: { id?: string }[] } | null;
     if (!Array.isArray(body?.data)) {
       return {
@@ -1082,11 +1086,15 @@ export async function grokChat(
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   const llm = provider;
+  const failureLabel = custom?.ok ? `Custom provider ${llm.label} (${model})` : llm.label;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload: Record<string, unknown> = {
     model,
     temperature: 0.2,
-    max_tokens: maxTokens,
+    // Gemini shares its output budget with thinking; the 2,200-token writer
+    // request measured 85 visible tokens. Reserve room for a complete draft.
+    max_tokens: custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)
+      ? Math.max(maxTokens, 16_384) : maxTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -1122,9 +1130,14 @@ export async function grokChat(
     return result;
   };
   const isTimeout = (err: unknown) =>
-    err instanceof Error && (/timeout/i.test(err.name) || /timed?\s*out/i.test(err.message));
+    err instanceof Error && (/timeout|abort/i.test(err.name) || /timed?\s*out/i.test(err.message));
   const deadline = Date.now() + timeoutMs;
   const remaining = () => Math.max(1, deadline - Date.now());
+  let retryFailureDetail = "";
+  const transportError = (err: unknown) => {
+    const message = isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err);
+    return retryFailureDetail ? `${message}\n\n${retryFailureDetail}` : message;
+  };
   let res: Response;
   try {
     res = await fetch(url, {
@@ -1136,16 +1149,19 @@ export async function grokChat(
   } catch (err) {
     return {
       ok: false,
-      error: connectionError(llm.label, err),
+      error: transportError(err),
       meta: openAiMeta(undefined, isTimeout(err)),
     };
   }
   if (res.status === 429 || res.status >= 500) {
-    if (timeoutMs < 30_000) {
-      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+    let rejectedBody: string;
+    try { rejectedBody = await res.text(); } catch (err) {
+      return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
-    if (remaining() <= 1_000)
-      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+    retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
+    if (timeoutMs < 30_000 || remaining() <= 1_000) {
+      return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
+    }
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -1157,7 +1173,7 @@ export async function grokChat(
     } catch (err) {
       return {
         ok: false,
-        error: connectionError(llm.label, err),
+        error: transportError(err),
         meta: openAiMeta(undefined, isTimeout(err)),
       };
     }
@@ -1166,20 +1182,24 @@ export async function grokChat(
     error?: { message?: string; type?: string; code?: string | number } | string;
     model?: string;
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
+    choices?: { finish_reason?: string; message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
+  let responseText: string;
+  try { responseText = await res.text(); } catch (err) {
+    return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
+  }
   try {
-    body = (await res.json()) as typeof body;
+    body = JSON.parse(responseText) as typeof body;
   } catch {
     return {
       ok: false,
-      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}`,
+      error: res.ok ? `${failureLabel} returned an unreadable response` : providerHttpError(failureLabel, res.status, responseText, llm.apiKey),
       meta: openAiMeta(),
     };
   }
   if (!res.ok) {
-    // Do not reflect arbitrary remote-provider bodies into a job or the desk.
-    // For the loopback local model, recognize the one actionable structured
+    // Preserve the provider's words, redacting the credential sent to it.
+    // For the loopback local model, recognize the actionable structured
     // failure an editor can fix by choosing a larger-context model or reducing
     // the supplied record. This also replaces the opaque "API error 400" that
     // hid a measured 35k-token request against a 32k context.
@@ -1198,25 +1218,32 @@ export async function grokChat(
       ok: false,
       error: localContextFailure
         ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
-        : `${llm.label} API error ${res.status}`,
+        : providerHttpError(failureLabel, res.status, body, llm.apiKey),
       meta: openAiMeta(body),
     };
   }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
-    // reflect an Authorization header or request payload; preserve the useful
-    // HTTP failure category without letting that body enter a job error or UI.
-    if (llm.label === "Custom AI")
-      return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
+    // reflect an Authorization header; retain its message after redacting the key.
+    if (custom?.ok)
+      return { ok: false, error: `${failureLabel} API error\n\n${providerErrorDetail(body, llm.apiKey)}`, meta: openAiMeta(body) };
     return {
       ok: false,
-      error: `${llm.label} API error${detail ? `: ${detail}` : ""}`,
+      error: `${failureLabel} API error${detail ? `: ${detail}` : ""}`,
       meta: openAiMeta(body),
     };
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
+  if (body.choices?.[0]?.finish_reason === "length") {
+    return {
+      ok: false,
+      error: `${failureLabel}: ${isGeminiOpenAiEndpoint(llm.baseUrl) ? "Google" : "Provider"} says: reply was cut off because the output token limit was reached (finish reason: length).`,
+      ...(text ? { partialText: text } : {}),
+      meta: openAiMeta(body),
+    };
+  }
   if (!text) {
     // A "thinking" model (gemma4, qwen3.x, ...) can spend its whole
     // `max_tokens` budget on `reasoning_content` (most OpenAI-compatible
@@ -1228,6 +1255,7 @@ export async function grokChat(
     // an unlisted model, a different quantization, or an explicit
     // LLM_REASONING_EFFORT override can still hit it, so this checks the
     // actual response rather than trusting the flag.
+    if (custom?.ok) return { ok: false, error: `${failureLabel} returned no model output.`, meta: openAiMeta(body) };
     const reasoning = (message?.reasoning_content ?? message?.reasoning ?? "").trim();
     if (reasoning) {
       return {
@@ -1328,8 +1356,9 @@ export function providerBudget(
   }
   // A custom connection is an explicit OpenAI-compatible transport resolved
   // at the server boundary. Its endpoint/model are intentionally absent from
-  // the public registry, but it has the same ordinary HTTP call shape.
-  if (isCustomModelChoice(choice)) return { ...KIND_BUDGETS.openai };
+  // the public registry. Research, writing and checks need a pipeline budget,
+  // even when the provider's transport is HTTP; 38 seconds starved the writer.
+  if (isCustomModelChoice(choice)) return { ...KIND_BUDGETS.codex };
   const entry = providerEntry(choice);
   if (entry) return effectiveBudget(entry.id, overrides);
   /*
@@ -1653,20 +1682,24 @@ export function unreadableReplyError(label?: string): string {
  * functions are injected, and no model is called here.
  */
 export async function readableReplyOrRetry<T>(input: {
-  attempt: () => Promise<GrokOk | GrokErr>;
+  attempt: (retryInstruction?: string) => Promise<GrokOk | GrokErr>;
   read: (text: string) => T | null;
   label?: string;
+  onRetry?: () => void | Promise<void>;
 }): Promise<
-  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; retried: boolean }
-  | { ok: false; error: string; meta?: ChatResultMetadata; retried: boolean }
+  | { ok: true; value: T; text: string; meta?: ChatResultMetadata; partialText?: string; retried: boolean }
+  | { ok: false; error: string; meta?: ChatResultMetadata; partialText?: string; retried: boolean }
 > {
   const first = await input.attempt();
-  if (!first.ok) return { ok: false, error: first.error, meta: first.meta, retried: false };
+  if (!first.ok) return { ok: false, error: first.error, partialText: first.partialText, meta: first.meta, retried: false };
   const value = input.read(first.text);
   if (value !== null) return { ok: true, value, text: first.text, meta: first.meta, retried: false };
 
-  const second = await input.attempt();
-  if (!second.ok) return { ok: false, error: second.error, meta: second.meta, retried: true };
+  await input.onRetry?.();
+  const second = await input.attempt(
+    "Your previous reply could not be read as JSON. Reply with JSON only: one complete valid JSON object matching the requested fields. Escape quotes and newlines inside strings. Do not include Markdown fences, commentary, or text outside the JSON object.",
+  );
+  if (!second.ok) return { ok: false, error: second.error, partialText: second.partialText, meta: second.meta, retried: true };
   const recovered = input.read(second.text);
   if (recovered !== null)
     return { ok: true, value: recovered, text: second.text, meta: second.meta, retried: true };

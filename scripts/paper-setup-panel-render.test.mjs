@@ -163,6 +163,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/form-error": formErrorStub,
       "@/components/desk-chrome-utils": utilsStub,
       "@/components/paper-setup-form": formModule,
+      "@/components/newsletter-mailbox": inlineModule("export function NewsletterMailbox() { return null; }"),
       "@/lib/auth/use-current-user": names(["useCurrentUserState"]),
       "@/components/states": names(["ListSkeleton"]),
       "@/lib/ops/dashboard": names(["getOpsHealth", "runOpsAction"]),

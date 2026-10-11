@@ -4,6 +4,7 @@ import { getSql } from "../db.ts";
 import { ensureNewsroomSchema } from "./membership.ts";
 import {
   inferCapabilities,
+  connectionReadinessError,
   decryptApiKey,
   discoverConnectionModels,
   discoverCustomAiModels,
@@ -131,6 +132,22 @@ describe("custom OpenAI-compatible connection contract", () => {
       const encrypted = encryptApiKey("sk-private-value");
       assert.doesNotMatch(encrypted, /sk-private-value/);
       assert.equal(decryptApiKey(encrypted), "sk-private-value");
+    } finally {
+      if (prior === undefined) delete process.env.BETTER_AUTH_SECRET;
+      else process.env.BETTER_AUTH_SECRET = prior;
+    }
+  });
+
+  it("explains a restored Gemini key encrypted under a different server secret", () => {
+    const prior = process.env.BETTER_AUTH_SECRET;
+    try {
+      process.env.BETTER_AUTH_SECRET = "original-server-secret";
+      const encrypted = encryptApiKey("private-gemini-key");
+      process.env.BETTER_AUTH_SECRET = "restored-dev-server-secret";
+      assert.throws(() => decryptApiKey(encrypted), /cannot be decrypted.*Re-enter/);
+      const error = connectionReadinessError({ id: "gemini", newsroomId: 1, name: "Gemini", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", modelId: "gemini-3.5-flash", encryptedApiKey: encrypted, enabled: true });
+      assert.match(error!, /cannot be decrypted.*before drafting/);
+      assert.doesNotMatch(error!, /private-gemini-key|original-server-secret|restored-dev-server-secret/);
     } finally {
       if (prior === undefined) delete process.env.BETTER_AUTH_SECRET;
       else process.env.BETTER_AUTH_SECRET = prior;

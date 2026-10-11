@@ -130,7 +130,9 @@ test("document reading retries only the failed chunk and keeps completed chunks"
   assert.match(evidence, /first evidence from deepseek-flash/);
   assert.match(evidence, /second evidence from qwen-local/);
 });
-test("Story retries only the failed writer call and keeps completed research", async () => {
+test("Story retries only the failed writer call and keeps completed research", async (t) => {
+  const interval = globalThis.setInterval;
+  t.mock.method(globalThis, "setInterval", (callback: () => void, delay: number) => interval(callback, delay === 12_000 ? 5 : delay));
   await ensureJobsSchema();
   const sql = await getSql(), room = 88405, user = "writer-call-failover-editor";
   await sql.query("insert into newsrooms(id,name) values($1,'Writer failover room') on conflict(id) do nothing", [room]);
@@ -168,6 +170,11 @@ test("Story retries only the failed writer call and keeps completed research", a
     },
     chat: async (_system, _user, _tokens, opts) => {
       providerCalls.push({ choice: opts?.choice, effort: opts?.reasoningEffort });
+      if (providerCalls.length === 2) {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        const [progress] = await sql.query<{ step_text: string }>("select step_text from desk_jobs where id=$1", [job.id]);
+        assert.match(progress.step_text, /Waiting on DeepSeek v4\.1 Flash/);
+      }
       return providerCalls.length === 1
         ? { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" }
         : { ok: true as const, text: "writer result" };

@@ -1,8 +1,10 @@
 import { withLeadDraftLock } from "./draft-order.server.ts";
+import type { Sql } from "../db.ts";
 import { stripReporterNotebook } from "./strip-draft.ts";
-import { evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
+import { EVIDENCE_REVIEW_VERSION_KEY, evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
 import { headlineSourceAfterEdit } from "./headline-control.ts";
 import { researchJsonWithStyleAudit, styleRecordForSavedText, type DraftStyleRecord } from "./draft-audit-record.ts";
+import { topicConfirmationFingerprint } from "./notes.ts";
 import type { DraftRow } from "./types.ts";
 import { sanitizeJsonLeaves } from "./storable-text.ts";
 export type DraftEditInput = { leadId: number; headline: string; dek: string; body: string; topic: string; evidenceDecision?: EvidenceDecision; evidenceToken?: string; sourceAttachmentNote?: string };
@@ -16,10 +18,13 @@ export type DraftEditInput = { leadId: number; headline: string; dek: string; bo
  * that record describes the body being saved here.
  */
 export async function saveDraftForEditor(context: { userId: string; newsroomId: number }, data: DraftEditInput, style?: DraftStyleRecord | null) {
+  return withLeadDraftLock(context, data.leadId, sql => saveDraftForEditorInTransaction(sql, context, data, style));
+}
+/** The caller already holds the lead fence; publish uses its own transaction. */
+export async function saveDraftForEditorInTransaction(sql: Sql, context: { userId: string; newsroomId: number }, data: DraftEditInput, style?: DraftStyleRecord | null) {
   // Style repair and editor-dialog rewrites share this persistence boundary.
   data = sanitizeJsonLeaves(data);
   style = sanitizeJsonLeaves(style);
-  return withLeadDraftLock(context, data.leadId, async (sql) => {
     const existing = await sql<DraftRow>`
       select * from drafts where lead_id = ${data.leadId} and newsroom_id = ${context.newsroomId}
       order by updated_at desc, id desc limit 1 for update
@@ -41,7 +46,49 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
     if (existing[0]) {
       if (decision && data.evidenceToken !== evidenceReviewToken(existing[0])) throw new Error("The draft or its evidence changed. Reload and review the current evidence before confirming.");
       const evidence = reconcileDraftEvidence(existing[0], body, decision);
-      const researchJson = withSourceNote(researchJsonWithStyleAudit(evidence.research_json, styleRecord()));
+      const nextFields = {
+        headline: data.headline,
+        dek: data.dek,
+        body,
+        topic: data.topic,
+        source_urls: evidence.source_urls,
+        provenance_json: evidence.provenance_json,
+        found_note: evidence.found_note,
+        unanswered: evidence.unanswered,
+      };
+      /*
+        UNIT ZC: an edit takes a completed check back.
+
+        A check completed before the identity stamp existed leaves only
+        `evidenceReconciledAt` and a `checkedText` equal to the BODY, so a
+        headline- or dek-only edit would leave the legacy pair still matching and
+        the zero-claims gate still clear. When this save actually moves the draft
+        -- the identity the token hashes changed -- and the row carried a
+        completion at all, write the ORIGINAL's identity: it no longer matches the
+        saved row, so the completion is stale and the gate reopens. A save that
+        changes nothing leaves the memo alone, so the ordinary publish-time save
+        cannot take a completion back.
+      */
+      const movedOn = evidenceReviewToken(existing[0]) !== evidenceReviewToken({ ...existing[0], ...nextFields });
+      let priorMemo: Record<string, unknown> = {};
+      try {
+        const parsed: unknown = JSON.parse(evidence.research_json);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) priorMemo = parsed as Record<string, unknown>;
+      } catch {
+        /* A malformed legacy memo is treated as nothing to preserve, never a crash. */
+      }
+      /* Unit ZC: introduce the stamp only when the row carries a completion and
+         NONE exists yet (a legacy completion). An existing stamp is preserved as
+         it stands: it already names a version, and replacing it with an
+         intermediate one would only ever make it match a draft nobody checked. */
+      const needsLegacyStamp =
+        movedOn &&
+        !(EVIDENCE_REVIEW_VERSION_KEY in priorMemo) &&
+        Boolean(priorMemo.evidenceReconciledAt);
+      const stamped = needsLegacyStamp
+        ? { ...priorMemo, [EVIDENCE_REVIEW_VERSION_KEY]: topicConfirmationFingerprint(evidenceReviewToken(existing[0])) }
+        : priorMemo;
+      const researchJson = withSourceNote(researchJsonWithStyleAudit(JSON.stringify(stamped), styleRecord()));
       /*
         WHO WROTE THIS HEADLINE (0.6.67). A redraft replaces the row, so the
         desk has to know whether the headline it is about to replace was the
@@ -70,5 +117,4 @@ export async function saveDraftForEditor(context: { userId: string; newsroomId: 
         values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, 'editor', ${withSourceNote(researchJsonWithStyleAudit(null, styleRecord()))})`;
     }
     return { ok: true as const };
-  });
 }

@@ -27,7 +27,7 @@ test("opening Checks keeps live capture claims unreviewed and acceptance unlocks
     Object.assign(globalThis,{fixtureReact:React,reviewState:reviewEvidenceCheckState,ranLine:evidenceRanLine,captureCount:citedCaptureCount});
     globalThis.captureReview={rows:[],manualClaimRows:[],evidenceToken:'live-review',claimRows:Array.from({length:11},(_,i)=>({key:'claim-'+i,judgment:{value:'unreviewed'},captures:[{versionId:i%3+1,available:true,readable:true}]}))};
     globalThis.screenData={lead:{lead:{id:461,headline:'Service changes',topic:'transportation',status:'published',source_urls:'[]'},draft:{id:8,headline:'Service changes',dek:'Feedback is open',body:'Residents can comment on service changes.',topic:'transportation',research_json:null},unreviewedClaimsAcceptedCount:11,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
-    globalThis.renderStory=()=>root.render(React.createElement(Route.component));
+    globalThis.renderStory=()=>root.render(React.createElement(Route.component,{key:globalThis.storyKey}));
     const root=createRoot(document.getElementById('root')); globalThis.renderStory();`;
   const bundle = await rolldown({ input: "fixture", plugins: [{
     name: "isolated-screen",
@@ -63,4 +63,15 @@ test("opening Checks keeps live capture claims unreviewed and acceptance unlocks
   assert.equal(await publish.isEnabled(), true);
   assert.equal(await page.getByText(reason, { exact: true }).count(), 1);
   assert.match(await checks.textContent(), /3 captures.*11 claims need review/);
+  // A legacy empty draft keeps its publish blocker and never inherits Ready.
+  await page.evaluate(() => {
+    globalThis.screenData.lead.draft.body = "";
+    globalThis.storyKey = "empty-draft";
+    globalThis.renderStory();
+  });
+  await page.waitForFunction(() => document.querySelector("[data-story-readiness]")?.getAttribute("title") === "No draft yet.");
+  assert.equal(await chip.getAttribute("data-story-readiness"), "not-ready");
+  assert.equal(await chip.innerText(), "No draft yet");
+  assert.equal(await publish.isEnabled(), false);
+  assert.ok(await page.getByText("The story body is empty.", { exact: true }).count() > 0);
 });

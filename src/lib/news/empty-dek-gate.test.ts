@@ -46,8 +46,19 @@ async function leadFixture(dek: string) {
     [USER, NEWSROOM],
   );
   await sql.query(
-    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the budget',$4,'The council approved the budget on Tuesday night after a short debate.','council','[]','','[]','news','[]','[]','{}')",
-    [USER, NEWSROOM, lead.id, dek],
+    "insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,integrity_notes,provenance_json,form,found_note,unanswered,research_json) values($1,$2,$3,'Council approves the budget',$4,'The council approved the budget on Tuesday night after a short debate.','council','[]','','[]','news','[]','[]',$5)",
+    [
+      USER,
+      NEWSROOM,
+      lead.id,
+      dek,
+      /* A completed evidence check for this body, so the zero-claims gate stays
+         out of the way and the dek gate is the only variable under test. */
+      JSON.stringify({
+        aiEvidenceReview: { checkedText: "The council approved the budget on Tuesday night after a short debate.", rows: [] },
+        evidenceReconciledAt: "2026-10-10T02:20:39.040Z",
+      }),
+    ],
   );
   return { leadId: lead.id };
 }

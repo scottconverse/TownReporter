@@ -25,7 +25,7 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
     selectedSourceIds: p.selected_source_ids ?? [],
     everyDayCount: p.every_day_source_count ?? 8,
     preferences,
-    cap: p.source_cap,
+    cap: (p.source_cap_override ?? p.source_cap),
   });
   const prioritySources = rotation.sourceIds.map((id: number) => pool.find((source: any) => source.id === id)).filter(Boolean);
   const sources = allAccepted ? orderAcceptedSources(pool, (p.selected_source_ids ?? []).slice(0, p.every_day_source_count ?? 8)) :
@@ -43,9 +43,9 @@ export async function dailyScanPlan(sql: Sql, newsroomId: number, policy?: any, 
       // The priority snapshot stays compatible; execution carries the complete pinned pool.
       ...(allAccepted ? { acceptedSources: sources } : {}),
       revision: p.revision,
-      sourceCap: p.source_cap,
+      sourceCap: (p.source_cap_override ?? p.source_cap),
       everyDaySourceCount: p.every_day_source_count ?? 8,
-      rotatingSourceCount: Math.max(0, p.source_cap - (p.every_day_source_count ?? 8)),
+      rotatingSourceCount: Math.max(0, (p.source_cap_override ?? p.source_cap) - (p.every_day_source_count ?? 8)),
     },
   };
 }
