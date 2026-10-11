@@ -2758,13 +2758,9 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
   const settings = await getPaperConfig(newsroomId).catch(() => null);
   const place: Place = opts.place ?? settings ?? { city: "", state: "" };
   await investigationNewsroom(opts.investigationId, newsroomId);
-  const investigation = await sql<{ title: string; ordinary_explanation: string | null }>`
-    select title, ordinary_explanation from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
+  const investigation = await sql<{ title: string }>`
+    select title from investigations where id = ${opts.investigationId} and newsroom_id = ${newsroomId} limit 1
   `;
-  const frontierContext = {
-    subject: `${investigation[0]?.title ?? ""} ${investigation[0]?.ordinary_explanation ?? ""}`,
-    town: place.city ?? "",
-  };
   const investigationTitle = investigation[0]?.title ?? "";
   if (opts.executionMode === "responsive" && !opts._responsiveOperation) {
     return responsiveResearchLoop(opts, investigationTitle, place, newsroomId);
@@ -2909,64 +2905,38 @@ export async function researchLoop(opts: ResearchLoopOptions): Promise<ResearchL
     id: number;
     label: string;
     kind: string;
-    why: string;
-    status: string;
-    closed_reason: string | null;
     next_steps: string;
     strategies_tried: string | null;
   };
-  const gateSavedFrontier = async (rows: ActiveFrontierRow[]) => {
-    const relevant: ActiveFrontierRow[] = [];
-    for (const row of rows) {
-      const gated = gateFrontierRelevance(row, frontierContext);
-      if (gated.status === "closed" && row.status !== "closed") {
-        await sql`
-          update frontier_items
-          set status = ${"closed"}, closed_reason = ${gated.closed_reason}
-          where id = ${row.id} and investigation_id = ${opts.investigationId}
-            and newsroom_id = ${newsroomId}
-        `;
-      } else if (gated.status !== "closed") {
-        relevant.push(gated);
-      }
-    }
-    return relevant.slice(0, 16);
-  };
-  const readActiveFrontier = async () => {
-    const rows = await sql<ActiveFrontierRow>`
-      select id, label, kind, why, status, closed_reason, next_steps, strategies_tried from frontier_items
-      where investigation_id = ${opts.investigationId}
-        and newsroom_id = ${newsroomId}
-        and status in ('open', 'investigating', 'reopened')
-      order by priority desc, id asc
-    `;
-    return gateSavedFrontier(rows);
-  };
+  const readActiveFrontier = () => sql<ActiveFrontierRow>`
+    select id, label, kind, next_steps, strategies_tried from frontier_items
+    where investigation_id = ${opts.investigationId}
+      and newsroom_id = ${newsroomId}
+      and status in ('open', 'investigating', 'reopened')
+    order by priority desc, id asc limit 16
+  `;
   const activeAtRunStart = await readActiveFrontier();
   if (!activeAtRunStart.length) {
     // Start a later Keep digging run from the strongest saved deferred work.
     // Do this once per run: items deferred during this run stay parked until
     // the next explicit continuation, so they cannot defeat the working-set
     // cap by cycling back in on the next hop.
-    const deferred = await sql<ActiveFrontierRow>`
-      select id, label, kind, why, status, closed_reason, next_steps, strategies_tried from frontier_items
-      where investigation_id = ${opts.investigationId}
-        and newsroom_id = ${newsroomId} and status = 'deferred'
-      order by priority desc, id asc
+    await sql`
+      update frontier_items
+      set status = ${"reopened"},
+          prior_status = ${"deferred"},
+          reopened_at = now(),
+          reopened_from = ${"New run resumed saved deferred trail"},
+          closed_reason = ${"Resumed at the start of a later research run"}
+      where id in (
+        select id from frontier_items
+        where investigation_id = ${opts.investigationId}
+          and newsroom_id = ${newsroomId}
+          and status = 'deferred'
+        order by priority desc, id asc
+        limit 16
+      )
     `;
-    const relevantDeferred = await gateSavedFrontier(deferred);
-    for (const row of relevantDeferred) {
-      await sql`
-        update frontier_items
-        set status = ${"reopened"},
-            prior_status = ${"deferred"},
-            reopened_at = now(),
-            reopened_from = ${"New run resumed saved deferred trail"},
-            closed_reason = ${"Resumed at the start of a later research run"}
-        where id = ${row.id} and investigation_id = ${opts.investigationId}
-          and newsroom_id = ${newsroomId} and status = 'deferred'
-      `;
-    }
   }
 
   hopLoop: for (let hop = 0; hop < hopsBudget; hop++) {
