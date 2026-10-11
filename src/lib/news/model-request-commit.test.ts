@@ -32,6 +32,7 @@ import {
 } from "./model-request-commit.server.ts";
 /* SG1b: these newsrooms have no paper_settings row, which the shared commit boundary now refuses. Mark room 1 set up, as the desk would. */
 import { ensurePaperSettingsSchema } from "./paper-settings.ts";
+import { modelChoiceLabel } from "./model-choice.ts";
 
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
@@ -53,10 +54,34 @@ for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claud
   assert.equal(result.ok, true);
   if (!result.ok) return;
   const [job] = await sql<{ failover_note: string; result_json: string }>`select failover_note,result_json from desk_jobs where id=${result.jobId}`;
-  assert.match(job.failover_note, /Claude.*signed out.*Codex Sol 6.1/);
+  assert.equal(job.failover_note, `${modelChoiceLabel(choice)}: Claude is signed out on this server. Sign in once: run claude auth login on the server. -> Codex Sol 6.1`);
   const receipt = JSON.parse(job.result_json);
   assert.equal(receipt.requestedRuntime, choice);
   assert.equal(receipt.actualRuntime, "codex-frontier");
+});
+
+for (const [error, reason] of [
+  ["Claude CLI not found", "Claude Code is not installed on this server."],
+  ["Claude Haiku usage limit exceeded", "Claude Haiku hit its usage limit."],
+  ["Claude Haiku is unavailable: local service failed", "Claude Haiku is not ready: Claude Haiku is unavailable: local service failed"],
+]) it(`records the picker readiness reason for ${error}`, async () => {
+  const sql = await getSql();
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku-reason','Picker reason regression','Why') returning id`;
+  const input = { context: { userId: "picker-haiku-reason", newsroomId: 1 }, leadId: lead.id, modelChoice: "claude-haiku" as const };
+  const deps = {
+    probeProvider: async (pick: string | undefined) => pick === "claude-haiku"
+      ? { ok: false as const, error }
+      : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
+    enqueueJob: (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
+  };
+  const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
+  assert.equal(warning.ok, false);
+  assert.ok(JSON.stringify(warning).includes(reason));
+  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps);
+  assert.equal(result.ok, true);
+  if (!result.ok) assert.fail("Acknowledged unavailable Haiku must use the ready fallback");
+  const [job] = await sql<{ failover_note: string }>`select failover_note from desk_jobs where id=${result.jobId}`;
+  assert.equal(job.failover_note, `Claude Haiku: ${reason} -> Codex Sol 6.1`);
 });
 
 it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {

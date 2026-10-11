@@ -121,7 +121,7 @@ async function resolveTechnicalPreflight(
       requested,
       resolved: plan.next,
       reason: plan.reason,
-      note: acknowledgedUnavailable ? `${previousLabel}: ${plan.reason === "auth" ? "signed out" : first.error} -> ${plan.label}` : failoverNoteSentence(plan.label, previousLabel, plan.reason),
+      note: acknowledgedUnavailable ? `${previousLabel}: ${readinessFailureMessage(requested, previousLabel, first.error)} -> ${plan.label}` : failoverNoteSentence(plan.label, previousLabel, plan.reason),
       stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
     },
   };

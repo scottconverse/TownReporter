@@ -1,11 +1,12 @@
 /** Preserve the provider's message for the desk while removing the key we sent. */
 export function providerErrorDetail(body: unknown, apiKey?: string | null): string {
+  if (Array.isArray(body)) body = body[0];
   let message: unknown = body;
   if (body && typeof body === "object") {
     const error = (body as { error?: unknown }).error;
+    const detail = error && typeof error === "object" ? error as { message?: unknown; status?: unknown } : body as { message?: unknown; status?: unknown };
     message = typeof error === "string" ? error
-      : error && typeof error === "object" ? (error as { message?: unknown }).message
-      : (body as { message?: unknown }).message;
+      : typeof detail.message === "string" && detail.message.trim() ? detail.message : detail.status;
   }
   if (typeof message !== "string") return "";
   const redacted = apiKey && apiKey !== "not-needed" ? message.replaceAll(apiKey, "[redacted]") : message;
