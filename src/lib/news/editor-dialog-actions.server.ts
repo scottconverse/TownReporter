@@ -1,3 +1,6 @@
+import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
+import { paperSetupWarning } from "./paper-settings.ts";
+import { checkRate } from "./ops.ts";
 /**
  * The server half of the editor's new dialogs (Unit BK).
  *
@@ -91,6 +94,8 @@ export type EditorDialogDeps = {
   insertLead: InsertLead;
   commitDraft: typeof commitStoryDraftForAuthenticatedEditor;
   now: () => Date;
+  paperSetupWarning?: typeof paperSetupWarning;
+  checkRate?: typeof checkRate;
 };
 
 export type EditorDialogContext = { userId: string; newsroomId: number };
@@ -162,7 +167,7 @@ export type AddLeadResult =
       /** A sentence the dialog shows in the warning style. Never a silent no-op. */
       notice?: string | null;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; warning?: { key: string; sentence: string } };
 
 /**
  * "Add a lead": file it, then do whatever "Then" asked for.
@@ -191,6 +196,7 @@ export async function performAddLead(
   context: EditorDialogContext,
   data: {
     paste: string;
+    override?: string[];
     why?: string;
     then: "score" | "draft" | "as-is";
     modelChoice?: string;
@@ -198,8 +204,8 @@ export async function performAddLead(
   },
   deps: EditorDialogDeps,
 ): Promise<AddLeadResult> {
-  const paste = data.paste.trim().slice(0, 20_000);
-  if (paste.length < 8) return { ok: false as const, error: "Give the desk a link or a tip." };
+  const paste = data.paste.trim();
+  if (!paste.length) return { ok: false as const, error: "Give the desk a link or a tip." };
 
   const firstLine = paste.split("\n")[0]?.replace(/\s+/g, " ").trim() ?? "";
   /*
@@ -216,11 +222,23 @@ export async function performAddLead(
   const isLink = looksLikeUrl(firstLine);
   const derived = isLink ? headlineFromUrl(firstLine).trim() : "";
   const headline = (derived.length >= 8 ? derived : isLink ? firstLine : firstLine || paste.slice(0, 120))
-    .trim()
-    .slice(0, 180);
-  if (headline.length < 8) return { ok: false as const, error: "Give the desk a link or a tip." };
+    .trim();
+  if (headline.length < 8) {
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId });
+    if (warning) return warning;
+  }
 
-  const why = (data.why ?? "").trim().slice(0, 800);
+  const why = (data.why ?? "").trim();
+  for (const [key, exceeded, sentence] of [
+    ["lead-paste-length", paste.length > 20_000, "This pasted lead is longer than the usual 20,000 characters."],
+    ["lead-headline-length", headline.length > 180, "This lead headline is longer than the usual 180 characters."],
+    ["lead-note-length", why.length > 800, "This lead note is longer than the usual 800 characters."],
+  ] as const) {
+    if (!exceeded) continue;
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      key, sentence, {kind: "newsroom", id: context.newsroomId});
+    if (warning) return warning;
+  }
   /*
     The URLs come out of `parseSourceLines`, the parser the "Paste a list" tab
     and `addSourcesBulk` already share, so a link written as "https://x, Name"
@@ -228,6 +246,12 @@ export async function performAddLead(
     case and answers an empty array.
   */
   const urls = parseSourceLines(paste).map((row) => row.url);
+  if (data.then === "draft") {
+    const setup = await (deps.paperSetupWarning ?? paperSetupWarning)(context, data.override, "draft this story");
+    if (setup) return setup;
+    const rate = await (deps.checkRate ?? checkRate)(context.userId, "draft", context.newsroomId, data.override, { record: false });
+    if (rate) return rate;
+  }
   const filed = await deps.insertLead(
     { userId: context.userId, newsroomId: context.newsroomId },
     { headline, why, topic: "council", urls },
@@ -296,10 +320,11 @@ export async function performAddLead(
       {
         context: { userId: context.userId, newsroomId: context.newsroomId },
         leadId,
+        override: data.override,
         modelChoice: resolution.providerId as StoryModelChoice,
         modelEffort: resolution.effort,
       },
-      {},
+      { ratePreflight: true },
     )
     .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Could not start the draft." }));
   if (!started.ok) {
@@ -340,7 +365,7 @@ export type HoldLeadResult =
  */
 export async function performHoldLead(
   context: EditorDialogContext,
-  data: { id: number; choice: string; note?: string },
+  data: { id: number; choice: string; note?: string; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<HoldLeadResult> {
   const sql = await deps.getSql();
@@ -354,14 +379,19 @@ export async function performHoldLead(
   const chosen = data.choice === "none" ? undefined : holdChoice(data.choice);
   if (data.choice !== "none" && !chosen) return { ok: false as const, error: "That is not a hold reason." };
 
+  if ((data.note ?? "").trim().length > 1000) {
+    const warning = await editorWarning({ ...context, sql }, data.override, "hold-note-length",
+      "This hold note is longer than the usual 1,000 characters.", { kind: "lead", id: data.id });
+    if (warning) return warning;
+  }
   const notes = parseNotes(lead.notes_json);
   notes.hold = {
     key: data.choice === "none" ? "none" : chosen!.key,
     reason: chosen?.label ?? "",
-    note: (data.note ?? "").trim().slice(0, 1000),
+    note: (data.note ?? "").trim(),
     at: deps.now().toISOString(),
   };
-  const held = await setLeadStatusForEditor(sql, context.newsroomId, { id: data.id, status: "held" }, packNotes(notes));
+  const held = await setLeadStatusForEditor(sql, context, { id: data.id, status: "held", override: data.override }, packNotes(notes));
   if (!held.ok) return held;
   const notice =
     chosen?.key === "follow-up"
@@ -437,7 +467,7 @@ export async function performSourceKillPattern(
 
 export type FindSourcesResult =
   | { ok: true; proposed: number; alreadyExisted: number; skipped: number; notice: string | null }
-  | { ok: false; error: string };
+  | { ok: false; error: string } | EditorWarningResult;
 
 /**
  * "Ask AI to find sources": propose pages, land them in Suggested sources.
@@ -458,11 +488,16 @@ export type FindSourcesResult =
  */
 export async function performFindSources(
   context: EditorDialogContext,
-  data: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null },
+  data: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<FindSourcesResult> {
   const topic = data.topic.trim();
-  if (topic.length < 4) return { ok: false as const, error: "Say what the paper should cover." };
+  if (!topic) return { ok: false as const, error: "Say what the paper should cover." };
+  if (topic.length < 4 || topic.length > 800) {
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      "source-search-topic", "This search topic is outside the usual 4 to 800 characters.", { kind: "newsroom", id: context.newsroomId });
+    if (warning) return warning;
+  }
 
   const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
   const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
@@ -845,7 +880,7 @@ export async function performWeaveIntoStory(
 
 /* ----------------------------------------------------------------- headline -- */
 
-export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false; error: string };
+export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false; error: string } | EditorWarningResult;
 
 /**
  * "Use this headline": write the chosen line onto the draft.
@@ -867,11 +902,16 @@ export type ChooseHeadlineResult = { ok: true; headline: string } | { ok: false;
  */
 export async function performChooseHeadline(
   context: EditorDialogContext,
-  data: { id: number; headline: string },
+  data: { id: number; headline: string; override?: string[] },
   deps: EditorDialogDeps,
 ): Promise<ChooseHeadlineResult> {
-  const headline = data.headline.trim().slice(0, 180);
-  if (headline.length < 8) return { ok: false as const, error: "A headline needs a full sentence." };
+  const headline = data.headline.trim();
+  if (!headline) return { ok: false as const, error: "The headline is empty." };
+  if (headline.length < 8 || headline.length > 180) {
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
+      "headline-length", "This headline is outside the usual 8 to 180 characters.", { kind: "lead", id: data.id });
+    if (warning) return warning;
+  }
 
   const sql = await deps.getSql();
   const drafts = await sql<DraftRow>`
@@ -893,6 +933,8 @@ export async function performChooseHeadline(
 export function editorDialogDeps(overrides: Partial<EditorDialogDeps> & Pick<EditorDialogDeps, "insertLead" | "commitDraft">): EditorDialogDeps {
   return {
     getSql,
+    paperSetupWarning,
+    checkRate,
     chat: grokChat,
     readAssignments: readModelAssignments,
     resolveLocalModel: async (newsroomId, scope) =>

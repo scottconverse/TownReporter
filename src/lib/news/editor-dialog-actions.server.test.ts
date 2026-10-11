@@ -55,11 +55,12 @@ const DRAFT = { id: 3, headline: "Council delays the budget", dek: "Because the 
 function fakeSql(plan: Plan, queries: Query[], chatCalls: { n: number }) {
   const tag = (strings: TemplateStringsArray, ...values: unknown[]) => {
     const text = strings.join(" ? ").replace(/\s+/g, " ").trim();
-    if (/^update /i.test(text)) {
+    if (/^(update|insert) /i.test(text)) {
       queries.push({ text, values, write: true });
       return Promise.resolve(/returning id/i.test(text) ? plan.leads ?? [] : []);
     }
     queries.push({ text, values, write: false });
+    if (/from leads/i.test(text)) return Promise.resolve(/source_urls/i.test(text) ? plan.killed ?? [] : plan.leads ?? []);
     if (/from drafts/i.test(text)) return Promise.resolve(plan.drafts ?? []);
     if (/from sources/i.test(text)) return Promise.resolve(plan.sources ?? []);
     if (/source_urls/i.test(text)) return Promise.resolve(plan.killed ?? []);
@@ -81,6 +82,8 @@ function makeDeps(plan: Plan) {
 
   const deps: EditorDialogDeps = {
     getSql: async () => sql,
+    paperSetupWarning: async () => null,
+    checkRate: async () => null,
     chat: (async (_system: string, _user: string, _maxTokens: number, options: Record<string, unknown>) => {
       chatCalls.n += 1;
       chatOptions.push(options);
@@ -300,6 +303,24 @@ describe("add a lead", () => {
     assert.equal(chatCalls.n, 0);
   });
 
+  it("warns about lead size and preserves every character after attributed consent", async () => {
+    const filed: Array<{headline:string;why:string}> = [];
+    const f = makeDeps({ insertLead: async (_ctx,input) => {filed.push(input);return {ok:true,id:42};} });
+    const paste = "A long headline ".repeat(1300);
+    const why = "A long note ".repeat(80);
+    const input = {paste,why,then:"as-is" as const};
+    const warned = await performAddLead(context,input,f.deps);
+    assert.equal("warning" in warned && warned.warning?.key, "lead-paste-length");
+    assert.equal(filed.length,0);
+    const saved = await performAddLead(context,{...input,override:["lead-paste-length","lead-headline-length","lead-note-length"]},f.deps);
+    assert.equal(saved.ok,true);
+    assert.equal(filed[0].headline,paste.trim());
+    assert.equal(filed[0].why,why.trim());
+    const audit=f.writes().filter(q=>/insert into audit_events/.test(q.text));
+    assert.equal(audit.length,3);
+    assert.ok(audit.every(q=>q.values[0]===context.userId));
+  });
+
   it("files and stops for as-is, with no model call and no notice", async () => {
     const { deps, chatCalls } = makeDeps({});
     const result = await performAddLead(context, { paste: "A neighbor says the vote was 4-3", then: "as-is" }, deps);
@@ -318,7 +339,8 @@ describe("add a lead", () => {
     const empty = makeDeps({});
     const blank = await performAddLead(context, { paste: "short", then: "as-is" }, empty.deps);
     assert.equal(blank.ok, false);
-    assert.match(blank.ok ? "" : blank.error, /Give the desk a link or a tip\./);
+    assert.match(blank.ok ? "" : blank.error, /shorter than 8/);
+    assert.equal("warning" in blank && blank.warning?.key, "lead-short-headline");
     assert.deepEqual(empty.queries, []);
   });
 });
@@ -365,6 +387,23 @@ describe("hold", () => {
     assert.match(result.ok ? String(result.notice) : "", /AI follow-ups are not built/);
   });
 
+  it("holds a drafted lead after consent with the real editor identity and keeps an overridden long note", async () => {
+    const note = "Long hold note ".repeat(90);
+    const f = makeDeps({ leads: [{ ...lead, status: "drafted", has_draft: true }] });
+    const warned = await performHoldLead(context, { id: 5, choice: "none", note }, f.deps);
+    assert.equal("warning" in warned && (warned as {warning:{key:string}}).warning.key, "hold-note-length");
+    assert.deepEqual(f.writes(), []);
+    const drafted = await performHoldLead(context, { id: 5, choice: "none", note, override: ["hold-note-length"] }, f.deps);
+    assert.equal("warning" in drafted && (drafted as {warning:{key:string}}).warning.key, "lead-status-drafted");
+    const saved = await performHoldLead(context, { id: 5, choice: "none", note, override: ["hold-note-length", "lead-status-drafted"] }, f.deps);
+    assert.equal(saved.ok, true);
+    const update = f.writes().find(q => /^update leads/.test(q.text))!;
+    assert.equal(JSON.parse(String(update.values[2])).hold.note, note.trim());
+    const audit = f.writes().filter(q => /insert into audit_events/.test(q.text));
+    assert.ok(audit.some(q => JSON.parse(String(q.values[1])).key === "lead-status-drafted"));
+    assert.ok(audit.every(q => q.values[0] === context.userId));
+  });
+
   it("refuses a lead that is not on the desk, and a reason the desk does not have", async () => {
     const missing = makeDeps({ leads: [] });
     assert.deepEqual(await performHoldLead(context, { id: 5, choice: "none" }, missing.deps), {
@@ -398,13 +437,18 @@ describe("choose a headline", () => {
     ]);
   });
 
-  it("refuses a headline too short to be one, and a lead with no draft", async () => {
+  it("warns about a short headline and refuses a lead with no draft", async () => {
     const short = makeDeps({ drafts: [DRAFT] });
-    assert.deepEqual(await performChooseHeadline(context, { id: 5, headline: "Budget" }, short.deps), {
-      ok: false,
-      error: "A headline needs a full sentence.",
-    });
+    const warning = await performChooseHeadline(context, { id: 5, headline: "Budget" }, short.deps);
+    assert.equal("warning" in warning && warning.warning.key, "headline-length");
     assert.deepEqual(short.saved, []);
+    const accepted = await performChooseHeadline(context, { id: 5, headline: "Budget", override: ["headline-length"] }, short.deps);
+    assert.equal(accepted.ok, true);
+    assert.equal(short.saved.length, 1);
+    const audited = short.writes().find(q => /insert into audit_events/.test(q.text));
+    assert.ok(audited, "an accepted short headline records the editor and key");
+    assert.equal(audited.values[0], context.userId);
+    assert.equal(JSON.parse(String(audited.values[1])).key, "headline-length");
 
     const none = makeDeps({ drafts: [] });
     assert.deepEqual(await performChooseHeadline(context, { id: 5, headline: "Council delays the budget" }, none.deps), {
@@ -451,13 +495,16 @@ describe("find sources", () => {
     assert.deepEqual((proposed[0] as { proposedBy: string }).proposedBy, "editor");
   });
 
-  it("refuses a topic too short to search for, and answers ok when the model fails", async () => {
+  it("warns about a short search topic and answers honestly when the model fails", async () => {
     const short = makeDeps({});
-    assert.deepEqual(await performFindSources(context, { topic: "wat", scope: "records" }, short.deps), {
-      ok: false,
-      error: "Say what the paper should cover.",
-    });
+    const topicWarning = await performFindSources(context, { topic: "wat", scope: "records" }, short.deps);
+    assert.equal("warning" in topicWarning && topicWarning.warning.key, "source-search-topic");
     assert.deepEqual(short.queries, []);
+    await performFindSources(context, { topic: "wat", scope: "records", override: ["source-search-topic"] }, short.deps);
+    const audit = short.writes().find(q => /insert into audit_events/.test(q.text));
+    assert.ok(audit, "source-topic consent is recorded even if the model later fails");
+    assert.equal(audit.values[0], context.userId);
+    assert.equal(JSON.parse(String(audit.values[1])).key, "source-search-topic");
 
     const down = makeDeps({ chat: { ok: false as const, error: "unreachable" } });
     const failed = await performFindSources(context, { topic: "Longmont water", scope: "records" }, down.deps);

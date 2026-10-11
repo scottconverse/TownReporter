@@ -24,19 +24,21 @@ const story = await screenModule(
 );
 const drafts = await screenModule("src/routes/desk.drafts.tsx", {}, real);
 const today = await screenModule("src/routes/desk.index.tsx", {}, real);
-const { publishBlockers, publishGateNote } = await import(
+const { publishBlockers, publishGateNote, publishConfirmation } = await import(
   await moduleUrl("src/lib/news/publish-blockers.ts", {
     "./desk-copy.ts": stubUrl("export const editorActionError = () => '';"),
   })
 );
 globalThis.readinessPublishBlockers = publishBlockers;
 globalThis.readinessPublishGateNote = publishGateNote;
+globalThis.readinessPublishConfirmation = publishConfirmation;
 const publishStory = await screenModule(
   "src/routes/desk.story.$leadId.tsx",
   {
     publishBlockers:
       "state => (globalThis.readinessBlockers = globalThis.readinessPublishBlockers(state))",
     publishGateNote: "blockers => globalThis.readinessPublishGateNote(blockers)",
+    publishConfirmation: "(blockers, section) => globalThis.readinessPublishConfirmation(blockers, section)",
     useMutation:
       "({mutationFn}) => ({mutate(){}, isPending: Boolean(globalThis.readinessDecisionPending && /decision/.test(String(mutationFn)))})",
     ActionButton: "({children, disabled}) => h('button', {disabled}, children)",
@@ -108,8 +110,8 @@ test("a pasted story with its section confirmed can be published", async () => {
       });
       assert.equal(
         button(await draw()).hasAttribute("disabled"),
-        true,
-        `${state} must block Publish`,
+        false,
+        `${state} must offer Publish with its warning`,
       );
     }
     draft.research_json = null;
@@ -143,6 +145,9 @@ test("Story, Drafts and Today show one matching chip for all four readiness stat
         status: "UNVERIFIED",
       })),
       checking,
+      /* Unit ZC: the zero-claim "Verified" row has a completed check; the
+         open-claim rows are unaffected by the zero-claims gate. */
+      evidenceCheckedCurrentVersion: openCount === 0 && !checking,
     });
     const row = {
       id: 8,
@@ -255,7 +260,7 @@ test("Publish and the Writer agree for a missing memo and a saved held item with
         /^Publish in /.test(b.textContent),
       );
       assert.ok(button);
-      assert.equal(button.hasAttribute("disabled"), blocked);
+      assert.equal(button.hasAttribute("disabled"), false, "held readiness is a warning");
       assert.ok(document.querySelector("[data-story-readiness]").textContent.includes(label));
       assert.ok(host.textContent.includes(`● ${label}`));
       const blocker = globalThis.readinessBlockers.find((item) => item.key === "readiness");

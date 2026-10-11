@@ -329,7 +329,12 @@ export const LIMITS = {
    * screen has no way to send more rows than it draws.
    */
   modelAssignments: 60,
+
 } as const;
+
+
+export const overrideInput = z.array(z.string()).optional();
+export const editorOverrideRequestInput = z.object({ override: overrideInput });
 
 /*
   ---------------------------------------------------------------------------
@@ -407,19 +412,53 @@ export function cleanPublishRequest(raw: unknown): {
   leadId: number | null;
   topic?: string;
   area?: string;
+  acknowledgedWarningKeys?: string[];
 } {
   if (typeof raw === "object" && raw !== null && !Array.isArray(raw)) {
-    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown };
+    const o = raw as { leadId?: unknown; topic?: unknown; area?: unknown;
+      acknowledgedWarningKeys?: unknown;
+    };
     const leadId = cleanPublishId(o.leadId);
     const topic = typeof o.topic === "string" ? o.topic.trim().slice(0, LIMITS.topic) : "";
     const area = cleanStoryArea(o.area);
+    /*
+      `acknowledgedWarningKeys` is OPTIONAL and only present when the client
+      actually sent it. An older client (or the bare id) sends no such field,
+      and its cleaned request must keep EXACTLY the old shape -- adding an empty
+      array would be an API drift the older callers and their tests never asked
+      for. The server function defaults an absent field to "acknowledged
+      nothing", so an old caller and a new caller-with-no-ticks mean the same
+      thing without the shape changing.
+    */
+    const acknowledged = cleanAcknowledgedWarningKeys(o.acknowledgedWarningKeys);
     return {
       leadId,
       ...(topic ? { topic } : {}),
       ...(area ? { area } : {}),
+      ...(o.acknowledgedWarningKeys === undefined ? {} : { acknowledgedWarningKeys: acknowledged }),
     };
   }
   return { leadId: cleanPublishId(raw) };
+}
+
+/**
+ * The warning keys an editor has acknowledged in the publish request (PR233).
+ *
+ * Preserve exact keys: clipping an outlet name would make its warning impossible
+ * to acknowledge. Only the server's recomputed current keys grant an override.
+ */
+function cleanAcknowledgedWarningKeys(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const key = value;
+    if (!key.trim() || seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
 }
 
 /**
@@ -437,6 +476,18 @@ export const updateArticleHeadlineInput = z.object({
       typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
     z.string(),
   ),
+});
+
+
+export const changePublishedStoryInput = z.object({
+  articleId: publishId,
+  /** The summary the reader sees under the headline. Blank is a real answer. */
+  dek: z.string().optional(),
+  /** A section key this newsroom files under. */
+  topic: z.string().max(LIMITS.topic).optional(),
+  /** The printed story text, replaced wholesale. Blank is the core's refusal. */
+  body: z.string().optional(),
+  override: overrideInput,
 });
 
 /*
@@ -645,7 +696,8 @@ export function cleanYoutubeKeyTestInput(raw: unknown): { apiKey?: string } {
 }
 
 export function cleanConnectionEnabled(raw: unknown): { id: string; enabled: boolean } {
-  const enabled = (raw && typeof raw === "object" ? (raw as { enabled?: unknown }).enabled : undefined);
+  const enabled =
+    raw && typeof raw === "object" ? (raw as { enabled?: unknown }).enabled : undefined;
   if (typeof enabled !== "boolean") throw new Error("Enabled must be true or false.");
   return { ...cleanConnectionId(raw), enabled };
 }
@@ -777,11 +829,11 @@ export const modelEffortLoose = modelEffortValue.nullable().catch(null);
  */
 export const suggestHeadlinesInput = z.object({
   leadId: publishId,
-  headline: z
-    .preprocess(
-      (v) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : ""),
-      z.string(),
-    )
+  headline: z.preprocess(
+    (v) =>
+      typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, LIMITS.headlineEdit) : "",
+    z.string(),
+  )
     .optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.optional(),
@@ -829,6 +881,17 @@ export const claimToken = z.string().max(LIMITS.evidenceToken).catch("");
  * refusal is a sentence about the review, not a schema dump.
  */
 export const acceptUnreviewedClaimsInput = z.object({
+  leadId: rowId,
+  evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
+});
+/**
+ * Unit ZC: the zero-claims acknowledgement press. It carries the DRAFT identity
+ * the editor's screen was holding (`evidenceReviewToken(draft)`, the page's
+ * `data.evidenceToken`), not the resolved review's own token: the server
+ * compares it against the locked current draft, so a stale tab cannot
+ * acknowledge words it never saw.
+ */
+export const acknowledgeUncheckedInput = z.object({
   leadId: rowId,
   evidenceToken: z.string().max(LIMITS.draftEvidenceToken).default(""),
 });
@@ -893,6 +956,7 @@ export const suggestedSourceReviewInput = z.object({
 
 /** `desk.ts:507` fileLead (`desk.ts:511-519` slice the same three fields). */
 export const fileLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   headline: z.string().max(LIMITS.leadHeadline),
   why: z.string().max(LIMITS.leadWhy),
   topic: z.string().max(LIMITS.leadTopic),
@@ -980,6 +1044,7 @@ export const runScanInput = z.preprocess(
   (v) => (v === undefined || v === null ? {} : v),
   z.object({
     daily: z.boolean().optional(),
+    override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     sectionKey: z.string().max(LIMITS.sectionKey).optional(),
@@ -993,6 +1058,7 @@ export const draftLeadInput = z.union([
   rowId,
   z.object({
     leadId: rowId,
+    override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortOrNull.optional(),
     researchScope: researchScopeValue.optional(),
@@ -1002,6 +1068,7 @@ export const draftLeadInput = z.union([
 
 /** `desk.ts:1934` writeStoryFromInput (`story-documents.server.ts:123` caps 22). */
 export const writeStoryInput = z.object({
+  override: z.array(z.string()).optional(),
   text: z.string().max(LIMITS.storyText),
   documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
   modelChoice: modelChoiceText.optional(),
@@ -1081,6 +1148,7 @@ export const reportingNotesInput = z.object({
 
 /** `desk.ts:2011` pullTodo. */
 export const pullTodoInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: rowId,
   query: z.string().max(LIMITS.pullQuery),
   index: z.number().int().nonnegative().max(1_000).optional(),
@@ -1131,6 +1199,7 @@ export const claimReviewedInput = z.object({
  * (`reuseLedger`) is a server-side decision, not something the screen picks.
  */
 export const rewriteFromLedgerInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: rowId,
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
@@ -1139,7 +1208,12 @@ export const rewriteFromLedgerInput = z.object({
 });
 
 /** `desk.ts:2117` / `desk.ts:2135` (stop, retry). */
-export const jobIdInput = z.object({ jobId: rowId });
+export const jobIdInput = z.object({ jobId: rowId, override: z.array(z.string()).optional() });
+
+export const sourceCheckInput = z.union([
+  rowId.transform((sourceId) => ({ sourceId, override: undefined as string[] | undefined })),
+  z.object({ sourceId: rowId, override: z.array(z.string()).optional() }),
+]);
 
 /*
   Editor-facing civic reporting (civic-reporting.ts). The one press behind
@@ -1168,6 +1242,7 @@ export const reportingActionValue = z.enum([
   attached to an unrelated lead.
 */
 export const startReportingInput = z.object({
+  override: z.array(z.string()).optional(),
   action: reportingActionValue,
   leadId: rowId.optional(),
   /** The editor's own words: subject, direction, what to account for separately. */
@@ -1183,6 +1258,7 @@ export const startReportingInput = z.object({
 
 /** `desk.ts` answerReportingFollowUp: a follow-up points at the run it continues. */
 export const reportingFollowUpInput = z.object({
+  override: z.array(z.string()).optional(),
   parentRequestId: rowId,
   /** The targeted work this follow-up asks for. */
   assignment: z.string().trim().max(4_000),
@@ -1228,6 +1304,7 @@ export const reportingObservationsScopeInput = z.object({
 
 /** `desk.ts:2208` setLeadStatus. */
 export const leadStatusInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   status: z.enum(["held", "killed", "new"]),
   /** Unit AK item 4 (migration 0094): the reason a kill states, when the
@@ -1258,6 +1335,7 @@ export const leadStatusRestoreInput = z.object({
 
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */
 export const leadDuplicateResolutionInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   action: z.enum(["not-a-duplicate", "reopen-prior"]),
 });
@@ -1275,6 +1353,7 @@ export const leadDuplicateResolutionInput = z.object({
  * `drafts.dek`, a different row this dialog does not touch).
  */
 export const editLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   headline: z.string().max(LIMITS.leadHeadline),
   why: z.string().max(LIMITS.leadWhy),
@@ -1321,6 +1400,7 @@ export const followUpsInput = z.preprocess(
 
 /** `desk.ts:2791` createAiFollowUp and `desk.ts:2796` updateAiFollowUp. */
 export const aiFollowUpInput = z.object({
+  override: z.array(z.string()).optional(),
   leadId: nullableId.optional(),
   articleId: nullableId.optional(),
   investigationId: rowId.optional(),
@@ -1338,6 +1418,7 @@ export const aiFollowUpUpdateInput = aiFollowUpInput.omit({ investigationId: tru
 
 /** `desk.ts:2831` followUpAction (`follow-up-copy.ts` `FollowUpAction`). */
 export const followUpActionInput = z.object({
+  override: z.array(z.string()).optional(),
   id: rowId,
   action: z.enum(["pause", "resume", "stop", "done", "run-now"]),
 });
@@ -1348,8 +1429,9 @@ export const followUpFindingsInput = z.preprocess(
   z.object({ limit: z.number().int().positive().max(50).optional() }),
 );
 
-/** `desk.ts:2510` overrideNamedOutlet. */
-export const outletInput = z.object({ leadId: rowId, outlet: z.string().max(LIMITS.outlet) });
+
+export const outletInput = z.object({ leadId: rowId, outlet: z.string(),
+  override: overrideInput });
 
 /** `desk.ts:2770` addCorrection (`correction-form.tsx:71` caps the body at 2000). */
 export const correctionInput = z.object({
@@ -1363,12 +1445,10 @@ export const correctionInput = z.object({
     sends and what the desk still shows first.
   */
   alsoFixBody: z.boolean().optional(),
-  /**
-   * The story text the paper should carry. Bounded by `LIMITS.storyText`, the
-   * same ceiling the publish path stores a body under, so a story that could be
-   * published can always be corrected.
-   */
-  storyBody: z.string().max(LIMITS.storyText).optional(),
+
+  storyBody: z.string().optional(),
+  /** The warning keys an accepted retry carries back (`override.ts`). */
+  override: overrideInput,
 });
 
 /**
@@ -1408,6 +1488,7 @@ export const draftMeetingReviewInput = z.object({
   acceptedArtifactId: rowId,
   confirmedSegmentIndexes: z.array(segmentIndex).max(LIMITS.segmentIndexes),
   note: z.string().max(LIMITS.reviewNote),
+  override: overrideInput,
 });
 
 /** `desk.ts:2893` getDraftHistoryItem. */
@@ -1436,7 +1517,7 @@ export const artifactIdInput = z.coerce.number().int().positive().max(2_147_483_
  * already accepts it (`dark.ts:1882` threads `opts.modelEffort` into
  * `reasoningEffort`).
  */
-export const darkRunInput = z.object({
+export const darkRunInput = z.object({ override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.darkPaste),
   investigationId: rowId.optional(),
   modelChoice: modelChoiceText.optional(),
@@ -1444,7 +1525,7 @@ export const darkRunInput = z.object({
 });
 
 /** `dark.ts:2067` openDarkInvestigation. */
-export const darkOpenInput = z.object({
+export const darkOpenInput = z.object({ override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.darkPaste),
   title: z.string().max(LIMITS.leadHeadline).optional(),
   ordinaryExplanation: z.string().max(1600).optional(),
@@ -1460,7 +1541,7 @@ export const darkOpenInput = z.object({
 /** `dark.ts:2217` / `dark.ts:3617`: a bare id, or the step's dials. */
 export const darkStepInput = z.union([
   rowId,
-  z.object({
+  z.object({ override: z.array(z.string()).optional(),
     id: rowId,
     modelChoice: modelChoiceText.optional(),
     modelEffort: modelEffortLoose.optional(),
@@ -1476,11 +1557,11 @@ export const darkStepInput = z.union([
  */
 export const darkSignalInput = z.preprocess(
   (v) => (typeof v === "number" ? { id: v } : v),
-  z.object({ id: rowId, asTip: z.boolean().optional() }),
+  z.object({ override: z.array(z.string()).optional(), id: rowId, asTip: z.boolean().optional() }),
 );
 
 /** `dark.ts` retryDarkRound (retry only the failed round's owned job). */
-export const darkRetryInput = z.object({
+export const darkRetryInput = z.object({ override: z.array(z.string()).optional(),
   jobId: rowId,
   nextModel: z.boolean().optional().default(false),
 });
@@ -1556,19 +1637,23 @@ export const captureTakedownInput = z.object({
   versionId: rowId,
   reason: z.string().max(LIMITS.takedownReason),
   removeLink: z.boolean().optional(),
+
+  override: overrideInput,
 });
 
 /* --- opinion.ts (4 rows) ------------------------------------------------- */
 
-/** `opinion.ts:161` startEditorial. */
+
 export const editorialStartInput = z.object({
-  subject: z.string().max(LIMITS.storyText),
-  askedFor: z.string().max(LIMITS.storyText).optional(),
+  subject: z.string(),
+  askedFor: z.string().optional(),
   articleSlug: z.string().max(LIMITS.slug).optional(),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortOrNull.optional(),
-  documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
+  documentIds: z.array(idText).optional(),
   retryRequestId: rowId.optional(),
+  /** The warning keys an accepted retry carries back (`override.ts`). */
+  override: overrideInput,
 });
 
 /**
@@ -1666,10 +1751,11 @@ export const trashId = rowId;
 
 /** `draft-batch.ts:112` startDraftBatch (`cleanDraftBatchInput` owns the answer). */
 export const draftBatchStartInput = z.looseObject({
+  override: z.array(z.string()).optional(),
   runtime: z.string().max(LIMITS.modelId).catch(""),
   items: z
     .array(z.looseObject({ leadId: rowId, researchScope: researchScopeValue.optional() }))
-    .max(5),
+,
 });
 
 /** `draft-batch.ts:140` getDraftBatch. */
@@ -1809,6 +1895,12 @@ export const importStoriesInput = z.object({
   tool: z.string().max(LIMITS.sourceTitle).catch(""),
   /** Only the ticked cards arrive here; the server re-checks every one. */
   stories: z.array(importStorySelection).max(LIMITS.importStories),
+  /**
+   * Item 38: a card whose text is not word-for-word the report's is a warning
+   * with an "Import anyway" answer, so the retry carries the key it was warned
+   * with. The keys, not the prose; `override.ts` does the asking.
+   */
+  override: overrideInput,
 });
 
 /* --- model-assignments-settings.ts (1 row) ------------------------------- */
@@ -1858,9 +1950,10 @@ export const modelAssignmentRowsInput = z
 
 /** `editor-dialog-actions.ts` holdLead. */
 export const holdLeadInput = z.object({
+  override: z.array(z.string()).optional(),
   id: publishId,
   choice: z.enum(["record-or-date", "follow-up", "not-now", "none"]),
-  note: z.string().max(LIMITS.holdNote).optional(),
+  note: z.string().optional(),
 });
 
 /**
@@ -1873,7 +1966,8 @@ export const holdLeadInput = z.object({
 export const sourceKillPatternInput = z.object({ sourceId: publishId });
 
 export const findSourcesInput = z.object({
-  topic: z.string().max(LIMITS.leadWhy),
+  override: z.array(z.string()).optional(),
+  topic: z.string(),
   scope: z.enum(["records", "organizations", "everything"]),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
@@ -1948,8 +2042,9 @@ export const weaveIntoStoryInput = z.object({
  * uses, and the section is the `council` default `fileLead` already applies.
  */
 export const addLeadInput = z.object({
-  paste: z.string().max(LIMITS.leadPaste),
-  why: z.string().max(LIMITS.leadWhy).optional(),
+  override: z.array(z.string()).optional(),
+  paste: z.string(),
+  why: z.string().optional(),
   then: z.enum(["score", "draft", "as-is"]),
   modelChoice: modelChoiceText.optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
@@ -1962,6 +2057,7 @@ export const addLeadInput = z.object({
  * already takes `{leadId, headline}`; this is only the press that keeps one.
  */
 export const chooseHeadlineInput = z.object({
+  override: z.array(z.string()).optional(),
   id: publishId,
-  headline: z.string().max(LIMITS.leadHeadline),
+  headline: z.string(),
 });

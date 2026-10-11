@@ -1,5 +1,19 @@
 import type { FindingCaptureEvidence } from "./finding-evidence-review.ts";
 
+/**
+ * Audit item 14: the one label for a judgment an editor recorded knowing it
+ * from OUTSIDE the captures. It is printed wherever a judgment is shown, so the
+ * desk never implies the captured records ground a judgment they do not.
+ */
+export const NO_CAPTURE_JUDGMENT_LABEL = "editor's judgment, no capture";
+
+/** That label, or null for an ordinary record-grounded judgment. */
+export function noCaptureJudgmentLabel(judgment: {
+  noCapture?: boolean;
+}): string | null {
+  return judgment.noCapture ? NO_CAPTURE_JUDGMENT_LABEL : null;
+}
+
 export type DisplayCaptureGroup<T extends FindingCaptureEvidence = FindingCaptureEvidence> = {
   capture: T;
   captures: T[];

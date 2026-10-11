@@ -1,5 +1,6 @@
 import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
+import { editorWarning, type EditorWarningResult } from "./editor-override.ts";
 
 const HOURLY: Record<string, number> = {
   scan: 10,
@@ -79,8 +80,15 @@ export async function assertRate(
   const cap = HOURLY[action] ?? 20;
   const sql = await getSql();
   await ensureDeskRateSchema();
-  await sql`
-    insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
+  // Insert-before-count keeps the ceiling safe under a concurrent burst (see
+  // above). But a REJECTED attempt must not leave the row it just inserted
+  // behind: the row would count against the editor's own budget, so a held-down
+  // Reddit button could burn the whole hour's allowance in rejected presses. The
+  // insert is undone on the over-cap path, so only runs that proceed consume it.
+  const [row] = await sql<{ id: number }>`
+    insert into desk_rate (user_id, action, newsroom_id)
+    values (${userId}, ${action}, ${newsroomId})
+    returning id
   `;
   const rows = await sql<{ c: number }>`
     select count(*)::int as c from desk_rate
@@ -88,8 +96,101 @@ export async function assertRate(
       and created_at > now() - interval '1 hour'
   `;
   if ((rows[0]?.c ?? 0) > cap) {
+    if (row) await sql`delete from desk_rate where id = ${row.id}`;
     throw new Error(`Rate limit: ${action} is capped at ${cap} per hour.`);
   }
+}
+
+/**
+ * The hourly cap, as a WARNING rather than a throw (item 25, Scott's rule).
+ *
+ * `checkRate` is `assertRate`'s shape for the scoped desk actions -- a scan, a
+ * draft, a Dark run, a pull, a brief -- with two differences that matter for a
+ * rule that says "warn, never block":
+ *
+ *   - at the cap it returns the structured warning instead of throwing, so the
+ *     UI can offer the second press;
+ *   - it records a unit ONLY when the action will run. A refused press inserts
+ *     nothing (so it does not extend its own hour), and the second press, its
+ *     `override` naming `rate:<action>` exactly, records the unit and the audit
+ *     and returns null.
+ *
+ * `assertRate` stays a hard throw for the unscoped consumers (reporting, Dark's
+ * own Reddit fetch, provider login/test, ops actions): those have no editor
+ * press to second-guess, and Reddit's budget is the provider's, not ours.
+ */
+export async function checkRate(
+  userId: string,
+  action: string,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+  override?: readonly string[],
+  options: { amount?: number; record?: boolean } = {},
+): Promise<EditorWarningResult | null> {
+  const sql = await getSql();
+  await ensureDeskRateSchema();
+  const [rows] = await sql<{ c: number }>`
+    select count(*)::int as c from desk_rate
+    where user_id = ${userId} and action = ${action} and newsroom_id = ${newsroomId}
+      and created_at > now() - interval '1 hour'
+  `;
+  const cap = HOURLY[action] ?? 20;
+  const used = rows?.c ?? 0;
+  const amount = options.amount ?? 1;
+  if (used + amount > cap) {
+    const sentence = `You have run ${action} ${used} times this hour; the cap is ${cap}. It may cost more.`;
+    const warning = await editorWarning(
+      { userId, newsroomId },
+      override,
+      `rate-${action}`,
+      sentence,
+      { kind: `rate:${action}`, id: newsroomId },
+    );
+    if (warning) return warning;
+  }
+  if (options.record !== false) await sql`
+    insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
+  `;
+  return null;
+}
+
+/**
+ * The source "Check now" cooldown, as a WARNING rather than a throw (item 26).
+ * Same shape as `checkRate`: it records the attempt only when it runs, so a
+ * refused press does not extend its own window; the second press, `override`
+ * naming `source-check-cooldown`, records the attempt and the audit.
+ */
+export async function checkCooldown(
+  userId: string,
+  action: string,
+  seconds: number,
+  newsroomId: number = DEFAULT_NEWSROOM_ID,
+  override?: readonly string[],
+): Promise<EditorWarningResult | null> {
+  const sql = await getSql();
+  await ensureDeskRateSchema();
+  const [last] = await sql<{ at: string | Date }>`
+    select created_at as at from desk_rate
+    where user_id = ${userId} and action = ${action} and newsroom_id = ${newsroomId}
+    order by created_at desc limit 1
+  `;
+  if (last) {
+    const ageMs = Date.now() - new Date(last.at).getTime();
+    if (Number.isFinite(ageMs) && ageMs < seconds * 1000) {
+      const wait = Math.max(1, Math.ceil((seconds * 1000 - ageMs) / 1000));
+      const warning = await editorWarning(
+        { userId, newsroomId },
+        override,
+        "source-check-cooldown",
+        `That was checked a moment ago. Try again in ${wait}s.`,
+        { kind: `cooldown:${action}`, id: newsroomId },
+      );
+      if (warning) return warning;
+    }
+  }
+  await sql`
+    insert into desk_rate (user_id, action, newsroom_id) values (${userId}, ${action}, ${newsroomId})
+  `;
+  return null;
 }
 
 /**
@@ -158,10 +259,20 @@ const AUDIT_EVENTS_SCHEMA = [
   "alter table audit_events add column if not exists subject_id integer",
 ];
 
-/** `audit_events`, once per database. See `audit` and `AUDIT_EVENTS_SCHEMA` above. */
-export async function ensureAuditEventsSchema(): Promise<void> {
-  const sql = await getSql();
-  await ensureSchemaOnce(sql, "audit-events", AUDIT_EVENTS_SCHEMA);
+/**
+ * `audit_events`, once per database. See `audit` and `AUDIT_EVENTS_SCHEMA`.
+ *
+ * Accepts an optional handle. A full `Sql` (the desk's `getSql()`, a
+ * transaction) is ensured directly. A tag-only `SqlTag` -- the shape
+ * `lead-lifecycle.ts` and its PGlite tests pass around, which has no `.query()`
+ * for the DDL batch to run through -- is left alone: such a caller owns its
+ * schema, and the audit write it then makes is a plain insert the tag can
+ * carry.
+ */
+export async function ensureAuditEventsSchema(sql?: AuditSqlTag): Promise<void> {
+  const handle = (sql ?? (await getSql())) as unknown as Sql;
+  if (typeof (handle as { query?: unknown }).query !== "function") return;
+  await ensureSchemaOnce(handle, "audit-events", AUDIT_EVENTS_SCHEMA);
 }
 
 export async function audit(
@@ -177,9 +288,20 @@ export async function audit(
 }
 
 /**
- * `audit()`, writing through a caller-supplied `Sql` -- for a caller that is
+ * The tagged-template half of a SQL handle, satisfied by both `Sql` (which also
+ * has `.query()`) and the lighter `SqlTag` that `lead-lifecycle.ts` and its
+ * tests pass around. Anything that only issues parameterized statements --
+ * `auditWithSql`, the override write -- needs no more than this.
+ */
+export interface AuditSqlTag {
+  <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]): Promise<T[]>;
+}
+
+/**
+ * `audit()`, writing through a caller-supplied handle -- for a caller that is
  * already inside a transaction and needs the event to commit, or roll back,
- * with the rest of its work (Unit CR, 0.6.81: redeeming a recovery code).
+ * with the rest of its work (Unit CR, 0.6.81: redeeming a recovery code), or
+ * for a caller that holds only a tagged-template handle (`SqlTag`).
  * `audit()` itself cannot join such a transaction: it resolves its own
  * `getSql()`, which on the PGlite backend is a different connection, so its
  * insert would survive a rollback of the caller's. Callers using this must
@@ -187,7 +309,7 @@ export async function audit(
  * cannot run inside the transaction -- it is DDL.
  */
 export async function auditWithSql(
-  sql: Sql,
+  sql: AuditSqlTag,
   userId: string,
   action: string,
   detail: string,
@@ -198,4 +320,10 @@ export async function auditWithSql(
     insert into audit_events (user_id, action, detail, newsroom_id, subject_kind, subject_id)
     values (${userId}, ${action}, ${detail.slice(0, 500)}, ${newsroomId}, ${subject?.kind ?? null}, ${subject?.id ?? null})
   `;
+}
+
+/** Record admitted work after enqueue succeeds; warning presses never spend a unit. */
+export async function recordDeskRun(userId: string, action: string, newsroomId: number) {
+  await ensureDeskRateSchema();
+  await (await getSql()).query("insert into desk_rate(user_id,action,newsroom_id) values($1,$2,$3)", [userId, action, newsroomId]);
 }

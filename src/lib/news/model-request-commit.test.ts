@@ -36,6 +36,56 @@ import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 
+for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) it(`warns for signed-out ${choice}, then records the accepted hop`, async () => {
+  const sql = await getSql();
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku','Picker regression','Why') returning id`;
+  const input = { context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice };
+  const deps = {
+    probeProvider: async (pick: string | undefined) => pick === choice
+      ? { ok: false as const, error: "Claude Code is signed out. Sign in again." }
+      : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
+    enqueueJob: async (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
+  };
+  const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
+  assert.equal(warning.ok, false);
+  assert.match(JSON.stringify(warning), /Claude is signed out on this server.*If you draft anyway/);
+  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const [job] = await sql<{ failover_note: string; result_json: string }>`select failover_note,result_json from desk_jobs where id=${result.jobId}`;
+  assert.match(job.failover_note, /Claude.*signed out.*Codex Sol 6.1/);
+  const receipt = JSON.parse(job.result_json);
+  assert.equal(receipt.requestedRuntime, choice);
+  assert.equal(receipt.actualRuntime, "codex-frontier");
+});
+
+it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {
+  const sql = await getSql();
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why)
+    values(1,'picker-haiku-ready','Picker regression','Why') returning id`;
+  const result = await commitStoryDraftForAuthenticatedEditor({
+    context: { userId: "picker-haiku-ready", newsroomId: 1 }, leadId: lead.id,
+    modelChoice: "claude-haiku", modelEffort: "medium", researchScope: "public",
+  }, {
+    probeProvider: async (choice) => {
+      assert.equal(choice, "claude-haiku");
+      return { ok: true, choice: "claude-haiku", label: "Claude Haiku" };
+    },
+    enqueueJob: (opts) => enqueueJob({ ...opts, kick: false }),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) assert.fail("Ready Haiku must enqueue");
+  const [job] = await sql<{ model_choice: string; model_choice_source: string; research_scope: string; result_json: string }>`
+    select model_choice,model_choice_source,research_scope,result_json from desk_jobs where id=${result.jobId}`;
+  assert.equal(job.model_choice, "claude-haiku");
+  assert.equal(job.model_choice_source, "editor");
+  assert.equal(job.research_scope, "public");
+  const receipt = JSON.parse(job.result_json);
+  assert.equal(receipt.requestedRuntime, "claude-haiku");
+  assert.equal(receipt.actualRuntime, "claude-haiku");
+  assert.equal(receipt.modelEffort, "medium");
+});
+
 type Counts = {
   jobs: number;
   requests: number;
@@ -318,24 +368,12 @@ describe("authenticated Codex commit boundary", () => {
     );
     assert.equal(storyExpired.ok, false);
     if (storyExpired.ok) assert.fail("expired Story OAuth must refuse");
-    assert.equal(storyExpired.kind, "provider-auth");
-    assert.match(storyExpired.error, /Codex needs you to sign in again/i);
-    assert.equal(storyExpired.detail, EXPIRED);
-    /*
-      0.6.63 Unit Y: the fallback ladder is DeepSeek v4.1 Flash -> Qwen 3.6
-      35B -> Codex Terra, and Claude Sonnet left it. An explicit
-      `codex-frontier` pick is not a rung of it, so the walk starts from the
-      ladder's top and probes all three rungs before giving up -- four probes
-      counting the pick itself. The pre-0.6.63 fixture saw three: its ladder
-      was codex-frontier, codex-balanced, claude-sonnet.
-    */
-    assert.equal(storyProbeCalls, 4);
-    assert.deepEqual(storyProbeChoices, [
-      "codex-frontier",
-      "deepseek-flash",
-      "qwen-local",
-      "codex-balanced",
-    ]);
+    assert.ok("warning" in storyExpired);
+    assert.equal(storyExpired.warning.key, "writer-not-ready");
+    assert.match(storyExpired.error, /If you draft anyway/);
+    // An explicit unavailable Story writer refuses at its own preflight.
+    assert.equal(storyProbeCalls, 1);
+    assert.deepEqual(storyProbeChoices, ["codex-frontier"]);
     assert.equal(storyEnqueueCalls, 0);
     assert.deepEqual(await countsFor(userId), before);
 
@@ -448,7 +486,7 @@ describe("authenticated Codex commit boundary", () => {
       },
     );
     assert.equal(opinionExpired.ok, false);
-    if (opinionExpired.ok) assert.fail("expired Opinion OAuth must refuse");
+    if (opinionExpired.ok || !("error" in opinionExpired)) assert.fail("expired Opinion OAuth must refuse");
     assert.match(opinionExpired.error, /Claude Code needs you to sign in again/i);
     assert.deepEqual(opinionCandidates, [
       "claude-frontier",

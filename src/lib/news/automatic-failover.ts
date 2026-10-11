@@ -40,6 +40,7 @@ import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./mod
 export type AutomaticFailoverInput = {
   /** How the preferred model was chosen. Explicit local/Ollama choices do not fail over. */
   source: "editor" | "auto" | "scheduled";
+  allowExplicitLocalFailover?: boolean;
   /** The concrete choice the job is currently running (or just failed) on. */
   current: string;
   /** The provider's own error text from the failed attempt. */
@@ -51,7 +52,7 @@ export type AutomaticFailoverInput = {
 };
 
 /** Why Automatic is moving on, so the caller can word the switch accurately. */
-export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable";
+export type AutomaticFailoverReason = "auth" | "timeout" | "quota" | "unavailable" | "unreadable" | "cutoff";
 
 export type AutomaticFailoverPlan = {
   next: StoryModelChoice;
@@ -132,6 +133,7 @@ export function automaticFailoverReason(
   detail: string | null | undefined,
 ): AutomaticFailoverReason | null {
   if (looksLikeContentRefusal(detail)) return null;
+  if (/reply was cut off/i.test(detail ?? "")) return "cutoff";
   if (looksLikeUnreadableReply(detail)) return "unreadable";
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
@@ -160,9 +162,10 @@ export async function planAutomaticFailover(
 ): Promise<AutomaticFailoverPlan | null> {
   // A newsroom that explicitly chose a local/Ollama model must not have its
   // work silently handed to a different provider after a technical failure.
-  if (input.current === "local-model" && input.source !== "auto") return null;
+  if (input.current === "local-model" && input.source !== "auto" && !input.allowExplicitLocalFailover) return null;
   const reason = automaticFailoverReason(input.error);
-  if (!reason) return null;
+  if (!reason && !input.current.startsWith("custom:")) return null;
+  if (!reason && looksLikeContentRefusal(input.error)) return null;
 
   const ladder = input.ladder ?? AUTOMATIC_LADDER;
   const currentIndex = ladder.indexOf(input.current);
@@ -176,7 +179,7 @@ export async function planAutomaticFailover(
       return {
         next: storyModelChoice(rung),
         label: probed.label || modelChoiceLabel(rung),
-        reason,
+        reason: reason ?? "unavailable",
       };
     }
   }
@@ -195,6 +198,7 @@ export function failoverReasonPhrase(
   previousLabel: string,
   reason: AutomaticFailoverReason,
 ): string {
+  if (reason === "cutoff") return `${previousLabel}: reply was cut off`;
   if (reason === "timeout") return `${previousLabel} timed out`;
   if (reason === "auth") return `${previousLabel} sign-in lapsed`;
   if (reason === "quota") return `${previousLabel} reached its usage limit`;
@@ -213,4 +217,21 @@ export function failoverNoteSentence(
   reason: AutomaticFailoverReason,
 ): string {
   return `This draft moved to ${newLabel} because ${failoverReasonPhrase(previousLabel, reason)}`;
+}
+
+/** Preserve each Story switch, accepting the durable wording from older runs. */
+export function appendStoryFailoverNote(previous: string, next: string): string {
+  const asTrail = (note: string) => {
+    const hop = /^This draft moved to (.+) because (.+)$/.exec(note);
+    return hop ? `${hop[2]} -> ${hop[1]}` : note;
+  };
+  const trail = asTrail(previous);
+  const hop = asTrail(next);
+  if (!trail) return hop;
+  if (trail === hop || trail.endsWith(` -> ${hop}`)) return trail;
+  const boundary = trail.lastIndexOf(" -> ");
+  const destination = boundary >= 0 ? trail.slice(boundary + 4) : "";
+  return destination && hop.startsWith(`${destination} `)
+    ? `${trail.slice(0, boundary)} -> ${hop}`
+    : `${trail} -> ${hop}`;
 }

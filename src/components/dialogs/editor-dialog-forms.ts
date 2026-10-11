@@ -187,12 +187,11 @@ export function newStoryProblem(state: NewStoryState, documentCount = 0): Proble
       the button stayed disabled and the walk could not press it at all.
     */
     if (!state.sourceText.trim() && !state.links.trim() && documentCount === 0) return "Paste the material or point at it. The AI needs something to read.";
-    if (state.assignment.trim().length < 8) return "Say what the story is. That is what the AI works from.";
+    if (state.assignment.trim().length === 0) return "Say what the story is. That is what the AI works from.";
     return null;
   }
   if (state.tab === "self") {
-    if (state.headline.trim().length < 8) return "Headline needs a full sentence.";
-    if (state.summary.trim().length < 8) return "Say why this is news.";
+    if (state.headline.trim().length === 0) return "Headline needs a full sentence.";
     if (state.story.trim().length < 40) return "The story needs some text.";
     // The section is not a nicety here either: the save below writes `topic`,
     // and the database refuses a draft with no section (see `section` above).
@@ -498,7 +497,7 @@ export const ADD_LEAD_THENS = [
 ] as const;
 
 export function addLeadProblem(state: AddLeadState): Problem {
-  if (state.paste.trim().length < 8) return "Paste a URL, or describe what you heard.";
+  if (state.paste.trim().length === 0) return "Paste a URL, or describe what you heard.";
   return null;
 }
 
@@ -799,9 +798,9 @@ export function headlineSuggestRequest(state: HeadlineState) {
  */
 export function headlineChoice(state: HeadlineState): string {
   const written = state.written.trim();
-  if (written) return written.slice(0, 180);
-  if (state.choice === "keep") return state.current.trim().slice(0, 180);
-  return String(state.choice || "").trim().slice(0, 180);
+  if (written) return written;
+  if (state.choice === "keep") return state.current.trim();
+  return String(state.choice || "").trim();
 }
 
 export function headlineProblem(state: HeadlineState): Problem {

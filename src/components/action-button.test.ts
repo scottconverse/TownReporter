@@ -222,6 +222,7 @@ describe("Publish: idle -> working -> done / failed, at the control", () => {
  */
 const CLAIMS_BLOCKER: PublishBlocker = {
   key: "claims-unreviewed",
+  kind: "warning",
   sentence: "3 claims need review. The evidence check raised them and no one has judged them.",
   action: { label: "Review the claims", target: { kind: "evidence-review" } },
   altAction: {

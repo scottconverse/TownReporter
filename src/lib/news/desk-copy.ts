@@ -903,6 +903,7 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (t.startsWith("Custom provider ")) return t;
   /*
     A dumped boundary check is not draft copy and nothing below would recognize
     it: every pattern here is about what a writing model said, and this is what
@@ -1237,6 +1238,7 @@ export function recoveringDraftCopy(): string {
 export function editorFetchError(raw: string | null | undefined, url?: string | null): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (t.startsWith("This public site refused even a normal browser.")) return t;
   const site = socialSiteName(url);
   const code = t.match(/\b(400|401|403|404|410|429)\b/)?.[1];
   if (site) {

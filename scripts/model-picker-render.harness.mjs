@@ -64,6 +64,8 @@ const writerBarUrl = moduleUrl(
 const availabilityStubSrc = `
 let current;
 let connections = [];
+let localChoice = { override: null, notice: null, catalog: { servers: [], defaultModel: null, checkedAt: 0 } };
+export function __setLocalChoice(data) { localChoice = data; }
 export function __setConnections(data) { connections = data; }
 export function __setAvailability(data) { current = data; }
 
@@ -78,6 +80,8 @@ export let role = "owner";
 export function __setRole(next) { role = next; }
 export const myDesk = async () => ({ ok: true, role, newsroomId: 1, claimed: true });
 export const useQuery = ({ queryKey }) => {
+  if (queryKey[0] === "local-model-choice") return { data: localChoice };
+  if (queryKey[0] === "local-model-catalog") return { data: localChoice.catalog };
   if (queryKey[0] === "custom-ai-connections") return { data: connections };
   if (queryKey[0] === "my-desk") return { data: { ok: true, role, newsroomId: 1, claimed: true } };
   return { data: current };
@@ -142,4 +146,5 @@ const { ModelPicker } = await import(
   )
 );
 
-export { ModelPicker, availabilityStub, registry, choiceModule };
+const writerBar = await import(writerBarUrl);
+export { ModelPicker, availabilityStub, registry, choiceModule, writerBar };

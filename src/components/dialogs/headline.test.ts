@@ -90,8 +90,8 @@ describe("Headline dialog", () => {
     assert.equal(headlineChoice(chosen), SUGGESTED[0]!);
     assert.equal(headlineChoice({ ...chosen, written: "  A better one entirely  " }), "A better one entirely");
     assert.equal(headlineChoice({ ...chosen, choice: "keep" }), CURRENT);
-    // A written line longer than the column is trimmed, not rejected.
-    assert.equal(headlineChoice({ ...chosen, written: "x".repeat(400) }).length, 180);
+    // Keep every typed character so the server can warn and save after consent.
+    assert.equal(headlineChoice({ ...chosen, written: "x".repeat(400) }), "x".repeat(400));
   });
 
   it("refuses a press with nothing long enough to be a headline", () => {

@@ -265,6 +265,26 @@ it("STILL voids the acceptance when the body is edited (the U24 guard)", async (
   assert.equal(printed.ok, false, "an edited story is not covered by the old acceptance");
 });
 
+it("publishes anyway after accepting claims, editing one word and saving, auditing current warnings", async () => {
+  const f = await fixture();
+  const ctx = { userId: f.userId, newsroomId: f.newsroomId };
+  await f.sql.query("update drafts set research_json=$1 where id=$2", [JSON.stringify({
+    aiEvidenceReview: { checkedText: (await displayedFields(f)).body, rows: [] },
+    storyReadiness: { version: 1, state: "not-ready", openCount: 2, totalCount: 2, reason: "2 claims need review." },
+  }), f.draftId]);
+  const accepted = await performAcceptUnreviewedClaims(ctx, f.leadId, await paneReviewToken(f));
+  assert.equal(accepted.ok, true, accepted.ok ? "" : accepted.error);
+  const fields = await displayedFields(f);
+  await saveDraftForEditor(ctx, { leadId: f.leadId, ...fields, body: fields.body.replace("short", "brief") });
+  const printed = await performPublish(ctx, f.leadId, MODEL_DRAFT_SECTIONS, undefined, {}, ["claims-unreviewed", "evidence-stale"]);
+  assert.equal(printed.ok, true, printed.ok ? "" : printed.error);
+  const articles = await f.sql.query("select id from articles where lead_id=$1 and newsroom_id=$2", [f.leadId, f.newsroomId]);
+  assert.equal(articles.length, 1);
+  const audits = await f.sql.query<{ detail: string; user_id: string }>("select detail,user_id from audit_events where newsroom_id=$1 and action='override'", [f.newsroomId]);
+  assert.deepEqual(audits.map(row => JSON.parse(row.detail).key).sort(), ["claims-unreviewed", "evidence-stale"]);
+  assert.ok(audits.every(row => row.user_id === f.userId && JSON.parse(row.detail).target.id === f.draftId));
+});
+
 it("STILL voids the acceptance when the headline, the dek or the section is edited", async () => {
   for (const patch of [
     { headline: "Council adopts the budget, 5-2" },
@@ -407,4 +427,38 @@ it("reopening the drafts list after a no-op Save uses the recorded acceptance", 
   const state = deskDraftState(row);
   assert.equal(state.label, "✓ Ready");
   assert.equal(state.readiness?.reason, "You accepted 1 claim the AI could not confirm.");
+});
+
+it("Drafts counts many accepted drafts in one query and agrees with the current evidence review", async () => {
+  const f = await fixture();
+  const context = { userId: f.userId, newsroomId: f.newsroomId };
+  assert.equal((await performAcceptUnreviewedClaims(context, f.leadId, await paneReviewToken(f))).ok, true);
+  const ids = [f.draftId];
+  for (let i=0; i<3; i++) {
+    const [lead] = await f.sql.query("insert into leads(user_id,newsroom_id,headline,why,topic,status,notes_json) select user_id,newsroom_id,headline,why,topic,status,notes_json from leads where id=$1 returning id", [f.leadId]);
+    const [draft] = await f.sql.query("insert into drafts(user_id,newsroom_id,lead_id,headline,dek,body,topic,source_urls,provenance_json,found_note,research_json,unanswered,form) select user_id,newsroom_id,$2,headline,dek,body,topic,source_urls,provenance_json,found_note,research_json,unanswered,form from drafts where id=$1 returning id", [f.draftId,lead.id]);
+    ids.push(Number(draft.id));
+  }
+  const { loadDeskClaimCounts, loadFindingEvidenceReview } = await vite.ssrLoadModule("/src/lib/news/finding-evidence-review.ts");
+  const { claimsNeedingReview } = await vite.ssrLoadModule("/src/lib/news/evidence-check-state.ts");
+  let queries=0;
+  const countedSql = Object.assign(f.sql.bind(null), f.sql, { query: async (text: string, params: unknown[]) => {
+    queries++; return f.sql.query(text, params);
+  }});
+  const counts = await loadDeskClaimCounts(countedSql, f.newsroomId, ids);
+  assert.equal(queries, 1, "one batch regardless of the number of accepted drafts");
+  assert.equal(counts.size, 4);
+  await f.sql.query("update drafts set found_note=$2 where id=$1", [ids[3], "{broken legacy evidence"]);
+  const partial = await loadDeskClaimCounts(countedSql, f.newsroomId, ids);
+  assert.equal(queries, 2, "a second desk read still uses only one additional query");
+  assert.equal(partial.size, 3, "one corrupt accepted draft cannot break the remaining desk rows");
+  await f.sql.query("update drafts set found_note=(select found_note from drafts where id=$2) where id=$1", [ids[3], ids[0]]);
+
+  for (const id of ids) {
+    const [draft] = await f.sql.query("select lead_id from drafts where id=$1", [id]);
+    const review = await loadFindingEvidenceReview(f.sql, f.newsroomId, draft.lead_id);
+    assert.equal(counts.get(id).outstanding, claimsNeedingReview(review.rows,review.claimRows,review.manualClaimRows,review.groundingRows));
+    assert.equal(counts.get(id).accepted, 1);
+  }
+  assert.equal((await loadDeskClaimCounts(countedSql, f.newsroomId+999, ids)).size,0,"newsroom isolation");
 });

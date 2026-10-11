@@ -16,6 +16,7 @@ const imports = {
   "@/components/desk-chrome": dataModule("export const Busy=()=>null; export const SecHead=()=>null;"),
   "@/lib/news/meeting-activity": dataModule("export const listMeetingActivity=()=>[];"),
   "@/lib/news/meeting-activity-label": dataModule("export const meetingStatusLabel=()=>({tone:'ok',text:'Captured'});"),
+  "@/components/scoped-actions": dataModule("export const captureAudioAgain=async()=>({ok:true});"),
   "@/lib/news/meeting-manual-run": dataModule("export const captureAudioAgain=async()=>({ok:true});"),
   "react": import.meta.resolve("react"),
   "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),

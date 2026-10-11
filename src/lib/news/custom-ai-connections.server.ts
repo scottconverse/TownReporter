@@ -1,4 +1,5 @@
 import { isGeminiOpenAiEndpoint, normalizeProviderModelId } from "./provider-model-id.ts";
+import { providerResponseDetail } from "./provider-error-detail.ts";
 
 export type CustomAiConnectionInput = {
   name: string;
@@ -21,7 +22,7 @@ export type StoredCustomAiConnection = {
 export type PublicCustomAiConnection = Omit<
   StoredCustomAiConnection,
   "newsroomId" | "encryptedApiKey"
-> & { hasApiKey: boolean };
+> & { hasApiKey: boolean; readinessError?: string };
 
 export function normalizeConnectionInput(input: CustomAiConnectionInput) {
   const name = input.name.trim();
@@ -52,6 +53,18 @@ export function normalizeConnectionInput(input: CustomAiConnectionInput) {
 export function publicConnection(connection: StoredCustomAiConnection): PublicCustomAiConnection {
   const { newsroomId: _room, encryptedApiKey, ...safe } = connection;
   return { ...safe, hasApiKey: Boolean(encryptedApiKey) };
+}
+
+export function connectionReadinessError(connection: StoredCustomAiConnection): string | undefined {
+  try {
+    const key = decryptApiKey(connection.encryptedApiKey);
+    if (isGeminiOpenAiEndpoint(connection.baseUrl) && !key) {
+      return "Google Gemini requires an API key. Enter it in Server settings before drafting.";
+    }
+  } catch (error) {
+    return error instanceof Error ? error.message : "The saved API key cannot be read. Re-enter it in Server settings.";
+  }
+  return undefined;
 }
 
 export function parseDiscoveredModels(body: unknown, baseUrl?: string): string[] {
@@ -143,7 +156,10 @@ export async function discoverConnectionModels(
     headers,
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(safeError(response.status));
+  if (!response.ok) {
+    const detail = await providerResponseDetail(response, apiKey);
+    throw new Error(`${safeError(response.status)}${detail ? `\n\n${detail}` : ""}`);
+  }
   return parseDiscoveredModels(await response.json(), connection.baseUrl);
 }
 
@@ -177,13 +193,15 @@ export async function testConnection(
         max_tokens: 128,
       }),
     });
-    if (!response.ok)
+    if (!response.ok) {
+      const detail = await providerResponseDetail(response, apiKey);
       return {
         ok: false,
-        message: safeError(response.status),
+        message: `${safeError(response.status)}${detail ? `\n\n${detail}` : ""}`,
         capabilities: inferCapabilities(null),
         latencyMs: Date.now() - started,
       };
+    }
     const body = await response.json();
     const capabilities = inferCapabilities(body);
     const answered = hasAssistantText(body);
@@ -240,14 +258,18 @@ export function encryptApiKey(value: string): string {
 }
 export function decryptApiKey(value: string | null): string | null {
   if (!value) return null;
-  const [version, iv, tag, body] = value.split(".");
-  if (version !== "v1" || !iv || !tag || !body) throw new Error("Stored API key is unreadable.");
-  const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
-  decipher.setAuthTag(Buffer.from(tag, "base64url"));
-  return Buffer.concat([
-    decipher.update(Buffer.from(body, "base64url")),
-    decipher.final(),
-  ]).toString("utf8");
+  try {
+    const [version, iv, tag, body] = value.split(".");
+    if (version !== "v1" || !iv || !tag || !body) throw new Error("Stored API key is unreadable.");
+    const decipher = createDecipheriv("aes-256-gcm", encryptionKey(), Buffer.from(iv, "base64url"));
+    decipher.setAuthTag(Buffer.from(tag, "base64url"));
+    return Buffer.concat([
+      decipher.update(Buffer.from(body, "base64url")),
+      decipher.final(),
+    ]).toString("utf8");
+  } catch {
+    throw new Error("The saved API key cannot be decrypted with this server's secret. Re-enter the connection's API key in Server settings before drafting. A restored database needs the secret that encrypted its keys.");
+  }
 }
 
 type Row = {
@@ -277,7 +299,10 @@ export async function listCustomAiConnections(userId: string): Promise<PublicCus
     await sql<Row>`select id,newsroom_id,name,base_url,encrypted_api_key,model_id,enabled from custom_ai_connections where newsroom_id=${me.newsroomId} order by name`
   )
     .map(fromRow)
-    .map(publicConnection);
+    .map((connection) => {
+      const readinessError = connectionReadinessError(connection);
+      return { ...publicConnection(connection), ...(readinessError ? { readinessError } : {}) };
+    });
 }
 /**
  * The owner, or a 403 with the one sentence every model-connection refusal
@@ -375,6 +400,8 @@ export async function resolveCustomAiChoice(
     throw new Error(
       "The selected custom AI connection is disabled, deleted, or has no model. TownReporter will try the next ready model for this unfinished call.",
     );
+  const readinessError = connectionReadinessError(fromRow(row));
+  if (readinessError) throw new Error(readinessError);
   return {
     name: row.name,
     baseUrl: row.base_url,

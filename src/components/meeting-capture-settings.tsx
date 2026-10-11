@@ -1,3 +1,4 @@
+import { runMeetingsNow, forceRecaptureMeeting } from "@/components/scoped-actions";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Busy, Field, InkButton, SecHead } from "@/components/desk-chrome";
@@ -8,7 +9,7 @@ import {
   meetingSettingsFailureMessage,
   type MeetingRetentionMode,
 } from "@/lib/news/meeting-settings";
-import { runMeetingsNow, forceRecaptureMeeting, stopMeetingsNow, resumeStoppedMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
+import { stopMeetingsNow, resumeStoppedMeetingsNow, type MeetingManualRunResult } from "@/lib/news/meeting-manual-run";
 
 /*
   N-1: the meeting-capture operator configuration surface.
@@ -289,12 +290,12 @@ function ManualRunControls({ enabled }: { enabled: boolean }) {
         <InkButton
           type="button"
           ariaLabel="Run meetings now"
-          disabled={!enabled || run.isPending || force.isPending}
+          disabled={run.isPending || force.isPending}
           onClick={() => run.mutate()}
         >
           {run.isPending ? "Running…" : "Run meetings now"}
         </InkButton>
-        {!enabled && <span className="text-sm text-ink-2">Turn meeting capture on to run.</span>}
+        {!enabled && <span className="text-sm text-ink-2">Meeting capture is off. You can approve one run without changing the schedule.</span>}
       </div>
 
       {/*

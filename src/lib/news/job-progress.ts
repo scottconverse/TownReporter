@@ -1,3 +1,5 @@
+import { CUT_OFF_WARNING } from "./draft-completeness.ts";
+import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
@@ -247,7 +249,7 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
       whose kind never reports a step -- still has a sentence to show rather
       than an empty line under the bar.
     */
-    step: row.step_text || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
+    step: (row.step_text?.startsWith("Waiting on Custom API connection") ? row.step_text.replace("Custom API connection", model) : row.step_text) || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
     startedAt: ms(row.started_at),
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
@@ -271,8 +273,14 @@ export function jobProgressView(
   headline: string | null = null,
 ): JobProgressView {
   const kind = row.kind;
+  let cutOff = false;
+  try { cutOff = JSON.parse(row.result_json ?? "{}").draftCutOff === true; } catch { /* Legacy receipt. */ }
+  let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
+  if (row.model_choice.startsWith("custom:")) {
+    try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
+  }
   return {
-    ...progressShape(row, modelChoiceLabel(effectiveStoryModelChoice(row.model_choice))),
+    ...progressShape(row, model),
     leadId,
     title: TITLES[kind] ?? row.kind,
     // Non-story kinds carry no headline, whatever the caller passed: their
@@ -289,7 +297,7 @@ export function jobProgressView(
           ? `/desk/story/${leadId}`
           : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
-    doneText: DONE_TEXT[kind] ?? "Done",
+    doneText: kind === "draft" && cutOff ? CUT_OFF_WARNING : DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
     /*
       Retry re-runs the request the row describes, so it is only offered for the
@@ -470,6 +478,15 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
       order by (j.status = 'running') desc, (j.status = 'queued') desc, j.id desc
       limit 30
     `;
+    if (rows.some(row => row.model_choice.startsWith("custom:"))) {
+      const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
+      await ensureCustomAiConnectionsSchema();
+      const connections = await sql<{id:string;name:string;model_id:string|null}>`select id,name,model_id from custom_ai_connections where newsroom_id=${newsroomId}`;
+      for (const row of rows) {
+        const connection = connections.find(value => `custom:${value.id}` === row.model_choice);
+        if (connection) row.result_json = JSON.stringify({...JSON.parse(row.result_json ?? "{}"),customModelLabel:modelChoiceLabel(row.model_choice,"story",{name:connection.name,modelId:connection.model_id})});
+      }
+    }
     const reportingRequestIds = rows.filter((row) => row.kind === "reporting").map((row) => row.subject_id);
     const reportingLeads = reportingRequestIds.length
       ? await sql<{ id: number; lead_id: number | null }>`select id, lead_id from reporting_requests where newsroom_id = ${newsroomId} and id = any(${reportingRequestIds}::int[])`
@@ -538,12 +555,12 @@ export const cancelStoryJob = createServerFn({ method: "POST" })
 export const retryStoryJob = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => {
-    const raw = input as { jobId?: unknown; nextModel?: unknown } | null;
+    const raw = input as { jobId?: unknown; nextModel?: unknown; override?: unknown } | null;
     const jobId = Number(raw?.jobId);
     if (!Number.isInteger(jobId) || jobId <= 0) throw new Error("A job id is required.");
-    return { jobId, nextModel: Boolean(raw?.nextModel) };
+    return { jobId, nextModel: Boolean(raw?.nextModel), override: z.array(z.string()).optional().parse(raw?.override) };
   })
-  .handler(async ({ context, data }): Promise<{ ok: boolean; model: string }> => {
+  .handler(async ({ context, data }) => {
     const sql = await getSql();
     const newsroomId = context.newsroomId ?? 1;
     const [row] = await sql<DeskJob>`
@@ -586,11 +603,13 @@ export const retryStoryJob = createServerFn({ method: "POST" })
     const context2 = { userId: context.userId, newsroomId };
     if (row.kind === "reconcile") {
       const { requestDraftReconciliation } = await import("./draft-reconcile.server.ts");
-      await requestDraftReconciliation(context2, { leadId, modelChoice: choice });
+      const result = await requestDraftReconciliation(context2, { leadId, modelChoice: choice, override: data.override });
+      if ("warning" in result) return { ...result, model: label };
     } else {
       const { commitStoryDraftForAuthenticatedEditor } = await import("./model-request-commit.server.ts");
       const result = await commitStoryDraftForAuthenticatedEditor({
         context: context2,
+        override: data.override,
         leadId,
         modelChoice: choice,
         modelEffort: null,
@@ -602,7 +621,7 @@ export const retryStoryJob = createServerFn({ method: "POST" })
         carries the sentence the editor needs. Swallowing it here would leave the
         card showing the old failure as though the press had done nothing.
       */
-      if (!result.ok) throw new Error(result.error);
+      if (!result.ok) return { ...result, model: label };
     }
     return { ok: true, model: label };
   });

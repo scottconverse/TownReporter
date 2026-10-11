@@ -80,6 +80,10 @@ function ImportPage() {
     refused: { headline: string; reason: string }[];
   } | null>(null);
 
+  const [overrides, setOverrides] = useState<string[]>([]);
+  const [pendingWarning, setPendingWarning] = useState<{ key: string; sentence: string } | null>(
+    null,);
+
   /*
     A paste handed over by the Desk's "Import finished stories" panel. Taken
     once and cleared, so coming back to this screen later opens empty rather
@@ -145,6 +149,8 @@ function ImportPage() {
   const read = () => {
     const parsed = parseFinishedStories(text);
     setDone(null);
+    setOverrides([]);
+    setPendingWarning(null);
     if (parsed.method === "none") {
       // Nothing to read, so the one structure call is offered -- visibly, with
       // the newsroom's own model picker, never behind the editor's back.
@@ -186,6 +192,8 @@ function ImportPage() {
       const parsed = { ...base, stories: result.stories };
       setCards(cardsFromReport(parsed));
       setNeedsModel(false);
+      setOverrides([]);
+      setPendingWarning(null);
       const summary = readSummary(parsed);
       setNotice({
         text: [
@@ -220,15 +228,31 @@ function ImportPage() {
   });
 
   const runImport = useMutation({
-    mutationFn: () =>
-      importFinishedStories({
-        data: {
+    mutationFn: (override: string[]) =>{
+
+      const
+        data = {
           text,
           tool,
           stories: ready.map(selectionFromCard),
+        };
+      return importFinishedStories({
+        data: override.length > 0 ? { ...data, override
+        } : data,
+      });
         },
-      }),
     onSuccess: (result) => {
+      /*
+        A card that is not word-for-word the paste is a warning, not a refusal:
+        nothing was written, the editor's own text is still on screen, and
+        `pendingWarning` is what the "Import anyway" press is for.
+      */
+      if (result.warning) {
+        setPendingWarning(result.warning);
+        setNotice({ text: result.warning.sentence, kind: "error" });
+        announceToDesk(result.warning.sentence, "err");
+        return;
+      }
       if (!result.ok) {
         setNotice({ text: result.error, kind: "error" });
         // B7R, item 4: a refusal is not a finished press, and the notice it
@@ -244,6 +268,8 @@ function ImportPage() {
       setReport(null);
       setText("");
       setNeedsModel(false);
+      setOverrides([]);
+      setPendingWarning(null);
       const held = result.imported.filter((i) => i.hold).length;
       const inIdeas = result.imported.filter((i) => i.kind === "idea").length;
       const inStories = result.imported.length - inIdeas;
@@ -284,6 +310,8 @@ function ImportPage() {
     setCards([]);
     setNeedsModel(false);
     setDone(null);
+    setOverrides([]);
+    setPendingWarning(null);
     announceToDesk(`${file.name} is in the box. Read the stories when you are ready.`);
   }
 
@@ -376,6 +404,8 @@ function ImportPage() {
                   setNeedsModel(false);
                   setNotice(null);
                   setDone(null);
+                  setOverrides([]);
+                  setPendingWarning(null);
                 }}
               >
                 Clear the box
@@ -513,7 +543,8 @@ function ImportPage() {
                       {card.triage ? (
                         <span className="text-sm text-muted">Triage: {card.triage}</span>
                       ) : null}
-                      {card.score ? <span className="text-sm text-muted">Score: {card.score}</span> : null}
+                      {card.score ? ( <span className="text-sm text-muted">Score: {card.score}</span>
+                      ) : null}
                     </span>
                   </div>
 
@@ -753,8 +784,8 @@ function ImportPage() {
                         ))}
                       </ul>
                       <p className="mt-1 text-sm text-muted">
-                        These go on the story's sources as names, with no page to open, so whoever edits it
-                        knows where the figure came from.
+                        These go on the story's sources as names, with no page to open, so whoever
+                        edits it knows where the figure came from.
                       </p>
                     </fieldset>
                   ) : null}
@@ -765,7 +796,10 @@ function ImportPage() {
                     </legend>
                     <div className="mt-1 space-y-1">
                       {IMPORT_DISCLOSURES.map((option) => (
-                        <label key={option.key} className="choice-row flex items-start gap-2 text-sm">
+                        <label
+                          key={option.key}
+                          className="choice-row flex items-start gap-2 text-sm"
+                        >
                           <input
                             type="radio"
                             name={`who-${card.key}`}
@@ -790,7 +824,9 @@ function ImportPage() {
                         />
                       </label>
                     ) : null}
-                    <p className="mt-1 text-sm text-muted">On the page it reads: {cardDisclosure(card) || "—"}</p>
+                    <p className="mt-1 text-sm text-muted">
+                      On the page it reads: {cardDisclosure(card) || "—"}
+                    </p>
                   </fieldset>
 
                   <details className="mt-3">
@@ -802,7 +838,9 @@ function ImportPage() {
                     <div className="mt-2 space-y-3">
                       <div className="grid gap-3 md:grid-cols-2">
                         <label className="block">
-                          <span className="text-sm tracking-[0.14em] text-muted uppercase">Score</span>
+                          <span className="text-sm tracking-[0.14em] text-muted uppercase">
+                            Score
+                          </span>
                           <input
                             className={inputClass + " mt-1 w-full"}
                             value={card.score}
@@ -811,7 +849,9 @@ function ImportPage() {
                           />
                         </label>
                         <label className="block">
-                          <span className="text-sm tracking-[0.14em] text-muted uppercase">Triage</span>
+                          <span className="text-sm tracking-[0.14em] text-muted uppercase">
+                            Triage
+                          </span>
                           <input
                             className={inputClass + " mt-1 w-full"}
                             value={card.triage}
@@ -859,8 +899,8 @@ function ImportPage() {
                         <span>
                           Hold this on the desk
                           <span className="block text-sm text-muted">
-                            It goes to the Queue with a Hold flag, and cannot be published until you take the
-                            hold off.
+                            It goes to the Queue with a Hold flag, and cannot be published until you
+                            take the hold off.
                           </span>
                         </span>
                       </label>
@@ -885,13 +925,29 @@ function ImportPage() {
           <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-rule pt-4">
             <InkButton
               tone="solid"
-              onClick={() => runImport.mutate()}
+              onClick={() => runImport.mutate([])}
               disabled={runImport.isPending || ready.length === 0}
             >
               {runImport.isPending ? "Importing…" : importLabel}
             </InkButton>
+            {}
+            {pendingWarning ? (
+              <InkButton
+                tone="solid"
+                onClick={() => {
+                  const next = Array.from(new Set([...overrides, pendingWarning.key]));
+                  setOverrides(next);
+                  runImport.mutate(next);
+                }}
+                disabled={runImport.isPending}
+              >
+                {runImport.isPending ? "Importing…" : "Import anyway"}
+              </InkButton>
+            ) : null}
             <span role="status" aria-live="polite" className="text-sm text-muted">
-              {ready.length === 0
+              {pendingWarning
+                ? "That text is not word-for-word what you pasted. Import it anyway to file it as it stands."
+                : ready.length === 0
                 ? ticked.length === 0
                   ? "Tick at least one story or idea to import."
                   : "Something below needs fixing before these can be imported."

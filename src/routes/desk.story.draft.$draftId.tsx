@@ -21,7 +21,7 @@ import { StoryBody } from "@/components/story-body";
 import { editorActionError } from "@/lib/news/desk-copy";
 import { refusedAnswer } from "@/lib/news/refused-answer";
 import { nameCheckText, readNameCheck } from "@/lib/news/name-check";
-import { publishBlockers, publishGateNote } from "@/lib/news/publish-blockers";
+import { publishBlockers, publishConfirmation, publishGateNote } from "@/lib/news/publish-blockers";
 import { lastDraftWhen, saveState } from "@/lib/news/writer-bar";
 import { Notice, WorkbenchSkeleton, EmptyState, ScreenError } from "@/components/states";
 import {
@@ -30,7 +30,11 @@ import {
   publishEditorial,
   saveEditorialDraft,
 } from "@/lib/news/opinion";
+import { changePublishedStory } from "@/lib/news/desk";
 import { useEditorSections } from "@/lib/use-sections";
+import { editorialSourcesError, parseEditorial } from "@/lib/news/editorial";
+import { PublishConfirmation } from "@/components/publish-confirmation";
+import type { PublishBlocker } from "@/lib/news/publish-blockers";
 
 export const Route = createFileRoute("/desk/story/draft/$draftId")({
   head: () => ({ meta: [{ title: "Editorial — TownReporter" }] }),
@@ -67,7 +71,7 @@ export const Route = createFileRoute("/desk/story/draft/$draftId")({
  */
 function EditorialPage() {
   const { sections } = useEditorSections();
-  const TOPICS = sections.map(s=>s.key);
+  const TOPICS = sections.map((s) =>s.key);
   const { draftId } = Route.useParams();
   const id = Number(draftId);
   const qc = useQueryClient();
@@ -89,6 +93,8 @@ function EditorialPage() {
   */
   const [previewSeen, setPreviewSeen] = useState(false);
   const [confirmingPublish, setConfirmingPublish] = useState(false);
+
+  const [liveWarning, setLiveWarning] = useState<{ key: string; sentence: string } | null>(null);
   /*
     The text as the server last had it. The save line says "Unsaved changes"
     until this matches the boxes again, which is the one question that line
@@ -159,14 +165,72 @@ function EditorialPage() {
     announcement of its own; the save already answers through `setMsg`.
   */
 
+  /*
+    Unit OH: the warnings the SERVER returned on a refused press, so a stale tab
+    sees every current warning before pressing again -- and so the acknowledgement
+    snapshot is taken from what the dialog ACTUALLY drew, not from what this tab
+    happened to know. Cleared on a fresh press.
+  */
+  const [refusedWarnings, setRefusedWarnings] = useState<{ key: string; sentence: string }[]>([]);
+
+  const change = useMutation({
+    mutationFn: (override?: string[]) =>
+      changePublishedStory({
+        data: { articleSlug: q.data?.published_slug ?? undefined, dek, topic, body, override },
+      }),
+    onSuccess: async (r) => {
+      if (r && r.ok === false) {
+        if ("warning" in r) {
+          setLiveWarning(r.warning);
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(r.error);
+        return;
+      }
+      setLiveWarning(null);
+      setMsg("Changed. The piece's link is unchanged, and the change is on the public log.");
+      void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
+      void qc.invalidateQueries({ queryKey: ["corrections"] });
+    },
+    onError: (e) =>
+      setMsg(
+        editorActionError(e instanceof Error ? e.message : "", "change the live piece") ??
+          "That did not change. Try again.",
+      ),
+  });
+
   const publish = useMutation({
-    mutationFn: async () => {
+    /*
+      The acknowledgement snapshot travels AS A MUTATION PARAMETER, taken at the
+      press -- not read out of component state in the same handler that then
+      calls `mutate()`, where a warning that arrived after the dialog opened
+      could be silently accepted. The dialog lists what it drew; the press sends
+      exactly those keys.
+    */
+    mutationFn: async (acknowledgedWarningKeys: string[]) => {
       await saveEditorialDraft({ data: { draftId: id, headline, dek, body, topic } });
-      return publishEditorial({ data: id });
+      return publishEditorial({ data: { draftId: id, acknowledgedWarningKeys } });
     },
     onSuccess: (r) => {
-      setMsg(r?.ok ? "On the paper." : (editorActionError(r?.error, "print it") ?? "That did not print."));
-      if (r?.ok) setBaseline(snapshot({ headline, dek, topic, body }));
+      if (r?.ok) {
+        setRefusedWarnings([]);
+        setConfirmingPublish(false);
+        setMsg("On the paper.");
+        setBaseline(snapshot({ headline, dek, topic, body }));
+      } else {
+        /*
+          The server's own words, and every warning it says is current, kept so
+          the dialog can list them and the editor can re-press on the list they
+          were actually shown.
+        */
+        setRefusedWarnings(
+          Array.isArray((r as { warnings?: unknown })?.warnings)
+            ? (r as { warnings: { key: string; sentence: string }[] }).warnings
+            : [],
+        );
+        setMsg(editorActionError(r?.error, "print it") ?? "That did not print.");
+      }
       void qc.invalidateQueries({ queryKey: ["editorial-draft", id] });
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
@@ -199,7 +263,14 @@ function EditorialPage() {
     are empty because nothing computes either for an editorial and the server's
     own refusal (`performPublishEditorial`) does not read them; leaving them out
     of the list is the same as the server not gating on them.
+
+    Unit OH: `publishBlockers` now carries a `kind` on every row, so the editorial
+    workbench shares the same warning/hard split as the reported one -- headline
+    and body are hard (a piece with nothing to print), the missing dek and stale
+    evidence are warnings, and the press is on whenever no hard reason stands.
   */
+  const sectionNameNow = sections.find((s) => s.key === topic)?.name ?? topic;
+
   const blockers = publishBlockers({
     headline,
     dek,
@@ -220,9 +291,46 @@ function EditorialPage() {
     reviewingEvidence: review.isPending,
     reconcileActive: false,
     publishing: publish.isPending,
-  });
+  }) as PublishBlocker[];
 
-  const sectionNameNow = sections.find((s) => s.key === topic)?.name ?? topic;
+  /*
+    The claims appendix every op-ed needs, from the SAME `parseEditorial` +
+    `editorialSourcesError` the server uses (`opinion-draft.server.ts`), read off
+    the editor's text on the client so the warning is drawn before the press
+    rather than only after it. `publishBlockers` does not know about an editorial
+    appendix, so this row is added here with the same key the server refuses on:
+    the acknowledgement snapshot then covers it.
+  */
+  const editorialSourcesWarning = editorialSourcesError(
+    parseEditorial(`${headline}\n\n${body }`).appendix,
+  );
+  if (editorialSourcesWarning) {
+    blockers.push({
+      key: "editorial-sources",
+      kind: "warning",
+      sentence: editorialSourcesWarning,
+      action: { label: "Review the claims and sources", target: { kind: "evidence-review" } },
+    });
+  }
+
+  /*
+    The dialog's decision, from the whole list (the page's own plus any the
+    server returned). Only warnings are acknowledged; a hard reason keeps the
+    confirm press off, so it can never be pressed over.
+  */
+  const publishDecision = publishConfirmation(
+    [
+      ...blockers,
+      ...refusedWarnings.map<PublishBlocker>((warning) => ({
+        key: warning.key,
+        kind: "warning",
+        sentence: warning.sentence,
+        action: { label: "Review", target: { kind: "evidence-review" } },
+      })),
+    ],
+    sectionNameNow,
+  );
+
   const saveLine = saveState({
     published: onPaper,
     dirty,
@@ -316,8 +424,8 @@ function EditorialPage() {
       lede={
         <>
           Unsigned, as the paper's own position. Edit it here, then print it. A
-          published piece is never edited — a correction runs as a dated note
-          above it.
+          change to a piece already on the paper warns first and is written to
+          the public change log beside it — it is never made silently.
         </>
       }
     >
@@ -327,13 +435,25 @@ function EditorialPage() {
         </Link>
       </p>
 
-      {evidenceStale && !onPaper ? <div className="note publish-blocked" role="status">
-        <strong>The story changed. Review its retained evidence before publishing.</strong>
-        <p>Check these sources against the edited body. Removing evidence keeps the original privately.</p>
-        <pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>{[q.data.source_urls,q.data.provenance_json,q.data.found_note,q.data.unanswered].filter(value => value && !["[]","{}"].includes(value)).join("\n\n")}</pre>
-        <InkButton disabled={review.isPending} onClick={() => review.mutate("keep")}>I checked: keep this evidence</InkButton>
-        <InkButton tone="ghost" disabled={review.isPending} onClick={() => review.mutate("remove")}>Remove old evidence from public story</InkButton>
-      </div> : null}
+      {evidenceStale && !onPaper ? (
+        <div className="note publish-blocked" role="status">
+          <strong>The story changed. Review its retained evidence before publishing.</strong>
+          <p>
+            Check these sources against the edited body. Removing evidence keeps the original
+            privately.
+          </p>
+          <pre style={{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}>
+            {[q.data.source_urls,q.data.provenance_json,q.data.found_note,q.data.unanswered].filter((value) => value && !["[]", "{}"].includes(value))
+              .join("\n\n")}
+          </pre>
+          <InkButton disabled={review.isPending} onClick={() => review.mutate("keep")}>
+            I checked: keep this evidence
+          </InkButton>
+          <InkButton tone="ghost" disabled={review.isPending} onClick={() => review.mutate("remove")}>
+            Remove old evidence from public story
+          </InkButton>
+        </div>
+      ) : null}
       {confirmDelete ? (
         <Notice kind="err">
           This deletes the editorial draft for good.
@@ -342,7 +462,9 @@ function EditorialPage() {
             : " Nothing else has a copy."}
         </Notice>
       ) : null}
-      {msg ? <Notice kind={msg === "Saved." || msg === "On the paper." ? "ok" : "err"}>{msg}</Notice> : null}
+      {msg ? (
+        <Notice kind={msg === "Saved." || msg === "On the paper." ? "ok" : "err"}>{msg}</Notice>
+      ) : null}
 
       <form className="work-form" onSubmit={(e) => e.preventDefault()}>
         <Field
@@ -357,14 +479,16 @@ function EditorialPage() {
             disabled={onPaper}
           />
         </Field>
+        {/* Audit item 7: editable on a published piece; saved under the warning. */}
         <Field label="Summary">
-          <input value={dek} onChange={(e) => setDek(e.target.value)} disabled={onPaper} />
+          <input value={dek} onChange={(e) => {setLiveWarning(null); setDek(e.target.value);}} />
         </Field>
         {/*
-          The drawn save line, in the drawn place: the head of the STORY box,
-          from the same `saveState` the reported screen uses, so both screens
-          say "Unsaved changes" for the same reason.
-        */}
+        The sticky publish bar, drawn at the foot of the story screen
+        (Desk Story.dc.html:122): the gate chips on the left, the first reason
+        Publish is off and the press on the right. The button is off exactly
+        when unit CT's list is not empty, on this screen as on the reported one.
+      */}
         <Field
           label="Story"
           htmlFor="editorial-body"
@@ -378,16 +502,16 @@ function EditorialPage() {
             id="editorial-body"
             rows={24}
             value={body}
-            onChange={(e) => setBody(e.target.value)}
-            disabled={onPaper}
+            onChange={(e) => {setLiveWarning(null); setBody(e.target.value);}}
           />
         </Field>
+        {/* Audit item 7: the section is editable on a published piece too. */}
         <Field label="Topic">
-          <select value={topic} onChange={(e) => setTopic(e.target.value)} disabled={onPaper}>
+          <select value={topic} onChange={(e) => {setLiveWarning(null); setTopic(e.target.value);}}>
             <option value="opinion">opinion</option>
             {TOPICS.filter((t) => t !== "about" && t !== "opinion").map((t) => (
               <option key={t} value={t}>
-                {sections.find(s=>s.key===t)?.name??t}
+                {sections.find((s) => s.key === t)?.name ?? t}
               </option>
             ))}
           </select>
@@ -395,12 +519,10 @@ function EditorialPage() {
       </form>
 
       {/*
-        The drawn action row (Desk Story.dc.html:112), carrying the presses
-        this screen can honour: the drawn "Save edits" and "Preview as reader",
-        and Delete, which the drawing does not draw anywhere -- it has no More
-        menu on this screen -- but which an editor must keep (a written piece
-        has to be removable). The three drawn presses with nothing behind them
-        here are listed in `design/SPEC-GAPS-0681.md`.
+        The sticky publish bar, drawn at the foot of the story screen
+        (Desk Story.dc.html:122): the gate chips on the left, the first reason
+        Publish is off and the press on the right. The button is off exactly
+        when unit CT's list is not empty, on this screen as on the reported one.
       */}
       <div className="work-bar astra-story-actions">
         {!onPaper ? (
@@ -447,6 +569,7 @@ function EditorialPage() {
             </ActionButton>
           </>
         ) : (
+          <>
           <p className="note">
             On the paper.{" "}
             <Link
@@ -461,6 +584,26 @@ function EditorialPage() {
               Published
             </Link>
           </p>
+            {/*
+              Audit item 7: the published piece's live edit. Same warn-then-
+              override contract as the reported story; the first press warns,
+              and "Change it anyway" sends the key back.
+            */}
+            <InkButton disabled={change.isPending || !q.data.published_slug} onClick={() => change.mutate(undefined)}>
+              {change.isPending ? "Saving…" : "Save changes"}
+            </InkButton>
+            {liveWarning ? (
+              <div className="note" role="status">
+                <p>{liveWarning.sentence}</p>
+                <InkButton
+                  disabled={change.isPending}
+                  onClick={() => change.mutate([liveWarning.key])}
+                >
+                  {change.isPending ? "Saving…" : "Change it anyway"}
+                </InkButton>
+              </div>
+            ) : null}
+          </>
         )}
         {/*
           Delete stays available after printing. The draft and the printed
@@ -519,13 +662,18 @@ function EditorialPage() {
       </div>
 
       {/*
-        "Names and spellings", the panel the drawn story screen carries too
-        (desk-name-check.tsx). It sits under the action row because the drawing
-        has nothing here: on the reported screen it lives on the Checks tab.
+        The sticky publish bar, drawn at the foot of the story screen
+        (Desk Story.dc.html:122): the gate chips on the left, the first reason
+        Publish is off and the press on the right. The button is off exactly
+        when unit CT's list is not empty, on this screen as on the reported one.
       */}
       <DeskNameCheck research={q.data.research_json} headline={headline} dek={dek} body={body} />
-      {/* Unit B8P: the material behind this piece was cut for length. Stored on
-          the draft, so it reads the same here as it does on the opinion desk. */}
+      {/*
+        The sticky publish bar, drawn at the foot of the story screen
+        (Desk Story.dc.html:122): the gate chips on the left, the first reason
+        Publish is off and the press on the right. The button is off exactly
+        when unit CT's list is not empty, on this screen as on the reported one.
+      */}
       <DeskLengthCut research={q.data.research_json} />
 
       {q.data.fact_sheet ? (
@@ -549,29 +697,28 @@ function EditorialPage() {
         <div className="astra-publish-bar" id="astra-publish-bar">
           <CheckGates gates={publishGates} label="Publish gates" />
           <div className="astra-publish-actions">
+            {/*
+        The sticky publish bar, drawn at the foot of the story screen
+        (Desk Story.dc.html:122): the gate chips on the left, the first reason
+        Publish is off and the press on the right. The button is off exactly
+        when unit CT's list is not empty, on this screen as on the reported one.
+      */}
             {confirmingPublish ? (
-              <>
-                <span className="note">
-                  This puts the piece on the public paper and in the feed, as the paper's own
-                  position. Corrections are published, not silent edits.
-                </span>
-                <InkButton
-                  disabled={publish.isPending || blockers.length > 0}
-                  onClick={() => {
-                    setConfirmingPublish(false);
-                    publish.mutate();
-                  }}
-                >
-                  {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
-                </InkButton>
-                <InkButton tone="quiet" onClick={() => setConfirmingPublish(false)}>
-                  Not yet
-                </InkButton>
-              </>
+              <PublishConfirmation
+                blockers={blockers}
+                sectionName={sectionNameNow}
+                consequenceText="This puts the piece on the public paper and in the feed, as the paper's own position. Corrections are published, not silent edits."
+                refusedWarnings={refusedWarnings}
+                publishing={publish.isPending}
+                onConfirm={() => {
+                  publish.mutate(publishDecision.acknowledgedWarningKeys);
+                }}
+                onCancel={() => setConfirmingPublish(false)}
+              />
             ) : (
               <>
                 <InkButton
-                  disabled={publish.isPending || blockers.length > 0}
+                  disabled={publish.isPending || !publishDecision.enabled}
                   onClick={() => setConfirmingPublish(true)}
                 >
                   {`Publish in ${sectionNameNow}`}

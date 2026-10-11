@@ -167,7 +167,7 @@ describe("New story dialog", () => {
     assert.match(newStoryProblem(state({ tab: "ai", assignment: "A full assignment sentence" })) ?? "", /Paste the material/);
 
     assert.match(newStoryProblem(state({ tab: "self" })) ?? "", /Headline needs a full sentence/);
-    assert.match(newStoryProblem(state({ tab: "self", headline: "A real headline" })) ?? "", /why this is news/i);
+    assert.match(newStoryProblem(state({ tab: "self", headline: "A real headline" })) ?? "", /story needs some text/i);
     assert.match(
       newStoryProblem(state({ tab: "self", headline: "A real headline", summary: "Why it matters" })) ?? "",
       /story needs some text/,

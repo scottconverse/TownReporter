@@ -184,6 +184,7 @@ export type DialogProps = {
   subtitle?: React.ReactNode;
   children?: React.ReactNode;
   footNote?: React.ReactNode;
+  primaryAction?: React.ReactNode;
   primaryLabel: string;
   onPrimary?: () => void;
   primaryDisabled?: boolean;
@@ -237,6 +238,7 @@ export function Dialog({
   children,
   footNote,
   primaryLabel,
+  primaryAction,
   onPrimary,
   primaryDisabled,
   altLabel,
@@ -358,7 +360,7 @@ export function Dialog({
                     {altLabel}
                   </InkButton>
                 ) : null}
-                <InkButton
+                {primaryAction ?? <InkButton
                   tone={primaryTone}
                   onClick={onPrimary}
                   disabled={primaryDisabled}
@@ -366,7 +368,7 @@ export function Dialog({
                   pendingLabel={primaryPendingLabel}
                 >
                   {primaryLabel}
-                </InkButton>
+                </InkButton>}
               </div>
             </div>
           </DialogPrimitive.Content>

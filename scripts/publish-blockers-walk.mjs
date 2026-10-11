@@ -1,57 +1,23 @@
 #!/usr/bin/env node
 /**
- * Every reason Publish is off, at the top of the Checks tab, each with its own
- * press (unit CT, 0.6.81) -- walked end to end on the built server and the real
- * desk UI.
+ * Publish warnings on the built server and real story page.
  *
- * WHAT WAS WRONG. On the owner's live story (/desk/story/250) Publish was off
- * and the page would not say why. The only sentence anywhere was small text at
- * the far right of the bottom bar, and it named one reason out of the five that
- * were holding the button down; `evidenceStale`, a running reconcile and a
- * saving evidence decision turned it grey with nothing said at all. The
- * "Override Longmont Leader" button that would have cleared the reason the one
- * sentence did name sat mid-form, in the same grey as every hint on the page.
- * And `performPublish` refuses a draft with an empty dek (0.6.80), which the
- * page never mentioned before the press.
+ * The baseline walk checks the warning list, repair controls, section selection,
+ * outlet override, readable typography in both themes, publication, and the
+ * bar's Review navigation. Warnings leave Publish enabled.
  *
- * WHAT THIS WALK PROVES, on the built server and the real desk UI:
+ * Release G regressions then publish an AI draft with eight unreviewed claims
+ * and an old three-claim readiness memo; accept claims, edit one word, save,
+ * and publish anyway; and check both the unchecked paste and personal-check
+ * paths. Each press must write an article and the expected editor override
+ * audit rows. The page and Drafts must both say Not checked yet for the paste.
  *
- *   1. A draft that names an outlet its Sources do not show, files under a
- *      section a machine chose (`topic_unchosen`) and carries no dek opens on
- *      the Checks tab with THREE rows at the TOP of that tab -- one per reason,
- *      in the order the editor meets them -- each with a status chip, the
- *      sentence, and a real button on a 44px target. The bottom bar counts the
- *      same three and offers one press to the list.
- *   2. Every row's press is the control that already existed: "Write a dek"
- *      focuses the dek box, "Pick a section" focuses the section select, and
- *      "Override Longmont Leader" writes the SAME `named_outlet_overrides` row
- *      the mid-form button writes. Pressing each row's button, and doing the
- *      work it points at, empties the list -- "Nothing is blocking Publish." --
- *      and the button comes on.
- *   3. With the list empty the story publishes, and the row the override wrote
- *      is in the database beside it.
- *   4. The publish bar's own "Review" press: from the Sources tab, one press
- *      lands on the Checks tab with the list in view. (The red "Draft saved -
- *      review required" banner this step used to press is gone; the bar and the
- *      Checks list carry the same reason.)
- *   5. Nothing informational in the block is under 14px and every text/backdrop
- *      pair in it clears WCAG AA (4.5:1), in both themes -- measured, not
- *      asserted from the stylesheet.
+ * This walk boots its own built server on 3581 with in-memory PGlite. No model
+ * is called: the model gateway points to a port proven dead, provider keys are
+ * cleared, and CLI backends point to nonexistent files. Captures stay under
+ * this checkout's reports/CT-evidence, or CT_EVIDENCE_DIR when supplied.
  *
- * Zero console errors, asserted at the end.
- *
- * NO MODEL IS CALLED, and none is needed: nothing in this walk exercises a
- * drafting, research or suggestion pass. `LLM_BASE_URL` points at a port this
- * walk proves is dead before it boots, ANTHROPIC_API_KEY is cleared, and both
- * unattended CLI rungs are pointed at files that do not exist -- so a rung that
- * somehow tried to run would fail rather than reach a real model.
- *
- * The server under test must be BUILT (`npm run build`); this walk imports
- * `.output/server/index.mjs` itself.
- *
- *   node scripts/publish-blockers-walk.mjs
- *
- * Screenshots land in reports/CT-evidence/ (override with CT_EVIDENCE_DIR).
+ * Run after npm run build: node scripts/publish-blockers-walk.mjs
  */
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
@@ -342,6 +308,9 @@ async function seedReviewRequiredDraft() {
      values (1, $1, 'draft', $2, 'completed', 'Done', $3, now())`,
     [ownerId, seeded.leadId, receipt],
   );
+  await pg.query("update drafts set body='The council reviewed the pilot program.',research_json=$1 where id=$2", [JSON.stringify({
+    storyReadiness: {version:1,state:"not-ready",openCount:0,totalCount:0,reason:"The pilot report still needs a source review."},
+  }), seeded.draftId]);
   facts.push({ reviewLeadId: seeded.leadId, reviewDraftId: seeded.draftId });
   step("a second lead carries a completed job that asked for a review");
   return seeded;
@@ -411,12 +380,11 @@ async function threeRowsOnePerReason() {
   );
 
   const summary = await page.locator("#publish-blockers > .meta").innerText();
-  assert.match(summary, /^3 things block Publish\./, `the list counts its own rows: ${summary}`);
-  assert.match(summary, /Each row has the press that clears it\./);
+  assert.match(summary, /^3 warnings before Publish\./, `the list counts its own rows: ${summary}`);
+  assert.match(summary, /choose Publish anyway\./);
 
   const dek = await page.locator('li[data-blocker="dek"]').innerText();
   assert.match(dek, /The dek is empty\./);
-  assert.match(dek, /Add a dek, the one-line summary under the headline, before you publish\./);
   assert.match(dek, /Write a dek/);
 
   const section = await page.locator('li[data-blocker="section"]').innerText();
@@ -431,7 +399,7 @@ async function threeRowsOnePerReason() {
   const chips = await page.$$eval("#publish-blockers .astra-blocker-chip", (els) =>
     els.map((el) => el.textContent),
   );
-  assert.deepEqual(chips, ["Blocks Publish", "Blocks Publish", "Blocks Publish"]);
+  assert.deepEqual(chips, ["Warning", "Warning", "Warning"]);
   step("three rows, one per reason, each with its chip and its press");
 }
 
@@ -455,18 +423,18 @@ async function theBottomBarNamesTheFirstReason() {
   const note = page.locator("#astra-publish-bar .publish-blocked");
   const text = await note.innerText();
   const firstRowsPress = (
-    await page.locator("#publish-blockers .astra-blocker-act").first().innerText()
+    await page.locator("#publish-blockers .astra-blocker-what").first().innerText()
   ).trim();
   assert.equal(
     text.replace(/\s*Review\s*$/, "").trim(),
-    `${firstRowsPress} to publish.`,
+    firstRowsPress,
     `the bar names the first reason as its own press: ${text}`,
   );
   assert.match(text, /Review/, "and offers the press that reaches the list");
   assert.equal(
     await publishButton().isDisabled(),
-    true,
-    "the Publish button is off while three reasons stand",
+    false,
+    "warnings leave Publish enabled so the editor can publish anyway",
   );
 
   /*
@@ -651,8 +619,8 @@ async function nothingIsBlocking() {
   assert.equal(await page.locator("#publish-blockers").count(), 0, "the cleared blocker panel is removed");
   assert.equal(
     (await page.locator("#astra-publish-bar .note").innerText()).trim(),
-    "Ready to publish.",
-    "the bar explicitly says the draft is ready",
+    "No fact check has been saved for this draft.",
+    "the clear bar does not claim a fact check ran",
   );
   assert.equal(await page.locator("#publish-blockers li.astra-blocker").count(), 0);
   assert.equal(
@@ -699,13 +667,13 @@ async function theBannerHasAPress() {
     one reason said as the press that clears it, not a count.
   */
   const soleReasonPress = (
-    await page.locator("#publish-blockers .astra-blocker-act").first().innerText()
+    await page.locator("#publish-blockers .astra-blocker-what").first().innerText()
   ).trim();
   assert.equal(
     (await page.locator("#astra-publish-bar .publish-blocked").innerText())
       .replace(/\s*Review\s*$/, "")
       .trim(),
-    `${soleReasonPress} to publish.`,
+    soleReasonPress,
     "and the bar names that one reason as its own press",
   );
 
@@ -726,6 +694,67 @@ async function theBannerHasAPress() {
 
 let currentLeadId = 0;
 let reviewLeadId = 0;
+
+/** Release G: exercise the advertised override through the built server and real editor. */
+async function releaseGOverrides() {
+  const pg = await db();
+  for (const mode of ["unreviewed", "accepted-edited", "pasted", "self-checked"]) {
+    const { leadId, draftId } = await seedLead({ headline: `Release G ${mode}`, dek: DEK,
+      topic: SECTION_KEY, topicUnchosen: false, scratch: "Release G override regression" });
+    const body = "On October 10, 2026, the council completed 2 planned checks after a short debate.";
+    const isPaste = mode === "pasted" || mode === "self-checked";
+    const url = `https://records.example/release-g-${leadId}`;
+    const capture = isPaste ? null : (await pg.query("insert into artifact_versions(user_id,newsroom_id,url,content_hash,title,full_text) values($1,1,$2,'fixture','Council record',$3) returning id", [ownerId, url, body])).rows[0].id;
+    const research = isPaste ? { importedText: true } : {
+      aiEvidenceReview: { checkedText: body, rows: [] },
+      storyReadiness: { version: 1, state: "not-ready", openCount: 3, totalCount: 3, reason: "3 claims need review." },
+    };
+    const findings = isPaste ? [] : Array.from({ length: 8 }, (_, i) => ({
+      text: `Council record finding ${i + 1}: the council completed 2 planned checks.`, source_urls: [url],
+      capture_event_ids: [], artifact_version_ids: [capture], locators: ["Council record"], excerpt: "the council completed 2 planned checks",
+    }));
+    await pg.query("update drafts set body=$1,found_note=$2,research_json=$3 where id=$4", [body, JSON.stringify(findings), JSON.stringify(research), draftId]);
+    await openTheStory(leadId);
+    step(`${mode}: waiting for the current claims warning`);
+    await waitForBlockerCount(1, `${mode}'s current warning`);
+    assert.deepEqual(await blockerKeys(), [isPaste ? "unchecked" : "claims-unreviewed"]);
+    step(`${mode}: the current warning is shown`);
+    if (isPaste) {
+      assert.equal(await page.locator("[data-story-readiness]").getAttribute("data-story-readiness"), "not-checked");
+      await page.goto(`${base}/desk/drafts`, { waitUntil: "domcontentloaded" });
+      const row = page.locator(".drafts-row", { hasText: `Release G ${mode}` });
+      await row.waitFor();
+      assert.match(await row.innerText(), /Not checked yet/);
+      await openTheStory(leadId);
+    }
+    if (mode === "accepted-edited") {
+      await page.getByRole("button", { name: /Publish anyway — I accept these claims/ }).click();
+      await waitForBlockerCount(0, "the recorded acceptance");
+      await page.locator("#story-body").fill(body.replace("short", "brief"));
+      await page.getByRole("button", { name: "Save edits", exact: true }).click();
+      await waitForTruth("the edited word to be saved", async () => {
+        const saved = await pg.query("select body from drafts where id=$1", [draftId]);
+        return saved.rows[0].body.includes("brief") ? true : null;
+      });
+      await waitForBlockerCount(2, "the edit's current warnings");
+    }
+    if (mode === "self-checked") {
+      await page.getByRole("button", { name: "I checked this story myself", exact: true }).click();
+      await waitForBlockerCount(0, "the recorded personal check");
+    }
+    await publishButton().click();
+    step(`${mode}: opened the publish confirmation`);
+    await page.getByRole("button", { name: `${mode === "self-checked" ? "Yes, print it" : "Publish anyway"} in ${SECTION_NAME}`, exact: true }).click();
+    step(`${mode}: pressed the confirmation`);
+    const article = await waitForTruth(`${mode} to publish`, async () => (await pg.query("select slug,body from articles where lead_id=$1", [leadId])).rows[0]);
+    assert.equal(article.body, mode === "accepted-edited" ? body.replace("short", "brief") : body);
+    const audits = await pg.query("select detail,user_id from audit_events where action='override' and subject_kind='drafts' and subject_id=$1", [draftId]);
+    const expected = mode === "self-checked" ? [] : mode === "accepted-edited" ? ["claims-unreviewed", "evidence-stale"] : [isPaste ? "unchecked" : "claims-unreviewed"];
+    assert.deepEqual(audits.rows.map(row => JSON.parse(row.detail).key).sort(), expected.sort());
+    assert.ok(audits.rows.every(row => row.user_id === ownerId));
+    step(`${mode}: published through the real confirmation with the expected override audits`);
+  }
+}
 
 async function main() {
   await preconditions();
@@ -771,6 +800,7 @@ async function main() {
 
     await publishing();
     await theBannerHasAPress();
+    await releaseGOverrides();
 
     assert.deepEqual(consoleErrors, [], "the desk reached all of this without a console error");
   } catch (err) {

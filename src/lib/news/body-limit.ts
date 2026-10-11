@@ -137,13 +137,31 @@ export class FetchResponseRefusal extends Error {
  * enforced. An explicitly binary type is refused; octet-stream PDFs are allowed
  * only on a .pdf path. This validates declared formats, not the truth of a MIME label.
  */
+const refusedHtml = new WeakMap<Response, string>();
+/** Bounded refusal HTML for discovering public routes, never article evidence. */
+export function refusedPageHtml(res: Response): string {
+  return refusedHtml.get(res) ?? "";
+}
+
 export async function capFetchResponse(res: Response, url: URL): Promise<Response> {
   const init = { status: res.status, statusText: res.statusText, headers: res.headers };
   // Consumers use the status/Location, never error bodies as reporting evidence.
   // Preserve 429 so the Reddit scheduler can apply its cooldown before retrying.
   if (!res.ok) {
-    await res.body?.cancel().catch(() => undefined);
-    return new Response(null, init);
+    const response = new Response(null, init);
+    const mime = (res.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    if (
+      [401, 403, 429].includes(res.status) &&
+      (!mime || mime === "text/html" || mime === "application/xhtml+xml")
+    ) {
+      try {
+        const capped = await readBodyCapped(res, 200_000);
+        if (capped.ok) refusedHtml.set(response, new TextDecoder().decode(capped.bytes));
+      } catch {
+        /* The status still permits the browser fallback. */
+      }
+    } else await res.body?.cancel().catch(() => undefined);
+    return response;
   }
   const mime = (res.headers.get("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
   const octetPdf = mime === "application/octet-stream" && /\.pdf$/i.test(url.pathname);

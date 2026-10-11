@@ -9,6 +9,8 @@ import type { MeetingStoryFocus } from "./meeting-evidence-retrieval.ts";
 import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provider-registry.ts";
 import type { OcrOptions } from "./ingest.ts";
 import { aiEvidenceReadiness, judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
+import { runDraftReply } from "./draft-reply.ts";
+import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
@@ -187,7 +189,7 @@ export type ReportChat = (
   user: string,
   maxTokens?: number,
   modelChoice?: EffectiveProviderChoice,
-  options?: { timeoutMs: number },
+  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number },
 ) => Promise<ChatResult>;
 
 export type WriterDraftCheckpoint = {
@@ -1058,6 +1060,14 @@ export async function defaultIngest(
   ocrOptions?: IngestOptions,
 ): Promise<FetchedDoc> {
   try {
+    const { isNewsletterUrl, retainedNewsletterDocument } = await import("./newsletter-scan.server.ts");
+    if (isNewsletterUrl(url)) {
+      const newsroomId = Number(ocrOptions?.newsroomId);
+      const stored = Number.isInteger(newsroomId) && newsroomId > 0
+        ? await retainedNewsletterDocument(url, newsroomId) : null;
+      return { url, title: stored?.title ?? "Newsletter", text: stored?.text ?? "", extras: [],
+        extraction_method: stored?.extractionMethod ?? "newsletter" };
+    }
     const got = await ingestDocument(url, ocrOptions);
     return {
       url,
@@ -1413,7 +1423,7 @@ export async function reportAndDraft(
         reasoningEffort: effectiveModelEffort,
       });
     });
-  const timedChat = (reserveMs: number): ReportChat => (system, user, maxTokens) => {
+  const timedChat = (reserveMs: number): ReportChat => (system, user, maxTokens, _choice, options) => {
     const remaining = timeLeft() - reserveMs;
     // Keep the provider's minimum useful call and the two-second handoff
     // margin inside the draft wall; injected batch adapters get this same cap.
@@ -1421,7 +1431,8 @@ export async function reportAndDraft(
       return Promise.resolve({ ok: false as const, error: "The draft ran out of time before this step." });
     }
     const timeoutMs = Math.min(limits.callMs, Math.max(6_000, remaining - 2_000));
-    return providerChat(system, user, maxTokens, effectiveModelChoice, { timeoutMs });
+    const attempt = (retry?: string) => providerChat([system, retry].filter(Boolean).join("\n\n"), user, maxTokens, effectiveModelChoice, { ...options, timeoutMs });
+    return options?.draftReply ? runDraftReply(attempt, options.minimumWords) : attempt();
   };
   const chat = timedChat(nameReserve);
   const nameChat = timedChat(0);
@@ -1786,7 +1797,14 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       failure wording is the token that classifier reads.
     */
     const write = await readableReplyOrRetry({
-      attempt: () => chat(reportWriteSystem(paper), built.packet, 2200),
+      attempt: (retryInstruction) => chat(
+        [reportWriteSystem(paper), retryInstruction].filter(Boolean).join("\n\n"),
+        built.packet,
+        2200,
+        effectiveModelChoice,
+        { timeoutMs: limits.callMs, draftReply: true, minimumWords: requestedBrief ? 20 : 0 },
+      ),
+      onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
       read: (text) => {
         const candidate = coerceDraft(text, {
           headline: opts.lead.headline,
@@ -1797,7 +1815,12 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       },
       label: "The writing model",
     });
-    if (!write.ok) return { error: write.error };
+    if (!write.ok) {
+      if (!write.partialText) return { error: write.error };
+      const partial = coerceDraft(write.partialText, {headline: opts.lead.headline, dek: opts.lead.why, topic: opts.lead.topic});
+      partial.integrity_notes = [partial.integrity_notes, CUT_OFF_WARNING].filter(Boolean).join("\n");
+      return {coerced: partial, parsed: parseJsonBlock<Record<string, unknown>>(write.partialText) ?? {}, body: partial.body};
+    }
     const coerced = write.value;
 
     const parsed = parseJsonBlock<Record<string, unknown>>(write.text) ?? {};
@@ -1868,6 +1891,8 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
           ? `MEETING TRANSCRIPT EVIDENCE MATCHED TO DRAFT (captured recording; segment numbers and timestamps are citation locators):\n${promptExtraEvidence}\n\n`
           : ""}EDITOR-SUPPLIED DOCUMENT EVIDENCE (filenames and tight page/character locators are valid citations for private uploads; a public URL is not required. Cite the smallest passage that supports the sentence, never an entire-document character range merely because the name appears somewhere inside it):\n${opts.documentEvidence ?? ""}`,
         1800,
+        effectiveModelChoice,
+        { timeoutMs: limits.callMs, draftReply: true, minimumWords: requestedBrief ? 20 : 0 },
       ).catch(() => ({ ok: false as const, error: "Editing did not complete." }));
       if (editAi.ok) {
         const edited = coerceDraft(editAi.text, {
@@ -2217,7 +2242,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     documentClaims,
     research_memo: {
       aiEvidenceReview,
-      storyReadiness: aiEvidenceReadiness(aiEvidenceReview),
+      storyReadiness: draftLooksCutOff(body, requestedBrief ? 20 : 0) ? {version:1,state:"not-ready",openCount:0,totalCount:0,reason:CUT_OFF_WARNING} : aiEvidenceReadiness(aiEvidenceReview),
       nameCheck: names.check,
       ...(meetingFocus ? { meetingFocus } : {}),
       ...(meetingEvidenceWide ? { meetingEvidenceWide: true } : {}),

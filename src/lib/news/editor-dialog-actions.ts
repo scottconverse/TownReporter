@@ -63,6 +63,7 @@ export const addLead = createServerFn({ method: "POST" })
       { userId: context.userId, newsroomId: owned(context) },
       {
         paste: data.paste,
+        override: data.override,
         why: data.why,
         then: data.then,
         modelChoice: data.modelChoice,
@@ -78,7 +79,7 @@ export const holdLead = createServerFn({ method: "POST" })
   .handler(({ context, data }) =>
     performHoldLead(
       { userId: context.userId, newsroomId: owned(context) },
-      { id: data.id, choice: data.choice, note: data.note },
+      { id: data.id, choice: data.choice, note: data.note, override: data.override },
       deps(),
     ),
   );
@@ -103,6 +104,7 @@ export const findSources = createServerFn({ method: "POST" })
       {
         topic: data.topic,
         scope: data.scope,
+        override: data.override,
         modelChoice: data.modelChoice,
         modelEffort: data.modelEffort as ModelEffort | null | undefined,
       },
@@ -157,7 +159,7 @@ export const chooseHeadline = createServerFn({ method: "POST" })
   .handler(({ context, data }) =>
     performChooseHeadline(
       { userId: context.userId, newsroomId: owned(context) },
-      { id: data.id, headline: data.headline },
+      { id: data.id, headline: data.headline, override: data.override },
       deps(),
     ),
   );

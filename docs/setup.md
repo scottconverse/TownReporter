@@ -568,6 +568,17 @@ Not used when:
 
 If Chromium is missing, those fetches skip the browser path. Packets still ingest. Meeting tapes will say there is no transcript yet.
 
+Self-hosted builds include matching `playwright` and `playwright-core` packages in
+`.output/server/node_modules`; Chromium itself remains in the browser cache.
+On the live box, run `npm run playwright:install` from the installed app as the
+same Windows user that runs the server. The Windows installer sets
+`PLAYWRIGHT_BROWSERS_PATH` to its configured browser directory; use that same
+value when installing. Without an override, Playwright uses the user's normal
+cache (`%LOCALAPPDATA%/ms-playwright` on Windows). An upgrade must install the
+Chromium revision matching the installed Playwright version. The app logs the
+actual module/launch/page error and browser path when rendering fails, then
+tries public feeds. It does not download a browser during a source read.
+
 **Serverless caveat.** Playwright needs a real Chromium on the machine. A Vercel serverless function usually cannot open it. If transcripts and Municode matter, run TownReporter on a VPS, a home box, or any long-running Node host where `npx playwright install chromium` succeeded. The paper and desk still deploy to Vercel; the browser path just will not fire there.
 
 ---

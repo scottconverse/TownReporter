@@ -1,8 +1,5 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   publishBlockers,
   publishBlockedSummary,
@@ -83,18 +80,24 @@ describe("publishBlockers", () => {
     the editor reads the refusal before the press rather than after it -- and
     this test fails if the two drift apart.
   */
-  it("says the server's own empty-dek refusal before the press, not after", () => {
+  it("says a missing dek in plain words, without claiming the desk refuses it", () => {
     const [only] = publishBlockers(withState({ dek: "" }));
     assert.equal(only?.key, "dek");
     assert.deepEqual(only?.action, { label: "Write a dek", target: { kind: "dek" } });
-
-    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-    const server = readFileSync(join(root, "lib", "news", "desk.ts"), "utf8");
-    const gate = "Add a dek, the one-line summary under the headline, before you publish.";
-    assert.ok(server.includes(gate), "the server gate this mirrors is gone; re-read desk.ts");
-    assert.ok(
-      (only?.sentence ?? "").includes(gate),
-      "the row must say what the server will say when it refuses",
+    /*
+      Unit OH: a dek is now a WARNING, not a wall. The old sentence borrowed
+      `performPublish`'s refusal verbatim -- "The desk refuses a story with no
+      dek" -- which was true when every blocker disabled the button and is a lie
+      now that the editor may print through without one. The row says what is
+      missing, and the confirm dialog names the section the editor is printing
+      under; nothing here claims a refusal the desk no longer makes.
+    */
+    assert.equal(only?.kind, "warning");
+    assert.match(only?.sentence ?? "", /dek/i);
+    assert.doesNotMatch(
+      only?.sentence ?? "",
+      /refuse/i,
+      "a warning must not say the desk refuses it",
     );
   });
 
@@ -254,11 +257,11 @@ describe("publishBlockers", () => {
     assert.equal(publishBlockedSummary([]), "");
     assert.equal(
       publishBlockedSummary(publishBlockers(withState({ sectionReady: false }))),
-      "1 thing blocks Publish",
+      "1 warning before Publish",
     );
     assert.equal(
       publishBlockedSummary(publishBlockers(withState({ sectionReady: false, dek: "" }))),
-      "2 things block Publish",
+      "2 warnings before Publish",
     );
   });
 });
@@ -268,41 +271,60 @@ describe("U24: a killed lead is not on its way anywhere", () => {
     The stand-in editorial day: a killed lead's Checks tab still carried
     "Before you can publish — 4 things block Publish" with four ENABLED buttons
     -- "Write the headline", "Write the story", "Write a dek", "Pick a section"
-    -- while the editors, "Draft with AI" and the publish bar were all correctly
-    gone. The action on a killed lead is Reopen, and that panel is on the page
-    already; a countdown to a publish that cannot happen is the desk
-    contradicting itself.
-  */
-  it("is the only status that hides the list", () => {
-    assert.equal(showsPublishPrep("killed", true), false);
-    for (const status of ["new", "drafted", "held", "published"]) {
-      assert.equal(showsPublishPrep(status, true), true, `${status} leads still show their blockers`);
-    }
-  });
+    -- while the editors, "Draft with AI" and the whole publish bar were all
+    correctly gone.
 
-  /*
-    FB6 item 8a (A2c-REPORT.md §6 C4). A story with no draft showed "4 things
-    block Publish" with four enabled prep rows directly above the page's own
-    "No draft yet". Nothing to prepare is not the same as nothing blocking a
-    publish, and the countdown was for a press the editor cannot reach yet.
+    ── WHAT CHANGED, AND WHY (unit OH) ──────────────────────────────────────
+    The old rule was "a killed lead shows no list", and it was right for a page
+    where killing a lead removed the publish bar: a countdown to a press the
+    editor cannot make is the desk contradicting itself. The owner changed the
+    rule on purpose. A KILLED OR HELD DRAFT NOW KEEPS ITS PUBLISH BAR, and the
+    way back is one press -- un-kill (or un-hold) and publish in the same press.
+    A list of reasons over a bar that exists is the work, not a dead end; the
+    list is hidden only when there is no draft to prepare, whatever the status.
   */
-  it("hides the list when there is no draft, whatever the status", () => {
-    for (const status of ["new", "drafted", "held", "published"]) {
+  it("keeps the list on a killed or held draft, and hides it only with no draft", () => {
+    for (const status of ["new", "drafted", "held", "killed", "published"]) {
+      assert.equal(showsPublishPrep(status, true), true, `${status} with a draft shows the work`);
       assert.equal(
         showsPublishPrep(status, false),
         false,
         `${status} with no draft must not show publish-prep work`,
       );
     }
-    assert.equal(showsPublishPrep("killed", false), false);
-    assert.equal(showsPublishPrep("new", true), true, "the list returns with the first draft");
   });
 
-  it("agrees with the server that a killed lead cannot print at all", () => {
-    /* The list is work toward a press, so hiding it is right exactly when the
-       press is refused. `performPublish` refuses this status by name. */
-    const desk = readFileSync(new URL("./desk.ts", import.meta.url), "utf8");
-    assert.match(desk, /if \(lead\.status === "killed"\) \{[\s\S]{0,120}Killed leads cannot print\./);
+  it("gives a killed or held draft a warning that names the one press, not a silent absence", () => {
+    /*
+      Unit OH: a killed or held draft keeps its bar, and the way back is ONE
+      press -- un-kill (or un-hold) and publish in the same press -- which the
+      server performs inside the publish transaction. The proof is behavioural:
+      the page state produces a WARNING whose sentence names that single press,
+      and a warning never disables the button (see `publishConfirmation`). What
+      the server does with the status is the server's own test's business, not a
+      string in a file read here.
+    */
+    for (const status of ["held", "killed"]) {
+      const blockers = publishBlockers(withState({ leadStatus: status }));
+      const row = blockers.find((blocker) => blocker.key === `lead-${status}`);
+      assert.ok(row, `${status} produces its own lead-${status} warning`);
+      assert.equal(
+        row!.kind,
+        "warning",
+        `${status} is a judgement an editor overrules, not a hard stop`,
+      );
+      assert.match(
+        row!.sentence,
+        /(un-hold|restore)/,
+        "the sentence names what the one press does",
+      );
+      assert.match(row!.sentence, /publish/i, "and that it publishes in the same press");
+      assert.deepEqual(
+        blockers.filter((blocker) => blocker.kind !== "warning"),
+        [],
+        `${status} adds no hard reason, so the press stays live`,
+      );
+    }
   });
 });
 

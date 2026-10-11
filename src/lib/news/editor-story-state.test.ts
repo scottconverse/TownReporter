@@ -45,6 +45,51 @@ it("acceptance keeps other publish gates", () => {
   assert.equal(result.publishEnabled, false);
   assert.equal(result.readiness.reason, other.sentence);
 });
+/*
+  ── A WARNING REPORTS NOT-READY BUT STILL PUBLISHES (unit OH) ────────────────
+  The decision this unit is built on: the story may READ "not-ready" -- the
+  readiness verdict is honest -- while the button is ON, because a warning is a
+  judgement the editor overrules. `publishEnabled` derives the ABSENCE of a hard
+  kind, so exactly one warning leaves it true even as `readiness.state` is
+  "not-ready". A hard kind is false. And a hand-built blocker with NO `kind` is
+  treated as hard, so every pre-OH caller's `publishEnabled` is unchanged.
+*/
+it("a warning reports not-ready yet leaves Publish enabled", () => {
+  const warning = {
+    key: "readiness",
+    kind: "warning",
+    sentence: "This story is not ready to publish.",
+  };
+  const result = acceptedClaimsPublishState({
+    blockers: [warning],
+    openCount: 0,
+    acceptedCount: 0,
+    hasAiJudgments: true,
+  });
+  assert.deepEqual(result.blockers, [warning], "the warning is still listed");
+  assert.equal(result.publishEnabled, true, "a warning never disables the button");
+  assert.equal(result.readiness.state, "not-ready", "and the readiness verdict is still honest");
+});
+it("a hard reason leaves Publish off", () => {
+  const hard = { key: "headline", kind: "hard", sentence: "The headline is empty." };
+  const result = acceptedClaimsPublishState({
+    blockers: [hard],
+    openCount: 0,
+    acceptedCount: 0,
+    hasAiJudgments: false,
+  });
+  assert.equal(result.publishEnabled, false);
+});
+it("a caller whose blockers carry no kind keeps its Publish gate (compatibility)", () => {
+  const legacy = { key: "dek", sentence: "Write a dek." };
+  const result = acceptedClaimsPublishState({
+    blockers: [legacy],
+    openCount: 0,
+    acceptedCount: 0,
+    hasAiJudgments: false,
+  });
+  assert.equal(result.publishEnabled, false, "an unknown reason is hard, never a silent unlock");
+});
 it("the story state helper carries the acceptance reason", () => {
   assert.equal(editorStoryState([], 9, 9).reason, "You accepted 9 claims the AI could not confirm.");
 });

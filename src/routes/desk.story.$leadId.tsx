@@ -1,6 +1,9 @@
+import { requestDraftReconciliationFn } from "@/components/scoped-actions";
+import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
-import { acceptedClaimsPublishState, readinessWithAcceptedClaims, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { UNCHECKED_STORY_REASON, uncheckedStoryNeedsCheck } from "@/lib/news/unchecked-story-gate";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -11,12 +14,13 @@ import {
 import {
   blockerPressState,
   publishBlockers,
-  publishGateNote,
+  publishConfirmation,
   publishPressState,
   showsPublishPrep,
   type PublishBlockerTarget,
 } from "@/lib/news/publish-blockers";
 import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/components/publish-bar-result";
+import { PublishConfirmation } from "@/components/publish-confirmation";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
@@ -48,7 +52,7 @@ import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
 import { EmptyState, WorkbenchSkeleton, Notice, ScreenError } from "@/components/states";
 import {
-  draftLead,
+  changePublishedStory,
   fixDraftStyle,
   getLead,
   loadLeadReportingPackage,
@@ -56,16 +60,14 @@ import {
   listDraftHistory,
   listPullJobs,
   publishLead,
-  pullTodo,
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
-  continuePullJob,
+  acknowledgeUncheckedStory,
   overrideNamedOutlet,
-  resolveLeadDuplicate,
-  rewriteFromLedger,
+  reverifyPublishedStory,
+  rewritePublishedStory,
   saveDraft,
   saveReportingNotes,
-  setLeadStatus,
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
@@ -131,6 +133,8 @@ import {
   readinessDot,
   saveState,
   writerIsReady,
+  writerDraftAction,
+  writerUnavailableReason,
 } from "@/lib/news/writer-bar";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
 import {
@@ -157,16 +161,7 @@ import { jobProgressView } from "@/lib/news/job-progress";
 */
 import { ReportingPackagePanel } from "@/components/reporting-package-panel";
 import { ReportThisLeadControl } from "@/components/report-this-lead";
-import {
-  assessCheckedDraftResult,
-  assessRefreshedCheckedDraft,
-  draftFieldsMatch,
-  getCheckedDraftResultFn,
-  getDraftReconciliationStatusFn,
-  requestDraftReconciliationFn,
-  type CheckedDraftResult,
-  type EditableDraftFields,
-} from "@/lib/news/draft-reconcile-actions";
+import { assessCheckedDraftResult, assessRefreshedCheckedDraft, draftFieldsMatch, getCheckedDraftResultFn, getDraftReconciliationStatusFn, type CheckedDraftResult, type EditableDraftFields } from "@/lib/news/draft-reconcile-actions";
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
@@ -358,6 +353,16 @@ function StoryPage() {
   */
   const [publishRefusal, setPublishRefusal] = useState("");
   /*
+    ── THE WARNINGS THE SERVER RETURNED ON A REFUSED PRESS (unit OH) ───────────
+    A refusal can carry the desk's CURRENT warnings, which may be more than this
+    page's stale tab holds -- a claim count that grew, a readiness verdict that
+    changed, a citation that drifted. They are held here so the confirm dialog
+    can draw every one of them before the editor presses again, and so a stale
+    tab cannot press its way past a warning it was never shown. Cleared by the
+    next press and by any edit, like the refusal itself.
+  */
+  const [refusedWarnings, setRefusedWarnings] = useState<{ key: string; sentence: string }[]>([]);
+  /*
     Unit UI1a. The blocker row that just recorded an acceptance, so the control
     that was pressed can say "Accepted" with a check instead of going quiet.
     Held for as long as the row is on the page: the acceptance is recorded
@@ -410,6 +415,24 @@ function StoryPage() {
   */
   const [headlineSuggestions, setHeadlineSuggestions] = useState<string[]>([]);
   const [headlineNote, setHeadlineNote] = useState("");
+
+  const [liveWarning, setLiveWarning] = useState<{
+    /** Which live press the warning answers, so the retry runs the same one. */
+    kind: "change" | "reverify" | "rewrite" | "meeting-review";
+    key: string;
+    sentence: string;
+  } | null>(null);
+  /*
+    An unknown outlet's override warns first too (audit item 35). Held with the
+    outlet it was for, so "Override anyway" sends the same name back.
+  */
+  const pendingMeetingReview = useRef<{confirmedSegmentIndexes: number[]; note: string} | null>(null);
+  const [customOutletName, setCustomOutletName] = useState("");
+  const [outletWarning, setOutletWarning] = useState<{
+    outlet: string;
+    key: string;
+    sentence: string;
+  } | null>(null);
   const [waitingSince, setWaitingSince] = useState<number | null>(null);
   const [slowWait, setSlowWait] = useState(false);
   /*
@@ -495,7 +518,7 @@ function StoryPage() {
     setSelectedMeetingTranscriptArtifactId((current) =>
       data?.meetingTranscriptChoices?.some((choice) => choice.artifactId === current)
         ? current
-        : data?.defaultMeetingTranscriptArtifactId ?? null,
+        : (data?.defaultMeetingTranscriptArtifactId ?? null),
     );
   }, [data?.meetingTranscriptChoices, data?.defaultMeetingTranscriptArtifactId]);
 
@@ -535,7 +558,8 @@ function StoryPage() {
   const writerAvailability = useQuery({
     queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
     queryFn: () => providerAvailability(),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
   const writerConnections = useQuery({
     queryKey: ["custom-ai-connections"],
@@ -630,9 +654,12 @@ function StoryPage() {
           reader's headline instead of silently reverting it to the draft's.
         */
         setHeadline(data?.articleId && data.articleHeadline ? data.articleHeadline : d.headline);
-        setDek(d.dek);
-        setBody(stripReporterNotebook(d.body ?? ""));
-        setTopic(leadTopicChoice.current ?? d.topic);
+
+        setDek(data?.articleDek != null ? data.articleDek : d.dek);
+        setBody(
+          stripReporterNotebook(data?.articleBody != null ? data.articleBody : (d.body ?? "")),
+        );
+        setTopic(leadTopicChoice.current ?? (data?.articleTopic ? data.articleTopic : d.topic));
         appliedFp.current = fp;
       }
       return;
@@ -767,7 +794,7 @@ function StoryPage() {
       const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
       if (fromLedger)
         return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
-      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId, override: writerAction.override } });
     },
     onMutate: (input) => {
       setMsg("");
@@ -840,7 +867,7 @@ function StoryPage() {
   });
 
   const draftMeetingReview = useMutation({
-    mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string }) => {
+    mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string; override?: string[] }) => {
       if (!data?.draft?.id || !data.evidenceToken || !data.draftMeetingEvidence?.currentArtifactId) {
         throw new Error("The current draft or transcript comparison is unavailable. Reload this story first.");
       }
@@ -851,17 +878,21 @@ function StoryPage() {
         acceptedArtifactId: data.draftMeetingEvidence.currentArtifactId,
         confirmedSegmentIndexes: input.confirmedSegmentIndexes,
         note: input.note,
+        override: input.override,
       } });
     },
-    onSuccess: async (res) => {
+    onSuccess: async (res, input) => {
       if (!answered(res)) {
         setMsg(NO_ANSWER);
         return;
       }
       if (!res.ok) {
+        if ("warning" in res) {pendingMeetingReview.current = input; setLiveWarning({kind: "meeting-review", ...res.warning}); return;}
         setMsg(res.error);
         return;
       }
+      setLiveWarning(null);
+      pendingMeetingReview.current = null;
       setMsg("Citation review saved against the current transcript. The draft text and original evidence remain unchanged.");
       await qc.invalidateQueries({ queryKey: ["lead", id] });
     },
@@ -941,14 +972,27 @@ function StoryPage() {
     which draft -- is the paper's record, and the desk shows it back below.
   */
   const overrideOutlet = useMutation({
-    mutationFn: (outlet: string) => overrideNamedOutlet({ data: { leadId: id, outlet } }),
-    onSuccess: async (res) => {
+    mutationFn: (args: { outlet: string; override?: string[] }) =>
+      overrideNamedOutlet({ data: { leadId: id, outlet: args.outlet, override: args.override } }),
+    onSuccess: async (res, args) => {
+
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setOutletWarning({
+            outlet: args.outlet,
+            key: res.warning.key,
+            sentence: res.warning.sentence,
+          });
+          return;
+        }
+        setOutletWarning(null);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
-      setMsg(
-        res.ok
-          ? `Recorded: you overrode the outlet check for ${res.outlet} on this draft.`
-          : res.error,
-      );
+        setMsg(res.error);
+        return;
+      }
+      setOutletWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      if (res?.ok) setMsg(`Recorded: you overrode the outlet check for ${res.outlet} on this draft.`);
     },
     onError: (err) => {
       setMsg(
@@ -1000,6 +1044,48 @@ function StoryPage() {
     },
   });
 
+  /*
+    Unit ZC: "I checked this story myself" -- the one-press acknowledgement of
+    the zero-claims gate. It carries the DRAFT identity the page is holding
+    (`data.evidenceToken`), the same value `performPublish` would confirm the
+    section against, so the server can refuse a press for a version the editor
+    never saw. It is a server round trip like the acceptance above, so it goes
+    through the shared `blockerPressState` and `ActionButton` phase machinery.
+  */
+  const acknowledgeUnchecked = useMutation({
+    /*
+      Unit ZC: the acknowledgement is for the words on screen, so the press saves
+      the CURRENT editor fields first (the same save the Publish press makes),
+      then reads the fresh draft identity the save produced and submits THAT. If
+      the editor types again while the save is in flight, those new unsaved fields
+      stay blocked -- the acknowledgement names the saved version, and the page's
+      `hasUnsavedDraftEdits` gate keeps the chip up.
+    */
+    mutationFn: async () => {
+      await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      const fresh = await getLead({ data: id });
+      return acknowledgeUncheckedStory({
+        data: { leadId: id, evidenceToken: fresh?.evidenceToken ?? "" },
+      });
+    },
+    onSuccess: async (res) => {
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      announceToDesk(
+        res.ok
+          ? "Recorded: you confirmed you checked this story against your sources."
+          : res.error,
+        res.ok ? "ok" : "err",
+      );
+    },
+    onError: (err) => {
+      announceToDesk(
+        editorActionError(err instanceof Error ? err.message : "", "record that check") ??
+          "Could not record that check.",
+        "err",
+      );
+    },
+  });
+
   const reviewEvidence = useMutation({
     mutationFn: (decision: EvidenceDecision) =>
       saveDraft({
@@ -1014,7 +1100,9 @@ function StoryPage() {
         },
       }),
     onSuccess: async () => {
+      setAcceptedUnreviewed(false);
       await qc.invalidateQueries({ queryKey: ["lead", id] });
+      await qc.invalidateQueries({ queryKey: ["finding-evidence-review", id] });
       setMsg("Saved.");
     },
     onError: (error) =>
@@ -1348,14 +1436,35 @@ function StoryPage() {
     still refused, in a sentence.
   */
   const publish = useMutation({
-    mutationFn: async () => {
+    /*
+      ── THE ACKNOWLEDGEMENTS ARE AN ARGUMENT, NOT STATE (unit OH) ─────────────
+      `publish.mutate(keys)` hands the mutationFn the exact warning keys the
+      dialog DREW at the moment of the press. This is deliberate: a
+      `setState` followed by `publish.mutate()` in the same handler would read
+      the PREVIOUS state through the closure, and the press would carry the
+      wrong acknowledgements. A value the caller passes is the value the request
+      sends, and there is no window in which the two can disagree.
+    */
+    mutationFn: async (acknowledgedWarningKeys: string[]) => {
       const notesProblem = await saveNotesQuietly();
       /*
-        The draft save is the story. If it fails, the server is about to print
-        a version the editor is not looking at, so the print stops -- with a
-        sentence that names what did not save, never a schema dump.
+        ── THE DRAFT SAVE IS SKIPPED ON A KILLED, UNCHANGED DRAFT (unit OH) ───
+        `saveDraftForEditor` takes `withLeadDraftLock`, which REFUSES a killed
+        lead even when nothing changed -- so on a killed lead the save below
+        would fail, the thrown reason would stop the print, and the ONE press
+        that is supposed to restore-and-publish could never be made. When the
+        lead is killed and the boxes still match the saved draft, there is
+        nothing to save: the press is the server's atomic restore+print, and the
+        server recomputes the draft it prints. A killed lead whose boxes HAVE
+        changed still goes through the save -- and is refused there, which is the
+        honest answer, not a silent print of unsaved text.
       */
-      try {
+      const killedUnchangedSaveIsRedundant =
+        data?.lead.status === "killed" &&
+        savedDraftFields !== null &&
+        draftFieldsMatch(savedDraftFields, { headline, dek, body, topic });
+      if (!killedUnchangedSaveIsRedundant) {
+        try {
         await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
       } catch (err) {
         throw new Error(
@@ -1363,8 +1472,20 @@ function StoryPage() {
             "The desk could not save your edits, so nothing was published. Try again.",
         );
       }
+      }
       return {
-        result: await publishLead({ data: { leadId: id, topic: topic.trim(), area } }),
+        result: await publishLead({
+          data: {
+            leadId: id,
+            topic: topic.trim(),
+            area,
+            /* The warnings the editor was SHOWN and accepted, snapshotted at
+               the confirm press. The server treats an unacknowledged warning it
+               returns as a refusal, so a stale tab cannot print past a warning
+               it never saw (unit OH). */
+            acknowledgedWarningKeys,
+          },
+        }),
         notesProblem,
       };
     },
@@ -1397,9 +1518,10 @@ function StoryPage() {
       const refresh = (queryKey: readonly unknown[]) => {
         void qc.invalidateQueries({ queryKey }).catch(() => {});
       };
-      const refuse = (text: string) => {
+      const refuse = (text: string, warnings: { key: string; sentence: string }[] = []) => {
         setMsg("");
         setPublishRefusal(text);
+        setRefusedWarnings(warnings);
         refresh(["lead", id]);
       };
       if (!answered(result)) {
@@ -1407,10 +1529,23 @@ function StoryPage() {
         return;
       }
       if (!result.ok) {
-        refuse(result.error);
+        /*
+          ── THE DESK'S OWN WARNINGS COME BACK WITH THE REFUSAL (unit OH) ─────
+          A refusal can carry the CURRENT warnings, which may be more than this
+          page's stale tab holds. They are held so the confirm dialog draws every
+          one of them and the editor presses again knowing what they accept;
+          they are NOT auto-acknowledged here, because the editor has not seen
+          them yet. The lead query is refreshed too, so a warning the server
+          names is not discarded by the reload -- the route's own `refusedWarnings`
+          is what the dialog reads until that reload lands.
+        */
+        const warnings =
+          "warnings" in result && Array.isArray(result.warnings) ? result.warnings : [];
+        refuse(result.error, warnings);
         return;
       }
       setPublishRefusal("");
+      setRefusedWarnings([]);
       setPublishedSlug(result.slug);
       setJustPublished(true);
       setMsg(notesProblem ? `On the paper. ${notesProblem}` : "On the paper.");
@@ -1500,6 +1635,94 @@ function StoryPage() {
     },
   });
 
+
+  const saveLiveChange = useMutation({
+    mutationFn: (override?: string[]) =>
+      changePublishedStory({
+        data: { articleId: data?.articleId ?? 0, dek, topic, body, override },
+      }),
+    onSuccess: async (res) => {
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setLiveWarning({ kind: "change", ...res.warning });
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(res.error);
+        return;
+      }
+      setLiveWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      await qc.invalidateQueries({ queryKey: ["paper"] });
+      await qc.invalidateQueries({ queryKey: ["published-desk"] });
+      await qc.invalidateQueries({ queryKey: ["corrections"] });
+      setMsg(
+        res && res.changed.length === 0
+          ? "Nothing on the paper changed."
+          : "Changed. The story's link is unchanged, and the change is on the public log.",
+      );
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "change the live story") ??
+          "Could not change the live story.",
+      );
+    },
+  });
+
+
+  const reverifyLive = useMutation({
+    mutationFn: (override?: string[]) =>
+      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort } }),
+    onSuccess: async (res) => {
+      if (res && res.ok === false) {
+        if ("warning" in res) {
+          setLiveWarning({ kind: "reverify", ...res.warning });
+          return;
+        }
+        setLiveWarning(null);
+        setMsg(res.error);
+        return;
+      }
+      setLiveWarning(null);
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+      setMsg(res?.ok ? `Re-checked ${res.review.rows.length} claims on the paper; ${res.review.rows.filter(row => row.verdict !== "Supported").length} need human review. The results are saved in the audit log.` : "Could not re-check the story.");
+    },
+    onError: (err) => {
+      setMsg(
+        editorActionError(err instanceof Error ? err.message : "", "re-check the live story") ??
+          "Could not re-check the live story.",
+      );
+    },
+  });
+
+  const rewriteLive = useMutation({
+    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort}}),
+    onSuccess: async res => {
+      if (!res.ok) {
+        if ("warning" in res) {setLiveWarning({kind: "rewrite", ...res.warning}); return;}
+        setMsg(res.error); return;
+      }
+      setLiveWarning(null);
+      appliedFp.current = "";
+      await qc.invalidateQueries({queryKey: ["lead", id]});
+      await qc.invalidateQueries({queryKey: ["published-desk"]});
+      setMsg(res.changed.length ? "Rewritten on the paper. The change is recorded in its public log." : "Rewrite finished. The text on the paper is unchanged.");
+    },
+    onError: () => setMsg("The rewrite could not finish. Check the live story before trying again."),
+  });
+
+  /** The second press for whichever live warning is showing. */
+  const acceptLiveWarning = useCallback(
+    (key: string) => {
+      if (liveWarning?.kind === "reverify") reverifyLive.mutate([key]);
+      else if (liveWarning?.kind === "meeting-review" && pendingMeetingReview.current) draftMeetingReview.mutate({...pendingMeetingReview.current, override: [key]});
+      else if (liveWarning?.kind === "rewrite") rewriteLive.mutate([key]);
+      else saveLiveChange.mutate([key]);
+    },
+    [liveWarning?.kind, reverifyLive, rewriteLive, draftMeetingReview, saveLiveChange],
+  );
+
   /*
    * Unit AK items 5 and 6: the Compare view's three presses and the Reopen on
    * a killed lead's page.
@@ -1587,8 +1810,9 @@ function StoryPage() {
   */
   useEffect(() => {
     setPublishRefusal("");
+    setRefusedWarnings([]);
     setAcceptedUnreviewed(false);
-  }, [headline, dek, body, topic]);
+  }, [headline, dek, body, topic, data?.evidenceToken]);
 
   if (isPending) {
     return (
@@ -1668,8 +1892,8 @@ function StoryPage() {
   const comparisonReason = comparePair
     ? data.lead.dup_ai_same === true && data.lead.dup_ai_why?.trim()
       ? data.lead.dup_ai_why.trim()
-      : comparisonExplanation?.reason ??
-        "The saved link does not match the current story evidence."
+      : (comparisonExplanation?.reason ??
+        "The saved link does not match the current story evidence.")
     : "";
   const compareShown = comparePair ? (compareOpen ?? true) : false;
   /*
@@ -1694,7 +1918,17 @@ function StoryPage() {
     /readiness check|did not answer in time|provider slow|timed?\s*out|choose another model/i.test(
       draftProblem,
     );
-  const canPublish = Boolean(data.draft) && data.lead.status !== "held" && !locked && !onPaper;
+  /*
+    ── A KILLED OR HELD DRAFT KEEPS ITS PUBLISH BAR (unit OH) ──────────────────
+    The owner changed the rule: the way back from a held or killed lead is one
+    press -- un-hold (or restore) and publish in the same press -- and a page
+    that hides the bar leaves the editor nowhere to make it. So the bar is drawn
+    whenever there is a draft and the story is not already on the paper;
+    `locked` still turns off the editors, "Draft with AI" and everything else a
+    killed lead must not offer, and the route's own one press says what it does
+    to a held or killed lead (see `publishBlockers`' `lead-held`/`lead-killed`).
+  */
+  const canPublish = Boolean(data.draft) && !onPaper;
   const found = findingsFrom(data.draft?.found_note);
   const unanswered = unansweredNotes(data.draft?.unanswered);
   const verify = data.draft?.integrity_notes?.trim() || "";
@@ -1858,18 +2092,22 @@ function StoryPage() {
   const heldForDraft = reportingPackage.data?.draftId === data.draft?.id
     ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
     : [];
-  const hasAiJudgments = Boolean(data.draft?.research_json?.includes('"aiEvidenceReview"'));
-  const legacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
+  const hasAiJudgments = liveClaimsOwnReadiness(data.draft?.research_json);
+  const storedLegacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  const legacyReadiness = readinessWithUncheckedStory(storedLegacyReadiness, {
+    recordedClaims: data.uncheckedRecordedClaims, evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked,
+    body: data.draft?.body ?? "", acknowledgedForVersion: data.uncheckedStoryAcknowledged, exempt: data.uncheckedExempt,
+  });
   /*
     Every reason the Publish button is off, in one place (unit CT).
 
-    `publishBlockers` owns the list -- a sentence and a press for each reason --
-    and the button's `disabled` below is `blockers.length > 0`, so what the
-    editor reads and the state of the button cannot disagree. Before this, one
-    reason out of six had a sentence, small text at the far right of the bottom
-    bar, and `evidenceStale`, a running reconcile and a saving evidence
-    decision turned the button grey with nothing said at all.
+    `publishBlockers` owns the list -- a sentence and a press for each reason.
+    Unit OH changed what the list means to the button: `disabled` is no longer
+    "the list is non-empty" but `publishConfirm.enabled`, which is false only
+    when a HARD reason stands in the way. A warning is a judgement the editor
+    overrules in the confirm dialog, so the list can be non-empty and the button
+    still on -- and what the editor reads still cannot disagree with the button.
 
     Naming another newsroom's reporting and not showing the reader where it
     came from blocks printing, the same way an unconfirmed claim of absence
@@ -1886,6 +2124,25 @@ function StoryPage() {
     refusal: publishRefusal,
     publishedSlug: justPublished ? publishedSlug : null,
   });
+  /*
+    Unit ZC: the zero-claims gate, decided over the CURRENT fields.
+
+    The loader hands the gate's server facts -- how many claims the run recorded,
+    whether a completed check covers the SAVED version, whether the saved version
+    is acknowledged, and whether this story is exempt. The page recomputes the
+    decision on the text in the boxes, not the saved row, so an editor who types a
+    dollar figure and has not pressed Save still meets the chip and the block. The
+    completion and the acknowledgement are for the SAVED version, so they only
+    count while there are no unsaved edits -- type one character and the gate the
+    editor is answering is no longer the one on file.
+  */
+  const uncheckedStory = uncheckedStoryNeedsCheck({
+    recordedClaims: data.uncheckedRecordedClaims,
+    evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked && !hasUnsavedDraftEdits,
+    body,
+    acknowledgedForVersion: data.uncheckedStoryAcknowledged && !hasUnsavedDraftEdits,
+    exempt: data.uncheckedExempt,
+  }).blocked;
   const publishChecks = publishBlockers({
     headline,
     dek,
@@ -1909,10 +2166,19 @@ function StoryPage() {
     // and its override can say so.
     contradictedClaims: evidenceState.contradicted,
     unreviewedAccepted: false,
+    uncheckedStory,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
     publishing: publish.isPending,
+    /* Unit OH: the lead's own status, so a held or killed draft says what the
+       one press does. `missing` is the page's word for a lead that is gone. */
+    leadStatus: data.lead.status,
+    /* Unit OH: the desk's own sentence for a meeting citation that no longer
+       matches the record. The loader field is added by the server worker; read
+       it defensively so this route compiles whether or not it has landed yet,
+       and so a missing field is simply no warning. */
+    meetingCitationNotice: data.meetingCitationNotice ?? undefined,
   });
   // Acceptance clears the Publish gate; it does not resolve the evidence claims.
   const acceptedPublishState = acceptedClaimsPublishState({
@@ -1920,6 +2186,27 @@ function StoryPage() {
     acceptedCount: data.unreviewedClaimsAcceptedCount, hasAiJudgments,
   });
   const blockers = acceptedPublishState.blockers;
+  /*
+    ── THE MERGED WARNINGS THE DIALOG AND THE PRESS BOTH SEE (unit OH) ─────────
+    The page's own blockers plus any warnings the SERVER returned on a refused
+    press. `publishConfirmation` is run on this merged list, so the confirm
+    button's LABEL and its enabled state account for a server warning this stale
+    tab did not know about -- a clean client plus one server warning still reads
+    "Publish anyway in <section>" and stays live. The same merged keys are
+    snapshotted and sent as `acknowledgedWarningKeys` on the next press, so the
+    editor acknowledges exactly the warnings the dialog drew.
+  */
+  const mergedBlockerByKey = new Map(blockers.map((blocker) => [blocker.key, blocker] as const));
+  for (const warning of refusedWarnings) {
+    mergedBlockerByKey.set(warning.key, {
+      key: warning.key,
+      kind: "warning",
+      sentence: warning.sentence,
+      action: { label: "Review", target: { kind: "evidence-review" } },
+    });
+  }
+  const mergedBlockers = [...mergedBlockerByKey.values()];
+  const publishConfirm = publishConfirmation(mergedBlockers, sectionNameNow);
   /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
@@ -1937,19 +2224,25 @@ function StoryPage() {
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
   const legacyEvidenceBlocker = blockers.find((blocker) => blocker.key === "claims-unreviewed");
-  const draftReadiness = data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
+  const draftReadiness = uncheckedStory ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON } : data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
-  const readiness = readinessDot(
-    writerIsReady({
-      choice: modelChoice,
-      availability: writerAvailability.data,
-      customConnection:
-        writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
-    }),
-    draftReadiness,
-  );
-  const heldPublishNote = heldForDraft.length && blockers[0]?.key === "readiness"
+  const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: modelChoiceLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
+  const writerAction = writerDraftAction(writerWarningReason);
+  const draftButtonLabel = writerAction.label;
+  const readiness = modelChoice !== "auto" && !writerAvailability.data
+    ? { label: writerAvailability.isError ? "● Readiness unknown" : "● Checking", tone: "warn" as const }
+    : readinessDot(
+      writerIsReady({
+        choice: modelChoice,
+        availability: writerAvailability.data,
+        customConnection:
+          writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
+      }),
+      draftReadiness,
+      writerAction.warning,
+    );
+  const heldPublishNote = heldForDraft.length && blockers.some(blocker => blocker.key === "readiness")
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
     : "";
   const blockerPress = blockerPressState({
@@ -1958,6 +2251,12 @@ function StoryPage() {
       isError: acceptUnreviewed.isError,
       error: acceptUnreviewed.error,
       answer: acceptUnreviewed.data,
+    },
+    acknowledge: {
+      isPending: acknowledgeUnchecked.isPending,
+      isError: acknowledgeUnchecked.isError,
+      error: acknowledgeUnchecked.error,
+      answer: acknowledgeUnchecked.data,
     },
     override: {
       isPending: overrideOutlet.isPending,
@@ -2079,7 +2378,7 @@ function StoryPage() {
         return;
       case "override-outlet":
         /* The same mutation the mid-form "Override <outlet>" button calls. */
-        overrideOutlet.mutate(target.outlet);
+        overrideOutlet.mutate({ outlet: target.outlet });
         return;
       case "add-source":
         setInspector("sources");
@@ -2101,6 +2400,10 @@ function StoryPage() {
           -- and the record names who accepted, when, and which draft version.
         */
         acceptUnreviewed.mutate();
+        return;
+      case "acknowledge-unchecked":
+        /* Unit ZC: "I checked this story myself" for the zero-claims gate. */
+        acknowledgeUnchecked.mutate();
         return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView?.({ block: "center" });
@@ -2196,8 +2499,8 @@ function StoryPage() {
       {styleFixes.length ? (
         <>
           <p className="note-one">
-            {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix. Tick the
-            ones you want the model to take on:
+            {styleFixes.length} thing{styleFixes.length === 1 ? "" : "s"} to fix. Tick the ones you
+            want the model to take on:
           </p>
           <ul className="meeting-citations">
             {styleRows
@@ -2218,8 +2521,7 @@ function StoryPage() {
       {styleReviews.length ? (
         <details>
           <summary>
-            {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not
-            to fix
+            {styleReviews.length} thing{styleReviews.length === 1 ? "" : "s"} to read, not to fix
           </summary>
           <ul className="meeting-citations">
             {styleRows
@@ -2254,17 +2556,19 @@ function StoryPage() {
         >
           {fixStyle.isPending ? "Fixing…" : "Fix these with the model"}
         </InkButton>
-        {/* Why it is off, in words. Empty when it is on, so nothing sits
-            beside a live button saying nothing. */}
-        {styleFixReason ? (
-          <p className="note-one style-fix-why">{styleFixReason}</p>
-        ) : null}
+        {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+        {styleFixReason ? <p className="note-one style-fix-why">{styleFixReason}</p> : null}
       </div>
       <p className="note-one">
-        One pass with the model the picker is set to. It is given the ticked findings above
-        and the draft, and returns the draft with those problems fixed. It may not change a
-        quotation, a number, a name or a link — a rewrite that does is refused and your text
-        is kept. The result is saved as a draft revision, never published.
+        One pass with the model the picker is set to. It is given the ticked findings above and the
+        draft, and returns the draft with those problems fixed. It may not change a quotation, a
+        number, a name or a link — a rewrite that does is refused and your text is kept. The result
+        is saved as a draft revision, never published.
       </p>
       {styleNote ? <p className="note-one">{styleNote}</p> : null}
     </section>
@@ -2273,50 +2577,39 @@ function StoryPage() {
   return (
     <DeskShell title={editorTitle(data.lead.headline)} kicker="Workbench" hideTitle>
       {/*
-        The phase 3 progress card used to sit here, above the title. Phase 2b
-        moves it down into the writing surface, under the action row, which is
-        where the drawing puts it -- see the "under the actions" block below the
-        form. The condition and the reassurance line traveled with it.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
 
       <h1 className="astra-wb-title">Story workspace</h1>
       {/*
-        The workbench's top bar (redesign phase 2b, "Desk Story.dc.html"): the
-        way back, and where this lead stands. The stage cells are spans, not
-        buttons -- the stage is derived from the record, and Do 3 of this unit's
-        brief keeps today's control wherever the drawing's button has no
-        behavior behind it, so a row of presses that go nowhere is the one thing
-        this row must not be.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       <div className="astra-wb-top">
         <Link to="/desk" className="astra-wb-back">
           ← Today
         </Link>
       </div>
       {/*
-        v3.1 fix: the context line is its own row, under the bar, rather than a
-        third item wrapped into it. It reads as a caption on the whole page
-        instead of competing with the stepper for the same line, and it is what
-        the reference calls for.
-
-        The status chip rides at the end of it. The drawing's top bar holds
-        exactly two things -- the way back and the stepper -- and the chip was
-        the third; the caption row is where it belongs, because the stepper
-        only tells progress, and the status word is the one thing on this page
-        that says a lead was killed or spiked.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       <div className="astra-wb-context">
-        <span>
-          Story from lead · {sectionNameNow}
-        </span>
+        <span>Story from lead · {sectionNameNow}</span>
         <StoryReadinessChip readiness={draftReadiness} />
+        {data.draft && draftReadiness.state !== "ready" ? <span className="meta">{draftReadiness.reason}</span> : null}
         {/*
-          Unit BH2 decision 5: the Kill press, on the row that already carries
-          this lead's status, because a kill is a change to exactly that. It is
-          not drawn for a lead that is already killed (nothing to do) or one on
-          the paper (legal removal is the route there, and unpublish is on the
-          published page). `quiet-danger` is InkButton's own tone for this: a
-          real action heading toward removal that is not a confirm step.
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
         {!locked && !onPaper ? (
           /*
@@ -2341,19 +2634,19 @@ function StoryPage() {
         ) : null}
       </div>
       {/*
-        A story that was ALREADY on the paper when the page opened says so here.
-        One printed from this page says so in the bar's own place instead
-        (`PublishBarResult`, unit PUB1), so the same sentence and the same link
-        are never on the screen twice.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       {onPaper && !justPublished ? (
-          <p className="note">
-            On the paper.{" "}
-            <Link to="/desk/published" className="inline-link">
-              See it under Published
-            </Link>
-          </p>
-        ) : null}
+        <p className="note">
+          On the paper.{" "}
+          <Link to="/desk/published" className="inline-link">
+            See it under Published
+          </Link>
+        </p>
+      ) : null}
       {comparePair && compareShown ? (
         <div id="lead-compare">
           <LeadComparePanel
@@ -2412,26 +2705,15 @@ function StoryPage() {
             hidden={inspector !== "checks"}
           >
             {/*
-              Every reason Publish is off, first thing on the tab the page
-              opens on (unit CT). The heading below was "Before you publish",
-              which would now be two near-identical headings for two different
-              things; the drawing calls this list "Evidence check".
-
-              UNIT U24 -- NOT ON A KILLED LEAD. This list is work toward a
-              publish, and a killed lead cannot be printed: the page already
-              drops the editors, "Draft with AI" and the whole publish bar for
-              it, because `performPublish` refuses a killed lead outright. What
-              was left was the list itself, advertising "4 things block
-              Publish" with four enabled buttons -- "Write the headline",
-              "Write the story", "Write a dek", "Pick a section" -- three of
-              which point at fields this page no longer draws. The action on a
-              killed lead is Reopen, and that panel is already on the page; a
-              second list of controls that cannot be reached is the desk
-              contradicting itself.
-            */}
-            {showsPublishPrep(data.lead.status, Boolean(data.draft)) && blockers.length > 0 ? (
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+            {showsPublishPrep(data.lead.status, Boolean(data.draft)) &&
+            mergedBlockers.length > 0 ? (
               <BeforeYouCanPublish
-                blockers={blockers}
+                blockers={mergedBlockers}
                 onAct={actOnBlocker}
                 busyTarget={blockerPress.busyTarget}
                 failedTarget={blockerPress.failedTarget}
@@ -2533,7 +2815,7 @@ function StoryPage() {
                         draft.mutate(undefined);
                       }}
                     >
-                      {waiting ? "Drafting…" : "Draft with AI"}
+                      {waiting ? "Drafting…" : draftButtonLabel}
                     </InkButton>
                     <PaperSetupGateNote gate={paperGate} />
                   </>
@@ -2541,19 +2823,11 @@ function StoryPage() {
               </section>
             )}
             {/*
-              The name check keeps its own panel under the list (unit CW): the
-              list carries one name row with the count and the first reason, and
-              this is the full answer -- every name, its source, the written
-              records -- for the row that sends the editor here.
-
-              The two prose blocks that used to sit here ("Claims & evidence",
-              "Claims of absence") are gone: the drawing does not have them, and
-              both were a paragraph and a link to the same panel the list now
-              names row by row. "Claims of absence" is not lost with them --
-              every still-unconfirmed absence is a row of the list, worded the
-              same way the Reporting tab words it, and the same unticked gate
-              item still blocks Publish and says so at the top of this tab.
-            */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
             {data.draft ? (
               <DeskNameCheck
                 research={data.draft.research_json}
@@ -2621,8 +2895,8 @@ function StoryPage() {
             <h2 className="side-h">{editorTitle(data.lead.headline)}</h2>
             <p className="side-why">{data.lead.why}</p>
             <p className="meta">
-              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)}
-              · {leadOrigin(data.lead)}
+              {data.lead.topic} · filed {formatShortDate(data.lead.created_at)}·{" "}
+              {leadOrigin(data.lead)}
               {data.lead.investigation_id ? (
                 <>
                   {" · "}
@@ -2659,19 +2933,31 @@ function StoryPage() {
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
               draftMeetingEvidence={data.draftMeetingEvidence}
-              onMeetingRedraft={locked || onPaper ? undefined : () => draft.mutate(undefined)}
-              meetingRedrafting={draft.isPending || waiting}
+              onMeetingRedraft={
+                locked
+                  ? undefined
+                  : onPaper
+                    ? () => rewriteLive.mutate(undefined)
+                    : () => draft.mutate(undefined)
+              }
+              meetingRedrafting={draft.isPending || waiting || rewriteLive.isPending}
               evidenceToken={data.evidenceToken}
-              onReverifyMeetingCitations={locked || onPaper || !data.draft ? undefined : (review) => draftMeetingReview.mutate(review)}
-              reverifyingMeetingCitations={draftMeetingReview.isPending}
+              onReverifyMeetingCitations={
+                locked || !data.draft
+                  ? undefined
+                  : (review) => draftMeetingReview.mutate(review)
+              }
+              reverifyingMeetingCitations={draftMeetingReview.isPending || reverifyLive.isPending}
               meetingAccounting={data.meetingAccounting}
               onRewriteFromLedger={
-                locked || onPaper || paperGate.blocked
+                locked || paperGate.blocked
                   ? undefined
+                  : onPaper
+                    ? () => rewriteLive.mutate(undefined)
                   : () => draft.mutate({ fromLedger: true })
               }
               rewritePhase={
-                waiting && pressWasRewrite.current
+                rewriteLive.isPending ? "working" : waiting && pressWasRewrite.current
                   ? "working"
                   : rewriteDone
                     ? "done"
@@ -2682,21 +2968,22 @@ function StoryPage() {
               rewriteReason={pressWasRewrite.current ? draftProblem : null}
             />
             {/*
-              The structured reporting package, drawn beside the editable copy
-              in the same tab the notes live in. It renders ONLY what the runner
-              filed (reporting-package-panel.tsx): a run that has not finished
-              shows the honest "no package yet" line, never a fake one. Its
-              "Open this story" links are the real filed leads the runner
-              recorded, and its follow-up/correction boxes start a NEW request
-              -- they never overwrite this draft, these notes or the checked
-              states.
-            */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
             <ReportingPackagePanel leadId={data.lead.id} />
           </section>
         </aside>
 
         <section className="story-work">
-          {/* Model availability appears only in the Redraft dialog. */}
+          {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           <div className="astra-wb-writer">
             <span className="astra-wb-writer-label">Writer</span>
             <button
@@ -2760,8 +3047,8 @@ function StoryPage() {
                 />
               </div>
               <p className="meta">
-                Redraft uses these settings. Your current saved draft stays in place until a new draft
-                finishes successfully.
+                Redraft uses these settings. Your current saved draft stays in place until a new
+                draft finishes successfully.
               </p>
             </section>
           ) : null}
@@ -2817,14 +3104,11 @@ function StoryPage() {
             </div>
           ) : null}
           {/*
-            One message for the whole "a draft job is open" span, chosen by
-            resolveDraftJobState so it can never contradict the button above:
-            "recovering" gets the calm restart notice below, everything else
-            (queued, or running with a live heartbeat) gets the ordinary
-            progress line. The "click dropped" wording is deliberately
-            confined to the genuinely-pending case -- it never renders next to
-            a failure or recovery notice (2026-09-02 incident).
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           {waiting && jobState === "recovering" ? (
             <Notice kind="warn">{recoveringDraftCopy()}</Notice>
           ) : waiting ? (
@@ -2841,24 +3125,20 @@ function StoryPage() {
           {publish.isPending ? <Busy label="Sending this to the paper…" /> : null}
           {saveTopic.isPending ? <Busy label="Saving your section…" /> : null}
           {/*
-            A successful action that also has something to report -- the draft
-            saved but the reporting notes did not -- still reads as a success:
-            the story was saved, and a red box would say otherwise. Both of
-            those sentences begin with the thing that worked, which is what the
-            color below reads. The sentence stays the first thing inside the
-            notice, where the editor reads it before the button under it.
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           {/*
-            Unit PUB1: the green "On the paper." used to be suppressed the
-            instant the lead became published (`!onPaper`), so the one sentence
-            that said the press worked was hidden -- and the bar it belonged to
-            had just unmounted. A story published FROM THIS PAGE keeps its
-            confirmation (`publishedSlug`); a story that arrived already on the
-            paper still says nothing, which is what `!onPaper` was for.
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           {draftProblem && (!onPaper || (justPublished && msg !== "On the paper.")) ? (
             <Notice kind={/^(Saved\.|On the paper\.)/.test(msg) ? "ok" : "err"}>
-              {draftProblem}
+              <span style={{ whiteSpace: "pre-wrap" }}>{draftProblem}</span>
               {/*
                 The one error the desk could describe but never act on. A
                 lapsed CLI login used to end at "sign in again", which meant a
@@ -2874,13 +3154,11 @@ function StoryPage() {
             </Notice>
           ) : null}
           {/*
-            0.6.64 Unit AB: a document the redraft could only partly read is no
-            longer a red error line -- the draft ran on the pages that were read
-            and every later document was still read. This is the plain notice
-            that names the document (pages read of total) and carries the one
-            action that finishes it, so an editor never has to guess that
-            pressing Redraft again is the way forward.
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           <StoryDocumentPartialNotice
             leadId={id}
             busy={waiting || draft.isPending}
@@ -2933,6 +3211,14 @@ function StoryPage() {
                     onClick={() => savePublishedHeadline.mutate()}
                   >
                     {savePublishedHeadline.isPending ? "Saving…" : "Save headline"}
+                  </InkButton>
+                ) : null}
+                {onPaper ? (
+                  <InkButton
+                    disabled={saveLiveChange.isPending || !data.articleId}
+                    onClick={() => saveLiveChange.mutate(undefined)}
+                  >
+                    {saveLiveChange.isPending ? "Saving…" : "Save changes"}
                   </InkButton>
                 ) : null}
                 {/*
@@ -3023,6 +3309,22 @@ function StoryPage() {
                   {headlineNote}
                 </p>
               ) : null}
+              {onPaper ? <InkButton disabled={reverifyLive.isPending} onClick={() => reverifyLive.mutate(undefined)}>Re-check live evidence</InkButton> : null}
+              {liveWarning ? (
+                <div className="note" role="status">
+                  <p>{liveWarning.sentence}</p>
+                  <InkButton
+                    disabled={saveLiveChange.isPending || reverifyLive.isPending || rewriteLive.isPending}
+                    onClick={() => acceptLiveWarning(liveWarning.key)}
+                  >
+                    {saveLiveChange.isPending || reverifyLive.isPending || rewriteLive.isPending
+                      ? "Saving…"
+                      : liveWarning.kind === "reverify"
+                        ? "Re-check anyway"
+                        : "Change it anyway"}
+                  </InkButton>
+                </div>
+              ) : null}
               {/*
                 The dek, under the drawing's own name for it: SUMMARY.
 
@@ -3038,8 +3340,7 @@ function StoryPage() {
                   rows={2}
                   className="astra-dek"
                   value={dek}
-                  onChange={(e) => setDek(e.target.value)}
-                  disabled={onPaper}
+                  onChange={(e) => {setLiveWarning(null); setDek(e.target.value);}}
                 />
               </Field>
               {/*
@@ -3076,8 +3377,7 @@ function StoryPage() {
                   rows={16}
                   placeholder={manualDraft === "paste" ? "Paste your story here." : manualDraft === "write" ? "Write your story here." : undefined}
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
-                  disabled={onPaper}
+                  onChange={(e) => {setLiveWarning(null); setBody(e.target.value);}}
                 />
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
@@ -3093,18 +3393,30 @@ function StoryPage() {
               with the way back. After a reopen it stays, saying the kill was
               undone, because a record that vanishes hides what happened.
             */
+            <>
             <KilledLeadRecord
               lead={leadForRecord}
               reopened={!locked}
               onReopen={locked ? reopenThisLead : undefined}
               formatDate={formatShortDate}
             />
+            {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton> : null}
+            </>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
               No draft yet. Draft with AI writes a first pass from the lead and its sources; you
               edit, then publish.
             </p>
           )}
+      {locked && data.draft ? <div>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
+      </div> : null}
+      {waiting ? <section className="astra-model-research">
+        <p className="meta">A draft is running. Changing models offers a stop and restart.</p>
+        <ModelPicker value={modelChoice} onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setModelEffort(defaultModelEffort(choice)); }} effort={modelEffort} onEffortChange={setModelEffort} disabled={draft.isPending} compact />
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)}>Use selected model</ActionButton>
+      </section> : null}
       <div className="work-bar astra-story-actions">
         {/*
           THE DRAWN ACTION ROW (unit CW).
@@ -3123,63 +3435,46 @@ function StoryPage() {
           saved are the heavy 2px ink (`.btn`), the two that only look are
           the light 1px rule (`.btn.quiet`).
         */}
-        {/*
-          FB5: the ⌘S chip below had nothing behind it. README "Interactions &
-          behavior" lists "⌘S saves in the story workbench", and the key fell
-          through to the browser's Save-page dialog instead (FB0-REPORT.md
-          Table B, "⌘S badge … DEAD"). It is bound rather than removed, because
-          saving here is manual -- there is a press, an "Unsaved changes" line
-          and no autosave.
-
-          `SaveShortcut` rides the button's own condition, so the key can never
-          save what the button would refuse, and it adds no announcement of its
-          own: this save already answers visibly and out loud through `setMsg`.
+            {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
-        {(data.draft || manualDraft) && !locked && !onPaper ? (
-          <>
-            <SaveShortcut
+            {(data.draft || manualDraft) && !locked && !onPaper ? (
+              <>
+                <SaveShortcut
               save={() => save.mutate()}
               enabled={!save.isPending && !reconcileActive}
             />
-            <InkButton
+                <InkButton
               tone={hasUnsavedDraftEdits || manualDraft ? "solid" : "quiet"}
               disabled={save.isPending || reconcileActive}
               onClick={() => save.mutate()}
             >
-            Save edits
-            {/*
-              The drawn ⌘S chip, aria-hidden so the press's accessible name
-              stays exactly "Save edits" -- the walks ask for it by that
-              name (`getByRole("button", { name: "Save edits", exact: true })`)
-              and a name of "Save edits ⌘S" would stop matching.
-            */}
-            <SaveShortcutHint />
-            </InkButton>
-          </>
-        ) : null}
-        {data.draft && !locked && !onPaper ? (
+                  Save edits
+                  {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+                  <SaveShortcutHint />
+                </InkButton>
+              </>
+            ) : null}
+            {data.draft && !locked && !onPaper ? (
           <div className="story-check-inline">
           <DraftReconcileControl {...reconcileControlProps} render="button" />
           </div>
         ) : null}
-        {/*
-          Unit CP item 1: the drawn "+ Add to story", which had no press on
-          this page at all. `Desk Story.dc.html:114` draws it in the draft
-          editor's own row, between "Check draft against evidence" and
-          "Redraft…", and `:172` wires it to the `add-to` action; this row is
-          the desk's version of that one, so it sits in the same place here.
-
-          Drawn only where it can act. The gate is the one the presses either
-          side of it use -- `!locked && !onPaper`, the page's "not killed and
-          not published" rule (`locked` at the top of this component is
-          `status === "killed"`, `onPaper` is `status === "published"` or a
-          published slug) -- plus `data.draft`, because the weave the dialog
-          runs has nothing to add to without one: `performWeaveIntoStory`
-          answers "This lead has no draft to add to yet." The drawing agrees
-          with that last condition: its row is drawn inside a draft that
-          already has a body.
+            {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
-        {!locked && !onPaper && meetingTranscriptChoices.length ? (
+            {!locked && !onPaper && meetingTranscriptChoices.length ? (
           <MeetingTranscriptChooser
             choices={meetingTranscriptChoices}
             selectedArtifactId={selectedMeetingArtifactId}
@@ -3187,10 +3482,10 @@ function StoryPage() {
             disabled={waiting || data.job?.status === "queued" || data.job?.status === "running"}
           />
         ) : null}
-        {!locked && !onPaper ? (
-          <>
-            <div className={data.draft?.body ? "story-redraft-inline" : ""}>
-            <ActionButton
+            {!locked && !onPaper ? (
+              <>
+                <div className={data.draft?.body ? "story-redraft-inline" : ""}>
+                  <ActionButton
               /*
                 The drawing's tone rule, applied to this press too: the three
                 presses that change what is saved are the heavy 2px ink
@@ -3257,40 +3552,46 @@ function StoryPage() {
                 else draft.mutate(undefined);
               }}
             >
-              {data.draft?.body ? (
-                /*
+                    {data.draft?.body ? (
+                      /*
                   The drawn ellipsis, aria-hidden so the press's accessible
                   name stays exactly "Redraft" -- the walks ask for it by that
                   name. The shared piece's icon is `aria-hidden` for the same
                   reason: the WORD is the name.
                 */
-                <>
-                  Redraft
-                  <span aria-hidden="true">…</span>
-                </>
-              ) : (
-                "Draft with AI"
+                      <>
+                        Redraft
+                        <span aria-hidden="true">…</span>
+                      </>
+                    ) : (
+                draftButtonLabel
               )}
-            </ActionButton>
-            </div>
-            <PaperSetupGateNote gate={paperGate} />
-          </>
-        ) : null}
-        {!data.draft && !locked && !onPaper ? (
-          <>
-            <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("write"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>Write it myself</InkButton>
-            <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("paste"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>Paste a story</InkButton>
-          </>
-        ) : null}
-        <details className="row-more story-more">
-          <summary className="btn quiet">More <span aria-hidden="true">&#9662;</span></summary>
-          <div className="row-more-panel">
-        {data.draft && !locked && !onPaper ? (
+                  </ActionButton>
+                </div>
+                <PaperSetupGateNote gate={paperGate} />
+              </>
+            ) : null}
+            {!data.draft && !locked && !onPaper ? (
+              <>
+                <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("write"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>
+                  Write it myself
+                </InkButton>
+                <InkButton tone="quiet" disabled={waiting} onClick={() => { setManualDraft("paste"); if (!manualDraft) { setHeadline(editorTitle(data.lead.headline)); if (!topicTouched) setTopic(data.lead.topic); } requestAnimationFrame(() => bodyField.current?.focus()); }}>
+                  Paste a story
+                </InkButton>
+              </>
+            ) : null}
+            <details className="row-more story-more">
+              <summary className="btn quiet">
+                More <span aria-hidden="true">&#9662;</span>
+              </summary>
+              <div className="row-more-panel">
+                {data.draft && !locked && !onPaper ? (
           <div className="story-check-overflow">
             <DraftReconcileControl {...reconcileControlProps} render="button" />
           </div>
         ) : null}
-        {data.draft?.body && !locked && !onPaper ? (
+                {data.draft?.body && !locked && !onPaper ? (
           <div className="story-redraft-overflow">
           <InkButton
             tone="quiet"
@@ -3301,17 +3602,17 @@ function StoryPage() {
           </InkButton>
           </div>
         ) : null}
-        {data.draft && !locked && !onPaper ? (
-          <InkButton
+                {data.draft && !locked && !onPaper ? (
+                  <InkButton
             tone="ghost"
             disabled={waiting || reconcileActive}
             onClick={() => setAddToOpen(true)}
           >
-            + Add to story
-          </InkButton>
-        ) : null}
-        {body ? (
-          /*
+                    + Add to story
+                  </InkButton>
+                ) : null}
+                {body ? (
+                  /*
             Unit UI1a2. The press is synchronous -- it opens the preview dialog
             -- so there is no `working` to show; what it HAS is a done state,
             and the page already records it (`previewSeen`, which the Checks
@@ -3320,7 +3621,7 @@ function StoryPage() {
             No walk asks for this control by name, so the done word cannot
             rename it out from under one.
           */
-          <ActionButton
+                  <ActionButton
             tone="quiet"
             phase={previewSeen ? "done" : "idle"}
             doneLabel="Preview opened"
@@ -3329,55 +3630,47 @@ function StoryPage() {
               preview.current?.showModal();
             }}
           >
-            Preview as reader
-          </ActionButton>
-        ) : null}
-        <a className="inline-link astra-checks-jump" href="#story-inspector">
-          Checks & sources
-        </a>
-        {/*
-          Unit BH2 decision 6: the drawn `dialog-12-compare.png`, opened by a
-          press of its own. It only exists once an evidence check has left two
-          versions behind -- before that there is nothing to compare, and the
-          inline "Evidence check results" panel in the inspector still holds
-          the same two decisions for anyone who reads it there.
+                    Preview as reader
+                  </ActionButton>
+                ) : null}
+                <a className="inline-link astra-checks-jump" href="#story-inspector">
+                  Checks & sources
+                </a>
+                {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
-        {evidenceReview ? (
-          <InkButton tone="quiet" onClick={() => setCompareVersionsOpen(true)}>
-            Compare versions
-          </InkButton>
-        ) : null}
-        {/*
-          Unit AK item 5: the press that opens the side-by-side view. It used
-          to be a link on the Queue that opened the other lead's page, which
-          had no comparison on it at all.
+                {evidenceReview ? (
+                  <InkButton tone="quiet" onClick={() => setCompareVersionsOpen(true)}>
+                    Compare versions
+                  </InkButton>
+                ) : null}
+                {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
-        {comparePair ? (
-          <button
+                {comparePair ? (
+                  <button
             className="btn"
             type="button"
             aria-expanded={compareShown}
             aria-controls="lead-compare"
             onClick={() => setCompareOpen(!compareShown)}
           >
-            Compare
-          </button>
-        ) : null}
-        {/*
-          CIVIC REPORTING (editor UI). The press that starts a civil-reports
-          run anchored on THIS lead: "Report this meeting" or "Develop this
-          lead". It shares the page's model/research state so the pin the
-          runner is handed is the same one the Writer row shows, and it is
-          gated exactly like the other presses that spend a model
-          (`!locked && !onPaper`, plus the paper-setup gate's own reason).
-
-          Which of the two words is drawn: a lead that already carries a draft
-          is one being developed, so it reads "Develop this lead"; a lead with
-          no draft yet is most often a meeting record the editor wants
-          accounted for, so it reads "Report this meeting". The control itself
-          owns the ask-and-model box it opens -- see report-this-lead.tsx.
+                    Compare
+                  </button>
+                ) : null}
+                {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
         */}
-        {!locked && !onPaper ? (
+                {!locked && !onPaper ? (
           <span className="astra-story-report-this">
             <ReportThisLeadControl
               leadId={data.lead.id}
@@ -3394,26 +3687,16 @@ function StoryPage() {
             />
           </span>
         ) : null}
+              </div>
+            </details>
           </div>
-        </details>
-      </div>
-      {/*
-        The evidence check's own block, under the row: its progress, its
-        dirty note, its finished notice. The drawing puts the job cards here,
-        and the row above only has space for a button. See
-        `reconcileControlProps`.
-
-        Unit CW2: `review` is withheld from this instance. That panel -- the
-        before/after comparison under the heading "Evidence check results",
-        with its two decisions -- is the one the Checks tab's compare press
-        opens as the Compare-versions dialog, on the same two functions, so
-        drawing it here as well printed the same decision twice and ran the
-        page thousands of pixels past the action row the drawing ends at. The
-        job's progress, its failure notice and its "Reload checked draft"
-        press all stay: those are the check's own state, and the drawing has
-        them.
-      */}
-      {data.draft && !locked && !onPaper ? (
+          {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+          {data.draft && !locked && !onPaper ? (
         <DraftReconcileControl
           {...reconcileControlProps}
           render="notes"
@@ -3421,28 +3704,27 @@ function StoryPage() {
           reviewOpen={false}
         />
       ) : null}
-      {/*
-        "A full JobCard under the actions while a check or redraft runs"
-        (phase 2b, item 1). Two cards, because this page runs two jobs: the
-        draft (the phase 3 banner's own component, moved here from above the
-        title) and the evidence check (the same JobCard, filtered to the
-        `reconcile` kind). Both render nothing when their job is not open.
-      */}
-      <StoryJobProgress
-        leadId={data.lead.id}
-        initial={
+          {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+          <StoryJobProgress
+            leadId={data.lead.id}
+            initial={
           data.job && (data.job.status === "queued" || data.job.status === "running")
             ? [jobProgressView(data.job, data.lead.id, data.draft?.id ?? null)]
             : null
         }
-        note={
-          <p className="story-running-note">
-            Your submission is saved. The draft will appear here automatically. You can return from{" "}
-            <Link to="/desk">Desk → Your recent drafts</Link>.
-          </p>
-        }
-      />
-      <StoryCheckJobProgress leadId={data.lead.id} />
+            note={
+              <p className="story-running-note">
+                Your submission is saved. The draft will appear here automatically. You can return
+                from <Link to="/desk">Desk → Your recent drafts</Link>.
+              </p>
+            }
+          />
+          <StoryCheckJobProgress leadId={data.lead.id} />
           {data.draft || !locked ? (
             /*
               STORY DETAILS (unit CW2).
@@ -3460,7 +3742,7 @@ function StoryPage() {
             */
             <details className="astra-story-details" id="story-details">
               <summary>Story details</summary>
-          {!locked && !onPaper ? (
+              {!locked && !onPaper ? (
             <Field label="Story direction for AI" hint="Tell the AI which decision or question to cover. This controls the draft's subject; it does not print or count as evidence.">
               <textarea
                 rows={2}
@@ -3474,13 +3756,11 @@ function StoryPage() {
           ) : null}
 
               {/*
-                The section is a field an editor confirms, not a default a
-                machine left behind. Publish is where it is confirmed: the
-                draft is saved first, the request carries this section, and the
-                server records it against the version it is about to print, so
-                what is confirmed is always the section of the version the desk
-                has. See the publish mutation.
-              */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
               <div id="story-topic">
                 <Field label="Topic">
                   <select
@@ -3496,7 +3776,7 @@ function StoryPage() {
                         saveTopic.mutate(e.target.value);
                       }
                     }}
-                    disabled={onPaper || locked || saveTopic.isPending}
+                    disabled={locked || saveTopic.isPending}
                   >
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
@@ -3509,35 +3789,25 @@ function StoryPage() {
                   </select>
                 </Field>
                 {/*
-                  A lead the scan filed under a section the model never chose.
-
-                  The desk still had to write a key (`schema.ts`), so the row
-                  and this select show one -- but it is the desk's fallback,
-                  not a decision, and printing it as though it were is how a
-                  guessed section reaches the paper. The notice is the same
-                  words the Queue row carries, and it goes away when the editor
-                  picks a section above -- or when the section has already been
-                  confirmed for this saved draft, which is what a person
-                  pressing Publish does.
-                */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
                 {!onPaper && data.lead.topic_unchosen && !sectionReady ? (
                   <p className="note publish-blocked">
                     Section not chosen — pick one. The scan filed this lead under{" "}
                     {sectionName(data.lead.topic)} because the model named no section this newsroom
-                    files under. Choose the section above, then publish: the Publish button names the
-                    section and pressing it is the confirmation.
+                    files under. Choose the section above, then publish: the Publish button names
+                    the section and pressing it is the confirmation.
                   </p>
                 ) : null}
                 {/*
-                  No separate Confirm button (0.6.67). It was a second step for
-                  a decision the editor had already made in the select above,
-                  and its reset nag -- "editing the section or the body means
-                  confirming it again" -- taught people to press a button that
-                  did nothing they could see. Publish carries this section and
-                  the server records it for the version it prints, so the
-                  guarantee is stronger than before and the desk is one press
-                  shorter.
-                */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
                 {onPaper || !sectionReady ? null : (
                   <p className="note">
                     Publishing this draft files it under {sectionNameNow}. The Publish button names
@@ -3547,18 +3817,11 @@ function StoryPage() {
                 )}
               </div>
               {/*
-                THE GROUND THIS STORY STANDS ON (0.6.71).
-
-                The paper's front page carries four geography pills, and the
-                only place that knows which one a story belongs to is the person
-                publishing it. One select, on the publish step that already
-                exists -- not a new step and not a desk re-layout (that is a
-                later phase).
-
-                Longmont is the default and the fallback: a story with no stored
-                area reads as the home town on the paper, so leaving this alone
-                is not an omission the reader ever sees.
-              */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
               <div id="story-area">
                 <Field label="Geography">
                   <select
@@ -3575,27 +3838,43 @@ function StoryPage() {
                   </select>
                 </Field>
                 <p className="note">
-                  Which pill this story answers to on the front page — {labels[HOME_AREA]} is
-                  the home town and the default.
+                  Which pill this story answers to on the front page — {labels[HOME_AREA]} is the
+                  home town and the default.
                 </p>
               </div>
               {/*
-                THE NAMED-OUTLET CHECK (0.6.62).
-
-                A body that says "the Denver Post reported" is asking the reader
-                to trust a report the paper has not shown them. The server
-                refuses to print while an outlet is named and its Sources do not
-                show it, unless an editor overrides that outlet for this draft
-                -- one at a time, and recorded: who, when, which outlet, which
-                draft.
-
-                This is the desk's half of it: what is outstanding, the button
-                that records the decision, and the record itself. None of it
-                reaches the public page -- a reader does not need the paper's
-                internal argument, but the newsroom needs the paper trail.
-              */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
               {data.draft ? (
                 <div id="story-outlets">
+                  {!onPaper && !locked ? <div className="note">
+                    <label>Outlet name
+                      <input value={customOutletName} disabled={overrideOutlet.isPending}
+                        onChange={event => {setCustomOutletName(event.target.value); setOutletWarning(null);}} />
+                    </label>
+                    <InkButton disabled={!customOutletName.trim() || overrideOutlet.isPending}
+                      onClick={() => overrideOutlet.mutate({outlet: customOutletName.trim()})}>Override outlet</InkButton>
+                  </div> : null}
+                      {outletWarning ? (
+                        <div role="status">
+                          <p className="note">{outletWarning.sentence}</p>
+                          <InkButton
+                            tone="quiet"
+                            disabled={overrideOutlet.isPending}
+                            onClick={() =>
+                              overrideOutlet.mutate({
+                                outlet: outletWarning.outlet,
+                                override: [outletWarning.key],
+                              })
+                            }
+                          >
+                            {overrideOutlet.isPending ? "Recording…" : "Override anyway"}
+                          </InkButton>
+                        </div>
+                      ) : null}
                   {data.namedOutlets.length > 0 ? (
                     <>
                       <p className="note publish-blocked">
@@ -3603,10 +3882,9 @@ function StoryPage() {
                         {data.namedOutlets.length === 1
                           ? data.namedOutlets[0]
                           : data.namedOutlets.join(", ")}{" "}
-                        and the Sources do not show{" "}
-                        {data.namedOutlets.length === 1 ? "it" : "them"}. Add the source you read,
-                        or override {data.namedOutlets.length === 1 ? "it" : "each one"} for this
-                        draft.
+                        and the Sources do not show {data.namedOutlets.length === 1 ? "it" : "them"}
+                        . Add the source you read, or override{" "}
+                        {data.namedOutlets.length === 1 ? "it" : "each one"} for this draft.
                       </p>
                       {onPaper ? null : (
                         <div>
@@ -3615,7 +3893,7 @@ function StoryPage() {
                               key={outlet}
                               tone="quiet"
                               disabled={overrideOutlet.isPending}
-                              onClick={() => overrideOutlet.mutate(outlet)}
+                              onClick={() => overrideOutlet.mutate({ outlet })}
                             >
                               {overrideOutlet.isPending ? "Recording…" : `Override ${outlet}`}
                             </InkButton>
@@ -3663,55 +3941,25 @@ function StoryPage() {
             </details>
           ) : null}
           {/*
-            The Style check section used to be drawn here, at the bottom of
-            the main column (unit CW2). It is the style row's own disclosure
-            body now -- `#evidence-detail-style` in the Checks tab list --
-            because the drawing's page ends at the action row and its style
-            row is the only place the drawing puts the repair press. It is
-            built as `styleDetail` below and handed to the panel.
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
           {/*
-            The evidence review used to be mounted here, at the bottom of the
-            page's main column (unit CW2). It is on the Checks tab now, where
-            the drawing puts the list it draws: the main column ends at the
-            action row, and the page's own stack of judgment forms under the
-            editors is gone with it.
-          */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
         </section>
       </div>
       {/*
-        ── WHERE THE PRESS WAS MADE IS WHERE THE ANSWER IS DRAWN (PUB1) ───────
-
-        A print takes the bar away -- `canPublish` is false once the lead is on
-        the paper -- so the "Published." banner takes the bar's OWN place, at
-        the same spot on the page, and stays there for the rest of the visit
-        rather than being a note at the top the editor has to find. A refusal
-        keeps the bar where it is and is drawn next to the button that was
-        pressed. Both are `PublishBarResult`, so neither can drift from the
-        other or from `publishPressState`.
-
-        ── AND THE PRESS ITSELF, CHANGED AND STAYING (UI1b-2) ───────────────
-
-        UI1a made the banner the ONLY confirmation, on the rule that a print
-        takes the control away so the two could not both be drawn. The owner
-        changed that rule on purpose. On his own story the auditor found the
-        Publish button GONE after "Yes, print it", and what he asked for was
-        the control changing: "click a publish button, it publishes and then
-        CHANGES to say 'Published' with, say, a green color". So the slot the
-        press was made in now holds the shared `ActionButton` in its `done`
-        phase -- "Published", the green token, the check, not pressable -- and
-        the banner stays beside it. See `PublishBarDone`.
-
-        The condition is `onPaper`, NOT `press.kind === "published"`, and that
-        is the decision this unit was asked to make and say out loud: the green
-        "Published" is a FACT ABOUT THE STORY, so it is drawn for as long as the
-        story is on the paper -- through the cache refreshes a print triggers,
-        and on a page opened later on a story that went up days ago. The banner
-        is the answer to a PRESS, so it is drawn only right after one
-        (`justPublished`, through `press`), which is PUB1's rule kept exactly.
-        A refusal leaves `onPaper` false, so it can never draw the Published
-        state.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       {onPaper ? (
         <PublishBarDone result={press} />
       ) : canPublish ? (
@@ -3732,10 +3980,6 @@ function StoryPage() {
             {canPublish ? (
               confirmingPublish ? (
                 <>
-                  <span className="note">
-                    This puts the story on the public paper and in the feed, under your name, now.
-                    Corrections are published, not silent edits.
-                  </span>
                   {uncredited.length > 0 ? (
                     <span className="note">
                       {uncredited.length === 1
@@ -3744,41 +3988,34 @@ function StoryPage() {
                     </span>
                   ) : null}
                   {/*
-                    The button and the list above it are one thing (unit CT):
-                    `blockers` is every reason this can be off, and the press
-                    is off exactly when that list is not empty. The old list
-                    named five states here and a sixth on the first press, and
-                    only one of them had a sentence anywhere on the page.
-                  */}
-                  {/*
-                    Unit UI1a: the confirm press goes through the shared
-                    `ActionButton`, so a press in flight is a spinner and the
-                    word "Publishing…" at the control the editor just pressed,
-                    with the button disabled -- not a button that looks
-                    unchanged until the page swaps under it.
-                  */}
-                  <ActionButton
-                    tone="primary"
-                    phase={publish.isPending ? "working" : "idle"}
-                    disabled={publish.isPending || !acceptedPublishState.publishEnabled}
-                    workingLabel="Publishing…"
-                    onAct={() => {
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+                  <PublishConfirmation
+                    blockers={blockers}
+                    sectionName={sectionNameNow}
+                    refusedWarnings={refusedWarnings}
+                    publishing={publish.isPending}
+                    onCancel={() => setConfirmingPublish(false)}
+                    onConfirm={() => {
                       setConfirmingPublish(false);
                       /* The last answer is about to be replaced by this
                          press's answer (unit PUB1). */
                       setPublishRefusal("");
-                      publish.mutate();
+                      setRefusedWarnings([]);
+                      /*
+                        The keys the dialog DREW, snapshotted here and handed to
+                        the mutation as an argument -- never read from state in
+                        the mutationFn, which would see the previous render's
+                        value. A warning that arrives after this press is not in
+                        these keys, so it is not silently acknowledged; the
+                        server returns it again and the dialog draws it.
+                      */
+                      publish.mutate(publishConfirm.acknowledgedWarningKeys);
                     }}
-                  >
-                    {publish.isPending ? "Publishing…" : `Yes, print it in ${sectionNameNow}`}
-                  </ActionButton>
-                  <ActionButton
-                    tone="secondary"
-                    phase="idle"
-                    onAct={() => setConfirmingPublish(false)}
-                  >
-                    Not yet
-                  </ActionButton>
+                  />
                 </>
               ) : (
                 <>
@@ -3786,24 +4023,17 @@ function StoryPage() {
                     tone="primary"
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
-                    disabled={publish.isPending || !acceptedPublishState.publishEnabled}
+                    disabled={publish.isPending || !publishConfirm.enabled}
                     onAct={() => setConfirmingPublish(true)}
                   >
                     {`Publish in ${sectionNameNow}`}
                   </ActionButton>
                   {/*
-                    The section is on the button, so the editor can read what
-                    they are about to confirm. This is the way back to the
-                    select when the name on the button is not the one they
-                    want -- and the focus, not just the scroll, because the
-                    point of pressing it is to change that field.
-
-                    Unit CW2 moved that select into the shut "Story details"
-                    disclosure, and a shut <details> swallows focus, so this
-                    press opens it first. Without that step the press would
-                    scroll to the section heading and leave the cursor
-                    nowhere, which is a dead press however the scroll looks.
-                  */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
                   <button
                     type="button"
                     className="inline-link astra-publish-section-change"
@@ -3818,33 +4048,22 @@ function StoryPage() {
                     {sectionReady ? "change" : "pick the section"}
                   </button>
                   {/*
-                    A greyed button with no sentence beside it is a dead end --
-                    the editor cannot tell whether it is broken, still loading,
-                    or refusing on purpose. The reason is text, not opacity.
-
-                    It used to name the first reason only, one at a time, in
-                    small text at the far right of this row: the owner read it
-                    as stray text and never found the button it pointed at.
-
-                    Unit CW puts the drawing's own sentence here: the first
-                    reason, said as the press that clears it -- "Confirm the
-                    claim to publish." -- above the same press to the list at
-                    the top of the Checks tab, where every reason has its own
-                    sentence and its own button. The count CT put here still
-                    runs, at the head of that list, which is the one place it
-                    was ever acted on.
-                  */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
                   {/*
-                    Unit PUB1: while the press is in flight the bar says so once,
-                    through `PublishBarResult` below. The `publishing` blocker is
-                    real -- it is what disables the button -- but its sentence
-                    ("See the publish bar to publish.") is a way to the bar, and
-                    an editor already ON the bar reading it mid-press is the same
-                    dead-press feel this unit removes.
-                  */}
-                  {blockers.length > 0 && press.kind !== "publishing" ? (
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
+                  {mergedBlockers.length > 0 && press.kind !== "publishing" ? (
                     <span className="note publish-blocked">
-                      {hasAiJudgments ? draftReadiness.reason : heldPublishNote || publishGateNote(blockers)}{" "}
+                      {hasAiJudgments
+                        ? draftReadiness.reason
+                        : heldPublishNote || mergedBlockers[0]?.sentence}{" "}
                       <button
                         type="button"
                         className="inline-link"
@@ -3879,8 +4098,12 @@ function StoryPage() {
                 </>
               )
             ) : null}
-            {/* The bar's own answer to the press: "Publishing…", the server's
-                refusal, or nothing when there is nothing to say. */}
+            {/*
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
             <PublishBarResult state={press} />
           </div>
         </div>
@@ -3906,14 +4129,11 @@ function StoryPage() {
         </article>
       </NativeDialog>
       {/*
-        Unit BH2 decisions 5 and 6: the three dialogs. They are mounted here, at
-        the foot of the page, because each one portals itself to the body -- the
-        position in this tree decides nothing about where it appears, and
-        grouping them keeps the page's own markup above unchanged.
-
-        Each is opened from a press that already existed, except Kill, whose
-        press is the one control this unit adds to the page.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       <KillDialog
         leadId={id}
         open={killOpen}
@@ -3921,11 +4141,11 @@ function StoryPage() {
         onKilled={afterLeadChange}
       />
       {/*
-        Unit CP items 1 and 2: the two dialogs that were built and drawn but had
-        no press anywhere on the desk. Mounted here for the same reason the
-        three above are -- each portals itself to the body, so where it sits in
-        this tree decides nothing about where it appears.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       <AddToStoryDialog
         leadId={id}
         open={addToOpen}
@@ -4086,7 +4306,13 @@ function usePhoneNotes() {
   return small;
 }
 
-function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; currentDraftId: number | null }) {
+function DraftHistoryPanel({
+  leadId,
+  currentDraftId,
+}: {
+  leadId: number;
+  currentDraftId: number | null;
+}) {
   const [open, setOpen] = useState(false);
   const [selectedDraftId, setSelectedDraftId] = useState<number | null>(null);
   const history = useQuery({
@@ -4110,23 +4336,35 @@ function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; current
       {open ? (
         <div>
           {history.isPending ? <p className="note-one">Loading saved drafts…</p> : null}
-          {history.isError ? <p className="note-gate">Draft history could not be loaded. Try again.</p> : null}
-          {!history.isPending && !history.isError && !drafts.length ? <p className="note-one">No saved draft history is available for this story.</p> : null}
+          {history.isError ? (
+            <p className="note-gate">Draft history could not be loaded. Try again.</p>
+          ) : null}
+          {!history.isPending && !history.isError && !drafts.length ? (
+            <p className="note-one">No saved draft history is available for this story.</p>
+          ) : null}
           {drafts.length ? (
             <ul className="meeting-citations" aria-label="Saved draft history">
               {drafts.map((draft) => (
                 <li key={draft.id}>
-                  <p><b>{draft.headline || "Untitled draft"}</b>{draft.id === currentDraftId ? " · Current draft" : " · Earlier draft"}</p>
-                  <p className="note-one">{new Date(draft.updatedAt).toLocaleString()} · {draft.topic || "Uncategorized"}</p>
+                  <p>
+                    <b>{draft.headline || "Untitled draft"}</b>
+                    {draft.id === currentDraftId ? " · Current draft" : " · Earlier draft"}
+                  </p>
+                  <p className="note-one">
+                    {new Date(draft.updatedAt).toLocaleString()} · {draft.topic || "Uncategorized"}
+                  </p>
                   {draft.transcriptLinks.map((link) => (
                     <p className="note-one" key={link.id}>
-                      Transcript artifact {link.artifactId} ({link.sha256.slice(0, 12)}…) · {link.citationCount} saved citation{link.citationCount === 1 ? "" : "s"}
+                      Transcript artifact {link.artifactId} ({link.sha256.slice(0, 12)}…) ·{" "}
+                      {link.citationCount} saved citation{link.citationCount === 1 ? "" : "s"}
                       {link.revisionNotice ? ` · ${link.revisionNotice}` : ""}
                     </p>
                   ))}
                   {draft.transcriptReviews.map((review, index) => (
                     <p className="note-one" key={`${draft.id}-review-${review.acceptedArtifactId}-${index}`}>
-                      Citation review of artifact {review.acceptedArtifactId} ({review.acceptedArtifactSha256.slice(0, 12)}…) by {review.reviewedBy} on {new Date(review.reviewedAt).toLocaleString()}: {review.note}
+                      Citation review of artifact {review.acceptedArtifactId} (
+                      {review.acceptedArtifactSha256.slice(0, 12)}…) by {review.reviewedBy} on{" "}
+                      {new Date(review.reviewedAt).toLocaleString()}: {review.note}
                     </p>
                   ))}
                   <button type="button" className="btn" onClick={() => setSelectedDraftId(draft.id)}>
@@ -4136,8 +4374,12 @@ function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; current
               ))}
             </ul>
           ) : null}
-          {detail.isPending && selectedDraftId != null ? <p className="note-one">Loading saved draft…</p> : null}
-          {detail.isError ? <p className="note-gate">The saved draft could not be loaded.</p> : null}
+          {detail.isPending && selectedDraftId != null ? (
+            <p className="note-one">Loading saved draft…</p>
+          ) : null}
+          {detail.isError ? (
+            <p className="note-gate">The saved draft could not be loaded.</p>
+          ) : null}
           {selected ? (
             <article className="note-sec" aria-label={`Saved draft ${selected.id}`}>
               <h3>{selected.headline || "Untitled draft"}</h3>
@@ -4145,33 +4387,58 @@ function DraftHistoryPanel({ leadId, currentDraftId }: { leadId: number; current
               <pre className="draft-history-body">{selected.body}</pre>
               {selected.transcriptLinks.map((link) => (
                 <section key={`history-link-${link.id}`}>
-                  <p><b>Original transcript artifact {link.artifactId}</b> · SHA-256 {link.sha256}</p>
+                  <p>
+                    <b>Original transcript artifact {link.artifactId}</b> · SHA-256 {link.sha256}
+                  </p>
                   {link.revisionNotice ? <p className="note-gate">{link.revisionNotice}</p> : null}
                   <ul className="meeting-citations">
                     {link.citations.map((citation, index) => (
                       <li key={`${link.id}-${citation.segmentIndex}-${index}`}>
-                        <p className="meeting-citation-head">Segment {citation.segmentIndex} · {citation.timestampSeconds == null ? "time unavailable" : meetingClock(citation.timestampSeconds)}</p>
-                        <p className="meeting-citation-excerpt">{citation.segmentAvailable ? citation.excerpt : "The saved citation no longer resolves to matching stored transcript text."}</p>
+                        <p className="meeting-citation-head">
+                          Segment {citation.segmentIndex} ·{" "}
+                          {citation.timestampSeconds == null ? "time unavailable" : meetingClock(citation.timestampSeconds)}
+                        </p>
+                        <p className="meeting-citation-excerpt">
+                          {citation.segmentAvailable ? citation.excerpt : "The saved citation no longer resolves to matching stored transcript text."}
+                        </p>
                         {citation.captionSha256 ? <code>{citation.captionSha256}</code> : null}
                       </li>
                     ))}
-                    {!link.citations.length ? <li>Transcript citations are missing or malformed in this history record.</li> : null}
+                    {!link.citations.length ? (
+                      <li>Transcript citations are missing or malformed in this history record.</li>
+                    ) : null}
                   </ul>
                 </section>
               ))}
               {selected.transcriptReviews.map((review) => (
                 <section key={`accepted-review-${review.id}`}>
-                  <p><b>Editor citation review</b> · artifact {review.acceptedArtifactId} · SHA-256 {review.acceptedArtifactSha256}</p>
-                  <p>{review.reviewedBy} · {new Date(review.reviewedAt).toLocaleString()}</p>
+                  <p>
+                    <b>Editor citation review</b> · artifact {review.acceptedArtifactId} · SHA-256{" "}
+                    {review.acceptedArtifactSha256}
+                  </p>
+                  <p>
+                    {review.reviewedBy} · {new Date(review.reviewedAt).toLocaleString()}
+                  </p>
                   <p>{review.note}</p>
                   <ul className="meeting-citations">
                     {review.citations.map((value, index) => {
-                      const citation = value as { sourceSegmentIndex?: number; acceptedSegmentIndex?: number; acceptedTimestampSeconds?: number; excerpt?: string; captionSha256?: string };
+                      const citation = value as {
+                        sourceSegmentIndex?: number;
+                        acceptedSegmentIndex?: number;
+                        acceptedTimestampSeconds?: number;
+                        excerpt?: string;
+                        captionSha256?: string;
+                      };
                       return (
                         <li key={`review-citation-${review.id}-${index}`}>
-                          <p>Original A segment {citation.sourceSegmentIndex ?? "unknown"} → accepted B segment {citation.acceptedSegmentIndex ?? "unknown"}
-                            {citation.acceptedTimestampSeconds != null && Number.isFinite(citation.acceptedTimestampSeconds) ? ` · ${meetingClock(citation.acceptedTimestampSeconds)}` : ""}</p>
-                          <p className="meeting-citation-excerpt">{citation.excerpt ?? "Accepted passage unavailable."}</p>
+                          <p>
+                            Original A segment {citation.sourceSegmentIndex ?? "unknown"} → accepted
+                            B segment {citation.acceptedSegmentIndex ?? "unknown"}
+                            {citation.acceptedTimestampSeconds != null && Number.isFinite(citation.acceptedTimestampSeconds) ? ` · ${meetingClock(citation.acceptedTimestampSeconds)}` : ""}
+                          </p>
+                          <p className="meeting-citation-excerpt">
+                            {citation.excerpt ?? "Accepted passage unavailable."}
+                          </p>
                           {citation.captionSha256 ? <code>{citation.captionSha256}</code> : null}
                         </li>
                       );
@@ -4244,7 +4511,10 @@ function ReportingNotesPane({
   onMeetingRedraft?: () => void;
   meetingRedrafting: boolean;
   evidenceToken: string;
-  onReverifyMeetingCitations?: (review: { confirmedSegmentIndexes: number[]; note: string }) => void;
+  onReverifyMeetingCitations?: (review: {
+    confirmedSegmentIndexes: number[];
+    note: string;
+  }) => void;
   reverifyingMeetingCitations: boolean;
   currentDraftId: number | null;
   /** WR1 phase 2: the whole-meeting run's accounting for this lead (see getLead). */
@@ -4415,7 +4685,7 @@ function ReportingNotesPane({
       evidenceToken={evidenceToken}
     />
   );
-    const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
+  const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
   const absenceBlock = gateClaims.length ? (
     <div className="note-sec note-gate">
       <p className="side-label">Verify before print · Claims of absence</p>
@@ -4494,8 +4764,8 @@ function ReportingNotesPane({
           );
         })}
         <p className="note-hint">
-          Pull opens a URL in that line, or searches the line when it has no URL, and drops the excerpt in the box under the story. The checkbox
-          just strikes it.
+          Pull opens a URL in that line, or searches the line when it has no URL, and drops the
+          excerpt in the box under the story. The checkbox just strikes it.
         </p>
         {pullMsg ? <p className="note-one">{pullMsg}</p> : null}
       </div>
@@ -4518,17 +4788,21 @@ function ReportingNotesPane({
           {earlierNotes.map((entry) => (
             <section key={entry.label}>
               <p className="side-label">{entry.label}</p>
-              <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{entry.text}</div>
+              <div className="note-one" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                {entry.text}
+              </div>
             </section>
           ))}
         </details>
       ) : null}
       {/*
-        WR1 phase 2: the whole-meeting run's ledger, beside the transcript block
-        and above the notes. It renders nothing at all for a lead whose draft
-        has no ledger rows, so every other story in the paper is unchanged.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       <MeetingLedgerPanel
+        liveRewriteEnabled={Boolean(onRewriteFromLedger)}
         leadId={leadId}
         accounting={meetingAccounting}
         transcriptArtifactId={
@@ -4657,8 +4931,8 @@ function ReportingNotesPane({
                 );
               })}
               <p className="note-hint">
-                Pull reads that claim&rsquo;s source page and drops the excerpt in the box under
-                the story. Add to notes writes the claim and its link into your reporting notes.
+                Pull reads that claim&rsquo;s source page and drops the excerpt in the box under the
+                story. Add to notes writes the claim and its link into your reporting notes.
               </p>
             </div>
           ) : null}
@@ -4697,13 +4971,11 @@ function ReportingNotesPane({
         </>
       )}
       {/*
-        Unit CU (0.6.81): the "People who still need to respond" section stood
-        here -- `FollowUpItem` per manual ask with Record reply / Nudge / Drop,
-        and the "Add a follow-up" form (who, what, due) under it. Removed
-        whole: DECISIONS.md:44 retires the human "seek a response" step, so
-        there is no ask to write and no reply to record. The rows are kept by
-        migrations/0106_retire_manual_follow_ups.sql.
-      */}
+          The fold used to print a count of failures -- "13 provider or page
+          failures" -- which is our bookkeeping and told the editor nothing
+          about why the pull came back empty. It now names the providers in
+          plain words; the raw lines stay inside for support.
+        */}
       {!locked ? (
         <div className="note-add">
           <input
@@ -4803,9 +5075,7 @@ function TodoRow({
         ) : null}
       </div>
       {!item.done && item.q ? (
-        <p className="todo-q">
-          {triedAt ? `Tried ${triedAt}: ${item.q}` : item.q}
-        </p>
+        <p className="todo-q">{triedAt ? `Tried ${triedAt}: ${item.q}` : item.q}</p>
       ) : null}
       {run ? (
         <PullProgress run={run} onStop={onStop} onContinue={onContinue} disabled={disabled} />
@@ -4816,7 +5086,9 @@ function TodoRow({
             <span>0s</span>
           </div>
           <p>Mechanical web search and document extraction — no AI model is being used.</p>
-          <p className="pull-counts" aria-live="polite">Creating the saved background job…</p>
+          <p className="pull-counts" aria-live="polite">
+            Creating the saved background job…
+          </p>
         </div>
       ) : null}
     </div>
@@ -4855,8 +5127,8 @@ function PullProgress({
       <p>Mechanical web search and document extraction — no AI model is being used.</p>
       <p className="pull-counts" aria-live="polite">
         {run.counters.searchesAttempted} searches · {run.counters.providersAttempted} providers ·{" "}
-        {run.counters.indexPagesChecked} index pages · {run.counters.documentsOpened} documents opened ·{" "}
-        {run.counters.documentsSaved} saved
+        {run.counters.indexPagesChecked} index pages · {run.counters.documentsOpened} documents
+        opened · {run.counters.documentsSaved} saved
       </p>
       <div className="pull-progress-actions">
         {active ? (

@@ -11,8 +11,11 @@ import {
   type FindingEvidenceReview,
   type FindingJudgment,
   type ManualClaimReferenceRelation,
+  EVIDENCE_OVERRIDE_KEYS,
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
+import { OverrideAnyway } from "@/components/override-anyway";
+import { NO_CAPTURE_JUDGMENT_LABEL } from "@/lib/news/finding-evidence-display";
 import { EvidenceCheckList } from "@/components/evidence-check-list";
 import { TAKEDOWN_REASON_MAX, takeDownEvidenceCapture } from "@/lib/news/evidence-takedown";
 import { takedownDoneNotice, takedownFailedNotice } from "@/lib/news/takedown-notice";
@@ -80,6 +83,10 @@ type JudgmentDraft = {
   value: FindingJudgment;
   reason: string;
   contraryVersionId: number | null;
+  /** Audit item 14: the editor's own note for a judgment with no capture. */
+  note: string;
+  /** True once this judgment was recorded outside the captures. */
+  noCapture?: boolean;
 };
 
 type CurrentDraft = {
@@ -102,6 +109,22 @@ const blankManualClaim = (): ManualClaimForm => ({
   kind: "record",
   references: [],
 });
+
+/** A server judgment as the editable draft this panel works on. */
+function draftFromJudgment(judgment: {
+  value: FindingJudgment;
+  reason: string;
+  contraryVersionId: number | null;
+  noCapture?: boolean;
+}): JudgmentDraft {
+  return {
+    value: judgment.value,
+    reason: judgment.reason,
+    contraryVersionId: judgment.contraryVersionId,
+    noCapture: judgment.noCapture,
+    note: "",
+  };
+}
 
 const judgmentLabels: Record<FindingJudgment, string> = {
   unreviewed: "Unreviewed",
@@ -133,6 +156,8 @@ function draftsFrom(review: FindingEvidenceReview): Record<string, JudgmentDraft
         value: row.judgment.value,
         reason: row.judgment.reason,
         contraryVersionId: row.judgment.contraryVersionId,
+        noCapture: row.judgment.noCapture,
+        note: "",
       },
     ]),
   );
@@ -478,6 +503,13 @@ function JudgmentControls({
   return (
     <div className="mt-5 border-t border-rule pt-4">
       <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">Editor judgment</p>
+      {/*
+        Audit item 14: a judgment recorded outside the captures says so, in the
+        one shared label, wherever judgments are shown.
+      */}
+      {judgment.noCapture ? (
+        <p className="mt-2 text-sm font-medium text-ink">{NO_CAPTURE_JUDGMENT_LABEL}</p>
+      ) : null}
       <label className="mt-2 block text-sm font-medium text-ink" htmlFor={`${idBase}-judgment-${index}`}>
         Judgment
       </label>
@@ -651,6 +683,20 @@ export function FindingEvidenceReviewPanel({
     null,
   );
   const [reloadRequired, setReloadRequired] = useState(false);
+  /*
+    Audit items 13-17: the warned first answer, held until its "<action> anyway"
+    press (or the editor edits the row). One per action, because the three
+    actions answer separately.
+  */
+  const [saveWarning, setSaveWarning] = useState<
+    { key: string; sentence: string; findingKey: string } | null
+  >(null);
+  const [manualWarning, setManualWarning] = useState<{ key: string; sentence: string } | null>(
+    null,
+  );
+  const [aiWarning, setAiWarning] = useState<
+    { key: string; sentence: string; action: "remove-sentence"; findingKey?: string } | null
+  >(null);
   const [openedCapture, setOpenedCapture] = useState<FindingEvidenceCaptureResult | null>(null);
   /*
     Unit U11b: the takedown form, opened by a press rather than drawn beside
@@ -669,6 +715,7 @@ export function FindingEvidenceReviewPanel({
     src/lib/news/evidence-takedown-form.ts.
   */
   const [takeDownState, setTakeDownState] = useState<TakeDownForm>(() => blankTakeDownForm(null));
+  const [takeDownWarning, setTakeDownWarning] = useState<{ versionId: number; key: string; sentence: string } | null>(null);
   const [takeDownFeedback, setTakeDownFeedback] = useState<{
     kind: "ok" | "err";
     text: string;
@@ -682,8 +729,11 @@ export function FindingEvidenceReviewPanel({
   const openedVersionId =
     openedCapture && openedCapture.ok ? openedCapture.capture.versionId : null;
   const takeDownForm = takeDownFormForCapture(takeDownState, openedVersionId);
-  const editTakeDown = (update: (current: TakeDownForm) => TakeDownForm) =>
+  const editTakeDown = (update: (current: TakeDownForm) => TakeDownForm) => {
+    setTakeDownWarning(null);
     setTakeDownState((current) => update(takeDownFormForCapture(current, openedVersionId)));
+  };
+  const manualOverrideKeys = useRef<string[]>([]);
   const [manualClaim, setManualClaim] = useState<ManualClaimForm>(blankManualClaim);
   const [recordToAdd, setRecordToAdd] = useState("");
   const [recordRelation, setRecordRelation] = useState<ManualClaimReferenceRelation>("corroborating");
@@ -704,11 +754,19 @@ export function FindingEvidenceReviewPanel({
 
   function updateManualClaim(update: (current: ManualClaimForm) => ManualClaimForm) {
     if (!manualDraftToken.current && review) manualDraftToken.current = review.evidenceToken;
+    /*
+      Editing the claim dismisses a warned answer, so an override key never
+      carries to different text (audit item 16/17).
+    */
+    setManualWarning(null);
+    manualOverrideKeys.current = [];
     setManualClaim(update);
   }
 
   function resetManualClaim() {
     manualDraftToken.current = "";
+    setManualWarning(null);
+    manualOverrideKeys.current = [];
     setManualClaim(blankManualClaim());
   }
 
@@ -754,7 +812,7 @@ export function FindingEvidenceReviewPanel({
     setFeedback({
       kind: "err",
       text:
-        result.data && !result.data.ok
+        result.data && "error" in result.data
           ? result.data.error
           : "Could not reload the evidence review.",
     });
@@ -765,7 +823,7 @@ export function FindingEvidenceReviewPanel({
       if (!review) throw new Error("The evidence review is not ready yet.");
       return getFindingEvidenceCapture({ data: { leadId, draftId: review.draftId, versionId } });
     },
-    onMutate: () => setOpenedCapture(null),
+    onMutate: () => { setOpenedCapture(null); setTakeDownWarning(null); },
     onSuccess: (result) => setOpenedCapture(result),
     onError: () =>
       setOpenedCapture({
@@ -807,9 +865,14 @@ export function FindingEvidenceReviewPanel({
     waiting here for the next record the owner opens.
   */
   const takeDown = useMutation({
-    mutationFn: (input: { versionId: number; reason: string; removeLink: boolean }) =>
+    mutationFn: (input: { versionId: number; reason: string; removeLink: boolean; override?: string[] }) =>
       takeDownEvidenceCapture({ data: input }),
-    onSuccess: async (result) => {
+    onSuccess: async (result, input) => {
+      if (!result.ok && "warning" in result) {
+        setTakeDownWarning({versionId: input.versionId, ...result.warning});
+        return;
+      }
+      setTakeDownWarning(null);
       if (!result.ok) {
         setTakeDownFeedback({ kind: "err", text: result.error });
         return;
@@ -840,16 +903,13 @@ export function FindingEvidenceReviewPanel({
     mutationFn: ({
       findingKey,
       judgment,
-      hasReadableCapture,
+      override,
     }: {
       findingKey: string;
       judgment: JudgmentDraft;
-      hasReadableCapture: boolean;
+      override?: string[];
     }) => {
       if (!review) throw new Error("The evidence review is not ready yet.");
-      if (judgment.value === "supports" && !hasReadableCapture) {
-        throw new Error("A support judgment needs a readable cited captured record.");
-      }
       return saveFindingEvidenceJudgment({
         data: {
           leadId,
@@ -859,11 +919,22 @@ export function FindingEvidenceReviewPanel({
           reason: judgment.reason,
           contraryVersionId: judgment.value === "contradicts" ? judgment.contraryVersionId : null,
           evidenceToken: draftToken.current || review.evidenceToken,
+          override,
+          editorNote: judgment.note,
         },
       });
     },
     onSuccess: async (result, variables) => {
       if (!result.ok) {
+        /*
+          Audit items 13/14: a judgment the captures cannot ground warns. The
+          sentence is drawn on the row with a "Save anyway" press, and a
+          no-capture override additionally needs the editor's own note.
+        */
+        if ("warning" in result) {
+          setSaveWarning({ ...result.warning, findingKey: variables.findingKey });
+          return;
+        }
         if (result.code === "conflict") {
           setFeedback({
             kind: "warn",
@@ -875,6 +946,7 @@ export function FindingEvidenceReviewPanel({
         setFeedback({ kind: "err", text: result.error });
         return;
       }
+      setSaveWarning(null);
       dirtyKeys.current.delete(variables.findingKey);
       const peerKeys = [...dirtyKeys.current];
       const previous = reviewAtDraftStart.current;
@@ -916,7 +988,7 @@ export function FindingEvidenceReviewPanel({
   });
 
   const manualSave = useMutation({
-    mutationFn: (action: "upsert" | "remove") => {
+    mutationFn: ({ action, override }: { action: "upsert" | "remove"; override?: string[] }) => {
       if (!review) throw new Error("The evidence review is not ready yet.");
       if (action === "remove") {
         if (!manualClaim.id) throw new Error("Choose a manual claim to remove.");
@@ -934,15 +1006,22 @@ export function FindingEvidenceReviewPanel({
           fact: manualClaim.fact,
           kind: manualClaim.kind,
           references: manualClaim.references,
+          override,
         },
       });
     },
     onSuccess: (result) => {
       if (!result.ok) {
+        /* Audit items 16/17: a claim over the length or reference limits warns. */
+        if ("warning" in result) {
+          setManualWarning(result.warning);
+          return;
+        }
         setFeedback({ kind: result.code === "conflict" ? "warn" : "err", text: result.error });
         if (result.code === "conflict") setReloadRequired(true);
         return;
       }
+      setManualWarning(null);
       qc.setQueryData(["finding-evidence-review", leadId, reviewRevision], result);
       appliedToken.current = result.review.evidenceToken;
       if (dirtyKeys.current.size) {
@@ -959,12 +1038,22 @@ export function FindingEvidenceReviewPanel({
   });
 
   const aiDecision = useMutation({
-    mutationFn: ({ action, findingKey }: { action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string }) => {
+    mutationFn: ({ action, findingKey, override }: { action: "accept-supported" | "mark-checked" | "remove-sentence"; findingKey?: string; override?: string[] }) => {
       if (!review || dirtyKeys.current.size || localDraftChanged || reloadRequired) throw new Error("Save or reload your unsaved changes before deciding on AI rows.");
-      return decideAiEvidence({ data: { leadId, draftId: review.draftId, evidenceToken: review.evidenceToken, action, findingKey } });
+      return decideAiEvidence({ data: { leadId, draftId: review.draftId, evidenceToken: review.evidenceToken, action, findingKey, override } });
     },
-    onSuccess: async (result) => {
-      if (!result.ok) { setFeedback({ kind: "err", text: result.error }); return; }
+    onSuccess: async (result, variables) => {
+      if (!result.ok) {
+        /* Audit item 15: an inexact sentence removal warns, then a coherent
+           removal is offered under "Remove it anyway". */
+        if ("warning" in result && result.warning.key === EVIDENCE_OVERRIDE_KEYS.removeSentence) {
+          setAiWarning({ ...result.warning, action: "remove-sentence", findingKey: variables.findingKey });
+          return;
+        }
+        setFeedback({ kind: "err", text: "error" in result ? result.error : "That decision was refused." });
+        return;
+      }
+      setAiWarning(null);
       qc.setQueryData(["finding-evidence-review", leadId], result);
       setDrafts(draftsFrom(result.review));
       setFeedback({ kind: "ok", text: "Evidence decision saved." });
@@ -980,11 +1069,21 @@ export function FindingEvidenceReviewPanel({
       draftToken.current = review.evidenceToken;
       reviewAtDraftStart.current = review;
     }
+    /*
+      A changed judgment or reason dismisses the warned answer; typing the
+      editor's NOTE (which is part of the same override) must not, or the field
+      would erase the prompt it belongs to.
+    */
+    if (
+      saveWarning?.findingKey === key &&
+      ("value" in update || "reason" in update || "contraryVersionId" in update)
+    )
+      setSaveWarning(null);
     dirtyKeys.current.add(key);
     setDrafts((current) => ({
       ...current,
       [key]: {
-        ...(current[key] ?? { value: "unreviewed", reason: "", contraryVersionId: null }),
+        ...(current[key] ?? { value: "unreviewed", reason: "", contraryVersionId: null, note: "" }),
         ...update,
       },
     }));
@@ -1117,6 +1216,31 @@ export function FindingEvidenceReviewPanel({
     );
 
   /**
+   * The warned first answer for one judgment row: audit items 13 and 14. A
+   * no-capture override additionally needs the editor's own note, so the field
+   * is drawn and the "Save anyway" press waits for it.
+   */
+  const renderSaveOverride = (findingKey: string, judgment: JudgmentDraft): ReactNode =>
+    saveWarning?.findingKey === findingKey ? (
+      <OverrideAnyway
+        warning={saveWarning}
+        actionWord="Save"
+        busy={save.isPending}
+        noteRequired={
+          saveWarning.key === EVIDENCE_OVERRIDE_KEYS.supportsNoCapture ||
+          saveWarning.key === EVIDENCE_OVERRIDE_KEYS.contradictsNoCapture
+        }
+        note={judgment.note}
+        noteLabel="Where you know this from"
+        notePlaceholder="I know this from outside the captures: …"
+        onNoteChange={(value) => updateDraft(findingKey, { note: value })}
+        onOverride={() =>
+          save.mutate({ findingKey, judgment, override: [saveWarning.key] })
+        }
+      />
+    ) : null;
+
+  /**
    * The body of one list row's shut disclosure. A row with no review row behind
    * it -- a claim of absence, the name row -- opens to nothing and gets no
    * disclosure at all.
@@ -1136,11 +1260,7 @@ export function FindingEvidenceReviewPanel({
 
     if (at.kind === "finding") {
       const finding = source.rows[at.index]!;
-      const judgment = drafts[finding.key] ?? {
-        value: finding.judgment.value,
-        reason: finding.judgment.reason,
-        contraryVersionId: finding.judgment.contraryVersionId,
-      };
+      const judgment = drafts[finding.key] ?? draftFromJudgment(finding.judgment);
       const citedVersions = citedVersionsOf(finding.captures);
       return (
         <article className="border border-rule bg-paper p-4 sm:p-5">
@@ -1187,21 +1307,16 @@ export function FindingEvidenceReviewPanel({
             savePending={save.isPending}
             localDraftChanged={localDraftChanged}
             onChange={(update) => updateDraft(finding.key, update)}
-            onSave={() =>
-              save.mutate({
-                findingKey: finding.key,
-                judgment,
-                hasReadableCapture: citedVersions.length > 0,
-              })
-            }
+            onSave={() => save.mutate({ findingKey: finding.key, judgment })}
           />
+          {renderSaveOverride(finding.key, judgment)}
         </article>
       );
     }
 
     if (at.kind === "claim") {
       const claim = source.claimRows[at.index]!;
-      const judgment = drafts[claim.key] ?? claim.judgment;
+      const judgment = drafts[claim.key] ?? draftFromJudgment(claim.judgment);
       const citedVersions = citedVersionsOf(claim.captures);
       return (
         <article className="border border-rule bg-paper p-4 sm:p-5">
@@ -1229,27 +1344,16 @@ export function FindingEvidenceReviewPanel({
             savePending={save.isPending}
             localDraftChanged={localDraftChanged}
             onChange={(update) => updateDraft(claim.key, update)}
-            onSave={() =>
-              save.mutate({
-                findingKey: claim.key,
-                judgment,
-                hasReadableCapture: citedVersions.length > 0,
-              })
-            }
+            onSave={() => save.mutate({ findingKey: claim.key, judgment })}
           />
+          {renderSaveOverride(claim.key, judgment)}
         </article>
       );
     }
 
     const manual = source.manualClaimRows[at.index]!;
-    const judgment = drafts[manual.key] ?? manual.judgment;
-    const corroborating = manual.captures.filter(
-      (capture) =>
-        capture.available &&
-        capture.readable &&
-        capture.relation === "corroborating" &&
-        capture.versionId != null,
-    );
+    const judgment = drafts[manual.key] ?? draftFromJudgment(manual.judgment);
+    /** The records a contradiction may cite: explicit contrary captures. */
     const contrary = manual.captures.filter(
       (capture) =>
         capture.available &&
@@ -1281,14 +1385,9 @@ export function FindingEvidenceReviewPanel({
           savePending={save.isPending}
           localDraftChanged={localDraftChanged}
           onChange={(update) => updateDraft(manual.key, update)}
-          onSave={() =>
-            save.mutate({
-              findingKey: manual.key,
-              judgment,
-              hasReadableCapture: corroborating.length > 0,
-            })
-          }
+          onSave={() => save.mutate({ findingKey: manual.key, judgment })}
         />
+        {renderSaveOverride(manual.key, judgment)}
         <div className="mt-4 flex flex-wrap gap-3 border-t border-rule pt-4">
           <InkButton
             tone="quiet"
@@ -1402,10 +1501,13 @@ export function FindingEvidenceReviewPanel({
             <label className="mt-3 block text-sm font-medium text-ink" htmlFor="manual-claim-fact">
               Claim text
             </label>
+            {/*
+              Audit item 16: the 400-character figure is a suggestion now, not a
+              hard stop -- a longer claim warns and is then saved whole.
+            */}
             <textarea
               id="manual-claim-fact"
               className="mt-1 min-h-24 w-full border border-rule bg-paper p-3 text-sm"
-              maxLength={400}
               disabled={disabled || saveBusy || localDraftChanged || reloadRequired}
               value={manualClaim.fact}
               onChange={(event) =>
@@ -1477,19 +1579,17 @@ export function FindingEvidenceReviewPanel({
                     <option value="context">Context</option>
                   </select>
                 </label>
+                {/*
+                  Audit item 17: six is a suggestion now. A seventh record (or a
+                  repeated one) warns on save and is accepted under override.
+                */}
                 <InkButton
                   small
                   disabled={
-                    !recordToAdd ||
-                    manualClaim.references.length >= 6 ||
-                    disabled ||
-                    saveBusy ||
-                    localDraftChanged ||
-                    reloadRequired
+                    !recordToAdd || disabled || saveBusy || localDraftChanged || reloadRequired
                   }
                   onClick={() => {
                     const versionId = Number(recordToAdd);
-                    if (!manualClaim.references.some((reference) => reference.versionId === versionId))
                       updateManualClaim((current) => ({
                         ...current,
                         references: [...current.references, { versionId, relation: recordRelation }],
@@ -1502,13 +1602,13 @@ export function FindingEvidenceReviewPanel({
               </div>
               {manualClaim.references.length ? (
                 <ul className="mt-3 space-y-2">
-                  {manualClaim.references.map((reference) => {
+                  {manualClaim.references.map((reference, referenceIndex) => {
                     const record = review.manualClaimCaptureOptions.find(
                       (candidate) => candidate.versionId === reference.versionId,
                     );
                     return (
                       <li
-                        key={reference.versionId}
+                        key={`${reference.versionId}:${referenceIndex}`}
                         className="flex flex-wrap items-center justify-between gap-2 border-l border-rule pl-3 text-sm"
                       >
                         <span>
@@ -1523,7 +1623,7 @@ export function FindingEvidenceReviewPanel({
                             updateManualClaim((current) => ({
                               ...current,
                               references: current.references.filter(
-                                (candidate) => candidate.versionId !== reference.versionId,
+                                (_, index) => index !== referenceIndex,
                               ),
                             }))
                           }
@@ -1535,20 +1635,19 @@ export function FindingEvidenceReviewPanel({
                   })}
                 </ul>
               ) : (
-                <p className="mt-3 text-sm text-muted">Select at least one exact captured record.</p>
+                <p className="mt-3 text-sm text-muted">No captured records selected. Saving will ask you to confirm.</p>
               )}
             </div>
             <div className="mt-4 flex flex-wrap gap-3">
               <InkButton
                 disabled={
                   !manualClaim.fact.trim() ||
-                  manualClaim.references.length === 0 ||
                   disabled ||
                   saveBusy ||
                   localDraftChanged ||
                   reloadRequired
                 }
-                onClick={() => manualSave.mutate("upsert")}
+                onClick={() => manualSave.mutate({ action: "upsert" })}
               >
                 {manualSave.isPending
                   ? "Saving manual claim…"
@@ -1567,12 +1666,22 @@ export function FindingEvidenceReviewPanel({
                   disabled={
                     disabled || saveBusy || localDraftChanged || reloadRequired || !reviewApplied
                   }
-                  onClick={() => manualSave.mutate("remove")}
+                  onClick={() => manualSave.mutate({ action: "remove" })}
                 >
                   Remove manual claim
                 </InkButton>
               ) : null}
             </div>
+            {manualWarning ? (
+              <OverrideAnyway
+                warning={manualWarning}
+                actionWord="Save"
+                busy={manualSave.isPending}
+                onOverride={() =>
+                  manualSave.mutate({ action: "upsert", override: manualOverrideKeys.current = [...new Set([...manualOverrideKeys.current, manualWarning.key])] })
+                }
+              />
+            ) : null}
           </div>
         </div>
       </details>
@@ -1595,10 +1704,10 @@ export function FindingEvidenceReviewPanel({
           </button>
         </Notice>
       ) : null}
-      {reviewQuery.data && !reviewQuery.data.ok ? (
+      {reviewQuery.data && "error" in reviewQuery.data ? (
         <Notice kind="err">
           {reviewQuery.data.error}
-          {reviewQuery.data.code !== "invalid-input" ? (
+          {(!("code" in reviewQuery.data) || reviewQuery.data.code !== "invalid-input") ? (
             <>
               {" "}
               <button
@@ -1743,7 +1852,7 @@ export function FindingEvidenceReviewPanel({
                         <InkButton
                           tone="danger"
                           small
-                          disabled={!takeDownForm.reason.trim() || takeDown.isPending}
+                          disabled={takeDown.isPending}
                           onClick={() =>
                             takeDown.mutate({
                               versionId: openedCapture.capture.versionId,
@@ -1754,6 +1863,11 @@ export function FindingEvidenceReviewPanel({
                         >
                           {takeDown.isPending ? "Taking down…" : "Take down this capture"}
                         </InkButton>
+                        {takeDownWarning?.versionId === openedVersionId ? <OverrideAnyway
+                          warning={takeDownWarning} actionWord="Take down" busy={takeDown.isPending}
+                          onOverride={() => takeDown.mutate({ versionId: openedVersionId!,
+                            reason: takeDownForm.reason, removeLink: takeDownForm.removeLink,
+                            override: [takeDownWarning.key] })} /> : null}
                         <InkButton
                           tone="quiet"
                           small
@@ -1844,6 +1958,25 @@ export function FindingEvidenceReviewPanel({
             review here. This review does not inventory every claim in the story.
           </p>
         </div>
+      ) : null}
+
+      {/*
+        Audit item 15: the warned first answer to "Remove this sentence from the
+        draft", with the press that retries it as a coherent removal.
+      */}
+      {aiWarning ? (
+        <OverrideAnyway
+          warning={aiWarning}
+          actionWord="Remove it"
+          busy={aiDecision.isPending}
+          onOverride={() =>
+            aiDecision.mutate({
+              action: "remove-sentence",
+              findingKey: aiWarning.findingKey,
+              override: [aiWarning.key],
+            })
+          }
+        />
       ) : null}
 
       <EvidenceCheckList

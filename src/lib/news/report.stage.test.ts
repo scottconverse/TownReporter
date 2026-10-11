@@ -121,3 +121,23 @@ describe("reportAndDraft progress stages", { timeout: 30_000 }, () => {
     assert.deepEqual(failureStages, expected.slice(0, 4));
   });
 });
+
+
+it("Gemini reaches the writer after a twenty-second research pass", async () => {
+  const originalNow = Date.now;
+  let now = originalNow();
+  Date.now = () => now;
+  let wrote = false;
+  try {
+    const result = await reportAndDraft({userId:"gemini-budget",lead,urls:[SOURCE],memory:[],modelChoice:"custom:9ce9a944-f444-4a69-8927-7c7705c07a35"}, {
+      ...baseDeps, budgetMs: undefined,
+      chat: async (system) => {
+        if (system === REPORT_RESEARCH_SYSTEM) { now += 20_000; return {ok:true,text:researchJson}; }
+        if (system === REPORT_WRITE_SYSTEM) { wrote = true; return {ok:true,text:draftJson}; }
+        return {ok:true,text:"{}"};
+      },
+    });
+    assert.equal(wrote,true);
+    assert.ok(!("error" in result), JSON.stringify(result));
+  } finally { Date.now = originalNow; }
+});
