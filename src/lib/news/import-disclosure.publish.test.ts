@@ -120,7 +120,7 @@ it("prints the imported story under the line the editor chose, and needs no AI p
   );
 });
 
-it("leaves the standard disclosure line alone for a story the desk wrote", async () => {
+it("leaves a draft without AI authoring receipts free of an AI claim", async () => {
   const { leadId } = await importedFixture("");
   const published = await performPublish({ userId: USER, newsroomId: NEWSROOM }, leadId, undefined, undefined, {}, ["unchecked"]);
   assert.equal(published.ok, true);
@@ -132,6 +132,6 @@ it("leaves the standard disclosure line alone for a story the desk wrote", async
   assert.equal(
     article.disclosure_text,
     "",
-    "empty means 'print the standard line', so nothing changes for a desk-written story",
+    "no model-written body or public-research receipt means no AI line is stored",
   );
 });

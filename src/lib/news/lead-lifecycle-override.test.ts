@@ -28,7 +28,7 @@ async function freshDb(): Promise<PGlite> {
   const db = new PGlite();
   await db.exec(`
     create table leads(id serial primary key, newsroom_id integer, status text,
-      possible_duplicate_of integer, killed_at timestamptz, kill_reason text,
+      possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text,
       kill_reason_url text, notes_json text);
     create table drafts(id serial primary key, lead_id integer, newsroom_id integer,
       body text default '', research_json text default '{}');
@@ -117,6 +117,31 @@ describe("setLeadStatusForEditor warns, never blocks (item 5)", () => {
 });
 
 describe("resolveLeadDuplicateForEditor warns, never blocks (item 6)", () => {
+  it("warns before moving a killed lead with a saved draft to New, then clears its duplicate link on override", async () => {
+    const db = await freshDb();
+    try {
+      await db.exec(`insert into leads(id,newsroom_id,status,possible_duplicate_of) values (8,7,'killed',3);
+        insert into drafts(id,lead_id,newsroom_id,body) values (8,8,7,'Saved prose');`);
+      const sql = makeSql(db);
+      const refused = await resolveLeadDuplicateForEditor(sql, context, { id: 8, action: "not-a-duplicate" });
+      assert.equal(refused.ok, false);
+      assert.equal((refused as { warning?: { key: string } }).warning?.key, "lead-duplicate-new-drafted");
+      const applied = await resolveLeadDuplicateForEditor(sql, context, {
+        id: 8,
+        action: "not-a-duplicate",
+        override: ["lead-duplicate-new-drafted"],
+      });
+      assert.equal(applied.ok, true);
+      const [lead] = await sql<{ status: string; possible_duplicate_of: number | null }>`
+        select status, possible_duplicate_of from leads where id = 8
+      `;
+      assert.deepEqual(lead, { status: "new", possible_duplicate_of: null });
+      await expectOverrideAudit(db, "lead-duplicate-new-drafted", 8);
+    } finally {
+      await db.close();
+    }
+  });
+
   it("warns on reopening a prior lead with a published story, applies on the second press", async () => {
     const db = await freshDb();
     try {

@@ -367,7 +367,19 @@ it("supplied-only never searches, follows discoveries, or credits an invented UR
   assert.ok(!("error" in result));
   assert.deepEqual(log.searches, []);
   assert.deepEqual(log.fetched, [supplied]);
-  if (!("error" in result)) assert.deepEqual(result.source_urls, [supplied]);
+  if (!("error" in result)) {
+    assert.deepEqual(result.source_urls, [supplied]);
+    assert.equal(result.research_memo.publicAiResearchCompleted, undefined);
+  }
+});
+it("records public AI research only after the public research model returns readable work", async () => {
+  const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };
+  const result = await reportAndDraft(
+    { userId: "public-research-receipt", lead, urls: [supplied], memory: [], modelChoice: "claude-frontier" },
+    dependencies(log),
+  );
+  assert.ok(!("error" in result));
+  if (!("error" in result)) assert.equal(result.research_memo.publicAiResearchCompleted, true);
 });
 it("research rejects unrelated press-release content before it reaches the writing packet", async () => {
   const log = { searches: [] as string[], fetched: [] as string[], packets: [] as string[] };

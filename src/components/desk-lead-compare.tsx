@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
+import { deskToast } from "@/components/desk-toast";
+import { KILL_TOAST_MS } from "@/components/fast-kill";
 import { parseUrlList } from "@/lib/paper";
 import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import {
@@ -48,7 +50,12 @@ export type CompareSide = {
 
 /** What a press reports back. `false` means it did not land, and the panel
  * says so in the editor's words rather than the server's. */
-export type CompareResult = { ok: boolean; error?: string };
+export type CompareResult = {
+  ok: boolean;
+  error?: string;
+  warning?: { key: string; sentence: string };
+  undo?: () => Promise<void>;
+};
 
 export function LeadComparePanel({
   current,
@@ -61,8 +68,8 @@ export function LeadComparePanel({
 }: {
   current: CompareSide;
   prior: CompareSide;
-  onNotADuplicate?: () => Promise<CompareResult>;
-  onKillThis?: () => Promise<CompareResult>;
+  onNotADuplicate?: (override?: string[]) => Promise<CompareResult>;
+  onKillThis?: (override?: string[]) => Promise<CompareResult>;
   onReopenPrior?: () => Promise<CompareResult>;
   matchReason?: string;
   /** The paper's own date formatter, passed in so the panel renders the same
@@ -73,23 +80,43 @@ export function LeadComparePanel({
   const [busy, setBusy] = useState<"" | "not-a-duplicate" | "kill" | "reopen">("");
   const [note, setNote] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
 
-  const run = (
+  const run = async (
     which: "not-a-duplicate" | "kill" | "reopen",
-    press: (() => Promise<CompareResult>) | undefined,
+    press: ((override?: string[]) => Promise<CompareResult>) | undefined,
+    override?: string[],
   ) => {
     if (!press || busy) return;
     setBusy(which);
     setNote(null);
-    void press().then(
-      (res) => {
-        setBusy("");
-        setNote(comparePressNote(which, res, { current, prior }));
-      },
-      () => {
-        setBusy("");
-        setNote(comparePressNote(which, undefined, { current, prior }));
-      },
-    );
+    try {
+      const res = await press(override);
+      setBusy("");
+      if (!res.ok && res.warning) {
+        const verb = which === "kill" ? "Kill" : "Move to New";
+        const warningKey = res.warning.key;
+        deskToast(res.warning.sentence, {
+          tone: "warn",
+          duration: Infinity,
+          undo: {
+            label: `${verb} anyway`,
+            run: () => run(which, press, [warningKey]),
+          },
+        });
+        return;
+      }
+      const resultNote = comparePressNote(which, res, { current, prior });
+      setNote(resultNote);
+      if (which === "kill" && res.ok && res.undo) {
+        deskToast(resultNote.text, {
+          tone: "ok",
+          duration: KILL_TOAST_MS,
+          undo: { label: "Undo", run: res.undo },
+        });
+      }
+    } catch {
+      setBusy("");
+      setNote(comparePressNote(which, undefined, { current, prior }));
+    }
   };
 
   const priorIsKilled = prior.status === "killed";
@@ -245,7 +272,7 @@ export function KilledLeadRecord({
   return (
     <section className="lead-killed-record" aria-labelledby="lead-killed-heading">
       <h2 id="lead-killed-heading" className="lead-compare-headline">
-        {KILLED_LEAD_HEADING}
+        {reopened ? editorTitle(lead.headline) : KILLED_LEAD_HEADING}
       </h2>
       <p className="meta">
         <Chip s={lead.status} />

@@ -1,4 +1,5 @@
 import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
+import { disclosureForPublishedStory } from "./ai-disclosure.ts";
 import { runDraftReply } from "./draft-reply.ts";
 import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
@@ -6680,10 +6681,13 @@ export const performPublish = createServerOnlyFn(async function performPublish(
         ${storableText(draft.body)}, ${storableText(draft.topic)}, ${draft.source_urls}, 'published', now(),
         ${provenanceJson}, ${storableText(row.form || "reported")}, ${storableText(row.found_note || "")},
         ${row.unanswered || "[]"}, ${row.id},
-        /* The line the editor chose on the import screen, carried on the draft.
-           Empty for every story the desk wrote, which prints the standard AI
-           line exactly as before. */
-        ${storableText(row.disclosure_text || "")},
+        /* The editor's imported line wins; otherwise derive the public line
+           from the model-body and public-research receipts on this draft. */
+        ${storableText(disclosureForPublishedStory({
+          text: row.disclosure_text,
+          modelBody: row.model_body,
+          researchJson: row.research_json,
+        }))},
         /* The geography pill this story answers to. NULL is the home town on the
            paper, which is the rule for the whole pre-0098 archive too -- see
            story-area.ts, which owns the four keys. */

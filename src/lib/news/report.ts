@@ -1573,6 +1573,7 @@ ${opts.documentEvidence ? `\nUploaded document evidence:\n${opts.documentEvidenc
 ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):\n${promptExtraEvidence}` : ""}`;
 
   let research: ResearchJson | null = null;
+  let publicAiResearchCompleted = false;
   if (timeLeft() > 8_000) {
     await deps.onStage?.("Planning the reporting");
     /*
@@ -1587,6 +1588,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       label: "The research model",
     });
     research = researchReply.ok ? researchReply.value : null;
+    publicAiResearchCompleted = !suppliedOnly && researchReply.ok;
   }
   if (meetingFocus) {
     // The research model may identify follow-ups, but it cannot silently
@@ -2241,6 +2243,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     claims,
     documentClaims,
     research_memo: {
+      ...(publicAiResearchCompleted ? { publicAiResearchCompleted: true } : {}),
       aiEvidenceReview,
       storyReadiness: draftLooksCutOff(body, requestedBrief ? 20 : 0) ? {version:1,state:"not-ready",openCount:0,totalCount:0,reason:CUT_OFF_WARNING} : aiEvidenceReadiness(aiEvidenceReview),
       nameCheck: names.check,

@@ -1,19 +1,8 @@
 /*
-  How the story in front of you was made, said plainly on the page.
-
-  Two shapes of published article exist in this paper and they were produced in
-  different ways, so one sentence cannot honestly cover both:
-
-    - a reported story is drafted by AI tools from records an editor supplied,
-      then reviewed and edited by a person (see the desk's Draft with AI path);
-    - a routine notice (Today / Weekend / Deadlines) is assembled by a fixed
-      template from owner-approved public sources, with no model in the loop at
-      all (routine-notice-editions.ts planRoutineEditions).
-
-  Saying the AI sentence over a template roundup would claim a person reviewed
-  and edited writing that no person and no model wrote, so the roundup gets its
-  own sentence instead of silence: a reader who sees no disclosure cannot tell
-  a considered omission from an oversight.
+  The public page has three honest outcomes: a story with AI work gets a line
+  derived from saved authoring receipts, a manual-only story carries no AI
+  claim, and a routine notice names its fixed-template path. AI_DISCLOSURE is
+  the example line for a story where both the research and draft model ran.
 */
 export const AI_DISCLOSURE =
   "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
@@ -25,11 +14,12 @@ export function AiDisclosure({ routine = false, text = "" }: { routine?: boolean
   /*
     An imported story gets its own line. The editor chose the wording on the
     import screen (src/routes/desk.import.tsx) and it is stored on the article,
-    because the standard line above would be false for a report an outside
-    research tool wrote: it would claim this paper's AI drafted it. Empty text
-    -- every story the desk wrote, and every article printed before migration
-    0091 -- falls back to exactly what used to print.
+    because a line cannot be inferred honestly from the article alone. Reported
+    stories receive a line derived from their authoring receipts; an empty line
+    means there is no supported AI claim. Routine notices have a separate true
+    description because their fixed template has no model-authored draft.
   */
-  const line = text.trim() || (routine ? ROUTINE_NOTICE_DISCLOSURE : AI_DISCLOSURE);
+  const line = text.trim() || (routine ? ROUTINE_NOTICE_DISCLOSURE : "");
+  if (!line) return null;
   return <p className="ai-disclosure">{line}</p>;
 }

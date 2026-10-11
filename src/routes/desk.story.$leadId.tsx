@@ -23,6 +23,7 @@ import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/com
 import { PublishConfirmation } from "@/components/publish-confirmation";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
+import { restoreStatus } from "@/components/fast-kill";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { readNameCheck } from "@/lib/news/name-check";
@@ -68,6 +69,7 @@ import {
   rewritePublishedStory,
   saveDraft,
   saveReportingNotes,
+  restoreKilledLead,
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
@@ -100,6 +102,7 @@ import {
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
+  storyLeadSectionLabel,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -1745,24 +1748,35 @@ function StoryPage() {
     await qc.invalidateQueries({ queryKey: ["leads"] });
   }, [qc, id]);
 
-  const moveToNew = useCallback(async () => {
-    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate" } });
+  const moveToNew = useCallback(async (override?: string[]) => {
+    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate", override } });
     if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if ("warning" in res && res.warning) return { ok: false, warning: res.warning };
     if (!res.ok) return { ok: false, error: res.error };
     await afterLeadChange();
     return { ok: true };
   }, [id, afterLeadChange]);
 
-  const killAsDuplicateOfPrior = useCallback(async () => {
+  const killAsDuplicateOfPrior = useCallback(async (override?: string[]) => {
     const prior = data?.lead.possible_duplicate;
     if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
     const res = await setLeadStatus({
-      data: { id, status: "killed", killReason: duplicateKillReason(prior.headline) },
+      data: { id, status: "killed", killReason: duplicateKillReason(prior.headline), override },
     });
     if (!answered(res)) return { ok: false, error: NO_ANSWER };
+    if ("warning" in res && res.warning) return { ok: false, warning: res.warning };
     if (!res.ok) return { ok: false, error: "The desk refused that kill." };
     await afterLeadChange();
-    return { ok: true };
+    const restore = restoreStatus(data?.lead.status);
+    return {
+      ok: true,
+      undo: async () => {
+        const undone = await restoreKilledLead({ data: { id, status: restore } });
+        if (!answered(undone)) throw new Error(NO_ANSWER);
+        if (!undone.ok) throw new Error(undone.error || "The lead could not be restored.");
+        await afterLeadChange();
+      },
+    };
   }, [data, id, afterLeadChange]);
 
   const reopenPrior = useCallback(async () => {
@@ -2064,6 +2078,7 @@ function StoryPage() {
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
+  const storyHeaderSection = storyLeadSectionLabel(sectionReady, sectionNameNow);
   /*
     ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
 
@@ -2609,7 +2624,7 @@ function StoryPage() {
           plain words; the raw lines stay inside for support.
         */}
       <div className="astra-wb-context">
-        <span>Story from lead · {sectionNameNow}</span>
+        <span>Story from lead · {storyHeaderSection}</span>
         <StoryReadinessChip readiness={draftReadiness} />
         {data.draft && draftReadiness.state !== "ready" ? <span className="meta">{draftReadiness.reason}</span> : null}
         {/*
