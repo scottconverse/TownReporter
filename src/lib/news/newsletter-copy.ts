@@ -52,11 +52,13 @@ export function testConnectionResultText(ok: boolean, message: string | null | u
     : "The desk could not reach the mailbox.";
 }
 
-/** What a save answers with; never reports the password. */
-export function mailboxSaveResultText(hadNewPassword: boolean): string {
+/** What a save answers with; the saved mailbox view is the source of truth. */
+export function mailboxSaveResultText(hadNewPassword: boolean, hasStoredPassword: boolean): string {
   return hadNewPassword
     ? "Mailbox saved. The password is stored on the desk and never shown again."
-    : "Mailbox saved. The stored password was kept.";
+    : hasStoredPassword
+      ? "Mailbox saved. The stored password was kept."
+      : "Mailbox settings saved. No password is stored yet. Add one before testing the mailbox.";
 }
 
 /**

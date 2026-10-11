@@ -5,10 +5,21 @@ import { test } from "node:test";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
+const typescript = require("typescript");
 const [appCss, deskCss] = await Promise.all([
   readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
   readFile(new URL("../src/desk-astra.css", import.meta.url), "utf8"),
 ]);
+const mailboxCopySource = await readFile(
+  new URL("../src/lib/news/newsletter-copy.ts", import.meta.url),
+  "utf8",
+);
+const mailboxCopyJs = typescript.transpileModule(mailboxCopySource, {
+  fileName: "newsletter-copy.ts",
+  compilerOptions: { module: typescript.ModuleKind.ESNext },
+}).outputText;
+const mailboxCopyUrl = `data:text/javascript;base64,${Buffer.from(mailboxCopyJs).toString("base64")}`;
+const { mailboxSaveResultText } = await import(mailboxCopyUrl);
 
 function rgb(value) {
   const parts = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
@@ -81,6 +92,24 @@ test("FB21: the one-time invite message wraps its long link at phone width", asy
       );
       await page.close();
     }
+  } finally {
+    await browser.close();
+  }
+});
+
+test("FB12: the saved mailbox status tells the truth when no password exists", async () => {
+  const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.setContent('<main><p id="save-result" role="status"></p></main>');
+    const noPasswordText = mailboxSaveResultText(false, false);
+    await page.locator("#save-result").evaluate((element, text) => {
+      element.textContent = text;
+    }, noPasswordText);
+    const screenText = await page.locator("#save-result").innerText();
+    assert.match(screenText, /no password is stored yet/i);
+    assert.doesNotMatch(screenText, /password was kept/i);
+    assert.match(mailboxSaveResultText(false, true), /stored password was kept/i);
   } finally {
     await browser.close();
   }
