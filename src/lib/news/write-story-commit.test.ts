@@ -314,7 +314,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     assert.deepEqual(JSON.parse(draft.source_urls), ["https://example.org/agenda"]);
   });
 
-  it("refuses the commit step, but keeps the filed lead, when the provider is not ready", async () => {
+  it("warns before drafting and keeps the filed lead when the provider is not ready", async () => {
     await ensureWriteStorySchema();
     const userId = `write-story-noprovider-${Date.now()}-${Math.random()}`;
     const NOT_INSTALLED = "Codex CLI not found on PATH.";
@@ -330,10 +330,12 @@ describe("writeStoryForAuthenticatedEditor", () => {
       },
     );
     assert.equal(res.ok, false);
-    if (res.ok) return assert.fail("a missing provider must refuse the draft");
+    if (res.ok) return assert.fail("an unavailable provider must warn before drafting");
     if (!("leadId" in res)) return assert.fail("the failed draft must retain its filed lead");
     assert.ok(res.leadId, "the lead is filed before the provider is asked");
-    assert.match(res.error, /Codex is not installed/i);
+    assert.ok("warning" in res);
+    assert.equal(res.warning.key, "writer-not-ready");
+    assert.match(res.error, /Codex.*not found.*If you draft anyway/i);
 
     const sql = await getSql();
     const [{ count }] = await sql<{ count: number }>`
