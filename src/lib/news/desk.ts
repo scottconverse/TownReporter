@@ -3627,13 +3627,14 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       nextChoice: EffectiveProviderChoice,
       reason: import("./automatic-failover.ts").AutomaticFailoverReason,
       nextLabel = modelChoiceLabel(nextChoice),
+      providerError?: string,
     ) => {
       if (nextChoice === activeReportSnapshot.modelChoice) return;
       const previousLabel = modelChoiceLabel(activeReportSnapshot.modelChoice);
       const nextEffort = modelEffort(nextChoice, activeReportSnapshot.modelEffort);
       await setModelRuntime(job.id, nextChoice, nextEffort);
       await setStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-      await setFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+      await setFailoverNote(job.id, providerError ? `${providerError} -> ${nextLabel}` : failoverNoteSentence(nextLabel, previousLabel, reason));
       job.model_choice = nextChoice;
       job.result_json = JSON.stringify({
         modelEffort: nextEffort,
@@ -3653,8 +3654,8 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
       const run = (snapshot: typeof activeReportSnapshot) => storyChat(system, user, maxTokens, {
         timeoutMs: Math.max(
-          options?.timeoutMs ?? 0,
-          providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
+          1,
+          options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
         ),
         choice: snapshot.modelChoice,
         newsroomId: job.newsroom_id,
@@ -3673,9 +3674,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
               ? null
               : modelEffort(choice, activeReportSnapshot.modelEffort),
         }),
-        onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason }) => {
+        onSwitch: async ({ previousLabel, nextLabel, nextChoice, reason, error }) => {
           void previousLabel;
-          await persistReportSwitch(nextChoice as EffectiveProviderChoice, reason, nextLabel);
+          await persistReportSwitch(nextChoice as EffectiveProviderChoice, reason, nextLabel, error);
         },
       });
       activeReportSnapshot = attempted.snapshot;

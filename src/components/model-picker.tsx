@@ -381,8 +381,7 @@ export function ModelPicker(props: Props) {
 
     Undecided (still loading, or the query failed) counts as available so the
     picker never locks up over a slow network call -- the preflight check on
-    the actual run is the backstop that refuses before spending anything either
-    way (see commitStoryDraftForAuthenticatedEditor).
+    the actual run warns before spending anything (see commitStoryDraftForAuthenticatedEditor).
   */
   function isAvailable(value: string): boolean {
     if (value === "none") return true;
@@ -414,10 +413,10 @@ export function ModelPicker(props: Props) {
     ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
     : isCustomModelChoice(shownValue)
       ? selectedUnavailable
-        ? unavailableReason(selected)
+        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
         : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
       : selectedUnavailable
-        ? unavailableReason(selected)
+        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
         : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
@@ -471,7 +470,6 @@ export function ModelPicker(props: Props) {
             <option
               key={option.value}
               value={option.value}
-              disabled={!available}
               title={`${pickerOptionTitle(option)}${available ? "" : ` — ${unavailableReason(option)}`}`}
             >
               {optionText(option)}

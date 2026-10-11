@@ -36,26 +36,27 @@ import { ensurePaperSettingsSchema } from "./paper-settings.ts";
 const EXPIRED =
   "Codex authentication has expired or Codex is signed out. Open Codex, sign in again, then try again.";
 
-for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) it(`refuses unavailable explicit ${choice} before enqueueing even when DeepSeek is ready`, async () => {
+for (const choice of ["claude-fable", "claude-frontier", "claude-sonnet", "claude-haiku"] as const) it(`warns for signed-out ${choice}, then records the accepted hop`, async () => {
   const sql = await getSql();
-  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why)
-    values(1,'picker-haiku','Picker regression','Why') returning id`;
-  const choices: string[] = [];
-  let enqueued = false;
-  const result = await commitStoryDraftForAuthenticatedEditor({
-    context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice,
-  }, {
-    probeProvider: async (choice) => {
-      choices.push(String(choice));
-      return choice?.startsWith("claude-")
-        ? { ok: false, error: "Claude Code is signed out. Sign in again." }
-        : { ok: true, choice: "deepseek-flash", label: "DeepSeek v4.1 Flash" };
-    },
-    enqueueJob: async (opts) => { enqueued = true; return enqueueJob({ ...opts, kick: false }); },
-  });
-  assert.equal(result.ok, false);
-  assert.equal(enqueued, false);
-  assert.deepEqual(choices, [choice]);
+  const [lead] = await sql<{ id: number }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'picker-haiku','Picker regression','Why') returning id`;
+  const input = { context: { userId: "picker-haiku", newsroomId: 1 }, leadId: lead.id, modelChoice: choice };
+  const deps = {
+    probeProvider: async (pick: string | undefined) => pick === choice
+      ? { ok: false as const, error: "Claude Code is signed out. Sign in again." }
+      : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
+    enqueueJob: async (opts: Parameters<typeof enqueueJob>[0]) => enqueueJob({ ...opts, kick: false }),
+  };
+  const warning = await commitStoryDraftForAuthenticatedEditor(input, deps);
+  assert.equal(warning.ok, false);
+  assert.match(JSON.stringify(warning), /Claude is signed out on this server.*If you draft anyway/);
+  const result = await commitStoryDraftForAuthenticatedEditor({ ...input, override: ["writer-not-ready"] }, deps);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const [job] = await sql<{ failover_note: string; result_json: string }>`select failover_note,result_json from desk_jobs where id=${result.jobId}`;
+  assert.match(job.failover_note, /Claude.*signed out.*Codex Sol 6.1/);
+  const receipt = JSON.parse(job.result_json);
+  assert.equal(receipt.requestedRuntime, choice);
+  assert.equal(receipt.actualRuntime, "codex-frontier");
 });
 
 it("enqueues ready Haiku with the editor's visible model, effort and scope", async () => {
@@ -367,9 +368,9 @@ describe("authenticated Codex commit boundary", () => {
     );
     assert.equal(storyExpired.ok, false);
     if (storyExpired.ok) assert.fail("expired Story OAuth must refuse");
-    assert.equal(storyExpired.kind, "provider-auth");
-    assert.match(storyExpired.error, /Codex needs you to sign in again/i);
-    assert.equal(storyExpired.detail, EXPIRED);
+    assert.ok("warning" in storyExpired);
+    assert.equal(storyExpired.warning.key, "writer-not-ready");
+    assert.match(storyExpired.error, /If you draft anyway/);
     // An explicit unavailable Story writer refuses at its own preflight.
     assert.equal(storyProbeCalls, 1);
     assert.deepEqual(storyProbeChoices, ["codex-frontier"]);

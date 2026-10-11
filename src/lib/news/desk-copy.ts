@@ -903,6 +903,7 @@ function providerSignInCopy(raw: string, again: string): string {
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;
   const t = raw.trim();
+  if (t.startsWith("Custom provider ")) return t;
   /*
     A dumped boundary check is not draft copy and nothing below would recognize
     it: every pattern here is about what a writing model said, and this is what

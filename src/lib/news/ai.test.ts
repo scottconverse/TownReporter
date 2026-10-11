@@ -533,12 +533,12 @@ describe("grokChat", () => {
     }
   });
 
-  it("uses the OpenAI-compatible call budget for an explicit custom connection", () => {
+  it("gives a custom connection enough time for research, writing and name checks", () => {
     const budget = providerBudget("custom:9ce9a944-f444-4a69-8927-7c7705c07a35");
     assert.deepEqual(budget, {
-      wallMs: 38_000,
-      callMs: 20_000,
-      reserveMs: 12_000,
+      wallMs: 420_000,
+      callMs: 150_000,
+      reserveMs: 170_000,
     });
   });
 
@@ -621,7 +621,7 @@ describe("grokChat", () => {
       );
       assert.equal(result.ok, false);
       if (!result.ok) {
-        assert.equal(result.error, "Custom AI API error 400\n\nbad credential [redacted]");
+        assert.equal(result.error, "Custom provider Custom AI (manual-model) API error 400\n\nbad credential [redacted]");
         assert.equal(result.meta?.provider, "openai-compatible");
         assert.equal(result.meta?.model, "manual-model");
       }
@@ -1740,5 +1740,25 @@ describe("the DeepSeek rung's writing call", () => {
       "none",
       "the rung's Off default is sent explicitly, or Ollama re-enables thinking",
     );
+  });
+});
+
+
+describe("custom provider failure detail", () => {
+  for (const mode of ["timeout", "quota", "body-error"] as const) it(`names Gemini and preserves ${mode}`, async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => {
+      if (mode === "timeout") throw new DOMException("Timed out", "TimeoutError");
+      return new Response(JSON.stringify({error:{message:"Google provider says quota exhausted"}}), {status: mode === "quota" ? 429 : 200});
+    };
+    try {
+      const result = await grokChat("system", "user", 8, { choice: "custom:9ce9a944-f444-4a69-8927-7c7705c07a35", newsroomId: 1, timeoutMs: 500 }, {
+        resolveCustom: async () => ({name:"Gemini",baseUrl:"https://generativelanguage.googleapis.com/v1beta/openai",modelId:"gemini-3.5-flash",apiKey:"test-key"}),
+      });
+      assert.equal(result.ok, false);
+      if (result.ok) return;
+      assert.match(result.error, /Gemini/);
+      assert.match(result.error, mode === "timeout" ? /timed out after 0.5 seconds/ : /Google provider says quota exhausted/);
+    } finally { globalThis.fetch = original; }
   });
 });

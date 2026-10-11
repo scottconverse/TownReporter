@@ -45,6 +45,19 @@ export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[
   return readinessFailureMessage(input.choice, input.label, "This provider is not configured on this server.");
 }
 
+/** The editor can proceed after seeing the unavailable writer and fallback warning. */
+export function writerReadinessWarning(reason: string): string {
+  return `${reason} If you draft anyway, the desk will use the next ready writing model.`;
+}
+
+export function writerDraftAction(reason?: string) {
+  return {
+    label: reason ? "Draft anyway" : "Draft with AI",
+    warning: reason ? writerReadinessWarning(reason) : undefined,
+    override: reason ? ["writer-not-ready"] : undefined,
+  };
+}
+
 /** The three colors these lines are allowed to be, in the desk's own names. */
 export type WriterTone = "ok" | "warn" | "mut";
 

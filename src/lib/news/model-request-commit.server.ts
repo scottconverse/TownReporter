@@ -6,6 +6,7 @@ import { assertHttpUrl } from "./url-guard.ts";
 import { sanitizeJsonLeaves, storableText } from "./storable-text.ts";
 import { assertRate, checkRate, recordDeskRun, audit } from "./ops.ts";
 import { enqueueJob, findOpenJob, kickJobs, requestJobCancel, setJobFailoverNote, setJobStage } from "./jobs.ts";
+import { readinessFailureMessage, writerReadinessWarning } from "./writer-bar.ts";
 import { scanPreflight } from "./preflight.ts";
 import { checkOpinionReadiness } from "./opinion-readiness.ts";
 import {
@@ -95,6 +96,7 @@ async function resolveTechnicalPreflight(
   newsroomId: number,
   probe: typeof probeProvider,
   allowExplicitFailover = true,
+  acknowledgedUnavailable = false,
 ) {
   const first = await probe(requested, newsroomId);
   if (first.ok) return { probe: first, switchReceipt: null };
@@ -104,7 +106,8 @@ async function resolveTechnicalPreflight(
   const plan = await planAutomaticFailover({
     source: requested === "auto" ? "auto" : "editor",
     current: requested,
-    error: first.error,
+    allowExplicitLocalFailover: acknowledgedUnavailable,
+    error: acknowledgedUnavailable ? `${first.error} ${modelChoiceLabel(requested)} is unavailable.` : first.error,
     probe: (choice) => probe(choice, newsroomId),
   });
   if (!plan) return { probe: first, switchReceipt: null };
@@ -117,7 +120,7 @@ async function resolveTechnicalPreflight(
       requested,
       resolved: plan.next,
       reason: plan.reason,
-      note: failoverNoteSentence(plan.label, previousLabel, plan.reason),
+      note: acknowledgedUnavailable ? `${previousLabel}: ${plan.reason === "auth" ? "signed out" : first.error} -> ${plan.label}` : failoverNoteSentence(plan.label, previousLabel, plan.reason),
       stage: `Switched to ${plan.label}: ${failoverReasonPhrase(previousLabel, plan.reason)}`,
     },
   };
@@ -204,7 +207,13 @@ export async function commitStoryDraftForAuthenticatedEditor(
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
-  const preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false);
+  let preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false);
+  if (!preflight.probe.ok && input.modelChoice !== "auto") {
+    const reason = readinessFailureMessage(input.modelChoice, modelChoiceLabel(input.modelChoice), preflight.probe.error);
+    const warning = await editorWarning(input.context, input.override, "writer-not-ready", writerReadinessWarning(reason), { kind: "lead", id: input.leadId });
+    if (warning) return commitWarning(warning);
+    preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, true, true);
+  }
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
   if (!ready.ok) {

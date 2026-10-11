@@ -40,6 +40,7 @@ import { modelChoiceLabel, storyModelChoice, type StoryModelChoice } from "./mod
 export type AutomaticFailoverInput = {
   /** How the preferred model was chosen. Explicit local/Ollama choices do not fail over. */
   source: "editor" | "auto" | "scheduled";
+  allowExplicitLocalFailover?: boolean;
   /** The concrete choice the job is currently running (or just failed) on. */
   current: string;
   /** The provider's own error text from the failed attempt. */
@@ -160,9 +161,10 @@ export async function planAutomaticFailover(
 ): Promise<AutomaticFailoverPlan | null> {
   // A newsroom that explicitly chose a local/Ollama model must not have its
   // work silently handed to a different provider after a technical failure.
-  if (input.current === "local-model" && input.source !== "auto") return null;
+  if (input.current === "local-model" && input.source !== "auto" && !input.allowExplicitLocalFailover) return null;
   const reason = automaticFailoverReason(input.error);
-  if (!reason) return null;
+  if (!reason && !input.current.startsWith("custom:")) return null;
+  if (!reason && looksLikeContentRefusal(input.error)) return null;
 
   const ladder = input.ladder ?? AUTOMATIC_LADDER;
   const currentIndex = ladder.indexOf(input.current);
@@ -176,7 +178,7 @@ export async function planAutomaticFailover(
       return {
         next: storyModelChoice(rung),
         label: probed.label || modelChoiceLabel(rung),
-        reason,
+        reason: reason ?? "unavailable",
       };
     }
   }

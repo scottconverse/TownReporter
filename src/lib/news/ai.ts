@@ -132,6 +132,7 @@ export type GrokChatAdapters = Partial<Record<Provider["kind"], GrokChatAdapter>
     baseUrl: string;
     modelId: string;
     apiKey: string | null;
+    name?: string;
   }>;
   /** Test seam for the server-only per-newsroom local-model resolver. */
   resolveLocal?: (newsroomId?: number) => Promise<LocalModelOverride | null>;
@@ -477,7 +478,7 @@ async function resolveCustomProvider(
         baseUrl: trimSlash(connection.baseUrl),
         model: connection.modelId,
         apiKey: connection.apiKey || "not-needed",
-        label: "Custom AI",
+        label: connection.name?.trim() || "Custom AI",
       },
     };
   } catch (err) {
@@ -1085,6 +1086,7 @@ export async function grokChat(
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
   }
   const llm = provider;
+  const failureLabel = custom?.ok ? `Custom provider ${llm.label} (${model})` : llm.label;
   const url = `${llm.baseUrl}/chat/completions`;
   const payload: Record<string, unknown> = {
     model,
@@ -1139,16 +1141,16 @@ export async function grokChat(
   } catch (err) {
     return {
       ok: false,
-      error: connectionError(llm.label, err),
+      error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err),
       meta: openAiMeta(undefined, isTimeout(err)),
     };
   }
   if (res.status === 429 || res.status >= 500) {
     if (timeoutMs < 30_000) {
-      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+      return { ok: false, error: `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(await res.text(), llm.apiKey)}`, meta: openAiMeta() };
     }
     if (remaining() <= 1_000)
-      return { ok: false, error: `${llm.label} API error ${res.status}`, meta: openAiMeta() };
+      return { ok: false, error: `${failureLabel} API error ${res.status}\n\n${providerErrorDetail(await res.text(), llm.apiKey)}`, meta: openAiMeta() };
     await new Promise((r) => setTimeout(r, Math.min(800, remaining())));
     try {
       res = await fetch(url, {
@@ -1160,7 +1162,7 @@ export async function grokChat(
     } catch (err) {
       return {
         ok: false,
-        error: connectionError(llm.label, err),
+        error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err),
         meta: openAiMeta(undefined, isTimeout(err)),
       };
     }
@@ -1171,13 +1173,16 @@ export async function grokChat(
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
-  const responseText = await res.text();
+  let responseText: string;
+  try { responseText = await res.text(); } catch (err) {
+    return { ok: false, error: isTimeout(err) ? `${failureLabel} timed out after ${timeoutMs / 1_000} seconds.` : connectionError(failureLabel, err), meta: openAiMeta(undefined, isTimeout(err)) };
+  }
   try {
     body = JSON.parse(responseText) as typeof body;
   } catch {
     return {
       ok: false,
-      error: res.ok ? `${llm.label} returned an unreadable response` : `${llm.label} API error ${res.status}${providerErrorDetail(responseText, llm.apiKey) ? `\n\n${providerErrorDetail(responseText, llm.apiKey)}` : ""}`,
+      error: res.ok ? `${failureLabel} returned an unreadable response` : `${failureLabel} API error ${res.status}${providerErrorDetail(responseText, llm.apiKey) ? `\n\n${providerErrorDetail(responseText, llm.apiKey)}` : ""}`,
       meta: openAiMeta(),
     };
   }
@@ -1202,20 +1207,19 @@ export async function grokChat(
       ok: false,
       error: localContextFailure
         ? "Local model request exceeds its context window. TownReporter will split or compact the meeting record; choose a larger-context local model if this continues."
-        : `${llm.label} API error ${res.status}${providerErrorDetail(body, llm.apiKey) ? `\n\n${providerErrorDetail(body, llm.apiKey)}` : ""}`,
+        : `${failureLabel} API error ${res.status}${providerErrorDetail(body, llm.apiKey) ? `\n\n${providerErrorDetail(body, llm.apiKey)}` : ""}`,
       meta: openAiMeta(body),
     };
   }
   if (body.error) {
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
-    // reflect an Authorization header or request payload; preserve the useful
-    // HTTP failure category without letting that body enter a job error or UI.
-    if (llm.label === "Custom AI")
-      return { ok: false, error: "Custom AI API error", meta: openAiMeta(body) };
+    // reflect an Authorization header; retain its message after redacting the key.
+    if (custom?.ok)
+      return { ok: false, error: `${failureLabel} API error\n\n${providerErrorDetail(body, llm.apiKey)}`, meta: openAiMeta(body) };
     return {
       ok: false,
-      error: `${llm.label} API error${detail ? `: ${detail}` : ""}`,
+      error: `${failureLabel} API error${detail ? `: ${detail}` : ""}`,
       meta: openAiMeta(body),
     };
   }
@@ -1232,6 +1236,7 @@ export async function grokChat(
     // an unlisted model, a different quantization, or an explicit
     // LLM_REASONING_EFFORT override can still hit it, so this checks the
     // actual response rather than trusting the flag.
+    if (custom?.ok) return { ok: false, error: `${failureLabel} returned no model output.`, meta: openAiMeta(body) };
     const reasoning = (message?.reasoning_content ?? message?.reasoning ?? "").trim();
     if (reasoning) {
       return {
@@ -1332,8 +1337,9 @@ export function providerBudget(
   }
   // A custom connection is an explicit OpenAI-compatible transport resolved
   // at the server boundary. Its endpoint/model are intentionally absent from
-  // the public registry, but it has the same ordinary HTTP call shape.
-  if (isCustomModelChoice(choice)) return { ...KIND_BUDGETS.openai };
+  // the public registry. Research, writing and checks need a pipeline budget,
+  // even when the provider's transport is HTTP; 38 seconds starved the writer.
+  if (isCustomModelChoice(choice)) return { ...KIND_BUDGETS.codex };
   const entry = providerEntry(choice);
   if (entry) return effectiveBudget(entry.id, overrides);
   /*

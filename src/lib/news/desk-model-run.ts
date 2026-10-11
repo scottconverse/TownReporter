@@ -19,6 +19,7 @@ import {
   planAutomaticFailover,
   automaticFailoverReason,
   looksLikeProviderQuota,
+  looksLikeContentRefusal,
   failoverReasonPhrase,
   failoverNoteSentence,
 } from "./automatic-failover.ts";
@@ -45,6 +46,7 @@ export async function runPinnedCallWithFailover<
     nextLabel: string;
     nextChoice: string;
     reason: import("./automatic-failover.ts").AutomaticFailoverReason;
+    error: string;
   }) => Promise<void>;
 }): Promise<{ result: TResult; snapshot: TSnapshot }> {
   const first = await opts.run(opts.snapshot);
@@ -56,15 +58,25 @@ export async function runPinnedCallWithFailover<
     probe: opts.probe,
     ladder: opts.ladder,
   });
-  if (!plan || plan.next === "auto") return { result: first, snapshot: opts.snapshot };
+  if (!plan || plan.next === "auto") {
+    const result = opts.snapshot.modelChoice.startsWith("custom:")
+      ? { ...first, error: `${first.error} ${looksLikeContentRefusal(first.error) ? "The desk stopped this request without switching models" : "The desk found no ready fallback"}; no draft was created.` }
+      : first;
+    return { result, snapshot: opts.snapshot };
+  }
   const next = await opts.resolve(plan.next);
   await opts.onSwitch({
     previousLabel: modelChoiceLabel(opts.snapshot.modelChoice),
     nextLabel: plan.label,
     nextChoice: plan.next,
     reason: plan.reason,
+    error: first.error,
   });
-  return { result: await opts.run(next), snapshot: next };
+  const second = await opts.run(next);
+  const result = !second.ok && opts.snapshot.modelChoice.startsWith("custom:")
+    ? { ...second, error: `${first.error} -> ${plan.label}: ${second.error ?? "failed"}` }
+    : second;
+  return { result, snapshot: next };
 }
 
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared
@@ -72,6 +84,7 @@ export async function runPinnedCallWithFailover<
  * Story job. Deliberately avoid the renderer's quota trigger words here while
  * preserving the reset detail when the provider supplied one. */
 export function storyProviderFailure(error: string): string {
+  if (error.startsWith("Custom provider ")) return error;
   if (!looksLikeProviderQuota(error) || automaticFailoverReason(error) !== "quota") return error;
   const reset = error
     .match(/resets?\s+(?:at\s+)?([^.,;]+(?:\s+[AP]M\s+[A-Z]{2,5})?)/i)?.[1]

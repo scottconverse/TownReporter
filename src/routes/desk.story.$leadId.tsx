@@ -133,6 +133,7 @@ import {
   readinessDot,
   saveState,
   writerIsReady,
+  writerDraftAction,
   writerUnavailableReason,
 } from "@/lib/news/writer-bar";
 import { integrityNoteItems } from "@/lib/news/coerce-draft";
@@ -793,7 +794,7 @@ function StoryPage() {
       const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
       if (fromLedger)
         return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
-      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId, override: writerAction.override } });
     },
     onMutate: (input) => {
       setMsg("");
@@ -2226,6 +2227,9 @@ function StoryPage() {
   const draftReadiness = uncheckedStory ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON } : data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
+  const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: modelChoiceLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
+  const writerAction = writerDraftAction(writerWarningReason);
+  const draftButtonLabel = writerAction.label;
   const readiness = modelChoice !== "auto" && !writerAvailability.data
     ? { label: writerAvailability.isError ? "● Readiness unknown" : "● Checking", tone: "warn" as const }
     : readinessDot(
@@ -2236,7 +2240,7 @@ function StoryPage() {
           writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null,
       }),
       draftReadiness,
-      writerUnavailableReason({ choice: modelChoice, label: modelChoiceLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find((row) => `custom:${row.id}` === modelChoice) ?? null }),
+      writerAction.warning,
     );
   const heldPublishNote = heldForDraft.length && blockers.some(blocker => blocker.key === "readiness")
     ? `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 100)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.`
@@ -2811,7 +2815,7 @@ function StoryPage() {
                         draft.mutate(undefined);
                       }}
                     >
-                      {waiting ? "Drafting…" : "Draft with AI"}
+                      {waiting ? "Drafting…" : draftButtonLabel}
                     </InkButton>
                     <PaperSetupGateNote gate={paperGate} />
                   </>
@@ -3396,7 +3400,7 @@ function StoryPage() {
               onReopen={locked ? reopenThisLead : undefined}
               formatDate={formatShortDate}
             />
-            {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton> : null}
+            {locked ? <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton> : null}
             </>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>
@@ -3405,7 +3409,7 @@ function StoryPage() {
             </p>
           )}
       {locked && data.draft ? <div>
-        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>Draft with AI</ActionButton>
+        <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate(undefined)} disabled={waiting}>{draftButtonLabel}</ActionButton>
         <ActionButton phase={draft.isPending ? "working" : "idle"} onAct={() => draft.mutate({ fromLedger: true })} disabled={waiting}>Rewrite from ledger</ActionButton>
       </div> : null}
       {waiting ? <section className="astra-model-research">
@@ -3560,7 +3564,7 @@ function StoryPage() {
                         <span aria-hidden="true">…</span>
                       </>
                     ) : (
-                "Draft with AI"
+                draftButtonLabel
               )}
                   </ActionButton>
                 </div>
