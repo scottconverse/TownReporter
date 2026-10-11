@@ -140,7 +140,7 @@ export const forceRecaptureMeeting = wrapScoped(_forceRecaptureMeeting, "Re-capt
 
 export const saveDailyScanPolicy = wrapScoped(_saveDailyScanPolicy, "Save this schedule");
 export const startDraftBatch = wrapScoped(_startDraftBatch, "Draft this batch");
-export const writeStoryFromInput = wrapScoped(_writeStoryFromInput, "Write this story");
+export const writeStoryFromInput = wrapScoped(_writeStoryFromInput, "Draft");
 export const addLead = wrapScoped(_addLead, "File this lead");
 export const updateAiFollowUp = wrapScoped(_updateAiFollowUp, "Save this follow-up");
 export const continuePullJob = wrapScoped(_continuePullJob, "Continue this Pull");

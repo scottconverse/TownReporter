@@ -119,3 +119,56 @@ it("filing into About and Opinion warns, then files that section with an audited
     assert.equal(row.topic, sectionKey); await expectAudit("lead-publication-section");
   }
 });
+
+// One consent retry must not file the warning attempt as an empty story.
+for (const choice of ["claude-haiku", "custom:walk-g7"] as const)
+  it(`${choice}: one confirmation files one story and one draft job`, async () => {
+    const sql = await getSql();
+    const actor = { userId: `walk-g7-${choice}`, newsroomId: 1 };
+    const input = {
+      context: actor,
+      text: "Write a complete community notice from this supplied development test material.",
+      modelChoice: choice,
+      researchScope: "supplied" as const,
+    };
+    const services = {
+      ...deps,
+      probeProvider: async (pick: string | undefined) =>
+        pick === choice
+          ? {
+              ok: false as const,
+              error:
+                choice === "claude-haiku"
+                  ? "Claude Code is signed out. Sign in again."
+                  : "The saved API key cannot be decrypted.",
+            }
+          : { ok: true as const, choice: "codex-frontier" as const, label: "Codex Sol 6.1" },
+    };
+    const counts = async () => {
+      const [row] = await sql<{ leads: number; drafts: number; jobs: number }>`select
+      (select count(*)::int from leads where user_id=${actor.userId}) as leads,
+      (select count(*)::int from drafts where user_id=${actor.userId}) as drafts,
+      (select count(*)::int from desk_jobs where user_id=${actor.userId}) as jobs`;
+      return row;
+    };
+    const warning = await writeStoryForAuthenticatedEditor(input, services);
+    assert.equal("warning" in warning && warning.warning?.key, "writer-not-ready");
+    assert.deepEqual(
+      await counts(),
+      { leads: 0, drafts: 0, jobs: 0 },
+      "waiting for consent must not file a story",
+    );
+    const result = await writeStoryForAuthenticatedEditor(
+      { ...input, override: ["writer-not-ready"] },
+      services,
+    );
+    assert.equal(result.ok, true);
+    assert.deepEqual(await counts(), { leads: 1, drafts: 1, jobs: 1 });
+    const [job] = await sql<{
+      subject_id: number;
+      result_json: string;
+    }>`select subject_id,result_json from desk_jobs where user_id=${actor.userId}`;
+    assert.equal(job.subject_id, result.leadId);
+    assert.equal(JSON.parse(job.result_json).requestedRuntime, choice);
+    assert.equal(JSON.parse(job.result_json).actualRuntime, "codex-frontier");
+  });

@@ -120,6 +120,16 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   const unresolved = Math.max(0, Number(facts.names_unresolved) || 0);
   const base = { needsYou: false, running, failed, yours };
 
+  // A filed empty row is still waiting for its first draft, regardless of its memo.
+  if (!facts.has_body) {
+    if (failed) return { ...base, key: "failed", label: "Draft failed" };
+    if (running) {
+      const stage = String(facts.job_stage ?? "").trim() || "Working…";
+      return { ...base, key: "running", label: elapsed ? `${stage} · ${elapsed}` : stage };
+    }
+    return { ...base, key: "empty", label: "No draft yet" };
+  }
+
   if (facts.story_readiness !== undefined) {
     const readiness = readinessWithAcceptedClaims(savedStoryReadiness(facts.story_readiness, running), facts.unreviewed_claims ?? 0, facts.unreviewed_claims_accepted_count ?? 0);
     const key = running ? "running" : failed ? "failed" : (readiness.state === "ready" || readiness.state === "verified") ? "ready" : readiness.state === "to-check" ? "evidence" : facts.has_body ? "not-ready" : "empty";
@@ -143,24 +153,6 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
     return { ...base, key: "evidence", label: "! Evidence to check", needsYou: true };
   }
   if (facts.imported_text) return { ...base, key: "imported", label: "Imported" };
-  /*
-    NOTHING WRITTEN YET, and this branch is why the last one can be trusted.
-
-    A lead filed by hand gets a draft row with body = '' (see
-    `insertLeadWithDraft` in desk.ts), so before this branch every such row fell
-    through to "Ready to check". The Publish step on Today then counted leads
-    nobody had written and Tonight's edition listed them, while the nav's Drafts
-    count -- leads whose status is `drafted` -- said 0: the same page saying two
-    things at once about the same two rows.
-
-    The word is deliberate. Not "Draft failed" (nothing was attempted), not
-    "Your draft" (nothing is), and not a state in the drawing at all, because
-    the drawing has no row for this case: its list is drafts, and this is a lead.
-    "Nothing written yet" is the one thing that is provably true here, and it is
-    also what the row's action points at -- the story workbench, where the
-    writing happens. Reported to the owner as a state added against the drawing.
-  */
-  if (!facts.has_body) return { ...base, key: "empty", label: "Nothing written yet" };
   /*
     "Ready to check", NOT the handoff's "Ready to publish".
 

@@ -132,9 +132,64 @@ export type AuthenticatedEditorContext = {
   newsroomId: number;
 };
 
+async function prepareStoryWriter(
+  context: AuthenticatedEditorContext,
+  modelChoice: StoryModelChoice,
+  override: string[] | undefined,
+  sql: Awaited<ReturnType<typeof getSql>>,
+  deps: StoryDraftCommitDeps,
+  target: { kind: "lead" | "newsroom"; id: number },
+) {
+  // Identity is public metadata; retain it even when the saved key is unreadable.
+  let customModelLabel: string | undefined;
+  if (modelChoice.startsWith("custom:")) {
+    const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
+    await ensureCustomAiConnectionsSchema();
+    const [connection] = await sql<{ name: string; model_id: string | null }>`
+      select name,model_id from custom_ai_connections
+      where id=${modelChoice.slice(7)} and newsroom_id=${context.newsroomId}
+    `;
+    if (connection) customModelLabel = modelChoiceLabel(modelChoice, "story", { name: connection.name, modelId: connection.model_id });
+  }
+  const requestedLabel = customModelLabel ?? modelChoiceLabel(modelChoice);
+  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
+  let preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, false, false, requestedLabel);
+  if (!preflight.probe.ok && modelChoice !== "auto") {
+    const reason = readinessFailureMessage(modelChoice, requestedLabel, preflight.probe.error);
+    const warning = await editorWarning(context, override, "writer-not-ready", writerReadinessWarning(reason), target);
+    if (warning) return commitWarning(warning);
+    preflight = await resolveTechnicalPreflight(modelChoice, context.newsroomId, scopedProbe, true, true, requestedLabel);
+  }
+  const providerProbe = preflight.probe;
+  const ready = scanPreflight(providerProbe, modelChoice);
+  if (!ready.ok) {
+    return {
+      ok: false as const,
+      kind: ready.kind,
+      error: ready.guidance,
+      detail: ready.detail,
+      retryable: ready.retryable,
+    };
+  }
+
+  const effectiveChoice = providerProbe.ok ? providerProbe.choice : modelChoice;
+  if (effectiveChoice === "local-model" && (!providerProbe.ok || !providerProbe.localModel)) {
+    return {
+      ok: false as const,
+      kind: "not-ready" as const,
+      error: "The selected local model could not be pinned to its exact server and model before enqueueing.",
+      detail: "Refresh the Local model list and try again. No draft job was started.",
+      retryable: true,
+    };
+  }
+  return { ok: true as const, preflight, customModelLabel, effectiveChoice };
+}
+
 export type StoryDraftCommitDeps = {
   /** Trusted server preflight for a composite file-and-draft action. */
   ratePreflight?: boolean;
+  /** Trusted composite-call admission, never supplied by a client. */
+  writerPreflight?: Extract<Awaited<ReturnType<typeof prepareStoryWriter>>, { ok: true }>;
   probeProvider?: typeof probeProvider;
   getSql?: typeof getSql;
   assertRate?: typeof assertRate;
@@ -207,48 +262,18 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
-  // Identity is public metadata; retain it even when the saved key is unreadable.
-  let customModelLabel: string | undefined;
-  if (input.modelChoice.startsWith("custom:")) {
-    const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
-    await ensureCustomAiConnectionsSchema();
-    const [connection] = await sql<{ name: string; model_id: string | null }>`
-      select name,model_id from custom_ai_connections
-      where id=${input.modelChoice.slice(7)} and newsroom_id=${input.context.newsroomId}
-    `;
-    if (connection) customModelLabel = modelChoiceLabel(input.modelChoice, "story", { name: connection.name, modelId: connection.model_id });
-  }
-  const requestedLabel = customModelLabel ?? modelChoiceLabel(input.modelChoice);
-  const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
-  let preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false, false, requestedLabel);
-  if (!preflight.probe.ok && input.modelChoice !== "auto") {
-    const reason = readinessFailureMessage(input.modelChoice, requestedLabel, preflight.probe.error);
-    const warning = await editorWarning(input.context, input.override, "writer-not-ready", writerReadinessWarning(reason), { kind: "lead", id: input.leadId });
-    if (warning) return commitWarning(warning);
-    preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, true, true, requestedLabel);
-  }
+  const writer = deps.writerPreflight ?? await prepareStoryWriter(
+    input.context, input.modelChoice, input.override, sql, deps, { kind: "lead", id: input.leadId },
+  );
+  if (!writer.ok) return writer;
+  const { preflight, customModelLabel, effectiveChoice } = writer;
   const providerProbe = preflight.probe;
+  // Validate the admitted result at the enqueue boundary without probing again.
   const ready = scanPreflight(providerProbe, input.modelChoice);
-  if (!ready.ok) {
-    return {
-      ok: false as const,
-      kind: ready.kind,
-      error: ready.guidance,
-      detail: ready.detail,
-      retryable: ready.retryable,
-    };
-  }
-
-  const effectiveChoice = providerProbe.ok ? providerProbe.choice : input.modelChoice;
-  if (effectiveChoice === "local-model" && (!providerProbe.ok || !providerProbe.localModel)) {
-    return {
-      ok: false as const,
-      kind: "not-ready" as const,
-      error: "The selected local model could not be pinned to its exact server and model before enqueueing.",
-      detail: "Refresh the Local model list and try again. No draft job was started.",
-      retryable: true,
-    };
-  }
+  if (!ready.ok) return {
+    ok: false as const, kind: ready.kind, error: ready.guidance,
+    detail: ready.detail, retryable: ready.retryable,
+  };
   const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
@@ -936,6 +961,14 @@ export async function writeStoryForAuthenticatedEditor(
     const rate = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { record: false });
     if (rate) return commitWarning(rate);
   }
+  // A consent retry repeats this whole action. Admit the writer before filing
+  // anything so waiting or cancelling cannot leave an empty story behind.
+  const modelChoice = storyModelChoice(input.modelChoice);
+  const writerPreflight = await prepareStoryWriter(
+    input.context, modelChoice, input.override, sql, deps,
+    { kind: "newsroom", id: input.context.newsroomId },
+  );
+  if (!writerPreflight.ok) return { ...writerPreflight, leadId: undefined };
   const notesJson = packNotes(sanitizeJsonLeaves({ ...appendScratch(parseNotes(null), scratch), editorialAssignment, suppliedUrls: urls, researchScope: input.researchScope === "supplied" ? "supplied" : "public" }));
   const urlsJson = JSON.stringify(urls);
   const rows = await sql<{ id: number }>`
@@ -977,10 +1010,9 @@ export async function writeStoryForAuthenticatedEditor(
     documentIds.push(links.id);
   }
   await linkStoryDocuments(sql,input.context.newsroomId,input.context.userId,leadId,documentIds);
-  const modelChoice = storyModelChoice(input.modelChoice);
   const commit = await commitStoryDraftForAuthenticatedEditor(
     { context: input.context, leadId, modelChoice, modelEffort: input.modelEffort, researchScope: input.researchScope, override: input.override },
-    { ...deps, ratePreflight: true },
+    { ...deps, ratePreflight: true, writerPreflight },
   );
   return { ...commit, leadId };
 }

@@ -18,7 +18,7 @@ export function editorStoryState(blockers: readonly { key: string; kind?: string
     blockers.find(row => row.key === "evidence-loading" || row.key === "reconcile-running") ??
     blockers.find(row => row.key === "draft-cut-off") ?? blockers.find(row => row.key === "unchecked") ?? blockers[0];
   return { state: first ? first.key === "evidence-loading" || first.key === "reconcile-running" ? "checking" : first.key === "unchecked" || first.key === "claims-unchecked" ? "not-checked" : "not-ready" : "ready",
-    openCount, totalCount: openCount, reason: first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
+    openCount, totalCount: openCount, reason: first?.key === "body" ? "No draft yet." : first?.sentence ?? acceptedClaimsReason(openCount, acceptedCount) ?? "Ready to publish." };
 }
 
 /** Acceptance is counted against outstanding claims, never treated as verification. */
@@ -46,8 +46,9 @@ export function liveClaimsOwnReadiness(raw: string | null | undefined): boolean 
 
 /** Apply the current zero-claims decision on both the story page and Drafts. */
 export function readinessWithUncheckedStory(readiness: StoryReadiness, input: Parameters<typeof uncheckedStoryNeedsCheck>[0]): StoryReadiness {
-  const unchecked = uncheckedStoryNeedsCheck(input);
   if (readiness.state === "checking") return readiness;
+  if (!input.body.trim()) return { ...readiness, state: "not-ready", reason: "No draft yet." };
+  const unchecked = uncheckedStoryNeedsCheck(input);
   if (unchecked.blocked) return readiness.state === "ready" || readiness.state === "verified" || readiness.state === "not-checked"
     ? { ...readiness, state: "not-checked", reason: unchecked.reason } : readiness;
   return readiness.state === "not-checked" ? { ...readiness, state: "ready", reason: "Ready to publish." } : readiness;
@@ -145,7 +146,9 @@ export function storyReadinessChip(readiness: StoryReadiness): {
       /* Unit ZC: warn like "Not ready", but named for what it is. */
       return { text: "! Not checked yet", tone: "warn" };
     case "not-ready":
-      return { text: "✕ Not ready", tone: "warn" };
+      return readiness.reason === "No draft yet."
+        ? { text: "No draft yet", tone: "quiet" }
+        : { text: "✕ Not ready", tone: "warn" };
   }
 }
 
@@ -164,6 +167,7 @@ export function storyReadiness(input: {
   /** Unit ZC: the one-press acknowledgement covers this version. */
   acknowledgedForVersion?: boolean;
 }): StoryReadiness {
+  if (!input.body.trim()) return { state: input.checking ? "checking" : "not-ready", openCount: 0, totalCount: input.claims.length, reason: input.checking ? "The AI is checking facts." : "No draft yet." };
   if (draftLooksCutOff(input.body)) return {state:"not-ready",openCount:0,totalCount:input.claims.length,reason:CUT_OFF_WARNING};
   const open = input.claims.filter((claim) => claim.status !== "VERIFIED");
   const paragraphs = input.body

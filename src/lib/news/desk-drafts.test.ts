@@ -119,7 +119,7 @@ test("a lead filed by hand has a draft row and no prose, so it never reads ready
   // nav -- which counts leads whose status is `drafted` -- said zero.
   const filed = deskDraftState({ ...quiet, has_body: false });
   assert.equal(filed.key, "empty");
-  assert.equal(filed.label, "Nothing written yet");
+  assert.equal(filed.label, "No draft yet");
   assert.equal(filed.needsYou, false, "an unwritten lead is not the editor's to fix");
   assert.equal(filed.running, false);
   assert.equal(deskDraftAction(filed), "Start story");
@@ -191,4 +191,25 @@ test("acceptance never promotes a held item's readiness, even with accepted clai
   const state = deskDraftState({ ...quiet, story_readiness, unreviewed_claims: 9, unreviewed_claims_accepted_count: 9 });
   assert.equal(state.readiness?.state, "not-ready");
   assert.equal(state.readiness?.reason, story_readiness.reason);
+});
+
+// A legacy empty row cannot inherit Ready from an absent or stale memo.
+test("empty drafts say No draft yet even with a Ready memo", () => {
+  for (const memo of [
+    null,
+    { version: 1, state: "ready", openCount: 0, totalCount: 0, reason: "Ready to publish." },
+  ]) {
+    const state = deskDraftState({ ...quiet, has_body: false, story_readiness: memo });
+    assert.equal(state.key, "empty");
+    assert.equal(state.label, "No draft yet");
+  }
+  const running = deskDraftState({
+    ...quiet,
+    has_body: false,
+    story_readiness: null,
+    job_status: "running",
+    job_stage: "Writing draft",
+  });
+  assert.equal(running.key, "running");
+  assert.equal(running.label, "Writing draft");
 });
