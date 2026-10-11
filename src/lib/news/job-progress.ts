@@ -1,3 +1,4 @@
+import { CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { z } from "zod";
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "../db.ts";
@@ -272,6 +273,8 @@ export function jobProgressView(
   headline: string | null = null,
 ): JobProgressView {
   const kind = row.kind;
+  let cutOff = false;
+  try { cutOff = JSON.parse(row.result_json ?? "{}").draftCutOff === true; } catch { /* Legacy receipt. */ }
   let model = modelChoiceLabel(effectiveStoryModelChoice(row.model_choice));
   if (row.model_choice.startsWith("custom:")) {
     try { model = JSON.parse(row.result_json ?? "{}").customModelLabel || model; } catch { /* Legacy receipt. */ }
@@ -294,7 +297,7 @@ export function jobProgressView(
           ? `/desk/story/${leadId}`
           : RESULT_HREF[kind]?.(row.subject_id) ?? null),
     resultDraftId: draftId,
-    doneText: DONE_TEXT[kind] ?? "Done",
+    doneText: kind === "draft" && cutOff ? CUT_OFF_WARNING : DONE_TEXT[kind] ?? "Done",
     openLabel: OPEN_LABEL[kind] ?? "Open result",
     /*
       Retry re-runs the request the row describes, so it is only offered for the

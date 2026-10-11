@@ -100,6 +100,8 @@ test("part G: cut-off bodies retry once per model, hop through ready models and 
   assert.equal(gate.readiness.reason,"This draft looks cut off. Read it before you publish.");
 
   assert.notEqual(gate.readiness.state,"ready");
+  const completed = jobProgressView({kind:"draft",model_choice:"codex-balanced",status:"completed",result_json:JSON.stringify({draftCutOff:true})} as never,443,374);
+  assert.equal(completed.doneText,gate.readiness.reason);
   let writerCalls = 0;
   const saved = await reportAndDraft({userId:"part-g-cutoff",modelChoice:"codex-balanced",researchScope:"supplied",lead:{id:443,headline:"Applications open",why:"Families can apply.",topic:"government"} as never,urls:[],memory:[]}, {
     budgetMs:16_000,ingest:async()=>{throw new Error("No external sources");},search:async()=>[],hydrate:async()=>[],capture:async()=>({version_id:1,capture_event_id:1}),

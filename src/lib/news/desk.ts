@@ -1,3 +1,4 @@
+import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { runDraftReply } from "./draft-reply.ts";
 import { checkSourceForEditor, fileLeadForEditor, startPullForEditor } from "./desk-policy-actions.server.ts";
 import { scanDuplicateChat } from "./scan-duplicate-chat.ts";
@@ -4274,6 +4275,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             nameCheck: reported.research_memo.nameCheck,
             styleAudit: styleAuditSummary(styleRecord),
           }),
+          draftCutOff: draftLooksCutOff(reported.body) || reported.research_memo.storyReadiness?.reason === CUT_OFF_WARNING,
           ...(meetingMaterial ? { meetingArtifactId: meetingMaterial.meeting.artifactId } : {}),
         }),
       );
