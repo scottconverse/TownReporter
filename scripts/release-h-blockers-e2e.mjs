@@ -230,6 +230,22 @@ async function largeQueueFiltersRemainClickable() {
     );
   }
   await page.reload({ waitUntil: "domcontentloaded" });
+  for (const width of [1099, 1100, 1179, 1180, 1279]) {
+    await page.setViewportSize({ width, height: 1000 });
+    const filters = page.getByRole("group", { name: "Filter leads", exact: true });
+    const tabs = await page.locator(".queue-tabs").boundingBox();
+    const search = await page.locator(".queue-search").boundingBox();
+    const filterRow = await page.locator(".queue-filters").boundingBox();
+    assert.ok(tabs && search && filterRow, `the ${width}px Queue renders its normal-text filter controls`);
+    assert.ok(
+      tabs.x + tabs.width <= search.x || tabs.x >= search.x + search.width || tabs.y + tabs.height <= search.y || tabs.y >= search.y + search.height,
+      `normal-text Search does not overlap the tabs at ${width}px: ${JSON.stringify({ tabs, search })}`,
+    );
+    assert.ok(tabs.y + tabs.height <= filterRow.y, `normal-text filters wrap below the tabs at ${width}px`);
+    const firstPile = filters.getByRole("button").first();
+    await firstPile.click();
+    assert.equal(await firstPile.getAttribute("aria-pressed"), "true", `normal-text pile accepts a click at ${width}px`);
+  }
   await page.getByRole("button", { name: "Switch to large text", exact: true }).click();
   await page.getByRole("button", { name: "Switch to normal text", exact: true }).waitFor();
   assert.equal(
@@ -261,7 +277,7 @@ async function largeQueueFiltersRemainClickable() {
     await page.getByLabel("Sort", { exact: true }).selectOption("newest");
     await page.getByLabel("Section", { exact: true }).selectOption("all");
   }
-  step("every pile, Search, Sort and Section accepted clicks at 1440px and 390px with Large text");
+  step("every Large-text Queue filter works at 1440px and 390px, with normal-text wraps preserved through 1279px");
 }
 
 async function main() {
