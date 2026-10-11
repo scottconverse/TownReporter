@@ -917,6 +917,8 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
     {
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
+      "@/components/desk-toast": deskToastStub,
+      "@/components/fast-kill": inlineModule("export const KILL_TOAST_MS = 15000;"),
       "@/components/states": statesStub,
       "@/lib/paper": paperStub,
       "@/lib/news/desk-copy": deskCopy,

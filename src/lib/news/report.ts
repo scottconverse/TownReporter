@@ -121,6 +121,8 @@ export type StoryClaim = {
 };
 
 export type ResearchMemo = {
+  /** Written only when the public research model returned readable work. */
+  publicAiResearchCompleted?: true;
   aiEvidenceReview?: AiEvidenceReview;
   storyReadiness?: import("./story-readiness.ts").StoryReadiness & { version: 1 };
   nameCheck?: NameCheck;

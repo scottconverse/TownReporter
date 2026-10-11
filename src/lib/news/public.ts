@@ -169,8 +169,10 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
         origin_model_body: string | null;
         origin_research_json: string | null;
       }>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered, disclosure_text,
+      select articles.id, articles.slug, articles.headline, articles.dek, articles.body,
+             articles.topic, articles.source_urls, articles.status, articles.published_at,
+             articles.provenance_json, articles.form, articles.found_note, articles.unanswered,
+             articles.disclosure_text,
              origin.model_body as origin_model_body,
              origin.research_json as origin_research_json,
              /* Whether a fixed-template routine notice printed this row. The
