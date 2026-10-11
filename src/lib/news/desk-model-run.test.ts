@@ -32,9 +32,8 @@ import { modelChoiceLabel } from "./model-choice.ts";
  * rather than assertions being relaxed:
  *
  *  - A hop only ever goes FORWARD (`planAutomaticFailover` slices the ladder
- *    after `current`), so a row sitting on Codex Terra -- the last rung -- has
- *    no rung to hop to and stays put. Tests that want a hop now start the row
- *    on DeepSeek.
+ *    after `current`). DeepSeek advances to Local model; balanced Codex
+ *    advances to Gemini Flash since Release H.
  *  - The fake probe answers about the rung it was handed instead of returning
  *    one hardcoded provider. The old constant probe ("Claude Sonnet") silently
  *    disagreed with the ladder the moment the ladder changed, and a test that
@@ -59,10 +58,8 @@ const LIVE_401 =
   "Codex error (401): Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.";
 const LIVE_TIMEOUT_NO_OUTPUT = "Codex request timed out after 150s, 0 bytes out";
 
-/** Job 41's own row as it was recorded, which sat on Codex Terra. The ladder's
- * last rung has no rung after it, so a failover test overrides `model_choice`
- * to an earlier rung; the default is kept because it is the row this file's
- * docstring is about. */
+/** Job 41's recorded balanced Codex choice. Tests override it when they need
+ * to exercise the earlier rungs or all of the remaining ladder. */
 function job(overrides: Partial<DeskJob> = {}): DeskJob {
   return {
     id: 41,
@@ -314,15 +311,11 @@ describe("failOverAndRetry", () => {
     });
 
     assert.ok("error" in result);
-    /*
-      A row on the ladder's FIRST rung has two rungs after it, so the walk
-      probes both -- each exactly once, in ladder order -- and the message names
-      the last one Automatic tried. The pre-0.6.63 fixture saw a single probe
-      because Codex Terra was the last rung and only Claude Sonnet followed it.
-    */
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next, but it was not ready/);
-    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready on this machine\./);
+    /* A failed first rung probes all three later rungs once, in order.
+       The message names Gemini Flash, the final rung that was tried. */
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash"], "each later rung is probed once");
+    assert.match(result.error, /Automatic tried Gemini 3\.8 Flash \(Pro plan\) next, but it was not ready/);
+    assert.match(result.error, /Gemini 3\.8 Flash \(Pro plan\) is not ready on this machine\./);
   });
 });
 
@@ -451,9 +444,9 @@ describe("Story provider failure and stage failover", () => {
     });
     assert.equal(result.ok, false);
     if (result.ok) return;
-    assert.deepEqual(probed, ["qwen-local", "codex-balanced"], "each later rung is probed once");
-    assert.match(result.error, /Automatic tried Codex Sol 6\.1 \(balanced\) next/);
-    assert.match(result.error, /Codex Sol 6\.1 \(balanced\) is not ready/);
+    assert.deepEqual(probed, ["qwen-local", "codex-balanced", "gemini-flash"], "each later rung is probed once");
+    assert.match(result.error, /Automatic tried Gemini 3\.8 Flash \(Pro plan\) next/);
+    assert.match(result.error, /Gemini 3\.8 Flash \(Pro plan\) is not ready/);
     assert.doesNotMatch(result.error, /Opinion request/);
   });
 });

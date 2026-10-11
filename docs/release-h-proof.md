@@ -42,6 +42,7 @@ Work was isolated to `tr-release-h`, branch `release/h-gemini-cli`, based on
 - Focused existing/affected unit tests: 259 passed.
 - Gemini transport and integration tests: 23 passed (includes long stdin, suffix mapping, missing/signed-out/ready, provider words, actual fake transport hop, forced selected-model preservation, timeout and cleanup).
 - CI exposed two older ladder expectations; the corrected writer-checkpoint and OCR routing fixtures passed locally with isolated PGlite, preserving completed research and the separate vision-provider order.
+- A broader 12-file failover regression run passed 234 tests after updating Dark Desk and Story all-rung expectations for Gemini.
 - Picker/progress/Queue browser tests: 47 passed.
 - Application and test typechecks, lint, Common.ps1 parsing, and Vite client/server build passed.
 - Final head CI is reported on the PR.
@@ -70,6 +71,8 @@ Work was isolated to `tr-release-h`, branch `release/h-gemini-cli`, based on
 - `src/lib/news/forced-runtime.server.ts`
 - `src/lib/news/draft-checkpoint.test.ts`
 - `src/lib/news/ocr-run-routing.test.ts`
+- `src/lib/news/dark-round-failover.test.ts`
+- `src/lib/news/desk-model-run.test.ts`
 - `src/lib/news/model-assignments.ts`
 - `src/lib/news/model-choice.test.ts`
 - `src/lib/news/model-readiness.ts`

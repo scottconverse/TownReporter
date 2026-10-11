@@ -26,7 +26,7 @@ const CODEX_AUTH_FAILURE =
 /*
   The same two failures in the first rung's own words (0.6.63, Unit Y item 1).
   `probeOpenAi`'s credential refusal and the transport's zero-output timeout are
-  what DeepSeek actually reports, and only rung 1 has a rung after it now.
+  what DeepSeek actually reports; the next ready rung receives the unfinished call.
 */
 const DEEPSEEK_AUTH_FAILURE =
   "DeepSeek v4.1 Flash rejected its credentials. Sign in or update its key.";
@@ -85,11 +85,7 @@ describe("planDarkRoundFailover", () => {
     const stageMessages: string[] = [];
     const probed: string[] = [];
 
-    /*
-      The job sits on rung 1, which is the first rung a hop can leave now that
-      Codex Terra is the LAST rung (0.6.63, Unit Y item 1). Before the ladder
-      changed this fixture was Terra, whose next rung was Claude Sonnet.
-    */
+    /* The job starts on DeepSeek, so its next ready rung is Local model. */
     const result = await planDarkRoundFailover(
       job({ model_choice: "deepseek-flash" }),
       DEEPSEEK_AUTH_FAILURE,
@@ -156,12 +152,8 @@ describe("planDarkRoundFailover", () => {
     let modelChoiceSet = false;
     let stageSet = false;
 
-    /*
-      An explicit choice on the ladder's LAST rung has no rung after it, so the
-      hop falls back to the whole ladder -- the same "an editor's pick is a
-      preference, not a pin" rule as before, read off a ladder whose last rung
-      moved (Unit Y item 1).
-    */
+    /* Balanced Codex now has Gemini Flash after it on the writing ladder.
+       An explicit choice advances to that ready rung on a technical failure. */
     const result = await planDarkRoundFailover(
       job({ model_choice_source: "editor" }),
       CODEX_AUTH_FAILURE,
@@ -177,11 +169,11 @@ describe("planDarkRoundFailover", () => {
     );
 
     assert.deepEqual(result, {
-      next: "deepseek-flash",
-      label: "DeepSeek v4.1 Flash",
+      next: "gemini-flash",
+      label: "Gemini 3.8 Flash (Pro plan)",
       switchedBecause: "Codex Sol 6.1 (balanced) sign-in lapsed",
     });
-    assert.deepEqual(probed, ["deepseek-flash"]);
+    assert.deepEqual(probed, ["gemini-flash"]);
     assert.equal(modelChoiceSet, true);
     assert.equal(stageSet, true);
   });
