@@ -39,6 +39,7 @@ import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
+import { verifyLeadCompareActions } from "./lead-compare-actions-e2e.mjs";
 import {
   SERVER_FN_HEADER,
   awaitServerFnCall,
@@ -811,6 +812,15 @@ async function main() {
     [email],
   );
   const newsroomId = owner.rows[0].newsroom_id;
+  await verifyLeadCompareActions({
+    page,
+    pool,
+    base,
+    userId: owner.rows[0].user_id,
+    newsroomId,
+    stamp,
+    step,
+  });
   /*
     The assertions below were re-authored for unit CW2 (0.6.81, commit
     f6953ca1), which moved the review onto the Checks tab's drawn list. Three
