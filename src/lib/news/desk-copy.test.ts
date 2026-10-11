@@ -78,6 +78,7 @@ import {
   scanDecisionsSentence,
   resolveDraftJobState,
   recoveringDraftCopy,
+  queuedDraftCopy,
   DRAFT_JOB_STALE_AFTER_SECONDS,
   redditFeedLabel,
   redditFeedStatusLabel,
@@ -1187,11 +1188,19 @@ describe("Worth a Look presentation", () => {
     );
   });
 
-  it("resolveDraftJobState: a queued job also reads as drafting", () => {
+  it("resolveDraftJobState: a fresh queued job says it is waiting for a worker", () => {
     assert.equal(
       resolveDraftJobState({ status: "queued", updated_at: new Date().toISOString() }),
-      "drafting",
+      "queued",
     );
+  });
+
+  it("resolveDraftJobState: an old queued job remains queued and never implies an app restart", () => {
+    const now = Date.now();
+    const oldQueuedAt = new Date(now - (STALE_RUNNING_SECONDS + 5) * 1000).toISOString();
+    assert.equal(resolveDraftJobState({ status: "queued", updated_at: oldQueuedAt }, now), "queued");
+    assert.match(queuedDraftCopy(), /Queued, waiting for the writing worker\./);
+    assert.doesNotMatch(queuedDraftCopy(), /checking facts|restarted|recovering/i);
   });
 
   it("resolveDraftJobState: a cold heartbeat on a running job reads as recovering, never as a failure prompting a re-click", () => {

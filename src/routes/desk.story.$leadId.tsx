@@ -5,7 +5,7 @@ import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFrom
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
-import { UNCHECKED_STORY_REASON, uncheckedStoryNeedsCheck } from "@/lib/news/unchecked-story-gate";
+import { uncheckedStoryNeedsCheck, uncheckedStoryReason } from "@/lib/news/unchecked-story-gate";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
 import { BeforeYouCanPublish } from "@/components/publish-blockers";
@@ -27,7 +27,7 @@ import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
-import { readNameCheck } from "@/lib/news/name-check";
+import { readNameCheck, selectedDocumentClaimsForDraft } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
@@ -102,6 +102,7 @@ import {
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
+  queuedDraftCopy,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -1864,6 +1865,7 @@ function StoryPage() {
   // resolveDraftJobState in desk-copy.ts for why this replaced three
   // separately-latched pieces of local state.
   const jobState = resolveDraftJobState(data.job);
+  const queuedEmptyDraft = jobState === "queued" && !data.draft?.body?.trim();
   const sources = parseUrlList(data.lead.source_urls);
   const fromDark =
     Boolean(data.lead.investigation_id) ||
@@ -2099,11 +2101,15 @@ function StoryPage() {
     ? (reportingPackage.data?.pkg?.held ?? []).filter((item) => item.storyId === filedStoryId && item.unverified)
     : [];
   const hasAiJudgments = liveClaimsOwnReadiness(data.draft?.research_json);
-  const storedLegacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive || waiting) ??
+  const documentPassageCount = selectedDocumentClaimsForDraft(data.draft?.research_json, { headline, dek, body }).length;
+  const manualCheckRecorded = Boolean(data.uncheckedStoryAcknowledged && !hasUnsavedDraftEdits &&
+    data.uncheckedRecordedClaims === 0 && !data.uncheckedEvidenceChecked);
+  const storedLegacyReadiness = savedStoryReadiness(data.draft?.research_json, reconcileActive) ??
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const legacyReadiness = readinessWithUncheckedStory(storedLegacyReadiness, {
     recordedClaims: data.uncheckedRecordedClaims, evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked,
     body: data.draft?.body ?? "", acknowledgedForVersion: data.uncheckedStoryAcknowledged, exempt: data.uncheckedExempt,
+    documentPassageCount,
   });
   /*
     Every reason the Publish button is off, in one place (unit CT).
@@ -2142,20 +2148,22 @@ function StoryPage() {
     count while there are no unsaved edits -- type one character and the gate the
     editor is answering is no longer the one on file.
   */
-  const uncheckedStory = uncheckedStoryNeedsCheck({
+  const uncheckedStoryDecision = uncheckedStoryNeedsCheck({
     recordedClaims: data.uncheckedRecordedClaims,
     evidenceCheckedCurrentVersion: data.uncheckedEvidenceChecked && !hasUnsavedDraftEdits,
     body,
     acknowledgedForVersion: data.uncheckedStoryAcknowledged && !hasUnsavedDraftEdits,
     exempt: data.uncheckedExempt,
-  }).blocked;
+    documentPassageCount,
+  });
+  const uncheckedStory = uncheckedStoryDecision.blocked;
   const publishChecks = publishBlockers({
     headline,
     dek,
     body,
     evidenceLoading: Boolean(hasAiJudgments && data.draft && !evidenceLoaded),
-    readiness: hasAiJudgments ? reconcileActive || waiting ? "checking" : heldForDraft.length ? "not-ready" : undefined : legacyReadiness.state,
-    readinessReason: hasAiJudgments ? reconcileActive || waiting ? "The AI is checking this draft." : heldForDraft.length ?
+    readiness: queuedEmptyDraft ? "queued" : hasAiJudgments ? reconcileActive ? "checking" : heldForDraft.length ? "not-ready" : undefined : legacyReadiness.state,
+    readinessReason: queuedEmptyDraft ? queuedDraftCopy() : hasAiJudgments ? reconcileActive ? "The AI is checking this draft." : heldForDraft.length ?
       `${heldForDraft[0]!.headline.replace(/\s+/g, " ").slice(0, 70)}${heldForDraft.length > 1 ? ` and ${heldForDraft.length - 1} more` : ""}.` : undefined : legacyReadiness.reason,
     sectionReady,
     openClaims: openClaims.length,
@@ -2173,6 +2181,7 @@ function StoryPage() {
     contradictedClaims: evidenceState.contradicted,
     unreviewedAccepted: false,
     uncheckedStory,
+    documentPassageCount,
     evidenceStale,
     reviewingEvidence: reviewEvidence.isPending,
     reconcileActive,
@@ -2230,7 +2239,9 @@ function StoryPage() {
   */
   // The resolved Checks state outranks an older saved memo, including published drafts.
   const legacyEvidenceBlocker = blockers.find((blocker) => blocker.key === "claims-unreviewed");
-  const draftReadiness = uncheckedStory ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON } : data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
+  const draftReadiness = queuedEmptyDraft
+    ? { state: "queued" as const, openCount: 0, totalCount: 0, reason: queuedDraftCopy() }
+    : uncheckedStory ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: uncheckedStoryDecision.reason || uncheckedStoryReason(documentPassageCount) } : data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
   const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: storyModelLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
@@ -2782,6 +2793,8 @@ function StoryPage() {
                   */
                   evidenceRecorded: draftChecks.evidenceChecked,
                   onEvidenceState,
+                  manualCheckRecorded,
+                  documentPassageCount,
                   readinessReason: hasAiJudgments ? draftReadiness.reason : undefined,
                   onDraftChanged: (draft) => { setHeadline(draft.headline); setDek(draft.dek); setBody(draft.body); setTopic(draft.topic); },
                 }}
@@ -2935,6 +2948,8 @@ function StoryPage() {
               leadId={id}
               notes={notes}
               hasDraft={Boolean(data.draft)}
+              hasDraftBody={Boolean(data.draft?.body?.trim())}
+              manualCheckRecorded={manualCheckRecorded}
               currentDraftId={data.draft ? Number(data.draft.id) : null}
               locked={locked || onPaper}
               openedExtractionByUrl={data.openedExtractionByUrl ?? {}}
@@ -3115,7 +3130,9 @@ function StoryPage() {
           about why the pull came back empty. It now names the providers in
           plain words; the raw lines stay inside for support.
         */}
-          {waiting && jobState === "recovering" ? (
+          {waiting && jobState === "queued" ? (
+            <p className="note-one" role="status">{queuedDraftCopy()}</p>
+          ) : waiting && jobState === "recovering" ? (
             <Notice kind="warn">{recoveringDraftCopy()}</Notice>
           ) : waiting ? (
             <Busy
@@ -3529,7 +3546,9 @@ function StoryPage() {
                       : "idle"
               }
               workingLabel={
-                jobState === "recovering"
+                jobState === "queued"
+                  ? "Queued…"
+                  : jobState === "recovering"
                   ? "Recovering…"
                   : data.job?.failover_note
                     ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
@@ -4493,6 +4512,8 @@ function ReportingNotesPane({
   leadId,
   notes,
   hasDraft,
+  hasDraftBody,
+  manualCheckRecorded,
   locked,
   openedExtractionByUrl,
   draftMeetingEvidence,
@@ -4510,6 +4531,8 @@ function ReportingNotesPane({
   leadId: number;
   notes: ReportingNotes;
   hasDraft: boolean;
+  hasDraftBody: boolean;
+  manualCheckRecorded: boolean;
   locked: boolean;
   /** Capture-time extraction method for each `notes.opened` url, when known (see getLead). */
   openedExtractionByUrl: Record<string, string | null>;
@@ -4689,6 +4712,7 @@ function ReportingNotesPane({
       onReverify={onReverifyMeetingCitations}
       reverifying={reverifyingMeetingCitations}
       evidenceToken={evidenceToken}
+      manualCheckRecorded={manualCheckRecorded}
     />
   );
   const gateClaims = notes.todo.map((t, i) => ({ t, i })).filter((row) => row.t.src === "gate");
@@ -4825,9 +4849,11 @@ function ReportingNotesPane({
       {!filled ? (
         <>
           <p className="note-one" style={{ marginTop: small ? 0 : 8 }}>
-            {hasDraft
+            {hasDraftBody
               ? "This draft was written before notes were kept. Redraft fills them; lines you add stay."
-              : "Draft with AI fills this. You can add a line."}
+              : hasDraft
+                ? "Reporting notes will appear after the first draft run."
+                : "Draft with AI fills this. You can add a line."}
           </p>
       {absenceBlock}
           {todoList("empty")}

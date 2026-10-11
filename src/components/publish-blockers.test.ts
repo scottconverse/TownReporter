@@ -117,12 +117,19 @@ describe("BeforeYouCanPublish", () => {
     assert.equal(pressed.length, 0, "rendering must not press anything");
   });
 
-  it("prints the zero-claims row with its exact sentence and both presses (unit ZC)", () => {
+  it("prints the unchecked row with an accurate sentence and both presses (unit ZC)", () => {
     const html = render({ uncheckedStory: true });
-    assert.match(html, /No claims were recorded for this story, so nothing has been checked\./);
+    assert.match(html, /The automatic evidence check has not recorded claim judgments for this draft\./);
     assert.match(html, /press &#x27;I checked this story myself&#x27;/);
     assert.match(html, /Run the evidence check/);
     assert.match(html, /I checked this story myself/);
+  });
+
+  it("includes selected document passages in the unchecked warning without treating them as a full check", () => {
+    const row = publishBlockers({ ...CLEAN, uncheckedStory: true, documentPassageCount: 5 }).find((item) => item.key === "unchecked");
+    assert.match(row?.sentence ?? "", /5 selected passages/);
+    assert.match(row?.sentence ?? "", /do not verify every statement/);
+    assert.equal(row?.kind, "warning");
   });
 
   it("draws the acknowledgement press working and failed when its mutation says so (unit ZC)", () => {

@@ -120,7 +120,7 @@ it("refuses to print a zero-claims story nobody has checked, in the exact senten
   assert.equal(printed.ok, false, "a checkable story with no recorded claims must not print unchecked");
   assert.equal(
     printed.ok ? "" : printed.error,
-    "No claims were recorded for this story, so nothing has been checked. Run the evidence check, or read it against your sources and press 'I checked this story myself'.",
+    "The automatic evidence check has not recorded claim judgments for this draft. Run the evidence check, or read it against your sources and press 'I checked this story myself'.",
   );
   const [article] = await f.sql.query("select id from articles where newsroom_id=$1", [f.newsroomId]);
   assert.equal(article, undefined, "nothing printed");
@@ -202,7 +202,7 @@ it("takes the acknowledgement back on an edit", async () => {
   ]);
   const printed = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
   assert.equal(printed.ok, false, "the editor's acknowledgement was for the words they read");
-  assert.match(printed.ok ? "" : printed.error, /nothing has been checked/);
+  assert.match(printed.ok ? "" : printed.error, /automatic evidence check has not recorded claim judgments/);
 });
 
 it("a completed zero-claims evidence check clears the gate for the version it checked, and an edit reopens it", async () => {
@@ -259,7 +259,7 @@ it("a completed zero-claims evidence check clears the gate for the version it ch
   await sql.query("delete from articles where newsroom_id=$1", [f.newsroomId]);
   const afterEdit = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
   assert.equal(afterEdit.ok, false, "the check does not survive an edit in the zero-claims case");
-  assert.match(afterEdit.ok ? "" : afterEdit.error, /nothing has been checked/);
+  assert.match(afterEdit.ok ? "" : afterEdit.error, /automatic evidence check has not recorded claim judgments/);
 });
 
 it("leaves a story with recorded claims to the ordinary claims gate", async () => {
@@ -335,7 +335,7 @@ it("the acknowledgement survives an unchanged editor save (derived styleAudit) a
   );
   const afterHeadline = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
   assert.equal(afterHeadline.ok, false, "an acknowledgement is for the words the editor read");
-  assert.match(afterHeadline.ok ? "" : afterHeadline.error, /nothing has been checked/);
+  assert.match(afterHeadline.ok ? "" : afterHeadline.error, /automatic evidence check has not recorded claim judgments/);
 });
 
 it("a legacy zero-claim completed check survives an unchanged save and reopens on a headline-only edit", async () => {
@@ -388,7 +388,7 @@ it("a legacy zero-claim completed check survives an unchanged save and reopens o
   );
   const afterHeadline = await performPublish({ userId: f.userId, newsroomId: f.newsroomId }, f.leadId, SECTION);
   assert.equal(afterHeadline.ok, false);
-  assert.match(afterHeadline.ok ? "" : afterHeadline.error, /nothing has been checked/);
+  assert.match(afterHeadline.ok ? "" : afterHeadline.error, /automatic evidence check has not recorded claim judgments/);
 });
 
 it("refuses a stale or missing acknowledgement token and audits nothing", async () => {
@@ -447,6 +447,6 @@ it("still demands the unchecked sentence when a zero-claim draft has only flagge
   assert.equal(printed.ok, false);
   assert.equal(
     printed.ok ? "" : printed.error,
-    "No claims were recorded for this story, so nothing has been checked. Run the evidence check, or read it against your sources and press 'I checked this story myself'.",
+    "The automatic evidence check has not recorded claim judgments for this draft. Run the evidence check, or read it against your sources and press 'I checked this story myself'.",
   );
 });

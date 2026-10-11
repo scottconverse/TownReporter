@@ -1,13 +1,8 @@
-import { nameCheckText, readNameCheck } from "../lib/news/name-check";
+import { nameCheckText, readNameCheck, selectedDocumentClaimsForDraft } from "../lib/news/name-check";
 
 export function DeskNameCheck({ research, headline, dek, body }: { research: string | null | undefined; headline: string; dek: string; body: string }) {
   const check = readNameCheck(research);
-  let documentClaims: Array<{fact:string;kind:string;filename:string;locator:string;excerpt:string}> = [];
-  try {
-    const rows = JSON.parse(research ?? "{}").reportedDocumentClaims?.rows;
-    const checkedText = JSON.parse(research ?? "{}").reportedDocumentClaims?.checkedText;
-    if (checkedText === nameCheckText({headline,dek,body}) && Array.isArray(rows)) documentClaims = rows.filter(row => row && typeof row.fact === "string" && typeof row.filename === "string" && typeof row.locator === "string" && typeof row.excerpt === "string");
-  } catch { /* malformed legacy research remains invisible rather than breaking the desk */ }
+  const documentClaims = selectedDocumentClaimsForDraft(research, { headline, dek, body });
   const stale = Boolean(check && check.checkedText !== nameCheckText({ headline, dek, body }));
   const pending = check?.rows.filter(row => row.status === "unresolved") ?? [];
   return <section className="story-name-check" aria-label="Names and spellings">
