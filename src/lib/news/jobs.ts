@@ -150,17 +150,17 @@ export const JOB_STALL_SECONDS = 60;
 const LANE_CONCURRENCY: Record<JobLane, number> = { editorial: 1, default: 2, draft: 2 };
 
 /**
- * One `draining` flag per lane, shared by every bundled copy of this module in
+ * Occupied worker slots per lane, shared by every bundled copy of this module in
  * the process. The background entry and SSR entry can each bundle jobs.ts;
- * module-local flags let both copies open a full lane and bypass its limit.
+ * Module-local counters would let both copies open a full lane and bypass its limit.
  * `Symbol.for` keeps the ownership record common without making a cross-process
  * scheduler claim -- separate server processes still coordinate only through
  * the existing database claim tokens and stale-run recovery.
  */
-const JOB_DRAINING_KEY = Symbol.for("townreporter:job-lane-draining");
+const JOB_DRAINING_KEY = Symbol.for("townreporter:job-lane-workers");
 const jobGlobal = globalThis as typeof globalThis &
-  Record<symbol, Record<JobLane, boolean> | undefined>;
-const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: false, default: false, draft: false });
+  Record<symbol, Record<JobLane, number> | undefined>;
+const draining = (jobGlobal[JOB_DRAINING_KEY] ??= { editorial: 0, default: 0, draft: 0 });
 
 export async function ensureJobsSchema(sql?: Sql) {
   const runner = sql ?? (await getSql());
@@ -730,9 +730,8 @@ export async function setJobModelRuntime(
 }
 
 /**
- * Drain one lane. Each lane has its own `draining` flag, so a caller already
- * draining `editorial` does not block a caller trying to drain `default` --
- * that independence is the entire point of ENG-105's fix. Within a lane,
+ * Drain the free slots in one lane. Later presses can use an idle slot even
+ * while a sibling worker is still inside a long job. Within a lane,
  * `LANE_CONCURRENCY[lane]` workers run in parallel, each looping the same
  * "claim one, run it, look for the next" shape the original single-lane
  * drainer used.
@@ -746,75 +745,82 @@ export async function setJobModelRuntime(
  * that one update, exactly as it did before lanes existed.
  */
 async function drainLane(lane: JobLane): Promise<{ ran: number }> {
-  if (draining[lane]) return { ran: 0 };
-  draining[lane] = true;
+  const concurrency = LANE_CONCURRENCY[lane] - draining[lane];
+  if (concurrency <= 0) return { ran: 0 };
+  // Reserve synchronously before the first await, including across bundles.
+  draining[lane] += concurrency;
+  let workersStarted = false;
   let ran = 0;
   try {
     await ensureJobsSchema();
     const sql = await getSql();
-    const concurrency = LANE_CONCURRENCY[lane];
+    workersStarted = true;
     const workers = Array.from({ length: concurrency }, () =>
       (async () => {
-        for (let n = 0; n < 8; n++) {
-          const next = await sql<DeskJob>`
-            select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
-                   stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
-                   created_at, updated_at, started_at, finished_at
-            from desk_jobs candidate
-            where lane = ${lane}
-              and not coalesce(candidate.cancel_requested, false)
-        and not (
-          candidate.model_choice in ('local-model', 'qwen-local')
-          and exists (
-            select 1 from desk_jobs local_work
-            where local_work.id <> candidate.id
-              and local_work.model_choice in ('local-model', 'qwen-local')
-              and local_work.status = 'running'
-              and not coalesce(local_work.cancel_requested, false)
-              and local_work.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+        try {
+          for (let n = 0; n < 8; n++) {
+            const next = await sql<DeskJob>`
+              select id, newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, research_scope, draft_batch_id, lane, status, stage, failover_note, error, result_json,
+                     stages_json, stage_index, pct, step_text, beat_at, cancel_requested, result_href,
+                     created_at, updated_at, started_at, finished_at
+              from desk_jobs candidate
+              where lane = ${lane}
+                and not coalesce(candidate.cancel_requested, false)
+          and not (
+            candidate.model_choice in ('local-model', 'qwen-local')
+            and exists (
+              select 1 from desk_jobs local_work
+              where local_work.id <> candidate.id
+                and local_work.model_choice in ('local-model', 'qwen-local')
+                and local_work.status = 'running'
+                and not coalesce(local_work.cancel_requested, false)
+                and local_work.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+            )
           )
-        )
-              and (
-                status = 'queued'
-                or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
-              )
-              and not (
-                candidate.kind = 'follow-up'
-                and exists (
-                  select 1 from desk_jobs draft
-                  where draft.newsroom_id = candidate.newsroom_id
-                    and draft.kind = 'draft' and draft.status in ('queued', 'running')
+                and (
+                  status = 'queued'
+                  or (status = 'running' and updated_at < now() - make_interval(secs => ${STALE_RUNNING_SECONDS}))
                 )
-              )
-              and not (
-                candidate.kind = 'follow-up'
-                and exists (
-                  select 1 from desk_jobs active_follow_up
-                  where active_follow_up.newsroom_id = candidate.newsroom_id
-                    and active_follow_up.kind = 'follow-up'
-                    and active_follow_up.id <> candidate.id
-                    and active_follow_up.status = 'running'
+                and not (
+                  candidate.kind = 'follow-up'
+                  and exists (
+                    select 1 from desk_jobs draft
+                    where draft.newsroom_id = candidate.newsroom_id
+                      and draft.kind = 'draft' and draft.status in ('queued', 'running')
+                  )
                 )
-              )
-              and not (
-                candidate.kind = 'draft'
-                and exists (
-                  select 1 from desk_jobs active_follow_up
-                  where active_follow_up.newsroom_id = candidate.newsroom_id
-                    and active_follow_up.kind = 'follow-up'
-                    and active_follow_up.status = 'running'
-                    and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+                and not (
+                  candidate.kind = 'follow-up'
+                  and exists (
+                    select 1 from desk_jobs active_follow_up
+                    where active_follow_up.newsroom_id = candidate.newsroom_id
+                      and active_follow_up.kind = 'follow-up'
+                      and active_follow_up.id <> candidate.id
+                      and active_follow_up.status = 'running'
+                  )
                 )
-              )
-            order by id asc
-            limit 1
-          `;
-          if (!next[0]) break;
-          const took = await executeJob(next[0]);
-          if (took) ran += 1;
-          // A lost claim race is not "nothing left" -- loop again rather than
-          // stopping this worker while a sibling worker (or another job
-          // entirely) may still be waiting in this same lane.
+                and not (
+                  candidate.kind = 'draft'
+                  and exists (
+                    select 1 from desk_jobs active_follow_up
+                    where active_follow_up.newsroom_id = candidate.newsroom_id
+                      and active_follow_up.kind = 'follow-up'
+                      and active_follow_up.status = 'running'
+                      and active_follow_up.updated_at >= now() - make_interval(secs => ${STALE_RUNNING_SECONDS})
+                  )
+                )
+              order by id asc
+              limit 1
+            `;
+            if (!next[0]) break;
+            const took = await executeJob(next[0]);
+            if (took) ran += 1;
+            // A lost claim race is not "nothing left" -- loop again rather than
+            // stopping this worker while a sibling worker (or another job
+            // entirely) may still be waiting in this same lane.
+          }
+        } finally {
+          draining[lane] -= 1;
         }
       })(),
     );
@@ -822,7 +828,7 @@ async function drainLane(lane: JobLane): Promise<{ ran: number }> {
   } catch (err) {
     console.error(`[jobs] drain failed (lane=${lane})`, err);
   } finally {
-    draining[lane] = false;
+    if (!workersStarted) draining[lane] -= concurrency;
   }
   return { ran };
 }

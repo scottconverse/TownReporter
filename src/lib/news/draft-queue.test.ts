@@ -105,3 +105,50 @@ test("FB16: two local jobs cannot run at once across lanes", async () => {
     __setJobWorkForTest();
   }
 });
+
+test("FB16: a later cloud draft uses a free slot while a local draft is still running", async () => {
+  const newsroomId = 98603;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const started = new Set<number>();
+  const drains: Promise<unknown>[] = [];
+  __setJobWorkForTest(async (job) => {
+    started.add(job.subject_id);
+    if (job.subject_id === 1) await gate;
+  });
+  try {
+    await enqueueJob({
+      newsroomId,
+      userId: "fb16",
+      kind: "draft",
+      subjectId: 1,
+      modelChoice: "local-model",
+      kick: false,
+    });
+    drains.push(drainQueuedJobs());
+    await until(async () => started.has(1), "local draft did not start");
+    // An empty worker has nothing to claim while the first draft holds its gate.
+    // A second wake-up must keep the spare slot usable for a later press.
+    await drainQueuedJobs();
+    await enqueueJob({
+      newsroomId,
+      userId: "fb16",
+      kind: "draft",
+      subjectId: 2,
+      modelChoice: "gemini-flash",
+      kick: false,
+    });
+    drains.push(drainQueuedJobs());
+    await until(
+      async () => started.has(2),
+      "an idle writing slot stayed reserved behind the long draft",
+    );
+    assert.equal((await latestJob({ newsroomId, kind: "draft", subjectId: 1 }))?.status, "running");
+  } finally {
+    release();
+    await Promise.all(drains);
+    __setJobWorkForTest();
+  }
+});
