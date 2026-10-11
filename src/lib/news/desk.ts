@@ -7373,7 +7373,7 @@ export async function performSuggestHeadlines(
     chat?: typeof grokChat;
     resolveLocalModel?: (newsroomId: number, scope: "story") => Promise<LocalModelOverride | null>;
   } = {},
-): Promise<{ ok: true; options: string[] } | { ok: false; error: string }> {
+): Promise<{ ok: true; options: string[]; model: string | null } | { ok: false; error: string }> {
   const sql = await getSql();
   const leads = await sql<LeadRow>`
     select id, headline, topic from leads
@@ -7428,7 +7428,7 @@ export async function performSuggestHeadlines(
         "The story model did not come back with anything that would print as a headline. Your headline is exactly as you left it.",
     };
   }
-  return { ok: true as const, options };
+  return { ok: true as const, options, model: got.meta?.model?.trim() || null };
 }
 
 export const suggestHeadlines = createServerFn({ method: "POST" })

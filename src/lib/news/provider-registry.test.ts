@@ -260,28 +260,17 @@ describe("the provider registry is the one description of a writing model", () =
         "claude-sonnet",
         "claude-haiku",
         "local-model",
-        // Unit U29: the owner's 2026-09-30 decision made DeepSeek v4.1 Flash
-        // Opinion's first Automatic rung, and "keep the picker regardless" is
-        // why it is a NAME in Opinion's menu as well.
+        // The shared picker names DeepSeek anywhere ordinary writing can run it.
         "deepseek-flash",
       ],
     );
-    /*
-      Everything Opinion offers, Story and Dark offer too -- with the one
-      exception the owner asked for, and it is not an Opinion-only capability:
-      DeepSeek is the first rung of the DESK's ladder, so Story, Scan and Dark
-      Desk already run it. They reach it through Automatic; Opinion's menu also
-      names it. Nothing Story or Dark can do is missing from Opinion.
-    */
-    for (const entry of providersFor("opinion")) {
-      if (entry.id === "deepseek-flash") continue;
-      assert.ok(entry.offeredFor.story && entry.offeredFor.dark);
-    }
+    // Every ordinary chat surface can name the same DeepSeek rung. OCR needs
+    // vision support and forced work requires a stand-alone provider.
     const deepseek = providerEntry("deepseek-flash")!;
     assert.deepEqual(
       SURFACES.filter((surface) => deepseek.offeredFor[surface]),
-      ["opinion"],
-      "the DeepSeek rung is nameable on Opinion and nowhere else",
+      ["story", "scan", "follow-up", "opinion", "dark"],
+      "the shared picker offers DeepSeek anywhere ordinary chat work can run",
     );
     assert.ok(automaticLadder().includes("deepseek-flash"), "and it is the desk's first rung too");
   });
@@ -303,16 +292,15 @@ describe("the Automatic ladder is derived, not typed out", () => {
     for (const id of ladder) {
       assert.ok(providerEntry(id), `ladder names ${id}, which is not in the registry`);
     }
-    // The rungs are not menu options, so they are the ladder minus the story
-    // picker. This asserts the ladder is a superset of the story list's
-    // ordering rather than its reverse.
+    // DeepSeek is the named rung in the shared Story picker. The other named
+    // ladder provider is the non-selectable local rung.
     assert.deepEqual(
       ladder.filter((id) => providersFor("story").some((entry) => entry.id === id)),
-      ["codex-balanced", "gemini-flash"],
+      ["deepseek-flash", "codex-balanced", "gemini-flash"],
     );
     assert.deepEqual(
-      ladder.slice(0, 2),
-      automaticLadder().filter((id) => !providersFor("story").some((entry) => entry.id === id)),
+      ladder.filter((id) => !providersFor("story").some((entry) => entry.id === id)),
+      ["qwen-local"],
     );
   });
 

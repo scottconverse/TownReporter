@@ -950,8 +950,12 @@ export function holdInitial(): HoldState {
 }
 
 /** `current` is the headline the story has now, which the dialog was opened for. */
-export function headlineInitial(current: string): HeadlineState {
-  return { choice: "keep", written: "", current, suggestions: [], model: "auto", effort: null };
+export function headlineInitial(
+  current: string,
+  model = "auto",
+  effort: string | null = null,
+): HeadlineState {
+  return { choice: "keep", written: "", current, suggestions: [], model, effort };
 }
 
 /* --------------------------------------------------------- More ▾ (lead) -- */

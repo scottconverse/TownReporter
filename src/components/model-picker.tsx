@@ -1,14 +1,10 @@
 import {
-  DARK_MODEL_CHOICES,
-  FORCED_MODEL_CHOICES,
-  OPINION_MODEL_CHOICES,
-  STORY_MODEL_CHOICES,
+  SHARED_MODEL_CHOICES,
   localModelOptionLabel,
   localModelOptionText,
   localModelSelectionHelp,
   sortLocalModelsForPicker,
   isCustomModelChoice,
-  modelChoicesFor,
   modelChoiceHelp,
   pickerOptionText,
   pickerOptionTitle,
@@ -22,6 +18,7 @@ import {
   defaultModelEffort,
   modelEffortLabel,
   modelEffortsFor,
+  providerEntry,
   type ModelEffort,
 } from "@/lib/news/provider-registry";
 import {
@@ -74,7 +71,6 @@ type PickerControls<T extends StoryModelChoice> = {
   disabled?: boolean;
   compact?: boolean;
   layout?: "stacked" | "inline";
-  excludeAutomatic?: boolean;
   effort?: ModelEffort | null;
   onEffortChange?: (value: ModelEffort | null) => void;
 };
@@ -319,18 +315,7 @@ export function ModelPicker(props: Props) {
     queryFn: () => localModelCatalog(),
     staleTime: 15_000,
   });
-  const builtInOptions =
-    props.scope === "opinion"
-      ? OPINION_MODEL_CHOICES
-      : props.scope === "dark"
-        ? DARK_MODEL_CHOICES
-      : props.scope === "forced"
-          ? FORCED_MODEL_CHOICES
-          : props.scope === "ocr"
-            ? modelChoicesFor("ocr")
-          : props.scope === "follow-up"
-            ? modelChoicesFor("follow-up")
-          : STORY_MODEL_CHOICES;
+  const builtInOptions = SHARED_MODEL_CHOICES;
   const customOptions: ModelChoiceOption[] = (connections.data ?? []).map((connection) => ({
     value: `custom:${connection.id}`,
     label: connection.name,
@@ -349,7 +334,7 @@ export function ModelPicker(props: Props) {
     : [];
   const options = [
     ...noneOptions,
-    ...builtInOptions.filter((option) => !props.excludeAutomatic || option.value !== "auto"),
+    ...builtInOptions,
     ...customOptions,
   ];
   if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
@@ -383,6 +368,7 @@ export function ModelPicker(props: Props) {
   const helpId = useId();
   const effortId = useId();
   const selectId = useId();
+  const pickerScope = props.scope ?? "story";
   /*
     Which providers are actually usable ON THIS SERVER, not just offered for
     this surface. `providersFor()` (provider-registry.ts) only filters by
@@ -413,6 +399,8 @@ export function ModelPicker(props: Props) {
   */
   function isAvailable(value: string): boolean {
     if (value === "none") return true;
+    const entry = providerEntry(value);
+    if (entry && !entry.offeredFor[pickerScope]) return false;
     return writerIsReady({
       choice: value,
       availability: availability.data,
@@ -423,6 +411,10 @@ export function ModelPicker(props: Props) {
     });
   }
   function unavailableReason(option: ModelChoiceOption): string {
+    const entry = providerEntry(option.value);
+    if (entry && !entry.offeredFor[pickerScope]) {
+      return "This model is not available for this kind of work.";
+    }
     return writerUnavailableReason({
       choice: option.value,
       label: option.label,
@@ -471,7 +463,10 @@ export function ModelPicker(props: Props) {
       ? props.effort
       : defaultModelEffort(shownValue, exactModel);
   return (
-    <div className={["model-picker", props.compact ? "compact" : "", props.layout].filter(Boolean).join(" ")}>
+    <div
+      data-model-picker="shared"
+      className={["model-picker", props.compact ? "compact" : "", props.layout].filter(Boolean).join(" ")}
+    >
       <label htmlFor={selectId} className="model-picker-label">
         {props.label ?? (props.scope === "dark" ? "Digging model" : "Writing model")}
       </label>

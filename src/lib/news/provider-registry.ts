@@ -101,14 +101,11 @@ export const PICKER_PROVIDER_IDS = [
   "claude-haiku",
   "local-model",
   /*
-    `deepseek-flash` is the one id in BOTH lists (unit U29, owner decision
-    2026-09-30). It is Automatic's first rung everywhere -- see `ladderRank` on
-    its entry -- and Opinion's model menu now offers it BY NAME as well, which
-    is what puts its id here. Story, Scan and Dark Desk keep reaching it the
-    way they always have, through Automatic; the forced surfaces (a batch, a
-    meeting redraft, OCR, a transcript) do not offer it at all, because a run
-    that has to name ONE runtime up front may not name a rung
-    (`validateForcedRuntime`).
+    `deepseek-flash` is also Automatic's first rung everywhere (unit U29,
+    owner decision 2026-09-30). It is a named choice on the shared Story, Scan,
+    Follow-up, Opinion and Dark Desk picker. Forced and OCR jobs keep it out of
+    their runnable provider lists because a rung is not a stand-alone runtime
+    and it does not provide OCR vision support.
   */
   "deepseek-flash",
 ] as const;
@@ -777,21 +774,20 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       (Boolean(env("TOWNREPORTER_DEEPSEEK_BASE_URL")) || localDiscoveryReachable),
     offSwitchEnv: "TOWNREPORTER_DEEPSEEK",
     /*
-      Opinion's menu, and nowhere else (unit U29, owner decision 2026-09-30:
-      "use deepseek ... keep the picker regardless").
-
-      Story, Scan and Dark Desk already run this model through Automatic, and
-      their menus are unchanged -- an editor there picks "Automatic" and the
-      ladder resolves to this rung. Opinion gets it BY NAME because Opinion's
-      Automatic has its own ladder and its own picker, and the owner's choice
-      was that an editor writing an editorial can select the model Automatic
-      will try first.
-
-      `forced: false` on purpose: a batch, a meeting redraft, OCR or a
-      transcript must name a runtime an editor can hold, and a rung is not one
-      (`validateForcedRuntime` refuses it).
+      Named everywhere the shared chat-model picker runs this provider:
+      Story, Scan, Follow-up, Opinion and Dark Desk. It remains an Automatic
+      rung as well, so every ordinary work surface can show and run the same
+      exact model by name. OCR requires a vision-capable model, and forced
+      jobs must choose one stand-alone runtime rather than an Automatic rung.
     */
-    offeredFor: { ...NO_SURFACE, opinion: true },
+    offeredFor: {
+      ...NO_SURFACE,
+      story: true,
+      scan: true,
+      "follow-up": true,
+      opinion: true,
+      dark: true,
+    },
     ladderRank: 1,
     // The one rung both ladders share, and first on each: the desk researches
     // and drafts with it, and Opinion does too.

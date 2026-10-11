@@ -235,11 +235,16 @@ it("sends the exact saved local model to headline suggestions", async () => {
       },
       chat: async (_system, _user, _maxTokens, options) => {
         call = options;
-        return { ok: true as const, text: "1. Council approves plan after Tuesday vote\n2. Officials approve the revised city plan\n3. Council approves changes to city proposal" };
+        return {
+          ok: true as const,
+          text: "1. Council approves plan after Tuesday vote\n2. Officials approve the revised city plan\n3. Council approves changes to city proposal",
+          meta: { provider: "ollama", model: "loaded-headline-model", durationMs: 17, timedOut: false },
+        };
       },
     },
   );
   assert.equal(result.ok, true);
+  assert.equal(result.ok ? result.model : null, "loaded-headline-model");
   assert.equal(call?.choice, "local-model");
   assert.deepEqual(call?.localModel, selected);
   await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);

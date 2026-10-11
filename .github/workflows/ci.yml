@@ -182,6 +182,8 @@ jobs:
       # It is pure: it parses src/styles.css and src/desk-astra.css and opens
       # no browser, no server and no database. ~0.2s, beside lint.
       - run: node --test scripts/contrast-audit.mjs
+      - name: Shared model-picker coverage guard
+        run: node --test scripts/shared-model-picker-guard.test.mjs
 
   # The unit gate, on several machines at once.
   #

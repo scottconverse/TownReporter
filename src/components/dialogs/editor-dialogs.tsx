@@ -1115,6 +1115,9 @@ export type HeadlineDialogProps = {
   leadId: number;
   /** The headline the story has now, which "Keep mine" saves. */
   current: string;
+  /** First choice and effort from Models > Who does what for headlines. */
+  defaultModel?: string;
+  defaultEffort?: string | null;
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
@@ -1145,13 +1148,18 @@ export type HeadlineDialogProps = {
 export function HeadlineDialog({
   leadId,
   current,
+  defaultModel = "auto",
+  defaultEffort = null,
   open,
   onClose,
   onDone,
   onSaved,
 }: HeadlineDialogProps) {
   const press = usePress();
-  const factory = React.useCallback(() => headlineInitial(current), [current]);
+  const factory = React.useCallback(
+    () => headlineInitial(current, defaultModel, defaultEffort),
+    [current, defaultModel, defaultEffort],
+  );
   const [state, set] = useDialogState<HeadlineState>(factory, open, press.clear);
 
   const done = (text: string): PressAnswer => {
@@ -1172,7 +1180,12 @@ export function HeadlineDialog({
       if (!asked.ok) return { problem: asked.error };
       if (!asked.options.length) return { problem: "The AI offered no headlines. Your own line still works." };
       set({ suggestions: asked.options, choice: asked.options[0] ?? state.choice });
-      return { note: `${asked.options.length} suggestions. Pick one, or type your own.` };
+      const runtime = asked.model?.trim();
+      return {
+        note: runtime
+          ? `${asked.options.length} suggestions from ${runtime}. Pick one, or type your own.`
+          : `${asked.options.length} suggestions. The provider did not report which model ran. Pick one, or type your own.`,
+      };
     });
 
   const onPrimary = () =>

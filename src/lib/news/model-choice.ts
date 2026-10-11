@@ -104,6 +104,31 @@ export function modelChoicesFor(surface: ProviderSurface): readonly ModelChoiceO
 
 export const STORY_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("story");
 
+/**
+ * One complete model list for every rendered ModelPicker. A provider that
+ * cannot run a particular kind of job remains visible in the same position;
+ * ModelPicker disables it with the surface-specific readiness explanation.
+ * The order follows the existing surface lists, with newly named providers
+ * appended when their first offering appears.
+ */
+const SHARED_PICKER_SURFACES: readonly ProviderSurface[] = [
+  "story",
+  "scan",
+  "follow-up",
+  "opinion",
+  "dark",
+  "ocr",
+  "forced",
+];
+
+export const SHARED_MODEL_CHOICES: readonly ModelChoiceOption[] = Array.from(
+  new Map(
+    SHARED_PICKER_SURFACES
+      .flatMap((surface) => modelChoicesFor(surface))
+      .map((option) => [option.value, option] as const),
+  ).values(),
+);
+
 export type CustomModelChoice = `custom:${string}`;
 /**
  * Every value a job may store. Automatic's own rungs are in the union even
@@ -182,15 +207,14 @@ export const DEFAULT_OPINION_MODEL = "auto" as const;
  */
 export const DARK_AUTOMATIC_LADDER: readonly string[] = automaticLadder();
 /**
- * Opinion's picker: Automatic, then every named Codex and Claude model, then
- * Local model, then DeepSeek v4.1 Flash (unit U29), plus the newsroom's saved
- * connections at the edge.
+ * Opinion uses the same complete list as every other ModelPicker. Its
+ * Automatic ladder and assignment defaults remain Opinion-specific.
  *
- * DeepSeek is the only entry in this list that is also an Automatic rung --
- * it is first on Opinion's ladder AND selectable by name, which is what the
- * owner asked for ("keep the picker regardless"). It is offered here and
- * nowhere else (`offeredFor` on its registry entry): Story, Scan and Dark
- * Desk still reach it only through their own Automatic.
+ * DeepSeek remains the first rung on Opinion's and the general Automatic
+ * ladders. Naming it directly on Story, Scan, Follow-up and Dark Desk gives
+ * those screens the same choice path Opinion already had. OCR and forced
+ * single-runtime work keep it visible but disabled because that rung is not
+ * offered for those jobs.
  */
 export const OPINION_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFor("opinion");
 
@@ -215,13 +239,12 @@ export const FORCED_MODEL_CHOICES: readonly ModelChoiceOption[] = modelChoicesFo
 export type OpinionModelChoice = StoryModelChoice;
 export type DarkModelChoice = StoryModelChoice;
 /**
- * Forced jobs show Automatic as their recommended task-specific ladder.
- * Automatic's internal rungs remain absent from the picker: the run resolves
- * and records the exact provider/model used before work begins.
+ * Server-side choices for forced jobs. The shared UI still shows the same
+ * full list, with providers outside this set disabled; Automatic resolves and
+ * records its exact provider/model before work begins.
  *
- * Unit U29: Opinion's menu does offer one rung by name (DeepSeek v4.1 Flash),
- * and that changes nothing here. OCR uses this list so the surface can choose
- * either its own Automatic ladder or a named provider.
+ * OCR uses this list so the server accepts Automatic or a named provider that
+ * can read a scanned page. It is deliberately narrower than the shared UI.
  */
 export type ForcedModelChoice = Exclude<StoryModelChoice, AutomaticRungId>;
 
