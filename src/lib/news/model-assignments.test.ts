@@ -475,6 +475,19 @@ describe("the lines the who-does-what selects show", () => {
     assert.equal(connectionWord("local"), "on this computer");
   });
 
+  it("uses Pro shorthand only in Gemini's compact assignment cell", () => {
+    for (const [value, full, compact] of [
+      ["gemini-flash", "Gemini 3.8 Flash (Pro plan)", "Gemini 3.8 Flash (Pro)"],
+      ["gemini-pro", "Gemini 3.1 Pro (Pro plan)", "Gemini 3.1 Pro (Pro)"],
+    ]) {
+      const option = jobModelOptions("story-draft").find((one) => one.value === value);
+      assert.ok(option);
+      assert.equal(option.label, full);
+      assert.equal(jobOptionLabel(option), compact);
+      assert.ok(jobOptionTitle(option).includes(full));
+    }
+  });
+
   it("never draws a line longer than a select is known to show", () => {
     for (const job of MODEL_JOBS) {
       for (const option of jobModelOptions(job.key)) {

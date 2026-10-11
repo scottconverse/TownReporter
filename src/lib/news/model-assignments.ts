@@ -337,7 +337,13 @@ function jobOptionLine(option: ModelChoiceOption): string {
 /** The line the select shows, dropped to the bare name when it would clip. */
 export function jobOptionLabel(option: ModelChoiceOption): string {
   const line = jobOptionLine(option);
-  return line.length <= JOB_OPTION_LABEL_MAX ? line : option.label;
+  if (line.length <= JOB_OPTION_LABEL_MAX) return line;
+  // The compact assignment cell keeps the model name and plan shorthand;
+  // the main picker and the option title retain the full Pro plan label.
+  if (providerEntry(option.value)?.kind === "gemini-cli") {
+    return option.label.replace(/\(Pro plan\)$/, "(Pro)");
+  }
+  return option.label;
 }
 
 /**

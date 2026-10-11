@@ -47,6 +47,7 @@ const ENV_KEYS = [
   "TOWNREPORTER_DEEPSEEK_MODEL",
   "TOWNREPORTER_QWEN_MODEL",
   "CODEX_CLI_PATH",
+  "GEMINI_CLI_PATH",
   "FAKE_CODEX_SIGNED_IN",
 ] as const;
 
@@ -79,6 +80,7 @@ const DEEPSEEK_URL = "http://127.0.0.1:11434/v1";
   no longer depends on what happens to be running on the machine.
 */
 const BARE = {
+  GEMINI_CLI_PATH: "missing-gemini-cli-for-no-provider-fixture",
   TOWNREPORTER_CLAUDE_CODE: "0",
   TOWNREPORTER_CODEX: "0",
   TOWNREPORTER_DEEPSEEK: "0",
