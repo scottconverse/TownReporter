@@ -1,5 +1,6 @@
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
 import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger, setLeadStatus } from "@/components/scoped-actions";
+import { resolveLeadDuplicate as resolveLeadDuplicateRaw, setLeadStatus as setLeadStatusRaw } from "@/lib/news/desk";
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
@@ -1749,7 +1750,7 @@ function StoryPage() {
   }, [qc, id]);
 
   const moveToNew = useCallback(async (override?: string[]) => {
-    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate", override } });
+    const res = await resolveLeadDuplicateRaw({ data: { id, action: "not-a-duplicate", override } });
     if (!answered(res)) return { ok: false, error: NO_ANSWER };
     if ("warning" in res && res.warning) return { ok: false, warning: res.warning };
     if (!res.ok) return { ok: false, error: res.error };
@@ -1760,7 +1761,7 @@ function StoryPage() {
   const killAsDuplicateOfPrior = useCallback(async (override?: string[]) => {
     const prior = data?.lead.possible_duplicate;
     if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
-    const res = await setLeadStatus({
+    const res = await setLeadStatusRaw({
       data: { id, status: "killed", killReason: duplicateKillReason(prior.headline), override },
     });
     if (!answered(res)) return { ok: false, error: NO_ANSWER };
