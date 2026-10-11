@@ -237,6 +237,10 @@ describe("Unit BB: local model picker load state", () => {
     const keys = ["TOWNREPORTER_DEEPSEEK", "TOWNREPORTER_CODEX", "TOWNREPORTER_CLAUDE_CODE"];
     const old = keys.map(key => process.env[key]);
     keys.forEach(key => { process.env[key] = "0"; });
+    // A signed-in Gemini program on the machine running the tests is a ready
+    // Automatic rung; point at a missing program so only the fake local servers count.
+    const oldGemini = process.env.GEMINI_CLI_PATH;
+    process.env.GEMINI_CLI_PATH = "C:/missing/agy.exe";
     const servers: FakeServers = { lmStudio: [], ollama: { ids: CLOUD_IDS, running: [] }, log: [] };
     try {
       await withFetch(fakeFetch(servers), async () => {
@@ -258,6 +262,7 @@ describe("Unit BB: local model picker load state", () => {
       });
     } finally {
       keys.forEach((key,index) => { if(old[index] === undefined) delete process.env[key]; else process.env[key] = old[index]; });
+      if (oldGemini === undefined) delete process.env.GEMINI_CLI_PATH; else process.env.GEMINI_CLI_PATH = oldGemini;
     }
   });
 
