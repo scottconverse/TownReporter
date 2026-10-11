@@ -267,7 +267,7 @@ function Set-AppEnvironment {
     # stderr redirected into app.out.log/app.err.log -- so nothing about an
     # ignored XAI_API_KEY would ever reach the screen. Start.ps1 prints its own
     # warning for the inherited case; the providers.json case is reported below.
-    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|CLAUDE_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
+    if ($item.Name -match '^(DATABASE_URL|TEST_POSTGRES_ADMIN_URL|BETTER_AUTH_|PUBLIC_SITE_URL|VITE_|TOWNREPORTER_|LLM_|ANTHROPIC_|OPENAI_|CLAUDE_CLI_PATH|GEMINI_CLI_PATH|CODEX_CLI_PATH|WATCHDOG_|PGPASSWORD)') { [Environment]::SetEnvironmentVariable($item.Name, $null, 'Process') }
   }
   $env:DATABASE_URL = "postgresql://townreporter:$($config.DatabasePassword)@127.0.0.1:$($config.PgPort)/townreporter"
   $env:BETTER_AUTH_SECRET = $config.AuthSecret
@@ -295,7 +295,7 @@ function Set-AppEnvironment {
         Write-Warning "Ignoring $($property.Name) in providers.json: TownReporter no longer uses Grok (xAI), and reads no XAI_* setting. Remove the line to silence this."
         continue
       }
-      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|CLAUDE_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
+      if ($property.Name -notmatch '^(LLM_(BASE_URL|API_KEY|MODEL)|ANTHROPIC_(API_KEY|MODEL)|OPENAI_API_KEY|CLAUDE_CLI_PATH|GEMINI_CLI_PATH|CODEX_CLI_PATH|TOWNREPORTER_(CLAUDE_CODE|CODEX|LOCAL|VOICE_FILE))$') { throw "Unsupported provider setting: $($property.Name)" }
       [Environment]::SetEnvironmentVariable($property.Name, [string]$property.Value, 'Process')
     }
   }

@@ -337,7 +337,7 @@ test("a stored SuperGrok choice shows Automatic, explains itself, and offers no 
   // Automatic will actually do, read from the ladder itself. The middle rung
   // reads "Local model" since 0.6.69 (Unit AL item 4): it names no model of its
   // own, because it runs whatever LM Studio has loaded.
-  assert.match(html, /DeepSeek v4\.1 Flash, Local model, then Codex Sol 6\.1 \(balanced\)/);
+  assert.match(html, /DeepSeek v4\.1 Flash, Local model, Codex Sol 6\.1 \(balanced\), then Gemini 3\.8 Flash \(Pro plan\)/);
 });
 
 test("a stored SuperGrok choice on the forced surface falls back to Automatic", () => {
@@ -376,4 +376,24 @@ for (const [choice, error, sentence] of [
     availabilityStub.__setAvailability(undefined);
     await browser.close();
   }
+});
+
+
+test("Gemini Pro plan choices remain selectable with their own setup warning", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    for (const choice of ["gemini-flash", "gemini-pro"]) {
+      const reason = "The Gemini program is not signed in. Open a terminal on the server and run agy, then sign in with your Google account.";
+      availabilityStub.__setAvailability({ [choice]: false, reasons: { [choice]: reason } });
+      await page.setContent(renderToStaticMarkup(createElement(ModelPicker, { value: choice, onChange() {} })));
+      const select = page.getByLabel("Writing model", { exact: true });
+      await select.selectOption(choice);
+      assert.equal(await select.inputValue(), choice);
+      assert.equal(await select.locator("option:checked").isEnabled(), true);
+      assert.match(await select.locator("option:checked").innerText(), /Gemini .*Pro plan/);
+      assert.match(await page.locator(".model-picker-help").first().innerText(), /Gemini program is not signed in.*run agy/);
+    }
+  } finally { availabilityStub.__setAvailability(undefined); await browser.close(); }
 });

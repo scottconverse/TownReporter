@@ -56,6 +56,7 @@ import {
   localModelCatalog,
   providerAvailability,
   refreshLocalModelCatalog,
+  testCloudUsageWarnings,
 } from "@/lib/news/provider-availability";
 import { modelReadiness, type ReadinessFacts } from "@/lib/news/model-readiness";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
@@ -205,6 +206,7 @@ function ModelsPage() {
   */
   const testAll = useMutation({
     mutationFn: async () => {
+      await testCloudUsageWarnings();
       const [fresh] = await Promise.all([
         refreshLocalModelCatalog(),
         qc.invalidateQueries({ queryKey: ["provider-statuses"], refetchType: "all" }),
@@ -218,7 +220,7 @@ function ModelsPage() {
     onSuccess: (fresh) => {
       qc.setQueryData(["local-model-catalog"], fresh);
       setNote(
-        "Re-read every sign-in and looked for local servers on this machine. Nothing was sent to any model — a card's own Test is what asks a model for one word.",
+        "Re-read every sign-in and looked for local servers. Retained Ollama Cloud usage warnings were checked with one short model call each.",
       );
     },
     onError: (e) =>
@@ -630,9 +632,11 @@ function JobRow({
       status: statuses.data?.find((row) => row.provider === signin),
       connection: connections.find((row) => `custom:${row.id}` === providerId),
       available: availability.data?.[providerId],
+      reason: availability.data?.reasons?.[providerId],
     };
   }
-  const readinessLabel = modelReadiness(readinessFor(resolvedSaved.providerId));
+  const readinessFacts = readinessFor(resolvedSaved.providerId);
+  const readinessLabel = modelReadiness(readinessFacts);
 
   const facts = {
     built: job?.built ?? true,
@@ -786,10 +790,10 @@ function JobRow({
         <div className="model-job-status">
           <StatusChip
             label={readinessLabel}
-            help={jobStatusHelp(facts)}
+            help={readinessFacts.reason ?? jobStatusHelp(facts)}
             /* Name the resolved default without making it a readiness state. */
             below={
-              kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined
+              readinessFacts.reason ?? (kind === "default" ? modelChoiceLabel(resolvedSaved.providerId, surface) : undefined)
             }
           />
         </div>
@@ -965,6 +969,7 @@ function ConnectionsTab({
         }
       >
         <SignInConnections onNote={onNote} />
+        <GeminiPlanConnection />
       </ConnectionGroup>
 
       <ConnectionGroup
@@ -1309,6 +1314,30 @@ function ApiKeyConnections({
  * owns them on /desk/ops; this is the place they are LINKED to, not a second
  * place to edit them.
  */
+function GeminiPlanConnection() {
+  const availability = useQuery({
+    queryKey: PROVIDER_AVAILABILITY_QUERY_KEY,
+    queryFn: () => providerAvailability(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const ready = availability.data?.["gemini-flash"] === true;
+  const reason = availability.data?.reasons?.["gemini-flash"];
+  const message = reason ?? (ready
+    ? "The Gemini program is installed and signed in to your Google account. Drafts use your Pro plan, with no API key or API credit."
+    : availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
+      : "Could not check the Gemini program. Use Test all connections to check again.");
+  return (
+    <ConnectionCard
+      title="Gemini (Pro plan)"
+      how="Uses the Gemini command-line program and your Google sign-in"
+      chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={ready ? "Ready" : "Warning"} help={message} />}
+    >
+      <p className="text-sm text-muted">{message}</p>
+      <ProviderModelRows entries={entriesOfKind("gemini-cli")} />
+    </ConnectionCard>
+  );
+}
+
 function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
   const statuses = useQuery({
     queryKey: ["provider-statuses"],

@@ -22,9 +22,14 @@ import { isCustomModelChoice } from "./model-choice.ts";
 import { clockLabel } from "./follow-up-copy.ts";
 
 /** Reasons use the existing availability check, with no extra probes. */
-export type ProviderAvailability = Record<string, boolean> & { reasons?: Record<string, string> };
+export type ProviderAvailability = Record<string, boolean> & { reasons?: Record<string, string>; cloudWarnings?: { baseUrl: string; id: string; reason: string }[] };
+
+export function localCloudReadinessReason(availability: ProviderAvailability | undefined, model?: { baseUrl: string; id: string } | null): string | undefined {
+  return model ? availability?.cloudWarnings?.find(row => row.baseUrl.replace(/\/+$/, "") === model.baseUrl.replace(/\/+$/, "") && row.id === model.id)?.reason : undefined;
+}
 
 export function readinessFailureMessage(choice: string, name: string, message: string): string {
+  if (message.startsWith("Ollama says:") || choice.startsWith("gemini-")) return message;
   if (choice.startsWith("claude-")) {
     if (/CLI not found|not installed/i.test(message)) return "Claude Code is not installed on this server.";
     if (/signed out|not logged|sign in|session expired/i.test(message)) return "Claude is signed out on this server. Sign in once: run claude auth login on the server.";
@@ -36,6 +41,10 @@ export function readinessFailureMessage(choice: string, name: string, message: s
 
 export function writerUnavailableReason(input: Parameters<typeof writerIsReady>[0] & { label: string }): string | undefined {
   if (writerIsReady(input)) return undefined;
+  if (input.choice === "local-model" && input.localModel) {
+    const warning = localCloudReadinessReason(input.availability, input.localModel);
+    if (warning) return warning;
+  }
   const message = isCustomModelChoice(input.choice) ? input.customConnection?.readinessError : undefined;
   if (message) return readinessFailureMessage(input.choice, input.label, message);
   const reason = input.availability?.reasons?.[input.choice];
@@ -78,8 +87,13 @@ export function writerIsReady(input: {
   availability: ProviderAvailability | undefined;
   /** The connection behind a `custom:<id>` choice, when the desk has one. */
   customConnection: { enabled: boolean; modelId: string | null; readinessError?: string } | null;
+  localModel?: { baseUrl: string; id: string } | null;
 }): boolean {
   if (input.choice === "auto") return true;
+  if (input.choice === "local-model" && input.localModel) {
+    if (localCloudReadinessReason(input.availability, input.localModel)) return false;
+    if (input.availability?.reasons?.["local-model"]?.startsWith("Ollama says:")) return true;
+  }
   if (isCustomModelChoice(input.choice)) {
     return Boolean(input.customConnection?.enabled && input.customConnection.modelId && !input.customConnection.readinessError);
   }

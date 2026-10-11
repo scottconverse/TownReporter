@@ -30,6 +30,8 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
     "TOWNREPORTER_CODEX",
+    "GEMINI_CLI_PATH",
+    "FAKE_GEMINI_SIGNED_OUT",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
     // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
@@ -54,6 +56,8 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
   }
+  process.env.GEMINI_CLI_PATH = fileURLToPath(new URL("../../../scripts/fakes/fake-gemini-cli.mjs", import.meta.url));
+  process.env.FAKE_GEMINI_SIGNED_OUT = "1";
   try {
     fn();
   } finally {
@@ -76,6 +80,8 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
     "ANTHROPIC_EFFORT",
     "TOWNREPORTER_CLAUDE_CODE",
     "TOWNREPORTER_CODEX",
+    "GEMINI_CLI_PATH",
+    "FAKE_GEMINI_SIGNED_OUT",
     "TOWNREPORTER_LOCAL",
     "CLAUDE_CLI_PATH",
     // The two Automatic rungs added in 0.6.63 (Unit Y item 1). A rung's
@@ -99,6 +105,8 @@ async function withEnvAsync<T>(vars: Record<string, string | undefined>, fn: () 
   for (const [k, v] of Object.entries(vars)) {
     if (v !== undefined) process.env[k] = v;
   }
+  process.env.GEMINI_CLI_PATH = fileURLToPath(new URL("../../../scripts/fakes/fake-gemini-cli.mjs", import.meta.url));
+  process.env.FAKE_GEMINI_SIGNED_OUT = "1";
   try {
     return await fn();
   } finally {

@@ -1,6 +1,11 @@
 import { createServerOnlyFn } from "@tanstack/react-start";
 import type { ChatResultMetadata } from "./ai-result-metadata.ts";
 import { providerErrorDetail, providerResponseDetail, providerHttpError } from "./provider-error-detail.ts";
+const ollamaCloudServer = createServerOnlyFn(() => import("./ollama-cloud-readiness.server.ts"));
+async function recordOllamaCloudCall(endpoint: string, model: string, status: number, detail: unknown, apiKey?: string | null) {
+  (await ollamaCloudServer()).recordOllamaCloudCall(endpoint, model, status, detail, apiKey);
+}
+const geminiServer = createServerOnlyFn(() => import("./ai-gemini-cli.server.ts"));
 const codexServer = createServerOnlyFn(() => import("./ai-codex.server.ts"));
 const claudeServer = createServerOnlyFn(() => import("./ai-claude-code.server.ts"));
 const customServer = createServerOnlyFn(() => import("./custom-ai-connections.server.ts"));
@@ -114,6 +119,7 @@ export type Provider =
   | ({ kind: "anthropic" } & AnthropicConfig)
   | ({ kind: "claude-code" } & ClaudeCodeConfig)
   | ({ kind: "codex" } & CodexConfig)
+  | ({ kind: "gemini-cli" } & CodexConfig)
   | ({ kind: "openai" } & LlmConfig);
 
 type GrokChatAdapter = (
@@ -393,6 +399,7 @@ function explicitProvider(
     entry.kind === "local" && Boolean(localOverride) && env("TOWNREPORTER_LOCAL") !== "0";
   if (!entry.enabled() && !resolvedLocalIsEnabled) return null;
 
+  if (entry.kind === "gemini-cli") return { kind: "gemini-cli", model, label: entry.label };
   if (entry.kind === "codex") return { kind: "codex", model, label: entry.label };
 
   if (entry.kind === "openai") {
@@ -830,6 +837,11 @@ export async function probeProvider(
     // Environment-configured local gateways also need an exact queue snapshot.
     localOverride = { baseUrl: provider.baseUrl, id: provider.model };
   }
+  if (provider.kind === "gemini-cli") {
+    const { probeGeminiCli } = await geminiServer();
+    const result = await probeGeminiCli(provider.label);
+    return result.ok ? { ...result, choice: storyModelChoice(choice) } : result;
+  }
   if (provider.kind === "codex") {
     const { probeCodex } = await codexServer();
     const result = await probeCodex(provider.label);
@@ -1081,6 +1093,10 @@ export async function grokChat(
       reasoningEffort: opts?.reasoningEffort,
     });
   }
+  if (provider.kind === "gemini-cli") {
+    const { geminiChat } = await geminiServer();
+    return geminiChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
+  }
   if (provider.kind === "codex") {
     const { codexChat } = await codexServer();
     return codexChat({ system, user, model, timeoutMs, reasoningEffort: opts?.reasoningEffort });
@@ -1159,6 +1175,7 @@ export async function grokChat(
       return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
     }
     retryFailureDetail = providerHttpError(failureLabel, res.status, rejectedBody, llm.apiKey);
+    await recordOllamaCloudCall(llm.baseUrl, model, res.status, rejectedBody, llm.apiKey);
     if (timeoutMs < 30_000 || remaining() <= 1_000) {
       return { ok: false, error: retryFailureDetail, meta: openAiMeta() };
     }
@@ -1188,6 +1205,7 @@ export async function grokChat(
   try { responseText = await res.text(); } catch (err) {
     return { ok: false, error: transportError(err), meta: openAiMeta(undefined, isTimeout(err)) };
   }
+  if (!res.ok) await recordOllamaCloudCall(llm.baseUrl, model, res.status, responseText, llm.apiKey);
   try {
     body = JSON.parse(responseText) as typeof body;
   } catch {
@@ -1223,6 +1241,7 @@ export async function grokChat(
     };
   }
   if (body.error) {
+    await recordOllamaCloudCall(llm.baseUrl, model, 500, body, llm.apiKey);
     const detail = typeof body.error === "string" ? body.error : body.error.message;
     // A custom endpoint is outside TownReporter's control. Its error body may
     // reflect an Authorization header; retain its message after redacting the key.
@@ -1267,6 +1286,7 @@ export async function grokChat(
     }
     return { ok: false, error: "Empty model response", meta: openAiMeta(body) };
   }
+  await recordOllamaCloudCall(llm.baseUrl, model, res.status, "");
   return { ok: true, text, meta: openAiMeta(body) };
 }
 

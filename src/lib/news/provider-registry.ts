@@ -45,6 +45,7 @@
 export type ProviderKind =
   | "claude-code"
   | "codex"
+  | "gemini-cli"
   | "openai"
   | "anthropic"
   | "local";
@@ -92,6 +93,8 @@ export const PICKER_PROVIDER_IDS = [
   "codex-frontier",
   "codex-balanced",
   "codex-luna",
+  "gemini-flash",
+  "gemini-pro",
   "claude-fable",
   "claude-frontier",
   "claude-sonnet",
@@ -374,6 +377,7 @@ export const DISCOVERED_LOCAL_ADDRESSES: readonly string[] = [
 export const KIND_BUDGETS: Record<ProviderKind, ProviderBudget> = {
   "claude-code": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   codex: { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
+  "gemini-cli": { wallMs: 420_000, callMs: 150_000, reserveMs: 170_000 },
   anthropic: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   openai: { wallMs: 38_000, callMs: 20_000, reserveMs: 12_000 },
   // A measured four-hour council-meeting draft takes about 20 minutes across
@@ -493,6 +497,37 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       drafting". Terra stays a named pick on every surface.
     */
     ladderRank: 3,
+  },
+  {
+    id: "gemini-flash",
+    label: "Gemini 3.8 Flash (Pro plan)",
+    detail: "Uses the Gemini program signed in to your Google Pro plan",
+    optionDetail: "",
+    kind: "gemini-cli",
+    model: "gemini-3.8-flash-medium",
+    envOverrides: {},
+    budget: KIND_BUDGETS["gemini-cli"],
+    plannerModel: "gemini-3.8-flash-medium",
+    enabled: () => true,
+    offeredFor: { ...EVERY_SURFACE, ocr: false },
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
+    ladderRank: 4,
+  },
+  {
+    id: "gemini-pro",
+    label: "Gemini 3.1 Pro (Pro plan)",
+    detail: "Uses the Gemini program signed in to your Google Pro plan",
+    optionDetail: "",
+    kind: "gemini-cli",
+    model: "gemini-3.1-pro-high",
+    envOverrides: {},
+    budget: KIND_BUDGETS["gemini-cli"],
+    plannerModel: "gemini-3.1-pro-high",
+    enabled: () => true,
+    offeredFor: { ...EVERY_SURFACE, ocr: false },
+    efforts: ["low", "medium", "high"],
+    defaultEffort: "medium",
   },
   {
     id: "claude-fable",
@@ -935,7 +970,7 @@ export function defaultModelEffort(
   ) {
     return "none";
   }
-  if (id !== "auto" && (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code"))) {
+  if (id !== "auto" && (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli"))) {
     return null;
   }
   return entry?.defaultEffort && choices.includes(entry.defaultEffort)

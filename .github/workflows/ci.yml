@@ -217,6 +217,8 @@ jobs:
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
       TOWNREPORTER_TEST_SHARD_TOTAL: "6"
+      GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
+      FAKE_GEMINI_SIGNED_OUT: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -733,6 +735,7 @@ jobs:
           PROVIDER_SIGNIN_BASE_URL: http://127.0.0.1:3312
           PROVIDER_SIGNIN_PHASE: fake
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
           FAKE_CLAUDE_STATE_FILE: /tmp/fake-claude-signed-in
           FAKE_CLAUDE_DELAY_MS: "8000"
         run: |
@@ -932,6 +935,7 @@ jobs:
           HOST: 127.0.0.1
           DARK_PICKER_BASE_URL: http://127.0.0.1:3316
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
         run: |
           npm start > /tmp/dark-picker.log 2>&1 &
           DEV_PID=$!
@@ -988,6 +992,7 @@ jobs:
           DAILY_SCAN_E2E_ARTIFACT_DIR: "${{ runner.temp }}/daily-scan-evidence"
           DATABASE_URL: ""
           CLAUDE_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-claude-cli.mjs"
+          GEMINI_CLI_PATH: "${{ github.workspace }}/scripts/fakes/fake-gemini-cli.mjs"
           FAKE_CLAUDE_SIGNED_IN: "1"
           FAKE_CLAUDE_VALID_DRAFT: "1"
         run: |
@@ -1043,6 +1048,7 @@ jobs:
           SOURCES_DESK_BASE_URL: http://127.0.0.1:3421
           DATABASE_URL: ""
           CLAUDE_CLI_PATH: scripts/fakes/fake-claude-cli.mjs
+          GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
           FAKE_CLAUDE_SIGNED_IN: "1"
         run: |
           npm start > /tmp/sources-desk.log 2>&1 &

@@ -253,6 +253,8 @@ describe("the provider registry is the one description of a writing model", () =
         "codex-frontier",
         "codex-balanced",
         "codex-luna",
+        "gemini-flash",
+        "gemini-pro",
         "claude-fable",
         "claude-frontier",
         "claude-sonnet",
@@ -293,11 +295,11 @@ describe("the provider registry is the one description of a writing model", () =
 });
 
 describe("the Automatic ladder is derived, not typed out", () => {
-  it("orders Automatic with DeepSeek first and Codex Sol 6.1 (balanced) last", () => {
+  it("orders Automatic with DeepSeek first and Gemini after balanced Codex", () => {
     // 0.6.63, Unit Y item 1, on the owner's measured blind research test:
     // DeepSeek v4.1 Flash 30.9, Qwen3.6-35B 15.8, Terra 15.3.
     const ladder = automaticLadder();
-    assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced"]);
+    assert.deepEqual(ladder, ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
     for (const id of ladder) {
       assert.ok(providerEntry(id), `ladder names ${id}, which is not in the registry`);
     }
@@ -306,7 +308,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
     // ordering rather than its reverse.
     assert.deepEqual(
       ladder.filter((id) => providersFor("story").some((entry) => entry.id === id)),
-      ["codex-balanced"],
+      ["codex-balanced", "gemini-flash"],
     );
     assert.deepEqual(
       ladder.slice(0, 2),
@@ -380,7 +382,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
     // endpoint), which this test's environment does not have, so the only
     // rung left standing is Codex. Naming the endpoints makes them stand.
     withEnv({ TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), []);
+      assert.deepEqual(enabledAutomaticLadder(), ["gemini-flash"]);
       assert.deepEqual(
         withEnvValue(
           {
@@ -389,14 +391,14 @@ describe("the Automatic ladder is derived, not typed out", () => {
           },
           () => enabledAutomaticLadder(),
         ),
-        ["deepseek-flash", "qwen-local"],
+        ["deepseek-flash", "qwen-local", "gemini-flash"],
       );
       // The static list is unchanged: it is read at module load by ai.ts, and
       // the probe loop already copes with a rung that turns out to be gone.
-      assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced"]);
+      assert.deepEqual(automaticLadder(), ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
     });
     withEnv({ TOWNREPORTER_CLAUDE_CODE: "0", TOWNREPORTER_CODEX: "0" }, () => {
-      assert.deepEqual(enabledAutomaticLadder(), []);
+      assert.deepEqual(enabledAutomaticLadder(), ["gemini-flash"]);
     });
   });
 
@@ -413,7 +415,7 @@ describe("the Automatic ladder is derived, not typed out", () => {
         },
         () => enabledAutomaticLadder(),
       ),
-      ["qwen-local"],
+      ["qwen-local", "gemini-flash"],
     );
   });
 });

@@ -642,7 +642,8 @@ function rungWords(
 function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undefined {
   if (read.availability) {
     const ready = read.availability[entry.id === "qwen-local" ? "local-model" : entry.id] !== false;
-    return {source:"words",tone: ready ? "ready" : "slow",label: ready ? "Ready" : "Not ready",help: read.availability.reasons?.[entry.id === "qwen-local" ? "local-model" : entry.id] ?? ""};
+    const reason = read.availability.reasons?.[entry.id === "qwen-local" ? "local-model" : entry.id] ?? "";
+    return {source:"words",tone: ready ? "ready" : "slow",label: ready ? "Ready" : reason.startsWith("Ollama says:") ? "Warning" : "Not ready",help: reason};
   }
   const login = LOGIN_FOR_KIND[entry.kind];
   const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
@@ -675,6 +676,7 @@ export function writingModelLines(read?: OpsModelRead): OpsModelLine[] {
       const metadata = read.catalog.servers.find(server => server.baseUrl === model?.baseUrl)?.models.find(row => row.id === model?.id);
       note = model ? localModelOptionText({id:model.id,loaded:metadata?.loaded ?? null,cloud:metadata?.cloud}) : "Backend not checked yet";
     }
+    if (chip?.source === "words" && chip.label === "Warning" && chip.help) note = `${note} · ${chip.help}`;
     lines.push(chip ? { n, name: entry.label, note, chip } : { n, name: entry.label, note });
   };
   for (const id of automaticLadder()) {

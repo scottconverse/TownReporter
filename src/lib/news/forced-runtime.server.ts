@@ -71,7 +71,7 @@ export type NamedForcedRuntimeSnapshot =
   | {
       runtime: Exclude<ForcedRuntime, "local" | "local-model" | AutomaticRungId>;
       modelChoice: CliProviderChoice;
-      transport: "claude-code" | "codex";
+      transport: "claude-code" | "codex" | "gemini-cli";
       model: string;
       modelEffort?: ModelEffort;
     }
@@ -185,18 +185,23 @@ export async function validateForcedRuntime(
   }
   const choice = choiceFor(runtime);
   const entry = providerEntry(choice);
-  if (!entry || (entry.kind !== "claude-code" && entry.kind !== "codex")) {
+  if (!entry || (entry.kind !== "claude-code" && entry.kind !== "codex" && entry.kind !== "gemini-cli")) {
     throw new Error("The selected batch model is unavailable in this build.");
   }
-  const ready =
-    entry.kind === "claude-code"
+  // Gemini readiness warns in the picker. A named pick still runs and can
+  // report the program's own failure through the existing provider hop.
+  if (entry.kind !== "gemini-cli") {
+    const ready = entry.kind === "claude-code"
       ? await (await import("./ai-claude-code.server.ts")).probeClaudeCode(entry.label)
       : await (await import("./ai-codex.server.ts")).probeCodex(entry.label);
-  if (!ready.ok) throw new Error(ready.error);
+    if (!ready.ok) throw new Error(ready.error);
+  }
   return {
     runtime,
     modelChoice: choice as CliProviderChoice,
-    model: providerModel(entry),
+    model: entry.kind === "gemini-cli"
+      ? (await import("./ai-gemini-cli.server.ts")).geminiModelForEffort(providerModel(entry), modelEffort(choice, effort)) ?? providerModel(entry)
+      : providerModel(entry),
     transport: entry.kind,
     ...(modelEffort(choice, effort) ? { modelEffort: modelEffort(choice, effort)! } : {}),
   };
@@ -394,6 +399,7 @@ export type ForcedChatAdapters<T> = {
     noTools?: boolean;
     reasoningEffort?: ModelEffort | null;
   }) => Promise<T>;
+  gemini?: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null }) => Promise<T>;
   codex: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null }) => Promise<T>;
   local: (
     system: string,
@@ -463,6 +469,10 @@ export async function runForcedChat<T>(
       reasoningEffort: valid.modelEffort,
     });
   }
+  if (valid.transport === "gemini-cli") {
+    const gemini = adapters.gemini ?? (async (input) => (await import("./ai-gemini-cli.server.ts")).geminiChat(input) as Promise<T>);
+    return gemini({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort });
+  }
   return adapters.codex({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort });
 }
 
@@ -480,7 +490,7 @@ export function forcedOcrOptions(
     forcedPlan:
       snapshot.transport === "local"
         ? { kind: "local", baseUrl: snapshot.localModel.baseUrl, model: snapshot.localModel.id }
-        : snapshot.transport === "custom"
+        : snapshot.transport === "custom" || snapshot.transport === "gemini-cli"
           ? undefined
           : {
             kind: snapshot.transport,

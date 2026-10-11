@@ -95,7 +95,7 @@ export function looksLikeProviderQuota(detail: string | null | undefined): boole
 export function looksLikeProviderUnavailable(detail: string | null | undefined): boolean {
   return (
     Boolean(detail) &&
-    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
+    /\bunavailable\b|unreachable|connection refused|failed to connect|failed to fetch|network error|cli not found|Gemini program was not found|Gemini program could not start|connection is disabled|connection is (?:disabled, )?deleted|has no model|(?:api|http|status|error)[^\r\n]{0,20}\b5\d\d\b|\(5\d\d\)|service unavailable/i.test(
       detail!,
     )
   );
@@ -138,7 +138,7 @@ export function automaticFailoverReason(
   if (looksLikeTimeoutOrNoOutput(detail)) return "timeout";
   if (looksLikeProviderQuota(detail)) return "quota";
   if (looksLikeProviderAuthFailure(detail)) return "auth";
-  if (looksLikeProviderUnavailable(detail)) return "unavailable";
+  if (looksLikeProviderUnavailable(detail) || /^Gemini says:|^Gemini request failed/i.test(detail ?? "")) return "unavailable";
   return null;
 }
 

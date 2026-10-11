@@ -289,6 +289,7 @@ export function jobSlotEmptyLabel(slot: JobSlotName): string {
  * prints the same word on each card's second line.
  */
 export const CONNECTION_WORD: Readonly<Record<ProviderKind, string>> = {
+  "gemini-cli": "Gemini (Pro plan)",
   "claude-code": "sign-in",
   codex: "sign-in",
   openai: "API",

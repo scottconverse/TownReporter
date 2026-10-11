@@ -69,7 +69,7 @@ const PROVIDER_AUTH_GUIDANCE = {
  * expired" and the desk told the editor to retry.
  */
 const PROVIDER_AUTH_RE =
-  /signed out|not logged|unauthorized|sign in|rejected.*credentials|credentials.*rejected|invalid.*(?:credential|api key)|oauth.*expired|(?:login|auth(?:entication)?|session).*expired|expired.*(?:oauth|login|auth(?:entication)?|session)|failed to authenticate|re-?authenticate|\b401\b/i;
+  /signed out|not signed in|not logged|unauthorized|sign in|rejected.*credentials|credentials.*rejected|invalid.*(?:credential|api key)|oauth.*expired|(?:login|auth(?:entication)?|session).*expired|expired.*(?:oauth|login|auth(?:entication)?|session)|failed to authenticate|re-?authenticate|\b401\b/i;
 
 export function looksLikeProviderAuthFailure(detail: string | null | undefined): boolean {
   return Boolean(detail) && PROVIDER_AUTH_RE.test(detail!);
@@ -194,6 +194,9 @@ export function scanPreflight(probe: ProbeResult, modelChoice?: string): Preflig
   // verbatim. They must reach the editor as the guidance, not be re-labelled
   // "unavailable" and shown alongside sign-in advice for a CLI this choice has
   // nothing to do with.
+  if (/^The Gemini program|^Gemini .*program/i.test(detail)) {
+    return { ok: false, kind: "unconfigured", guidance: detail, detail: "", retryable: false };
+  }
   if (isLocalModelNotReady(detail)) {
     return { ok: false, kind: "unconfigured", guidance: detail, detail: "", retryable: false };
   }

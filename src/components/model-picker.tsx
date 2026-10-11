@@ -388,6 +388,7 @@ export function ModelPicker(props: Props) {
     return writerIsReady({
       choice: value,
       availability: availability.data,
+      localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
       customConnection: isCustomModelChoice(value)
         ? (connections.data?.find((row) => `custom:${row.id}` === value) ?? null)
         : null,
@@ -398,6 +399,7 @@ export function ModelPicker(props: Props) {
       choice: option.value,
       label: option.label,
       availability: availability.data,
+      localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
       customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
     }) ?? "";
   }
@@ -558,7 +560,7 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
-              . For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
+              . For Gemini (Pro plan), install the Gemini program on that computer, run <code>agy</code> and sign in with your Google account. Use <code>GEMINI_CLI_PATH</code> if it is installed elsewhere. No API key is needed. For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
               Ollama Cloud models are hosted and appear separately after Ollama is connected. TownReporter discovers default local addresses automatically. Use{" "}
               <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
               for a different address, model or authenticated server -- see{" "}
