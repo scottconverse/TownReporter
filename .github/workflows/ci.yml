@@ -103,7 +103,7 @@ jobs:
           check run_import_stories '^(scripts/co-transcript-walk\.mjs|scripts/import-stories-e2e\.mjs)$'
           check run_paste_one_story '^(scripts/meeting-settings-e2e\.mjs|scripts/paste-one-story-e2e\.mjs)$'
           check run_import_any_format '^(scripts/import-any-format-e2e\.mjs)$'
-          check run_front_page_river '^(scripts/front-page-river-e2e\.mjs|scripts/paper-panels\.mjs|scripts/stats-privacy-e2e\.mjs)$'
+          check run_front_page_river '^(scripts/front-page-river-e2e\.mjs|scripts/paper-panels\.mjs|scripts/stats-privacy-e2e\.mjs|scripts/reading-stats-export-e2e\.mjs)$'
           check run_import_civic_scanner_v26 '^(scripts/import-civic-scanner-v26-e2e\.mjs)$'
           check run_daily_scan_automatic '^(scripts/daily-scan-automatic-e2e\.mjs)$'
           check run_desk_dark_flash '^(scripts/desk-dark-flash-walk\.mjs|scripts/fb6-desk-feedback-walk\.mjs|scripts/walk-every-control-0681\.mjs)$'
@@ -1629,6 +1629,11 @@ jobs:
       # something to touch. ~9s.
       - name: The Stats page keeps no per-person trace, in a browser
         run: node scripts/stats-privacy-e2e.mjs
+      - name: The Stats screen and CSV agree on loads and visits, in a browser
+        env:
+          BETTER_AUTH_SECRET: ci-reading-stats-export-secret-not-for-production
+          TOWNREPORTER_CLAUDE_CODE: "0"
+        run: node scripts/reading-stats-export-e2e.mjs
       # `npm run check:panels`. The paper's two ink panels, measured in a real
       # browser: white-on-cream text, text past the panel's own right edge, and
       # words broken across lines are all invisible to a font-size floor, to the

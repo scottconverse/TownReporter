@@ -232,6 +232,10 @@ const deskNavUrl = moduleUrl(
   await readFile(new URL("../src/lib/desk-nav.ts", import.meta.url), "utf8"),
   "desk-nav.ts",
 );
+const deskJobGroupsUrl = moduleUrl(
+  await readFile(new URL("../src/lib/desk/desk-job-groups.ts", import.meta.url), "utf8"),
+  "desk-job-groups.ts",
+);
 
 const { DeskShell } = await import(
   moduleUrl(
@@ -265,6 +269,7 @@ const { DeskShell } = await import(
         "export function isAgentKind() { return false; } export function matchesFollowUpFilter() { return false; }",
       ),
       "@/lib/desk-nav": deskNavUrl,
+      "@/lib/desk/desk-job-groups": deskJobGroupsUrl,
       "@/components/desk-chrome-utils": deskChromeUtilsUrl,
 
       "@/components/desk-toaster": deskToasterStub,

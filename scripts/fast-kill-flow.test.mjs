@@ -164,6 +164,7 @@ const deskCopy = await moduleUrl("src/lib/news/desk-copy.ts", {
   "../paper.ts": paperStub,
 });
 const deskNavUrl = await moduleUrl("src/lib/desk-nav.ts", {});
+const deskJobGroupsUrl = await moduleUrl("src/lib/desk/desk-job-groups.ts", {});
 const deskJobsUrl = await moduleUrl("src/components/desk-jobs.ts", {});
 const deskChromeUtils = await moduleUrl("src/components/desk-chrome-utils.ts", {
   "@/components/desk-toast": toastStub,
@@ -186,6 +187,7 @@ const deskChromeUrl = await moduleUrl("src/components/desk-chrome.tsx", {
   "@/lib/news/claim": stub(`export async function leaveEditor() { return { ok: true }; }`),
   "@/lib/news/desk-copy": deskCopy,
   "@/lib/desk-nav": deskNavUrl,
+  "@/lib/desk/desk-job-groups": deskJobGroupsUrl,
   "@/components/desk-chrome-utils": deskChromeUtils,
   "@/components/desk-toaster": stub(`export function DeskToaster() { return null; }`),
   "@/components/desk-jobs": deskJobsUrl,
