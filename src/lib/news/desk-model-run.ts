@@ -40,6 +40,8 @@ export async function runPinnedCallWithFailover<
   run: (snapshot: TSnapshot) => Promise<TResult>;
   probe: typeof probeProvider;
   ladder?: readonly string[];
+  /** Draft writing keeps trying ready rungs until one produces a readable draft. */
+  exhaustLadder?: boolean;
   resolve: (choice: Exclude<ReturnType<typeof import("./model-choice.ts").storyModelChoice>, "auto">) => Promise<TSnapshot>;
   onSwitch: (input: {
     previousLabel: string;
@@ -61,8 +63,8 @@ export async function runPinnedCallWithFailover<
     partialText = result.partialText ?? partialText;
     if (result.ok || !result.error) return { result, snapshot };
     cutOffSeen ||= /reply was cut off/i.test(result.error);
-    // Only cut-off draft steps exhaust the ladder; other callers retain one hop.
-    if (visited.size > 1 && !cutOffSeen) {
+    // Ordinary non-writing calls retain one hop; writers exhaust ready rungs.
+    if (visited.size > 1 && !cutOffSeen && !opts.exhaustLadder) {
       const error = opts.snapshot.modelChoice.startsWith("custom:")
         ? `${trail} -> ${modelChoiceLabel(snapshot.modelChoice)}: ${result.error}` : result.error;
       return {result: {...result,error},snapshot};
@@ -78,7 +80,7 @@ export async function runPinnedCallWithFailover<
     }
     const next = await opts.resolve(plan.next);
     const previousLabel = snapshot.modelLabel ?? modelChoiceLabel(snapshot.modelChoice);
-    const error = /reply was cut off/.test(result.error) ? `${previousLabel}: reply was cut off` : result.error;
+    const error = result.error === "reply was cut off" ? `${previousLabel}: reply was cut off` : result.error;
     await opts.onSwitch({previousLabel, nextLabel: plan.label, nextChoice: plan.next, reason: plan.reason, error});
     trail = trail ? `${trail} -> ${error}` : error;
     snapshot = next;

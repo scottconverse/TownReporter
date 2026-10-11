@@ -32,7 +32,7 @@ import {
   type ModelEffort,
 } from "./provider-registry.ts";
 import { PAPER } from "../paper.ts";
-import { normalizeProviderModelId } from "./provider-model-id.ts";
+import { isGeminiOpenAiEndpoint, normalizeProviderModelId } from "./provider-model-id.ts";
 import type { LocalCatalog } from "./local-models.ts";
 import {
   LOCAL_MODEL_NOTHING_LOADED,
@@ -1091,7 +1091,10 @@ export async function grokChat(
   const payload: Record<string, unknown> = {
     model,
     temperature: 0.2,
-    max_tokens: maxTokens,
+    // Gemini shares its output budget with thinking; the 2,200-token writer
+    // request measured 85 visible tokens. Reserve room for a complete draft.
+    max_tokens: custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)
+      ? Math.max(maxTokens, 16_384) : maxTokens,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -1179,7 +1182,7 @@ export async function grokChat(
     error?: { message?: string; type?: string; code?: string | number } | string;
     model?: string;
     usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-    choices?: { message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
+    choices?: { finish_reason?: string; message?: { content?: string; reasoning_content?: string; reasoning?: string } }[];
   };
   let responseText: string;
   try { responseText = await res.text(); } catch (err) {
@@ -1233,6 +1236,14 @@ export async function grokChat(
   }
   const message = body.choices?.[0]?.message;
   const text = message?.content?.trim() ?? "";
+  if (body.choices?.[0]?.finish_reason === "length") {
+    return {
+      ok: false,
+      error: `${failureLabel}: ${isGeminiOpenAiEndpoint(llm.baseUrl) ? "Google" : "Provider"} says: reply was cut off because the output token limit was reached (finish reason: length).`,
+      ...(text ? { partialText: text } : {}),
+      meta: openAiMeta(body),
+    };
+  }
   if (!text) {
     // A "thinking" model (gemma4, qwen3.x, ...) can spend its whole
     // `max_tokens` budget on `reasoning_content` (most OpenAI-compatible

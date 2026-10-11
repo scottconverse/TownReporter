@@ -705,6 +705,14 @@ it("publishes a killed lead once acknowledged, in one transaction, then audits t
     "published",
     "the killed lead status moved to published atomically",
   );
+  const sql = await getSql();
+  const [override] = await sql.query<{ user_id: string; created_at: string; subject_id: number }>(
+    "select user_id,created_at,subject_id from audit_events where newsroom_id=$1 and action='override' and detail::jsonb->>'key'='lead-killed'",
+    [NEWSROOM],
+  );
+  assert.equal(override.user_id, USER);
+  assert.ok(Number.isFinite(Date.parse(String(override.created_at))));
+  assert.equal(override.subject_id, await draftIdOf(leadId));
 });
 
 /* ------------------------------------------------------------------------ */

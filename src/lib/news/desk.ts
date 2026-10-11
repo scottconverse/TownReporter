@@ -3655,7 +3655,7 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       if (nextChoice) await persistReportSwitch(nextChoice, reason);
     };
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
-      const run = (snapshot: typeof activeReportSnapshot) => storyChat(system, user, maxTokens, {
+      const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => storyChat([system, retryInstruction].filter(Boolean).join("\n\n"), user, maxTokens, {
         timeoutMs: Math.max(
           1,
           options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
@@ -3668,7 +3668,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeReportSnapshot,
         source: job.model_choice_source ?? "editor",
-        run: options?.draftReply ? snapshot => runDraftReply(() => run(snapshot), options.minimumWords) : run,
+        exhaustLadder: options?.draftReply === true,
+        run: options?.draftReply ? snapshot => runDraftReply(instruction => run(snapshot, instruction), options.minimumWords, {
+          requireReadable: true,
+          onRetry: () => setStage(job.id, "Retrying the draft once — reply with JSON only"),
+        }) : run,
         probe: (choice) => probe(choice, job.newsroom_id),
         resolve: async (choice) => ({
           modelChoice: choice,
@@ -3708,9 +3712,9 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
         switchNote: string;
       };
       } = { receipt: null };
-      const run = (snapshot: typeof activeBatchSnapshot) => runForcedChat(
+      const run = (snapshot: typeof activeBatchSnapshot, retryInstruction?: string) => runForcedChat(
         snapshot,
-        system,
+        [system, retryInstruction].filter(Boolean).join("\n\n"),
         user,
         maxTokens,
         { noTools: true, timeoutMs: options?.timeoutMs },
@@ -3719,7 +3723,11 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeBatchSnapshot,
         source: batchWasAutomatic(activeBatchSnapshot) ? "auto" : "editor",
-        run: options?.draftReply ? snapshot => runDraftReply(() => run(snapshot), options.minimumWords) : run,
+        exhaustLadder: options?.draftReply === true,
+        run: options?.draftReply ? snapshot => runDraftReply(instruction => run(snapshot, instruction), options.minimumWords, {
+          requireReadable: true,
+          onRetry: () => setStage(job.id, "Retrying the draft once — reply with JSON only"),
+        }) : run,
         probe: (choice) => probe(choice, job.newsroom_id),
         ladder: batchWasAutomatic(activeBatchSnapshot) ? AUTOMATIC_LADDER : FORCED_FAILOVER_LADDER,
         resolve: (choice) => {

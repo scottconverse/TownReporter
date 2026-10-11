@@ -1460,30 +1460,26 @@ function StoryPage() {
     mutationFn: async (acknowledgedWarningKeys: string[]) => {
       const notesProblem = await saveNotesQuietly();
       /*
-        ── THE DRAFT SAVE IS SKIPPED ON A KILLED, UNCHANGED DRAFT (unit OH) ───
-        `saveDraftForEditor` takes `withLeadDraftLock`, which REFUSES a killed
-        lead even when nothing changed -- so on a killed lead the save below
-        would fail, the thrown reason would stop the print, and the ONE press
-        that is supposed to restore-and-publish could never be made. When the
-        lead is killed and the boxes still match the saved draft, there is
-        nothing to save: the press is the server's atomic restore+print, and the
-        server recomputes the draft it prints. A killed lead whose boxes HAVE
-        changed still goes through the save -- and is refused there, which is the
-        honest answer, not a silent print of unsaved text.
+        An unchanged draft needs no save before the server's atomic publish.
+        The ordinary save refuses killed leads, even for unchanged text. Do
+        not decide whether to skip it from this tab's cached lifecycle status:
+        another control may already have killed the lead. The publish fence
+        recomputes the warnings, restores the lead and audits the override.
+        Changed fields still have to save; silently printing older text would
+        discard the editor's changes.
       */
-      const killedUnchangedSaveIsRedundant =
-        data?.lead.status === "killed" &&
+      const unchangedSaveIsRedundant =
         savedDraftFields !== null &&
         draftFieldsMatch(savedDraftFields, { headline, dek, body, topic });
-      if (!killedUnchangedSaveIsRedundant) {
+      if (!unchangedSaveIsRedundant) {
         try {
-        await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
-      } catch (err) {
-        throw new Error(
-          editorActionError(err instanceof Error ? err.message : "", "save your edits") ??
-            "The desk could not save your edits, so nothing was published. Try again.",
-        );
-      }
+          await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+        } catch (err) {
+          throw new Error(
+            editorActionError(err instanceof Error ? err.message : "", "save your edits") ??
+              "The desk could not save your edits, so nothing was published. Try again.",
+          );
+        }
       }
       return {
         result: await publishLead({
