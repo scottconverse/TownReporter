@@ -15,6 +15,7 @@ import {
   actionEvidenceLine,
   claimBadge,
   hasReportingPackage,
+  heldRecommendationCopy,
   heldLine,
   methodLine,
   packageGaps,
@@ -223,7 +224,8 @@ function PackageBody({
       ) : null}
       {report.held.length ? (
         <section className="reporting-held" aria-label="Held possibilities">
-          <h3>Held for later</h3>
+          <h3>{heldRecommendationCopy().heading}</h3>
+          <p>{heldRecommendationCopy().detail}</p>
           <ul>
             {report.held.map((held, index) => (
               <li key={`${held.storyId}-${index}`}>

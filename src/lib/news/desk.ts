@@ -221,8 +221,8 @@ import {
 } from "./outlet-credit";
 import {
   buildScanUserMessage,
+  composeScanHandoffSummary,
   composeScanRunSummary,
-  composeZeroLeadSummary,
   editorFetchError,
   kindFromSourceUrl,
   tierFromKind,
@@ -3036,6 +3036,7 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       standingPageDropped,
       noEventDropped,
       firstDroppedReason,
+      filedHeadlines,
     } = await fileScanLeads(
       writeSql,
       context,
@@ -3127,15 +3128,18 @@ export const performScanWork = createServerOnlyFn(async function performScanWork
       firstDiscardedHeadline,
       mergedSameScan,
     });
-    let editorSummary = String(data.editor_summary ?? "").trim();
-    if (leadsCreated === 0 && !editorSummary)
-      editorSummary = composeZeroLeadSummary({
-        fetched: fetchedCount,
-        changed: pendingHashes.filter((p) => p.changed).length,
-      });
-    // The assembly -- counts and the coverage line first, the model's
-    // paragraph trimmed to the room left -- lives in desk-copy.ts so the
-    // folding is testable without a database (see composeScanRunSummary).
+    // The model's paragraph can name candidates that the duplicate, event or
+    // filing checks did not insert. Build the history narrative from the
+    // actual inserted headlines and the batches that ran instead.
+    const editorSummary = composeScanHandoffSummary({
+      sourcesAnalyzed: analyzedSourceCount,
+      analysisBatches: batches.length,
+      batchesFailed,
+      candidateHandoffs: data.leads.length,
+      filedHeadlines,
+    });
+    // Counts and coverage clauses remain assembled by this pure helper so
+    // every handoff survives the persisted summary limit.
     let summary = composeScanRunSummary({
       editorSummary,
       decisionsSentence,

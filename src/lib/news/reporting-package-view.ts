@@ -279,3 +279,10 @@ export function hasReportingPackage(report: ReportingPackage | null): report is 
 export function heldLine(held: PackageHeld): string {
   return held.unverified ? held.headline + " (unresolved)" : held.headline;
 }
+
+export function heldRecommendationCopy(): { heading: string; detail: string } {
+  return {
+    heading: "AI recommends holding these items for now",
+    detail: "This is the reporting run's recommendation. It does not change the saved lead status in the Queue.",
+  };
+}

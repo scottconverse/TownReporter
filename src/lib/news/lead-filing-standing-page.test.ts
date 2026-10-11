@@ -132,6 +132,10 @@ test("run 66's standing pages are dropped; the published leads beside them file"
     );
 
     assert.equal(result.leadsCreated, 2, "the two published leads are what the run found");
+    assert.deepEqual(result.filedHeadlines, [
+      "Recovery Cafe Longmont lists meditation, film and recovery-circle sessions for Sept. 25",
+      "Longmont Public Library Lists Regular Hours and Shoutbomb Text Notification Signup",
+    ], "the history narrative can use the actual inserted titles");
     assert.equal(result.standingPageDropped, 3, "the three standing pages were dropped as pages");
     assert.equal(result.noEventDropped, 1, "the model's own verdict dropped the museum page");
     assert.equal(

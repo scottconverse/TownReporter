@@ -364,11 +364,39 @@ const SEARCH_JUDGE_SYSTEM = [
   "Only set answers to true when a result actually establishes the fact asked for. A related page, a directory listing or an older story about the same topic is false.",
 ].join("\n");
 
-/** The query: the editor's question, as written. Truncated to what a search
- * provider will take, and stripped of the trailing question mark that some
- * providers treat as a literal token. */
+/** Build a search query from the subject, not the run label or generic task
+ * instructions sometimes saved beside it. */
 export function searchQuestionFor(what: string): string {
-  return what.trim().replace(/\?+\s*$/, "").slice(0, 180);
+  const subject = what
+    .trim()
+    .replace(/^[A-Z][A-Z0-9 _-]{1,40}:\s*/, "")
+    .split(/\s+(?:Report what changed|State explicitly|Tell me what changed|If nothing changed)\b/i, 1)[0]!
+    .replace(/^(?:please\s+)?(?:re[- ]?check|check|review|research)\s+/i, "")
+    .replace(/[.?!]+\s*$/, "")
+    .trim();
+  return subject.slice(0, 180);
+}
+
+const SEARCH_SUBJECT_STOPWORDS = new Set([
+  "about", "after", "are", "been", "before", "change", "changed", "check", "does", "for", "from",
+  "has", "have", "into", "is", "it", "latest", "new", "posted", "report", "recheck", "the", "this",
+  "was", "were", "what", "when", "where", "which", "will", "with",
+]);
+
+function searchSubjectWords(value: string): string[] {
+  return [...new Set(value.toLocaleLowerCase("en-US").match(/[\p{L}\p{N}]+/gu) ?? [])]
+    .filter((word) => word.length >= 4 && !SEARCH_SUBJECT_STOPWORDS.has(word));
+}
+
+function searchHasRelevantEvidence(question: string, hits: readonly WebHit[]): boolean {
+  const subjectWords = searchSubjectWords(question);
+  const distinctive = new Set(subjectWords.filter((word) => word.length >= 8));
+  for (const hit of hits) {
+    const resultWords = new Set(searchSubjectWords(`${hit.title} ${hit.snippet ?? ""}`));
+    const shared = subjectWords.filter((word) => resultWords.has(word));
+    if (shared.length >= 2 || shared.some((word) => distinctive.has(word))) return true;
+  }
+  return false;
 }
 
 async function defaultSearch(question: string, newsroomId: number): Promise<SearchAttempt> {
@@ -490,6 +518,9 @@ export async function runSearchAgent(
   if (!verdict.ok) {
     // Not `no-change`: the judge failing is the agent being unable to check.
     return couldNotCheck(`Could not tell whether the results answer it: ${verdict.error}`);
+  }
+  if (!verdict.answers && !searchHasRelevantEvidence(question, hits)) {
+    return couldNotCheck("The search returned no result about the subject, so this check could not tell whether anything changed.");
   }
   if (!verdict.answers) {
     return {
