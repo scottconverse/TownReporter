@@ -263,7 +263,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     assert.equal(Number(count), 0);
   });
 
-  it("files a lead with the pasted text kept as scratch, then probes readiness before enqueuing", async () => {
+  it("probes readiness once, then files a lead with pasted text kept as scratch and enqueues", async () => {
     const sql = await ensureWriteStorySchema();
     const userId = `write-story-file-${Date.now()}-${Math.random()}`;
     let probeCalls = 0;
@@ -314,7 +314,7 @@ describe("writeStoryForAuthenticatedEditor", () => {
     assert.deepEqual(JSON.parse(draft.source_urls), ["https://example.org/agenda"]);
   });
 
-  it("warns before drafting and keeps the filed lead when the provider is not ready", async () => {
+  it("warns before filing any story when the provider is not ready", async () => {
     await ensureWriteStorySchema();
     const userId = `write-story-noprovider-${Date.now()}-${Math.random()}`;
     const NOT_INSTALLED = "Codex CLI not found on PATH.";
@@ -331,17 +331,20 @@ describe("writeStoryForAuthenticatedEditor", () => {
     );
     assert.equal(res.ok, false);
     if (res.ok) return assert.fail("an unavailable provider must warn before drafting");
-    if (!("leadId" in res)) return assert.fail("the failed draft must retain its filed lead");
-    assert.ok(res.leadId, "the lead is filed before the provider is asked");
+    assert.equal("leadId" in res ? res.leadId : undefined, undefined, "waiting for consent must not file a lead");
     assert.ok("warning" in res);
     assert.equal(res.warning.key, "writer-not-ready");
     assert.match(res.error, /Codex.*not found.*If you draft anyway/i);
 
     const sql = await getSql();
     const [{ count }] = await sql<{ count: number }>`
-      select count(*) as count from leads where id = ${res.leadId}
+      select count(*) as count from leads where user_id = ${userId}
     `;
-    assert.equal(Number(count), 1);
+    assert.equal(Number(count), 0);
+    const [{ drafts }] = await sql<{ drafts: number }>`
+      select count(*) as drafts from drafts where user_id = ${userId}
+    `;
+    assert.equal(Number(drafts), 0);
   });
 
   it("lets this newsroom's own section name and brief decide the beat", async () => {
