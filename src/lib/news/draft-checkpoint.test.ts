@@ -95,15 +95,8 @@ test("document reading retries only the failed chunk and keeps completed chunks"
     {
       modelEffort: "none",
       source: "auto",
-      /*
-        0.6.63 Unit Y: the ladder is DeepSeek v4.1 Flash -> Qwen 3.6 35B ->
-        Codex Terra. This fixture used to start on Codex Terra -- the old
-        ladder's last rung -- and hop to Claude Sonnet. A hop only ever goes
-        FORWARD, so a row on the last rung has nowhere to go and the retry
-        never happens at all; the row starts at the first rung now, and the
-        probe answers about the rung it was handed instead of naming one
-        provider for every rung.
-      */
+      /* Start on DeepSeek so the failed second evidence call advances to
+         the next rung, preserving the completed first evidence slice. */
       probe: async (choice) => ({
         ok: true,
         label: modelChoiceLabel(choice),
@@ -173,7 +166,7 @@ test("Story retries only the failed writer call and keeps completed research", a
       if (providerCalls.length === 2) {
         await new Promise((resolve) => setTimeout(resolve, 40));
         const [progress] = await sql.query<{ step_text: string }>("select step_text from desk_jobs where id=$1", [job.id]);
-        assert.match(progress.step_text, /Waiting on DeepSeek v4\.1 Flash/);
+        assert.match(progress.step_text, /Waiting on Gemini 3\.8 Flash \(Pro plan\)/);
       }
       return providerCalls.length === 1
         ? { ok: false as const, error: "Codex request timed out after 150s, 0 bytes out" }
@@ -192,17 +185,13 @@ test("Story retries only the failed writer call and keeps completed research", a
   assert.equal(reportCalls, 1, "the reporting pipeline must not restart");
   assert.equal(upstreamResearchCalls, 1, "completed ingestion/search/report gathering must be reused");
   /*
-    0.6.63 Unit Y: the ladder is DeepSeek v4.1 Flash -> Qwen 3.6 35B -> Codex
-    Terra, and Claude Sonnet left it. This row is an explicit pick sitting on
-    the ladder's LAST rung, so no rung follows it and -- for an explicit pick
-    that is not on the ladder -- `planAutomaticFailover` restarts the walk
-    from the ladder's top: DeepSeek. The fixture used to expect Claude Sonnet
-    because its probe named that one provider for every rung it was handed;
-    the probe now answers about the rung it actually got.
+    Release H adds Gemini Flash after balanced Codex. This explicit Codex
+    choice moves forward to Gemini without repeating completed research;
+    the selected low effort follows the unfinished writer call.
   */
   assert.deepEqual(providerCalls, [
     { choice: "codex-balanced", effort: "low" },
-    { choice: "deepseek-flash", effort: "low" },
+    { choice: "gemini-flash", effort: "low" },
   ]);
 });
 

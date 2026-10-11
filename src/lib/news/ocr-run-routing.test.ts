@@ -325,9 +325,9 @@ describe("ordinary public-document OCR model routing", () => {
     const priorTerraModel = process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
     try {
       delete process.env.TOWNREPORTER_CODEX_TERRA_MODEL;
-      // The writing/research ladder exactly as 0.6.63 ships it: DeepSeek, then
-      // Qwen on this computer, then Codex Terra. OCR must not follow it.
-      assert.deepEqual([...automaticLadder()], ["deepseek-flash", "qwen-local", "codex-balanced"]);
+      // Writing now tries DeepSeek, Local model, balanced Codex, then Gemini.
+      // OCR keeps its own vision-capable Codex -> Claude order.
+      assert.deepEqual([...automaticLadder()], ["deepseek-flash", "qwen-local", "codex-balanced", "gemini-flash"]);
 
       const selected: string[] = [];
       const result = await productionOcr(singleRenderedPdfFixture(), {
