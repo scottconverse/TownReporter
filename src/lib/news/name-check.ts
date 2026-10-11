@@ -22,6 +22,33 @@ export type NameCheck = {
 };
 export const nameCheckText = (draft: { headline: string; dek: string; body: string }) =>
   [draft.headline, draft.dek, draft.body].join("\n\n");
+
+export type ReportedDocumentClaim = {
+  fact: string;
+  kind: string;
+  filename: string;
+  locator: string;
+  excerpt: string;
+};
+
+/** Uploaded passage selections belong to the exact draft text that produced them. */
+export function selectedDocumentClaimsForDraft(
+  raw: string | null | undefined,
+  draft: { headline: string; dek: string; body: string },
+): ReportedDocumentClaim[] {
+  try {
+    const memo = JSON.parse(raw ?? "{}");
+    const record = memo?.reportedDocumentClaims;
+    if (record?.checkedText !== nameCheckText(draft) || !Array.isArray(record.rows)) return [];
+    return record.rows.filter((row: unknown): row is ReportedDocumentClaim => {
+      if (!row || typeof row !== "object") return false;
+      const value = row as Record<string, unknown>;
+      return ["fact", "kind", "filename", "locator", "excerpt"].every((key) => typeof value[key] === "string");
+    });
+  } catch {
+    return [];
+  }
+}
 export function readNameCheck(raw: string | null | undefined): NameCheck | null {
   try {
     const check = JSON.parse(raw ?? "{}").nameCheck;

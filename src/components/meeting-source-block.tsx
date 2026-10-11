@@ -54,6 +54,7 @@ export function MeetingSourceBlock({
   onReverify,
   reverifying = false,
   evidenceToken = "",
+  manualCheckRecorded = false,
 }: {
   notes: Pick<ReportingNotes, "meeting" | "transcriptCitations">;
   usedEvidence?: DraftMeetingEvidence | null;
@@ -62,6 +63,7 @@ export function MeetingSourceBlock({
   onReverify?: (review: { confirmedSegmentIndexes: number[]; note: string }) => void;
   reverifying?: boolean;
   evidenceToken?: string;
+  manualCheckRecorded?: boolean;
 }) {
   const candidates = meetingCitationsFor(notes);
   const visibleCandidates = candidates.slice(0, 50);
@@ -216,7 +218,9 @@ export function MeetingSourceBlock({
         </>
       ) : (
         <p className="note-one note-gate">
-          This lead has transcript material, but the current draft has no complete persisted used-citation record. Publishing will remain blocked until it is redrafted from the current recording.
+          {manualCheckRecorded
+            ? "You confirmed that you checked this story against your sources. This draft has no saved transcript citation list; the transcript is available below if you need to review it again."
+            : "This lead has transcript material, but this draft has no saved transcript citation list. Compare the story with the transcript below and record your check under Checks, or redraft from the recording."}
         </p>
       )}
       {/*

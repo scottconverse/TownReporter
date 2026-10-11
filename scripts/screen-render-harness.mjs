@@ -60,7 +60,7 @@ export async function screenModuleUrl(path, overrides = {}, real = []) {
               "./preflight.ts": stubUrl(
                 "export const looksLikeProviderAuthFailure=()=>false,providerAuthTarget=()=>null;",
               ),
-              "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>null;"),
+              "./lead-match.ts": stubUrl("export const distinguishingOverlap=()=>null; export const titleEntityOverlap=()=>false;"),
               "../paper.ts": await runtimeModule(new URL("../src/lib/paper.ts", import.meta.url)),
             })
           : await runtimeModule(new URL(`../${file}`, import.meta.url));

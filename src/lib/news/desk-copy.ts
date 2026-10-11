@@ -1184,7 +1184,7 @@ export function stalledRunCopy(kind: "scan" | "dark" | "draft" | "editorial"): s
  */
 export const DRAFT_JOB_STALE_AFTER_SECONDS = 120;
 
-export type DraftJobUiState = "idle" | "drafting" | "recovering" | "failed" | "done";
+export type DraftJobUiState = "idle" | "queued" | "drafting" | "recovering" | "failed" | "done";
 
 /**
  * One state per draft job, derived from the job row alone -- nothing sticky,
@@ -1198,7 +1198,8 @@ export type DraftJobUiState = "idle" | "drafting" | "recovering" | "failed" | "d
  * clearing that stale message. A job can only be in one of these states;
  * compute it fresh every render instead of remembering it.
  *
- * - "drafting": queued, or running with a fresh heartbeat.
+ * - "queued": waiting for a worker. Queue age does not mean the app restarted.
+ * - "drafting": running with a fresh heartbeat.
  * - "recovering": running but the heartbeat has gone cold for longer than
  *   the reclaim window -- the app most likely restarted mid-draft. The
  *   drainer in `./jobs.ts` will reclaim and re-run this same job on its own;
@@ -1217,12 +1218,17 @@ export function resolveDraftJobState(
   if (!job) return "idle";
   if (job.status === "completed") return "done";
   if (job.status === "failed") return "failed";
-  if (job.status === "running" || job.status === "queued") {
+  if (job.status === "queued") return "queued";
+  if (job.status === "running") {
     const updated = Date.parse(job.updated_at ?? "");
     const stale = Number.isFinite(updated) && nowMs - updated > DRAFT_JOB_STALE_AFTER_SECONDS * 1000;
     return stale ? "recovering" : "drafting";
   }
   return "idle";
+}
+
+export function queuedDraftCopy(): string {
+  return "Queued, waiting for the writing worker.";
 }
 
 /**

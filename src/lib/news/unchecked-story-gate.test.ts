@@ -158,6 +158,22 @@ describe("uncheckedStoryNeedsCheck", () => {
     assert.equal(result.reason, UNCHECKED_STORY_REASON);
   });
 
+  it("describes uploaded passage matches without calling them evidence judgments", () => {
+    const result = uncheckedStoryNeedsCheck({
+      recordedClaims: 0,
+      evidenceCheckedCurrentVersion: false,
+      body: "The council approved the $547.5 million budget on Tuesday.",
+      acknowledgedForVersion: false,
+      exempt: false,
+      documentPassageCount: 5,
+    });
+    assert.equal(result.blocked, true);
+    assert.match(result.reason, /5 selected passages/);
+    assert.match(result.reason, /automatic evidence check has not recorded claim judgments/);
+    assert.match(result.reason, /do not verify every statement/);
+    assert.doesNotMatch(result.reason, /no claims were recorded|nothing has been checked/i);
+  });
+
   it("does not block a zero-claims body with nothing checkable in it", () => {
     const result = uncheckedStoryNeedsCheck({
       recordedClaims: 0,

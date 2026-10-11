@@ -38,6 +38,8 @@ export function EvidenceCheckList({
   onMarkChecked,
   busy = false,
   readinessReason,
+  manualCheckRecorded = false,
+  documentPassageCount = 0,
 }: {
   /** "Ran 8:14 a.m. · Claude Sonnet · checked against 3 captures", or "". */
   ranLine: string;
@@ -62,6 +64,10 @@ export function EvidenceCheckList({
   onMarkChecked?: (row: EvidenceListRow) => void;
   busy?: boolean;
   readinessReason?: string;
+  /** The editor recorded the version-bound "I checked this story myself" choice. */
+  manualCheckRecorded?: boolean;
+  /** Selected uploaded passages for the exact text now on screen. */
+  documentPassageCount?: number;
 }) {
   const [spotChecking, setSpotChecking] = useState(false);
   const supported = rows.filter((row) => row.aiVerdict === "Supported");
@@ -94,6 +100,7 @@ export function EvidenceCheckList({
     <section className="astra-evidence" aria-label="Evidence check">
       <h2 className="astra-evidence-title">Evidence check</h2>
       {readinessReason ? <p role="status">{readinessReason}</p> : null}
+      {manualCheckRecorded ? <p role="status">Manual check recorded. You confirmed that you checked this story against your sources. Automatic evidence judgments have not been recorded for this draft.</p> : null}
       {checked ? <p role="status">AI checked {checked} claims against the record: {supported.length} supported, {checked - supported.length} need you</p> : null}
       {ranLine ? (
         <p className="astra-evidence-ran" role="status">
@@ -105,7 +112,11 @@ export function EvidenceCheckList({
         <button type="button" className="btn" disabled={busy || !onAcceptSupported} onClick={onAcceptSupported}>Accept the AI's supported rows</button>
       </> : null}
       {rows.length === 0 ? (
-        <p className="meta">No claims are recorded for this draft yet.</p>
+        documentPassageCount > 0 ? (
+          <p className="meta" role="status">{documentPassageCount} uploaded passage{documentPassageCount === 1 ? " was" : "s were"} matched to selected claims, but no evidence judgments have been recorded for the claims in this story. These passage matches do not verify every statement.</p>
+        ) : manualCheckRecorded ? null : (
+          <p className="meta" role="status">No automatic evidence judgments are recorded for this draft yet.</p>
+        )
       ) : (
         renderRows(exceptions)
       )}

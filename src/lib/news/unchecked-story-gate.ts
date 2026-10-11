@@ -17,7 +17,13 @@ import type { DraftRow } from "./types.ts";
 
 /** The one sentence the blocker, the refusal and the readiness reason all use. */
 export const UNCHECKED_STORY_REASON =
-  "No claims were recorded for this story, so nothing has been checked. Run the evidence check, or read it against your sources and press 'I checked this story myself'.";
+  "The automatic evidence check has not recorded claim judgments for this draft. Run the evidence check, or read it against your sources and press 'I checked this story myself'.";
+
+export function uncheckedStoryReason(documentPassageCount = 0): string {
+  if (documentPassageCount <= 0) return UNCHECKED_STORY_REASON;
+  const count = Math.floor(documentPassageCount);
+  return `The uploaded document has ${count} selected passage${count === 1 ? "" : "s"} for this draft, but the automatic evidence check has not recorded claim judgments. These passage matches do not verify every statement. Run the evidence check, or read the story against your sources and press 'I checked this story myself'.`;
+}
 
 const MONTHS =
   /\b(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec)\b/i;
@@ -100,11 +106,12 @@ export function uncheckedStoryNeedsCheck(input: {
   body: string;
   acknowledgedForVersion: boolean;
   exempt: boolean;
+  documentPassageCount?: number;
 }): UncheckedStoryDecision {
   if (input.exempt) return { blocked: false, reason: "" };
   if (input.recordedClaims > 0) return { blocked: false, reason: "" };
   if (input.evidenceCheckedCurrentVersion) return { blocked: false, reason: "" };
   if (input.acknowledgedForVersion) return { blocked: false, reason: "" };
   if (!bodyHasCheckableFact(input.body)) return { blocked: false, reason: "" };
-  return { blocked: true, reason: UNCHECKED_STORY_REASON };
+  return { blocked: true, reason: uncheckedStoryReason(input.documentPassageCount) };
 }
