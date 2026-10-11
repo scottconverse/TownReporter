@@ -917,6 +917,7 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
     await readFile(new URL("../src/components/desk-lead-compare.tsx", import.meta.url), "utf8"),
     "desk-lead-compare.tsx",
     {
+      "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
       "@/components/states": statesStub,
