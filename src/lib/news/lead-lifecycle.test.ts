@@ -15,7 +15,7 @@ function makeSql(db: PGlite): SqlTag {
 test("drafted and published leads refuse backward status changes and duplicate reopen", async () => {
   const db = new PGlite();
   try {
-    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
       create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default 'Saved prose', research_json text default '{}');
       create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
       insert into leads(id,newsroom_id,status,possible_duplicate_of,killed_at,kill_reason,kill_reason_url) values (1,7,'drafted',null,null,null,null),(2,7,'published',null,null,null,null),(3,7,'held',1,null,null,null),(4,7,'held',2,null,null,null);
@@ -58,6 +58,26 @@ test("empty placeholder drafts allow hold and duplicate reopen while prose and i
     assert.equal((await setLeadStatusForEditor(sql, 7, { id: 7, status: "held" })).ok, false);
     assert.deepEqual((await sql<{ status: string }>`select status from leads order by id`).map(row => row.status),
       ["held", "new", "held", "new", "killed", "held", "new"]);
+  } finally {
+    await db.close();
+  }
+});
+
+test("Not a duplicate moves a killed lead to New and clears its duplicate link", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      insert into leads(id,newsroom_id,status,possible_duplicate_of,killed_at,kill_reason,kill_reason_url)
+      values (11,7,'killed',10,now(),'Already covered',null);`);
+    const sql = makeSql(db);
+    const result = await resolveLeadDuplicateForEditor(sql, 7, { id: 11, action: "not-a-duplicate" });
+    assert.equal(result.ok, true);
+    const [lead] = await sql<{ status: string; possible_duplicate_of: number | null }>`
+      select status, possible_duplicate_of from leads where id = 11
+    `;
+    assert.deepEqual(lead, { status: "new", possible_duplicate_of: null });
   } finally {
     await db.close();
   }

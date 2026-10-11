@@ -920,6 +920,8 @@ const { LeadComparePanel, KilledLeadRecord } = await import(
       "../lib/news/desk-warning.ts": await sharedModuleUrl("src/lib/news/desk-warning.ts"),
       "@tanstack/react-router": reactRouterStub,
       "@/components/desk-chrome": deskChromeStub,
+      "@/components/desk-toast": deskToastStub,
+      "@/components/fast-kill": inlineModule("export const KILL_TOAST_MS = 15000;"),
       "@/components/states": statesStub,
       "@/lib/paper": paperStub,
       "@/lib/news/desk-copy": deskCopy,

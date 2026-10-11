@@ -49,7 +49,12 @@ export type CompareSide = {
 
 /** What a press reports back. `false` means it did not land, and the panel
  * says so in the editor's words rather than the server's. */
-export type CompareResult = { ok: boolean; error?: string };
+export type CompareResult = {
+  ok: boolean;
+  error?: string;
+  warning?: { key: string; sentence: string };
+  undo?: () => Promise<void>;
+};
 
 export function LeadComparePanel({
   current,
@@ -62,8 +67,8 @@ export function LeadComparePanel({
 }: {
   current: CompareSide;
   prior: CompareSide;
-  onNotADuplicate?: () => Promise<CompareResult>;
-  onKillThis?: () => Promise<CompareResult>;
+  onNotADuplicate?: (override?: string[]) => Promise<CompareResult>;
+  onKillThis?: (override?: string[]) => Promise<CompareResult>;
   onReopenPrior?: () => Promise<CompareResult>;
   matchReason?: string;
   /** The paper's own date formatter, passed in so the panel renders the same
@@ -76,7 +81,7 @@ export function LeadComparePanel({
 
   const run = (
     which: "not-a-duplicate" | "kill" | "reopen",
-    press: (() => Promise<CompareResult>) | undefined,
+    press: ((override?: string[]) => Promise<CompareResult>) | undefined,
   ) => {
     if (!press || busy) return;
     setBusy(which);
@@ -246,7 +251,7 @@ export function KilledLeadRecord({
   return (
     <section className="lead-killed-record" aria-labelledby="lead-killed-heading">
       <h2 id="lead-killed-heading" className="lead-compare-headline">
-        {KILLED_LEAD_HEADING}
+        {reopened ? editorTitle(lead.headline) : KILLED_LEAD_HEADING}
       </h2>
       <p className="meta">
         <Chip s={lead.status} />

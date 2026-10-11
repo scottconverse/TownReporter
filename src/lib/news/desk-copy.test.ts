@@ -21,6 +21,7 @@ import {
   REOPEN_PRIOR_LABEL,
   reopenedPriorNote,
   DEVELOPING_LABEL,
+  storyLeadSectionLabel,
   editorError,
   editorActionError,
   editorDraftError,
@@ -2061,6 +2062,11 @@ describe("Unit AK: duplicate and kill wording", () => {
       reopenedPriorNote("  Juvenile altercation  "),
       "Reopened Juvenile altercation — it is back on the desk as New.",
     );
+  });
+
+  it("names the Story section only after the editor has chosen it", () => {
+    assert.equal(storyLeadSectionLabel(false, "Council"), "Section not chosen");
+    assert.equal(storyLeadSectionLabel(true, "Infrastructure"), "Infrastructure");
   });
 
   it("keeps the two presses that settle a duplicate saying the same thing", () => {

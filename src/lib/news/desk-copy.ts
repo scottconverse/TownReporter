@@ -2348,6 +2348,11 @@ export function comparePressNote(
 export const KILLED_LEAD_HEADING = "This lead was killed";
 export const REOPEN_LABEL = "Reopen";
 
+/** The story workbench must not turn a fallback topic into a chosen section. */
+export function storyLeadSectionLabel(sectionChosen: boolean, sectionName: string): string {
+  return sectionChosen ? sectionName : "Section not chosen";
+}
+
 /** Unit AK item 2: the plain-words label on a finding filed HELD against a
  * killed lead because it carries facts the killed lead did not have. */
 export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";

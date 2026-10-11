@@ -1,5 +1,5 @@
 import { useDeskMutation } from "@/components/desk-action";
-import { setLeadStatus } from "@/lib/news/desk";
+import { resolveLeadDuplicate as resolveLeadDuplicateRaw, setLeadStatus as setLeadStatusRaw } from "@/lib/news/desk";
 import { requestDraftReconciliationFn } from "@/components/scoped-actions";
 import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFromLedger } from "@/components/scoped-actions";
 import { NativeDialog } from "@/components/dialog";
@@ -25,6 +25,7 @@ import { PublishBarDone, PublishBarResult, PublishTranscriptNotice } from "@/com
 import { PublishConfirmation } from "@/components/publish-confirmation";
 import { ActionButton, type ActionPhase } from "@/components/action-button";
 import { KilledLeadRecord, LeadComparePanel } from "@/components/desk-lead-compare";
+import { KILL_TOAST_MS, restoreStatus } from "@/components/fast-kill";
 import { StoryDocumentList, StoryDocumentPartialNotice } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { readNameCheck } from "@/lib/news/name-check";
@@ -70,6 +71,7 @@ import {
   rewritePublishedStory,
   saveDraft,
   saveReportingNotes,
+  restoreKilledLead,
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
@@ -98,10 +100,13 @@ import {
   editorActionError,
   editorDraftError,
   expectedDraftJobHasLanded,
+  killedAsDuplicateNote,
+  movedToNewNote,
   initialStoryTopic,
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
+  storyLeadSectionLabel,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -1764,40 +1769,67 @@ function StoryPage() {
     [liveWarning?.kind, reverifyLive, rewriteLive, draftMeetingReview, saveLiveChange],
   );
 
-  /*
-   * Unit AK items 5 and 6: the Compare view's three presses and the Reopen on
-   * a killed lead's page.
-   *
-   * These are plain callbacks rather than useMutation()s because each one has
-   * to hand a result back to the panel that pressed it -- "did that land?" is
-   * the whole point of the press, and a fire-and-forget mutation cannot answer.
-   * Every branch below returns `{ ok: false, error }` with a sentence, so a
-   * refusal from the desk is shown, not swallowed.
-   */
   const afterLeadChange = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: ["lead", id] });
     await qc.invalidateQueries({ queryKey: ["leads"] });
   }, [qc, id]);
 
-  const moveToNew = useCallback(async () => {
-    const res = await resolveLeadDuplicate({ data: { id, action: "not-a-duplicate" } });
-    if (!answered(res)) return { ok: false, error: NO_ANSWER };
-    if (!res.ok) return { ok: false, error: res.error };
-    await afterLeadChange();
-    return { ok: true };
-  }, [id, afterLeadChange]);
+  const moveToNewMutation = useDeskMutation({
+    mutationFn: (input: { id: number; action: "not-a-duplicate"; headline: string; override?: string[] }) =>
+      resolveLeadDuplicateRaw({ data: { id: input.id, action: input.action, override: input.override } }),
+    warningAction: "Move to New",
+    pending: "Moving to New…",
+    done: (_result, input) => input.override?.length ? movedToNewNote(input.headline) : "",
+    after: afterLeadChange,
+    failedLead: "Could not move that lead to New. ",
+  });
+  const moveToNew = useCallback(
+    () => moveToNewMutation.mutateAsync({ id, action: "not-a-duplicate", headline: data?.lead.headline ?? "" }),
+    [data?.lead.headline, id, moveToNewMutation],
+  );
 
   const storyStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "killed" | "new"; killReason?: string; override?: string[] }) => setLeadStatus({ data: input }),
+    mutationFn: (input: {
+      id: number;
+      status: "killed" | "new";
+      killReason?: string;
+      duplicateOf?: string;
+      override?: string[];
+      restore?: ReturnType<typeof restoreStatus>;
+    }) => setLeadStatusRaw({ data: {
+      id: input.id,
+      status: input.status,
+      killReason: input.killReason,
+      override: input.override,
+    } }),
     warningAction: (input) => input.status === "killed" ? "Kill" : "Reopen",
-    pending: "Saving…", done: (_res, input) => input.status === "killed" ? "The lead moved to Killed." : "The lead is open again.",
+    pending: "Saving…",
+    done: (_res, input) => input.status === "killed"
+      ? input.duplicateOf ? killedAsDuplicateNote(input.duplicateOf) : "The lead moved to Killed."
+      : "The lead is open again.",
+    undo: (_res, input) => input.status === "killed" ? {
+      label: "Undo",
+      run: async () => {
+        const undone = await restoreKilledLead({ data: { id: input.id, status: input.restore ?? "new" } });
+        if (!answered(undone)) throw new Error(NO_ANSWER);
+        if (!undone.ok) throw new Error(undone.error || "The lead could not be restored.");
+        await afterLeadChange();
+      },
+    } : null,
+    duration: (_res, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
     after: afterLeadChange,
     failedLead: "Could not change that lead. ",
   });
   const killAsDuplicateOfPrior = useCallback(async () => {
     const prior = data?.lead.possible_duplicate;
     if (!prior) return { ok: false, error: "The earlier lead is no longer available to name." };
-    return await storyStatus.mutateAsync({ id, status: "killed", killReason: duplicateKillReason(prior.headline) });
+    return await storyStatus.mutateAsync({
+      id,
+      status: "killed",
+      killReason: duplicateKillReason(prior.headline),
+      duplicateOf: prior.headline,
+      restore: restoreStatus(data?.lead.status),
+    });
   }, [data, id, storyStatus]);
 
   const reopenPrior = useCallback(async () => {
@@ -2095,6 +2127,7 @@ function StoryPage() {
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
+  const storyHeaderSection = storyLeadSectionLabel(sectionReady, sectionNameNow);
   /*
     ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
 
@@ -2640,7 +2673,7 @@ function StoryPage() {
           plain words; the raw lines stay inside for support.
         */}
       <div className="astra-wb-context">
-        <span>Story from lead · {sectionNameNow}</span>
+        <span>Story from lead · {storyHeaderSection}</span>
         <StoryReadinessChip readiness={draftReadiness} />
         {data.draft && draftReadiness.state !== "ready" ? <span className="meta">{draftReadiness.reason}</span> : null}
         {/*
