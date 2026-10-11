@@ -245,6 +245,17 @@ describe("Unit BB: local model picker load state", () => {
         assert.ok(result.skippedRungs?.includes("No model is loaded on this computer."));
         assert.equal(wroteChatCall(servers.log), false);
       });
+      resetLocalCatalogCacheForTests();
+      const loaded: FakeServers = {lmStudio: [], ollama: {ids: [...CLOUD_IDS, "gemma4:12b"], running: ["gemma4:12b"]}, log: []};
+      await withFetch(fakeFetch(loaded), async () => {
+        const result = await probeProvider("auto", NEWSROOM_ID, undefined, "story");
+        assert.equal(result.ok, true);
+        if (result.ok) {
+          assert.equal(result.choice, "local-model");
+          assert.deepEqual(result.localModel, {baseUrl: OLLAMA_BASE, id: "gemma4:12b"});
+        }
+        assert.equal(wroteChatCall(loaded.log), false);
+      });
     } finally {
       keys.forEach((key,index) => { if(old[index] === undefined) delete process.env[key]; else process.env[key] = old[index]; });
     }
