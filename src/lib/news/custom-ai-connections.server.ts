@@ -1,3 +1,4 @@
+import { modelChoiceLabel } from "./model-choice.ts";
 import { isGeminiOpenAiEndpoint, normalizeProviderModelId } from "./provider-model-id.ts";
 import { providerResponseDetail } from "./provider-error-detail.ts";
 
@@ -401,7 +402,7 @@ export async function resolveCustomAiChoice(
       "The selected custom AI connection is disabled, deleted, or has no model. TownReporter will try the next ready model for this unfinished call.",
     );
   const readinessError = connectionReadinessError(fromRow(row));
-  if (readinessError) throw new Error(readinessError);
+  if (readinessError) throw new Error(`${modelChoiceLabel(`custom:${id}`, "story", { name: row.name, modelId: row.model_id })}: ${readinessError}`);
   return {
     name: row.name,
     baseUrl: row.base_url,

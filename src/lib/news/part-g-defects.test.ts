@@ -45,7 +45,7 @@ test("part G: HTTP errors retain short provider words and redact credentials", a
 test("part G: custom progress uses the configured name and model", () => {
 
   const label = modelChoiceLabel("custom:gemini", "story", {name:"Gemini",modelId:"gemini-3.5-flash"});
-  assert.equal(label, "Gemini \u2014 gemini-3.5-flash");
+  assert.equal(label, "Gemini (gemini-3.5-flash)");
   const view = jobProgressView({kind:"draft",model_choice:"custom:gemini",result_json:JSON.stringify({customModelLabel:label}),step_text:"Waiting on Custom API connection",status:"running"} as never,443,null);
   assert.equal(view.model,label);
   assert.equal(view.step,`Waiting on ${label}`);

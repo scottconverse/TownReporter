@@ -97,6 +97,7 @@ async function resolveTechnicalPreflight(
   probe: typeof probeProvider,
   allowExplicitFailover = true,
   acknowledgedUnavailable = false,
+  requestedLabel = modelChoiceLabel(requested),
 ) {
   const first = await probe(requested, newsroomId);
   if (first.ok) return { probe: first, switchReceipt: null };
@@ -107,13 +108,13 @@ async function resolveTechnicalPreflight(
     source: requested === "auto" ? "auto" : "editor",
     current: requested,
     allowExplicitLocalFailover: acknowledgedUnavailable,
-    error: acknowledgedUnavailable ? `${first.error} ${modelChoiceLabel(requested)} is unavailable.` : first.error,
+    error: acknowledgedUnavailable ? `${first.error} ${requestedLabel} is unavailable.` : first.error,
     probe: (choice) => probe(choice, newsroomId),
   });
   if (!plan) return { probe: first, switchReceipt: null };
   const resolved = await probe(plan.next, newsroomId);
   if (!resolved.ok) return { probe: first, switchReceipt: null };
-  const previousLabel = modelChoiceLabel(requested);
+  const previousLabel = requestedLabel;
   return {
     probe: resolved,
     switchReceipt: {
@@ -206,13 +207,25 @@ export async function commitStoryDraftForAuthenticatedEditor(
   }
 
   const researchScope = input.researchScope ?? parseNotes(leads[0].notes_json).researchScope ?? "public";
+  // Identity is public metadata; retain it even when the saved key is unreadable.
+  let customModelLabel: string | undefined;
+  if (input.modelChoice.startsWith("custom:")) {
+    const { ensureCustomAiConnectionsSchema } = await import("./custom-ai-connections.server.ts");
+    await ensureCustomAiConnectionsSchema();
+    const [connection] = await sql<{ name: string; model_id: string | null }>`
+      select name,model_id from custom_ai_connections
+      where id=${input.modelChoice.slice(7)} and newsroom_id=${input.context.newsroomId}
+    `;
+    if (connection) customModelLabel = modelChoiceLabel(input.modelChoice, "story", { name: connection.name, modelId: connection.model_id });
+  }
+  const requestedLabel = customModelLabel ?? modelChoiceLabel(input.modelChoice);
   const scopedProbe: typeof probeProvider = deps.probeProvider ?? ((choice, newsroomId) => probeProvider(choice, newsroomId, undefined, "story"));
-  let preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false);
+  let preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, false, false, requestedLabel);
   if (!preflight.probe.ok && input.modelChoice !== "auto") {
-    const reason = readinessFailureMessage(input.modelChoice, modelChoiceLabel(input.modelChoice), preflight.probe.error);
+    const reason = readinessFailureMessage(input.modelChoice, requestedLabel, preflight.probe.error);
     const warning = await editorWarning(input.context, input.override, "writer-not-ready", writerReadinessWarning(reason), { kind: "lead", id: input.leadId });
     if (warning) return commitWarning(warning);
-    preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, true, true);
+    preflight = await resolveTechnicalPreflight(input.modelChoice, input.context.newsroomId, scopedProbe, true, true, requestedLabel);
   }
   const providerProbe = preflight.probe;
   const ready = scanPreflight(providerProbe, input.modelChoice);
@@ -285,6 +298,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
         skippedRungs: providerProbe.skippedRungs,
         preflightFailover: preflight.switchReceipt,
       }),
+      ...(customModelLabel ? { requestedCustomModelLabel: customModelLabel, ...(effectiveChoice === input.modelChoice ? { customModelLabel } : {}) } : {}),
       ...(leads[0].status === "killed" ? { allowKilledLead: true } : {}),
       ...(meetingVideoId ? { meetingVideoId } : {}),
       ...(input.reuseLedger ? { reuseLedger: true } : {}),

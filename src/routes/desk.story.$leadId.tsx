@@ -567,6 +567,18 @@ function StoryPage() {
     staleTime: 15_000,
   });
 
+  const storyModelLabel = (choice: unknown) => {
+    const connection = writerConnections.data?.find(row => `custom:${row.id}` === choice);
+    if (!connection && typeof choice === "string" && choice.startsWith("custom:")) {
+      try {
+        const receipt = JSON.parse(data?.job?.result_json ?? "{}");
+        if (choice === data?.job?.model_choice && receipt.customModelLabel) return receipt.customModelLabel as string;
+        if (choice === receipt.requestedRuntime && receipt.requestedCustomModelLabel) return receipt.requestedCustomModelLabel as string;
+      } catch { /* Legacy receipt; use the connection list when it arrives. */ }
+    }
+    return modelChoiceLabel(choice, "story", connection);
+  };
+
   const previousJobError =
     !waiting && !msg && data?.job?.status === "failed"
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
@@ -603,7 +615,7 @@ function StoryPage() {
   const lastDraft = civicReportingDraft
     ? ""
     : lastDraftLine({
-        modelLabel: data?.job?.model_choice ? modelChoiceLabel(data.job.model_choice) : "",
+        modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
         when: lastDraftWhen(data?.job?.finished_at),
       });
 
@@ -2227,7 +2239,7 @@ function StoryPage() {
   const draftReadiness = uncheckedStory ? { state: "not-checked" as const, openCount: 0, totalCount: 0, reason: UNCHECKED_STORY_REASON } : data.draft ? hasAiJudgments ? acceptedPublishState.readiness :
     legacyEvidenceBlocker ? { state: "not-ready" as const, openCount: evidenceState.toReview, totalCount: evidenceState.toReview, reason: legacyEvidenceBlocker.sentence } : readinessWithAcceptedClaims(legacyReadiness, evidenceState.toReview, data.unreviewedClaimsAcceptedCount) :
     { state: "not-ready" as const, openCount: 0, totalCount: 0, reason: "No draft yet." };
-  const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: modelChoiceLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
+  const writerWarningReason = writerUnavailableReason({ choice: modelChoice, label: storyModelLabel(modelChoice), availability: writerAvailability.data, customConnection: writerConnections.data?.find(row => `custom:${row.id}` === modelChoice) ?? null });
   const writerAction = writerDraftAction(writerWarningReason);
   const draftButtonLabel = writerAction.label;
   const readiness = modelChoice !== "auto" && !writerAvailability.data
@@ -2458,7 +2470,7 @@ function StoryPage() {
     noteWarning: reconcileNoteWarning,
     checkedDraftReady,
     checkedDraftStale,
-    modelLabel: modelChoiceLabel(reconcileStatus.data?.modelChoice ?? modelChoice),
+    modelLabel: storyModelLabel(reconcileStatus.data?.modelChoice ?? modelChoice),
     review: evidenceReview,
     reviewOpen: evidenceReviewOpen,
     onStart: () => reconcile.mutate(),
@@ -2759,7 +2771,7 @@ function StoryPage() {
                 list={{
                   checkedAt: evidenceCheckedAt,
                   modelLabel: reconcileStatus.data?.modelChoice
-                    ? modelChoiceLabel(reconcileStatus.data.modelChoice)
+                    ? storyModelLabel(reconcileStatus.data.modelChoice)
                     : "",
                   openClaims,
                   nameCheck,
@@ -2883,7 +2895,7 @@ function StoryPage() {
               <div className="astra-current-model">
                 <p className="side-label">Redraft settings</p>
                 <p>
-                  <strong>{modelChoiceLabel(modelChoice)}</strong> ·{" "}
+                  <strong>{storyModelLabel(modelChoice)}</strong> ·{" "}
                   {researchScope === "supplied" ? "Supplied material only" : "Public research"}
                 </p>
                 <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
@@ -2993,7 +3005,7 @@ function StoryPage() {
               aria-controls="story-model-research"
               onClick={() => setModelResearchOpen((open) => !open)}
             >
-              Model & research · {modelChoiceLabel(modelChoice)}
+              Model & research · {storyModelLabel(modelChoice)}
             </button>
             <button
               className="btn quiet"
@@ -3382,7 +3394,7 @@ function StoryPage() {
               </Field>
               {data.draft?.form ? <p className="meta">Form · {data.draft.form}</p> : null}
               {data.job?.failover_note ? (
-                <p className="meta">Model note: {data.job.failover_note}</p>
+                <p className="meta">Model note: {jobProgressView(data.job, data.lead.id, data.draft?.id ?? null).failoverNote}</p>
               ) : null}
             </form>
           ) : waiting ? null : locked || killRecord ? (

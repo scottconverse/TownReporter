@@ -233,6 +233,9 @@ function darkJobEffort(row: Pick<DeskJob, "kind" | "result_json">): ModelEffort 
 }
 
 function progressShape(row: DeskJob, model: string): ProgressShape {
+  let customLabel: string | undefined;
+  try { const receipt = JSON.parse(row.result_json ?? "{}"); customLabel = receipt.customModelLabel || receipt.requestedCustomModelLabel; } catch { /* Legacy receipt. */ }
+  const named = (text: string) => customLabel ? text.replaceAll("Custom API connection", customLabel) : text;
   return {
     id: row.id,
     kind: row.kind,
@@ -249,13 +252,13 @@ function progressShape(row: DeskJob, model: string): ProgressShape {
       whose kind never reports a step -- still has a sentence to show rather
       than an empty line under the bar.
     */
-    step: (row.step_text?.startsWith("Waiting on Custom API connection") ? row.step_text.replace("Custom API connection", model) : row.step_text) || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…"),
+    step: named(row.step_text || row.stage || (row.status === "queued" ? "Waiting to start…" : "Working…")),
     startedAt: ms(row.started_at),
     endedAt: ms(row.finished_at),
     beatAt: ms(row.beat_at),
     updatedAt: ms(row.updated_at),
     error: row.error ?? null,
-    failoverNote: row.failover_note ?? "",
+    failoverNote: named(row.failover_note ?? ""),
     cancelRequested: (row.status === "queued" || row.status === "running") && Boolean(row.cancel_requested),
   };
 }
