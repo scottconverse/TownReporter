@@ -12,6 +12,7 @@ import { isOnboarded } from "./paper-settings.ts";
 import { canonicalPublicUrl } from "./fetch-outcome.ts";
 import { markRemovedCaptures, removedCapturesFor } from "./evidence.ts";
 import { publicSlug, publicTopic } from "./request-input.ts";
+import { disclosureForPublishedStory } from "./ai-disclosure.ts";
 
 function samePublicUrl(left: string, right: string): boolean {
   try { return canonicalPublicUrl(left) === canonicalPublicUrl(right); }
@@ -163,9 +164,17 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
     if (!(await isOnboarded(DEFAULT_NEWSROOM_ID))) return null;
     try {
       const sql = await getSql();
-      const rows = await sql<ArticleRow & { routine_notice: boolean }>`
-      select id, slug, headline, dek, body, topic, source_urls, status, published_at,
-             provenance_json, form, found_note, unanswered, disclosure_text,
+      const rows = await sql<ArticleRow & {
+        routine_notice: boolean;
+        origin_model_body: string | null;
+        origin_research_json: string | null;
+      }>`
+      select articles.id, articles.slug, articles.headline, articles.dek, articles.body,
+             articles.topic, articles.source_urls, articles.status, articles.published_at,
+             articles.provenance_json, articles.form, articles.found_note, articles.unanswered,
+             articles.disclosure_text,
+             origin.model_body as origin_model_body,
+             origin.research_json as origin_research_json,
              /* Whether a fixed-template routine notice printed this row. The
                 reader-facing disclosure line depends on it, and it cannot be
                 inferred from the article's own columns: a routine notice is
@@ -175,7 +184,9 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
                where r.article_id = articles.id and r.newsroom_id = articles.newsroom_id
              ) as routine_notice
       from articles
-      where slug = ${slug} and status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
+      left join drafts as origin
+        on origin.id = articles.origin_draft_id and origin.newsroom_id = articles.newsroom_id
+      where articles.slug = ${slug} and articles.status = 'published' and articles.newsroom_id = ${DEFAULT_NEWSROOM_ID}
       limit 1
     `;
       if (!rows[0]) return null;
@@ -186,7 +197,15 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
         what it opens. See that function for why the flags are joined here
         rather than stored in `provenance_json`.
       */
-      const article = await publicArticleForReaders(rows[0]);
+      const { origin_model_body, origin_research_json, ...articleRow } = rows[0];
+      const article = await publicArticleForReaders({
+        ...articleRow,
+        disclosure_text: disclosureForPublishedStory({
+          text: articleRow.disclosure_text,
+          modelBody: origin_model_body,
+          researchJson: origin_research_json,
+        }),
+      });
       const corrs = await sql<{ body: string; created_at: string }>`
         select body, created_at from corrections
         where article_id = ${rows[0].id}

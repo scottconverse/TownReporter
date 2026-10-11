@@ -980,11 +980,11 @@ export const fileLeadInput = z.object({
   /**
    * Who wrote the story, when the screen that filed it knows.
    *
-   * The published page prints `drafts.disclosure_text` over the story and falls
-   * back to its own AI line when it is empty (`ai-disclosure.tsx:33`). A story
-   * an editor pasted in whole is not that line's story, so the paste tab says
-   * which one it is and `fileLead` carries it. Absent -- every other caller --
-   * writes nothing, which is the old behaviour exactly.
+   * The published page preserves this editor-chosen line. Other stories derive
+   * their public AI line from the saved authoring receipts; a story an editor
+   * pasted in whole is not that line's story, so the paste tab says which one
+   * it is and `fileLead` carries it. Absent -- every other caller -- writes
+   * nothing.
    */
   disclosureKey: z.enum(["outside-ai", "person", "other"]).optional(),
   disclosureOther: z.string().max(LIMITS.disclosureOther).optional(),

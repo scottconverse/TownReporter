@@ -115,10 +115,39 @@ export async function resolveLeadDuplicateForEditor(
   const { context: ctx, newsroomId } = normalizeContext(context);
   await ensureAuditEventsSchema(sql as never);
   if (data.action === "not-a-duplicate") {
+    const [lead] = await sql<{ status: string; has_draft: boolean; has_published: boolean }>`
+      select leads.status,
+        exists (select 1 from drafts where drafts.lead_id = leads.id and drafts.newsroom_id = ${newsroomId} and (drafts.body ~ '[^[:space:]]' or coalesce(nullif(btrim(drafts.research_json), ''), '{}')::jsonb->>'importedText' = 'true')) as has_draft,
+        exists (select 1 from articles where articles.lead_id = leads.id and articles.newsroom_id = ${newsroomId} and articles.status = 'published') as has_published
+      from leads where id = ${data.id} and newsroom_id = ${newsroomId}
+    `;
+    if (!lead) return { ok: false as const, error: "That lead is no longer on the desk." };
+
+    const publishedWarning = lead.status === "published" || lead.has_published
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-duplicate-new-published",
+          "This lead has a published story. Moving it to New will leave that story published.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (publishedWarning) return publishedWarning;
+    const draftedWarning = lead.status === "drafted" || lead.has_draft
+      ? await editorWarning(
+          { ...ctx, sql },
+          typeof context === "number" ? undefined : data.override,
+          "lead-duplicate-new-drafted",
+          "This lead has a written draft. Moving it to New will keep the saved draft.",
+          { kind: "lead", id: data.id },
+        )
+      : null;
+    if (draftedWarning) return draftedWarning;
+
     const rows = await sql<{ id: number }>`
       update leads
       set possible_duplicate_of = null, dup_kind = null,
-          status = case when status = 'held' then 'new' else status end
+          status = 'new'
       where id = ${data.id} and newsroom_id = ${newsroomId}
       returning id
     `;

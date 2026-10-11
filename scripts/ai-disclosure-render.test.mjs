@@ -20,12 +20,18 @@ import { howRoute, renderArticle } from "./article-page-render.mjs";
   the article's own body renderer.
 */
 
-const AI_LINE =
+const BOTH_AI_LINE =
   "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
 
-test("an article page states the AI disclosure, in the story column above the records", () => {
-  const html = renderArticle();
-  assert.match(html, new RegExp(AI_LINE.replace(/\./g, "\\.")));
+test("a manual article page does not claim AI found records or wrote its first draft", () => {
+  const html = renderArticle({ disclosure_text: "" });
+  assert.doesNotMatch(html, /AI tools helped/);
+  assert.doesNotMatch(html, /class="ai-disclosure"/);
+});
+
+test("an article page places its recorded AI disclosure above the sources", () => {
+  const html = renderArticle({ disclosure_text: BOTH_AI_LINE });
+  assert.match(html, new RegExp(BOTH_AI_LINE.replace(/\./g, "\\.")));
   /*
     It closes the story body -- the drawing's last `<p>` inside `<article>` --
     and the records it points at are the band below it. So the order asserted
@@ -59,5 +65,5 @@ test("a routine-notice roundup does NOT claim AI wrote it, and says what did", (
 
 test("/how-we-report states the same disclosure sentence, word for word", () => {
   const html = renderToStaticMarkup(createElement(howRoute.Route.options.component));
-  assert.match(html, new RegExp(AI_LINE.replace(/\./g, "\\.")));
+  assert.match(html, new RegExp(BOTH_AI_LINE.replace(/\./g, "\\.")));
 });
