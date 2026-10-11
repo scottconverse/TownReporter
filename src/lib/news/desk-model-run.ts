@@ -53,12 +53,20 @@ export async function runPinnedCallWithFailover<
   let partialText: string | undefined;
   const visited = new Set<string>();
   let trail = "";
+  let cutOffSeen = false;
   while (!visited.has(snapshot.modelChoice)) {
     visited.add(snapshot.modelChoice);
     const attempt = await opts.run(snapshot);
     const result = attempt as TResult & { partialText?: string };
     partialText = result.partialText ?? partialText;
     if (result.ok || !result.error) return { result, snapshot };
+    cutOffSeen ||= /reply was cut off/i.test(result.error);
+    // Only cut-off draft steps exhaust the ladder; other callers retain one hop.
+    if (visited.size > 1 && !cutOffSeen) {
+      const error = opts.snapshot.modelChoice.startsWith("custom:")
+        ? `${trail} -> ${modelChoiceLabel(snapshot.modelChoice)}: ${result.error}` : result.error;
+      return {result: {...result,error},snapshot};
+    }
     const plan = await planAutomaticFailover({source: opts.source, current: snapshot.modelChoice,
       error: result.error, probe: opts.probe, ladder: opts.ladder});
     if (!plan || plan.next === "auto" || visited.has(plan.next)) {
