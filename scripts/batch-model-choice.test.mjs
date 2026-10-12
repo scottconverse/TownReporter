@@ -119,6 +119,16 @@ test("the strip and the dialog start on one model and one effort", async () => {
   await React.act(async () => root.unmount());
 });
 
+test("a new batch starts on automatic and no effort, so no earlier batch's choice carries in", async () => {
+  const { container, root } = mount();
+  await React.act(async () => root.render(h(QueueBatchControls)));
+  assert.equal(selectsOf(container, "strip").model, "auto");
+  assert.equal(selectsOf(container, "strip").effort, "");
+  assert.deepEqual(selectsOf(container, "dialog"), selectsOf(container, "strip"));
+  assert.deepEqual(runs.at(-1), { runtime: "auto", effort: null });
+  await React.act(async () => root.unmount());
+});
+
 test("a model picked in the strip shows in the dialog, with its effort, and runs", async () => {
   const { container, root } = mount();
   await React.act(async () => root.render(h(QueueBatchControls)));

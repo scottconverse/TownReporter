@@ -84,7 +84,7 @@ test("the primary local picker names its cloud backend before it is chosen", asy
     await page.setContent(render({ value: "local-model" }));
     // DHE1-11: the Local option is named by the model it will run...
     const text = await page.locator('option[value="local-model"]').innerText();
-    assert.equal(text, "deepseek-v4.1-flash:cloud");
+    assert.equal(text, "Local model (deepseek-v4.1-flash:cloud)");
     // ...and the backend status (cloud, spends credits) prints once beside the picker.
     const status = await page.locator(".model-picker-help").allInnerTexts();
     assert.equal(status.filter((line) => /spends credits/.test(line)).length, 1);

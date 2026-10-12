@@ -262,7 +262,7 @@ export function PageWatchPanel({
       <div className="astra-watch-model">
         <ModelPicker
           scope="dark"
-          label="Model for this watch"
+          label="Digging model"
           layout="stacked"
           value={row ? row.watch_model_choice as StoryModelChoice : model}
           disabled={busy}

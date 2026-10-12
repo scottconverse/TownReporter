@@ -1964,7 +1964,7 @@ function InvestigationWorkspace({
 
       <ModelPicker
         scope="dark"
-        label="Model for this file"
+        label="Digging model for this file"
         layout="stacked"
         value={modelChoice}
         onChange={onModelChoice}
