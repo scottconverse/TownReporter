@@ -68,3 +68,22 @@ it("firstSentenceForDek returns empty for empty, null or undefined body", () => 
   assert.equal(firstSentenceForDek(undefined), "");
   assert.equal(firstSentenceForDek("   "), "");
 });
+
+// guards: DHC12 -- a dek that repeats the headline word for word must not print as the public dek.
+it("prints no dek when the dek repeats the headline, ignoring case and punctuation", () => {
+  assert.equal(
+    dekOrFallback("Council Approves Budget!", "The body.", "council approves budget"),
+    "",
+  );
+  assert.equal(
+    dekOrFallback("", "Council approves the budget. It takes effect Monday.", "Council approves the budget."),
+    "",
+  );
+});
+
+it("keeps a dek that only shares words with the headline", () => {
+  assert.equal(
+    dekOrFallback("The council voted 5-2 on the budget.", "Body text.", "Council approves budget"),
+    "The council voted 5-2 on the budget.",
+  );
+});

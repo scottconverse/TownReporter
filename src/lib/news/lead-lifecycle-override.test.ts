@@ -29,7 +29,7 @@ async function freshDb(): Promise<PGlite> {
   await db.exec(`
     create table leads(id serial primary key, newsroom_id integer, status text,
       possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text,
-      kill_reason_url text, notes_json text);
+      kill_reason_url text, notes_json text, kill_prior_status text);
     create table drafts(id serial primary key, lead_id integer, newsroom_id integer,
       body text default '', research_json text default '{}');
     create table articles(id serial primary key, lead_id integer, newsroom_id integer, status text);

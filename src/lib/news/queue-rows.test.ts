@@ -176,28 +176,33 @@ test("Newest and Oldest are the filing time, and the id breaks a tie the same wa
   );
 });
 
-test("on the Killed tab, Best is what keeps coming back, not the score", () => {
+test("on the Killed tab, Best is the newest kill first, not the score", () => {
   const rows = [
-    lead({ id: 1, status: "killed", newsworthiness: 99 }),
-    lead({ id: 2, status: "killed", newsworthiness: 1, last_resurfaced_at: "2026-09-05T00:00:00.000Z" }),
-    lead({ id: 3, status: "killed", newsworthiness: 50, last_resurfaced_at: "2026-09-09T00:00:00.000Z" }),
+    lead({ id: 1, status: "killed", newsworthiness: 99, killed_at: "2026-09-01T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", newsworthiness: 1, killed_at: "2026-09-09T10:00:00.000Z" }),
+    lead({ id: 3, status: "killed", newsworthiness: 50, killed_at: "2026-09-05T10:00:00.000Z" }),
   ];
   const out = queueSort(rows, "best", "killed");
   assert.deepEqual(
     out.map((l) => l.id),
-    [3, 2, 1],
+    [2, 3, 1],
   );
 });
 
-test("a killed lead that never came back sorts after one that did, newest kill first", () => {
+test("a lead killed today is on the Killed tab above older kills, even one that came back", () => {
   const rows = [
-    lead({ id: 1, status: "killed" }),
-    lead({ id: 2, status: "killed" }),
-    lead({ id: 5, status: "killed", last_resurfaced_at: "2026-09-05T00:00:00.000Z" }),
+    lead({
+      id: 1,
+      status: "killed",
+      killed_at: "2026-09-05T10:00:00.000Z",
+      last_resurfaced_at: "2026-09-09T10:00:00.000Z",
+    }),
+    lead({ id: 2, status: "killed", killed_at: "2026-10-12T08:00:00.000Z" }),
+    lead({ id: 3, status: "killed", killed_at: null }),
   ];
   assert.deepEqual(
     queueSort(rows, "best", "killed").map((l) => l.id),
-    [5, 2, 1],
+    [2, 1, 3],
   );
 });
 

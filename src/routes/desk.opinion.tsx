@@ -1057,13 +1057,29 @@ function OpinionPage() {
                   }
                   if (piece.data) {
                     return (
-                      <InkButton
-                        tone="solid"
-                        disabled={publish.isPending}
-                        onClick={() => publish.mutate({ draftId: openId })}
-                      >
-                        {publish.isPending ? "Publishing…" : "Publish to the paper"}
-                      </InkButton>
+                      <>
+                        {/* DHC11: the empty summary is said on screen before the press, not only after it. */}
+                        {piece.data.dek?.trim() ? null : (
+                          <div className="mt-3 border border-rule bg-paper-2 p-4" role="note">
+                            <p className="text-sm text-ink">This piece has no summary for readers.</p>
+                            <button
+                              type="button"
+                              className="btn mt-3"
+                              disabled={publish.isPending}
+                              onClick={() => publish.mutate({ draftId: openId })}
+                            >
+                              {publish.isPending ? "Publishing…" : "Publish anyway"}
+                            </button>
+                          </div>
+                        )}
+                        <InkButton
+                          tone="solid"
+                          disabled={publish.isPending}
+                          onClick={() => publish.mutate({ draftId: openId })}
+                        >
+                          {publish.isPending ? "Publishing…" : "Publish to the paper"}
+                        </InkButton>
+                      </>
                     );
                   }
                   return null;

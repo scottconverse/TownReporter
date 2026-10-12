@@ -782,10 +782,18 @@ function StoryPage() {
 
   useEffect(() => {
     if (!waitingSince) return;
+    /*
+      The failed job is ours when it is the one the press returned. The press
+      can lose the race: the poll can show the failed job before the press's
+      success handler has recorded its id. Then any failed job that is NOT the
+      one open at press time is ours, so the wait ends instead of "Working…"
+      staying on the button for good (DHC14).
+    */
     if (
       data?.job?.status !== "failed" ||
-      expectedDraftJobId.current == null ||
-      data.job.id !== expectedDraftJobId.current
+      (expectedDraftJobId.current != null
+        ? data.job.id !== expectedDraftJobId.current
+        : data.job.id === priorDraftJobId.current)
     )
       return;
     expectedDraftJobId.current = null;
@@ -1871,7 +1879,7 @@ function StoryPage() {
     undo: (_res, input) => input.status === "killed" ? {
       label: "Undo",
       run: async () => {
-        const undone = await restoreKilledLead({ data: { id: input.id, status: input.restore ?? "new" } });
+        const undone = await restoreKilledLead({ data: { id: input.id, status: input.restore } });
         if (!answered(undone)) throw new Error(NO_ANSWER);
         if (!undone.ok) throw new Error(undone.error || "The lead could not be restored.");
         await afterLeadChange();
@@ -4141,7 +4149,7 @@ function StoryPage() {
         */}
                   <PublishConfirmation
                     blockers={blockers}
-                    sectionName={sectionReady ? sectionNameNow : "no section"}
+                    sectionName={sectionReady ? sectionNameNow : `${sectionNameNow} (no section was chosen)`}
                     refusedWarnings={refusedWarnings}
                     publishing={publish.isPending}
                     onCancel={() => setConfirmingPublish(false)}
@@ -4194,7 +4202,7 @@ function StoryPage() {
                       disabled={publish.isPending || !publishConfirm.enabled}
                       onAct={() => setConfirmingPublish(true)}
                     >
-                      {`Publish anyway in ${sectionNameNow}`}
+                      {`Publish anyway in ${sectionNameNow}`} (no section was chosen)
                     </ActionButton>
                   ) : null}
                   {/*

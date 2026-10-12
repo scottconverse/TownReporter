@@ -226,10 +226,14 @@ function QueuePage() {
     Open tab in the same paint as the Undo press and moves back if the server
     refuses -- leaving the lead killed and the toast saying why.
   */
+  /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
+  const undoOptimistic = leadStatusOptimistic(qc);
+  const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
     mutationFn: (press: KillUndoPress) =>
       restoreKilledLead({ data: { id: press.id, status: press.status } }),
-    ...leadStatusOptimistic(qc),
+    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…",
     done: () => "Undone: the lead is back on the Queue.",
@@ -325,7 +329,7 @@ function QueuePage() {
                 await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
                 return;
               }
-              await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
+              await undoKill.mutateAsync(killUndoPress(input.id, input.restore));
             },
           },
     /*
@@ -358,7 +362,7 @@ function QueuePage() {
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Killing…",
     done: () => "The lead moved to Killed.",
-    undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new")); } }),
+    undo: (_result, input) => ({ label: "Undo", run: async () => { await undoKill.mutateAsync(killUndoPress(input.id, input.restore)); } }),
     failedLead: "Could not kill that lead. ",
   });
   const remove = useMutation({
@@ -848,7 +852,7 @@ function QueuePage() {
             from, so it reads this session's memory (`killedFrom`) and falls back
             to `new` for a lead killed before the screen knew.
           */
-          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id) ?? "new"));
+          void undoKill.mutate(killUndoPress(lead.id, killedFrom.current.get(lead.id)));
         } else {
           announceOnly("Nothing to undo on that lead.");
         }
@@ -999,6 +1003,9 @@ function QueuePage() {
         tone: report.failures.length ? "err" : "ok",
         // One line that updates, not a stack that disagrees with itself.
         id: BULK_STATUS_TOAST_ID,
+        // DHC08: a bulk Kill keeps the same Undo window as a single kill (the
+        // single kill's toast is KILL_TOAST_MS for the same reason).
+        duration: input.status === "killed" ? KILL_TOAST_MS : undefined,
         undo:
           report.undoIds.length > 0
             ? {
@@ -1006,7 +1013,7 @@ function QueuePage() {
                 run: async () => {
                   const back = await Promise.allSettled(
                     report.undoIds.map((id) => input.status === "killed"
-                      ? undoKill.mutateAsync(killUndoPress(id, input.restores?.[id] ?? "new"))
+                      ? undoKill.mutateAsync(killUndoPress(id, input.restores?.[id]))
                       : setStatus.mutateAsync({ id, status: "new", override: input.overrideById?.[id] })),
                   );
                   const failed = back.filter((r) => r.status === "rejected").length;
@@ -1535,8 +1542,9 @@ function QueuePage() {
 
       {/* The note explains the rows it is printed above, so it is read off the
           page rather than off the whole list (Unit CZ-long-lists): on the
-          Killed tab "best" puts resurfaced leads first, so a page that holds
-          none of them is a page the note has nothing to say about. */}
+          Killed tab "best" lists the newest kill first, so a page that holds
+          none of the came-back leads is a page the note has nothing to say
+          about. */}
       {filter === "killed" && shown.some((l) => (l.resurfaced_count ?? 0) > 0) ? (
         <p className="meta seen-again-note">{SEEN_AGAIN_EXPLAINER}</p>
       ) : null}
@@ -1718,7 +1726,9 @@ function QueuePage() {
                     either: this menu's kill row is the drawn "Kill with a
                     reason" below.
                   */
-                  onBack={() => setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" })}
+                  onBack={() => (l.status === "killed"
+                    ? undoKill.mutate(killUndoPress(l.id))
+                    : setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" }))}
                   /*
                     FB6, item 5: the row's own Release / Bring back says what it
                     is doing while it does it, and carries the failure sentence.

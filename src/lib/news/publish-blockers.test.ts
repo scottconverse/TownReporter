@@ -416,3 +416,12 @@ describe("U24: claims the evidence check raised and nobody judged", () => {
     assert.match(only?.sentence ?? "", /^2 claims need review \(2 contradicted by the record\)\./);
   });
 });
+
+// guards: DHC05 -- the killed-lead card names the button it presses, and says what that press does before the press.
+it("a killed lead's warning names the Publish anyway button and says the press publishes the draft", () => {
+  const row = publishBlockers(withState({ leadStatus: "killed" })).find((blocker) => blocker.key === "lead-killed");
+  assert.ok(row, "a killed lead produces its warning");
+  assert.equal(row!.action?.label, "Publish anyway");
+  assert.match(row!.sentence, /Publish anyway/, "the sentence names the button the editor presses");
+  assert.match(row!.sentence, /publishes this draft/, "the sentence says the press publishes");
+});
