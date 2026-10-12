@@ -115,9 +115,17 @@ export function NewsletterMailbox() {
           ...(password === "" ? {} : { password }),
         },
       }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      // The mutation response is the just-saved configuration. Updating the
+      // cache before clearing `touched` keeps the form from briefly reseeding
+      // itself from the stale pre-save query result.
+      qc.setQueryData(["newsletter-mailbox"], {
+        ...mailbox.data,
+        ...result.mailbox,
+        waiting: mailbox.data?.waiting ?? [],
+      });
       setSaveErr(null);
-      setSaveNote(mailboxSaveResultText(password !== ""));
+      setSaveNote(mailboxSaveResultText(password !== "", result.mailbox.hasPassword));
       setPassword("");
       setTouched(false);
       announceToDesk("Newsletter mailbox saved.");

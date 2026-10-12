@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DeskShell, InkButton } from "@/components/desk-chrome";
 import { EmptyState, Notice, ScreenError, WorkbenchSkeleton } from "@/components/states";
+import { TranscriptRecordHeader, TranscriptStorageDetails } from "@/components/meeting-transcript-record";
 import { getTranscriptView } from "@/lib/news/desk";
 import {
-  transcriptByteSize,
   transcriptPlainText,
   transcriptSegmentUrl,
   transcriptStamp,
@@ -183,14 +183,6 @@ function TranscriptPage() {
 
   if (!view) return null;
   const downloadUrl = q.data.downloadUrl;
-  const heading = view.title ?? "Meeting transcript";
-  const meta = [
-    view.meetingDate ? `Meeting of ${view.meetingDate}` : null,
-    `${view.lines.length} caption ${view.lines.length === 1 ? "line" : "lines"}`,
-    `video ${view.videoId}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   return (
     <DeskShell
@@ -214,8 +206,7 @@ function TranscriptPage() {
       </p>
 
       <div className="transcript-head">
-        <h2 className="transcript-title">{heading}</h2>
-        <p className="note-one">{meta}</p>
+        <TranscriptRecordHeader view={view} />
         <p className="note-one">
           Every caption segment of the meeting, in order. Each timestamp opens the video at that
           second. The draft's own citations are quoted in the story's notes; this is the whole tape
@@ -232,16 +223,7 @@ function TranscriptPage() {
         this newsroom -- the page never takes a path from anywhere else, and
         the server refuses one supplied in the request.
       */}
-      <div className="note-sec transcript-file-facts">
-        <p className="side-label">Stored at</p>
-        <p className="transcript-path">{view.storagePath}</p>
-        <p className="note-one">
-          SHA-256 <code className="transcript-hash">{view.sha256}</code>
-        </p>
-        <p className="note-one">
-          Captured {view.capturedAt} · {transcriptByteSize(view.byteSize)} · {view.format}
-        </p>
-      </div>
+      <TranscriptStorageDetails view={view} />
 
       {view.lines.length === 0 ? (
         <Notice kind="warn">

@@ -828,7 +828,7 @@ async function main() {
       - The inventory is a shut extra at the foot of the list (no id, found by
         the `#draft-pass-claims-heading` it holds). It carries NO controls: the
         returned claim's record checks and judgment live on that claim's OWN row
-        above, which is where `View exact captured version` is pressed now.
+      above, which is where `Open the saved source copy` is pressed now.
       - Editor-authored claims are rows of the list too. They are found by the
         `Manual claim N · <kind>` heading their row renders (uppercased on
         screen by CSS), and the add-a-claim form is the other shut extra,
@@ -844,7 +844,8 @@ async function main() {
   await review.locator("article").first()
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
-  const recordedPassages = review.getByText("Recorded excerpt found in cited version");
+  // FA10 leads with the passage and keeps this status in Details for support.
+  const recordedPassages = review.getByText("The passage appears in this copy.", { exact: true });
   if ((await recordedPassages.count()) !== 1)
     throw new Error("expected the direct citation and captured-event citation to share one displayed record");
   await recordedPassages.first().waitFor();
@@ -856,11 +857,11 @@ async function main() {
       `Saved copy number ${findingFixture.citedVersionId} of the page · capture event ${findingFixture.captureEventId} (saved copy ${findingFixture.citedVersionId})`,
     )
     .waitFor();
-  const unavailablePassages = review.getByText("Cited capture unavailable", { exact: true });
+  const unavailablePassages = review.getByText("Saved copy is unavailable.", { exact: true });
   if ((await unavailablePassages.count()) !== 1)
     throw new Error("expected exactly one unavailable cited-capture passage");
   await unavailablePassages.first().waitFor();
-  await review.getByRole("button", { name: "View cited captured version" }).first().click();
+  await review.getByRole("button", { name: "Open the saved source copy" }).first().click();
   const capturedText = review.getByRole("region", { name: "Captured text" });
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
@@ -869,7 +870,7 @@ async function main() {
   /*
     The inventory leg, re-authored for unit CW2 (f6953ca1). The returned claim's
     record checks and judgment moved onto that claim's OWN row of the drawn list
-    above, so `View exact captured version` is no longer inside the inventory --
+    above, so `Open the saved source copy` is no longer inside the inventory --
     measured 2026-09-28 on the merged tree, the inventory's shut disclosure holds
     zero controls (artifacts/db2/review-dom.json, details[3].controls = []), and
     the card is on the claim's row instead, still exactly one of it. The
@@ -896,10 +897,10 @@ async function main() {
   if ((await returnedClaimRow.count()) !== 1)
     throw new Error("expected the returned claim to have exactly one row of its own in the list");
   if (
-    (await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).count()) !== 1
+    (await returnedClaimRow.getByRole("button", { name: "Open the saved source copy" }).count()) !== 1
   )
     throw new Error("expected one rendered exact-provenance card for the shared artifact and capture event");
-  await returnedClaimRow.getByRole("button", { name: "View exact captured version" }).first().click();
+  await returnedClaimRow.getByRole("button", { name: "Open the saved source copy" }).first().click();
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
     .waitFor();
@@ -975,9 +976,12 @@ async function main() {
   if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
     throw new Error("manual claim judgment did not remain reopened after reload");
   step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
-  const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
-  if ((await newerCaptureButtons.count()) !== 1)
-    throw new Error("expected one newer-capture action for the grouped cited record");
+  const newerCaptureButtons = firstFindingRecord.getByRole("button", {
+    name: /Review a newer saved copy/,
+  });
+  const newerCaptureCount = await newerCaptureButtons.count();
+  if (newerCaptureCount !== 1)
+    throw new Error(`expected one newer-capture action for the grouped cited record; found ${newerCaptureCount}`);
   await newerCaptureButtons.first().click();
   await capturedText
     .getByText("The recreation room update was reconsidered Wednesday.")

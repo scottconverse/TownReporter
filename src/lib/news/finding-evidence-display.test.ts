@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   captureStateSentence,
   captureSupportLine,
+  formatCaptureTimestamp,
   groupDisplayCaptures,
   revealOpenedCapture,
 } from "./finding-evidence-display.ts";
@@ -56,28 +57,25 @@ describe("finding evidence display groups", () => {
 describe("what the captured-version card says", () => {
   it("explains the card when no excerpt was saved, instead of naming a comparison nobody made", () => {
     const sentence = captureStateSentence(capture({ excerptState: "no-excerpt" }));
-    assert.doesNotMatch(sentence, /No recorded excerpt to compare/);
-    assert.match(sentence, /No excerpt was saved with this claim/);
-    assert.match(sentence, /nothing to put side by side/);
-    assert.match(sentence, /This is the saved copy the draft was written from\./);
+    assert.equal(sentence, "No passage was saved with this claim. This is the copy the draft used.");
   });
 
   it("keeps the states an editor can act on in their own words", () => {
     assert.equal(
       captureStateSentence(capture({ takenDown: true, readable: false })),
-      "Excerpt removed at the publisher's request",
+      "Text removed at the publisher's request.",
       "the owner's decision, not a defect in the capture",
     );
-    assert.match(captureStateSentence(capture({ readable: false })), /no readable captured text/);
+    assert.match(captureStateSentence(capture({ readable: false })), /has no readable text/);
     assert.match(captureStateSentence(capture({ available: false })), /unavailable/);
-    assert.match(captureStateSentence(capture({ excerptState: "found" })), /Recorded excerpt found/);
+    assert.match(captureStateSentence(capture({ excerptState: "found" })), /passage appears in this copy/);
     assert.match(
       captureStateSentence(capture({ excerptState: "not-found" })),
-      /Recorded excerpt not found/,
+      /passage was not found in this copy/,
     );
     assert.match(
       captureStateSentence(capture({ readable: false }), "Selected captured record"),
-      /^Selected captured record/,
+      /^Selected captured record has no readable text/,
       "the manual stack names its own kind of record",
     );
   });
@@ -93,6 +91,13 @@ describe("what the captured-version card says", () => {
       capture({ versionId: null, captureEventId: 13, available: false }),
     ]);
     assert.equal(captureSupportLine(eventOnly!), "capture event 13");
+  });
+
+  it("formats timestamps as readable UTC dates and declines invalid input", () => {
+    assert.equal(formatCaptureTimestamp("2026-09-08T10:00:00Z"), "September 8, 2026 at 10:00 AM UTC");
+    assert.equal(formatCaptureTimestamp("2026-09-08 10:00:00.123456+00"), "September 8, 2026 at 10:00 AM UTC");
+    assert.equal(formatCaptureTimestamp("not a date"), null);
+    assert.equal(formatCaptureTimestamp(null), null);
   });
 });
 

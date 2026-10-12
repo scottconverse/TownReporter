@@ -1228,7 +1228,7 @@ export function InviteAnEditorPanel() {
             {message ? (
               <div className="mt-3 border-t border-rule pt-3">
                 <p className="astra-label">Ready-to-send message</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm">{message}</p>
+                <p className="invite-copy-message mt-1 whitespace-pre-wrap text-sm">{message}</p>
                 <InkButton
                   tone="quiet"
                   onClick={() => {

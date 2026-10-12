@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePaper } from "@/lib/paper-context-state";
 import { useState } from "react";
 import { ActionButton } from "@/components/action-button";
+import { ReportingRunSummary } from "@/components/reporting-run-summary";
 import { Field } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
 import { invalidateDeskJobs } from "@/components/job-card-state";
@@ -184,18 +185,13 @@ function PackageBody({
   observations: ObservationRow[];
   onRefresh: () => void;
 }) {
-  const run = reportingRunState(report);
   const gaps = packageGaps(report);
   return (
     <section className="reporting-package" aria-label="Reporting package">
       <header className="reporting-package-head">
         <h2>Reporting package</h2>
-        <p className="meta">{methodLine(report)}</p>
       </header>
-      <div className={`reporting-run reporting-run-${run.tone}`} role="status">
-        <strong>{run.label}</strong>
-        <p className="meta">{run.detail}</p>
-      </div>
+      <ReportingRunSummary report={report} methodDetails={methodLine(report)} />
       {report.stories.length > 1 ? (
         <nav className="reporting-story-links" aria-label="Stories in this package">
           <p className="side-label">This run returned {report.stories.length} stories</p>

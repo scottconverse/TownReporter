@@ -47,11 +47,14 @@ describe("the password never comes back", () => {
     assert.equal(passwordPreservesStored("", false), false);
   });
 
-  it("the save result reports a change without the typed password", () => {
-    const withNew = mailboxSaveResultText(true);
+  it("the save result distinguishes a kept password from no password", () => {
+    const withNew = mailboxSaveResultText(true, false);
     assert.match(withNew, /never shown again/i);
     assert.doesNotMatch(withNew, /hunter2/);
-    assert.match(mailboxSaveResultText(false), /stored password was kept/i);
+    assert.match(mailboxSaveResultText(false, true), /stored password was kept/i);
+    const withoutOne = mailboxSaveResultText(false, false);
+    assert.match(withoutOne, /no password is stored yet/i);
+    assert.doesNotMatch(withoutOne, /password was kept/i);
   });
 
   it("a test-connection result is the server's own plain message, shown as-is", () => {

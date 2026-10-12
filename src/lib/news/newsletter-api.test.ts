@@ -187,12 +187,41 @@ describe("newsletter API: mailbox settings contract", () => {
       userId: nextUser(), newsroomId, address: MAILBOX_ADDRESS,
       host: "imap.town.example", port: 993, ssl: true, password: SECRET,
     });
-    await saveNewsletterMailbox({
-      userId: nextUser(), newsroomId, address: MAILBOX_ADDRESS,
-      host: "imap.town.example", port: 993, ssl: true,
+    const updated = await saveNewsletterMailbox({
+      userId: nextUser(), newsroomId, address: "updated@town.example",
+      host: "imap.changed.town.example", port: 143, ssl: false,
     });
+    assert.equal(updated.mailbox.address, "updated@town.example");
+    assert.equal(updated.mailbox.host, "imap.changed.town.example");
+    assert.equal(updated.mailbox.port, 143);
+    assert.equal(updated.mailbox.ssl, false);
+    assert.equal(updated.mailbox.hasPassword, true);
     const row = await getMailbox(newsroomId);
     assert.equal(mailboxPassword(row!), SECRET);
+    const view = await readMailboxView(newsroomId);
+    assert.equal(view.address, "updated@town.example");
+    assert.equal(view.host, "imap.changed.town.example");
+    assert.equal(view.port, 143);
+    assert.equal(view.ssl, false);
+  });
+
+  it("saves changed mailbox settings when no password has been stored", async () => {
+    const newsroomId = nextNewsroom();
+    const result = await saveNewsletterMailbox({
+      userId: nextUser(), newsroomId, address: "desk@town.example",
+      host: "imap.new.town.example", port: 143, ssl: false,
+    });
+    assert.equal(result.mailbox.address, "desk@town.example");
+    assert.equal(result.mailbox.host, "imap.new.town.example");
+    assert.equal(result.mailbox.port, 143);
+    assert.equal(result.mailbox.ssl, false);
+    assert.equal(result.mailbox.hasPassword, false);
+    const view = await readMailboxView(newsroomId);
+    assert.equal(view.address, "desk@town.example");
+    assert.equal(view.host, "imap.new.town.example");
+    assert.equal(view.port, 143);
+    assert.equal(view.ssl, false);
+    assert.equal(view.hasPassword, false);
   });
 
   it("resets the cursor but preserves the cadence claim when the account identity changes", async () => {

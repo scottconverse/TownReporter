@@ -46,18 +46,19 @@ const EMPTY_MAILBOX: NewsletterMailboxView = {
 };
 
 /**
- * The safe status an EDITOR may read. `configured` means a password is saved:
- * a mailbox row with no password is not a mailbox the desk can read, so it
- * reads as "not set up" to the editor and to the poller alike.
+ * The safe status an EDITOR may read. `configured` still means a password is
+ * saved, but address and server settings remain visible without one so saving
+ * the form cannot appear to discard them. The poller still refuses to connect
+ * until the mailbox has a password.
  */
 export async function readMailboxView(newsroomId: number): Promise<NewsletterMailboxView> {
   await ensureNewsletterSchema();
   const row = await getMailbox(newsroomId);
   const list = await (await import("./newsletter-poll.server.ts")).waitingMessages(newsroomId);
-  if (!row || !row.hasPassword) return { ...EMPTY_MAILBOX, waiting: list };
+  if (!row) return { ...EMPTY_MAILBOX, waiting: list };
   const safe = publicMailbox(row);
   return {
-    configured: true,
+    configured: safe.hasPassword,
     address: safe.address,
     host: safe.host,
     port: safe.port,

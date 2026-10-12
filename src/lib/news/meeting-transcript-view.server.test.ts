@@ -27,7 +27,10 @@ function artifactFile(name: string, text: string): { path: string; sha256: strin
 type Row = Record<string, unknown>;
 
 /** A Sql that answers the artifact select with whatever rows the caller allows. */
-function fakeSql(rows: Row[]): { sql: Sql; calls: { text: string; params: unknown[] }[] } {
+function fakeSql(
+  rows: Row[],
+  capture = { title: "City Council Regular Meeting", published: "2026-09-22T03:00:00Z" },
+): { sql: Sql; calls: { text: string; params: unknown[] }[] } {
   const calls: { text: string; params: unknown[] }[] = [];
   const sql = {
     async query<T>(text: string, params?: unknown[]): Promise<T[]> {
@@ -40,7 +43,7 @@ function fakeSql(rows: Row[]): { sql: Sql; calls: { text: string; params: unknow
         ] as T[];
       }
       if (/from meeting_capture_records/.test(text)) {
-        return [{ title: "City Council Regular Meeting", published: "2026-09-22T03:00:00Z" }] as T[];
+        return [capture] as T[];
       }
       return [] as T[];
     },
@@ -168,12 +171,36 @@ describe("meeting transcript view", () => {
     assert.deepEqual(view.lines.map((line) => line.segmentIndex), [0, 1]);
     assert.deepEqual(view.lines.map((line) => line.startSeconds), [0, 75]);
     assert.equal(view.title, "City Council Regular Meeting");
-    assert.equal(view.meetingDate, "2026-09-22");
+    assert.equal(view.meetingDate, null);
+    assert.equal(view.postedDate, "2026-09-22");
     assert.equal(view.sha256, "c".repeat(64));
     assert.equal(view.videoId, "vid-42");
     assert.equal(
       transcriptPlainText(view),
       "[00:00:00] The meeting was called to order.\n[00:01:15] Councilmember Diaz moved to adopt the budget.",
     );
+  });
+
+  it("takes the meeting date from the title and keeps the video posting date separate", async () => {
+    const { sql } = fakeSql(
+      [
+        {
+          id: 12,
+          video_id: "museum-42",
+          storage_path: "D:/captures/newsroom-1/museum-42/transcript-ab.srv3",
+          sha256: "c".repeat(64),
+          format: "srv3",
+          byte_size: 1_351_168,
+          captured_at: "2026-09-30 03:10:00+00",
+        },
+      ],
+      {
+        title: "Museum Advisory Board Meeting, September 21, 2026",
+        published: "2026-09-30T03:00:00Z",
+      },
+    );
+    const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 12 });
+    assert.equal(view.meetingDate, "2026-09-21");
+    assert.equal(view.postedDate, "2026-09-30");
   });
 });

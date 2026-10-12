@@ -52,7 +52,10 @@ export type TranscriptView = {
   artifactId: number;
   videoId: string;
   title: string | null;
+  /** Date the meeting took place, read from an explicit date in its title. */
   meetingDate: string | null;
+  /** Date the video was published; shown separately from the meeting date. */
+  postedDate: string | null;
   storagePath: string;
   sha256: string;
   format: string;
