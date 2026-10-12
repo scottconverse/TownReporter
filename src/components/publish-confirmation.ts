@@ -54,6 +54,8 @@ export function PublishConfirmation(props: {
   onCancel: () => void;
   /** The press is in flight. */
   publishing?: boolean;
+  /** The editor recorded "I accept these claims are unreviewed" on this page (DJ-3). */
+  claimsAccepted?: boolean;
 }) {
   /*
     ── THE MERGED LIST THE DECISION IS MADE FROM (unit OH) ───────────────────
@@ -76,7 +78,7 @@ export function PublishConfirmation(props: {
     });
   }
   const merged = [...byKey.values()];
-  const decision = publishConfirmation(merged, props.sectionName);
+  const decision = publishConfirmation(merged, props.sectionName, { claimsAccepted: props.claimsAccepted });
 
   /* The warnings to draw, in merged order, with each key drawing exactly once
      (the server's sentence where it spoke last). */

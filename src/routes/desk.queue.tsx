@@ -60,10 +60,11 @@ import { parseUrlList } from "@/lib/paper";
 import { darkLeadPrefill } from "@/lib/news/dark-seed";
 import type { LeadRow } from "@/lib/news/types";
 import { usePaper } from "@/lib/paper-context-state";
+import { createLeadWrites } from "@/lib/lead-writes-in-flight";
 import { newsInTownPlaceholder } from "@/lib/paper-phrases";
 import { useDeskMutation } from "@/components/desk-action";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
-import { deskErrorReason, deskToast } from "@/components/desk-toast";
+import { deskErrorReason, deskToast, dismissDeskToast } from "@/components/desk-toast";
 import {
   KILL_TOAST_MS,
   KillReasonChips,
@@ -220,6 +221,8 @@ function QueuePage() {
     pressed; U reads this instead, so the hint's own promise holds.
   */
   const lastKill = useRef<{ id: number; restore: RestoreStatus } | null>(null);
+  /* THT-8: each lead's status write that has not answered yet; a restore waits for it. */
+  const leadWrites = useRef(createLeadWrites());
   const killLead = (lead: { id: number; status: string }) => {
     const restore = restoreStatus(lead.status);
     killedFrom.current.set(lead.id, restore);
@@ -244,10 +247,28 @@ function QueuePage() {
   const undoOptimistic = leadStatusOptimistic(qc);
   const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
-    mutationFn: (press: KillUndoPress) => {
+    mutationFn: async (press: KillUndoPress) => {
       // The lead is being put back, so U must not aim at it again.
       if (lastKill.current?.id === press.id) lastKill.current = null;
-      return restoreKilledLead({ data: { id: press.id, status: press.status, keepRecord: press.keepRecord } });
+      /*
+        THT-8, DHJ-2: the toast says "Restoring…" in the same paint as the press,
+        and goes when the write answers (the done or failed toast takes over).
+        A bulk press owns its own outcome, so it stays quiet here.
+      */
+      const restoringId = `desk-restoring-${press.id}`;
+      if (!bulkMuted.current) deskToast("Restoring…", { id: restoringId, duration: Infinity });
+      try {
+        /*
+          THT-8: the restore reads the lead's status on the server, and a slow
+          kill write (several seconds under load) lands AFTER a U pressed right
+          behind it -- the restore found nothing killed, then the kill landed and
+          U was lost. The way back waits for this lead's own write first.
+        */
+        await leadWrites.current.settled(press.id);
+        return await restoreKilledLead({ data: { id: press.id, status: press.status, keepRecord: press.keepRecord } });
+      } finally {
+        dismissDeskToast(restoringId);
+      }
     },
     optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
     rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
@@ -281,13 +302,18 @@ function QueuePage() {
         to `setLeadStatus` would be a refusal waiting to happen.
       */
       restore?: RestoreStatus;
-    }) => setLeadStatus({ data: {
-      id: input.id,
-      status: input.status,
-      killReason: input.killReason,
-      killReasonUrl: input.killReasonUrl,
-      override: input.override,
-    } }),
+    }) => {
+      const write = setLeadStatus({ data: {
+        id: input.id,
+        status: input.status,
+        killReason: input.killReason,
+        killReasonUrl: input.killReasonUrl,
+        override: input.override,
+      } });
+      // Remembered per lead so a restore pressed behind it waits its turn (THT-8).
+      leadWrites.current.track(input.id, write);
+      return write;
+    },
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
       moves back if the write does not take. `desk-lead-status.ts` owns the rule

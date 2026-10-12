@@ -600,6 +600,15 @@ export type PublishConfirmation = {
 export function publishConfirmation(
   blockers: readonly PublishBlocker[],
   sectionName: string,
+  options: {
+    /*
+      DJ-3: the editor has recorded "I accept these claims are unreviewed" on
+      this page. The warning that carried those words is gone from `blockers`
+      once the record exists, so the confirm keeps the words itself: an act that
+      accepted unreviewed claims must read as that act on its button.
+    */
+    claimsAccepted?: boolean;
+  } = {},
 ): PublishConfirmation {
   const warnings = blockers.filter((blocker) => blocker.kind === "warning");
   const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
@@ -612,13 +621,14 @@ export function publishConfirmation(
   const acceptWords = warnings
     .find((warning) => warning.key === "claims-unreviewed" && warning.altAction?.target.kind === "accept-unreviewed")
     ?.altAction?.label.replace(/^Publish anyway/, "");
-  const overrideLabel = `Publish anyway in ${sectionName}${acceptWords ?? ""}`;
+  const words = acceptWords ?? (options.claimsAccepted ? " — I accept these claims are unreviewed" : "");
+  const overrideLabel = `Publish anyway in ${sectionName}${words}`;
   return {
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
     confirmLabel:
-      warnings.length > 0 ? overrideLabel : `Yes, print it in ${sectionName}`,
+      warnings.length > 0 || words !== "" ? overrideLabel : `Yes, print it in ${sectionName}`,
   };
 }
 
