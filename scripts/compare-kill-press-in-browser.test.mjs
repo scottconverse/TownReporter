@@ -1,12 +1,13 @@
-// guards: Compare "Same story — kill this one" did nothing in a browser that closes the native confirm (DHG-1)
+// guards: Compare "Same story — kill this one" keeps its confirm, kills on yes, and says so when the confirm is closed (DHG-1)
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { installDom, moduleUrl, transpileToUrl } from "./dom-harness.mjs";
 
 const window = installDom();
-/* What an automated walk does to a native dialog: it dismisses it. */
+/* An automated walk dismisses a native dialog; a person may press OK. */
 let confirmAsked = 0;
-window.confirm = () => { confirmAsked++; return false; };
+let confirmAnswer = false;
+window.confirm = () => { confirmAsked++; return confirmAnswer; };
 globalThis.confirm = window.confirm;
 const React = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -45,10 +46,12 @@ const { LeadComparePanel } = await import(panelUrl);
 
 const side = (id, headline, status) => ({ id, headline, status, why: "A source record says this happened.", source_urls: "[]" });
 
-for (const status of ["held", "new"]) {
-  test(`pressing "Same story — kill this one" on a ${status} lead kills it even when the browser closes any native dialog`, async () => {
+for (const [status, answer] of [["held", true], ["new", true], ["held", false]]) {
+  test(`"Same story — kill this one" on a ${status} lead, confirm answered ${answer ? "OK" : "closed"}`, async () => {
     const root = createRoot(document.getElementById("root"));
     const kills = [];
+    confirmAsked = 0;
+    confirmAnswer = answer;
     try {
       await React.act(async () => root.render(React.createElement(LeadComparePanel, {
         current: side(458, "Housing and Human Services Advisory Board Sets Agency Funding Hearings", status),
@@ -64,8 +67,13 @@ for (const status of ["held", "new"]) {
         press.dispatchEvent(new window.Event("click", { bubbles: true }));
         await new Promise((resolve) => setTimeout(resolve, 0));
       });
-      assert.deepEqual(kills, ["kill"], "the press sent the kill");
-      assert.equal(confirmAsked, 0, "no native dialog stands between the press and the kill");
+      assert.equal(confirmAsked, 1, "the confirm is still asked (never remove a feature)");
+      if (answer) {
+        assert.deepEqual(kills, ["kill"], "OK sends the kill");
+      } else {
+        assert.deepEqual(kills, [], "a closed confirm sends nothing");
+        assert.match(document.body.textContent, /Nothing was killed: the question was closed without a yes/, "the panel says why nothing changed");
+      }
     } finally {
       await React.act(async () => root.unmount());
     }
