@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
-import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
+import { moduleUrl as sharedModuleUrl, noJobModelAssignmentUrl } from "./dom-harness.mjs";
 
 // Render the real LeadRowView component (src/components/desk-leads.tsx) --
 // specifically the "seen again ×N" resurfaced badge added for a killed lead
@@ -16,6 +16,7 @@ import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
 // uses, so this test exercises the real badge markup without a router, a
 // paper context provider, or a live server.
 function moduleUrl(source, fileName, imports = {}) {
+  imports = { "@/components/use-job-model-assignment": noJobModelAssignmentUrl, ...imports };
   let output = ts.transpileModule(source, {
     fileName,
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },

@@ -48,7 +48,7 @@ import { test } from "node:test";
 import * as React from "react";
 import ts from "typescript";
 import { parseHTML } from "linkedom";
-import { moduleUrl as sharedModuleUrl } from "./dom-harness.mjs";
+import { moduleUrl as sharedModuleUrl, noJobModelAssignmentUrl } from "./dom-harness.mjs";
 
 /* ------------------------------------------------------------------ the DOM */
 
@@ -171,7 +171,7 @@ function moduleUrl(text, fileName, imports = {}) {
     fileName,
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
   }).outputText;
-  const resolved = { react: import.meta.resolve("react"), "react-dom": import.meta.resolve("react-dom"), ...imports };
+  const resolved = { react: import.meta.resolve("react"), "react-dom": import.meta.resolve("react-dom"), "@/components/use-job-model-assignment": noJobModelAssignmentUrl, ...imports };
   let rewritten = output;
   for (const [name, url] of Object.entries(resolved)) {
     rewritten = rewritten.replaceAll(JSON.stringify(name), JSON.stringify(url));

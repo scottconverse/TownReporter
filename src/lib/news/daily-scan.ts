@@ -8,7 +8,6 @@ import {
   PICKER_PROVIDER_IDS,
   isAutomaticRungId,
   modelEffort,
-  type AutomaticRungId,
   type ModelEffort,
 } from "./provider-registry.ts";
 import {
@@ -22,12 +21,11 @@ import { type SourceHealthFacts } from "./source-inventory.ts";
  * What a daily-scan policy may store as its runtime.
  *
  * "auto" is here since 0.6.64 (Unit AA): the scheduled scan can run Automatic
- * and walks the same writing ladder a story does. A rung is still NOT here --
- * DeepSeek v4.1 Flash and the local rung are what Automatic RESOLVED to on the
- * day, which the run record names, never a hand pick an editor can store (the
- * old value was `Exclude<StoryModelChoice, "auto" | AutomaticRungId>`).
+ * and walks the same writing ladder a story does. DeepSeek is also a named
+ * runtime. The loaded-local rung remains internal; a named Local model keeps
+ * its saved endpoint and model.
  */
-export type DailyScanRuntime = Exclude<StoryModelChoice, AutomaticRungId>;
+export type DailyScanRuntime = Exclude<StoryModelChoice, "qwen-local">;
 type LegacyDailyScanRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type StoredDailyScanRuntime = DailyScanRuntime | LegacyDailyScanRuntime;
 export type DailyScanPolicy = {
@@ -100,7 +98,7 @@ const CAP = 12;
 /** Additive schema compatibility for desks that saved a schedule before the
  * daily and rotating source split was introduced. */
 export async function ensureDailyScanPolicySchema(sqlInput?: Sql) {
-  const sql = sqlInput ?? await getSql();
+  const sql = sqlInput ?? (await getSql());
   await ensureSchemaOnce(sql, "daily-scan-fixed-source-count", [
     "alter table daily_scan_policies add column if not exists every_day_source_count integer not null default 8",
   ]);
@@ -118,22 +116,17 @@ function validDailyScanRuntime(value: string): value is DailyScanRuntime {
   return (
     value === "auto" ||
     isCustomModelChoice(value) ||
-    /*
-      Unit U29: a rung is still not a runtime an editor may store, and it now
-      has to be said rather than inherited from the picker list. `deepseek-flash`
-      is in `PICKER_PROVIDER_IDS` because Opinion's model menu offers it by
-      name, so "in the picker list" no longer means "selectable for a scan" --
-      which is what this guard means, and what its declared type
-      (`DailyScanRuntime`, rungs excluded) has always meant.
-    */
-    (!isAutomaticRungId(value) &&
+    // DeepSeek is a named runtime; the loaded-local rung remains internal.
+
+    ((value === "deepseek-flash" || !isAutomaticRungId(value)) &&
       PICKER_PROVIDER_IDS.includes(value as (typeof PICKER_PROVIDER_IDS)[number]))
   );
 }
 
 function validStoredDailyScanRuntime(value: unknown): value is StoredDailyScanRuntime {
-  return typeof value === "string" &&
-    (validDailyScanRuntime(value) || LEGACY_DAILY_SCAN_RUNTIMES.has(value));
+  return (
+    typeof value === "string" &&
+    (validDailyScanRuntime(value) || LEGACY_DAILY_SCAN_RUNTIMES.has(value)));
 }
 
 /**
@@ -161,7 +154,7 @@ export function cleanDailyScanPolicyInput(raw: unknown): CleanDailyScanPolicyInp
   const value = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const sourceIds = Array.isArray(value.selectedSourceIds) ? value.selectedSourceIds : [];
   const input: CleanDailyScanPolicyInput = {
-    override: Array.isArray(value.override) && value.override.every(k => typeof k === "string") ? value.override : undefined,
+    override: Array.isArray(value.override) && value.override.every((k ) => typeof k === "string") ? value.override : undefined,
     enabled: value.enabled === true,
     localTime: typeof value.localTime === "string" ? value.localTime.trim() : "",
     runtime: typeof value.runtime === "string" ? dailyScanRuntime(value.runtime) : "auto",
@@ -379,7 +372,8 @@ export async function readDailyScanPolicy(
     localTime,
     timezone: paper.timezone,
     runtime: dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime),
-    modelEffort: modelEffort(dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime), p?.model_effort),
+    modelEffort: modelEffort(dailyScanRuntime(p?.runtime ?? UNSAVED_DAILY_SCAN_POLICY.runtime), p?.model_effort,
+    ),
     sourceCap: p?.source_cap_override ?? p?.source_cap ?? UNSAVED_DAILY_SCAN_POLICY.sourceCap,
     everyDaySourceCount: p?.every_day_source_count ?? UNSAVED_DAILY_SCAN_POLICY.everyDaySourceCount,
     selectedSourceIds: p?.selected_source_ids ?? [...UNSAVED_DAILY_SCAN_POLICY.selectedSourceIds],
@@ -479,7 +473,8 @@ export const saveDailyScanPolicy = createServerFn({ method: "POST" })
           error: e instanceof Error ? e.message : "The selected runtime is unavailable.",
         };
       }
-    const saved = await saveDailyCapForEditor(context, data, () => persistDailyScanPolicy(sql, context.newsroomId, context.userId, data, ids));
+    const saved = await saveDailyCapForEditor(context, data, () => persistDailyScanPolicy(sql, context.newsroomId, context.userId, data, ids),
+    );
     if (!saved.ok) return { ...saved, code: "source-limit" };
     if (!saved.saved)
       return {
@@ -577,7 +572,8 @@ async function pause(
     told whether a row appeared under it.
   */
   if (!value && revision > 0) {
-    const [current] = await sql.query<{ runtime: StoredDailyScanRuntime; model_effort: ModelEffort | null }>(
+    const [current] = await sql.query<{ runtime: StoredDailyScanRuntime; model_effort: ModelEffort | null ;
+    }>(
       "select runtime,model_effort from daily_scan_policies where newsroom_id=$1 and revision=$2",
       [context.newsroomId, revision],
     );
@@ -792,8 +788,7 @@ export function planDailySourceRotation(input: DailyRotationInput): DailyRotatio
   }
   const selectedDeferred = [
     ...selectedInPool.filter((id) => ineligible.has(id)),
-    ...overBudget,
-  ];
+    ...overBudget];
 
   const taken = new Set(selected);
   const remaining = Math.max(0, budget - selected.length);
@@ -880,9 +875,9 @@ export function dailyRotationNote(input: {
     );
   if (input.rotatedCount)
     parts.push(
-      `then ${input.rotatedCount} from the rotation of ${input.poolSize}`,
-    );
-  parts.push(`a full pass takes about ${input.fullPassDays} day${input.fullPassDays === 1 ? "" : "s"} at this rate`);
+      `then ${input.rotatedCount} from the rotation of ${input.poolSize}`);
+  parts.push(`a full pass takes about ${input.fullPassDays} day${input.fullPassDays === 1 ? "" : "s"} at this rate`,
+  );
   if (input.unmarkedQuietCount)
     parts.push(
       `${input.unmarkedQuietCount} quiet source${input.unmarkedQuietCount === 1 ? "" : "s"} carry no priority flag`,
@@ -929,9 +924,11 @@ export function freshnessOfFromChosen(
 }
 
 /** The chosen limit is stored intact after a warned second press. */
-export async function saveDailyCapForEditor(context: { userId: string; newsroomId: number }, data: SaveDailyScanPolicyInput, save: () => Promise<boolean>) {
+export async function saveDailyCapForEditor(context: { userId: string; newsroomId: number }, data: SaveDailyScanPolicyInput, save: () => Promise<boolean>,
+) {
   if (data.sourceCap < 1 || data.sourceCap > CAP) {
-    const warning = await editorWarning(context, data.override, "daily-source-cap", `The daily scan limit is ${data.sourceCap} sources; the usual range is 1 to 12. It may cost more.`, { kind: "newsroom", id: context.newsroomId });
+    const warning = await editorWarning(context, data.override, "daily-source-cap", `The daily scan limit is ${data.sourceCap} sources; the usual range is 1 to 12. It may cost more.`, { kind: "newsroom", id: context.newsroomId },
+    );
     if (warning) return warning;
   }
   return { ok: true as const, saved: await save() };

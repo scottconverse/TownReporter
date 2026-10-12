@@ -39,6 +39,10 @@ test("new-story picker and confirmation use Draft anyway and submit once after c
         : `export const ${name}=async()=>undefined;`
   ).join("\n"));
   stubs.set("@tanstack/react-query", `export function useQuery({queryKey}){return {data:queryKey[0]==='custom-ai-connections'?[]:queryKey[0]==='provider-availability'?{'claude-haiku':false,reasons:{'claude-haiku':'Claude is signed out on this server.'}}:undefined};}export const useMutation=()=>({});export const useQueryClient=()=>({});`);
+  // The production assignment hook stays in the dialog. Its transport and
+  // failover module's AI dependency must remain outside this isolated bundle.
+  stubs.set("@/lib/news/model-assignments-settings", `export const MODEL_ASSIGNMENTS_QUERY_KEY=['model-assignments'];export const getModelAssignmentsFn=async()=>({ok:true,assignments:[]});`);
+  stubs.set("consent-ai-transport", `export const AUTOMATIC_LADDER=[];`);
   stubs.set("@/lib/use-sections", `export const useEditorSections=()=>({sections:[{key:'community',name:'Community'}],isPending:false});`);
   stubs.set("@/components/first-run-picker-default", `export const useFirstRunPickerDefault=()=> 'auto';`);
   stubs.set("@/components/desk-chrome-utils", `export const announceToDesk=()=>{};export const announceOnly=()=>{};`);
@@ -54,6 +58,7 @@ test("new-story picker and confirmation use Draft anyway and submit once after c
   const bundle = await rolldown({ cwd: root, input: "consent-fixture", transform: { jsx: "react-jsx", define: { "import.meta.env": "{}" } }, plugins: [{
     name: "isolated-new-story",
     resolveId(id, importer) {
+      if (id === "./ai.ts" && importer?.endsWith("automatic-failover.ts")) return "\0consent-ai-transport";
       if (id === "consent-fixture" || stubs.has(id)) return "\0" + id;
       if (id === "./desk-chrome" && importer?.includes("components")) return "\0@/components/desk-chrome";
       if (id.startsWith("@/")) {

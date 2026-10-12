@@ -112,6 +112,7 @@ import {
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
@@ -330,15 +331,6 @@ function StoryPage() {
     effect is the one that sticks. The owner's own touch always wins too (see
     first-run-picker-default.ts).
   */
-  useFirstRunPickerSeed({
-    surface: "story",
-    current: modelChoice,
-    touched: () => modelChoiceTouched.current,
-    apply: (choice) => {
-      setModelChoice(choice);
-      setModelEffort(defaultModelEffort(choice));
-    },
-  });
   /*
     Publishing is the only irreversible thing on this page, and it was the
     only one that did not ask.
@@ -528,6 +520,23 @@ function StoryPage() {
     refetchIntervalInBackground: true,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
+  });
+
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+    preserveCurrent: Boolean(data?.job),
+  });
+  useFirstRunPickerSeed({
+    surface: "story",
+    current: modelChoice,
+    touched: () => modelChoiceTouched.current || storyDraftAssignment.hasAssignment || Boolean(data?.job),
+    apply: (choice) => {
+      setModelChoice(choice);
+      setModelEffort(defaultModelEffort(choice));
+    },
   });
 
   const meetingTranscriptChoices = data?.meetingTranscriptChoices ?? [];
@@ -836,9 +845,10 @@ function StoryPage() {
         data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
       const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
+      const modelChoiceExplicit = modelChoiceTouched.current || Boolean(data?.job?.model_choice);
       if (fromLedger)
-        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId } });
-      return draftLead({ data: { leadId: id, modelChoice, modelEffort, researchScope, meetingArtifactId, override: writerAction.override } });
+        return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId } });
+      return draftLead({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId, override: writerAction.override } });
     },
     onMutate: (input) => {
       setMsg("");
@@ -1740,7 +1750,7 @@ function StoryPage() {
 
   const reverifyLive = useMutation({
     mutationFn: (override?: string[]) =>
-      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort } }),
+      reverifyPublishedStory({ data: { articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice) } }),
     onSuccess: async (res) => {
       if (res && res.ok === false) {
         if ("warning" in res) {
@@ -1764,7 +1774,7 @@ function StoryPage() {
   });
 
   const rewriteLive = useMutation({
-    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort}}),
+    mutationFn: (override?: string[]) => rewritePublishedStory({data: {articleId: data?.articleId ?? 0, override, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current || Boolean(data?.job?.model_choice)}}),
     onSuccess: async res => {
       if (!res.ok) {
         if ("warning" in res) {setLiveWarning({kind: "rewrite", ...res.warning}); return;}

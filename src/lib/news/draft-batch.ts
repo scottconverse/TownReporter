@@ -3,12 +3,13 @@ import { deskMiddleware } from "./desk-auth.ts";
 import { isCustomModelChoice, type StoryModelChoice } from "./model-choice.ts";
 import { PICKER_PROVIDER_IDS } from "./provider-registry.ts";
 import { modelEffort, type AutomaticRungId, type ModelEffort } from "./provider-registry.ts";
-import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput } from "./request-input.ts";
+import { cleanOrRaw, draftBatchDismissInput, draftBatchGetInput, draftBatchStartInput ,
+} from "./request-input.ts";
 import { paperSetupWarning } from "./paper-settings.ts";
 
-export type DraftBatchRuntime = Exclude<StoryModelChoice, AutomaticRungId>;
+export type DraftBatchRuntime = Exclude<StoryModelChoice, "qwen-local">;
 export type DraftBatchStoredRuntime =
-  | DraftBatchRuntime
+  DraftBatchRuntime
   | AutomaticRungId
   | "local"
   | "claude-cli"
@@ -94,8 +95,9 @@ export function visibleDraftBatchItems<T extends { leadStatus: string | null }>(
 const runtimes = new Set<string>([...PICKER_PROVIDER_IDS, "auto"]);
 
 export function cleanDraftBatchInput(
-  value: unknown,
-): { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null; override?: string[] } | DraftBatchFailure {
+  value: unknown): | { ok: true; items: DraftBatchStartItem[]; runtime: DraftBatchRuntime; modelEffort: ModelEffort | null; override?: string[] ;
+      modelChoiceExplicit?: boolean;
+    } | DraftBatchFailure {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return { ok: false, code: "invalid-input", error: "Choose between one and five leads." };
   }
@@ -151,8 +153,10 @@ export function cleanDraftBatchInput(
   if (row.modelEffort !== undefined && effort !== row.modelEffort) {
     return { ok: false, code: "invalid-input", error: "Choose an effort supported by this model." };
   }
-  if (row.override !== undefined && (!Array.isArray(row.override) || !row.override.every(k => typeof k === "string"))) return { ok: false, code: "invalid-input", error: "Override keys are invalid." };
-  return { ok: true, items, runtime, modelEffort: effort, override: row.override as string[] | undefined };
+  if (row.override !== undefined && (!Array.isArray(row.override) || !row.override.every((k ) => typeof k === "string"))) return { ok: false, code: "invalid-input", error: "Override keys are invalid." };
+  return { ok: true, items, runtime, modelEffort: effort, override: row.override as string[] | undefined ,
+    modelChoiceExplicit: row.modelChoiceExplicit === true,
+  };
 }
 
 export const startDraftBatch = createServerFn({ method: "POST" })
@@ -182,7 +186,11 @@ export const startDraftBatch = createServerFn({ method: "POST" })
     }
     let runtimeSnapshot;
     try {
-      runtimeSnapshot = await server.validateBatchRuntime(context.newsroomId, input.runtime, input.modelEffort);
+      runtimeSnapshot = await server.validateBatchRuntime(context.newsroomId, input.runtime, input.modelEffort,
+        undefined,
+        undefined,
+        input.modelChoiceExplicit,
+      );
     } catch (error) {
       return server.batchRuntimeFailure(error);
     }

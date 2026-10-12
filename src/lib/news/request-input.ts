@@ -839,6 +839,7 @@ export const suggestHeadlinesInput = z.object({
   )
     .optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.optional(),
 });
 export const researchScopeValue = z.enum(["public", "supplied"]);
@@ -1049,6 +1050,7 @@ export const runScanInput = z.preprocess(
     daily: z.boolean().optional(),
     override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
+    modelChoiceExplicit: z.boolean().optional(),
     modelEffort: modelEffortOrNull.optional(),
     sectionKey: z.string().max(LIMITS.sectionKey).optional(),
     customSourceIds: z.array(rowId).max(LIMITS.packSources).optional(),
@@ -1063,6 +1065,7 @@ export const draftLeadInput = z.union([
     leadId: rowId,
     override: z.array(z.string()).optional(),
     modelChoice: modelChoiceText.optional(),
+    modelChoiceExplicit: z.boolean().optional(),
     modelEffort: modelEffortOrNull.optional(),
     researchScope: researchScopeValue.optional(),
     meetingArtifactId: rowId.optional(),
@@ -1075,6 +1078,7 @@ export const writeStoryInput = z.object({
   text: z.string().max(LIMITS.storyText),
   documentIds: z.array(idText).max(LIMITS.documentIds).optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
   sectionKey: z.string().max(LIMITS.sectionKey).optional(),
@@ -1205,6 +1209,7 @@ export const rewriteFromLedgerInput = z.object({
   override: z.array(z.string()).optional(),
   leadId: rowId,
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
   meetingArtifactId: rowId.optional(),
@@ -1255,6 +1260,7 @@ export const startReportingInput = z.object({
   /** Set only by a follow-up press: the run this one continues. */
   parentRequestId: rowId.optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
 });
@@ -1267,6 +1273,7 @@ export const reportingFollowUpInput = z.object({
   assignment: z.string().trim().max(4_000),
   seedUrls: z.string().max(20_000).optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   researchScope: researchScopeValue.optional(),
 });
@@ -1413,6 +1420,7 @@ export const aiFollowUpInput = z.object({
   /** `follow-ups.ts:389` takes at most 8, each cut at 500. */
   targets: z.array(z.string().max(LIMITS.aiFollowUpTarget)).max(8).optional(),
   modelChoice: z.string().max(LIMITS.aiFollowUpModel).optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
 });
 
@@ -1466,6 +1474,7 @@ export const correctionWordingInput = z.object({
   wasWrong: z.string().max(LIMITS.correctionLine),
   isRight: z.string().max(LIMITS.correctionLine),
   modelChoice: z.string().max(160).optional(),
+  modelChoiceExplicit: z.boolean().optional(),
 });
 
 /**
@@ -1524,6 +1533,7 @@ export const darkRunInput = z.object({ override: z.array(z.string()).optional(),
   paste: z.string().max(LIMITS.darkPaste),
   investigationId: rowId.optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.optional(),
 });
 
@@ -1547,6 +1557,7 @@ export const darkStepInput = z.union([
   z.object({ override: z.array(z.string()).optional(),
     id: rowId,
     modelChoice: modelChoiceText.optional(),
+    modelChoiceExplicit: z.boolean().optional(),
     modelEffort: modelEffortLoose.optional(),
   }),
 ]);
@@ -1652,6 +1663,7 @@ export const editorialStartInput = z.object({
   askedFor: z.string().optional(),
   articleSlug: z.string().max(LIMITS.slug).optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   voiceMode: z.enum(["paper", "neutral"]).optional(),
   documentIds: z.array(idText).optional(),
@@ -1708,6 +1720,7 @@ export const draftStyleFixInput = draftEditInput
   .omit({ evidenceDecision: true, evidenceToken: true })
   .extend({
     modelChoice: modelChoiceText.optional(),
+    modelChoiceExplicit: z.boolean().optional(),
     modelEffort: modelEffortLoose.optional(),
     findingIds: z
       .array(z.string().max(LIMITS.styleFindingId))
@@ -1828,6 +1841,7 @@ export const opsAction = z.string().max(LIMITS.opsActionId).catch("");
 export const importStructureInput = z.object({
   text: z.string().max(LIMITS.importText),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
 });
 
@@ -1974,6 +1988,7 @@ export const findSourcesInput = z.object({
   topic: z.string(),
   scope: z.enum(["records", "organizations", "everything"]),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 
@@ -1998,6 +2013,7 @@ export const findReplacementInput = z.object({
   url: z.string().max(LIMITS.url).optional(),
   title: z.string().max(LIMITS.headlineEdit).optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 
@@ -2024,6 +2040,7 @@ export const weaveIntoStoryInput = z.object({
   /** The reviewed body. Present only on the confirm press. */
   saveText: z.string().max(LIMITS.storyBody).optional(),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 
@@ -2051,6 +2068,7 @@ export const addLeadInput = z.object({
   why: z.string().optional(),
   then: z.enum(["score", "draft", "as-is"]),
   modelChoice: modelChoiceText.optional(),
+  modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortLoose.nullable().optional(),
 });
 

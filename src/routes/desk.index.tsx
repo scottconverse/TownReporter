@@ -95,6 +95,7 @@ import { draftItemLabel } from "@/lib/news/draft-item";
 import { keepsFailing } from "@/lib/news/source-rows";
 import { usePaper, usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
 import { PaperSetupGateNote } from "@/components/PaperSetupGateNote";
@@ -418,6 +419,13 @@ function DeskHome() {
   });
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const scanModelTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: scanModelTouched,
+    setChoice: (choice) => setScanModel(choice),
+    setEffort: setScanModelEffort,
+  });
   /*
     FB6, item 3: `Run scan now` was a LAZY BAR and a SILENT FAIL (FB0-Report
     Table B). The button swapped its own word to "Scanning…" and that was the
@@ -427,7 +435,7 @@ function DeskHome() {
     `["desk-jobs"]` query every other card on this desk already reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort, modelChoiceExplicit: scanModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -482,10 +490,16 @@ function DeskHome() {
     first-run-picker-default.ts).
   */
   const storyModelTouched = useRef(false);
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: storyModelTouched,
+    setChoice: (choice) => setStoryModel(choice),
+    setEffort: setStoryModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "story",
     current: storyModel,
-    touched: () => storyModelTouched.current,
+    touched: () => storyModelTouched.current || storyDraftAssignment.hasAssignment,
     apply: (choice) => {
       setStoryModel(choice);
       setStoryModelEffort(defaultModelEffort(choice));
@@ -607,6 +621,7 @@ function DeskHome() {
           documentIds: storyDocuments.map((d) => d.id),
           modelChoice: storyModel,
           modelEffort: storyModelEffort,
+          modelChoiceExplicit: storyModelTouched.current,
           researchScope: storyScope,
           sectionKey: storySection || undefined,
         },
@@ -970,7 +985,7 @@ function DeskHome() {
       same one "Write draft" sends, so one page cannot have two answers.
     */
     mutationFn: (leadId: number) =>
-      draftLead({ data: { leadId, modelChoice: storyModel, modelEffort: storyModelEffort } }),
+      draftLead({ data: { leadId, modelChoice: storyModel, modelEffort: storyModelEffort, modelChoiceExplicit: storyModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       void qc.invalidateQueries({ queryKey: ["drafts-desk"] });
@@ -2506,7 +2521,11 @@ function DeskHome() {
                 scope="scan"
                 label="Model for this scan"
                 value={scanModel}
-                onChange={setScanModel}
+                onChange={(choice) => {
+                  scanModelTouched.current = true;
+                  setScanModel(choice);
+                  setScanModelEffort(defaultModelEffort(choice));
+                }}
                 effort={scanModelEffort}
                 onEffortChange={setScanModelEffort}
               />
