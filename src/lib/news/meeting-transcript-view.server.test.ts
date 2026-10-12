@@ -14,6 +14,7 @@ import {
 } from "./meeting-transcript-view.server.ts";
 import * as transcriptDownloadModule from "./meeting-transcript-view.server.ts";
 import {
+  TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE,
   TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
   TranscriptViewRefused,
   transcriptPlainText,
@@ -191,6 +192,42 @@ describe("meeting transcript view", () => {
         error.status === 404 &&
         error.message === TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
     );
+  });
+
+  it("DHH-5 says a missing original is not checked, never valid, and keeps the recorded hash", async () => {
+    const { sql } = fakeSql([
+      {
+        id: 60,
+        video_id: "gone-60",
+        storage_path: join(scratch, "missing-60.srv3"),
+        sha256: "e".repeat(64),
+        format: "srv3",
+        byte_size: 100,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 60 });
+    assert.equal(view.originalAvailable, false);
+    assert.equal(view.sha256, "e".repeat(64));
+    assert.match(TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE, /not checked/);
+    assert.doesNotMatch(TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE, /valid/i);
+  });
+
+  it("DHH-5 reports an original that is on disk as available", async () => {
+    const file = artifactFile("present-63.srv3", "<transcript/>");
+    const { sql } = fakeSql([
+      {
+        id: 63,
+        video_id: "here-63",
+        storage_path: file.path,
+        sha256: file.sha256,
+        format: "srv3",
+        byte_size: file.bytes.length,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    const view = await loadTranscriptView(sql, { newsroomId: 1, artifactId: 63 });
+    assert.equal(view.originalAvailable, true);
   });
 
   it("prints every stored segment in order, with the artifact facts", async () => {

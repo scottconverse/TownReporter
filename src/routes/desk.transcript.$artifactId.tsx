@@ -6,6 +6,7 @@ import { EmptyState, Notice, ScreenError, WorkbenchSkeleton } from "@/components
 import { getTranscriptView } from "@/lib/news/desk";
 import {
   fetchTranscriptOriginal,
+  TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE,
   transcriptByteSize,
   transcriptPlainText,
   transcriptSegmentUrl,
@@ -267,6 +268,12 @@ function TranscriptPage() {
         <p className="note-one">
           SHA-256 <code className="transcript-hash">{view.sha256}</code>
         </p>
+        {view.originalAvailable ? null : (
+          <p className="note-one" role="status">
+            {TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE} The SHA-256 above is the value recorded when
+            the file was captured.
+          </p>
+        )}
         <p className="note-one">
           Captured {view.capturedAt} · {transcriptByteSize(view.byteSize)} · {view.format}
         </p>
@@ -275,7 +282,7 @@ function TranscriptPage() {
       {view.lines.length === 0 ? (
         <Notice kind="warn">
           This artifact has no stored caption lines, so there is nothing to read.
-          {originalProblem ? null : " The original file is still available above."}
+          {originalProblem || !view.originalAvailable ? null : " The original file is still available above."}
         </Notice>
       ) : (
         <ol className="transcript-lines">
