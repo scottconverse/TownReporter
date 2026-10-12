@@ -664,11 +664,31 @@ export function LeadRowView({
             </InkButton>
           ) : null
         ) : held ? (
-          onBack ? (
-            <InkButton tone="quiet" small pending={backPending} pendingLabel="Releasing…" onClick={onBack}>
-              Release
-            </InkButton>
-          ) : null
+          <>
+            {onBack ? (
+              <InkButton tone="quiet" small pending={backPending} pendingLabel="Releasing…" onClick={onBack}>
+                Release
+              </InkButton>
+            ) : null}
+            {/*
+              DHD2-4: a held row showed "Release" and icons but no named Kill, so
+              the fast kill had no text door on held leads. The same press as the
+              open row's Kill (`onKillNow`), with the words on it. Added beside
+              Release; nothing the held row showed is taken away.
+            */}
+            {onKillNow ? (
+              <InkButton
+                tone="quiet-danger"
+                small
+                pending={killPending}
+                pendingLabel="Killing…"
+                onClick={onKillNow}
+                ariaLabel={`Kill the lead: ${lead.headline}`}
+              >
+                Kill
+              </InkButton>
+            ) : null}
+          </>
         ) : closed ? null : (
           <>
             <Link

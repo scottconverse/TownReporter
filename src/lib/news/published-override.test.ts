@@ -13,7 +13,7 @@ import { createServer, type ViteDevServer } from "vite";
   not. Changing it now writes the real `articles` row AND appends a row to the
   public change log (`corrections`), so a reader sees that the paper changed
   something rather than finding the text quietly different. The first press
-  warns ("This story is live. Your change will show on the paper."); the change
+  warns ("This story is live. Your change will show on the public page."); the change
   happens only when the editor accepts with `override:[key]`.
 
   Item 35. The named-outlet gate only knows the outlets on the newsroom's list
@@ -210,7 +210,7 @@ it("warns before a live summary change, then applies it and shows it in the chan
   const first = await performChangePublishedStory(ctx, { articleId, dek: "A new summary." });
   assert.equal(first.ok, false);
   assert.ok(warned(first), "the first press must warn rather than change the paper");
-  assert.equal(first.warning.sentence, "This story is live. Your change will show on the paper.");
+  assert.equal(first.warning.sentence, "This story is live. Your change will show on the public page.");
 
   assert.equal(
     (await article(articleId)).dek,

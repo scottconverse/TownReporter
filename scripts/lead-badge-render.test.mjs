@@ -1056,8 +1056,9 @@ test("Compare keeps the kill press for killed leads and hides it for published s
       }),
     );
     if (status === "killed") {
-      assert.match(html, /Same story — kill this one/);
-      assert.match(html, /aria-label="Same story/);
+      // DHD2-8: on a lead that is already killed the press reads as what it does now.
+      assert.match(html, />Already killed — add duplicate note</);
+      assert.match(html, /aria-label="Already killed — add duplicate note: /);
     } else {
       assert.doesNotMatch(html, /Same story — kill this one/);
       assert.doesNotMatch(html, /aria-label="Same story/);

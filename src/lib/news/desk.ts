@@ -5207,6 +5207,12 @@ export const restoreKilledLead = createServerFn({ method: "POST" })
       where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
     `;
     if (!current) return { ok: false as const, error: "That lead is not killed." };
+    // DHD2-3: Undo puts back the kill reason the lead had before the kill. With
+    // no prior reason recorded (null), the reason the kill wrote stays as it was.
+    await sql`
+      update leads set kill_reason = coalesce(kill_prior_reason, kill_reason), kill_prior_reason = null
+      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+    `;
     const wanted = data.status ?? (current.prior === "held" || current.prior === "drafted" ? current.prior : "new");
     if (wanted === "drafted") {
       const rows = await sql<{ id: number }>`
@@ -6982,7 +6988,7 @@ export const LIVE_STORY_CHANGE_KEY = "published-live-change";
 
 /** The sentence the desk shows before it lets a live change through. */
 export const LIVE_STORY_CHANGE_SENTENCE =
-  "This story is live. Your change will show on the paper.";
+  "This story is live. Your change will show on the public page.";
 
 export type LiveStoryChangeInput = {
   articleId?: number;

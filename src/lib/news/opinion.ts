@@ -44,6 +44,8 @@ export type EditorialRow = {
   created_at: string;
   finished_at: string | null;
   headline: string | null;
+  /** DHD2-12: the draft's summary, so the row can say before a press that it is empty. */
+  dek?: string | null;
   words: number | null;
   published_slug: string | null;
   /** Latest durable desk job stage for an open request (for live progress UI). */
@@ -140,6 +142,7 @@ export const listEditorials = createServerFn({ method: "GET" })
              r.draft_id, r.error,
              r.created_at, r.finished_at,
              d.headline,
+             d.dek,
              d.integrity_notes,
              d.research_json,
              case when d.body is null then null

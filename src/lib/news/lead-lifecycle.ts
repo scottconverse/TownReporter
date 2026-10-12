@@ -94,16 +94,19 @@ export async function setLeadStatusForEditor(
     // DHC06: the first kill remembers the status the lead held before it, so
     // Undo and "Bring back" put it back. DHC09: a kill on a lead that is already
     // killed keeps the first kill record (its time, its status, its reason) and
-    // only adds the new note to the reason.
+    // only adds the new note to the reason, after a " · " separator (DHD2-8).
+    // DHD2-3: a kill with no reason typed keeps the reason the lead already has,
+    // and the first kill remembers that reason so Undo can put it back.
     await sql`
       update leads set status = 'killed',
               kill_prior_status = case when status = 'killed' then kill_prior_status else status end,
+              kill_prior_reason = case when status = 'killed' then kill_prior_reason else kill_reason end,
               killed_at = case when status = 'killed' then killed_at else now() end,
               kill_reason = case
-                when status <> 'killed' then ${reason || null}::text
                 when ${reason || null}::text is null then kill_reason
+                when status <> 'killed' then ${reason || null}::text
                 when coalesce(btrim(kill_reason), '') = '' then ${reason || null}::text
-                else kill_reason || ' Killed again: ' || ${reason || null}::text
+                else kill_reason || ' · Killed again: ' || ${reason || null}::text
               end,
               kill_reason_url = case
                 when status = 'killed' then coalesce(kill_reason_url, ${data.killReasonUrl?.trim() || null}::text)
@@ -158,10 +161,13 @@ export async function resolveLeadDuplicateForEditor(
       : null;
     if (draftedWarning) return draftedWarning;
 
+    // DHD2-6: the duplicate kill reason goes with the duplicate call. A reason
+    // the editor wrote in their own words stays.
     const rows = await sql<{ id: number }>`
       update leads
       set possible_duplicate_of = null, dup_kind = null,
-          status = 'new'
+          status = 'new',
+          kill_reason = case when kill_reason like 'Duplicate of %' then null else kill_reason end
       where id = ${data.id} and newsroom_id = ${newsroomId}
       returning id
     `;

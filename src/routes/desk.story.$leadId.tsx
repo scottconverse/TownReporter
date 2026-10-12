@@ -76,6 +76,8 @@ import {
   stopPullJob,
   suggestHeadlines,
   updateArticleHeadline,
+  LIVE_STORY_CHANGE_KEY,
+  LIVE_STORY_CHANGE_SENTENCE,
 } from "@/lib/news/desk";
 import type { PullRunView } from "@/lib/news/pull.server";
 import { failureSummary } from "@/lib/news/pull-outcome";
@@ -725,6 +727,17 @@ function StoryPage() {
     const d = data?.draft;
     if (!d) {
       if (data?.lead && !topicTouched) setTopic(initialStoryTopic(data.lead.topic));
+      /*
+        A printed story can have no draft row. The box then has to start from
+        the paper too, or its summary, headline and text stay empty on every
+        load and an edit to the summary has nothing to save from.
+      */
+      if (data?.articleId && appliedFp.current === "") {
+        setHeadline(data.articleHeadline ?? "");
+        setDek(data.articleDek ?? "");
+        setBody(stripReporterNotebook(data.articleBody ?? ""));
+        appliedFp.current = `article|${data.articleId}`;
+      }
       return;
     }
     const fp = `${d.updated_at ?? ""}|${(d.body ?? "").length}|${d.headline ?? ""}`;
@@ -2348,6 +2361,18 @@ function StoryPage() {
   const mergedBlockers = [...mergedBlockerByKey.values()];
   const publishConfirm = publishConfirmation(mergedBlockers, sectionNameNow);
   /*
+    DHD2-2 / DHD2-11: a warning's "... anyway" press publishes on its FIRST press.
+    The press is the answer to the warnings it names, so it sends the keys the
+    page drew and clears the last refusal. Used by the no-section "Publish anyway
+    in <section>" press and by the held and killed cards' "Publish anyway".
+  */
+  const publishAnyway = () => {
+    setConfirmingPublish(false);
+    setPublishRefusal("");
+    setRefusedWarnings([]);
+    publish.mutate(publishConfirm.acknowledgedWarningKeys);
+  };
+  /*
     Unit UI1a: the three blocker presses that are a SERVER round trip, as the
     facts the shared `ActionButton` needs -- which row is running, which last
     failed, and the server's own reason for it. The other rows in the list are
@@ -2547,6 +2572,9 @@ function StoryPage() {
         return;
       case "publish-bar":
         document.getElementById("astra-publish-bar")?.scrollIntoView?.({ block: "center" });
+        return;
+      case "publish-now":
+        publishAnyway();
         return;
     }
   };
@@ -3359,9 +3387,12 @@ function StoryPage() {
                   </InkButton>
                 ) : null}
                 {onPaper ? (
+                  <p className="note">{LIVE_STORY_CHANGE_SENTENCE}</p>
+                ) : null}
+                {onPaper ? (
                   <InkButton
                     disabled={saveLiveChange.isPending || !data.articleId}
-                    onClick={() => saveLiveChange.mutate(undefined)}
+                    onClick={() => saveLiveChange.mutate([LIVE_STORY_CHANGE_KEY])}
                   >
                     {saveLiveChange.isPending ? "Saving…" : "Save changes"}
                   </InkButton>
@@ -4200,7 +4231,7 @@ function StoryPage() {
                       phase={publish.isPending ? "working" : "idle"}
                       workingLabel="Publishing…"
                       disabled={publish.isPending || !publishConfirm.enabled}
-                      onAct={() => setConfirmingPublish(true)}
+                      onAct={publishAnyway}
                     >
                       {`Publish anyway in ${sectionNameNow}`} (no section was chosen)
                     </ActionButton>
@@ -4314,6 +4345,7 @@ function StoryPage() {
       <KillDialog
         leadId={id}
         leadStatus={data.lead.status}
+        hasDraft={Boolean(data.draft?.body?.trim())}
         onRestored={afterLeadChange}
         open={killOpen}
         onOpenChange={setKillOpen}

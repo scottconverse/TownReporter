@@ -358,7 +358,7 @@ function DeskHome() {
     pending: "Undoing…", done: () => "Undone: the lead is back on the Queue.",
   });
   const setStatus = useDeskMutation({
-    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string }) =>
+    mutationFn: (input: { id: number; status: "held" | "killed" | "new"; release?: boolean; override?: string[]; restore?: RestoreStatus; killReason?: string; killReasonUrl?: string; headline?: string }) =>
       setLeadStatus({ data: { id: input.id, status: input.status, override: input.override, killReason: input.killReason, killReasonUrl: input.killReasonUrl } }),
     /*
       FB6, item 2 (README:484). The row moves in the same paint as the press and
@@ -370,6 +370,10 @@ function DeskHome() {
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     warningAction: (input) => input.release ? "Release" : input.status === "killed" ? "Kill" : input.status === "held" ? "Hold" : "Reopen",
     pending: "Saving…",
+    /*
+      DHD2-5: a Today Kill names the lead it killed. The toast never says a draft
+      was saved -- a kill does not save one.
+    */
     done: (_result, input) =>
       input.release
         ? "Released."
@@ -377,7 +381,9 @@ function DeskHome() {
           ? "Undone: the lead is back on the Queue."
           : input.status === "held"
             ? "The lead is on hold, off the Queue until you release it."
-            : "The lead moved to Killed, and its row keeps an Undo.",
+            : input.headline?.trim()
+              ? `Killed ${input.headline.trim()}.`
+              : "The lead moved to Killed, and its row keeps an Undo.",
     /*
       L4 of the batch-6 pre-merge audit. The Kill sentence above names an Undo,
       and a killed row is exactly the one that may not be on screen to offer it
@@ -395,7 +401,7 @@ function DeskHome() {
               else await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
             },
           },
-    chips: (_result, input) => input.status === "killed" ? <KillReasonChips leadId={input.id} save={(request) => setStatus.mutate({ ...request.data, override: input.override, restore: input.restore })} /> : null,
+    chips: (_result, input) => input.status === "killed" ? <KillReasonChips leadId={input.id} save={(request) => setStatus.mutate({ ...request.data, override: input.override, restore: input.restore, headline: input.headline })} /> : null,
     duration: (_result, input) => input.status === "killed" ? KILL_TOAST_MS : undefined,
     failedLead: "Could not change that lead. ",
   });
@@ -1065,7 +1071,7 @@ function DeskHome() {
         break;
       case "kill":
         // X is the row's fast Kill, with Undo and optional reason chips.
-        if (lead) setStatus.mutate(killPress(lead.id, restoreStatus(lead.status)));
+        if (lead) setStatus.mutate({ ...killPress(lead.id, restoreStatus(lead.status)), headline: lead.headline });
         break;
       case "undo":
         if (lead) setStatus.mutate({ id: lead.id, status: "new", release: lead.status === "held" });
@@ -2237,7 +2243,7 @@ function DeskHome() {
                                 </InkButton>
                                 <InkButton
                                   tone="quiet-danger"
-                                  onClick={() => setStatus.mutate(killPress(l.id, restoreStatus(l.status)))}
+                                  onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
                                 >
                                   Kill <kbd>X</kbd>
                                 </InkButton>

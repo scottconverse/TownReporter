@@ -425,3 +425,12 @@ it("a killed lead's warning names the Publish anyway button and says the press p
   assert.match(row!.sentence, /Publish anyway/, "the sentence names the button the editor presses");
   assert.match(row!.sentence, /publishes this draft/, "the sentence says the press publishes");
 });
+
+// guards: DHD2-2 -- the held and killed cards' "Publish anyway" press publishes on its first press, so its target is the publish-now press, not a scroll to the bar.
+it("the killed and held cards' Publish anyway press publishes now rather than scrolling to the bar", () => {
+  for (const leadStatus of ["killed", "held"]) {
+    const row = publishBlockers(withState({ leadStatus })).find((blocker) => blocker.action?.label === "Publish anyway");
+    assert.ok(row, `a ${leadStatus} lead's card has a Publish anyway press`);
+    assert.deepEqual(row!.action?.target, { kind: "publish-now" }, `${leadStatus}: the press must publish, not only point at the bar`);
+  }
+});

@@ -555,6 +555,25 @@ test("DHC04: the first kill of a drafted lead says the draft is kept, and one pr
   await page.close();
 });
 
+test("DHD2-1: a lead with a saved draft shows the draft warning even when its status reads new", async () => {
+  desk.__reset();
+  const page = await mount(
+    openHost((open, setOpen) =>
+      React.createElement(KillDialog, { leadId: 7, leadStatus: "new", hasDraft: true, open, onOpenChange: setOpen }),
+    ),
+  );
+  assert.match(
+    lastLayer().textContent,
+    /This lead has a written draft that is not printed\. Killing keeps the draft\./,
+    "the first panel names the draft on the Story page path, whatever the status says",
+  );
+  await page.click(radio("Already printed"));
+  await page.click(button("Kill with this reason"));
+  assert.equal(desk.calls.length, 1, "one press, one kill");
+  assert.deepEqual(desk.calls[0].data.override, ["lead-status-drafted"]);
+  await page.close();
+});
+
 test("a link is sent with the reason, and is never sent on its own", async () => {
   desk.__reset();
   const page = await mount(

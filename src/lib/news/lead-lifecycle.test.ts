@@ -87,7 +87,7 @@ test("Not a duplicate moves a killed lead to New and clears its duplicate link",
 test("a kill remembers the prior status, and a second kill keeps the first record and appends the note", async () => {
   const db = new PGlite();
   try {
-    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_prior_reason text, kill_reason_url text, notes_json text);
       create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
       create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
       insert into leads(id,newsroom_id,status) values (1,7,'held'),(2,7,'new');`);
@@ -106,10 +106,50 @@ test("a kill remembers the prior status, and a second kill keeps the first recor
     `;
     assert.equal(second.kill_prior_status, "held", "the second kill must not overwrite the status before the first kill");
     assert.equal(second.killed_at, first.killed_at, "the first kill time is kept");
-    assert.equal(second.kill_reason, "Not news Killed again: Same story as lead 9");
+    assert.equal(second.kill_reason, "Not news · Killed again: Same story as lead 9", "DHD2-8: the repeated note is separated, not run on");
     await setLeadStatusForEditor(sql, 7, { id: 2, status: "killed" });
     const [untouched] = await sql<{ kill_prior_status: string }>`select kill_prior_status from leads where id = 2`;
     assert.equal(untouched.kill_prior_status, "new");
+  } finally {
+    await db.close();
+  }
+});
+
+// guards: DHD2-3 -- a kill with no reason typed keeps the reason the lead already has, and the first kill remembers it so Undo can put it back.
+test("a kill with no reason typed keeps the lead's reason, and remembers it for Undo", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, kill_prior_reason text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      insert into leads(id,newsroom_id,status,kill_reason) values (3,7,'held','Covered last week');`);
+    const sql = makeSql(db);
+    assert.equal((await setLeadStatusForEditor(sql, 7, { id: 3, status: "killed" })).ok, true);
+    const [killed] = await sql<{ status: string; kill_reason: string | null; kill_prior_reason: string | null }>`
+      select status, kill_reason, kill_prior_reason from leads where id = 3
+    `;
+    assert.deepEqual(killed, { status: "killed", kill_reason: "Covered last week", kill_prior_reason: "Covered last week" });
+  } finally {
+    await db.close();
+  }
+});
+
+// guards: DHD2-6 -- "Not a duplicate" clears the duplicate kill reason it wrote, and keeps a reason the editor wrote in their own words.
+test("Not a duplicate clears a Duplicate-of kill reason but keeps an editor's own reason", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      insert into leads(id,newsroom_id,status,possible_duplicate_of,kill_reason) values (12,7,'killed',10,'Duplicate of Council Budget Hearing'),(13,7,'killed',10,'Not news');`);
+    const sql = makeSql(db);
+    assert.equal((await resolveLeadDuplicateForEditor(sql, 7, { id: 12, action: "not-a-duplicate" })).ok, true);
+    assert.equal((await resolveLeadDuplicateForEditor(sql, 7, { id: 13, action: "not-a-duplicate" })).ok, true);
+    const rows = await sql<{ id: number; status: string; kill_reason: string | null }>`select id, status, kill_reason from leads order by id`;
+    assert.deepEqual(rows, [
+      { id: 12, status: "new", kill_reason: null },
+      { id: 13, status: "new", kill_reason: "Not news" },
+    ]);
   } finally {
     await db.close();
   }

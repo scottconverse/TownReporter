@@ -56,6 +56,12 @@ export type KillDialogProps = {
   /** The lead to kill. `setLeadStatus` takes the row id. */
   leadId: number;
   leadStatus?: string;
+  /**
+   * DHD2-1: the lead has a written draft, whatever its status says. A lead can
+   * hold a saved draft while its status reads "new", and the server warns on
+   * the draft either way, so the first panel names it on both paths.
+   */
+  hasDraft?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called once the kill has landed, so the page can refetch the lead. */
@@ -63,7 +69,8 @@ export type KillDialogProps = {
   onRestored?: () => void | Promise<void>;
 };
 
-export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, onRestored }: KillDialogProps) {
+export function KillDialog({ leadId, leadStatus, hasDraft, open, onOpenChange, onKilled, onRestored }: KillDialogProps) {
+  const drafted = leadStatus === "drafted" || Boolean(hasDraft);
   const [fill, setFill] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [url, setUrl] = useState("");
@@ -115,7 +122,7 @@ export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, o
           data: {
             ...captured,
             status: "killed",
-            override: leadStatus === "drafted" ? ["lead-status-drafted", ...(override ?? [])] : override,
+            override: drafted ? ["lead-status-drafted", ...(override ?? [])] : override,
           },
         }),
         { action: "Kill" }, warning => { onOpenChange(false); return askDeskToastOverride(warning); },
@@ -178,7 +185,7 @@ export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, o
       */
       {...dialogPressProps(busy, "Killing…")}
     >
-      {leadStatus === "drafted" ? (
+      {drafted ? (
         <p className="astra-modal-alert" role="note">
           This lead has a written draft that is not printed. Killing keeps the draft.
         </p>

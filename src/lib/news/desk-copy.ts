@@ -2293,6 +2293,8 @@ export const COMPARE_CURRENT_LABEL = "This lead";
 export const COMPARE_PRIOR_LABEL = "The lead it matched";
 export const MOVE_TO_NEW_LABEL = "Not a duplicate — move to New";
 export const KILL_THIS_ONE_LABEL = "Same story — kill this one";
+/** DHD2-8: the same press on a lead that is already killed adds a duplicate note; it does not kill again. */
+export const ALREADY_KILLED_DUPLICATE_LABEL = "Already killed — add duplicate note";
 export const REOPEN_PRIOR_LABEL = "Newer facts — reopen the old one";
 
 /** Unit AK item 5: after "Not a duplicate — move to New". */
