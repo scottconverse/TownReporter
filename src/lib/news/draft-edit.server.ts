@@ -1,6 +1,7 @@
 import { withLeadDraftLock } from "./draft-order.server.ts";
 import type { Sql } from "../db.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { dekOrFallback } from "./dek-fallback.ts";
+import { appendEditorChecks, cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
 import { EVIDENCE_REVIEW_VERSION_KEY, evidenceReviewToken, reconcileDraftEvidence, type EvidenceDecision } from "./draft-evidence.ts";
 import { headlineSourceAfterEdit } from "./headline-control.ts";
 import { researchJsonWithStyleAudit, styleRecordForSavedText, type DraftStyleRecord } from "./draft-audit-record.ts";
@@ -29,7 +30,13 @@ export async function saveDraftForEditorInTransaction(sql: Sql, context: { userI
       select * from drafts where lead_id = ${data.leadId} and newsroom_id = ${context.newsroomId}
       order by updated_at desc, id desc limit 1 for update
     `;
+    const cleanedSummary = cleanMissingFactNotes(data.headline, data.dek);
     const body = stripReporterNotebook(data.body);
+    const cleanedDek =
+      cleanedSummary.dek ||
+      (cleanedSummary.notes.length ? dekOrFallback("", body) || cleanedSummary.headline : "");
+    data = { ...data, headline: cleanedSummary.headline, dek: cleanedDek };
+    const integrityNotes = appendEditorChecks(existing[0]?.integrity_notes, cleanedSummary.notes);
     const decision = data.evidenceDecision === "keep" || data.evidenceDecision === "remove" ? data.evidenceDecision : undefined;
     /*
       No timestamp on this record, deliberately: the audit is a pure function
@@ -51,6 +58,7 @@ export async function saveDraftForEditorInTransaction(sql: Sql, context: { userI
         dek: data.dek,
         body,
         topic: data.topic,
+        integrity_notes: integrityNotes,
         source_urls: evidence.source_urls,
         provenance_json: evidence.provenance_json,
         found_note: evidence.found_note,
@@ -100,6 +108,7 @@ export async function saveDraftForEditorInTransaction(sql: Sql, context: { userI
       const headlineSource = headlineSourceAfterEdit(existing[0], data.headline);
       await sql`
         update drafts set headline = ${data.headline}, dek = ${data.dek}, body = ${body},
+          integrity_notes = ${integrityNotes},
           topic = ${data.topic}, headline_source = ${headlineSource},
           source_urls = ${evidence.source_urls}, provenance_json = ${evidence.provenance_json},
           found_note = ${evidence.found_note}, unanswered = ${evidence.unanswered}, research_json = ${researchJson}, updated_at = now()
@@ -113,8 +122,8 @@ export async function saveDraftForEditorInTransaction(sql: Sql, context: { userI
         theirs by construction -- and the column's default is `model`, which
         would be a lie about a headline the model never wrote.
       */
-      await sql`insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, headline_source, research_json)
-        values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, 'editor', ${withSourceNote(researchJsonWithStyleAudit(null, styleRecord()))})`;
+      await sql`insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, integrity_notes, headline_source, research_json)
+        values (${context.userId}, ${context.newsroomId}, ${data.leadId}, ${data.headline}, ${data.dek}, ${body}, ${data.topic}, ${integrityNotes}, 'editor', ${withSourceNote(researchJsonWithStyleAudit(null, styleRecord()))})`;
     }
     return { ok: true as const };
 }

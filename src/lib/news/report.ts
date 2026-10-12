@@ -45,13 +45,14 @@ import { sanitizePublicUrls } from "./schema.ts";
 import { usableLeadSources } from "./result-quality.ts";
 import type { LeadRow, MemoryRow } from "./types.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { appendEditorChecks, cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
 import { titlesOverlap } from "./desk-copy.ts";
 import { ungroundedDraftSpecifics, type DraftGroundingRow } from "./draft-specifics.ts";
 import type { EditorialAssignment } from "./write-story.ts";
 import { checkStoryNames, replaceName, type UploadedNameEvidence } from "./name-check-work.ts";
 import { nameCheckNotes, nameCheckText, type NameCheck } from "./name-check.ts";
 import { parseDocumentClaims, type DocumentReportedClaim } from "./document-reconcile-evidence.ts";
+import { dekOrFallback } from "./dek-fallback.ts";
 export { stripReporterNotebook } from "./strip-draft.ts";
 export { outletNamesForHost, uncreditedOutlets } from "./source-credit.ts";
 
@@ -357,6 +358,7 @@ If the named company issued a press release and it is in the evidence, their job
 
 Headline: the actual news. Specific nouns, active verbs, a number/location/deadline when useful. No agency-speak.
 One line, about ten to fourteen words: the reader knows what happened and to whom without opening the story. No questions, no colon-stacked two-part headline unless the second half is a separate fact, and never hedge in a headline — a "may" or "could" there is a story the reporting did not establish.
+Reader summary: the headline and dek are for readers only. Never put a fact-check note about missing information in either field, including "the notice does not state", "is not stated", "did not say", "not specified", or "unclear from the notice". Put that note in integrity_notes or unanswered. Keep substantive reporting about what the city has or has not decided in the body.
 Lede: the most important new fact immediately. A reader who stops after paragraph one knows what happened and why it matters.
 Nut graf: within the first few paragraphs, why someone in ${p.city} should care.
 Body: details, impact, money, people affected, history, disagreement or uncertainty, what happens next. Order of reader value, not the order of the press release.
@@ -404,6 +406,7 @@ Body: markdown paragraphs, no h1, not JSON. Do not print the claims list in the 
 export const REPORT_WRITE_SYSTEM = reportWriteSystem(PAPER);
 
 export const REPORT_EDIT_SYSTEM = `You are the newsroom editor for TownReporter. Reconcile the draft against the supplied evidence, then edit. The draft is not evidence; its assertions and links are claims to check. Retain supported facts and useful writing, remove or qualify unsupported assertions, and record unresolved checks in integrity_notes. Do not add facts absent from the evidence.
+The headline and dek are for readers only. Keep missing-fact notes such as "does not state", "is not stated", "did not say", "not specified", and "unclear from the notice" out of both fields; put them in integrity_notes or unanswered. Keep substantive reporting about what the city has or has not decided in the body.
 Research questions and unknowns are hypotheses from an earlier pass, not evidence. When the supplied evidence answers one, remove it from unanswered and integrity_notes or narrow it to only what the evidence leaves unresolved. Preserve questions and unknowns the evidence does not answer.
 ${EVIDENCE_RECONCILIATION_RULES}
 Checklist:
@@ -1847,13 +1850,17 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
         };
       });
     const checkpointClaims = parseClaims(parsed.claims).filter(claim=>checkpointUrls.includes(claim.url));
+    const checkpointSummary = cleanMissingFactNotes(coerced.headline, coerced.dek);
     await deps.onWriterDraft?.({
-      headline: coerced.headline,
-      dek: coerced.dek,
+      headline: checkpointSummary.headline,
+      dek: checkpointSummary.dek,
       body: passBody,
       topic: opts.lead.topic,
       source_urls: checkpointUrls,
-      integrity_notes: [coerced.integrity_notes, retainedNotes, "NAME CHECK: Not yet completed. This saved writer checkpoint has not had its names checked against written sources."].filter(Boolean).join("\n"),
+      integrity_notes: appendEditorChecks(
+        [coerced.integrity_notes, retainedNotes, "NAME CHECK: Not yet completed. This saved writer checkpoint has not had its names checked against written sources."].filter(Boolean).join("\n"),
+        checkpointSummary.notes,
+      ),
       form: parsed.form,
       found: checkpointFindings,
       unanswered: parsed.unanswered,
@@ -2228,14 +2235,21 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     ),
   };
 
+  const readerSummary = cleanMissingFactNotes(coerced.headline, coerced.dek);
+  const readerDek = readerSummary.dek ||
+    (readerSummary.notes.length ? dekOrFallback("", body) || readerSummary.headline : "");
+  const finalIntegrityNotes = appendEditorChecks(
+    [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
+    readerSummary.notes,
+  );
   return {
-    headline: coerced.headline,
-    dek: coerced.dek,
+    headline: readerSummary.headline,
+    dek: readerDek,
     body,
     topic: coerced.topic,
     source_urls: used,
     citation_status: citationStatus,
-    integrity_notes: [coerced.integrity_notes, retainedNotes].filter(Boolean).join("\n"),
+    integrity_notes: finalIntegrityNotes,
     memory_entities: coerced.memory_entities,
     form,
     provenance,

@@ -1,3 +1,5 @@
+import { cleanMissingFactNotes } from "./strip-draft.ts";
+
 /**
  * The one line under a headline never goes missing.
  *
@@ -90,5 +92,6 @@ export function firstSentenceForDek(body: string | null | undefined): string {
  */
 export function dekOrFallback(dek: string | null | undefined, body: string | null | undefined): string {
   const clean = String(dek ?? "").trim();
-  return clean || firstSentenceForDek(body);
+  const summary = clean || firstSentenceForDek(body);
+  return cleanMissingFactNotes("", summary).dek;
 }
