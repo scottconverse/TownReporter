@@ -2212,6 +2212,18 @@ function DeskHome() {
                                   {held ? "Release" : "Undo"} <kbd>U</kbd>
                                 </InkButton>
                                 {held ? (
+                                  /*
+                                    Walk E2, DHE2-4: a held lead had no Kill on Today.
+                                    Same press as the open row's Kill, with its Undo.
+                                  */
+                                  <InkButton
+                                    tone="quiet-danger"
+                                    onClick={() => setStatus.mutate({ ...killPress(l.id, restoreStatus(l.status)), headline: l.headline })}
+                                  >
+                                    Kill <kbd>X</kbd>
+                                  </InkButton>
+                                ) : null}
+                                {held ? (
                                   <DeskMoreMenu
                                     ariaLabel={`More actions for ${l.headline}`}
                                     items={[
