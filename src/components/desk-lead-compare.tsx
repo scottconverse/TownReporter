@@ -48,13 +48,6 @@ export type CompareSide = {
   killed_at?: string | null;
 };
 
-/** The answer the desk's warning message offers for each press (the words its button carries). */
-const WARNING_ANSWER_LABEL: Record<"not-a-duplicate" | "kill" | "reopen", string> = {
-  "not-a-duplicate": "Move to New anyway",
-  kill: "Kill anyway",
-  reopen: "Reopen anyway",
-};
-
 /** What a press reports back. `false` means it did not land, and the panel
  * says so in the editor's words rather than the server's. */
 export type CompareResult = {
@@ -100,10 +93,10 @@ export function LeadComparePanel({
         const warning = deskWarning(res);
         if (warning) {
           /* DHG-1: a press the desk held for a yes/no answer used to leave this
-             panel silent, and the lead stayed as it was. The panel now says why
-             nothing moved and which answer to give; the answer itself is still
-             the desk's warning message with its own button. */
-          setNote({ kind: "err", text: `Nothing was saved yet. ${warning.sentence} Use “${WARNING_ANSWER_LABEL[which]}” to confirm.` });
+             panel silent, so the lead looked unchanged with no reason given. The
+             panel now says that nothing was saved and where the question is. The
+             warning itself stays in the desk message, the one place it is shown. */
+          setNote({ kind: "err", text: "Nothing was saved yet. Confirm the press in the desk message that just appeared." });
           return;
         }
         setNote(comparePressNote(which, res, { current, prior }));
