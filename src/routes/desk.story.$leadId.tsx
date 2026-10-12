@@ -50,7 +50,7 @@ import { areaPills, HOME_AREA } from "@/lib/story-area";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { editorTitle } from "@/lib/news/desk-copy";
+import { draftFailedNotSavedWords, editorTitle } from "@/lib/news/desk-copy";
 import { Busy, DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { leadOrigin, announceToDesk } from "@/components/desk-chrome-utils";
 import { SaveShortcut, SaveShortcutHint } from "@/components/desk-save-shortcut";
@@ -3659,7 +3659,7 @@ function StoryPage() {
             </>
           ) : draftProblem ? (
             <p className="meta" role="alert" style={{ marginTop: 14 }}>
-              The meeting draft failed and was not saved. Review the error above, then try Draft with AI again.
+              {draftFailedNotSavedWords(Boolean(data?.lead.meeting_video_id || data?.lead.meeting_artifact_id))}
             </p>
           ) : (
             <p className="meta" style={{ marginTop: 14 }}>

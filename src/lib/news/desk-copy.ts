@@ -899,6 +899,17 @@ function providerSignInCopy(raw: string, again: string): string {
   }
 }
 
+/**
+ * The line under a failed draft that left nothing on the page. Only a lead
+ * that came from a meeting says "meeting"; any other lead gets the general
+ * words the story page uses for a draft that did not finish (THT-4).
+ */
+export function draftFailedNotSavedWords(isMeetingLead: boolean): string {
+  return isMeetingLead
+    ? "The meeting draft failed and was not saved. Review the error above, then try Draft with AI again."
+    : "The draft did not finish and was not saved. Review the error above, then try Draft with AI again.";
+}
+
 /** Workbench draft errors. Not scan copy, not Dark Desk “Keep digging”. */
 export function editorDraftError(raw: string | null | undefined): string | null {
   if (!raw?.trim()) return null;

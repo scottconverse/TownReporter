@@ -144,7 +144,11 @@ export function LocalModelSelect({
 
   const servers = catalog.data?.servers ?? [];
   const reachable = servers.filter((s) => s.reachable);
-  const selected = choice.data ? choice.data.override : (catalog.data?.defaultModel ?? null);
+  const selected = choice.data
+    ? choice.data.source === "default" && !choice.data.storedPick
+      ? null
+      : choice.data.override
+    : (catalog.data?.defaultModel ?? null);
   const source = choice.data?.source ?? "stored";
   /* Store and display the exact endpoint/model pair that a run will use. */
   const selectedServer = selected
@@ -159,12 +163,20 @@ export function LocalModelSelect({
       !choice.data ||
       !selected ||
       source === "stored" ||
-      isUseLoadedLocalModelPick(choice.data.storedPick) ||
+      choice.data.storedPick ||
       attemptedDiscoveredDefaultSaveFor.has(scope)
     )
       return;
     attemptedDiscoveredDefaultSaveFor.add(scope);
-    save.mutate(selected);
+    /*
+      THT-1/THT-2: with nothing stored, the first owner view used to save the
+      discovered model as an exact pick. That model was whatever the resolver
+      returned at that moment: the loaded one, or -- when nothing was loaded --
+      the preferred CLOUD model (deepseek-v4.1-flash:cloud), which then became
+      "Local model" for good and put DeepSeek's effort list under it. What the
+      editor has chosen is the use-loaded choice, so that is what is stored.
+    */
+    save.mutate({ baseUrl: USE_LOADED_LOCAL_MODEL, id: USE_LOADED_LOCAL_MODEL });
   }, [choice.data, ownerKnown, save, scope, selected, source]);
 
   /*
@@ -228,8 +240,8 @@ export function LocalModelSelect({
           id={selectId}
           disabled={save.isPending}
           value={
-            isUseLoadedLocalModelPick(choice.data?.storedPick)
-              ? "* *"
+            !choice.data?.storedPick || isUseLoadedLocalModelPick(choice.data.storedPick)
+              ? `${USE_LOADED_LOCAL_MODEL} ${USE_LOADED_LOCAL_MODEL}`
               : selected
                 ? `${selected.baseUrl} ${selected.id}`
                 : ""
@@ -459,15 +471,21 @@ export function ModelPicker(props: Props) {
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
+  /*
+    THT-1/THT-2: with nothing stored and nothing loaded the resolver answers
+    with the preferred CLOUD model as a "default". That is not what Local model
+    will run (the editor's choice is "use whatever is loaded"), so it must not
+    name the option or pick the effort list.
+  */
+  const localPick = selectedLocalChoice.data
+    ? selectedLocalChoice.data.source === "default" && !selectedLocalChoice.data.storedPick
+      ? null
+      : selectedLocalChoice.data.override
+    : selectedLocalCatalog.data?.defaultModel;
   const exactModel =
     !noFallback && shownValue === "local-model"
-      ? selectedLocalChoice.data
-        ? (selectedLocalChoice.data.override?.id ?? null)
-        : (selectedLocalCatalog.data?.defaultModel?.id ?? null)
+      ? (localPick?.id ?? null)
       : (customConnection?.modelId ?? null);
-  const localPick = selectedLocalChoice.data
-    ? selectedLocalChoice.data.override
-    : selectedLocalCatalog.data?.defaultModel;
   const localBackend = localPick?.id ?? null;
   const localMetadata = selectedLocalCatalog.data?.servers
     .find((server) => server.baseUrl === localPick?.baseUrl)
