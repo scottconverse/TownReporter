@@ -34,6 +34,16 @@ export async function confirmSectionAndWaitForPublishable(page, { publishable = 
   await openStoryDetails(page);
   const block = page.locator("#story-topic");
   await block.waitFor({ state: "visible", timeout: 45_000 });
+  // Walk fixtures must make the same explicit section choice as an editor.
+  // An empty manual draft's former fallback is no longer a chosen section.
+  const section = page.locator("#story-topic-select");
+  if ((await section.inputValue()) === "") {
+    const choice = await section.locator("option").evaluateAll(options =>
+      options.find(option => option.value && !option.disabled)?.value,
+    );
+    if (!choice) throw new Error("The fixture desk has no section to choose.");
+    await section.selectOption(choice);
+  }
   /*
     Save first, and only when there is something to save: pressing "Save edits"
     on an already-saved draft is a no-op the desk may well have disabled, and a

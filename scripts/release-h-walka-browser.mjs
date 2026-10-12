@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { chromium } from "playwright";
+import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
 
 async function main() {
@@ -230,6 +231,9 @@ async function main() {
       .first()
       .waitFor();
     assert.equal(await page.locator("#story-topic-select").inputValue(), "");
+    await confirmSectionAndWaitForPublishable(page, { publishable: false });
+    assert.notEqual(await page.locator("#story-topic-select").inputValue(), "");
+    await page.getByRole("button", { name: /^Publish in / }).waitFor();
   });
   await check("DHA5", async () => {
     const id = await lead("DHA5 first writer");
