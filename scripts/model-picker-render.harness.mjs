@@ -74,6 +74,9 @@ export function __setConnections(data) { connections = data; }
 // DHE1-1: a saved-connections query that has not answered yet (no data, pending).
 let connectionsPending = false;
 export function __setConnectionsPending(pending) { connectionsPending = pending; }
+// H06: the local-model catalog has not answered yet (first paint, a fresh dialog).
+let catalogPending = false;
+export function __setCatalogPending(pending) { catalogPending = pending; }
 export function __setAvailability(data) { current = data; }
 
 /*
@@ -88,7 +91,10 @@ export function __setRole(next) { role = next; }
 export const myDesk = async () => ({ ok: true, role, newsroomId: 1, claimed: true });
 export const useQuery = ({ queryKey }) => {
   if (queryKey[0] === "local-model-choice") return { data: localChoice };
-  if (queryKey[0] === "local-model-catalog") return { data: localChoice.catalog };
+  if (queryKey[0] === "local-model-catalog")
+    return catalogPending
+      ? { data: undefined, isLoading: true, isPending: true }
+      : { data: localChoice.catalog, isLoading: false, isPending: false };
   if (queryKey[0] === "custom-ai-connections") return connectionsPending ? { data: undefined, isPending: true } : { data: connections, isPending: false };
   if (queryKey[0] === "my-desk") return { data: { ok: true, role, newsroomId: 1, claimed: true } };
   return { data: current };

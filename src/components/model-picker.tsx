@@ -166,8 +166,12 @@ export function LocalModelSelect({
     save.mutate(selected);
   }, [choice.data, ownerKnown, save, scope, selected, source]);
 
-  if (catalog.isLoading) return null;
-
+  /*
+    H06: while the catalog is still loading the block stays on screen, with
+    the use-loaded option (it needs no catalog) and a "looking" line. It used
+    to return null here, so a fresh dialog or the first paint showed Local
+    model with no local select at all.
+  */
   if (readOnly) {
     /*
       Read-only, with the choice still named: an editor whose story will run on
@@ -196,7 +200,9 @@ export function LocalModelSelect({
       <label htmlFor={selectId} className="model-picker-label">
         {selectedModel?.cloud ? "Ollama Cloud model — hosted, spends credits" : "Local model"}
       </label>
-      {reachable.length === 0 ? (
+      {catalog.isLoading ? (
+        <span className="model-picker-help">Looking for local models on this computer…</span>
+      ) : reachable.length === 0 ? (
         <span className="model-picker-help">
           No local server found on this machine. Start LM Studio&apos;s server or Ollama, or set
           LLM_BASE_URL. See docs/local-models.md.

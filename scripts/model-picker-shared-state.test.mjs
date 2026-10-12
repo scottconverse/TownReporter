@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { ModelPicker, availabilityStub } from "./model-picker-render.harness.mjs";
 
-const { __setConnections, __setConnectionsPending, __setLocalChoice } = availabilityStub;
+const { __setConnections, __setConnectionsPending, __setCatalogPending, __setLocalChoice } = availabilityStub;
 
 const geminiKeyConnection = {
   id: "gemini-key",
@@ -94,4 +94,28 @@ test("DHE1-11: with no backend checked yet, the status still says so, once, besi
     true,
     "the not-checked status sits beside the picker",
   );
+});
+
+test("H06: Local model picked shows the local select with its use-loaded option on every door while the catalog loads", () => {
+  __setConnections([]);
+  __setConnectionsPending(false);
+  __setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null, checkedAt: 0 } });
+  __setCatalogPending(true);
+  try {
+    for (const scope of ["story", "opinion", "forced", "dark", "scan", "follow-up"]) {
+      const doc = renderPicker({ value: "local-model", scope });
+      assert.ok(
+        doc.querySelector(".local-model-picker"),
+        `${scope}: Local model picked, but the local select is missing while the catalog loads`,
+      );
+      assert.ok(
+        [...doc.querySelectorAll(".local-model-picker option")].some(
+          (option) => option.textContent === "Use whatever model is loaded (recommended)",
+        ),
+        `${scope}: the use-loaded option is missing while the catalog loads`,
+      );
+    }
+  } finally {
+    __setCatalogPending(false);
+  }
 });
