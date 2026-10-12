@@ -88,3 +88,17 @@ test('a saved not-checked memo defers to the current gate: acknowledged or compl
     assert.equal(publishButton().hasAttribute('disabled'),false,'the unchecked warning keeps Publish available');
   } finally { await act(async()=>root.unmount()); }
 });
+
+// DHF-9: with no section chosen, the publish heading and its press must not contradict each other.
+test('with no section chosen, the publish heading does not tell the editor to choose while the press publishes anyway',async()=>{
+  const {document}=installDom(); const {createRoot}=await import('react-dom/client');const root=createRoot(document.getElementById('root'));
+  const draft={id:8,headline:'Council votes',dek:'A plan',body:'Council approved the $547.5 million budget.',topic:'government',research_json:null};
+  globalThis.screenData={lead:{lead:{id:22,headline:'Council votes',topic:'government',status:'drafted',source_urls:'[]',uncheckedRecordedClaims:0,uncheckedEvidenceChecked:false,uncheckedStoryAcknowledged:false,uncheckedExempt:false},draft,topicConfirmed:null,namedOutlets:[],outletOverrides:[],evidenceToken:'content'},sources:[],memory:[]};
+  try {
+    await act(async()=>root.render(h(screen.Route.component,{key:'no-section'})));
+    const text=document.body.textContent;
+    assert.equal(/Choose a section to publish/.test(text),false,'no heading may say to choose a section the press already publishes without');
+    assert.match(text,/No section chosen\. Pick one, or publish in .+ anyway\./);
+    assert.ok([...document.querySelectorAll('button')].some(b=>/^Publish anyway in .+\(no section was chosen\)$/.test(b.textContent)),'the publish-anyway press stays');
+  } finally { await act(async()=>root.unmount()); }
+});

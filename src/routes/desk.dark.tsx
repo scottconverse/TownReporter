@@ -363,7 +363,7 @@ function DarkPage() {
         : defaultModelEffort(remembered)
       : validatedModelEffort(remembered, detail.data.run?.model_effort));
     fileModelExplicitFor.current = last == null ? null : openId;
-  }, [openId, detail.data, darkDefaultModel, darkAssignment.isPending, darkAssignment.hasAssignment, darkAssignment.resolution.providerId, darkAssignment.resolution.effort]);
+  }, [openId, detail.data, darkDefaultModel, darkAssignment.isPending, darkAssignment.hasAssignment, darkAssignment.resolution.providerId, darkAssignment.resolution.effort, setModelChoice, setModelEffort]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
   useEffect(() => {
