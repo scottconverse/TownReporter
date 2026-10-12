@@ -978,7 +978,7 @@ function DarkPage() {
             onModelEffort={setModelEffort}
             modelDisabled={digging || busyStart}
           />
-          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} modelDefault={modelChoice} onModelPick={pickModelChoice} />
+          <PageWatchPanel files={investigations.data ?? []} onOpenFile={openWatchedFile} />
         </div>
       </section>
       <div className={"astra-split-deep" + (noFiles ? " astra-empty-desk" : "")}>

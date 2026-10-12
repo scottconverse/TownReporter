@@ -1,17 +1,16 @@
 /*
-  DHE1-2 (Release H, walk G): the Dark Desk's page-watch picker and the "Start a
-  file" dialog's picker are views over ONE dark model.
+  DHE1-2 (Release H, walk H): the Dark Desk's "Digging model" and the "Model for
+  page watches" picker are DIFFERENT jobs. A Digging pick must not move the
+  page-watch picker, and a page-watch pick must not move Digging.
 
   WHAT IS REAL. `PageWatchPanel` from src/components/page-watch-panel.tsx, and
   the real `ModelPicker` (through the picker render harness). Only the data
   hooks are stubbed, so the panel mounts with no watch open.
 
-  WHAT IS HELD THE WAY DESK.DARK.TSX HOLDS IT. One `model` state. The panel gets
-  `modelDefault={model}` and `onModelPick={setModel}`; the dialog's picker gets
-  `value={model}` and `onChange={setModel}`.
-
-  THE CLAIM. Change the page-watch picker and the dialog's picker shows it at
-  once. Change the dialog's picker and the page-watch picker shows it at once.
+  WHAT IS HELD THE WAY DESK.DARK.TSX HOLDS IT. One Digging `model` state that
+  the "Start a file" dialog's picker reads and writes. Walk H's route also
+  handed that state to the panel (`modelDefault`, `onModelPick`); the test
+  still hands it over, so a panel that follows it again fails here.
 */
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -73,7 +72,7 @@ function changeSelect(element, value) {
   });
 }
 
-test("DHE1-2: a model picked in the page-watch picker shows in the dialog's picker, and back", () => {
+test("DHE1-2: a Digging pick does not move the page-watch picker, and back", () => {
   availabilityStub.__setAvailability(Object.fromEntries(["codex-luna", "auto", "local-model"].map((id) => [id, true])));
   const container = document.createElement("div");
   document.body.appendChild(container);
@@ -81,14 +80,16 @@ test("DHE1-2: a model picked in the page-watch picker shows in the dialog's pick
   act(() => root.render(h(DarkPageAndDialog)));
   const modelSelect = (surface) => container.querySelector(`[data-surface="${surface}"] select`);
   try {
-    assert.equal(modelSelect("dialog").value, "codex-luna", "the dialog starts on the shared model");
-    assert.equal(modelSelect("page").value, "codex-luna", "the page-watch picker starts on the same model");
+    assert.equal(modelSelect("dialog").value, "codex-luna", "the dialog starts on the Digging model");
+    const watchStart = modelSelect("page").value;
 
-    changeSelect(modelSelect("page"), "local-model");
-    assert.equal(modelSelect("dialog").value, "local-model", "a page-watch pick shows in the dialog");
+    changeSelect(modelSelect("dialog"), "local-model");
+    assert.equal(modelSelect("dialog").value, "local-model", "the Digging pick shows in the dialog");
+    assert.equal(modelSelect("page").value, watchStart, "the page-watch picker keeps its own value");
 
-    changeSelect(modelSelect("dialog"), "auto");
-    assert.equal(modelSelect("page").value, "auto", "a dialog pick shows in the page-watch picker");
+    changeSelect(modelSelect("page"), "codex-luna");
+    assert.equal(modelSelect("page").value, "codex-luna", "a page-watch pick shows in its own picker");
+    assert.equal(modelSelect("dialog").value, "local-model", "and does not move the Digging model");
   } finally {
     act(() => root.unmount());
   }

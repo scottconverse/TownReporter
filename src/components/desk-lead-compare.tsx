@@ -4,7 +4,6 @@ import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
 import { parseUrlList } from "@/lib/paper";
-import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
@@ -144,15 +143,11 @@ export function LeadComparePanel({
           <InkButton
             tone="quiet-danger"
             disabled={busy !== ""}
-            onClick={() =>
-              confirmBeforeKillingDuplicate(
-                (message) => window.confirm(message),
-                currentIsKilled
-                  ? "Add a duplicate note to “" + current.headline + "”, already killed, as a duplicate of “" + prior.headline + "”?"
-                  : "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
-                () => run("kill", onKillThis),
-              )
-            }
+            /* DHG-1: this press used to open a native browser confirm first. A walk
+               in an automated browser dismisses that dialog, so the press sent
+               nothing, and a person who closed it saw no change and no reason. The
+               press now does what its words say; the kill toast carries Undo. */
+            onClick={() => run("kill", onKillThis)}
             ariaLabel={`${currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}: ${current.headline}`}
           >
             {busy === "kill" ? "Saving…" : currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}

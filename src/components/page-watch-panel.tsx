@@ -36,13 +36,9 @@ const WORDS: Record<string, string> = {
 export function PageWatchPanel({
   files,
   onOpenFile,
-  modelDefault,
-  onModelPick,
 }: {
   files: Array<{ id: number; title: string }>;
   onOpenFile: (id: number) => void;
-  modelDefault?: StoryModelChoice;
-  onModelPick?: (choice: StoryModelChoice) => void;
 }) {
   const qc = useQueryClient(),
     { formatListDateTime, formatClockTime } = usePaperDateFormatters();
@@ -73,7 +69,14 @@ export function PageWatchPanel({
     refetchInterval: selected != null ? 15000 : false,
   });
   const row = detail.data?.watch;
-  const model = row ? row.watch_model_choice as StoryModelChoice : modelDefault ?? "auto";
+  /*
+    DHE1-2 (walk H): "Model for page watches" is its own job. With no watch
+    open it holds the model the NEXT watch will start on, in this panel's own
+    state. It used to read the Dark Desk's Digging model and write back to it,
+    so one Digging pick moved it.
+  */
+  const [newWatchModel, setNewWatchModel] = useState<StoryModelChoice>("auto");
+  const model = row ? row.watch_model_choice as StoryModelChoice : newWatchModel;
   async function refresh() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["page-watches"] }),
@@ -263,9 +266,8 @@ export function PageWatchPanel({
       <div className="astra-watch-model">
         {/*
           DHE1-2: this picker saves the model of ONE watched page (its own row),
-          a different job from the open file's model, so it has its own name.
-          With no watch open, the picker is the Dark Desk's one model, so a pick
-          here shows in the dialog and the dials panel too (onModelPick).
+          a different job from the open file's Digging model, so it has its own
+          name and its own state.
         */}
         <ModelPicker
           scope="dark"
@@ -278,7 +280,7 @@ export function PageWatchPanel({
               clear();
               modelSave.mutate({ id: row.id, choice, effort: defaultModelEffort(choice) });
             } else {
-              onModelPick?.(choice);
+              setNewWatchModel(choice);
             }
           }}
         />
