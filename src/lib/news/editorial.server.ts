@@ -882,8 +882,13 @@ export async function fileEditorial(
       `model_body` (0119) is the model's own body, hoisted so `body` and
       `model_body` are the same bytes here. The editor's later save on this row
       (`saveOpinionDraft`) rewrites `body` and leaves this column alone.
+
+      A piece the editor pasted in ("written-by-the-editor") was written by a
+      person, so no model body is kept for it (FC04). Its `body` still holds
+      the text.
     */
     const editorialBody = storableText(body);
+    const modelBody = input.sourceKind === "written-by-the-editor" ? null : editorialBody;
     const rows = await sql<{ id: number }>`
       insert into drafts (user_id, newsroom_id, lead_id, headline, dek, body, topic, source_urls, form, integrity_notes, research_json, model_body)
       values (
@@ -896,7 +901,7 @@ export async function fileEditorial(
             ...(lengthCut ? { lengthCut } : {}),
           }),
         )},
-        ${editorialBody}
+        ${modelBody}
       )
       returning id
     `;
