@@ -291,22 +291,36 @@ export function runCodexProcessForTest(
 export async function probeCodex(
   label = "Codex",
 ): Promise<{ ok: true; label: string } | { ok: false; error: string }> {
+  const status = await probeCodexStatus();
+  return status.signedIn
+    ? { ok: true, label }
+    : { ok: false, error: status.error ?? "Codex could not confirm its login." };
+}
+
+/** Installed and signed-in are separate facts for the shared readiness UI. */
+export async function probeCodexStatus(): Promise<{
+  installed: boolean;
+  signedIn: boolean;
+  error: string | null;
+}> {
   const lookup = await findCodexCli();
-  if (!lookup.ok) return { ok: false, error: lookup.error };
+  if (!lookup.ok) return { installed: false, signedIn: false, error: lookup.error };
   const bin = lookup.bin;
   const result = await run(bin, ["login", "status"], "", 10_000);
-  if (result.code === 0) return { ok: true, label };
-  if (result.timedOut) return { ok: false, error: "Codex login check timed out." };
+  if (result.code === 0) return { installed: true, signedIn: true, error: null };
+  if (result.timedOut) return { installed: true, signedIn: false, error: "Codex login check timed out." };
   const combined = `${result.stdout}\n${result.stderr}`;
   if (isCodexAuthFailure(combined)) {
-    return { ok: false, error: CODEX_AUTH_REQUIRED };
+    return { installed: true, signedIn: false, error: CODEX_AUTH_REQUIRED };
   }
   if (classifyCodexDiagnostic(combined, result) === "startup-permission") {
-    return { ok: false, error: CODEX_STARTUP_PERMISSION };
+    return { installed: true, signedIn: false, error: CODEX_STARTUP_PERMISSION };
   }
+  const missing = bin === "codex" && result.code === null && !combined.trim();
   return {
-    ok: false,
-    error: bin === "codex" ? CODEX_CLI_MISSING : "Codex could not confirm its login.",
+    installed: !missing,
+    signedIn: false,
+    error: missing ? CODEX_CLI_MISSING : "Codex could not confirm its login.",
   };
 }
 

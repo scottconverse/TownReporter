@@ -41,7 +41,7 @@ try {
   const box = page.getByRole("region", { name: "The desk's local model", exact: true });
   await box.waitFor({ timeout: 15000 });
   await box.getByText(/The desk uses|No model is loaded/).waitFor();
-  const group = page.getByRole("group", { name: "Local & self-hosted", exact: true });
+  const group = page.getByRole("group", { name: "Models on a computer or server", exact: true });
   // Choose a specific model through the page, then replace it with the sentinel.
   // This walk needs a loaded local chat model, discovered read-only; it never loads one.
   const row = group

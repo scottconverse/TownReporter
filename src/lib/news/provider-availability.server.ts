@@ -27,13 +27,24 @@ export async function getProviderAvailability(
   }
   // The CLI off switch alone cannot tell whether Claude is signed in. Use
   // the same probe as draft preflight, including its API-key transport.
-  await Promise.all(PICKER_PROVIDER_IDS.filter((id) => ["claude-code", "gemini-cli"].includes(providerEntry(id)?.kind ?? ""))
+  const statusProbeIds = PICKER_PROVIDER_IDS.filter((id) => ["claude-code", "gemini-cli"].includes(providerEntry(id)?.kind ?? ""));
+  const codexIds = PICKER_PROVIDER_IDS.filter((id) => providerEntry(id)?.kind === "codex");
+  await Promise.all(statusProbeIds
     .map(async (id) => {
       const result = await (deps.probeProvider ?? probeProvider)(id, newsroomId, undefined, "story");
       availability[id] = result.ok;
       if (!result.ok) availability.reasons![id] = readinessFailureMessage(id, providerEntry(id)?.label ?? id, result.error);
       else delete availability.reasons![id];
     }));
+  const codexProbeId = codexIds.find((id) => availability[id]);
+  if (codexProbeId) {
+    const result = await (deps.probeProvider ?? probeProvider)(codexProbeId, newsroomId, undefined, "story");
+    for (const id of codexIds) {
+      availability[id] = result.ok;
+      if (!result.ok) availability.reasons![id] = readinessFailureMessage(id, providerEntry(id)?.label ?? id, result.error);
+      else delete availability.reasons![id];
+    }
+  }
   // These are warnings, not preflight refusals. Inference still tries the
   // editor's selected model; catalog reads never erase a usage-limit receipt.
   for (const id of PICKER_PROVIDER_IDS.filter(id => id !== "local-model")) {

@@ -19,4 +19,7 @@ it("names model options with Group 3 readiness only when facts exist", () => {
   assert.equal(modelReadinessOption("API model", {
     connection: { enabled: false, hasApiKey: true, modelId: "example" },
   }), "API model · Turned off");
+  assert.equal(modelReadinessOption("API model", {
+    connection: { enabled: true, hasApiKey: true, modelId: "example", lastTest: { ok: false } },
+  }), "API model · Last test failed");
 });

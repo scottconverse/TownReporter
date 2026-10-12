@@ -44,10 +44,9 @@ describe("Models page local choice words", () => {
     ));
   it("only says Ready when a local model is loaded", () => {
     assert.equal(localServerStatus(server), "Ready");
-    assert.equal(
-      localServerStatus({ ...server, models: [{ ...model, loaded: false }] }),
-      "Running, no model loaded — load one in LM Studio (Developer tab) or press Use this one",
-    );
+    const unloaded = localServerStatus({ ...server, models: [{ ...model, loaded: false }] });
+    assert.match(unloaded, /Server reachable.*no.*model.*loaded/i);
+    assert.notEqual(unloaded, "Ready");
     assert.notEqual(localServerStatus({ ...server, models: [{ ...model, cloud: true }] }), "Ready");
     assert.equal(localServerStatus({ ...server, reachable: false }), "Could not reach");
   });

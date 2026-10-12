@@ -52,14 +52,13 @@ import { Chip, type ChipTone } from "@/components/status-chip";
 import { myDesk } from "@/lib/news/claim";
 import { getProviderStatuses } from "@/lib/news/provider-login";
 import { DeskLocalModelBox } from "@/components/desk-local-model";
-import { localServerStatus } from "@/lib/news/desk-local-model";
+import { localServerReadiness, localServerStatus } from "@/lib/news/desk-local-model";
 import { USE_LOADED_LOCAL_MODEL } from "@/lib/news/model-choice";
 import { getLocalModelChoice, saveLocalModelFn } from "@/lib/news/provider-settings";
 import {
   localModelCatalog,
   providerAvailability,
   refreshLocalModelCatalog,
-  testCloudUsageWarnings,
 } from "@/lib/news/provider-availability";
 import { modelReadiness, type ReadinessFacts } from "@/lib/news/model-readiness";
 import { PROVIDER_AVAILABILITY_QUERY_KEY } from "@/lib/news/provider-availability-key";
@@ -79,7 +78,6 @@ import {
   MODEL_JOBS,
   cleanJobEffort,
   connectionWord,
-  jobEffortLabel,
   jobEffortOptionTitle,
   jobEffortOptions,
   jobStatusHelp,
@@ -107,6 +105,7 @@ import {
 } from "@/lib/news/model-assignments-settings";
 import {
   defaultModelEffort,
+  modelEffortLabel,
   providersFor,
   type ModelEffort,
   type ProviderEntry,
@@ -196,7 +195,7 @@ function ModelsPage() {
       : null;
 
   /*
-    "Test all connections" -- and what it deliberately does NOT do.
+    "Refresh connection status" -- and what it deliberately does NOT do.
 
     A per-card Test is one real word to one model, which is the editor asking
     for it. Doing that for every connection at once is not a connection test,
@@ -209,7 +208,6 @@ function ModelsPage() {
   */
   const testAll = useMutation({
     mutationFn: async () => {
-      await testCloudUsageWarnings();
       const [fresh] = await Promise.all([
         refreshLocalModelCatalog(),
         qc.invalidateQueries({ queryKey: ["provider-statuses"], refetchType: "all" }),
@@ -222,9 +220,7 @@ function ModelsPage() {
     },
     onSuccess: (fresh) => {
       qc.setQueryData(["local-model-catalog"], fresh);
-      setNote(
-        "Re-read every sign-in and looked for local servers. Retained Ollama Cloud usage warnings were checked with one short model call each.",
-      );
+      setNote("Connection status refreshed. No model was asked to write.");
     },
     onError: (e) =>
       setNote(e instanceof Error ? e.message : "Could not check the connections just now."),
@@ -246,7 +242,7 @@ function ModelsPage() {
             disabled={testAll.isPending}
             onClick={() => testAll.mutate()}
           >
-            {testAll.isPending ? "Checking…" : "Test all connections"}
+            {testAll.isPending ? "Refreshing…" : "Refresh connection status"}
           </button>
         ) : null}
         {isOwner ? (
@@ -742,7 +738,7 @@ function JobRow({
                 */
                 efforts.map((effort: ModelEffort) => (
                   <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
-                    {jobEffortLabel(effort)}
+                    {modelEffortLabel(effort, exactModelFor(draft.first.providerId))}
                   </option>
                 ))
               ) : (
@@ -842,7 +838,7 @@ const SELECT_STYLE: CSSProperties = {
 };
 
 /** Job identity and status span three readable picker columns. */
-const EFFORT_WIDTH = "112px";
+const EFFORT_WIDTH = "180px";
 const ROW_GRID: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
@@ -949,8 +945,8 @@ function ConnectionsTab({
           with is on the other tab, with each job&rsquo;s live state beside it.
         </p>
         <ConnectionGroup
-          title="Local & self-hosted"
-          note="Choose a model on this computer or your own server. Cloud models spend credits."
+          title="Models on a computer or server"
+          note="On-device models run on that computer. Hosted cloud models run elsewhere and may spend credits."
         >
           <LocalServers onNote={onNote} isOwner={false} />
         </ConnectionGroup>
@@ -960,15 +956,15 @@ function ConnectionsTab({
   return (
     <div className="mt-4 flex flex-col gap-7">
       <ConnectionGroup
-        title="Frontier · API key"
-        note="Pay per use. Key stored on the server; never shown again after saving."
+        title="Your API connections"
+        note="These services may charge per use. Connection details are stored on this server."
       >
         <ApiKeyConnections onNote={onNote} onOpen={onOpen} />
       </ConnectionGroup>
 
       <ConnectionGroup
-        title="Subscription sign-ins (OAuth)"
-        note="Uses your existing plan instead of per-use billing. Sign-ins expire; the desk warns 3 days ahead."
+        title="Your AI subscriptions"
+        note="Uses your existing provider plan. TownReporter checks the sign-in without asking the model to write."
         below={
           <>
             These sign-ins carry per-model time limits, which stay on{" "}
@@ -984,8 +980,8 @@ function ConnectionsTab({
       </ConnectionGroup>
 
       <ConnectionGroup
-        title="Local & self-hosted"
-        note="Choose a model on this computer or your own server. Cloud models spend credits."
+        title="Models on a computer or server"
+        note="On-device models run on that computer. Hosted cloud models run elsewhere and may spend credits."
       >
         <LocalServers onNote={onNote} isOwner={isOwner} />
       </ConnectionGroup>
@@ -1014,7 +1010,7 @@ function ConnectionsTab({
  * moment the provider was removed, which is exactly the kind of stale claim a
  * chip nobody draws any more keeps making.
  */
-type ConnectionChipKind = "connected" | "signedin" | "running" | "off" | "notset" | "unreachable";
+type ConnectionChipKind = "connected" | "signedin" | "running" | "reachable" | "off" | "notset" | "unreachable";
 
 const CONNECTION_CHIP: Readonly<
   Record<ConnectionChipKind, { tone: ChipTone; label: string; help: string }>
@@ -1033,6 +1029,11 @@ const CONNECTION_CHIP: Readonly<
     tone: "ready",
     label: "✓ Running",
     help: "This server answers and a model is already in memory, so the first call starts working straight away.",
+  },
+  reachable: {
+    tone: "slow",
+    label: "Server reachable",
+    help: "This server answers, but no on-device chat model is loaded, so it is not ready for a local writing job.",
   },
   off: {
     tone: "quiet",
@@ -1134,7 +1135,7 @@ function EffortChips({
           className="text-sm font-bold"
           style={{ border: "1px solid var(--line)", color: "var(--fg2)", padding: "0 6px" }}
         >
-          {jobEffortLabel(effort)}
+          {modelEffortLabel(effort, exactModel)}
         </span>
       ))}
     </div>
@@ -1151,8 +1152,26 @@ function EffortChips({
  * inventing one would be the second registry rule 3 forbids, so the row states
  * what the registry actually declares.
  */
-function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
+function ProviderModelRows({
+  entries,
+  readinessFacts,
+}: {
+  entries: readonly ProviderEntry[];
+  readinessFacts?: ReadinessFacts;
+}) {
   const [showAll, setShowAll] = useState(false);
+  const readiness = readinessFacts ? modelReadiness(readinessFacts) : null;
+  const readyToRun = readiness === "Ready";
+  const statusCopy = readyToRun
+    ? "Ready to try writing with this connection."
+    : readiness
+      ? "Can be chosen, but this connection is not ready."
+      : "Connection readiness has not been confirmed.";
+  const statusDetail = readinessFacts?.reason ?? (
+    readiness === "Last test failed"
+      ? readinessFacts?.status?.lastTest?.detail
+      : readinessFacts?.status?.detail
+  );
   return (
     <div className="flex flex-col">
       {(showAll ? entries : entries.slice(0, 5)).map((entry) => (
@@ -1167,10 +1186,17 @@ function ProviderModelRows({ entries }: { entries: readonly ProviderEntry[] }) {
           }}
         >
           <span className="text-base font-bold">{entry.label}</span>
-          <span className="text-sm text-ink-2" title={entry.detail}>
-            {entry.optionDetail ?? entry.detail} · {connectionWord(entry.kind)}
-          </span>
-          <EffortChips providerId={entry.id} />
+          <span className="text-sm text-ink-2">{statusCopy}</span>
+          <details className="text-sm">
+            <summary className="cursor-pointer py-2 underline underline-offset-2">Details</summary>
+            <p className="mt-1 break-words text-ink-2">
+              {entry.detail} · Uses {connectionWord(entry.kind)}.
+            </p>
+            {!readyToRun && statusDetail ? (
+              <p className="mt-1 break-words text-ink-2">Connection check: {statusDetail}</p>
+            ) : null}
+            <EffortChips providerId={entry.id} />
+          </details>
         </div>
       ))}
       {entries.length > 5 ? (
@@ -1200,6 +1226,10 @@ function ApiKeyConnections({
   onOpen: (dialog: ConnectionDialog) => void;
 }) {
   const qc = useQueryClient();
+  const [testMessages, setTestMessages] = useState<Record<string, string>>({});
+  const [testResults, setTestResults] = useState<
+    Record<string, { ok: boolean; latencyMs: number; message: string }>
+  >({});
   const connections = useQuery({
     queryKey: ["custom-ai-connections"],
     queryFn: () => getCustomAiConnectionsFn(),
@@ -1222,7 +1252,26 @@ function ApiKeyConnections({
   const test = useMutation({
     mutationFn: (row: PublicCustomAiConnection) =>
       testCustomAiConnectionFn({ data: { id: row.id } }),
+    onMutate: (row) => {
+      setTestMessages((current) => {
+        const next = { ...current };
+        delete next[row.id];
+        return next;
+      });
+      setTestResults((current) => {
+        const next = { ...current };
+        delete next[row.id];
+        return next;
+      });
+    },
     onSuccess: (res, row) => {
+      setTestResults((current) => ({ ...current, [row.id]: res }));
+      setTestMessages((current) => ({
+        ...current,
+        [row.id]: res.ok
+          ? `The model answered in ${(res.latencyMs / 1000).toFixed(1)} seconds.`
+          : `The model did not answer in ${(res.latencyMs / 1000).toFixed(1)} seconds: ${res.message}`,
+      }));
       onNote(
         res.ok
           ? `${row.name} answered in ${(res.latencyMs / 1000).toFixed(1)} seconds.`
@@ -1230,7 +1279,22 @@ function ApiKeyConnections({
       );
       refresh();
     },
-    onError: () => onNote("That check did not run."),
+    onError: (error, row) => {
+      const message = error instanceof Error ? error.message : "connection error";
+      setTestResults((current) => ({
+        ...current,
+        [row.id]: {
+          ok: false,
+          latencyMs: 0,
+          message: `The test did not finish: ${message}`,
+        },
+      }));
+      setTestMessages((current) => ({
+        ...current,
+        [row.id]: `The test did not finish: ${message}`,
+      }));
+      onNote("That check did not run.");
+    },
   });
   if (connections.isPending) return <ListSkeleton rows={2} />;
   if (connections.isError && !connections.data) {
@@ -1250,17 +1314,32 @@ function ApiKeyConnections({
   const rows = connections.data ?? [];
   return (
     <>
-      {rows.map((row) => (
-        <ConnectionCard
+      {rows.map((row) => {
+        const testingThis = test.isPending && test.variables?.id === row.id;
+        const result = testResults[row.id];
+        const readiness = modelReadiness({
+          connection: {
+            enabled: row.enabled,
+            hasApiKey: row.hasApiKey,
+            modelId: row.modelId,
+            lastTest: result ? { ok: result.ok } : null,
+          },
+        });
+        const chip = testingThis
+          ? <ConnectionChip kind="connected" label="Testing" help={`Sending a short request to ${row.name} and waiting for an answer.`} />
+          : readiness === "Last test failed"
+            ? <ConnectionChip kind="unreachable" label="Test failed" help={testMessages[row.id] ?? result?.message} />
+            : result?.ok
+              ? <ConnectionChip kind="signedin" label="Answered" help={testMessages[row.id]} />
+              : <ConnectionChip
+                  kind={!row.hasApiKey ? "notset" : !row.enabled ? "off" : "connected"}
+                  label={!row.hasApiKey ? undefined : !row.enabled ? "Turned off" : undefined}
+                />;
+        return <ConnectionCard
           key={row.id}
           title={row.name}
-          how={`${row.hasApiKey ? "API key — stored on the server" : "No API key"} · ${hostOf(row.baseUrl)}${row.modelId ? ` · ${row.modelId}` : ""}`}
-          chip={
-            <ConnectionChip
-              kind={!row.hasApiKey ? "notset" : row.enabled ? "connected" : "off"}
-              label={!row.hasApiKey ? undefined : row.enabled ? undefined : "Turned off"}
-            />
-          }
+          how={row.hasApiKey ? "Connection saved on this server" : "Add its key in Settings before testing"}
+          chip={chip}
           actions={
             <>
               <InkButton
@@ -1276,7 +1355,7 @@ function ApiKeyConnections({
                   test.mutate(row);
                 }}
               >
-                {test.isPending ? "Testing…" : "Test"}
+                {testingThis ? "Testing…" : "Test"}
               </InkButton>
               <InkButton tone="quiet" onClick={() => onOpen({ kind: "connection", id: row.id })}>
                 Settings
@@ -1293,9 +1372,23 @@ function ApiKeyConnections({
             </>
           }
         >
+          {testingThis ? (
+            <p role="status" aria-live="polite" className="text-sm text-ink-2">
+              Sending a short request to {row.name} and waiting for an answer…
+            </p>
+          ) : testMessages[row.id] ? (
+            <p role="status" aria-live="polite" className="text-sm text-ink-2">{testMessages[row.id]}</p>
+          ) : null}
+          <details className="text-sm">
+            <summary className="cursor-pointer py-2 underline underline-offset-2">Connection details</summary>
+            <p className="break-all text-ink-2">Server address: {row.baseUrl}</p>
+            <p className="break-all text-ink-2">
+              Model: {row.modelId || "not chosen"}; API key: {row.hasApiKey ? "stored" : "not saved"}.
+            </p>
+          </details>
           <EffortChips providerId={`custom:${row.id}`} exactModel={row.modelId} />
-        </ConnectionCard>
-      ))}
+        </ConnectionCard>;
+      })}
 
       {/*
         A provider with nothing configured is a card with one button, not a
@@ -1335,8 +1428,12 @@ function GeminiPlanConnection() {
   const reason = availability.data?.reasons?.["gemini-flash"];
   const message = reason ?? (ready
     ? "The Gemini program is installed and signed in to your Google account. Drafts use your Pro plan, with no API key or API credit."
-    : availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
-      : "Could not check the Gemini program. Use Test all connections to check again.");
+      : availability.isPending ? "Checking the Gemini program and Google sign-in on this server."
+      : "Could not check the Gemini program. Use Refresh connection status to check again.");
+  const readinessFacts: ReadinessFacts = {
+    available: ready,
+    reason: reason ?? (!ready ? message : undefined),
+  };
   return (
     <ConnectionCard
       title="Gemini (Pro plan)"
@@ -1344,7 +1441,7 @@ function GeminiPlanConnection() {
       chip={<ConnectionChip kind={ready ? "signedin" : "unreachable"} label={ready ? "Ready" : "Warning"} help={message} />}
     >
       <p className="text-sm text-muted">{message}</p>
-      <ProviderModelRows entries={entriesOfKind("gemini-cli")} />
+      <ProviderModelRows entries={entriesOfKind("gemini-cli")} readinessFacts={readinessFacts} />
     </ConnectionCard>
   );
 }
@@ -1376,23 +1473,36 @@ function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
         className="m-0 grid list-none grid-cols-1 gap-3.5 p-0 md:grid-cols-2"
         style={{ gridColumn: "1 / -1" }}
       >
-        {(statuses.data ?? []).map((status) => (
-          <ProviderStatusCard
+        {(statuses.data ?? []).map((status) => {
+          const readiness = modelReadiness({ status });
+          const kind: ConnectionChipKind = readiness === "Ready"
+            ? "signedin"
+            : readiness === "Turned off"
+              ? "off"
+              : readiness === "Last test failed"
+                ? "reachable"
+                : readiness === "Not installed" || readiness === "Sign in needed"
+                  ? "unreachable"
+                  : "notset";
+          const help = readiness === "Ready"
+            ? CONNECTION_CHIP.signedin.help
+            : readiness === "Turned off"
+              ? CONNECTION_CHIP.off.help
+              : readiness === "Not installed"
+                ? `The ${status.name} command was not found on this machine, so the desk cannot use it.`
+                : readiness === "Last test failed"
+                  ? status.lastTest?.detail || `${status.name} is signed in, but its last test failed.`
+                  : status.detail || `${status.name} needs a sign-in before the desk can use it.`;
+          return <ProviderStatusCard
             key={status.provider}
             status={status}
             onNote={onNote}
             times={[]}
             chip={
               <ConnectionChip
-                kind={status.signedIn ? "signedin" : status.installed ? "notset" : "unreachable"}
-                label={status.installed ? undefined : "Not installed"}
-                help={
-                  status.signedIn
-                    ? CONNECTION_CHIP.signedin.help
-                    : status.installed
-                      ? "This sign-in has not been made yet, so a job assigned to it cannot run."
-                      : "This machine has no such command installed, so no job assigned to it can run."
-                }
+                kind={kind}
+                label={readiness ?? "Warning"}
+                help={help}
               />
             }
           >
@@ -1400,9 +1510,10 @@ function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
                 for that transport, not a typed-out list of model names. */}
             <ProviderModelRows
               entries={entriesOfKind(status.provider === "claude" ? "claude-code" : "codex")}
+              readinessFacts={{ status }}
             />
-          </ProviderStatusCard>
-        ))}
+          </ProviderStatusCard>;
+        })}
       </ul>
     </>
   );
@@ -1415,7 +1526,7 @@ function SignInConnections({ onNote }: { onNote: (text: string) => void }) {
  * the OAuth group's pointer at the time-limit fields, which stay where they
  * are. It sits outside the card grid so the grid's own columns are untouched.
  * There is no action slot: the design puts "+ Add a connection" on the PAGE
- * header, beside "Test all connections", not on a group rule.
+ * header, beside "Refresh connection status", not on a group rule.
  */
 function ConnectionGroup({
   title,
@@ -1586,7 +1697,8 @@ function LocalServerCard({
   const kindLabel = SERVER_KIND_LABEL[server.kind] ?? server.kind;
   const loopback = isLoopback(server.baseUrl);
   const origin = originOf(server.baseUrl);
-  const inMemory = server.models.filter((model) => model.loaded === true && !model.cloud).length;
+  const readiness = localServerReadiness(server);
+  const inMemory = readiness.loadedCount;
   return (
     <ConnectionCard
       title={`${kindLabel} · ${loopback ? "this machine" : "remote"}`}
@@ -1595,18 +1707,14 @@ function LocalServerCard({
         (server.reachable
           ? inMemory
             ? ` · ${inMemory} in memory`
-            : " · nothing in memory"
+            : readiness.state === "load-state-unknown" ? " · load state unknown" : " · nothing in memory"
           : " · not reachable")
       }
       chip={
         <ConnectionChip
-          kind={!server.reachable ? "unreachable" : "running"}
-          label={server.reachable ? (inMemory ? "Ready" : "Running") : undefined}
-          help={
-            server.reachable
-              ? "This server answers. Its models and load states are listed below."
-              : undefined
-          }
+          kind={readiness.state === "unreachable" ? "unreachable" : readiness.state === "ready" ? "signedin" : "reachable"}
+          label={readiness.state === "ready" ? "Ready" : readiness.state === "unreachable" ? undefined : "Server reachable"}
+          help={readiness.help}
         />
       }
       actions={

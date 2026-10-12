@@ -561,6 +561,46 @@ describe("Server card rows (CX2)", () => {
     assert.notEqual(chip.tone, "ready");
   });
 
+  it("a reachable Local model server stays not ready until its model is in memory", () => {
+    const baseUrl = "http://127.0.0.1:1234/v1";
+    const server = {
+      kind: "lmstudio" as const,
+      baseUrl,
+      reachable: true,
+      models: [{
+        id: "downloaded-model", label: "downloaded-model", loaded: false,
+        kind: "chat" as const, thinking: false, vision: false, cloud: false, contextLength: null,
+      }],
+    };
+    const availability = Object.assign({ "local-model": true }, { reasons: {} }) as unknown as ProviderAvailability;
+    const chip = wordsOf(chipOf(writingModelLines({
+      times: [timeRow({ providerId: "qwen-local", label: "Local model", endpoint: baseUrl })],
+      statuses: [],
+      catalog: catalogOf([server]),
+      availability,
+    }), "Local model"));
+    assert.equal(chip.label, "No model loaded");
+    assert.match(chip.help, /server answers.*no on-device chat model is loaded/i);
+  });
+
+  it("the Server Codex row uses the same missing-install status as Connections", () => {
+    const codex = statusRow({
+      provider: "codex",
+      installed: false,
+      signedIn: false,
+      detail: "Codex was not found on this machine.",
+    });
+    const availability = Object.assign({ "codex-cli": true }, { reasons: {} }) as unknown as ProviderAvailability;
+    const chip = chipOf(writingModelLines({
+      times: [timeRow({ providerId: "codex-cli" })],
+      statuses: [codex],
+      catalog: catalogOf([]),
+      availability,
+    }), "Codex Sol 6.1 (balanced)");
+    assert.equal(chip?.source, "status");
+    assert.equal(chip?.source === "status" ? chip.status : null, codex);
+  });
+
   it("Writing models: a local rung's chip is built from its own settings and the live catalog", () => {
     const server = { kind: "lmstudio" as const, baseUrl: "http://127.0.0.1:1234/v1", reachable: true, models: [] };
     const read = (over: {
@@ -688,7 +728,7 @@ describe("Server card rows (CX2)", () => {
     );
     assert.equal(emptyMemory.label, "No model loaded");
     assert.equal(emptyMemory.tone, "slow");
-    assert.match(emptyMemory.help, /no chat model is loaded in memory/);
+    assert.match(emptyMemory.help, /no on-device chat model is loaded/);
     const first = wordsOf(
       chipOf(
         writingModelLines(

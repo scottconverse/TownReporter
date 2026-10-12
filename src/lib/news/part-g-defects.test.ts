@@ -235,21 +235,19 @@ test("part G: cut-off bodies retry once per model, hop through ready models and 
 });
 
 
-test("part G: Server health agrees with picker availability and names a cloud local model", () => {
+test("part G: Server health prefers Codex status and names a cloud local model", () => {
 
   const lines = writingModelLines({times:[],statuses:[{provider:"codex",installed:false}] as never,catalog:{servers:[],defaultModel:null,checkedAt:0},availability:{"codex-balanced":true,"local-model":true},localModel:{id:"deepseek-v4.1-flash:cloud",baseUrl:"http://127.0.0.1:11434/v1"}});
 
-  for (const name of ["Codex Sol 6.1 (balanced)","Local model"]) {
+  const codex = lines.find(line => line.name === "Codex Sol 6.1 (balanced)")!;
+  assert.equal(codex.chip?.source,"status");
+  assert.equal((codex.chip as {status:{installed:boolean}}).status.installed,false);
 
-    const row = lines.find(line => line.name === name)!;
-
-    assert.equal(row.chip?.source,"words");
-
-    assert.equal((row.chip as {label:string}).label,"Ready");
-
-    if(name === "Local model") { assert.match(row.note,/deepseek-v4.1-flash:cloud.*cloud/); assert.doesNotMatch(row.note,/on this computer/); }
-
-  }
+  const local = lines.find(line => line.name === "Local model")!;
+  assert.equal(local.chip?.source,"words");
+  assert.equal((local.chip as {label:string}).label,"Ready");
+  assert.match(local.note,/deepseek-v4.1-flash:cloud.*cloud/);
+  assert.doesNotMatch(local.note,/on this computer/);
 
 });
 
