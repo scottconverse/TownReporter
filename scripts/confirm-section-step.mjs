@@ -43,6 +43,7 @@ export async function confirmSectionAndWaitForPublishable(page, { publishable = 
     );
     if (!choice) throw new Error("The fixture desk has no section to choose.");
     await section.selectOption(choice);
+    await page.waitForFunction(() => !document.getElementById("story-topic-select")?.disabled);
   }
   /*
     Save first, and only when there is something to save: pressing "Save edits"

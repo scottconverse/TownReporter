@@ -218,7 +218,7 @@ async function main() {
     );
   });
   await check("DHA4", async () => {
-    const id = await lead("DHA4 unchosen story", { draft: true });
+    const id = await lead("DHA4 unchosen story", { draft: true, body: "The council approved a $10 million budget on Tuesday." });
     await page.goto(base + `/desk/story/${id}`, { waitUntil: "networkidle" });
     await page.getByText("Story from lead · Section not chosen", { exact: true }).waitFor();
     assert.equal(
@@ -233,6 +233,17 @@ async function main() {
     assert.equal(await page.locator("#story-topic-select").inputValue(), "");
     await confirmSectionAndWaitForPublishable(page, { publishable: false });
     assert.notEqual(await page.locator("#story-topic-select").inputValue(), "");
+    await page.getByRole("button", { name: /^Publish in / }).waitFor();
+    await page.reload({ waitUntil: "networkidle" });
+    await page.getByRole("button", { name: /^Publish in / }).waitFor();
+    await page.getByRole("tab", { name: "Checks", exact: true }).click();
+    await page.getByRole("button", { name: "I checked this story myself", exact: true }).click();
+    for (let i = 0; i < 60; i++) {
+      const [saved] = await sql.query("select notes_json from leads where id=$1", [id]);
+      if (JSON.parse(saved.notes_json).uncheckedStoryConfirmation) break;
+      await page.waitForTimeout(100);
+    }
+    await page.reload({ waitUntil: "networkidle" });
     await page.getByRole("button", { name: /^Publish in / }).waitFor();
   });
   await check("DHA5", async () => {

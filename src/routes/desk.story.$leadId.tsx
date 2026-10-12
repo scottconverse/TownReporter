@@ -66,6 +66,7 @@ import {
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
   acknowledgeUncheckedStory,
+  confirmDraftTopic,
   overrideNamedOutlet,
   reverifyPublishedStory,
   rewritePublishedStory,
@@ -983,7 +984,14 @@ function StoryPage() {
   }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
 
   const saveTopic = useMutation({
-    mutationFn: (nextTopic: string) => saveLeadTopic({ data: { leadId: id, topic: nextTopic } }),
+    mutationFn: async (nextTopic: string) => {
+      if (data?.draft) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+        return confirmed;
+      }
+      return saveLeadTopic({ data: { leadId: id, topic: nextTopic } });
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       setMsg("Saved.");
@@ -1000,6 +1008,10 @@ function StoryPage() {
     mutationFn: async () => {
       const notesProblem = await saveNotesQuietly();
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      if (topicTouched) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+      }
       return { notesProblem };
     },
     onSuccess: async ({ notesProblem }) => {
@@ -3862,6 +3874,10 @@ function StoryPage() {
                       if (!data.draft) {
                         leadTopicChoice.current = e.target.value;
                         setMsg("");
+                        saveTopic.mutate(e.target.value);
+                      } else if (e.target.value === topic && !hasUnsavedDraftEdits) {
+                        // Choosing the existing suggestion changes no draft fields,
+                        // so Save edits cannot record this explicit choice.
                         saveTopic.mutate(e.target.value);
                       }
                     }}

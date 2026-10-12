@@ -57,7 +57,7 @@ test("the drafts list reads the desk's real state out of a text column", async (
   await pg.exec(`
     create table leads (
       id integer primary key, newsroom_id integer not null, headline text, status text,
-      origin text, newsworthiness integer, why text
+      origin text, newsworthiness integer, why text, topic text, created_at timestamptz default now()
     );
     create table drafts (
       id integer primary key, lead_id integer, newsroom_id integer, headline text, dek text,
@@ -172,7 +172,7 @@ test("the nav's count-only read equals the Drafts screen's All count", async () 
   await pg.exec(`
     create table leads (
       id integer primary key, newsroom_id integer not null, headline text, status text,
-      origin text, newsworthiness integer, why text
+      origin text, newsworthiness integer, why text, topic text, created_at timestamptz default now()
     );
     create table drafts (
       id integer primary key, lead_id integer, newsroom_id integer, headline text, dek text,

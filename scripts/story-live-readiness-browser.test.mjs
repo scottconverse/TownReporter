@@ -26,7 +26,7 @@ test("opening Checks keeps live capture claims unreviewed and acceptance unlocks
     import {evidenceRanLine,citedCaptureCount} from ${JSON.stringify(list)};
     Object.assign(globalThis,{fixtureReact:React,reviewState:reviewEvidenceCheckState,ranLine:evidenceRanLine,captureCount:citedCaptureCount});
     globalThis.captureReview={rows:[],manualClaimRows:[],evidenceToken:'live-review',claimRows:Array.from({length:11},(_,i)=>({key:'claim-'+i,judgment:{value:'unreviewed'},captures:[{versionId:i%3+1,available:true,readable:true}]}))};
-    globalThis.screenData={lead:{lead:{id:461,headline:'Service changes',topic:'transportation',status:'published',source_urls:'[]'},draft:{id:8,headline:'Service changes',dek:'Feedback is open',body:'Residents can comment on service changes.',topic:'transportation',research_json:null},unreviewedClaimsAcceptedCount:11,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
+    globalThis.screenData={lead:{lead:{id:461,headline:'Service changes',topic:'transportation',status:'published',source_urls:'[]'},draft:{id:8,headline:'Service changes',model_headline:'Service changes',dek:'Feedback is open',body:'Residents can comment on service changes.',topic:'transportation',research_json:null},unreviewedClaimsAcceptedCount:11,namedOutlets:[],outletOverrides:[]},sources:[],memory:[]};
     globalThis.renderStory=()=>root.render(React.createElement(Route.component,{key:globalThis.storyKey}));
     const root=createRoot(document.getElementById('root')); globalThis.renderStory();`;
   const bundle = await rolldown({ input: "fixture", plugins: [{
