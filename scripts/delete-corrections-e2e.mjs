@@ -861,7 +861,7 @@ async function main() {
   if ((await unavailablePassages.count()) !== 1)
     throw new Error("expected exactly one unavailable cited-capture passage");
   await unavailablePassages.first().waitFor();
-  await review.getByRole("button", { name: "View cited captured version" }).first().click();
+  await review.getByRole("button", { name: "Open the saved source copy" }).first().click();
   const capturedText = review.getByRole("region", { name: "Captured text" });
   await capturedText
     .getByText("The library board approved the recreation room update Tuesday.")
