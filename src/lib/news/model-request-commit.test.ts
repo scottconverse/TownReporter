@@ -285,6 +285,7 @@ async function ensureCommitBoundarySchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      research_scope text not null default 'public',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
@@ -293,6 +294,7 @@ async function ensureCommitBoundarySchema() {
   `);
   await sql.query("alter table editorial_requests add column if not exists voice_mode text not null default 'paper'",
   );
+  await sql.query("alter table editorial_requests add column if not exists research_scope text not null default 'public'");
   await sql.query(`
     create table if not exists leads (
       id serial primary key,
@@ -477,6 +479,7 @@ describe("authenticated Codex commit boundary", () => {
         pointers_json text not null default '[]',
         our_story_json text,
         model_choice text not null default 'auto',
+        research_scope text not null default 'public',
         draft_id integer,
         error text,
         created_at timestamptz not null default now(),
@@ -779,7 +782,7 @@ describe("authenticated Codex commit boundary", () => {
     carry that choice all the way to both the `editorial_requests` row and
     the queued `desk_jobs` row -- not just trust the fix upstream.
   */
-  it("persists and enqueues an explicit local-model pick, not claude-frontier", async () => {
+  it("persists the Opinion research scope and enqueues the explicit local-model pick", async () => {
     const sql = await ensureCommitBoundarySchema();
     const userId = `opinion-local-model-${Date.now()}-${Math.random()}`;
     const selected = { baseUrl: "https://ollama.example/v1", id: "glm-5.2:cloud" };
@@ -789,6 +792,7 @@ describe("authenticated Codex commit boundary", () => {
         context: { userId, newsroomId: 1 },
         subject: "Longmont should fund a second library branch downtown.",
         modelChoice: "local-model",
+        researchScope: "supplied",
       },
       {
         checkReadiness: (choice) =>
@@ -817,10 +821,11 @@ describe("authenticated Codex commit boundary", () => {
     assert.equal(result.modelChoice, "local-model");
     assert.equal(enqueuedChoice, "local-model");
 
-    const [request] = await sql<{ model_choice: string }>`
-      select model_choice from editorial_requests where user_id = ${userId}
+    const [request] = await sql<{ model_choice: string; research_scope: string }>`
+      select model_choice, research_scope from editorial_requests where user_id = ${userId}
     `;
     assert.equal(request?.model_choice, "local-model");
+    assert.equal(request?.research_scope, "supplied");
 
     const [job] = await sql<{ model_choice: string; result_json: string }>`
       select model_choice, result_json from desk_jobs where kind = 'editorial' and user_id = ${userId}

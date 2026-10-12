@@ -142,6 +142,18 @@ async function main() {
   await page.getByText(/CLAIMS AND SOURCES|primegov/i).first().waitFor({ timeout: 20_000 });
   step("the sources came with it");
 
+  // DHB4: a missing dek is a visible warning, followed by an explicit,
+  // recorded Publish anyway press. The paper and feed checks above happened
+  // before either publish press, so the paste path itself remains draft-only.
+  await page.getByRole("button", { name: "Publish to the paper", exact: true }).click();
+  const dekWarning = page.getByText("Add a dek, the one-line summary under the headline, before you publish.", { exact: true });
+  await dekWarning.waitFor({ timeout: 20_000 });
+  const publishAnyway = page.getByRole("button", { name: /Publish anyway/ });
+  await publishAnyway.waitFor({ timeout: 20_000 });
+  await publishAnyway.click();
+  await page.getByText(/On the paper\./).waitFor({ timeout: 30_000 });
+  step("DHB4: the missing-dek warning has a Publish anyway press and the editorial publishes");
+
   if (errors.length) throw new Error(`console errors: ${errors.slice(0, 3).join(" | ")}`);
   step("no console errors");
 

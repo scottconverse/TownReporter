@@ -85,9 +85,9 @@ export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
     const { ensureEditorialRequestSchema } = await import("./editorial.server");
     await ensureEditorialRequestSchema();
     const sql = await getSql();
-    const [row] = await sql<{ source_text: string; asked_for: string; error: string | null; finished_at: string | null; draft_id: number | null;
+    const [row] = await sql<{ source_text: string; asked_for: string; research_scope: string; error: string | null; finished_at: string | null; draft_id: number | null;
     }>`
-      select source_text, asked_for, error, finished_at, draft_id from editorial_requests
+      select source_text, asked_for, research_scope, error, finished_at, draft_id from editorial_requests
       where id=${requestId} and newsroom_id=${owned(context)} limit 1
     `;
     if (!row || !row.finished_at || !row.error || row.draft_id !== null) return { ok: false as const, error: "That failed request has no restorable material." };
@@ -96,7 +96,7 @@ export const getFailedEditorialMaterial = createServerFn({ method: "GET" })
     }>`select count(*) as count from story_documents where editorial_request_id=${requestId} and newsroom_id=${owned(context)}`;
     const attachmentCount = Number(docs?.count ?? 0);
     if (!row.source_text && !attachmentCount) return { ok: false as const, error: "This older request was saved before full-paste recovery existed; its missing text cannot be reconstructed." };
-    return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, attachmentCount };
+    return { ok: true as const, requestId, sourceText: row.source_text, askedFor: row.asked_for, researchScope: row.research_scope === "supplied" ? "supplied" as const : "public" as const, attachmentCount };
   });
 
 export const opinionReadiness = createServerFn({ method: "GET" })
@@ -220,7 +220,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelChoiceExplicit?: boolean; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelChoiceExplicit?: boolean; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; researchScope?: "public" | "supplied"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
       editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
@@ -236,6 +236,7 @@ export const startEditorial = createServerFn({ method: "POST" })
       modelChoiceExplicit: data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       voiceMode: data.voiceMode,
+      researchScope: data.researchScope,
       documentIds: data.documentIds,
       retryRequestId: data.retryRequestId,
       override: data.override,

@@ -217,6 +217,7 @@ export async function writeEditorial(
   const cfg = await getPaperConfig(input.newsroomId);
   input = {
     ...input,
+    researchScope: input.researchScope === "supplied" ? "supplied" : "public",
     paper: {
       name: cfg.name,
       city: cfg.city,
@@ -346,7 +347,8 @@ export async function writeEditorial(
       if (!entry || entry.kind !== "claude-code") {
         return { ok: false, error: "The selected Claude model is unavailable." };
       }
-      if (completedResearch === null) {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      if (!suppliedOnly && completedResearch === null) {
         const research = await chat({
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
@@ -360,7 +362,9 @@ export async function writeEditorial(
       }
       await reportStage(editorialInput)("Writing the editorial");
       return chat({
-        system: "",
+        system: suppliedOnly
+          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          : "",
         systemPromptFile: found.voice.path,
         /*
           UNIT U31 -- THE WRITER RESEARCHES AND WRITES IN ONE RUN.
@@ -382,13 +386,15 @@ export async function writeEditorial(
           logged (see `voice.server.ts`), and the path is validated before it
           is read.
         */
-        allowedTools: EDITORIAL_TOOLS,
+        allowedTools: suppliedOnly ? [] : EDITORIAL_TOOLS,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: completedResearch,
+          research: completedResearch ?? "",
+          suppliedMaterial: editorialInput.sourceText,
+          researchScope: editorialInput.researchScope,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
@@ -402,7 +408,8 @@ export async function writeEditorial(
       if (!entry || entry.kind !== "codex") {
         return { ok: false, error: "The selected Codex model is unavailable." };
       }
-      if (completedResearch === null) {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      if (!suppliedOnly && completedResearch === null) {
         const research = await codexChat({
           system: RESEARCH_INSTRUCTIONS,
           user: researchPack,
@@ -416,7 +423,9 @@ export async function writeEditorial(
       }
       await reportStage(editorialInput)("Writing the editorial");
       return codexChat({
-        system: "",
+        system: suppliedOnly
+          ? "The editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them."
+          : "",
         systemPromptFile: found.voice.path,
         /*
           UNIT U31 -- the writer gets its web search back (U12b took it away).
@@ -430,13 +439,15 @@ export async function writeEditorial(
           the restored capability a property a test can hold instead of a
           default the installed CLI is free to change.
         */
-        webSearch: true,
+        webSearch: !suppliedOnly,
         user: buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: completedResearch,
+          research: completedResearch ?? "",
+          suppliedMaterial: editorialInput.sourceText,
+          researchScope: editorialInput.researchScope,
         }),
         model: providerModel(entry),
         timeoutMs: editorialTimeoutMs(),
@@ -527,28 +538,32 @@ export async function writeEditorial(
         says it: the desk searched and read, and the writing pack carries the
         counts, the captures' URLs and their capture ids.
       */
-      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      const desk = suppliedOnly ? null : await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice,
         ...(localModel ? { localModel } : {}),
         exactModel,
       });
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
-        voice.text,
+        suppliedOnly
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: desk.findings,
+          research: desk?.findings ?? "",
           suppliedMaterial: editorialInput.sourceText,
           suppliedMaterialCap,
-          deskResearch: {
+          researchScope: editorialInput.researchScope,
+          ...(desk ? { deskResearch: {
             searches: desk.searches,
             pages: desk.pages,
             captures: desk.captures,
             window: desk.window,
-          },
+          } } : {}),
         }),
         4_000,
         {
@@ -573,25 +588,29 @@ export async function writeEditorial(
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai.ts");
       const chat = deps.grokChat ?? grokChat;
-      const desk = await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
+      const suppliedOnly = editorialInput.researchScope === "supplied";
+      const desk = suppliedOnly ? null : await deskResearchFor(editorialInput, researchPack, voice.text, chat, {
         choice: opinionModelChoice(editorialInput.modelChoice),
       });
       await reportStage(editorialInput)("Writing the editorial");
       return chat(
-        voice.text,
+        suppliedOnly
+          ? `${voice.text}\n\nThe editor selected supplied-only scope. Do not search, browse, open, fetch, or cite outside sources. Name missing facts in EDITOR CHECKS rather than inventing them.`
+          : voice.text,
         buildWritingPack({
           paper: editorialInput.paper,
           subject: editorialInput.subject,
           ourStory: editorialInput.ourStory,
           askedFor: editorialInput.askedFor,
-          research: desk.findings,
+          research: desk?.findings ?? "",
           suppliedMaterial: editorialInput.sourceText,
-          deskResearch: {
+          researchScope: editorialInput.researchScope,
+          ...(desk ? { deskResearch: {
             searches: desk.searches,
             pages: desk.pages,
             captures: desk.captures,
             window: desk.window,
-          },
+          } } : {}),
         }),
         4_000,
         {
@@ -936,6 +955,7 @@ export async function ensureEditorialRequestSchema() {
       our_story_json text,
       model_choice text not null default 'auto',
       voice_mode text not null default 'paper',
+      research_scope text not null default 'public',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
@@ -984,10 +1004,11 @@ export async function performEditorialWork(
     our_story_json: string | null;
     model_choice: string;
     voice_mode: string;
+    research_scope: string;
     draft_id: number | null;
   }>`
     select id, subject, source_text, source_kind, source_ref, asked_for, pointers_json, our_story_json,
-           model_choice, voice_mode, draft_id
+           model_choice, voice_mode, research_scope, draft_id
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
   `;
@@ -1177,6 +1198,7 @@ export async function performEditorialWork(
         sourceRef: req.source_ref,
         modelChoice: activeChoice,
         voiceMode: req.voice_mode === "neutral" ? "neutral" : "paper",
+        researchScope: req.research_scope === "supplied" ? "supplied" : "public",
         modelEffort: activeEffort,
         requestedModelChoice: requestedChoice,
         requestedModelEffort: requestedEffort,

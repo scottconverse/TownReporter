@@ -39,6 +39,8 @@ const expectedModelNames = [
   "Codex Sol 6.1",
   "Codex Sol 6.1 (balanced)",
   "Codex Luna",
+  "Gemini 3.8 Flash (Pro plan)",
+  "Gemini 3.1 Pro (Pro plan)",
   "Claude Fable",
   "Claude Opus",
   "Claude Sonnet",
@@ -67,7 +69,7 @@ async function openRowMenu(row) {
 
 async function assertSharedModelPicker(picker, expectedValue, surface) {
   const names = (await picker.locator("option").allInnerTexts()).map((line) =>
-    line.split("—")[0].trim(),
+    line.split("—")[0].replace(/\s+·\s+Ready$/, "").trim(),
   );
   if (JSON.stringify(names) !== JSON.stringify(expectedModelNames)) {
     throw new Error(`${surface} model picker choices differ: ${JSON.stringify(names)}`);
@@ -465,6 +467,37 @@ async function main() {
   // Selecting must NOT delete. Prove it survives a reload before confirmation.
   await bulkRow.getByLabel(`Select ${leadHeadline} for deletion`).check();
   await page.getByRole("button", { name: /Delete selected \(1\)/ }).waitFor({ timeout: 10_000 });
+  // DHB1: the shared writing picker belongs on the bulk strip, and its
+  // choice is the one the batch dialog will queue. Opening that dialog does
+  // not start a model job; this walk stops after checking the carried choice.
+  const bulkWritingModel = page.getByLabel("Writing model").filter({ visible: true }).first();
+  await bulkWritingModel.waitFor({ timeout: 10_000 });
+  const bulkOptions = await bulkWritingModel.locator("option").evaluateAll((nodes) =>
+    nodes.map((node) => ({ value: node.value, label: node.textContent ?? "" })),
+  );
+  const bulkNames = bulkOptions.map((option) =>
+    option.label.split("—")[0].replace(/\s+·\s+Ready$/, "").trim(),
+  );
+  if (JSON.stringify(bulkNames) !== JSON.stringify(expectedModelNames)) {
+    throw new Error(`the bulk picker does not match the shared model list: ${JSON.stringify(bulkNames)}`);
+  }
+  const balancedCodex = bulkOptions.find((option) => option.label.includes("Codex Sol 6.1 (balanced)"));
+  if (!balancedCodex) throw new Error("the bulk picker is missing Codex Sol 6.1 (balanced)");
+  await bulkWritingModel.selectOption(balancedCodex.value);
+  const bulkEffort = page.getByLabel("Thinking effort").filter({ visible: true }).first();
+  await bulkEffort.waitFor({ timeout: 10_000 });
+  const chosenEffort = await bulkEffort.inputValue();
+  await page.getByRole("button", { name: /Start 1 story from the selected leads/ }).click();
+  const batchDialog = page.getByRole("dialog").last();
+  await batchDialog.waitFor({ timeout: 10_000 });
+  const dialogModel = batchDialog.getByLabel("Writing model");
+  if ((await dialogModel.inputValue()) !== balancedCodex.value) {
+    throw new Error("the selected bulk model was not carried into the draft start");
+  }
+  if ((await batchDialog.getByLabel("Thinking effort").inputValue()) !== chosenEffort) {
+    throw new Error("the selected bulk effort was not carried into the draft start");
+  }
+  step("DHB1: the selected-lead strip exposes the shared picker and carries model and effort into Start");
   await page.reload({ waitUntil: "networkidle" });
   await page.locator(".lead-row", { hasText: leadHeadline }).first().waitFor({ timeout: 20_000 });
   step("selecting a lead for deletion does not delete it until confirmed");
@@ -483,6 +516,22 @@ async function main() {
     throw new Error("bulk-deleted lead is still on the queue after reload");
   }
   step("the bulk-deleted lead is gone after reload");
+
+  // DHB3: local-provider Settings hands over to the exact box on Models.
+  await page.goto(`${base}/desk/models?tab=conn`, { waitUntil: "networkidle" });
+  const connectionsTab = page.getByRole("tab", { name: /Connections/ });
+  await connectionsTab.waitFor({ timeout: 20_000 });
+  if ((await connectionsTab.getAttribute("aria-selected")) !== "true") {
+    throw new Error("Models did not open its Connections tab");
+  }
+  const localSettings = page.getByRole("link", { name: "Settings", exact: true }).first();
+  await localSettings.waitFor({ timeout: 20_000 });
+  await localSettings.click();
+  await page.waitForURL(`${base}/desk/models?tab=conn#local-model`, { timeout: 20_000 });
+  const localModelBox = page.locator("#local-model");
+  await localModelBox.waitFor({ timeout: 20_000 });
+  if (!(await localModelBox.isVisible())) throw new Error("The local-model destination is not visible");
+  step("DHB3: local provider Settings opens and scrolls to the local-model box");
 
   // ── Dark Desk dials open and describe themselves ──────────────────────────
   await page.goto(`${base}/desk/dark`, { waitUntil: "networkidle" });

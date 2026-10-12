@@ -57,6 +57,7 @@ async function ensureSchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      research_scope text not null default 'public',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),

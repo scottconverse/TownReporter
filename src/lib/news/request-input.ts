@@ -1666,6 +1666,7 @@ export const editorialStartInput = z.object({
   modelChoiceExplicit: z.boolean().optional(),
   modelEffort: modelEffortOrNull.optional(),
   voiceMode: z.enum(["paper", "neutral"]).optional(),
+  researchScope: z.enum(["public", "supplied"]).optional(),
   documentIds: z.array(idText).optional(),
   retryRequestId: rowId.optional(),
   /** The warning keys an accepted retry carries back (`override.ts`). */

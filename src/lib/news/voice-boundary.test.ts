@@ -125,16 +125,10 @@ describe("the voice never becomes a command-line argument", () => {
   });
 
   /*
-    The remaining two properties live in ai-claude-code.server.ts and
-    editorial.server.ts, both of which spawn the real `claude` CLI as a child
-    process (ai-claude-code.server.ts) or hit the database on import chains
-    that are not worth pulling into a unit test here. Exercising them for
-    real means mocking a process spawn, which is a legitimate next step but a
-    separate piece of work from the containment defect this file was written
-    to catch. Left as source-shape checks, each anchored to a specific
-    control-flow relationship (a flag appearing within a bounded window of
-    the branch that selects it) rather than a bare substring, so a comment or
-    an unrelated mention elsewhere in the file cannot satisfy them.
+    The Claude CLI argument selection below remains a narrow adapter check.
+    The Opinion writer's path, empty inline prompt, and tool behavior are
+    exercised through the real exported writer and recorded transport calls
+    in editorial.test.ts.
   */
   it("the CLI adapter passes a path, never the prompt text, when a file is given", () => {
     const src = readFileSync(new URL("./ai-claude-code.server.ts", import.meta.url), "utf8");
@@ -143,18 +137,6 @@ describe("the voice never becomes a command-line argument", () => {
       src,
       /usingFile[\s\S]{0,200}--system-prompt-file/,
       "supplying a file must select the file flag",
-    );
-  });
-
-  it("the editorial writer hands over a path and never the text", () => {
-    const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    assert.match(code, /systemPromptFile:\s*found\.voice\.path/, "it must pass the path");
-    assert.match(code, /system:\s*""/, "the inline system prompt must be empty");
-    assert.doesNotMatch(
-      code,
-      /readFileSync|readFile\(/,
-      "the editorial writer must never open the voice file itself",
     );
   });
 });
@@ -271,28 +253,4 @@ describe("the editorial voice rides with the web tools it needs", () => {
     }
   });
 
-  it("the writing call carries the voice path AND the web tools", () => {
-    const src = readFileSync(new URL("./editorial.server.ts", import.meta.url), "utf8");
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-    /*
-      Two production Claude calls in that file: the gathering pass and the
-      writer, and since U31 BOTH name the web tools. The property that matters
-      is on the writer -- the call that loads the voice by path -- so it is read
-      off that call's own slice rather than counted across the file.
-    */
-    const writeCallStart = code.indexOf("systemPromptFile: found.voice.path");
-    assert.notEqual(writeCallStart, -1, "the writing call must still pass the voice path");
-    const callEnd = code.indexOf("});", writeCallStart);
-    const callSlice = code.slice(writeCallStart, callEnd === -1 ? undefined : callEnd);
-    assert.match(
-      callSlice,
-      /allowedTools:\s*EDITORIAL_TOOLS/,
-      "the writer holds the voice and the tools: the voice carries the research protocol",
-    );
-    assert.doesNotMatch(
-      callSlice,
-      /noTools:\s*true/,
-      "the writer's tool surface must not be hidden from it",
-    );
-  });
 });
