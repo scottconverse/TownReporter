@@ -10,6 +10,7 @@ import {
   darkFileFromSeed,
   darkFileInitial,
   darkFileSeed,
+  darkFileWithShared,
   darkProblem,
   darkRequest,
   modelRowFor,
@@ -207,5 +208,23 @@ describe("Start a Dark Desk file dialog", () => {
     darkRequest(held);
     renderToStaticMarkup(createElement(DarkFileBody, { ...base, state: Object.freeze({ ...held }) }));
     assert.deepEqual(held, snapshot);
+  });
+});
+
+// DHE1-2: the Dark Desk "Start a file" dialog and the page's "Digging model" are one state.
+describe("the Dark Desk file dialog sends the page's model", () => {
+  it("a model the page shows is the model the file opens with, not the dialog's own default", () => {
+    const own = { ...darkFileInitial(), question: "Who signed the lease?", tip: "county records", model: "auto", effort: null };
+    const pick = modelRowFor("dark").find((r) => r.value !== "auto");
+    assert.ok(pick, "the dark row offers a named model");
+    const page = { model: pick.value, effort: "low" };
+    const sent = darkRequest(darkFileWithShared(own, page));
+    assert.equal(sent.run.modelChoice, pick.value);
+    assert.equal(sent.run.modelEffort, "low");
+  });
+
+  it("with no page model the dialog keeps its own choice", () => {
+    const own = { ...darkFileInitial(), question: "Who signed the lease?", tip: "county records", model: "auto", effort: null };
+    assert.equal(darkFileWithShared(own), own);
   });
 });

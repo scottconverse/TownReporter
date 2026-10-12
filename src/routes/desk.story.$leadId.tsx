@@ -31,6 +31,7 @@ import { DeskNameCheck } from "@/components/desk-name-check";
 import { readNameCheck } from "@/lib/news/name-check";
 import { MeetingSourceBlock } from "@/components/meeting-source-block";
 import { MeetingTranscriptChooser } from "@/components/meeting-transcript-chooser";
+import { transcriptSourceName, transcriptToPickFromFailure } from "@/lib/news/meeting-transcript-alignment-copy";
 import { MeetingLedgerPanel } from "@/components/meeting-ledger-panel";
 import { meetingClock } from "@/components/meeting-source-block-utils";
 import { DraftScopePicker } from "@/components/draft-scope-picker";
@@ -143,7 +144,7 @@ import { resolveJobModel } from "@/lib/news/model-assignments";
 import {
   draftFallbackAttribution,
   runningWriterSentence,
-  lastDraftLine,
+  lastDraftInHand,
   lastDraftWhen,
   requestedModelChoice,
   readinessDot,
@@ -626,6 +627,8 @@ function StoryPage() {
       ? (editorDraftError(data.job.error) ?? data.job.error ?? "The last draft did not finish.")
       : "";
   const draftProblem = msg || previousJobError;
+  /* DHE1-4: a draft that names an aligned transcript to pick gets a press for it. */
+  const transcriptPick = draftProblem ? transcriptToPickFromFailure(draftProblem, meetingTranscriptChoices) : null;
 
   /*
     The writer row's derived words (unit CW).
@@ -654,13 +657,13 @@ function StoryPage() {
     The Reporting package shows its own run status; until the page has a
     truthful reporting receipt line, suppress this stale attribution.
   */
-  const lastDraft = civicReportingDraft
-    ? ""
-    : lastDraftLine({
-        modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
-        when: lastDraftWhen(data?.job?.finished_at),
-        draftSaved: Boolean(data?.draft) && !draftProblem,
-      });
+  const lastDraft = lastDraftInHand({
+    hasDraft: Boolean(data?.draft),
+    civicReporting: civicReportingDraft,
+    jobStatus: data?.job?.status,
+    modelLabel: data?.job?.model_choice ? storyModelLabel(data.job.model_choice) : "",
+    finishedAt: data?.job?.finished_at,
+  });
   const requestedDraftModelChoice = data?.job
     ? requestedModelChoice(data.job.result_json, data.job.model_choice)
     : "";
@@ -880,7 +883,7 @@ function StoryPage() {
       is what every other press on this screen passes, so the order and the
       arguments of `saveReportingNotes` then `draftLead` are unchanged.
     */
-    mutationFn: async (input: string | { fromLedger: true } | undefined) => {
+    mutationFn: async (input: string | { fromLedger?: boolean; transcriptArtifactId?: number } | undefined) => {
       /*
         WR1 phase 2: one press, two sources. A string (or nothing) means the
         ordinary Draft/Redraft, reading the tape and the packet; `{fromLedger}`
@@ -895,7 +898,8 @@ function StoryPage() {
       await saveReportingNotes({
         data: { leadId: id, scratch, storyDirection: direction ?? storyDirection, researchScope, todos: parseNotes(data?.lead.notes_json).todo }, // tampercheck: allow existing reporting checklist items are preserved through draft, save and publish; not an implementation placeholder.
       });
-      const meetingArtifactId = selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
+      const pickedArtifactId = typeof input === "object" && input !== null ? input.transcriptArtifactId : undefined;
+      const meetingArtifactId = pickedArtifactId ?? selectedMeetingArtifactId ?? data?.defaultMeetingTranscriptArtifactId ?? undefined;
       const modelChoiceExplicit = modelChoiceTouched.current || Boolean(data?.job?.model_choice);
       if (fromLedger)
         return rewriteFromLedger({ data: { leadId: id, modelChoice, modelEffort, modelChoiceExplicit, researchScope, meetingArtifactId } });
@@ -3325,6 +3329,19 @@ function StoryPage() {
                 page. It renders only when the error really is that.
               */}
               <ProviderSignInButton detail={draftProblem} />
+              {transcriptPick && !locked ? (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={draft.isPending}
+                  onClick={() => {
+                    setSelectedMeetingTranscriptArtifactId(transcriptPick.artifactId);
+                    draft.mutate({ transcriptArtifactId: transcriptPick.artifactId });
+                  }}
+                >
+                  {`Pick ${transcriptSourceName(transcriptPick)} (transcript ${transcriptPick.artifactId}) and draft again`}
+                </button>
+              ) : null}
               {canChooseAnotherModel ? (
                 <button className="btn" type="button" onClick={() => setModelResearchOpen(true)}>
                   Choose another model

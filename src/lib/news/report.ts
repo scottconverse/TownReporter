@@ -192,7 +192,7 @@ export type ReportChat = (
   user: string,
   maxTokens?: number,
   modelChoice?: EffectiveProviderChoice,
-  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number },
+  options?: { timeoutMs: number; draftReply?: boolean; minimumWords?: number; onRetry?: () => void | Promise<void> },
 ) => Promise<ChatResult>;
 
 export type WriterDraftCheckpoint = {
@@ -1437,7 +1437,7 @@ export async function reportAndDraft(
     }
     const timeoutMs = Math.min(limits.callMs, Math.max(6_000, remaining - 2_000));
     const attempt = (retry?: string) => providerChat([system, retry].filter(Boolean).join("\n\n"), user, maxTokens, effectiveModelChoice, { ...options, timeoutMs });
-    return options?.draftReply ? runDraftReply(attempt, options.minimumWords) : attempt();
+    return options?.draftReply ? runDraftReply(attempt, options.minimumWords, { onRetry: options.onRetry }) : attempt();
   };
   const chat = timedChat(nameReserve);
   const nameChat = timedChat(0);
@@ -1809,7 +1809,12 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
         built.packet,
         2200,
         effectiveModelChoice,
-        { timeoutMs: limits.callMs, draftReply: true, minimumWords: requestedBrief ? 20 : 0 },
+        {
+          timeoutMs: limits.callMs,
+          draftReply: true,
+          minimumWords: requestedBrief ? 20 : 0,
+          onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
+        },
       ),
       onRetry: () => deps.onStage?.("Retrying the draft once — reply with JSON only"),
       read: (text) => {

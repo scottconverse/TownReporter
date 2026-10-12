@@ -42,7 +42,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { batchRuntimePick, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
@@ -584,6 +584,14 @@ function QueuePage() {
     setChoice: setBatchRuntime,
     setEffort: setBatchEffort,
   });
+  // DHE1-10: one pick path for the strip and the dialog, so both show it and the
+  // editor's pick counts as theirs (a late job default cannot overwrite it).
+  const pickBatchRuntime = (choice: string) => {
+    batchRuntimeTouched.current = true;
+    const pick = batchRuntimePick(choice);
+    setBatchRuntime(pick.runtime);
+    setBatchEffort(pick.effort);
+  };
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -1319,11 +1327,7 @@ function QueuePage() {
                   scope="forced"
                   label="Model for these stories"
                   value={batchRuntime}
-                  onChange={(choice) => {
-                    const runtime = choice as DraftBatchRuntime;
-                    setBatchRuntime(runtime);
-                    setBatchEffort(defaultModelEffort(runtime));
-                  }}
+                  onChange={pickBatchRuntime}
                   effort={batchEffort}
                   onEffortChange={setBatchEffort}
                   disabled={startBatch.isPending}
@@ -2048,12 +2052,7 @@ function QueuePage() {
             scope="forced"
             label="Model for these stories"
             value={batchRuntime}
-            onChange={(choice) => {
-              const runtime = choice as DraftBatchRuntime;
-              batchRuntimeTouched.current = true;
-              setBatchRuntime(runtime);
-              setBatchEffort(defaultModelEffort(runtime));
-            }}
+            onChange={pickBatchRuntime}
             effort={batchEffort}
             onEffortChange={setBatchEffort}
             disabled={startBatch.isPending}

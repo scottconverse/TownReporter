@@ -96,6 +96,7 @@ import {
   addToRequest,
   darkFileFromSeed,
   darkFileSeed,
+  darkFileWithShared,
   darkProblem,
   darkRequest,
   fillStepId,
@@ -922,6 +923,13 @@ export function AddToStoryDialog({
 
 /* ------------------------------------------------------------- dark file --- */
 
+export type DarkFileSharedModel = {
+  model: StoryModelChoice;
+  effort: ModelEffort | null;
+  onModelChoice: (choice: StoryModelChoice) => void;
+  onModelEffort: (effort: ModelEffort | null) => void;
+};
+
 export type DarkFileDialogProps = {
   open: boolean;
   onClose: () => void;
@@ -929,6 +937,13 @@ export type DarkFileDialogProps = {
   defaultModel?: StoryModelChoice;
   defaultEffort?: ModelEffort | null;
   defaultModelExplicit?: boolean;
+  /**
+   * The model and effort the page itself shows (its "Digging model" picker).
+   * When given, the dialog draws and writes these instead of its own copy, so
+   * a pick in either place shows in both and the file opens with the value on
+   * screen. The `default*` props are then only the factory's starting point.
+   */
+  shared?: DarkFileSharedModel;
   /**
    * Seeds the file fields the caller already knows, instead of making the editor
    * retype them (`darkFileSeed`). Every open reseeds from the factory, so a
@@ -989,7 +1004,7 @@ export type DarkFileDialogProps = {
  * memoized on the two strings rather than on the object: a caller passing an
  * inline literal would otherwise get a fresh factory each render.
  */
-export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride, defaultModelExplicit }: DarkFileDialogProps) {
+export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, defaultLimit, defaultModel: modelOverride, defaultEffort: effortOverride, defaultModelExplicit, shared }: DarkFileDialogProps) {
   const press = usePress();
   const modelFromModels = useFirstRunPickerDefault("dark") ?? "auto";
   const defaultModel = modelOverride ?? modelFromModels;
@@ -1018,19 +1033,30 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, default
   useJobModelAssignment<StoryModelChoice>({
     jobKey: "dark",
     touched: modelTouched,
-    setChoice: (choice) => set({ model: choice }),
-    setEffort: (effort) => set({ effort }),
+    setChoice: (choice) => { if (!shared) set({ model: choice }); },
+    setEffort: (effort) => { if (!shared) set({ effort }); },
     preserveCurrent: modelOverride !== undefined,
     refreshWhen: open,
   });
+  // With `shared`, the page's model and effort are the only copy on screen: the
+  // dialog's own `model`/`effort` fields are not drawn and not written.
+  const view = darkFileWithShared(state, shared);
   const setFromEditor = React.useCallback((patch: Partial<DarkFileState>) => {
     if (Object.prototype.hasOwnProperty.call(patch, "model")) modelTouched.current = true;
+    if (shared) {
+      // The shared picker only offers the page's own model and effort unions.
+      if (patch.model !== undefined) shared.onModelChoice(patch.model as StoryModelChoice);
+      if (Object.prototype.hasOwnProperty.call(patch, "effort")) shared.onModelEffort((patch.effort ?? null) as ModelEffort | null);
+      const { model: _model, effort: _effort, ...rest } = patch;
+      if (Object.keys(rest).length > 0) set(rest);
+      return;
+    }
     set(patch);
-  }, [set]);
+  }, [set, shared]);
 
   const onPrimary = () =>
     press.run(async () => {
-      const request = darkRequest(state);
+      const request = darkRequest(view);
       const opened = await openDarkInvestigation({ data: request.open });
       if (!opened.ok) return { problem: opened.error };
       announceToDesk(`Opened "${opened.title}".`);
@@ -1048,12 +1074,12 @@ export function DarkFileDialog({ open, onClose, onOpened, prefill, seed, default
       footNote="You'll watch its activity log live and can stop it any time."
       primaryLabel="Open the file"
       onPrimary={onPrimary}
-      primaryDisabled={press.busy || darkProblem(state) !== null}
+      primaryDisabled={press.busy || darkProblem(view) !== null}
     >
       <DarkFileBody
-        state={state}
+        state={view}
         set={setFromEditor}
-        problem={press.problem ?? darkProblem(state)}
+        problem={press.problem ?? darkProblem(view)}
         note={press.note}
         ModelPicker={DialogModelPicker}
         Choice={Choice}

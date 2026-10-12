@@ -81,9 +81,14 @@ test("the primary local picker names its cloud backend before it is chosen", asy
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();
-    await page.setContent(render());
+    await page.setContent(render({ value: "local-model" }));
+    // DHE1-11: the Local option is named by the model it will run...
     const text = await page.locator('option[value="local-model"]').innerText();
-    assert.match(text, /deepseek-v4\.1-flash:cloud.*cloud.*spends credits/);
+    assert.equal(text, "deepseek-v4.1-flash:cloud");
+    // ...and the backend status (cloud, spends credits) prints once beside the picker.
+    const status = await page.locator(".model-picker-help").allInnerTexts();
+    assert.equal(status.filter((line) => /spends credits/.test(line)).length, 1);
+    assert.match(status.join("\n"), /Local model — deepseek-v4\.1-flash:cloud.*cloud.*spends credits/);
     assert.doesNotMatch(text, /on this computer/);
   } finally {
     availabilityStub.__setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null } });
@@ -236,10 +241,11 @@ test("the owner keeps the local model controls", () => {
 */
 test("an unavailable provider remains selectable with its reason", () => {
   availabilityStub.__setAvailability({ "local-model": false });
-  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "auto", onChange() {} }));
-  // Unit P item 7: the option shows the registry's short half-line, not the
-  // 56-character clause that was clipped to "...or anot" in a 191px box.
-  assert.match(html, /<option[^>]*value="local-model"[^>]*>Local model — backend not checked yet — TownReporter cannot reach a local model[\s\S]*?<\/option>/);
+  const html = renderToStaticMarkup(createElement(ModelPicker, { value: "local-model", onChange() {} }));
+  // DHE1-11: the Local option is named by its model (here none is chosen yet);
+  // the backend status prints once beside the picker, not inside the option.
+  assert.match(html, /<option[^>]*value="local-model"[^>]*>Local model<\/option>/);
+  assert.match(html, /<span class="model-picker-help">Local model — backend not checked yet — TownReporter cannot reach a local model/);
   // The option remains marked; provider help belongs to the selected model.
   assert.match(html, /TownReporter cannot reach a local model\. Start LM Studio/);
   assert.match(html, /then click Refresh\. See docs\/local-models\.md\./);

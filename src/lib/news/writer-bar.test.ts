@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   customConnectionStatus,
   draftFallbackAttribution,
+  lastDraftInHand,
   lastDraftLine,
   lastDraftWhen,
   readinessDot,
@@ -291,6 +292,35 @@ describe("running writer and switch reason", () => {
     assert.equal(
       runningWriterSentence({ pickedModel: "Automatic", writerModel: "Automatic", failoverNote: "" }),
       undefined,
+    );
+  });
+});
+
+describe("lastDraftInHand: the draft in hand keeps its model after a save message", () => {
+  const finishedAt = "2026-10-12T16:53:00.000Z";
+  it("still names the model after the page shows its own 'Draft saved.' message", () => {
+    assert.match(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "DeepSeek v4.1 Flash", finishedAt }),
+      /^Last draft: DeepSeek v4\.1 Flash, /,
+    );
+  });
+  it("names a local run with its exact model", () => {
+    assert.match(
+      lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "completed", modelLabel: "Local model (deepseek-v4.1-flash:cloud)", finishedAt }),
+      /^Last draft: Local model \(deepseek-v4\.1-flash:cloud\), /,
+    );
+  });
+  it("says nothing when the latest job failed, because its model and time are not the draft's", () => {
+    assert.equal(lastDraftInHand({ hasDraft: true, civicReporting: false, jobStatus: "failed", modelLabel: "Gemini Flash", finishedAt }), "");
+  });
+  it("says nothing for a civic-reporting draft or when there is no draft", () => {
+    assert.equal(lastDraftInHand({ hasDraft: true, civicReporting: true, jobStatus: "completed", modelLabel: "Gemini Flash", finishedAt }), "");
+    assert.equal(lastDraftInHand({ hasDraft: false, civicReporting: false, jobStatus: "completed", modelLabel: "Gemini Flash", finishedAt }), "");
+  });
+  it("names the fallback writer's attribution for an empty-draft switch", () => {
+    assert.equal(
+      draftFallbackAttribution({ pickedModel: "Codex Sol", writerModel: "Gemini Flash", failoverNote: "This draft moved to Gemini Flash because Codex Sol returned an empty draft." }),
+      "You picked Codex Sol. Gemini Flash wrote this draft because Codex Sol returned an empty draft.",
     );
   });
 });

@@ -17,6 +17,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  batchRuntimePick,
   cleanQueueWindow,
   queueCounts,
   queueMatchesSearch,
@@ -339,4 +340,22 @@ test("the header box picks exactly the leads on screen, and clears them all", ()
   assert.deepEqual(queueSelectAllShown([1, 2, 3], true), [1, 2, 3]);
   assert.deepEqual(queueSelectAllShown([1, 2, 3], false), []);
   assert.deepEqual(queueSelectAllShown([], true), []);
+});
+
+// DHE1-6 (walk E1): on the Killed pile, "Newest first" and "Oldest first" are the kill time in opposite directions.
+test("Killed pile: Newest first and Oldest first are opposite orders by kill time, not the same list", () => {
+  const rows = [
+    lead({ id: 343, status: "killed", killed_at: "2026-10-01T22:26:00.000Z" }),
+    lead({ id: 443, status: "killed", killed_at: "2026-10-12T04:38:00.000Z" }),
+    lead({ id: 470, status: "killed", killed_at: "2026-10-12T04:47:00.000Z" }),
+  ];
+  assert.deepEqual(queueSort(rows, "newest", "killed").map((l) => l.id), [470, 443, 343]);
+  assert.deepEqual(queueSort(rows, "oldest", "killed").map((l) => l.id), [343, 443, 470]);
+});
+
+// DHE1-10 (walk E1): the bulk strip and the batch dialog share one runtime and effort.
+test("a batch runtime pick sets the model and the effort that model carries, the same way for the strip and the dialog", () => {
+  const pick = batchRuntimePick("deepseek-flash");
+  assert.equal(pick.runtime, "deepseek-flash");
+  assert.equal(pick.effort, "none");
 });
