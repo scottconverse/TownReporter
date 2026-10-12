@@ -20,7 +20,7 @@ import {
   type StoryModelChoice,
 } from "./model-choice.ts";
 import { parseWriteStoryInput } from "./write-story.ts";
-import { modelEffort, type ModelEffort } from "./provider-registry.ts";
+import { recordedModelEffort, type ModelEffort } from "./provider-registry.ts";
 import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import { appendScratch, packNotes, parseNotes } from "./notes.ts";
 import { sectionScanSnapshot, ensureSectionsSchema, getSections, readTopicSections, resolvedSectionKey ,
@@ -302,7 +302,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     ok: false as const, kind: ready.kind, error: ready.guidance,
     detail: ready.detail, retryable: ready.retryable,
   };
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined);
   const open = await (deps.findOpenJob ?? findOpenJob)({
     newsroomId: input.context.newsroomId,
     kind: "draft",
@@ -348,7 +348,7 @@ export async function commitStoryDraftForAuthenticatedEditor(
     resultJson: JSON.stringify({
       ...initialModelRuntimeReceipt({
         requestedRuntime: input.modelChoice,
-        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
         localModel: providerProbe.ok ? providerProbe.localModel : undefined,
@@ -457,7 +457,7 @@ export async function commitScanForAuthenticatedEditor(
       retryable: true,
     };
   }
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined);
   let sectionSnapshot;
   try {sectionSnapshot=await sectionScanSnapshot(input.context.newsroomId,input.sectionKey);}
   catch(error) {return {ok:false as const,error:error instanceof Error?error.message:"Invalid section.",detail:"Open Paper setup to review the section and its assigned sources.",retryable:true,
@@ -557,7 +557,7 @@ export async function commitScanForAuthenticatedEditor(
     modelChoiceSource: input.modelChoice === "auto" ? "auto" : "editor",
     resultJson: JSON.stringify(initialModelRuntimeReceipt({
       requestedRuntime: input.modelChoice,
-      requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+      requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, providerProbe.ok ? providerProbe.localModel?.id : undefined),
       actualRuntime: effectiveChoice,
       actualEffort: effectiveEffort,
       localModel: providerProbe.ok ? providerProbe.localModel : undefined,
@@ -737,7 +737,7 @@ export async function commitOpinionForAuthenticatedEditor(
       error: "The selected local model could not be pinned to its exact server and model before enqueueing. Refresh the Local model list and try again.",
     };
   }
-  const effectiveEffort = modelEffort(effectiveChoice, input.modelEffort);
+  const effectiveEffort = recordedModelEffort(effectiveChoice, input.modelEffort, readiness.localModel?.id);
 
   // OAuth is checked before schema setup or a database handle is requested.
   // A signed-out provider therefore cannot mutate even database metadata, let
@@ -860,7 +860,7 @@ export async function commitOpinionForAuthenticatedEditor(
       modelChoice: effectiveChoice,
       resultJson: JSON.stringify(initialModelRuntimeReceipt({
         requestedRuntime: input.modelChoice,
-        requestedEffort: modelEffort(input.modelChoice, input.modelEffort),
+        requestedEffort: recordedModelEffort(input.modelChoice, input.modelEffort, readiness.localModel?.id),
         actualRuntime: effectiveChoice,
         actualEffort: effectiveEffort,
         localModel: readiness.localModel,

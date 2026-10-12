@@ -79,8 +79,6 @@ import {
   MODEL_JOBS,
   cleanJobEffort,
   connectionWord,
-  jobEffortLabel,
-  jobEffortOptionTitle,
   jobEffortOptions,
   jobStatusHelp,
   jobStatusKind,
@@ -107,6 +105,7 @@ import {
 } from "@/lib/news/model-assignments-settings";
 import {
   defaultModelEffort,
+  modelEffortLabel,
   providersFor,
   type ModelEffort,
   type ProviderEntry,
@@ -726,7 +725,7 @@ function JobRow({
               title={
                 efforts.length
                   ? shownEffort
-                    ? jobEffortOptionTitle(shownEffort)
+                    ? modelEffortLabel(shownEffort, firstExact)
                     : "This model declares no effort levels; the desk sends none"
                   : PROVIDER_DEFAULT_HELP
               }
@@ -742,8 +741,8 @@ function JobRow({
                   and the closed control wears the selected option's title.
                 */
                 efforts.map((effort: ModelEffort) => (
-                  <option key={effort} value={effort} title={jobEffortOptionTitle(effort)}>
-                    {jobEffortLabel(effort)}
+                  <option key={effort} value={effort} title={modelEffortLabel(effort, firstExact)}>
+                    {modelEffortLabel(effort, firstExact)}
                   </option>
                 ))
               ) : (
@@ -1131,11 +1130,11 @@ function EffortChips({
       {efforts.map((effort) => (
         <span
           key={effort}
-          title={jobEffortOptionTitle(effort)}
+          title={modelEffortLabel(effort, exactModel)}
           className="text-sm font-bold"
           style={{ border: "1px solid var(--line)", color: "var(--fg2)", padding: "0 6px" }}
         >
-          {jobEffortLabel(effort)}
+          {modelEffortLabel(effort, exactModel)}
         </span>
       ))}
     </div>

@@ -57,7 +57,7 @@ describe("DeepSeek v4.1 Flash effort defaults to None", () => {
   });
 
   it("labels the Off level as the picker's None choice for DeepSeek", () => {
-    assert.equal(modelEffortLabel("none", "deepseek-v4.1-flash:cloud"), "Off — no extra thinking");
+    assert.equal(modelEffortLabel("none", "deepseek-v4.1-flash:cloud"), "None — fastest");
   });
 
   it("keeps DeepSeek on none when Automatic carries medium into its rung", () => {

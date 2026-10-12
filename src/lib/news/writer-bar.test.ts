@@ -220,7 +220,7 @@ it("uses the picker key-read failure for the API connection status", () => {
 
   assert.equal(connectionStatus.kind, "unreachable");
   assert.equal(connectionStatus.label, pickerReason);
-  assert.equal(connectionStatus.label, "This connection's key cannot be read. Open Models and paste the key again.");
+  assert.equal(connectionStatus.label, "Gemini (key) — key can't be read. Fix it in Server -> Connections.");
 });
 
 it("names the picked model, actual writer, and first failure after a fallback chain", () => {
