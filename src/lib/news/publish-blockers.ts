@@ -582,7 +582,8 @@ export function publishGateNote(blockers: readonly PublishBlocker[]): string {
  *     The page snapshots exactly these at the moment of the confirm press, so a
  *     warning that arrives while the dialog is open is not silently accepted.
  *   - `confirmLabel` -- "Publish anyway in <section>" when there is anything to
- *     overrule, the desk's own unchanged "Yes, print it in <section>" when
+ *     overrule (with the unreviewed-claims words after it when that is the
+ *     warning, matching the button above the press), the desk's own unchanged "Yes, print it in <section>" when
  *     there is not.
  *
  * A blocker with NO `kind` (an older caller, or a hand-built list) is treated as
@@ -602,12 +603,22 @@ export function publishConfirmation(
 ): PublishConfirmation {
   const warnings = blockers.filter((blocker) => blocker.kind === "warning");
   const hasHard = blockers.some((blocker) => blocker.kind !== "warning");
+  /*
+    DHI-8: the warning block above the press offers "Publish anyway — I accept
+    these claims are unreviewed", and this confirm is the same act. It carries
+    the same words after the section, so the two buttons never read as two
+    different decisions.
+  */
+  const acceptWords = warnings
+    .find((warning) => warning.key === "claims-unreviewed" && warning.altAction?.target.kind === "accept-unreviewed")
+    ?.altAction?.label.replace(/^Publish anyway/, "");
+  const overrideLabel = `Publish anyway in ${sectionName}${acceptWords ?? ""}`;
   return {
     enabled: !hasHard,
     warnings,
     acknowledgedWarningKeys: warnings.map((warning) => warning.key),
     confirmLabel:
-      warnings.length > 0 ? `Publish anyway in ${sectionName}` : `Yes, print it in ${sectionName}`,
+      warnings.length > 0 ? overrideLabel : `Yes, print it in ${sectionName}`,
   };
 }
 

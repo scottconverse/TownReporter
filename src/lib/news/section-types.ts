@@ -28,6 +28,15 @@ export function isMiscTopic(topic?: string | null): boolean {
   );
 }
 
+/**
+ * THT-19: what a section picker shows for a section. "Opinion" is the paper's
+ * opinion pages, not a news section, so the picker says so beside it; every
+ * other section shows its own name. The stored key is untouched.
+ */
+export function sectionPickerLabel(key: string, name: string): string {
+  return key.trim().toLowerCase() === "opinion" ? "Opinion (opinion pages)" : name;
+}
+
 export type Section = {
   key: string;
   name: string;

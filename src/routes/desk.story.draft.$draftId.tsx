@@ -35,6 +35,7 @@ import { useEditorSections } from "@/lib/use-sections";
 import { editorialSourcesError, parseEditorial } from "@/lib/news/editorial";
 import { PublishConfirmation } from "@/components/publish-confirmation";
 import type { PublishBlocker } from "@/lib/news/publish-blockers";
+import { sectionPickerLabel } from "@/lib/news/section-types";
 
 export const Route = createFileRoute("/desk/story/draft/$draftId")({
   head: () => ({ meta: [{ title: "Editorial — TownReporter" }] }),
@@ -508,7 +509,7 @@ function EditorialPage() {
         {/* Audit item 7: the section is editable on a published piece too. */}
         <Field label="Topic">
           <select value={topic} onChange={(e) => {setLiveWarning(null); setTopic(e.target.value);}}>
-            <option value="opinion">opinion</option>
+            <option value="opinion">{sectionPickerLabel("opinion", "Opinion")}</option>
             {TOPICS.filter((t) => t !== "about" && t !== "opinion").map((t) => (
               <option key={t} value={t}>
                 {sections.find((s) => s.key === t)?.name ?? t}

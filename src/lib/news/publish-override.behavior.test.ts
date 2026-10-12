@@ -128,7 +128,14 @@ describe("OH: EVERY warning key leaves the press on, listed and labelled", () =>
         decision.warnings.some((warning) => warning.key === key),
         `${key} must be listed among the warnings drawn`,
       );
-      assert.equal(decision.confirmLabel, "Publish anyway in Council");
+      /* DHI-8: the confirm repeats the words of the unreviewed-claims button above the press. */
+      const accept = decision.warnings.find((warning) => warning.key === key)?.altAction;
+      assert.equal(
+        decision.confirmLabel,
+        key === "claims-unreviewed" && accept?.target.kind === "accept-unreviewed"
+          ? `Publish anyway in Council${accept.label.replace(/^Publish anyway/, "")}`
+          : "Publish anyway in Council",
+      );
       assert.ok(
         decision.acknowledgedWarningKeys.includes(key),
         `${key} must be among the keys the retry acknowledges`,
@@ -292,4 +299,20 @@ it("preserves exact acknowledged keys, including long named outlets, at the RPC 
     cleanPublishRequest({ leadId: 42, acknowledgedWarningKeys: [key, key, "dek", null, ""] }),
     { leadId: 42, acknowledgedWarningKeys: [key, "dek"] },
   );
+});
+
+describe("DHI-8: the two overrides for unreviewed claims use the same words", () => {
+  it("the confirm names the section and repeats the accept button's words", () => {
+    const patch = WARNING_STATES.find((state) => state.key === "claims-unreviewed")!.patch;
+    const blockers = withState(patch);
+    const accept = blockers.find((blocker) => blocker.key === "claims-unreviewed")!.altAction!;
+    const decision = publishConfirmation(blockers, "County & Region");
+    assert.equal(decision.confirmLabel, `Publish anyway in County & Region${accept.label.replace(/^Publish anyway/, "")}`);
+    assert.match(decision.confirmLabel, /^Publish anyway in County & Region — I accept these claims/);
+  });
+
+  it("a different warning keeps the short confirm", () => {
+    const patch = WARNING_STATES.find((state) => state.key === "readiness")!.patch;
+    assert.equal(publishConfirmation(withState(patch), "Council").confirmLabel, "Publish anyway in Council");
+  });
 });
