@@ -1168,7 +1168,7 @@ function DeskHome() {
     Undo stays on the row (the dialog's own doc puts it there): a killed lead is
     dimmed with its way back, which is what the drawing of Today asks for.
   */
-  const [killLead, setKillLead] = useState<{ id: number; headline: string } | null>(null);
+  const [killLead, setKillLead] = useState<{ id: number; headline: string; status: string } | null>(null);
 
   // These initial reads populate controls throughout Today, including the
   // recent-story links above The wire. Presenting the ready heading before
@@ -2211,7 +2211,7 @@ function DeskHome() {
                                         </Link>
                                       ) },
                                       { label: "Kill with a reason", danger: true,
-                                        onSelect: () => setKillLead({ id: l.id, headline: l.headline }) },
+                                        onSelect: () => setKillLead({ id: l.id, headline: l.headline, status: l.status }) },
                                     ]}
                                   />
                                 ) : null}
@@ -2768,6 +2768,8 @@ function DeskHome() {
       {killLead ? (
         <KillDialog
           leadId={killLead.id}
+          leadStatus={killLead.status}
+          onRestored={() => qc.invalidateQueries({ queryKey: ["leads"] })}
           open
           onOpenChange={(open) => {
             if (!open) setKillLead(null);

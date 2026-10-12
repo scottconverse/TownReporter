@@ -82,6 +82,7 @@ export function isTypingTarget(target: unknown): boolean {
   if (!el) return false;
   if (el.isContentEditable === true) return true;
   const tag = el.tagName;
+  if (tag === "INPUT" && /^(checkbox|radio)$/.test((el as HTMLInputElement).type)) return false;
   return typeof tag === "string" && /^(INPUT|TEXTAREA|SELECT)$/.test(tag);
 }
 
@@ -179,7 +180,9 @@ export function triageAction(
 ): TriageAction {
   if (overlayOpen) return null;
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
-  if (isInteractiveTarget(event.target)) return null;
+  // H remains available after selecting a row; text fields and overlays own their keys.
+  if (isTypingTarget(event.target)) return null;
+  if (isInteractiveTarget(event.target) && event.key.toLowerCase() !== "h") return null;
   switch (event.key.toLowerCase()) {
     case "j":
       return { kind: "move", delta: 1 };

@@ -185,6 +185,7 @@ async function answer(fn, data) {
 export const addCorrection = async ({ data }) => answer("addCorrection", data);
 export const suggestCorrectionWording = async ({ data }) => answer("suggestCorrectionWording", data);
 export const setLeadStatus = async ({ data }) => answer("setLeadStatus", data);
+export const restoreKilledLead = async ({ data }) => answer("restoreKilledLead", data);
 `;
 const deskStubUrl = stub(deskStubSrc);
 const desk = await import(deskStubUrl);
@@ -241,6 +242,7 @@ const dialogPressUrl = moduleUrl(
   "dialog-press.ts",
 );
 const killUrl = moduleUrl(await source("src/components/dialogs/KillDialog.tsx"), "KillDialog.tsx", {
+  "../fast-kill": await sharedModuleUrl("src/components/fast-kill.ts"),
   "../editor-warning-consent.ts": await sharedModuleUrl("src/components/editor-warning-consent.ts"),
   "../desk-toast.ts": await sharedModuleUrl("src/components/desk-toast.ts"),
   "@/components/dialog": dialogUrl,

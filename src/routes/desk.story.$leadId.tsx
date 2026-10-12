@@ -66,6 +66,7 @@ import {
   resolveDraftMeetingReview,
   acceptUnreviewedClaims,
   acknowledgeUncheckedStory,
+  confirmDraftTopic,
   overrideNamedOutlet,
   reverifyPublishedStory,
   rewritePublishedStory,
@@ -1014,7 +1015,14 @@ function StoryPage() {
   }, [id, scratch, storyDirection, researchScope, data?.lead.notes_json]);
 
   const saveTopic = useMutation({
-    mutationFn: (nextTopic: string) => saveLeadTopic({ data: { leadId: id, topic: nextTopic } }),
+    mutationFn: async (nextTopic: string) => {
+      if (data?.draft) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+        return confirmed;
+      }
+      return saveLeadTopic({ data: { leadId: id, topic: nextTopic } });
+    },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       setMsg("Saved.");
@@ -1031,6 +1039,10 @@ function StoryPage() {
     mutationFn: async () => {
       const notesProblem = await saveNotesQuietly();
       await saveDraft({ data: { leadId: id, headline, dek, body, topic } });
+      if (topicTouched) {
+        const confirmed = await confirmDraftTopic({ data: id });
+        if (!confirmed.ok) throw new Error(confirmed.error);
+      }
       return { notesProblem };
     },
     onSuccess: async ({ notesProblem }) => {
@@ -1552,7 +1564,7 @@ function StoryPage() {
         result: await publishLead({
           data: {
             leadId: id,
-            topic: topic.trim(),
+            topic: sectionReady ? topic.trim() : undefined,
             area,
             /* The warnings the editor was SHOWN and accepted, snapshotted at
                the confirm press. The server treats an unacknowledged warning it
@@ -2162,7 +2174,7 @@ function StoryPage() {
       - a person already confirmed this exact section for this saved version:
         yes, without a second press.
   */
-  const sectionChosenByModel = Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
+  const sectionChosenByModel = Boolean(data.draft?.model_headline?.trim()) && Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
   const sectionAlreadyConfirmed =
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
@@ -3885,7 +3897,7 @@ function StoryPage() {
                 <Field label="Topic">
                   <select
                     id="story-topic-select"
-                    value={topic}
+                    value={sectionReady ? topic : ""}
                     onChange={(e) => {
                       setTopic(e.target.value);
                       /* A person moved it. See `topicTouched`. */
@@ -3894,10 +3906,15 @@ function StoryPage() {
                         leadTopicChoice.current = e.target.value;
                         setMsg("");
                         saveTopic.mutate(e.target.value);
+                      } else if (e.target.value === topic && !hasUnsavedDraftEdits) {
+                        // Choosing the existing suggestion changes no draft fields,
+                        // so Save edits cannot record this explicit choice.
+                        saveTopic.mutate(e.target.value);
                       }
                     }}
                     disabled={locked || saveTopic.isPending}
                   >
+                    <option value="" disabled>Choose a section</option>
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
                         {sectionName(t)}
@@ -4115,7 +4132,7 @@ function StoryPage() {
         */}
                   <PublishConfirmation
                     blockers={blockers}
-                    sectionName={sectionNameNow}
+                    sectionName={sectionReady ? sectionNameNow : "no section"}
                     refusedWarnings={refusedWarnings}
                     publishing={publish.isPending}
                     onCancel={() => setConfirmingPublish(false)}
@@ -4144,10 +4161,33 @@ function StoryPage() {
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
                     disabled={publish.isPending || !publishConfirm.enabled}
-                    onAct={() => setConfirmingPublish(true)}
+                    onAct={() => {
+                      if (!sectionReady) {
+                        openStoryDetails();
+                        requestAnimationFrame(() => document.getElementById("story-topic-select")?.focus());
+                        return;
+                      }
+                      setConfirmingPublish(true);
+                    }}
                   >
-                    {`Publish in ${sectionNameNow}`}
+                    {sectionReady ? `Publish in ${sectionNameNow}` : "Choose a section to publish"}
                   </ActionButton>
+                  {/*
+                    Warn, never block (Scott, Oct 10): with no section chosen the
+                    editor can still print. The server files it under the lead's
+                    own section, as before this page asked for a choice.
+                  */}
+                  {!sectionReady ? (
+                    <ActionButton
+                      tone="quiet"
+                      phase={publish.isPending ? "working" : "idle"}
+                      workingLabel="Publishing…"
+                      disabled={publish.isPending || !publishConfirm.enabled}
+                      onAct={() => setConfirmingPublish(true)}
+                    >
+                      {`Publish anyway in ${sectionNameNow}`}
+                    </ActionButton>
+                  ) : null}
                   {/*
           The fold used to print a count of failures -- "13 provider or page
           failures" -- which is our bookkeeping and told the editor nothing
@@ -4256,6 +4296,8 @@ function StoryPage() {
         */}
       <KillDialog
         leadId={id}
+        leadStatus={data.lead.status}
+        onRestored={afterLeadChange}
         open={killOpen}
         onOpenChange={setKillOpen}
         onKilled={afterLeadChange}

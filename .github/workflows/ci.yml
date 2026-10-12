@@ -554,6 +554,8 @@ jobs:
           node scripts/desk-flows-e2e.mjs
       - name: Queue and Today Kill anyway, draft preservation and Undo
         run: node scripts/desk-kill-anyway-walk.mjs
+      - name: Release H Walk A six browser regressions
+        run: node scripts/release-h-walka-browser.mjs
       - name: Release H blocks-work browser walk
         run: node scripts/release-h-blockers-e2e.mjs
 

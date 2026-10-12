@@ -37,7 +37,7 @@ import { mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { checkedUrl } from "./browser-guard.mjs";
 import { completeFirstRunSetup, fillPendingSetupCodeIfPresent } from "./first-run-setup-step.mjs";
-import { confirmSectionAndWaitForPublishable } from "./confirm-section-step.mjs";
+import { confirmSectionAndWaitForPublishable, openStoryDetails } from "./confirm-section-step.mjs";
 import { chooseDeskAppearance } from "./desk-appearance-fixture.mjs";
 import { verifyLeadCompareActions } from "./lead-compare-actions.mjs";
 import {
@@ -1165,6 +1165,11 @@ async function main() {
     return input instanceof HTMLSelectElement && !input.disabled;
   });
   step("a pending evidence keep/remove decision disables finding judgments until refresh");
+  // This directly seeded manual draft has no model section choice. Choose
+  // its saved section explicitly before testing claim acceptance and Publish.
+  await openStoryDetails(page);
+  await page.locator("#story-topic-select").selectOption("community");
+  await page.waitForFunction(() => !document.getElementById("story-topic-select")?.disabled);
   await page.getByRole("button", { name: "Publish anyway — I accept these claims are unreviewed", exact: true }).click();
   await page.waitForFunction(() => {
     const accept = [...document.querySelectorAll("#publish-blockers button")]

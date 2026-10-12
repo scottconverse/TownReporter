@@ -1044,7 +1044,7 @@ test("the Compare view explains a disabled reopen instead of offering it mutely"
   assert.match(tag, /disabled/, "a live lead's reopen press must be disabled");
 });
 
-test("the Compare view hides the kill press for a lead that is already killed or published", () => {
+test("Compare keeps the kill press for killed leads and hides it for published stories", () => {
   for (const status of ["killed", "published"]) {
     const { current, prior } = compareSides({ current: { status } });
     const html = renderToStaticMarkup(
@@ -1055,8 +1055,13 @@ test("the Compare view hides the kill press for a lead that is already killed or
         onKillThis: async () => ({ ok: true }),
       }),
     );
-    assert.doesNotMatch(html, /Same story — kill this one/);
-    assert.doesNotMatch(html, /aria-label="Same story/);
+    if (status === "killed") {
+      assert.match(html, /Same story — kill this one/);
+      assert.match(html, /aria-label="Same story/);
+    } else {
+      assert.doesNotMatch(html, /Same story — kill this one/);
+      assert.doesNotMatch(html, /aria-label="Same story/);
+    }
   }
 });
 

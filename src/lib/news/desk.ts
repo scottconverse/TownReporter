@@ -4525,6 +4525,18 @@ const DESK_DRAFT_ROWS_SQL = `
         -- published, is not a draft on the desk.
         and l.status in ('new','drafted','held')
       order by d.lead_id, d.updated_at desc, d.id desc
+    ), desk_work as (
+      select * from latest_draft
+      union all
+      -- First writes have jobs before saved drafts. Negative ids identify temporary rows.
+      select -l.id, l.id, l.headline, null, l.topic, null,
+             null, null, l.created_at, false, l.headline, l.status, l.origin,
+             l.newsworthiness, l.why, '{}'::jsonb
+      from leads l
+      where l.newsroom_id = $1 and l.status in ('new','drafted','held')
+        and not exists (select 1 from latest_draft d where d.lead_id = l.id)
+        and exists (select 1 from desk_jobs j where j.newsroom_id = $1
+          and j.kind = 'draft' and j.subject_id = l.id and j.status in ('queued','running'))
     )
     select v.id, v.lead_id,
            coalesce(nullif(v.headline, ''), v.lead_headline) as headline,
@@ -4555,7 +4567,7 @@ const DESK_DRAFT_ROWS_SQL = `
              then (select count(*)::int from jsonb_array_elements(v.research->'nameCheck'->'rows') r
                     where r->>'status' = 'unresolved')
              else 0 end as names_unresolved
-    from latest_draft v
+    from desk_work v
     left join lateral (
       select j.status, j.stage, j.started_at, j.updated_at, j.model_choice, j.error
       from desk_jobs j
