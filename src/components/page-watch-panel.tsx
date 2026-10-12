@@ -37,10 +37,12 @@ export function PageWatchPanel({
   files,
   onOpenFile,
   modelDefault,
+  onModelPick,
 }: {
   files: Array<{ id: number; title: string }>;
   onOpenFile: (id: number) => void;
   modelDefault?: StoryModelChoice;
+  onModelPick?: (choice: StoryModelChoice) => void;
 }) {
   const qc = useQueryClient(),
     { formatListDateTime, formatClockTime } = usePaperDateFormatters();
@@ -53,8 +55,7 @@ export function PageWatchPanel({
   const [url, setUrl] = useState(""),
     [name, setName] = useState(""),
     [reason, setReason] = useState(""),
-    [file, setFile] = useState(""),
-    [modelOverride, setModelOverride] = useState<StoryModelChoice | null>(null);
+    [file, setFile] = useState("");
   const [note, setNote] = useState(""),
     [error, setError] = useState(""),
     [leadId, setLeadId] = useState<number | null>(null),
@@ -72,7 +73,7 @@ export function PageWatchPanel({
     refetchInterval: selected != null ? 15000 : false,
   });
   const row = detail.data?.watch;
-  const model = row ? row.watch_model_choice as StoryModelChoice : modelOverride ?? modelDefault ?? "auto";
+  const model = row ? row.watch_model_choice as StoryModelChoice : modelDefault ?? "auto";
   async function refresh() {
     await Promise.all([
       qc.invalidateQueries({ queryKey: ["page-watches"] }),
@@ -260,17 +261,24 @@ export function PageWatchPanel({
           )}
           {(watches.data?.length ?? 0) > 5 ? <InkButton tone="quiet" onClick={() => setShowAll(!showAll)}>{showAll ? "Show fewer" : `Show all ${watches.data?.length}`}</InkButton> : null}
       <div className="astra-watch-model">
+        {/*
+          DHE1-2: this picker saves the model of ONE watched page (its own row),
+          a different job from the open file's model, so it has its own name.
+          With no watch open, the picker is the Dark Desk's one model, so a pick
+          here shows in the dialog and the dials panel too (onModelPick).
+        */}
         <ModelPicker
           scope="dark"
-          label="Digging model"
+          label="Model for page watches"
           layout="stacked"
           value={row ? row.watch_model_choice as StoryModelChoice : model}
           disabled={busy}
           onChange={(choice) => {
-            setModelOverride(choice);
             if (row) {
               clear();
               modelSave.mutate({ id: row.id, choice, effort: defaultModelEffort(choice) });
+            } else {
+              onModelPick?.(choice);
             }
           }}
         />

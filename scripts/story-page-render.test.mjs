@@ -20,6 +20,7 @@ const stub = {
   auditDraft: `() => ({findings: []})`, findingsWithIds: `() => []`,
   parseNotes: `() => ({todos: [], sources: []})`,
   DeskShell: `({children}) => children`, WorkbenchSkeleton: `() => "story loading screen"`,
+  resolveJobModel: `() => ({providerId: "auto", effort: null, source: "surface-default", rank: null, notice: null})`,
 };
 for (const node of ast.statements) {
   if (!ts.isImportDeclaration(node) || node.importClause?.isTypeOnly) continue;
