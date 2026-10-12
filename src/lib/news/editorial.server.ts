@@ -955,7 +955,6 @@ export async function ensureEditorialRequestSchema() {
   `,
     `alter table editorial_requests add column if not exists model_choice text not null default 'auto'`,
     `alter table editorial_requests add column if not exists source_text text not null default ''`,
-    `alter table editorial_requests add column if not exists research_scope text not null default 'public'`,
   ]);
 }
 
