@@ -58,6 +58,12 @@ export type TranscriptView = {
   format: string;
   byteSize: number;
   capturedAt: string;
+  /**
+   * Whether the stored original can be read right now. When it cannot, the page
+   * must not describe the file as checked or valid: the SHA-256 is only the
+   * value recorded at capture.
+   */
+  originalAvailable: boolean;
   lines: TranscriptViewLine[];
 };
 
@@ -97,6 +103,14 @@ export function transcriptViewPath(artifactId: number): string {
 /** What the editor reads when the stored original cannot be found or opened. */
 export const TRANSCRIPT_ORIGINAL_MISSING_MESSAGE =
   "The original file is missing from this computer. The text transcript is still here.";
+
+/**
+ * The integrity line the page prints while the stored original cannot be read.
+ * It says the file was not checked, never that it is valid: with no file there
+ * is nothing to check the recorded SHA-256 against.
+ */
+export const TRANSCRIPT_INTEGRITY_NOT_CHECKED_MESSAGE =
+  "Integrity: not checked (the original file is missing).";
 
 export type TranscriptOriginalDownload =
   | { ok: true; blob: Blob }

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { accessSync, constants, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type { Sql } from "../db.ts";
 import {
@@ -134,8 +134,24 @@ export async function loadTranscriptView(
     format: artifact.format,
     byteSize: Number(artifact.byte_size ?? 0),
     capturedAt: artifact.captured_at,
+    originalAvailable: originalIsReadable(artifact.storage_path),
     lines,
   };
+}
+
+/**
+ * Whether the stored original can be opened for reading right now.
+ *
+ * Checked when the page loads, so the integrity line is true on first paint
+ * rather than appearing only after an editor clicks Download and gets a 404.
+ */
+function originalIsReadable(storagePath: string): boolean {
+  try {
+    accessSync(storagePath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export type TranscriptOriginal = {
