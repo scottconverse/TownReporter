@@ -4,7 +4,7 @@ import { StoryReadinessChip } from "./story-readiness-chip.tsx";
 
 /** Empty/queued/failed placeholders have a desk state, but no readiness verdict. */
 export function DraftStateChip({ state }: { state: DeskDraftState }) {
-  return state.readiness ? (
+  return state.readiness && !state.running ? (
     <StoryReadinessChip readiness={state.readiness} />
   ) : (
     <span className="chip d-quiet" role="status">

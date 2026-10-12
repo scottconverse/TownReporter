@@ -128,7 +128,7 @@ export function LeadComparePanel({
         >
           {busy === "not-a-duplicate" ? "Saving…" : MOVE_TO_NEW_LABEL}
         </InkButton>
-        {current.status !== "killed" && current.status !== "published" && onKillThis ? (
+        {current.status !== "published" && onKillThis ? (
           <InkButton
             tone="quiet-danger"
             disabled={busy !== ""}

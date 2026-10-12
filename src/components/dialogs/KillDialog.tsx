@@ -1,6 +1,7 @@
 import { withEditorWarningAction } from "../editor-warning-consent.ts";
-import { askDeskToastOverride } from "../desk-toast.ts";
-import { setLeadStatus } from "@/lib/news/desk";
+import { askDeskToastOverride, deskToast } from "../desk-toast.ts";
+import { setLeadStatus, restoreKilledLead } from "@/lib/news/desk";
+import { KILL_TOAST_MS, restoreStatus } from "../fast-kill";
 import { useState } from "react";
 import { ChoiceCard, Dialog } from "@/components/dialog";
 import { dialogPressProps } from "@/lib/news/dialog-press";
@@ -23,8 +24,8 @@ import { dialogPressProps } from "@/lib/news/dialog-press";
  *     shortcut on this screen (the same reason unit BH left the drawn ⌘S badge
  *     off Save: a badge for a key that does nothing is a lie to the reader), so
  *     that clause is left out of the footnote rather than advertised.
- *   - Undo on the row. That belongs to the Queue's row, which is lane 3's
- *     surface (unit BH2 decision 5), not to this dialog.
+ * The landed kill also carries a toast Undo, including the warning override
+ * path. It restores the captured status and leaves the saved draft intact.
  */
 const QUICK_FILLS: { key: string; label: string; note?: string; reason: string }[] = [
   {
@@ -54,13 +55,15 @@ const QUICK_FILLS: { key: string; label: string; note?: string; reason: string }
 export type KillDialogProps = {
   /** The lead to kill. `setLeadStatus` takes the row id. */
   leadId: number;
+  leadStatus?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called once the kill has landed, so the page can refetch the lead. */
   onKilled?: () => void | Promise<void>;
+  onRestored?: () => void | Promise<void>;
 };
 
-export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogProps) {
+export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, onRestored }: KillDialogProps) {
   const [fill, setFill] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [url, setUrl] = useState("");
@@ -89,6 +92,7 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
   }
 
   async function kill(withReason: boolean) {
+    const restore = restoreStatus(leadStatus);
     setBusy(withReason ? "primary" : "alt");
     setError("");
     try {
@@ -116,6 +120,14 @@ export function KillDialog({ leadId, open, onOpenChange, onKilled }: KillDialogP
       setFill(null);
       setReason("");
       setUrl("");
+      deskToast("The lead moved to Killed.", {
+        duration: KILL_TOAST_MS,
+        undo: { label: "Undo", run: async () => {
+          const undone = await restoreKilledLead({ data: { id: leadId, status: restore } });
+          if (!undone?.ok) throw new Error("The lead could not be restored.");
+          await onRestored?.();
+        } },
+      });
       await onKilled?.();
       onOpenChange(false);
     } catch {

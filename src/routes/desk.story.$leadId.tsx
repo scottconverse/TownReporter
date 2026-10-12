@@ -1521,7 +1521,7 @@ function StoryPage() {
         result: await publishLead({
           data: {
             leadId: id,
-            topic: topic.trim(),
+            topic: sectionReady ? topic.trim() : undefined,
             area,
             /* The warnings the editor was SHOWN and accepted, snapshotted at
                the confirm press. The server treats an unacknowledged warning it
@@ -2131,7 +2131,7 @@ function StoryPage() {
       - a person already confirmed this exact section for this saved version:
         yes, without a second press.
   */
-  const sectionChosenByModel = Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
+  const sectionChosenByModel = Boolean(data.draft?.model_headline?.trim()) && Boolean(String(data.draft?.topic ?? "").trim()) && !data.lead.topic_unchosen;
   const sectionAlreadyConfirmed =
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
@@ -3854,7 +3854,7 @@ function StoryPage() {
                 <Field label="Topic">
                   <select
                     id="story-topic-select"
-                    value={topic}
+                    value={sectionReady ? topic : ""}
                     onChange={(e) => {
                       setTopic(e.target.value);
                       /* A person moved it. See `topicTouched`. */
@@ -3867,6 +3867,7 @@ function StoryPage() {
                     }}
                     disabled={locked || saveTopic.isPending}
                   >
+                    <option value="" disabled>Choose a section</option>
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
                         {sectionName(t)}
@@ -4084,7 +4085,7 @@ function StoryPage() {
         */}
                   <PublishConfirmation
                     blockers={blockers}
-                    sectionName={sectionNameNow}
+                    sectionName={sectionReady ? sectionNameNow : "no section"}
                     refusedWarnings={refusedWarnings}
                     publishing={publish.isPending}
                     onCancel={() => setConfirmingPublish(false)}
@@ -4113,9 +4114,16 @@ function StoryPage() {
                     phase={publish.isPending ? "working" : "idle"}
                     workingLabel="Publishing…"
                     disabled={publish.isPending || !publishConfirm.enabled}
-                    onAct={() => setConfirmingPublish(true)}
+                    onAct={() => {
+                      if (!sectionReady) {
+                        openStoryDetails();
+                        requestAnimationFrame(() => document.getElementById("story-topic-select")?.focus());
+                        return;
+                      }
+                      setConfirmingPublish(true);
+                    }}
                   >
-                    {`Publish in ${sectionNameNow}`}
+                    {sectionReady ? `Publish in ${sectionNameNow}` : "Choose a section to publish"}
                   </ActionButton>
                   {/*
           The fold used to print a count of failures -- "13 provider or page
@@ -4225,6 +4233,8 @@ function StoryPage() {
         */}
       <KillDialog
         leadId={id}
+        leadStatus={data.lead.status}
+        onRestored={afterLeadChange}
         open={killOpen}
         onOpenChange={setKillOpen}
         onKilled={afterLeadChange}

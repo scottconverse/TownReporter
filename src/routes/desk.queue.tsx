@@ -1748,6 +1748,7 @@ function QueuePage() {
                   bulkDeleteReason={bulkDeleteReasons[l.id] ?? null}
                   deleteSelected={selectedDeleteLeads.includes(l.id)}
                   onDeleteSelect={(selected) => {
+                    setCursor(index);
                     setConfirmingBulkDelete(false);
                     setBulkDeleteNotice("");
                     setSelectedDeleteLeadIds((ids) =>
@@ -2172,6 +2173,8 @@ function QueuePage() {
       {killFor ? (
         <KillDialog
           leadId={killFor.id}
+          leadStatus={killFor.status}
+          onRestored={() => qc.invalidateQueries({ queryKey: ["leads"] })}
           open
           onOpenChange={(open) => {
             if (!open) setKillFor(null);

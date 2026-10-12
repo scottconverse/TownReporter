@@ -119,6 +119,11 @@ export function deskDraftState(facts: DeskDraftFacts, elapsed = ""): DeskDraftSt
   const yours = editorOwnsHeadline(facts);
   const unresolved = Math.max(0, Number(facts.names_unresolved) || 0);
   const base = { needsYou: false, running, failed, yours };
+  if (running) {
+    const label = job === "queued" ? "Queued" : "Writing";
+    return { ...base, key: "running", label: elapsed ? `${label} · ${elapsed}` : label,
+      readiness: !facts.has_body || facts.story_readiness === undefined ? undefined : savedStoryReadiness(facts.story_readiness, true) };
+  }
 
   // A filed empty row is still waiting for its first draft, regardless of its memo.
   if (!facts.has_body) {
