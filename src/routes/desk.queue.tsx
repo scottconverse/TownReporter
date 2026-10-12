@@ -1273,6 +1273,25 @@ function QueuePage() {
               <span className="queue-bulk-count">{selectedDeleteLeads.length} selected</span>
               <div className="queue-bulk-acts">
                 {/*
+                  DHB1: this is the picker whose choice the Start press is
+                  about to use. The batch dialog below shares the same runtime
+                  and effort state, so opening it can still review the exact
+                  model this strip selected without a second resolution path.
+                */}
+                <ModelPicker
+                  scope="forced"
+                  value={batchRuntime}
+                  onChange={(choice) => {
+                    const runtime = choice as DraftBatchRuntime;
+                    setBatchRuntime(runtime);
+                    setBatchEffort(defaultModelEffort(runtime));
+                  }}
+                  effort={batchEffort}
+                  onEffortChange={setBatchEffort}
+                  disabled={startBatch.isPending}
+                  compact
+                />
+                {/*
                   Start N stories is the same batch the desk has always run
                   (startDraftBatch, one job per lead, five at a time); the bar
                   is a second way to reach it, not a new mechanism. A held,

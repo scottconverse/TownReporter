@@ -1251,6 +1251,44 @@ describe("the Opinion writer researches and writes in one run, holding the voice
     assert.equal(stages[stages.length - 1], "Writing the editorial");
   });
 
+  it("supplied-only Opinion skips outside research and asks the writer to name missing facts in editor checks", async () => {
+    const calls: { system: string; user: string }[] = [];
+    const searched: string[] = [];
+    const result = await writeEditorial(
+      {
+        ...ORCHESTRATION_INPUT,
+        modelChoice: "deepseek-flash",
+        researchScope: "supplied",
+        subject: "Longmont Public Media's studio tour",
+        sourceText: "The supplied material says a studio tour is planned. It does not provide an event date.",
+        onStage: async () => {},
+      },
+      {
+        grokChat: async (system, user) => {
+          calls.push({ system, user });
+          return STOPPED;
+        },
+        deskResearch: {
+          ...deskSeams(searched),
+          search: async (query) => {
+            searched.push(query);
+            return { hits: [], decision: "not-evaluated" };
+          },
+        },
+        claudeCodeChat: mustNotRun("Claude"),
+        codexChat: mustNotRun("Codex"),
+      },
+    );
+
+    assert.equal(result.ok, false, "the fake stopped the one writing call");
+    assert.deepEqual(searched, [], "supplied-only scope does not search outside the packet");
+    assert.equal(calls.length, 1, "there is no desk planning or reading call");
+    assert.match(calls[0]!.user, /supplied-only scope/i);
+    assert.match(calls[0]!.user, /EDITOR CHECKS/i);
+    assert.match(calls[0]!.user, /date/);
+    assert.doesNotMatch(calls[0]!.user, /RESEARCH RUN BY THE DESK|RESEARCH GATHERED FOR THIS PIECE/);
+  });
+
   /*
     The U25 Stop seam, reached from the writer. A job the editor cancelled
     during research must end cancelled with nothing written -- not with a

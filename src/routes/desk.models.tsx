@@ -1530,7 +1530,7 @@ function LocalServers({ onNote, isOwner }: { onNote: (text: string) => void; isO
               <InkButton tone="quiet" disabled={refresh.isPending} onClick={() => refresh.mutate()}>
                 {refresh.isPending ? "Checking…" : "Check again"}
               </InkButton>
-              <a className="inline-link" href="/desk/ops">
+              <a className="inline-link" href="/desk/models?tab=conn#local-model">
                 Settings
               </a>
             </>
@@ -1632,7 +1632,7 @@ function LocalServerCard({
                   : `Open ${kindLabel} ↗`}
             </a>
           ) : null}
-          <a className="inline-link" href="/desk/ops">
+          <a className="inline-link" href="/desk/models?tab=conn#local-model">
             Settings
           </a>
         </>

@@ -33,6 +33,7 @@ import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { OverrideAnyway } from "@/components/override-anyway";
+import { DraftScopePicker } from "@/components/draft-scope-picker";
 import { StoryDocumentUpload, type StoryUpload } from "@/components/story-documents";
 import { DeskNameCheck } from "@/components/desk-name-check";
 import { DeskLengthCut } from "@/components/desk-length-cut";
@@ -79,10 +80,15 @@ function OpinionPage() {
   const qc = useQueryClient();
   const [subject, setSubject] = useState("");
   const [askedFor, setAskedFor] = useState("");
+  const [researchScope, setResearchScope] = useState<"public" | "supplied">("public");
   const [paperVoiceText, setPaperVoiceText] = useState("");
   const [paperVoiceNotice, setPaperVoiceNotice] = useState<{ text: string; kind: "error" | "success" } | null>(null);
   const [documents, setDocuments] = useState<StoryUpload[]>([]);
   const [startWarning, setStartWarning] = useState<{key: string; sentence: string} | null>(null);
+  const [publishWarning, setPublishWarning] = useState<{
+    draftId: number;
+    warnings: { key: string; sentence: string }[];
+  } | null>(null);
   const acceptedOverrides = useRef<string[]>([]);
   const [documentsBusy, setDocumentsBusy] = useState(false);
   const [retryRequestId, setRetryRequestId] = useState<number | undefined>();
@@ -97,7 +103,7 @@ function OpinionPage() {
   const [modelChoice, setModelChoice] = useState<OpinionModelChoice>(DEFAULT_OPINION_MODEL);
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort(DEFAULT_OPINION_MODEL));
   const startVoiceMode = useRef<"paper" | "neutral">("paper");
-  useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, retryRequestId]);
+  useEffect(() => { setStartWarning(null); acceptedOverrides.current = []; }, [subject, askedFor, documents, modelChoice, modelEffort, researchScope, retryRequestId]);
   /*
     F3b: F3 stores the first-run default for Opinion's scope too, and this page
     sends whatever the picker shows as an explicit pick -- so on a fresh
@@ -250,7 +256,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
+    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, researchScope, modelChoice, modelEffort, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         if (res && "warning" in res) { setStartWarning(res.warning); return; }
@@ -282,6 +288,7 @@ function OpinionPage() {
       if (!res.ok) { setError(res.error); return; }
       setSubject(res.sourceText);
       setAskedFor(res.askedFor);
+      setResearchScope(res.researchScope);
       setRetryRequestId(res.requestId);
       setSuccess(`The complete saved material is back in the form above.${res.attachmentCount ? ` ${res.attachmentCount} retained attachment${res.attachmentCount === 1 ? " is" : "s are"} ready for retry.` : ""}`);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -297,12 +304,24 @@ function OpinionPage() {
     server fn, same guard: nothing publishes without this click.
   */
   const publish = useMutation({
-    mutationFn: (draftId: number) => publishEditorial({ data: draftId }),
-    onSuccess: (r) => {
+    mutationFn: (request: { draftId: number; acknowledgedWarningKeys?: string[] }) =>
+      publishEditorial({
+        data: {
+          draftId: request.draftId,
+          acknowledgedWarningKeys: request.acknowledgedWarningKeys,
+        },
+      }),
+    onSuccess: (r, request) => {
       if (!r?.ok) {
+        const warnings = r && "warnings" in r ? r.warnings : undefined;
+        if (warnings?.length) {
+          setPublishWarning({ draftId: request.draftId, warnings });
+          return;
+        }
         setError(r?.error ?? "That did not print.");
         return;
       }
+      setPublishWarning(null);
       setSuccess("On the paper. See it under Published, or read it on the paper.");
       void qc.invalidateQueries({ queryKey: ["editorials"] });
     },
@@ -555,6 +574,11 @@ function OpinionPage() {
             documents={documents}
             onChange={setDocuments}
             onBusy={setDocumentsBusy}
+            disabled={start.isPending}
+          />
+          <DraftScopePicker
+            value={researchScope}
+            onChange={setResearchScope}
             disabled={start.isPending}
           />
           <label className="block">
@@ -827,9 +851,9 @@ function OpinionPage() {
                       <InkButton
                         tone="solid"
                         disabled={publish.isPending}
-                        onClick={() => publish.mutate(r.draft_id!)}
+                        onClick={() => publish.mutate({ draftId: r.draft_id! })}
                       >
-                        {publish.isPending && publish.variables === r.draft_id
+                        {publish.isPending && publish.variables?.draftId === r.draft_id
                           ? "Publishing…"
                           : "Publish"}
                       </InkButton>
@@ -986,6 +1010,18 @@ function OpinionPage() {
                       {editorialRemovalCopy(Boolean(r.draft_id), Boolean(r.published_slug))}
                     </p>
                   ) : null}
+                  {publishWarning?.draftId === r.draft_id && openId !== r.draft_id ? (
+                    <div className="astra-span">
+                      <OpinionPublishWarnings
+                        warnings={publishWarning.warnings}
+                        busy={publish.isPending}
+                        onPublishAnyway={() => publish.mutate({
+                          draftId: publishWarning.draftId,
+                          acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+                        })}
+                      />
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -1017,7 +1053,7 @@ function OpinionPage() {
                       <InkButton
                         tone="solid"
                         disabled={publish.isPending}
-                        onClick={() => publish.mutate(openId)}
+                        onClick={() => publish.mutate({ draftId: openId })}
                       >
                         {publish.isPending ? "Publishing…" : "Publish to the paper"}
                       </InkButton>
@@ -1032,6 +1068,16 @@ function OpinionPage() {
             }
             sub="Read it here, and publish it from here when it is ready. Edit opens the full editor for changes."
           />
+          {publishWarning?.draftId === openId ? (
+            <OpinionPublishWarnings
+              warnings={publishWarning.warnings}
+              busy={publish.isPending}
+              onPublishAnyway={() => publish.mutate({
+                draftId: publishWarning.draftId,
+                acknowledgedWarningKeys: publishWarning.warnings.map((warning) => warning.key),
+              })}
+            />
+          ) : null}
           {piece.isPending ? (
             <ListSkeleton />
           ) : !piece.data ? (
@@ -1091,6 +1137,31 @@ function OpinionPage() {
         </section>
       ) : null}
     </DeskShell>
+  );
+}
+
+function OpinionPublishWarnings({
+  warnings,
+  busy,
+  onPublishAnyway,
+}: {
+  warnings: { key: string; sentence: string }[];
+  busy: boolean;
+  onPublishAnyway: () => void;
+}) {
+  return (
+    <div className="mt-3 border border-rule bg-paper-2 p-4" role="alert">
+      {warnings.map((warning) => (
+        <p key={warning.key} className="text-sm text-ink">
+          {warning.sentence}
+        </p>
+      ))}
+      <div className="mt-3">
+        <button type="button" className="btn" disabled={busy} onClick={onPublishAnyway}>
+          {busy ? "Publishing…" : "Publish anyway"}
+        </button>
+      </div>
+    </div>
   );
 }
 

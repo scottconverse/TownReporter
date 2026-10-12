@@ -581,6 +581,7 @@ export async function commitOpinionForAuthenticatedEditor(
     modelChoice: OpinionModelChoice;
     modelEffort?: ModelEffort | null;
     voiceMode?: "paper" | "neutral";
+    researchScope?: "public" | "supplied";
 
   },
   deps: OpinionCommitDeps = {},
@@ -723,11 +724,11 @@ export async function commitOpinionForAuthenticatedEditor(
   const rows = await sql<{ id: number }>`
     insert into editorial_requests
       (user_id, newsroom_id, subject, source_text, source_kind, source_ref, asked_for,
-       pointers_json, our_story_json, model_choice, voice_mode)
+       pointers_json, our_story_json, model_choice, voice_mode, research_scope)
     values (${input.context.userId}, ${input.context.newsroomId}, ${subject}, ${sourceText}, ${sourceKind},
             ${sourceRef}, ${askedFor},
             ${JSON.stringify(pointers)},
-            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice}, ${input.voiceMode === "neutral" ? "neutral" : "paper"})
+            ${ourStory ? JSON.stringify(ourStory) : null}, ${effectiveChoice}, ${input.voiceMode === "neutral" ? "neutral" : "paper"}, ${input.researchScope === "supplied" ? "supplied" : "public"})
     returning id
   `;
   const requestId = rows[0]!.id;

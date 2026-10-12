@@ -28,6 +28,8 @@ export type WriteEditorialInput = {
   pointers: EditorialPointer[];
   ourStory?: { headline: string; url: string; dek?: string };
   askedFor?: string;
+  /** Whether this request may use discovered public sources. */
+  researchScope?: "public" | "supplied";
   /** For the record on the draft: what this was written from. */
   sourceKind: string;
   sourceRef: string;

@@ -36,6 +36,7 @@ export function DeskLocalModelBox({
   if (!choice) {
     return (
       <section
+        id="local-model"
         aria-label={TITLE}
         style={{
           gridColumn: "1 / -1",
@@ -58,6 +59,7 @@ export function DeskLocalModelBox({
 
   return (
     <section
+      id="local-model"
       aria-label={TITLE}
       style={{
         gridColumn: "1 / -1",
