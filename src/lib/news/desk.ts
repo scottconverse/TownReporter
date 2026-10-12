@@ -270,6 +270,9 @@ import {
 import { effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
 import { runScanChatWithFailover, scanCallTimeoutFor } from "./scan-model-run.ts";
 import {
+  MIN_RUNG_MS,
+  NO_MODEL_IN_TIME,
+  rungTimeoutMs,
   runPinnedCallWithFailover,
   type PerformDraftWorkDeps,
 } from "./desk-model-run.ts";
@@ -3656,21 +3659,31 @@ export const performDraftWork = createServerOnlyFn(async function performDraftWo
             : null;
       if (nextChoice) await persistReportSwitch(nextChoice, reason);
     };
+    // One wall-clock deadline and one failed-rung set per draft run (decisions 2-3).
+    const draftRunDeadlineAt = Date.now() + providerBudget(activeReportSnapshot.modelChoice, draftInput.providerOverrides).wallMs;
+    const draftRunTriedRungs = new Set<string>();
     reportDeps.chat = async (system, user, maxTokens = 800, _modelChoice, options) => {
-      const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => storyChat([system, retryInstruction].filter(Boolean).join("\n\n"), user, maxTokens, {
-        timeoutMs: Math.max(
-          1,
-          options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
-        ),
-        choice: snapshot.modelChoice,
-        newsroomId: job.newsroom_id,
-        localModel: (draftInput.providerOverrides as ProviderOverrides | undefined)?.["local-model"]?.localModel,
-        reasoningEffort: snapshot.modelEffort,
-      });
+      const run = (snapshot: typeof activeReportSnapshot, retryInstruction?: string) => {
+        const rung = rungTimeoutMs({
+          requestedMs: options?.timeoutMs ?? providerBudget(snapshot.modelChoice, draftInput.providerOverrides).callMs,
+          deadlineAt: draftRunDeadlineAt,
+          now: Date.now(),
+        });
+        if ("refused" in rung) return Promise.resolve({ ok: false as const, error: NO_MODEL_IN_TIME });
+        return storyChat([system, retryInstruction].filter(Boolean).join("\n\n"), user, maxTokens, {
+          timeoutMs: rung.timeoutMs,
+          choice: snapshot.modelChoice,
+          newsroomId: job.newsroom_id,
+          localModel: (draftInput.providerOverrides as ProviderOverrides | undefined)?.["local-model"]?.localModel,
+          reasoningEffort: snapshot.modelEffort,
+        });
+      };
       const attempted = await runPinnedCallWithFailover({
         snapshot: activeReportSnapshot,
         source: job.model_choice_source ?? "editor",
         exhaustLadder: options?.draftReply === true,
+        tried: options?.draftReply ? draftRunTriedRungs : undefined,
+        outOfTime: () => Date.now() + MIN_RUNG_MS > draftRunDeadlineAt,
         run: options?.draftReply ? snapshot => runDraftReply(instruction => run(snapshot, instruction), options.minimumWords, {
           requireReadable: true,
           onRetry: () => setStage(job.id, "Retrying the draft once — reply with JSON only"),

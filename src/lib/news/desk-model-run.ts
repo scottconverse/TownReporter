@@ -42,6 +42,11 @@ export async function runPinnedCallWithFailover<
   ladder?: readonly string[];
   /** Draft writing keeps trying ready rungs until one produces a readable draft. */
   exhaustLadder?: boolean;
+  /** Rungs that already failed in this draft run. A draft passes the same set
+   * to every chat call, so a retry cannot walk the ladder again (decision 3). */
+  tried?: Set<string>;
+  /** True once the draft run has no time for another real call (decision 2). */
+  outOfTime?: () => boolean;
   resolve: (choice: Exclude<ReturnType<typeof import("./model-choice.ts").storyModelChoice>, "auto">) => Promise<TSnapshot>;
   onSwitch: (input: {
     previousLabel: string;
@@ -53,25 +58,31 @@ export async function runPinnedCallWithFailover<
 }): Promise<{ result: TResult; snapshot: TSnapshot }> {
   let snapshot = opts.snapshot;
   let partialText: string | undefined;
-  const visited = new Set<string>();
+  const visited = opts.tried ?? new Set<string>();
   let trail = "";
   let cutOffSeen = false;
-  while (!visited.has(snapshot.modelChoice)) {
-    visited.add(snapshot.modelChoice);
+  let attempts = 0;
+  for (;;) {
+    if (visited.has(snapshot.modelChoice)) {
+      return { result: { ok: false, error: "Every model in the ladder already failed on this draft; nothing was saved." } as TResult,
+        snapshot };
+    }
+    attempts += 1;
     const attempt = await opts.run(snapshot);
     const result = attempt as TResult & { partialText?: string };
     partialText = result.partialText ?? partialText;
     if (result.ok || !result.error) return { result, snapshot };
+    visited.add(snapshot.modelChoice);
     cutOffSeen ||= /reply was cut off/i.test(result.error);
     // Ordinary non-writing calls retain one hop; writers exhaust ready rungs.
-    if (visited.size > 1 && !cutOffSeen && !opts.exhaustLadder) {
+    if (attempts > 1 && !cutOffSeen && !opts.exhaustLadder) {
       const error = opts.snapshot.modelChoice.startsWith("custom:")
         ? `${trail} -> ${modelChoiceLabel(snapshot.modelChoice)}: ${result.error}` : result.error;
       return {result: {...result,error},snapshot};
     }
     const plan = await planAutomaticFailover({source: opts.source, current: snapshot.modelChoice,
       error: result.error, probe: opts.probe, ladder: opts.ladder});
-    if (!plan || plan.next === "auto" || visited.has(plan.next)) {
+    if (!plan || plan.next === "auto" || visited.has(plan.next) || opts.outOfTime?.()) {
       const terminalError = snapshot.modelChoice.startsWith("custom:")
         ? `${result.error} ${looksLikeContentRefusal(result.error) ? "The desk stopped this request without switching models" : "The desk found no ready fallback"}; no draft was created.`
         : result.error;
@@ -85,7 +96,20 @@ export async function runPinnedCallWithFailover<
     trail = trail ? `${trail} -> ${error}` : error;
     snapshot = next;
   }
-  throw new Error("The writing model ladder repeated a model.");
+}
+
+/** The shortest real call a model gets. A limit below this is never sent. */
+export const MIN_RUNG_MS = 6_000;
+
+/** The message a draft shows when the run's time is gone before a model wrote (decision 2). */
+export const NO_MODEL_IN_TIME = "No model finished in time; nothing was saved.";
+
+/** A rung's own limit, capped by what the whole draft run has left. Never the
+ * leftover of an earlier model: below `MIN_RUNG_MS` the call is refused. */
+export function rungTimeoutMs(input: { requestedMs: number; deadlineAt: number; now: number }):
+  { timeoutMs: number } | { refused: true } {
+  const timeoutMs = Math.min(input.requestedMs, input.deadlineAt - input.now);
+  return timeoutMs >= MIN_RUNG_MS ? { timeoutMs } : { refused: true };
 }
 
 /** Keep terminal provider-limit errors in the Story vocabulary. The shared

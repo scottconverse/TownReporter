@@ -10,7 +10,7 @@ import { modelEffort, type ModelEffort, type ProviderOverrides } from "./provide
 import type { OcrOptions } from "./ingest.ts";
 import { aiEvidenceReadiness, judgeEvidenceClaims, type AiEvidenceReview } from "./evidence-ai.ts";
 import { runDraftReply } from "./draft-reply.ts";
-import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
+import { draftLooksCutOff, CUT_OFF_WARNING, EMPTY_DRAFT_ERROR } from "./draft-completeness.ts";
 import { coerceDraft } from "./coerce-draft.ts";
 import { researchScopeOf, type ResearchScope } from "./research-scope.ts";
 import {
@@ -1831,6 +1831,7 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
       if (!write.partialText) return { error: write.error };
       const partial = coerceDraft(write.partialText, {headline: opts.lead.headline, dek: opts.lead.why, topic: opts.lead.topic});
       partial.integrity_notes = [partial.integrity_notes, CUT_OFF_WARNING].filter(Boolean).join("\n");
+      if (!partial.body.trim() || !partial.headline.trim()) return { error: EMPTY_DRAFT_ERROR };
       return {coerced: partial, parsed: parseJsonBlock<Record<string, unknown>>(write.partialText) ?? {}, body: partial.body};
     }
     const coerced = write.value;
@@ -1939,6 +1940,8 @@ ${promptExtraEvidence ? `\nEditor pull box (does not print — use as evidence):
     const bodyWords = passBody.trim().split(/\s+/).filter(Boolean).length;
     if (requestedBrief && bodyWords > 350)
       coerced.integrity_notes = [coerced.integrity_notes, `Requested brief not met (${bodyWords} words). This draft was retained for editing rather than discarded.`].filter(Boolean).join("\n");
+    // Decision 1: a blank headline or body is a failed draft, never a saved one.
+    if (!passBody.trim() || !coerced.headline.trim()) return { error: EMPTY_DRAFT_ERROR };
     return { coerced, parsed, body: passBody };
   };
 
