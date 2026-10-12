@@ -3471,7 +3471,7 @@ function StoryPage() {
                 */}
                 <ModelPicker
                   scope="story"
-                  label="Headline model"
+                  label="Model for suggestions"
                   layout="stacked"
                   compact
                   value={headlineModel}

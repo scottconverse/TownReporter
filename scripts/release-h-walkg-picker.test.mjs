@@ -123,9 +123,9 @@ test("DHG-3: Suggest headlines has the shared headline picker, set to the headli
     const doc = parseHTML(html).document;
     assert.ok(html.includes("Suggest headlines"), "the Suggest headlines press is still on the Story page");
     const headline = [...doc.querySelectorAll('[data-model-picker="shared"]')].find(
-      (picker) => picker.querySelector("label")?.textContent.trim() === "Headline model",
+      (picker) => picker.querySelector("label")?.textContent.trim() === "Model for suggestions",
     );
-    assert.ok(headline, "Suggest headlines has its own shared model picker, named Headline model");
+    assert.ok(headline, "Suggest headlines has its own shared model picker, named Model for suggestions");
     assert.equal(
       headline.querySelector("option[selected]")?.getAttribute("value"),
       "codex-luna",
