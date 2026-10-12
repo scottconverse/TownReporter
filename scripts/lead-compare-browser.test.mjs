@@ -133,6 +133,7 @@ test("Compare Kill uses the shared warning retry and success Undo", async (t) =>
   await click([...document.querySelectorAll("button")].find((button) => button.textContent.includes("Same story")));
   assert.deepEqual(overrides, [[]]);
   assert.doesNotMatch(document.querySelector(".lead-compare").textContent, /written draft/i);
+  assert.match(document.querySelector(".lead-compare").textContent, /Nothing was saved yet/, "a held press must say in the panel that nothing moved");
   assert.equal(sent.length, 1, "the panel must not create a second warning action");
   assert.equal(sent[0].text, sentence);
   assert.equal(sent[0].options.action.label, "Kill anyway");
