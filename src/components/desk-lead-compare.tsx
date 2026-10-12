@@ -90,7 +90,16 @@ export function LeadComparePanel({
     void press().then(
       (res) => {
         setBusy("");
-        if (!deskWarning(res)) setNote(comparePressNote(which, res, { current, prior }));
+        const warning = deskWarning(res);
+        if (warning) {
+          /* DHG-1: a press the desk held for a yes/no answer used to leave this
+             panel silent, so the lead looked unchanged with no reason given. The
+             panel now says that nothing was saved and where the question is. The
+             warning itself stays in the desk message, the one place it is shown. */
+          setNote({ kind: "err", text: "Nothing was saved yet. Confirm the press in the desk message that just appeared." });
+          return;
+        }
+        setNote(comparePressNote(which, res, { current, prior }));
       },
       () => {
         setBusy("");

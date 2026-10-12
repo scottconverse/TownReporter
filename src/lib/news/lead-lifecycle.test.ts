@@ -154,3 +154,71 @@ test("Not a duplicate clears a Duplicate-of kill reason but keeps an editor's ow
     await db.close();
   }
 });
+
+// guards: Compare's "Same story" kill on a held lead with a saved draft must kill it (the editor confirmed the duplicate), while a plain kill of the same lead still warns.
+test("a held lead with a saved draft is killed as a duplicate, and a plain kill still warns", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, kill_prior_status text, kill_prior_reason text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default 'Saved prose', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      create table audit_events(id serial primary key, user_id text not null, action text not null,
+        detail text not null default '', created_at timestamptz not null default now(),
+        newsroom_id integer not null default 1, subject_kind text, subject_id integer);
+      insert into leads(id,newsroom_id,status) values (458,7,'held');
+      insert into drafts(id,lead_id,newsroom_id) values (1,458,7);`);
+    const sql = makeSql(db);
+    const editor = { userId: "editor-1", newsroomId: 7 };
+    const plainKill = await setLeadStatusForEditor(sql, editor, { id: 458, status: "killed" });
+    assert.equal(plainKill.ok, false);
+    const duplicateReason = "Duplicate of Housing and Human Service Advisory Board sets three agency funding hearings this month";
+    const duplicateWarned = await setLeadStatusForEditor(sql, editor, { id: 458, status: "killed", killReason: duplicateReason });
+    assert.equal(duplicateWarned.ok, false);
+    const duplicateKill = await setLeadStatusForEditor(sql, editor, {
+      id: 458,
+      status: "killed",
+      killReason: duplicateReason,
+      override: ["lead-status-drafted"],
+    });
+    assert.equal(duplicateKill.ok, true);
+    const [lead] = await sql<{ status: string; killed_at: string | null; kill_prior_status: string | null; kill_reason: string | null }>`
+      select status, killed_at, kill_prior_status, kill_reason from leads where id = 458
+    `;
+    assert.equal(lead.status, "killed");
+    assert.notEqual(lead.killed_at, null);
+    assert.equal(lead.kill_prior_status, "held");
+    assert.equal(lead.kill_reason, duplicateReason);
+    const [draft] = await sql<{ body: string }>`select body from drafts where lead_id = 458`;
+    assert.equal(draft.body, "Saved prose");
+  } finally {
+    await db.close();
+  }
+});
+
+// guards: Compare's "Same story" press on a held lead with no draft must kill it, leave killed_at set, and keep the held status for Undo.
+test("a held lead with no draft is killed as a duplicate and remembers that it was held", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, kill_prior_status text, kill_prior_reason text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      create table audit_events(id serial primary key, user_id text not null, action text not null,
+        detail text not null default '', created_at timestamptz not null default now(),
+        newsroom_id integer not null default 1, subject_kind text, subject_id integer);
+      insert into leads(id,newsroom_id,status) values (459,7,'held');`);
+    const sql = makeSql(db);
+    const editor = { userId: "editor-1", newsroomId: 7 };
+    const duplicateReason = "Duplicate of Housing and Human Service Advisory Board sets three agency funding hearings this month";
+    const duplicateKill = await setLeadStatusForEditor(sql, editor, { id: 459, status: "killed", killReason: duplicateReason });
+    assert.equal(duplicateKill.ok, true);
+    const [lead] = await sql<{ status: string; killed_at: string | null; kill_prior_status: string | null; kill_reason: string | null }>`
+      select status, killed_at, kill_prior_status, kill_reason from leads where id = 459
+    `;
+    assert.equal(lead.status, "killed");
+    assert.notEqual(lead.killed_at, null);
+    assert.equal(lead.kill_prior_status, "held");
+    assert.equal(lead.kill_reason, duplicateReason);
+  } finally {
+    await db.close();
+  }
+});
