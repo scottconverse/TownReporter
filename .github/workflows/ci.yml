@@ -155,7 +155,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      # fetch-depth 0: the removed-UI guard diffs the pull request's base against its head.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
@@ -184,6 +187,16 @@ jobs:
       - run: node --test scripts/contrast-audit.mjs
       - name: Shared model-picker coverage guard
         run: node --test scripts/shared-model-picker-guard.test.mjs
+      # Scott's never-remove rule: fails when this PR removes or rewords on-screen text
+      # in src/**/*.tsx unless the PR body has "Scott asked to remove: <text>".
+      # Cost: one git diff, about 1 second. Pull requests only; nightly runs have no base.
+      - name: Removed on-screen text guard
+        if: github.event_name == 'pull_request'
+        env:
+          GUARD_BASE: ${{ github.event.pull_request.base.sha }}
+          GUARD_HEAD: ${{ github.event.pull_request.head.sha }}
+          GUARD_PR_BODY: ${{ github.event.pull_request.body }}
+        run: node --test scripts/no-removed-ui-guard.test.mjs
 
   # The unit gate, on several machines at once.
   #
