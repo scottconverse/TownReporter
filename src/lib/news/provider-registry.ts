@@ -887,7 +887,7 @@ function defaultsToThinkingOff(model: string | undefined | null): boolean {
   const id = model?.trim() ?? "";
   return (
     /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
-    || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
+    || /^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
     || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)
   );
 }
@@ -900,6 +900,9 @@ function defaultsToThinkingOff(model: string | undefined | null): boolean {
  * measured accepting `reasoning_effort: "none"` and returning answer content,
  * while omitting the field spent the whole output budget on reasoning. No
  * unmeasured Qwen effort levels are offered.
+ * LM Studio names a model with its publisher folder in front
+ * ("qwen/qwen3.8-27b", "halo/qwen3.8-27b-q6-fast"); that name is still Qwen 3.8
+ * (Test walk 1, Oct 12: the folder broke the match, so the draft thought and ran out of room).
  */
 export function openAiCompatibleModelEfforts(
   model: string | undefined | null,
@@ -908,7 +911,7 @@ export function openAiCompatibleModelEfforts(
   if (/^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)) {
     return DEEPSEEK_V4_1_FLASH_EFFORTS;
   }
-  if (/^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
+  if (/^(?:[\w.-]+\/)?qwen3\.8(?:[-:/]|$)/i.test(id)) return QWEN_3_8_EFFORTS;
   if (/^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)) return QWEN_3_5_CLOUD_EFFORTS;
   // Gemini's OpenAI-compatible endpoint does not declare the same effort
   // vocabulary for the saved 2.5 preset. Use its provider default safely.
