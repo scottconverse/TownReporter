@@ -92,9 +92,14 @@ const readerProvenanceUrl = await realModule("../src/lib/news/reader-provenance.
   "./fetch-outcome.ts": fetchOutcomeUrl,
 });
 
-/* 0.6.80 (CK): the article page prints its dek through `dekOrFallback`. The
-   helper is pure and imports nothing, so the real module loads here. */
-const dekFallbackUrl = await realModule("../src/lib/news/dek-fallback.ts");
+/* 0.6.80 (CK): the article page prints its dek through `dekOrFallback`.
+   Keep both the fallback helper and the shared summary cleaner real in these
+   render tests, redirecting the helper's relative import to its own module. */
+const stripDraftUrl = await realModule("../src/lib/news/strip-draft.ts");
+const dekFallbackUrl = await realModule("../src/lib/news/dek-fallback.ts", {
+  ...pageImports,
+  "./strip-draft.ts": stripDraftUrl,
+});
 
 /* The chip that marks a machine-written correction, and the module that says
    which rows are automatic. Real, and pointed at each other, for the same
