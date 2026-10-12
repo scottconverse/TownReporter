@@ -4,6 +4,10 @@
 // runs) and must still name the picked model. Renders the real Story route, the
 // same way scripts/model-picker-doors.test.mjs renders every AI door.
 //
+// This lives in scripts/ (plain JS), not src/**/*.test.ts: the typecheck:test
+// project type-checks every src test and follows its imports, and it would pull
+// the untyped door harnesses into that check.
+//
 // Limit: the door harness stubs "@/lib/news/job-progress" (screen-render-harness
 // stubs every non-real import), so the "Model note" line that appears when a job
 // carries a failover_note cannot render here. The switch sentence ("You picked X.
@@ -13,9 +17,9 @@ import { after, describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { cleanupDoorModules, doorModule } from "../../../scripts/model-picker-doors.harness.mjs";
-import { availabilityStub } from "../../../scripts/model-picker-render.harness.mjs";
-import { modelChoiceLabel } from "./model-choice.ts";
+import { cleanupDoorModules, doorModule } from "./model-picker-doors.harness.mjs";
+import { availabilityStub } from "./model-picker-render.harness.mjs";
+import { modelChoiceLabel } from "../src/lib/news/model-choice.ts";
 
 const PICKED = "deepseek-flash";
 const ACTUAL = "codex-balanced";
@@ -37,7 +41,7 @@ const catalog = {
   checkedAt: 1,
 };
 
-function storyData(job: Record<string, unknown>, draftBody: string | null) {
+function storyData(job, draftBody) {
   return {
     "my-desk": { role: "owner", newsroomId: 1, claimed: true },
     sources: [],
@@ -82,19 +86,19 @@ function storyData(job: Record<string, unknown>, draftBody: string | null) {
   };
 }
 
-async function renderedStoryText(job: Record<string, unknown>, draftBody: string | null) {
+async function renderedStoryText(job, draftBody) {
   availabilityStub.__setAvailability({ [PICKED]: true, [ACTUAL]: true, "local-model": true });
   availabilityStub.__setLocalChoice({ override: local, catalog });
   availabilityStub.__setConnections([]);
-  (globalThis as Record<string, unknown>).screenData = storyData(job, draftBody);
-  (globalThis as Record<string, unknown>).pickerDoorState = {
+  globalThis.screenData = storyData(job, draftBody);
+  globalThis.pickerDoorState = {
     modelResearchOpen: false,
     modelChoice: PICKED,
   };
   const module = await import(await doorModule("src/routes/desk.story.$leadId.tsx"));
   const html = renderToStaticMarkup(createElement(module.Route.component, {}));
-  delete (globalThis as Record<string, unknown>).screenData;
-  delete (globalThis as Record<string, unknown>).pickerDoorState;
+  delete globalThis.screenData;
+  delete globalThis.pickerDoorState;
   const { document } = parseHTML(html);
   return (document.documentElement?.textContent ?? "").replace(/\s+/g, " ");
 }
@@ -148,6 +152,6 @@ describe("the Writer bar names the model that ran, and the pick (Oct 11 rule)", 
   });
 });
 
-function escapeRegExp(value: string): string {
+function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
