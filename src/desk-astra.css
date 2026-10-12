@@ -4289,7 +4289,7 @@
 /* At Large text, the native Section select's widest option can be much longer
    than its selected value. Let the bordered select groups give up width before
    the 100px Search floor pushes its hitbox back under the Queue tabs. */
-@media (min-width: 1280px) and (max-width: 1535px) {
+@media (min-width: 1341px) and (max-width: 1535px) {
   .desk-ltr.astra.large .queue-sel {
     flex: 0 1 auto;
     min-width: 0;
