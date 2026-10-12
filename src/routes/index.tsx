@@ -493,7 +493,7 @@ function Home() {
                         {headlineWithTag(lead.topic, lead.headline)}
                       </Link>
                     </h2>
-                    <p className="dek">{dekOrFallback(lead.dek, lead.body)}</p>
+                    <p className="dek">{dekOrFallback(lead.dek, lead.body, lead.headline)}</p>
                     <div className="meta">
                       <span>{formatShortDate(lead.published_at)}</span>
                       <span className="dot" />
