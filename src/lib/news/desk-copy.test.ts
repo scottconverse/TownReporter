@@ -2312,3 +2312,13 @@ it("recognizes government locality hosts without trusting commercial US domains"
   for (const host of ["shop.us", "longmont.us", "shop.co.us", "ci.longmont.co.us.example.com"])
     assert.equal(kindFromSourceUrl(`https://${host}/records`), "unclassified");
 });
+
+describe("failed draft words on the story page (THT-4)", () => {
+  it("says 'meeting' only for a meeting lead", async () => {
+    const { draftFailedNotSavedWords } = await import("./desk-copy.ts");
+    assert.match(draftFailedNotSavedWords(true), /^The meeting draft failed/);
+    const general = draftFailedNotSavedWords(false);
+    assert.doesNotMatch(general, /meeting/i);
+    assert.match(general, /^The draft did not finish and was not saved/);
+  });
+});

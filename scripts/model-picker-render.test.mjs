@@ -96,6 +96,55 @@ test("the primary local picker names its cloud backend before it is chosen", asy
   }
 });
 
+test("THT-1/2: with nothing stored, Local model shows 'use whatever is loaded', never the cloud default", async () => {
+  // The resolver's answer when nothing is stored and nothing is loaded: the
+  // preferred CLOUD model as a "default". It must not name the option, fill the
+  // exact-model select, or pick the effort list.
+  const cloud = { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" };
+  availabilityStub.__setRole("owner");
+  availabilityStub.__setLocalChoice({
+    override: cloud,
+    storedPick: null,
+    source: "default",
+    notice: null,
+    catalog: { servers: [{ baseUrl: cloud.baseUrl, reachable: true, models: [{ id: cloud.id, cloud: true, loaded: false }] }], defaultModel: cloud, checkedAt: 0 },
+  });
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(render({ value: "local-model", effort: null, onEffortChange() {} }));
+    assert.equal(await page.locator('option[value="local-model"]').innerText(), "Local model");
+    const sub = page.locator(".local-model-picker select").first();
+    assert.equal(await sub.inputValue(), "* *");
+    assert.equal(await sub.locator("option:checked").innerText(), "Use whatever model is loaded (recommended)");
+  } finally {
+    availabilityStub.__setLocalChoice({ override: null, catalog: { servers: [], defaultModel: null } });
+    await browser.close();
+  }
+});
+
+test("THT-20: the Dark Desk effort select offers each model's own default under Automatic, then the shared list", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    availabilityStub.__setAvailability({});
+    const page = await browser.newPage();
+    await page.setContent(render({ scope: "dark", value: "auto", effort: null, onEffortChange() {} }));
+    const lines = await page.getByLabel("Thinking effort").locator("option").allInnerTexts();
+    assert.match(lines[0], /each model's own default/);
+    assert.ok(lines.length >= 5, lines.join(" | "));
+    const sameAsStory = (await (async () => {
+      await page.setContent(render({ scope: "story", value: "auto", effort: null, onEffortChange() {} }));
+      return page.getByLabel("Thinking effort").locator("option").allInnerTexts();
+    })());
+    assert.deepEqual(lines, sameAsStory);
+  } finally {
+    availabilityStub.__setAvailability(undefined);
+    await browser.close();
+  }
+});
+
 test("an unreadable Gemini key is disclosed before the draft press", () => {
   availabilityStub.__setConnections([{ id: "gemini", name: "Gemini", modelId: "gemini-3.5-flash", enabled: true, readinessError: "The saved API key cannot be decrypted. Re-enter it in Server settings before drafting." }]);
   try {
