@@ -18,6 +18,8 @@ const real = [
   "@/components/check-gates",
   "@/components/publish-blockers",
   "@/lib/news/writer-bar",
+  "@/lib/desk/desk-job-groups",
+  "@/lib/desk/today-count-copy",
 ];
 const story = await screenModule(
   "src/routes/desk.story.$leadId.tsx",
