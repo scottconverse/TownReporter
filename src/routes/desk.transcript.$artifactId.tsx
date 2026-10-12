@@ -5,6 +5,7 @@ import { DeskShell, InkButton } from "@/components/desk-chrome";
 import { EmptyState, Notice, ScreenError, WorkbenchSkeleton } from "@/components/states";
 import { getTranscriptView } from "@/lib/news/desk";
 import {
+  fetchTranscriptOriginal,
   transcriptByteSize,
   transcriptPlainText,
   transcriptSegmentUrl,
@@ -63,6 +64,7 @@ function TranscriptPage() {
   });
 
   const [copied, setCopied] = useState("");
+  const [originalProblem, setOriginalProblem] = useState("");
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const fallbackRef = useRef<HTMLTextAreaElement>(null);
   const view = q.data?.ok ? q.data.view : null;
@@ -112,6 +114,28 @@ function TranscriptPage() {
     setCopied(
       "This browser would not write to the clipboard. The whole transcript is in the box below and selected — copy it with Ctrl+C (⌘C on a Mac).",
     );
+  };
+
+  /*
+    The original is fetched before anything is saved: a missing or unreadable
+    file is said on this page, never left as a download that quietly fails.
+  */
+  const downloadOriginal = async () => {
+    const url = q.data?.downloadUrl;
+    if (!view || !url) return;
+    const result = await fetchTranscriptOriginal(url);
+    if (!result.ok) {
+      setOriginalProblem(result.message);
+      return;
+    }
+    setOriginalProblem("");
+    const name = view.storagePath.split(/[\\/]/).at(-1) || "transcript";
+    const objectUrl = URL.createObjectURL(result.blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(objectUrl);
   };
 
   /*
@@ -182,7 +206,6 @@ function TranscriptPage() {
   }
 
   if (!view) return null;
-  const downloadUrl = q.data.downloadUrl;
   const heading = view.title ?? "Meeting transcript";
   const meta = [
     view.meetingDate ? `Meeting of ${view.meetingDate}` : null,
@@ -201,13 +224,9 @@ function TranscriptPage() {
           <InkButton tone="ghost" small onClick={() => void copyAll()}>
             Copy all
           </InkButton>
-          <a
-            className="btn small"
-            href={downloadUrl}
-            download={view.storagePath.split(/[\\/]/).at(-1) || "transcript"}
-          >
+          <button type="button" className="btn small" onClick={() => void downloadOriginal()}>
             Download original file
-          </a>
+          </button>
         </>
       }
     >
@@ -228,6 +247,12 @@ function TranscriptPage() {
         <p className="note-one" role="status">
           {copied}
         </p>
+        {originalProblem ? (
+          <Notice kind="warn">
+            {originalProblem} The SHA-256 below is the value recorded when the file was captured; it
+            has not been checked against the file.
+          </Notice>
+        ) : null}
       </div>
 
       {/*
@@ -249,8 +274,8 @@ function TranscriptPage() {
 
       {view.lines.length === 0 ? (
         <Notice kind="warn">
-          This artifact has no stored caption lines, so there is nothing to read. The original file
-          is still available above.
+          This artifact has no stored caption lines, so there is nothing to read.
+          {originalProblem ? null : " The original file is still available above."}
         </Notice>
       ) : (
         <ol className="transcript-lines">

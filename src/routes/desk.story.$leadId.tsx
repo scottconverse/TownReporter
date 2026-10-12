@@ -4244,7 +4244,9 @@ function StoryPage() {
                       setConfirmingPublish(true);
                     }}
                   >
-                    {sectionReady ? `Publish in ${sectionNameNow}` : "Choose a section to publish"}
+                    {sectionReady
+                      ? `Publish in ${sectionNameNow}`
+                      : `No section chosen. Pick one, or publish in ${sectionNameNow} anyway.`}
                   </ActionButton>
                   {/*
                     Warn, never block (Scott, Oct 10): with no section chosen the

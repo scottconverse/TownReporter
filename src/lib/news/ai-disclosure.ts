@@ -5,15 +5,28 @@ export type PublishedStoryDisclosureInput = {
   modelBody?: string | null;
   /** Draft research memo containing the public-research completion receipt. */
   researchJson?: string | null;
+  /** The body that was published; compared with `modelBody` to tell an unchanged AI draft from an edited one. */
+  publishedBody?: string | null;
 };
 
 const AI_DRAFTED_AND_RESEARCHED_LINE = "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
 const AI_DRAFTED_LINE = "A person reviewed and edited this story. AI tools helped write the first draft. The records we used are listed under Sources.";
 const AI_RESEARCHED_LINE = "A person wrote and edited this story. AI tools helped find records. The records we used are listed under Sources.";
+// D67 (DHF-2): an AI draft published with its body unchanged was approved, not edited.
+const AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE = "An editor approved this story for publication. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
+const AI_DRAFTED_APPROVED_LINE = "An editor approved this story for publication. AI tools helped write the first draft. The records we used are listed under Sources.";
+
+const DERIVED_LINES = [
+  AI_DRAFTED_AND_RESEARCHED_LINE,
+  AI_DRAFTED_LINE,
+  AI_RESEARCHED_LINE,
+  AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE,
+  AI_DRAFTED_APPROVED_LINE,
+];
 
 /** True when a saved line is one this module derives from the receipts, not one an editor typed. */
 export function isDerivedDisclosureLine(text: string | null | undefined): boolean {
-  return [AI_DRAFTED_AND_RESEARCHED_LINE, AI_DRAFTED_LINE, AI_RESEARCHED_LINE].includes(text?.trim() ?? "");
+  return DERIVED_LINES.includes(text?.trim() ?? "");
 }
 
 function completedPublicAiResearch(value: string | null | undefined): boolean {
@@ -37,14 +50,17 @@ export function disclosureForPublishedStory({
   text,
   modelBody,
   researchJson,
+  publishedBody,
 }: PublishedStoryDisclosureInput): string {
   const chosen = text?.trim();
   if (chosen) return chosen;
 
   const aiDrafted = Boolean(modelBody?.trim());
   const aiResearched = completedPublicAiResearch(researchJson);
-  if (aiDrafted && aiResearched) return AI_DRAFTED_AND_RESEARCHED_LINE;
-  if (aiDrafted) return AI_DRAFTED_LINE;
+  // Only a body that is still exactly the model's draft counts as approved; any edit keeps the edited line.
+  const approved = aiDrafted && publishedBody?.trim() === modelBody?.trim();
+  if (aiDrafted && aiResearched) return approved ? AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE : AI_DRAFTED_AND_RESEARCHED_LINE;
+  if (aiDrafted) return approved ? AI_DRAFTED_APPROVED_LINE : AI_DRAFTED_LINE;
   if (aiResearched) return AI_RESEARCHED_LINE;
   return "";
 }
@@ -59,11 +75,15 @@ export function disclosureForReader({
   text,
   modelBody,
   researchJson,
+  publishedBody,
   pastedByEditor,
 }: PublishedStoryDisclosureInput & { pastedByEditor?: boolean }): string {
-  if (!pastedByEditor) return disclosureForPublishedStory({ text, modelBody, researchJson });
+  // A stored derived line (the publish path saved one before D67) is recomputed from the receipts, so the
+  // approved-or-edited wording follows the body a reader is actually shown.
+  const chosen = isDerivedDisclosureLine(text) ? null : text;
+  if (!pastedByEditor) return disclosureForPublishedStory({ text: chosen, modelBody, researchJson, publishedBody });
   return disclosureForPublishedStory({
-    text: isDerivedDisclosureLine(text) ? null : text,
+    text: chosen,
     modelBody: null,
     researchJson,
   });

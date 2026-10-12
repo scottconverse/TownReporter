@@ -98,6 +98,28 @@ export async function doorModule(path, exports = [], extra = {}) {
   if (cache.has(key)) return cache.get(key);
   const imports = {
     "@/components/model-picker": modelPickerUrl,
+    "@/components/batch-model-choice": stubUrl(`
+      export function useBatchModelChoice() {
+        const runtime = globalThis.pickerDoorState?.batchRuntime ?? "auto";
+        return { runtime, effort: null, setEffort() {}, pick() {}, touched: { current: false } };
+      }
+    `),
+    // DHE1-2: the Dark page's one model state, seeded like the batch stub above.
+    "@/components/dark-model-choice": stubUrl(`
+      export function useDarkModelChoice() {
+        const model = globalThis.pickerDoorState?.modelChoice ?? "auto";
+        const effort = globalThis.pickerDoorState?.modelEffort ?? null;
+        return {
+          model,
+          effort,
+          setModel() {},
+          setEffort() {},
+          pick() {},
+          touched: { current: false },
+          assignment: { hasAssignment: false, isPending: false, resolution: { providerId: null, effort: null } },
+        };
+      }
+    `),
     "@/lib/news/provider-registry": registryUrl,
     "@/lib/news/model-choice": modelChoiceUrl,
     "@/lib/news/writer-bar": writerBarUrl,
@@ -149,6 +171,12 @@ async function doorModuleChild(path) {
   // route-only dependencies when making their transport stubs.
   const imports = {
     "@/components/model-picker": modelPickerUrl,
+    "@/components/batch-model-choice": stubUrl(`
+      export function useBatchModelChoice() {
+        const runtime = globalThis.pickerDoorState?.batchRuntime ?? "auto";
+        return { runtime, effort: null, setEffort() {}, pick() {}, touched: { current: false } };
+      }
+    `),
     "@/lib/news/provider-registry": registryUrl,
     "@/lib/news/model-choice": modelChoiceUrl,
   };

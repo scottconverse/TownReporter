@@ -641,7 +641,17 @@ export function LeadRowView({
         </span>
         <LeadSourceEvidenceCount sourceUrls={lead.source_urls} notesJson={lead.notes_json} />
       </span>
-      <span className="queue-filed">{formatAge(lead.created_at)}</span>
+      <span className="queue-filed">
+        {formatAge(lead.created_at)}
+        {lead.status === "killed" ? (
+          <>
+            <br />
+            <span className="queue-killed-on">
+              Killed {lead.killed_at ? formatShortDate(lead.killed_at) : "(kill date not recorded)"}
+            </span>
+          </>
+        ) : null}
+      </span>
       <div className="lead-actions row-acts queue-acts">
         {/*
           FB6, item 5: the way back belongs ON THE ROW.

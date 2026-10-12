@@ -101,6 +101,7 @@ const doorScopes = {
   "Drafts New story destination": ["story", "scan"],
   "Queue Draft selected": ["forced"],
   "Dark Desk": ["dark"],
+  "Dark start dialog": ["dark"],
   Story: ["story"],
   "Models Who does what": assignmentScopes,
   "Server Writing models": assignmentScopes,
@@ -223,6 +224,19 @@ test("FM3c: rendered shared options and actual local select agree across AI door
       path: "src/routes/desk.dark.tsx",
       state: { settingsOpen: true, modelChoice: "local-model" },
       data: { "dark-dials": { defaultLimitKey: "standard" } },
+    },
+    {
+      name: "Dark start dialog",
+      path: "src/components/dialogs/editor-dialogs.tsx",
+      component: "DarkFileDialog",
+      props: {
+        open: true,
+        defaultLimit: "standard",
+        defaultModel: "local-model",
+        shared: { model: "local-model", effort: null, onModelChoice() {}, onModelEffort() {} },
+        onClose() {},
+        onOpened() {},
+      },
     },
     {
       name: "Story",
@@ -393,11 +407,18 @@ test("FM3c: rendered shared options and actual local select agree across AI door
           /Gemini Pro.*API key/,
         );
         const selected = select.querySelector("option[selected]");
-        if (selected?.value === "local-model")
+        if (selected?.value === "local-model") {
           assert.ok(
             picker.querySelector('select option[value*="fixture-local-32b"]'),
             `${door.name}: each selected Local provider draws its model select`,
           );
+          // H06: the local select, with its "Use whatever model is loaded" option, is on every door.
+          assert.match(
+            picker.textContent,
+            /Use whatever model is loaded \(recommended\)/,
+            `${door.name}: Local selected but the local select (use-loaded option) is missing`,
+          );
+        }
         if (picker.getAttribute("data-model-scope") === "ocr")
           assert.match(picker.textContent, /OCR reads images.*Models without image support/);
       }

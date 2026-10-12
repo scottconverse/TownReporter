@@ -225,7 +225,7 @@ async function main() {
       await page.getByRole("button", { name: "Publish in Council", exact: true }).count(),
       0,
     );
-    await page.getByRole("button", { name: "Choose a section to publish", exact: true }).click();
+    await page.getByRole("button", { name: "No section chosen. Pick one, or publish in", exact: false }).click();
     await page
       .getByText("No section has been chosen for this story.", { exact: true })
       .first()
