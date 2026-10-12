@@ -392,3 +392,34 @@ describe("OH: EVERY warning key is enabled, listed above the press, and labelled
     assert.match(html, /The editorial desk flagged the sourcing on this story\./);
   });
 });
+
+describe("DHI-8 / DHJ-3: the confirm after 'I accept these claims are unreviewed'", () => {
+  const unreviewed = { unreviewedClaims: 3, unreviewedAccepted: false };
+  const accepted = { unreviewedClaims: 3, unreviewedAccepted: true };
+  const longWords = "Publish anyway in Infrastructure — I accept these claims are unreviewed";
+
+  it("reads the same long words before the acceptance is recorded", () => {
+    const { html } = render(unreviewed, { sectionName: "Infrastructure" });
+    assert.equal(confirmLabel(html), longWords);
+  });
+
+  it("keeps the long words after the acceptance is recorded and the warning is gone", () => {
+    const blockers = publishBlockers({ ...CLEAN, ...accepted });
+    const html = renderToStaticMarkup(
+      createElement(PublishConfirmation, {
+        blockers,
+        sectionName: "Infrastructure",
+        claimsAccepted: true,
+        onConfirm: () => {},
+        onCancel: () => {},
+      }),
+    );
+    assert.equal(confirmDisabled(html), false);
+    assert.equal(confirmLabel(html), longWords);
+  });
+
+  it("leaves the plain confirm words alone when nothing was accepted", () => {
+    const { html } = render({}, { sectionName: "Infrastructure" });
+    assert.equal(confirmLabel(html), "Yes, print it in Infrastructure");
+  });
+});

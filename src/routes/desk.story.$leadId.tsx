@@ -1171,6 +1171,14 @@ function StoryPage() {
     record rather than a side effect of printing -- and `performPublish` refuses
     without it, which is what makes it a gate instead of a suggestion.
   */
+  /*
+    DHI-8, DHJ-3: "Publish anyway — I accept these claims are unreviewed" does
+    what it says. The press records the acceptance, and when the record is
+    written it goes straight on to the same confirm the plain Publish press
+    opens (the confirm's own button repeats the words). The ref is set by that
+    press only, so the other ways to record an acceptance stay a record.
+  */
+  const confirmAfterAccept = useRef(false);
   const acceptUnreviewed = useMutation({
     /*
       Unit U24b: the press carries the REVIEW TOKEN the editor was looking at,
@@ -1189,7 +1197,10 @@ function StoryPage() {
         press and takes the accent; the refusal is a failure and takes the
         danger edge, so the reason is never painted as the next step.
       */
+      const goOn = confirmAfterAccept.current;
+      confirmAfterAccept.current = false;
       if (res.ok) setAcceptedUnreviewed(true);
+      if (res.ok && goOn) setConfirmingPublish(true);
       announceToDesk(
         res.ok
           ? `Recorded: you accepted ${res.count} unreviewed claim${res.count === 1 ? "" : "s"} for this draft.`
@@ -1198,6 +1209,7 @@ function StoryPage() {
       );
     },
     onError: (err) => {
+      confirmAfterAccept.current = false;
       announceToDesk(
         editorActionError(err instanceof Error ? err.message : "", "record that acceptance") ??
           "Could not record that acceptance.",
@@ -2608,6 +2620,7 @@ function StoryPage() {
           `performPublish` refuses without this record, so the press is the gate
           -- and the record names who accepted, when, and which draft version.
         */
+        confirmAfterAccept.current = true;
         acceptUnreviewed.mutate();
         return;
       case "acknowledge-unchecked":
@@ -4272,7 +4285,16 @@ function StoryPage() {
                     sectionName={sectionReady ? sectionNameNow : `${sectionNameNow} (no section was chosen)`}
                     refusedWarnings={refusedWarnings}
                     publishing={publish.isPending}
-                    onCancel={() => setConfirmingPublish(false)}
+                    claimsAccepted={acceptedUnreviewed}
+                    onCancel={() => {
+                      setConfirmingPublish(false);
+                      announceToDesk(
+                        acceptedUnreviewed
+                          ? `Nothing was published. Your acceptance of the unreviewed claims is recorded; press Publish in ${sectionNameNow} when you are ready.`
+                          : "Nothing was published.",
+                        "ok",
+                      );
+                    }}
                     onConfirm={() => {
                       setConfirmingPublish(false);
                       /* The last answer is about to be replaced by this
