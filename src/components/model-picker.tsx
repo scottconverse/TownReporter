@@ -507,7 +507,15 @@ export function ModelPicker(props: Props) {
   */
   const optionText = (option: ModelChoiceOption) =>
     option.value === "local-model"
-      ? (localBackend ? `Local model (${localBackend})` : "Local model")
+      ? (localBackend
+          ? `Local model (${localBackend})`
+          : selectedLocalChoice.data?.catalog.servers.some((server) => server.reachable)
+            ? // A local server answered and none of them has a model in
+              // memory: say so rather than leave a bare name, and never name
+              // a cloud default here. With no server reachable at all the
+              // status line already says "backend not checked yet".
+              "Local model (nothing loaded)"
+            : "Local model")
       : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
