@@ -139,9 +139,76 @@ export function stripReporterNotebook(body: string): string {
         .join("\n")
         .trim();
       if (!cleaned) return "";
-      return stripProcessNarration(cleaned).trim();
+      return stripYearNotesFromParagraph(stripProcessNarration(cleaned)).trim();
     })
     .filter(Boolean)
     .join("\n\n")
     .trim();
+}
+
+/*
+  Scott, Oct 11 2026: a story never tells readers that a source "does not
+  specify the year". A listing that says "Thursday, Oct. 15" in October means
+  this October; saying otherwise makes the paper look dumb and treats the
+  reader as dumb. The one exception is the turn of the year: a story written
+  in December about a date in January or February, where the year can really
+  be in doubt. There the sentence stays.
+*/
+const YEAR_NOTE =
+  /\b(?:(?:does not|doesn't|did not|didn't|do not|don't|fails? to)\s+(?:state|specify|say|give|list|include|provide|name|identify)\s+(?:the|a|an|which|what)\s+(?:[\w-]+\s+){0,2}year|(?:year|years)\b[^.!?;]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|given|listed|included|provided|named|identified|clear)|unstated|unspecified|unclear)|no\s+year\b[^.!?;]{0,40}\b(?:is\s+|was\s+)?(?:stated|specified|given|listed|provided))/i;
+const TURN_OF_YEAR_DATE = /\b(?:Jan(?:uary)?|Feb(?:ruary)?)\b\.?/;
+const JOINED_TAIL = /,\s+(?:but|though|although|while|yet|and|so)\s+[^,]*$/i;
+
+function capitalizeFirst(text: string): string {
+  return text.replace(/^(["“(]?)([a-z])/, (_m, open: string, ch: string) => `${open}${ch.toUpperCase()}`);
+}
+
+function endSentence(text: string): string {
+  const t = text.trim();
+  return /[.!?]["”'’)]?$/.test(t) ? t : `${t}.`;
+}
+
+/** Drop the clause that tells readers a year is missing; keep the rest of the sentence. */
+function stripYearNoteSentence(sentence: string, writtenOn: Date): string {
+  if (!YEAR_NOTE.test(sentence)) return sentence;
+  if (writtenOn.getMonth() === 11 && TURN_OF_YEAR_DATE.test(sentence)) return sentence;
+  const clauses = sentence.split(/;\s+/);
+  const kept = clauses
+    .map((clause) => {
+      const at = clause.search(YEAR_NOTE);
+      if (at < 0) return clause;
+      const before = clause.slice(0, at);
+      const tail = JOINED_TAIL.exec(before);
+      if (tail && tail.index >= 20) return clause.slice(0, tail.index);
+      return "";
+    })
+    .map((clause) => clause.trim().replace(/[.!?]+$/, ""))
+    .filter(Boolean);
+  if (!kept.length) return "";
+  return endSentence(capitalizeFirst(kept.join("; ")));
+}
+
+function stripYearNotesFromParagraph(paragraph: string, writtenOn: Date = new Date()): string {
+  if (!YEAR_NOTE.test(paragraph)) return paragraph;
+  return paragraph
+    .split("\n")
+    .map((line) =>
+      YEAR_NOTE.test(line)
+        ? splitSentences(line.replace(/[ \t]+/g, " "))
+            .map((sentence) => stripYearNoteSentence(sentence, writtenOn))
+            .filter(Boolean)
+            .join(" ")
+        : line,
+    )
+    .filter((line) => line.trim())
+    .join("\n");
+}
+
+/** Remove "the source does not specify the year" from a story body (Scott's rule). */
+export function stripYearNotes(body: string, writtenOn: Date = new Date()): string {
+  return body
+    .split(/\n{2,}/)
+    .map((p) => stripYearNotesFromParagraph(p, writtenOn).trim())
+    .filter(Boolean)
+    .join("\n\n");
 }
