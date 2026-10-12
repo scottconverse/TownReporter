@@ -463,11 +463,17 @@ export function ModelPicker(props: Props) {
   const localMetadata = selectedLocalCatalog.data?.servers
     .find((server) => server.baseUrl === localPick?.baseUrl)
     ?.models.find((model) => model.id === localBackend);
+  /*
+    DHE1-11: the Local option is named by the model it will run; the backend
+    status ("spends credits", "backend not checked yet") is printed once beside
+    the select below, not repeated inside the option list.
+  */
+  const localStatus = localBackend
+    ? localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })
+    : "backend not checked yet";
   const optionText = (option: ModelChoiceOption) =>
     option.value === "local-model"
-      ? localBackend
-        ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
-        : "Local model — backend not checked yet"
+      ? (localBackend ?? "Local model")
       : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
@@ -515,7 +521,20 @@ export function ModelPicker(props: Props) {
             </option>
           );
         })}
+        {/*
+          DHE1-1: the saved connections (the Gemini key line among them) arrive
+          from their own query. While it is pending the list must say so, not
+          silently come out shorter than the other doors'.
+        */}
+        {connections.isPending ? (
+          <option value="custom-connections-loading" disabled>
+            Saved API connections — loading…
+          </option>
+        ) : null}
       </select>
+      {shownValue === "local-model" ? (
+        <span className="model-picker-help">Local model — {localStatus}</span>
+      ) : null}
       {pickerScope === "ocr" ? (
         <span className="model-picker-help">
           OCR reads images. Models without image support stay listed and are marked as unable to

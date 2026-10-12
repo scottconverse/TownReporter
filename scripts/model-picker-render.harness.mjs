@@ -71,6 +71,9 @@ let connections = [];
 let localChoice = { override: null, notice: null, catalog: { servers: [], defaultModel: null, checkedAt: 0 } };
 export function __setLocalChoice(data) { localChoice = data; }
 export function __setConnections(data) { connections = data; }
+// DHE1-1: a saved-connections query that has not answered yet (no data, pending).
+let connectionsPending = false;
+export function __setConnectionsPending(pending) { connectionsPending = pending; }
 export function __setAvailability(data) { current = data; }
 
 /*
@@ -86,7 +89,7 @@ export const myDesk = async () => ({ ok: true, role, newsroomId: 1, claimed: tru
 export const useQuery = ({ queryKey }) => {
   if (queryKey[0] === "local-model-choice") return { data: localChoice };
   if (queryKey[0] === "local-model-catalog") return { data: localChoice.catalog };
-  if (queryKey[0] === "custom-ai-connections") return { data: connections };
+  if (queryKey[0] === "custom-ai-connections") return connectionsPending ? { data: undefined, isPending: true } : { data: connections, isPending: false };
   if (queryKey[0] === "my-desk") return { data: { ok: true, role, newsroomId: 1, claimed: true } };
   return { data: current };
 };

@@ -908,21 +908,19 @@ function DarkPage() {
       <DarkFileDialog
         open={startOpen}
         defaultLimit={darkSettings.data?.defaultLimitKey ?? "standard"}
-        defaultModel={
-          modelChoiceTouched.current
-            ? modelChoice
-            : darkAssignment.hasAssignment
-              ? darkAssignment.resolution.providerId as StoryModelChoice
-              : darkDefaultModel ?? modelChoice
-        }
-        defaultEffort={
-          modelChoiceTouched.current
-            ? modelEffort
-            : darkAssignment.hasAssignment
-              ? darkAssignment.resolution.effort
-              : defaultModelEffort(darkDefaultModel ?? modelChoice)
-        }
+        defaultModel={modelChoice}
+        defaultEffort={modelEffort}
         defaultModelExplicit={modelChoiceTouched.current}
+        shared={{
+          model: modelChoice,
+          effort: modelEffort,
+          onModelChoice: (choice) => {
+            modelChoiceTouched.current = true;
+            setModelChoice(choice);
+            setModelEffort(defaultModelEffort(choice));
+          },
+          onModelEffort: setModelEffort,
+        }}
         seed={seedFromImport || undefined}
         prefill={startPrefill}
         onClose={() => {

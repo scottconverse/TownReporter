@@ -165,7 +165,7 @@ export function draftFallbackAttribution(input: {
   const picked = input.pickedModel.trim();
   const writer = input.writerModel.trim();
   if (!picked || !writer || picked === writer || !input.failoverNote) return undefined;
-  const match = /timed out|sign-in lapsed|reached its usage limit|usage limit|was unavailable|reply was cut off|sent a reply the desk could not read|could not read/i.exec(input.failoverNote);
+  const match = /timed out|sign-in lapsed|reached its usage limit|usage limit|was unavailable|reply was cut off|sent a reply the desk could not read|could not read|returned an empty draft/i.exec(input.failoverNote);
   if (!match) return undefined;
   const reason = /timed out/i.test(match[0])
     ? "timed out"
@@ -177,7 +177,9 @@ export function draftFallbackAttribution(input: {
           ? "had its reply cut off"
           : /unavailable/i.test(match[0])
             ? "was unavailable"
-            : "sent a reply the desk could not read";
+            : /empty draft/i.test(match[0])
+              ? "returned an empty draft"
+              : "sent a reply the desk could not read";
   return `You picked ${picked}. ${writer} wrote this draft because ${picked} ${reason}.`;
 }
 
@@ -265,6 +267,25 @@ export function lastDraftLine(input: { modelLabel: string; when: string; draftSa
   if (!input.when.trim()) return "";
   const model = input.modelLabel.trim();
   return model ? `Last draft: ${model}, ${input.when}` : `Last draft: ${input.when}`;
+}
+
+/**
+ * The "Last draft" line for the draft in hand, whatever the page last printed.
+ * A save message ("Draft saved.") or an old error does not hide it: a finished
+ * draft always names the model that ran. Nothing is printed when the latest
+ * writer job did not complete, because then the draft in hand is not that
+ * job's draft, and nothing for a civic-reporting draft, which has no such job.
+ */
+export function lastDraftInHand(input: {
+  hasDraft: boolean;
+  civicReporting: boolean;
+  jobStatus: string | null | undefined;
+  modelLabel: string;
+  finishedAt: string | null | undefined;
+  now?: Date;
+}): string {
+  if (!input.hasDraft || input.civicReporting || input.jobStatus !== "completed") return "";
+  return lastDraftLine({ modelLabel: input.modelLabel, when: lastDraftWhen(input.finishedAt, input.now) });
 }
 
 /**

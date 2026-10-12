@@ -357,3 +357,13 @@ describe("failoverNoteSentence", () => {
     );
   });
 });
+
+describe("an empty draft moves to the next model and says why", () => {
+  it("reads an empty-draft failure as its own reason, not as no reason", () => {
+    assert.equal(automaticFailoverReason("Codex Sol returned an empty draft."), "empty");
+  });
+
+  it("names the model that returned the empty draft", () => {
+    assert.equal(failoverReasonPhrase("Codex Sol", "empty"), "Codex Sol returned an empty draft");
+  });
+});

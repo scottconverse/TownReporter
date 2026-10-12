@@ -19,6 +19,8 @@
 import { printedDupChip, openLeads, type DupAiVerdictFields } from "./desk-copy.ts";
 import type { NewsroomPlace } from "./lead-match.ts";
 import { cleanListWindow, type ListFilterWindow } from "./list-window.ts";
+import { defaultModelEffort, type ModelEffort } from "./provider-registry.ts";
+import type { DraftBatchRuntime } from "./draft-batch.ts";
 
 /**
  * The drawn tab set (README "3. Queue"), named here because the server has to
@@ -239,4 +241,15 @@ export function queueRowTick(picked: readonly number[], leadId: number, selected
 
 export function queueSelectAllShown(shownIds: readonly number[], checked: boolean): number[] {
   return checked ? [...shownIds] : [];
+}
+
+/**
+ * DHE1-10: the bulk strip's "Model for these stories" and the "Draft the
+ * selected leads" dialog are one batch runtime and one effort. Both pickers
+ * take their pick through this, so the effort always follows the model and the
+ * two controls cannot disagree.
+ */
+export function batchRuntimePick(choice: string): { runtime: DraftBatchRuntime; effort: ModelEffort | null } {
+  const runtime = choice as DraftBatchRuntime;
+  return { runtime, effort: defaultModelEffort(runtime) };
 }
