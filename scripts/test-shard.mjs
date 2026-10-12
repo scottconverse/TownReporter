@@ -23,12 +23,6 @@
 
 const INDEX = "TOWNREPORTER_TEST_SHARD";
 const TOTAL = "TOWNREPORTER_TEST_SHARD_TOTAL";
-const CI_TEST_GROUP_TIMEOUT_MS = 15 * 60 * 1000;
-
-/** CI shards must fail with diagnostics before a stuck test group consumes hours. */
-export function testGroupTimeoutMs(env = process.env) {
-  return env.CI === "true" ? CI_TEST_GROUP_TIMEOUT_MS : 0;
-}
 
 function wholeNumber(name, raw) {
   if (!/^[0-9]+$/.test(raw)) {

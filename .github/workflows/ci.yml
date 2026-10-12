@@ -220,7 +220,6 @@ jobs:
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
       TOWNREPORTER_TEST_SHARD_TOTAL: "24"
-      CI: "true"
       GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
       FAKE_GEMINI_SIGNED_OUT: "1"
     steps:
@@ -231,7 +230,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npm test
+      - run: timeout --signal=TERM --kill-after=5s 15m npm test
 
   # One check that is green only when the whole unit gate is green.
   #
