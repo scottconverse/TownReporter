@@ -1,5 +1,8 @@
 import { before, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getSql } from "../db.ts";
 import { applyMigrationsToTestPglite } from "../test-support/pglite-migrations.ts";
 import {
@@ -51,13 +54,17 @@ before(async () => {
     NEWSROOM,
     "WR1 test room",
   ]);
+  // The writer reads the retained transcript file, so the fixture's file is a
+  // real one: a path that does not exist would now fail the run before any model.
+  const transcriptFile = join(mkdtempSync(join(tmpdir(), "wr1-")), "wr1.vtt");
+  writeFileSync(transcriptFile, "WEBVTT\n\n00:00.000 --> 00:40.000\nOkay. And that carries unanimously.\n");
   const artifacts = await sql.query<{ id: number }>(
     `insert into meeting_transcript_artifacts
        (newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
      values ($1,$2,$3,$4,$5,$6,$7)
      on conflict (newsroom_id,video_id,artifact_type,sha256) where artifact_type='transcript' do update set updated_at=now()
      returning id`,
-    [NEWSROOM, VIDEO, "/tmp/wr1.vtt", "vtt", "wr1testsha", "captions", "transcript-only"],
+    [NEWSROOM, VIDEO, transcriptFile, "vtt", "wr1testsha", "captions", "transcript-only"],
   );
   artifactId = Number(artifacts[0]!.id);
   await sql.query(
@@ -578,6 +585,122 @@ describe("whole-meeting writer, against the migrated schema", () => {
       lastDraftLine({ modelLabel: "Codex Sol 6.1", when: "12:49 p.m.", draftSaved: false }),
       "",
       "a model and finish time do not make a draft that was never saved",
+    );
+  });
+
+  // A second transcript artifact on the same video, so the fixture's own one is untouched.
+  const insertArtifact = async (storagePath: string, sha: string): Promise<number> => {
+    const sql = await getSql();
+    const rows = await sql.query<{ id: number }>(
+      `insert into meeting_transcript_artifacts
+         (newsroom_id,video_id,storage_path,format,sha256,source_method,retention_mode)
+       values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [NEWSROOM, VIDEO, storagePath, "vtt", sha, "captions", "transcript-only"],
+    );
+    return Number(rows[0]!.id);
+  };
+
+  it("fails a meeting draft at once when the transcript file is missing, with no model call", async () => {
+    const sql = await getSql();
+    const missingPath = join(mkdtempSync(join(tmpdir(), "wr1-gone-")), "gone.vtt");
+    const goneArtifactId = await insertArtifact(missingPath, "wr1missingsha");
+    let modelCalls = 0;
+    const chat: ReportChat = async () => {
+      modelCalls += 1;
+      return { ok: false, error: "no model should run without a transcript" };
+    };
+    await assert.rejects(
+      runWholeMeetingDraft(
+        {
+          sql,
+          newsroomId: NEWSROOM,
+          userId: USER,
+          leadId,
+          artifactId: goneArtifactId,
+          videoId: VIDEO,
+          fallbackTitle: "fallback",
+          topic: "council",
+          modelChoice: "auto",
+          chat,
+        },
+        { primeGovOrigin: async () => null },
+      ),
+      /cannot be read.*file is missing/,
+    );
+    assert.equal(modelCalls, 0, "the run stops before any model is called");
+  });
+
+  it("retries an unreadable lead-story reply once, and writes the lead from the retry", async () => {
+    const sql = await getSql();
+    let leadCalls = 0;
+    const chat: ReportChat = async (system) => {
+      if (system.includes(INVENTORY_SYSTEM)) {
+        return {
+          ok: true,
+          text: JSON.stringify({
+            items: [{ kind: "vote", text: "Airport noise policy carries unanimously", who: "", timestamp: "0:00:00", packet_page: 57, numbers: "", source_words: "And that carries unanimously." }],
+          }),
+        };
+      }
+      if (system.includes(LEDGER_STATUS_SYSTEM)) {
+        return { ok: true, text: JSON.stringify({ items: [{ item_no: 1, status: "lead", reason: "the vote" }] }) };
+      }
+      if (system.includes(LEAD_WRITE_SYSTEM)) {
+        leadCalls += 1;
+        if (leadCalls === 1) return { ok: true, text: "" };
+        return {
+          ok: true,
+          text: JSON.stringify({ headline: "Council takes up airport noise policy", dek: "One line.", lead: "The council voted on the noise policy." }),
+        };
+      }
+      if (system.includes(COLD_CHECK_SYSTEM)) return { ok: true, text: JSON.stringify({ mismatches: [] }) };
+      return { ok: false, error: "unexpected stage" };
+    };
+    const result = await runWholeMeetingDraft(
+      {
+        sql,
+        newsroomId: NEWSROOM,
+        userId: USER,
+        leadId,
+        artifactId,
+        videoId: VIDEO,
+        fallbackTitle: "fallback",
+        topic: "council",
+        modelChoice: "auto",
+        chat,
+      },
+      { primeGovOrigin: async () => null },
+    );
+    assert.equal(leadCalls, 2, "the empty reply is retried once");
+    assert.equal(result.draft.headline, "Council takes up airport noise policy");
+    assert.match(result.draft.body, /The council voted on the noise policy\./);
+  });
+
+  it("fails a meeting draft when the lead-story reply is empty on both tries, and saves no draft", async () => {
+    const sql = await getSql();
+    const chat: ReportChat = async (system) => {
+      if (system.includes(INVENTORY_SYSTEM)) return { ok: true, text: JSON.stringify({ items: [] }) };
+      if (system.includes(LEAD_WRITE_SYSTEM)) return { ok: true, text: "" };
+      if (system.includes(COLD_CHECK_SYSTEM)) return { ok: true, text: JSON.stringify({ mismatches: [] }) };
+      return { ok: false, error: "unexpected stage" };
+    };
+    await assert.rejects(
+      runWholeMeetingDraft(
+        {
+          sql,
+          newsroomId: NEWSROOM,
+          userId: USER,
+          leadId,
+          artifactId,
+          videoId: VIDEO,
+          fallbackTitle: "fallback",
+          topic: "council",
+          modelChoice: "auto",
+          chat,
+        },
+        { primeGovOrigin: async () => null },
+      ),
+      /no story text/,
     );
   });
 });
