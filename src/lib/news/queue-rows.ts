@@ -238,6 +238,30 @@ export function queueSort<T extends QueueLead>(
   );
 }
 
+/**
+ * Whether the Queue may keep the rows it has on screen while the next page is
+ * in flight (DHE1-6).
+ *
+ * The screen keeps the last rows so a typed search does not blank the table.
+ * A tab, a sort or a section press is different: the rows on screen are then
+ * another tab's leads or another order, under the new pill and the new
+ * "Oldest first". The walk pressed Killed and saw Open leads under the Killed
+ * pill, and the Newest and Oldest captures were the same text for that reason.
+ * So the old rows stay only while the tab, the section and the sort are the
+ * ones they were read for. A missing previous query keeps nothing.
+ */
+export function queueKeepsRowsWhileLoading(
+  from: { filter?: unknown; section?: unknown; sort?: unknown } | undefined,
+  to: { filter: unknown; section: unknown; sort: unknown },
+): boolean {
+  return (
+    from !== undefined &&
+    from.filter === to.filter &&
+    from.section === to.section &&
+    from.sort === to.sort
+  );
+}
+
 /*
   The Queue's checkbox column as one rule (walk D, DHD1-3). A tick on one row
   adds or removes that row and nothing else. Only the header box sets the

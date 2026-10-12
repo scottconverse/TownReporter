@@ -21,6 +21,7 @@ import {
   cleanQueueWindow,
   queueCounts,
   queueMatchesSearch,
+  queueKeepsRowsWhileLoading,
   queueNeedle,
   queueRowTick,
   queueSelect,
@@ -388,4 +389,32 @@ test("DHE1-6: kills with no kill time still differ between Newest and Oldest, an
   const oldest = queueSort(rows, "oldest", "killed").map((l) => l.id);
   assert.deepEqual(newest, [3, 2, 1]);
   assert.deepEqual(oldest, [3, 1, 2]);
+});
+
+// DHE1-6 (walk F): the walk pressed Killed and read Open rows under the Killed
+// pill, so Newest and Oldest captured the same text. The order rule above is
+// right; what the screen kept while the Killed page loaded was wrong.
+test("DHE1-6: a tab, section or sort press does not keep the rows of the last query", () => {
+  const killedNewest = { filter: "killed", section: "all", sort: "newest" };
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "open", section: "all", sort: "best" }, killedNewest), false);
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { ...killedNewest, sort: "oldest" }), false);
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { ...killedNewest, section: "Schools" }), false);
+});
+
+test("DHE1-6: the same tab, section and sort keep the rows while a page is fetched", () => {
+  const killedNewest = { filter: "killed", section: "all", sort: "newest" };
+  assert.equal(queueKeepsRowsWhileLoading({ ...killedNewest }, killedNewest), true);
+  assert.equal(queueKeepsRowsWhileLoading(undefined, killedNewest), false);
+});
+
+test("DHE1-6: the Killed pile's two orders read as two lists after a press, not one", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-20T10:00:00.000Z", killed_at: "2026-10-10T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-10T10:00:00.000Z", killed_at: "2026-10-12T10:00:00.000Z" }),
+  ];
+  const newest = queueSort(rows, "newest", "killed").map((l) => l.id);
+  const oldest = queueSort(rows, "oldest", "killed").map((l) => l.id);
+  assert.notDeepEqual(newest, oldest);
+  // Pressing Oldest on the Killed tab must not keep the Newest page on screen.
+  assert.equal(queueKeepsRowsWhileLoading({ filter: "killed", section: "all", sort: "newest" }, { filter: "killed", section: "all", sort: "oldest" }), false);
 });

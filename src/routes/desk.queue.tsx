@@ -1,6 +1,6 @@
 import { startDraftBatch } from "@/components/scoped-actions";
 import { createFileRoute, Link, useLocation, useNavigate } from "@tanstack/react-router";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
@@ -43,7 +43,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { queueKeepsRowsWhileLoading, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
@@ -508,7 +508,17 @@ function QueuePage() {
           sort,
         },
       }),
-    placeholderData: keepPreviousData,
+    // DHE1-6: the old rows stay only for the same tab, section and sort. A
+    // tab press shows the loading rows, not the other tab's leads.
+    placeholderData: (previousData, previousQuery) => {
+      const [, fromFilter, fromSection, fromSort] = previousQuery?.queryKey ?? [];
+      return queueKeepsRowsWhileLoading(
+        previousQuery ? { filter: fromFilter, section: fromSection, sort: fromSort } : undefined,
+        { filter, section: sectionFilter, sort },
+      )
+        ? previousData
+        : undefined;
+    },
   });
   const { isPending, isError, error, refetch, isRefetching } = leadsQuery;
   /*
