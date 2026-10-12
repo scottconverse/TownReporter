@@ -401,6 +401,9 @@ test("FM3c: rendered shared options and actual local select agree across AI door
         if (picker.getAttribute("data-model-scope") === "ocr")
           assert.match(picker.textContent, /OCR reads images.*Models without image support/);
       }
+      // DHD1-2: the batch dialog's shared picker carries the same label as the bulk strip's.
+      if (door.name === "Queue Draft selected")
+        assert.match(pickers[0].textContent, /Model for these stories/, "dialog picker label matches the bulk strip");
       assert.ok(
         document.querySelector('select option[value*="fixture-local-32b"]'),
         `${door.name}: selected Local model exposes actual discovered model select`,
