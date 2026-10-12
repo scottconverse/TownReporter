@@ -85,20 +85,39 @@ export function groupDisplayCaptures<T extends FindingCaptureEvidence>(
  */
 export function captureStateSentence(
   capture: FindingCaptureEvidence,
-  recordLabel = "Cited capture",
+  recordLabel = "Saved copy",
 ): string {
-  if (!capture.available) return `${recordLabel} unavailable`;
+  if (!capture.available) return `${recordLabel} is unavailable.`;
   /*
     Taken down before "not readable", because it is the reason this record has
     no readable text -- and "exists, but no readable captured text is
     available" would read as a defect in the capture rather than a decision the
     owner recorded, with a reason, in the audit trail.
   */
-  if (capture.takenDown) return "Excerpt removed at the publisher's request";
-  if (!capture.readable) return `${recordLabel} exists, but no readable captured text is available`;
-  if (capture.excerptState === "found") return "Recorded excerpt found in cited version";
-  if (capture.excerptState === "not-found") return "Recorded excerpt not found in cited version";
-  return "No excerpt was saved with this claim, so there is nothing to put side by side. This is the saved copy the draft was written from.";
+  if (capture.takenDown) return "Text removed at the publisher's request.";
+  if (!capture.readable) return `${recordLabel} has no readable text.`;
+  if (capture.excerptState === "found") return "The passage appears in this copy.";
+  if (capture.excerptState === "not-found") return "The passage was not found in this copy.";
+  return "No passage was saved with this claim. This is the copy the draft used.";
+}
+
+/** A saved-copy timestamp in a format an editor can read and compare. */
+export function formatCaptureTimestamp(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  let normalized = value.trim().replace(" ", "T");
+  normalized = normalized.replace(/(\.\d{3})\d+/, "$1");
+  normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+  const date = new Date(normalized);
+  if (!Number.isFinite(date.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "UTC",
+    timeZoneName: "short",
+  }).format(date);
 }
 
 /**

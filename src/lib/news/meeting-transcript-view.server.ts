@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type { Sql } from "../db.ts";
+import { meetingDateFromTitle } from "./transcript-dates.ts";
 import {
   TranscriptViewRefused,
   type TranscriptView,
@@ -127,7 +128,8 @@ export async function loadTranscriptView(
     artifactId: Number(artifact.id),
     videoId: artifact.video_id,
     title: capture?.title?.trim() || null,
-    meetingDate: capture?.published ? String(capture.published).slice(0, 10) : null,
+      meetingDate: meetingDateFromTitle(capture?.title),
+      postedDate: capture?.published ? String(capture.published).slice(0, 10) : null,
     storagePath: artifact.storage_path,
     sha256: artifact.sha256,
     format: artifact.format,

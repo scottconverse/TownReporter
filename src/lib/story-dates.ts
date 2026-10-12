@@ -703,6 +703,11 @@ function isBareFragment(line: string): boolean {
   if (!words.length) return true;
   if (/^[a-z]/.test(words[0])) return true;
   if (/^\d/.test(words[0])) return true;
+  // Removing a deadline from "Residents get until Oct. 12 to weigh in" leaves
+  // "Residents get until to weigh in". It has a subject and verb, but the
+  // stranded deadline word makes it visibly incomplete; keep the full headline
+  // so the event and its date remain together.
+  if (/\buntil\s+to\b/i.test(line)) return true;
   const last = plain(words[words.length - 1]);
   if (TRAILING_FUNCTION_WORDS.has(last)) return true;
   // A place's generic "event for …" stays a fragment even with ballot labels.

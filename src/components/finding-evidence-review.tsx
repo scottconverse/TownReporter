@@ -14,6 +14,7 @@ import {
   EVIDENCE_OVERRIDE_KEYS,
 } from "@/lib/news/finding-evidence-review";
 import { InkButton } from "@/components/desk-chrome";
+import { CitedRecordChecks } from "@/components/cited-record-checks";
 import { OverrideAnyway } from "@/components/override-anyway";
 import { NO_CAPTURE_JUDGMENT_LABEL } from "@/lib/news/finding-evidence-display";
 import { EvidenceCheckList } from "@/components/evidence-check-list";
@@ -29,8 +30,6 @@ import { BusyLine, Notice } from "@/components/states";
 import { canRebaseDirtyEvidencePeers } from "@/lib/news/finding-evidence-peer";
 import {
   captureStateSentence,
-  captureSupportLine,
-  groupDisplayCaptures,
   revealOpenedCapture,
 } from "@/lib/news/finding-evidence-display";
 import {
@@ -270,140 +269,6 @@ type CaptureRow = FindingCaptureEvidence & { relation?: ManualClaimReferenceRela
  * and is not substituted -- the draft pass's exact record is the one the claim
  * was returned with, and the page has always said so rather than offered the
  * swap.
- */
-const citedRecordCopy = {
-  finding: {
-    heading: "Mechanical record checks",
-    fallback: "Cited capture",
-    view: "View cited captured version",
-    newer: "Review newer capture",
-    empty: "No cited captured version or capture event was recorded for this finding.",
-  },
-  claim: {
-    heading: "Exact draft provenance",
-    fallback: "Recorded provenance",
-    view: "View exact captured version",
-    newer: "",
-    empty: "No exact captured version or capture event was recorded for this returned URL.",
-  },
-} as const;
-
-function CitedRecordChecks({
-  variant,
-  captures,
-  onOpen,
-  pending,
-}: {
-  variant: "finding" | "claim";
-  captures: readonly CaptureRow[];
-  onOpen: (versionId: number) => void;
-  pending: boolean;
-}) {
-  const copy = citedRecordCopy[variant];
-  const displayedCaptures = groupDisplayCaptures([...captures]);
-  return (
-    <div className="mt-4 border-t border-rule pt-3">
-      <p className="text-sm font-medium tracking-[0.14em] text-muted uppercase">{copy.heading}</p>
-      {displayedCaptures.length ? (
-        <ul className="mt-2 space-y-3">
-          {displayedCaptures.map((group, captureIndex) => {
-            const capture = group.capture;
-            return (
-              <li
-                key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
-                className="border-l border-rule pl-3 text-sm"
-              >
-                <p className="font-medium text-ink">
-                  {capture.title ?? capture.url ?? copy.fallback}
-                </p>
-                <p className="mt-1 text-muted">
-                  {captureStateSentence(capture)}
-                  {capture.capturedAt ? ` · captured ${capture.capturedAt}` : ""}
-                </p>
-                {/*
-                  Unit PUB1: the ids stay, because an editor asking support to
-                  look at a capture needs to name it -- but on their own smaller
-                  line, labelled, in words rather than column names. Above it is
-                  what the record IS; this is how to quote it.
-                */}
-                {group.artifactVersionReference || group.captureEventIds.length ? (
-                  <p className="mt-1 text-xs text-muted">
-                    For support: {captureSupportLine(group)}
-                  </p>
-                ) : null}
-                {variant === "finding" ? (
-                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                    {capture.viewHref && capture.versionId != null ? (
-                      <button
-                        type="button"
-                        className="inline-link"
-                        onClick={() => onOpen(capture.versionId!)}
-                        disabled={pending}
-                      >
-                        {copy.view}
-                      </button>
-                    ) : null}
-                    {capture.newerCapture ? (
-                      <button
-                        type="button"
-                        className="inline-link"
-                        onClick={() => onOpen(capture.newerCapture!.versionId)}
-                        disabled={pending}
-                      >
-                        {copy.newer}
-                        {capture.newerCapture.capturedAt
-                          ? ` (${capture.newerCapture.capturedAt})`
-                          : ""}
-                      </button>
-                    ) : null}
-                  </p>
-                ) : (
-                  <>
-                    {capture.viewHref && capture.versionId != null ? (
-                      <button
-                        type="button"
-                        className="inline-link mt-1"
-                        onClick={() => onOpen(capture.versionId!)}
-                        disabled={pending}
-                      >
-                        {copy.view}
-                      </button>
-                    ) : null}
-                    {capture.newerCapture ? (
-                      <p className="mt-1 text-muted">
-                        A newer capture exists for review; it is not substituted for this draft’s
-                        exact record.
-                      </p>
-                    ) : null}
-                  </>
-                )}
-                {/*
-                  Unit PUB1: the read's own progress, said AT THE LINK. It used
-                  to be a line at the foot of the panel, below the fold on a
-                  long review, so the press looked like nothing happened until
-                  the text arrived somewhere off screen.
-                */}
-                {pending ? (
-                  <p className="mt-1 text-sm text-muted" role="status">
-                    Opening the saved copy…
-                  </p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
-      ) : (
-        <p className="mt-2 text-sm text-muted">{copy.empty}</p>
-      )}
-    </div>
-  );
-}
-
-/**
- * The record checks for a claim an editor added by hand: the exact captured
- * records they picked out, each with the role they gave it. No newer-capture
- * press here -- nothing was cited to compare against, so there is nothing a
- * newer capture could be better than.
  */
 function ManualRecordChecks({
   captures,
@@ -1291,6 +1156,7 @@ export function FindingEvidenceReviewPanel({
           <CitedRecordChecks
             variant="finding"
             captures={finding.captures}
+            passage={finding.finding.excerpt}
             onOpen={(versionId) => captureRead.mutate(versionId)}
             pending={captureRead.isPending}
           />

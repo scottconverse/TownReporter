@@ -90,6 +90,14 @@ export async function openReporting(t, stories, held = []) {
       "@/components/action-button": controls,
       "@/components/desk-chrome": controls,
       "@/components/states": controls,
+      "@/components/reporting-run-summary": await moduleUrl(
+        "src/components/reporting-run-summary.tsx",
+        {
+          "@/lib/news/reporting-run-summary": await moduleUrl(
+            "src/lib/news/reporting-run-summary.ts",
+          ),
+        },
+      ),
       "@/components/job-card-state": stubUrl("export const invalidateDeskJobs=()=>{};"),
       "@/lib/news/url-guard": await moduleUrl("src/lib/news/url-guard.ts"),
       "@/lib/news/reporting-package-view": await moduleUrl(

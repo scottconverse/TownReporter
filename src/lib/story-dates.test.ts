@@ -868,6 +868,25 @@ describe("a This week row that is a sentence cut in half (unit CN, item 2)", () 
   });
 });
 
+describe("a public deadline keeps its complete headline when a date is removed", () => {
+  it("does not print a stranded until-to phrase", () => {
+    const headline =
+      "Longmont Commits to New Playground, Swings at Hover Acres; Residents Get Until Oct. 12 to Weigh In on the Rest";
+    assert.deepEqual(
+      collectStoryDates([
+        {
+          slug: "hover-acres-playground",
+          section: "environment-open-space",
+          records: [],
+          headline,
+          published_on: "2026-09-30",
+        },
+      ]).map(({ date, what }) => [date, what]),
+      [["2026-10-12", headline]],
+    );
+  });
+});
+
 /**
  * Unit CV, item 2: the five strings the owner review quoted, and the row each
  * one prints now.
