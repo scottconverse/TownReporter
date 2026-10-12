@@ -55,7 +55,7 @@ type RedditScanResult = Extract<Awaited<ReturnType<typeof scanTipSubreddit>>, { 
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
-import { useJobModelAssignment } from "@/components/use-job-model-assignment";
+import { useDarkModelChoice } from "@/components/dark-model-choice";
 import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
@@ -272,20 +272,18 @@ function DarkPage() {
     remembered on the investigation, so "Keep digging" on a file that was
     started on Codex stays on Codex rather than quietly changing author.
   */
-  const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
-  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
-  const [fileModelChoice, setFileModelChoice] = useState<StoryModelChoice>("auto");
-  const [fileModelEffort, setFileModelEffort] = useState<ModelEffort | null>(null);
+  const {
+    model: modelChoice,
+    effort: modelEffort,
+    setModel: setModelChoice,
+    setEffort: setModelEffort,
+    pick: pickModelChoice,
+    touched: modelChoiceTouched,
+    assignment: darkAssignment,
+  } = useDarkModelChoice();
   const ocrModelChoice = useFirstRunPickerDefault("ocr") ?? "auto";
   const ocrModelEffort = defaultModelEffort(ocrModelChoice);
   const darkDefaultModel = useFirstRunPickerDefault("dark");
-  const modelChoiceTouched = useRef(false);
-  const darkAssignment = useJobModelAssignment<StoryModelChoice>({
-    jobKey: "dark",
-    touched: modelChoiceTouched,
-    setChoice: setModelChoice,
-    setEffort: setModelEffort,
-  });
   useFirstRunPickerSeed({
     surface: "dark",
     current: modelChoice,
@@ -358,8 +356,8 @@ function DarkPage() {
     if (last == null && assignedDefault == null) return;
     pickedFor.current = openId;
     const remembered = darkModelChoice(last ?? assignedDefault);
-    setFileModelChoice(remembered);
-    setFileModelEffort(last == null
+    setModelChoice(remembered);
+    setModelEffort(last == null
       ? darkAssignment.hasAssignment
         ? darkAssignment.resolution.effort
         : defaultModelEffort(remembered)
@@ -480,7 +478,7 @@ function DarkPage() {
       return continueInvestigation({
         data: picked
           ? { id, modelChoice: picked.choice, modelEffort: picked.effort, modelChoiceExplicit: picked.explicit }
-          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id },
+          : { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id },
       });
     },
     onSuccess: (res) => {
@@ -583,7 +581,7 @@ function DarkPage() {
   });
 
   const challengeCase = useMutation({
-    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (result, id) => {
       if (openId !== id) return;
       if (!result.ok) {
@@ -746,7 +744,7 @@ function DarkPage() {
   }, [reddit.isPending, redditLabel]);
 
   const writeBrief = useMutation({
-    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
+    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice: modelChoice, modelEffort: modelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         showNotice(res?.error ? `No brief: ${editorError(res.error) || "the request did not finish."}` : "No brief written.");
@@ -915,9 +913,7 @@ function DarkPage() {
           model: modelChoice,
           effort: modelEffort,
           onModelChoice: (choice) => {
-            modelChoiceTouched.current = true;
-            setModelChoice(choice);
-            setModelEffort(defaultModelEffort(choice));
+            pickModelChoice(choice);
           },
           onModelEffort: setModelEffort,
         }}
@@ -945,14 +941,14 @@ function DarkPage() {
             firstRoundPick.current = { choice: picked, effort, explicit: run.modelChoiceExplicit === true };
             fileModelTouchedFor.current = id;
             fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
-            setFileModelChoice(picked);
-            setFileModelEffort(effort);
+            setModelChoice(picked);
+            setModelEffort(effort);
           } else {
             const choice = darkDefaultModel ?? modelChoice;
             fileModelTouchedFor.current = id;
             fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
-            setFileModelChoice(choice);
-            setFileModelEffort(defaultModelEffort(choice));
+            setModelChoice(choice);
+            setModelEffort(defaultModelEffort(choice));
           }
           const signalId = pendingSignalId.current;
           pendingSignalId.current = null;
@@ -976,9 +972,7 @@ function DarkPage() {
           <DarkDialsPanel
             modelChoice={modelChoice}
             onModelChoice={(choice) => {
-              modelChoiceTouched.current = true;
-              setModelChoice(choice);
-              setModelEffort(defaultModelEffort(choice));
+              pickModelChoice(choice);
             }}
             modelEffort={modelEffort}
             onModelEffort={setModelEffort}
@@ -1259,17 +1253,16 @@ function DarkPage() {
               challengePending={challengeCase.isPending}
               onWriteBrief={() => writeBrief.mutate(openId)}
               briefPending={writeBrief.isPending || briefWaiting}
-              modelChoice={fileModelChoice}
+              modelChoice={modelChoice}
               onModelChoice={(choice) => {
                 fileModelTouchedFor.current = openId;
                 fileModelExplicitFor.current = openId;
-                setFileModelChoice(choice);
-                setFileModelEffort(defaultModelEffort(choice));
+                pickModelChoice(choice);
               }}
-              modelEffort={fileModelEffort}
+              modelEffort={modelEffort}
               onModelEffort={(effort) => {
                 fileModelTouchedFor.current = openId;
-                setFileModelEffort(effort);
+                setModelEffort(effort);
               }}
               ocrModelChoice={ocrModelChoice}
               ocrModelEffort={ocrModelEffort}
