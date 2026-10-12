@@ -86,7 +86,7 @@ jobs:
           }
           check run_lifecycle '^(scripts/lifecycle-e2e\.mjs)$'
           check run_smoke_dev '^(scripts/astra-dialog-e2e\.mjs|scripts/smoke-built-server\.mjs)$'
-          check run_desk_flows '^(scripts/desk-flows-e2e\.mjs)$'
+          check run_desk_flows '^(scripts/desk-flows-e2e\.mjs|scripts/release-h-blockers-e2e\.mjs)$'
           check run_desk_production_regression '^(scripts/desk-production-regression\.mjs)$'
           check run_scan_refresh_browser '^(scripts/scan-refresh-old-merge-falsification\.mjs|scripts/scan-refresh-runtime-proof\.mjs)$'
           check run_provider_signin '^(scripts/provider-signin-e2e\.mjs)$'
@@ -554,6 +554,8 @@ jobs:
           node scripts/desk-flows-e2e.mjs
       - name: Queue and Today Kill anyway, draft preservation and Undo
         run: node scripts/desk-kill-anyway-walk.mjs
+      - name: Release H blocks-work browser walk
+        run: node scripts/release-h-blockers-e2e.mjs
 
   # Directive item 5: an authenticated desk regression that walks Queue, Scan,
   # Sources, Published, Stats, and Server signed-in. The signed-in walk itself is

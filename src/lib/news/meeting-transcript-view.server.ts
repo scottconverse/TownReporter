@@ -188,6 +188,40 @@ export function attachmentFilename(filename: string): string {
   return cleaned || "transcript";
 }
 
+/** Preserve the original format's media type instead of labelling every file as opaque bytes. */
+export function transcriptOriginalMimeType(filename: string): string {
+  const extension = filename.toLowerCase().match(/\.[a-z0-9]+$/)?.[0] ?? "";
+  switch (extension) {
+    case ".srv3":
+    case ".xml":
+      return "application/xml";
+    case ".csv":
+      return "text/csv";
+    case ".json":
+      return "application/json";
+    case ".txt":
+      return "text/plain";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+export function transcriptOriginalContentDisposition(filename: string): string {
+  const safe = attachmentFilename(filename);
+  const fallback = safe.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  const encoded = encodeURIComponent(safe).replace(/['()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
+}
+
 /**
  * GET /api/transcript-file?artifactId=N -- the stored transcript, as a download.
  *
@@ -234,9 +268,10 @@ export async function transcriptFileHandler(request: Request): Promise<Response>
     return new Response(new Blob([file.bytes]), {
       status: 200,
       headers: {
-        "content-type": "application/octet-stream",
+        "content-type": transcriptOriginalMimeType(file.filename),
         "content-length": String(file.bytes.byteLength),
-        "content-disposition": `attachment; filename="${attachmentFilename(file.filename)}"`,
+        "content-disposition": transcriptOriginalContentDisposition(file.filename),
+        "x-content-type-options": "nosniff",
         "cache-control": "no-store",
       },
     });

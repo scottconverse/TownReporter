@@ -201,7 +201,11 @@ function TranscriptPage() {
           <InkButton tone="ghost" small onClick={() => void copyAll()}>
             Copy all
           </InkButton>
-          <a className="btn small" href={downloadUrl} download>
+          <a
+            className="btn small"
+            href={downloadUrl}
+            download={view.storagePath.split(/[\\/]/).at(-1) || "transcript"}
+          >
             Download original file
           </a>
         </>

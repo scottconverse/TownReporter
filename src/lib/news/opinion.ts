@@ -2,6 +2,7 @@ import { evidenceReviewToken, type EvidenceDecision } from "./draft-evidence.ts"
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
 import { deskMiddleware } from "./desk-auth";
+import { assertOwner } from "./desk-auth";
 import { audit } from "./ops";
 import { latestJob, runLooksStalled } from "./jobs";
 import { jobProgressView, type JobProgressView } from "./job-progress.ts";
@@ -105,6 +106,27 @@ export const opinionReadiness = createServerFn({ method: "GET" })
     return checkOpinionReadiness(choice, {}, owned(context));
   });
 
+export const getPaperEditorialVoice = createServerFn({ method: "GET" })
+  .middleware([deskMiddleware])
+  .handler(async ({ context }) => {
+    assertOwner(context.role);
+    const { getPaperVoiceText } = await import("./voice.server.ts");
+    return getPaperVoiceText();
+  });
+
+export const savePaperEditorialVoice = createServerFn({ method: "POST" })
+  .middleware([deskMiddleware])
+  .validator((value: unknown) =>
+    editorialText
+      .refine((text) => text.length <= 200_000, "The voice must be text under 200,000 characters.")
+      .parse(value),
+  )
+  .handler(async ({ context, data }) => {
+    assertOwner(context.role);
+    const { savePaperVoiceText } = await import("./voice.server.ts");
+    return savePaperVoiceText(data);
+  });
+
 export const listEditorials = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .handler(async ({ context }): Promise<EditorialRow[]> => {
@@ -198,7 +220,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
       editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
@@ -212,6 +234,7 @@ export const startEditorial = createServerFn({ method: "POST" })
       articleSlug: data.articleSlug,
       modelChoice,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
+      voiceMode: data.voiceMode,
       documentIds: data.documentIds,
       retryRequestId: data.retryRequestId,
       override: data.override,

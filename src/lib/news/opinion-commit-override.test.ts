@@ -25,6 +25,10 @@ const MATERIAL_KEY = "opinion:material-over-20-million";
 const readyOpinionDeps = {
   checkReadiness: async () => ({
     ready: true,
+    modelReady: true,
+    voiceReady: true,
+    voiceProblem: null,
+    modelProblems: [],
     why: "",
     problems: [],
     effectiveChoice: "auto" as const,
@@ -59,6 +63,7 @@ async function ensureSchema() {
       finished_at timestamptz
     )
   `);
+  await sql.query("alter table editorial_requests add column if not exists voice_mode text not null default 'paper'");
   await sql.query("delete from editorial_requests where newsroom_id=$1", [room]);
   await sql.query("delete from desk_jobs where newsroom_id=$1", [room]);
   await sql.query("delete from story_documents where newsroom_id=$1", [room]);
@@ -210,6 +215,10 @@ describe("Opinion commit overrides (item 21)", () => {
         ...readyOpinionDeps,
         checkReadiness: async () => ({
           ready: false,
+          modelReady: false,
+          voiceReady: true,
+          voiceProblem: null,
+          modelProblems: ["AI is not available. No model is set up yet."],
           why: "AI is not available. No model is set up yet.",
           problems: ["AI is not available. No model is set up yet."],
           effectiveChoice: "auto" as const,

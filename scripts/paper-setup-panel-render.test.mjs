@@ -176,7 +176,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
         `export const TRASH_DAYS = 30;\nexport function listTrash() { return null; }\nexport function purgeTrashItem() { return null; }\nexport function restoreTrashItem() { return null; }`,
       ),
       "@/lib/news/claim": inlineModule(
-        `export function myDesk() { return null; }\nexport function inviteEditor() { return null; }\nexport function myRecoveryCodesStatus() { return null; }\nexport function regenerateRecoveryCodes() { return null; }`,
+        `export function myDesk() { return null; }\nexport function inviteEditor() { return null; }\nexport function listMyPendingInvites() { return null; }\nexport function cancelMyPendingInvite() { return null; }\nexport function myRecoveryCodesStatus() { return null; }\nexport function regenerateRecoveryCodes() { return null; }`,
       ),
       "@/lib/paper-context-state": names(["usePaperDateFormatters"]),
       "@/lib/news/paper-settings": paperSettingsStub,

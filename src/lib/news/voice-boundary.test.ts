@@ -78,7 +78,7 @@ describe("the voice never becomes a command-line argument", () => {
       false,
       "an absolute path INSIDE this repository was accepted -- the containment refusal is gone",
     );
-    if (!result.ok) assert.match(result.error, /inside this repository/i);
+    if (!result.ok) assert.match(result.error, /outside this public repository/i);
   });
 
   it("accepts a real path outside the repository, and returns nothing but a path and a byte count", async () => {

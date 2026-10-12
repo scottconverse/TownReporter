@@ -904,6 +904,9 @@ export function editorDraftError(raw: string | null | undefined): string | null 
   if (!raw?.trim()) return null;
   const t = raw.trim();
   if (t.startsWith("Custom provider ") || /: (?:Google|Provider) says:/.test(t)) return t;
+  if (/invalid input syntax for type integer/i.test(t)) {
+    return "The meeting draft failed while saving the meeting record. The draft was not saved. Try Draft with AI again.";
+  }
   /*
     A dumped boundary check is not draft copy and nothing below would recognize
     it: every pattern here is about what a writing model said, and this is what

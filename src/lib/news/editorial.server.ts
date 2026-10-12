@@ -322,7 +322,7 @@ export async function writeEditorial(
   };
 
   return orchestrateEditorial(input, {
-    findVoiceFile,
+    findVoiceFile: () => findVoiceFile(input.voiceMode),
     runClaudePair: async ({ input: editorialInput, found, researchPack }) => {
       const resolveClaudeCode =
         deps.resolveClaudeCode ?? (await import("./ai.ts")).resolveClaudeCode;
@@ -460,7 +460,7 @@ export async function writeEditorial(
       by accident.
     */
     runLocalPair: async ({ input: editorialInput, researchPack }) => {
-      const voice = await readVoiceTextForLocalModel();
+      const voice = await readVoiceTextForLocalModel(editorialInput.voiceMode);
       if (!voice.ok) return voice;
       const choice = opinionModelChoice(editorialInput.modelChoice);
       const entry = providerEntry(choice);
@@ -561,7 +561,7 @@ export async function writeEditorial(
       ran, under the same voice (unit U31).
     */
     runCustomPair: async ({ input: editorialInput, researchPack }) => {
-      const voice = await readVoiceTextForLocalModel();
+      const voice = await readVoiceTextForLocalModel(editorialInput.voiceMode);
       if (!voice.ok) return voice;
       const { grokChat } = await import("./ai.ts");
       const chat = deps.grokChat ?? grokChat;
@@ -926,6 +926,7 @@ export async function ensureEditorialRequestSchema() {
       pointers_json text not null default '[]',
       our_story_json text,
       model_choice text not null default 'auto',
+      voice_mode text not null default 'paper',
       draft_id integer,
       error text,
       created_at timestamptz not null default now(),
@@ -972,10 +973,11 @@ export async function performEditorialWork(
     pointers_json: string;
     our_story_json: string | null;
     model_choice: string;
+    voice_mode: string;
     draft_id: number | null;
   }>`
     select id, subject, source_text, source_kind, source_ref, asked_for, pointers_json, our_story_json,
-           model_choice, draft_id
+           model_choice, voice_mode, draft_id
     from editorial_requests
     where id = ${job.subject_id} and newsroom_id = ${job.newsroom_id} limit 1
   `;
@@ -1163,6 +1165,7 @@ export async function performEditorialWork(
         sourceKind: req.source_kind,
         sourceRef: req.source_ref,
         modelChoice: activeChoice,
+        voiceMode: req.voice_mode === "neutral" ? "neutral" : "paper",
         modelEffort: activeEffort,
         requestedModelChoice: requestedChoice,
         requestedModelEffort: requestedEffort,
