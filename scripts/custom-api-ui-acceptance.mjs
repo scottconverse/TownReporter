@@ -42,7 +42,7 @@ const fakeProvider = createServer(async (request, response) => {
     const sent = JSON.parse(body);
     const prompt = (sent.messages ?? []).map((message) => message.content).join("\n");
     const marker = prompt.match(/CUSTOM_(?:OPINION_)?DOCUMENT_MARKER_[A-Z0-9_]+/)?.[0] ?? "";
-    const content = /Reply with TOWNREPORTER_OK\./.test(prompt)
+    const content = /why a town publishes meeting minutes/.test(prompt)
       ? "TOWNREPORTER_OK synthetic only"
       : /UNTRUSTED SOURCE TEXT:/.test(prompt)
         ? `The supplied document contains ${marker}.`
@@ -181,6 +181,8 @@ try {
   await page.getByRole("button", { name: "+ Add a connection" }).click();
   const section = page.locator("#custom-ai-connections");
   await section.getByLabel("Connection name", { exact: true }).waitFor();
+  // FG1 (Oct 11): the dialog said its opening sentence twice.
+  assert.equal(await page.getByText(/^Connect an OpenAI-compatible endpoint/).count(), 1);
   await section.getByLabel("Connection name", { exact: true }).fill("Isolated API fixture");
   await section.getByLabel("Base URL", { exact: true }).fill("http://127.0.0.1:3471/v1");
   await section.getByLabel(/^API key \(optional\)/).fill("fixture-secret-do-not-return");
@@ -204,12 +206,13 @@ try {
 
   page.once("dialog", (dialog) => dialog.accept());
   await row.getByRole("button", { name: "Test connection", exact: true }).click();
-  await section.getByText(/Success: Connection succeeded/).waitFor();
+  await section.getByText(/Endpoint answered: Endpoint answered/).waitFor();
+  await section.getByText(/Requested: synthetic-reporter\. Reported: /).waitFor();
   await section.getByText(/responses: not tested; model discovery: not tested/i).waitFor();
   assert.equal(providerRequests.length, 2);
   const sent = JSON.parse(providerRequests[1].body);
   assert.equal(sent.model, "synthetic-reporter");
-  assert.equal(sent.messages[0].content, "Reply with TOWNREPORTER_OK.");
+  assert.equal(sent.messages[0].content, "In one sentence, explain why a town publishes meeting minutes.");
   assert.equal(providerRequests[1].authorization, "Bearer fixture-secret-do-not-return");
 
   rejectNextTest = true;
