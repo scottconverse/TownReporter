@@ -58,6 +58,7 @@ export function CustomAiConnections({
   const [busy, setBusy] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const locked = managementActionsLocked(busy, busyAction);
   /*
     `initialEditId`, applied once per id.
@@ -138,8 +139,9 @@ export function CustomAiConnections({
       */}
       {showHeading ? <h2 id="custom-ai-heading">Add your own AI API</h2> : null}
       <p className="meta">
-        Connect an OpenAI-compatible endpoint, including LiteLLM. Saving does not call a model,
-        spend provider credit, or change the desk default.
+        Give this writing model a name and add the key from your AI service if it has one. Open
+        Details for its server address and model name. Saving stores these settings only; it does
+        not test the model, spend credits, or change which model writes.
       </p>
       <div>
         <InkButton
@@ -148,6 +150,7 @@ export function CustomAiConnections({
           onClick={() => {
             setEditingId(undefined);
             setModels([]);
+            setDetailsOpen(false);
             setResult(
               "Gemini preset loaded. Add your API key and save; it will then be ready in the writing model picker.",
             );
@@ -162,19 +165,7 @@ export function CustomAiConnections({
           Set up Gemini
         </InkButton>
       </div>
-      <p className="meta">
-        Using LiteLLM?{" "}
-        <a
-          href="https://docs.litellm.ai/docs/proxy/quick_start"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline"
-        >
-          Open the official setup guide (new tab)
-        </a>
-        . LiteLLM is optional and runs separately from TownReporter.
-      </p>
-      <form onSubmit={save} className="grid gap-4">
+      <form onSubmit={save} onInvalidCapture={() => setDetailsOpen(true)} className="grid gap-4">
         <Field label="Connection name">
           <input
             className={inputClass}
@@ -184,6 +175,11 @@ export function CustomAiConnections({
             onChange={(e) => setForm({ ...form, name: e.target.value })}
           />
         </Field>
+        <details open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
+          <summary className="cursor-pointer py-3 underline underline-offset-2 focus-visible:outline-2">
+            Details: server address, model name, and key
+          </summary>
+          <div className="grid gap-4 pt-2">
         <Field label="Base URL">
           <input
             className={inputClass}
@@ -195,13 +191,13 @@ export function CustomAiConnections({
           />
         </Field>
         <Field
-          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini API key" : "API key (optional)"}
+          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Google AI key" : "Key from your AI service (optional)"}
           hint={
             isGeminiOpenAiEndpoint(form.baseUrl)
               ? editingId
-                ? "Stored encrypted on the server. Leave blank to keep the existing key."
-                : "Required and stored encrypted on the server. It is never shown again."
-              : "Stored encrypted on the server. It is never shown again."
+                ? "Saved privately on this server. Leave blank to keep the existing key."
+                : "Needed for Gemini. Saved privately on this server and never shown again."
+              : "If your service gave you a key, it is saved privately on this server."
           }
         >
           <input
@@ -230,10 +226,10 @@ export function CustomAiConnections({
           </label>
         )}
         <Field
-          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini model id" : "Model id (optional)"}
+          label={isGeminiOpenAiEndpoint(form.baseUrl) ? "Gemini model name" : "Model name (optional)"}
           hint={
             isGeminiOpenAiEndpoint(form.baseUrl)
-              ? "Required. Gemini Flash is prefilled; replace it if your Google account supports a different model."
+              ? "Gemini Flash is prefilled; change it only if your Google account supports another model."
               : undefined
           }
         >
@@ -245,7 +241,7 @@ export function CustomAiConnections({
           />
         </Field>
         {!!models.length && (
-          <Field label="Discovered models">
+          <Field label="Model names reported by this service">
             <select
               className={inputClass}
               value={form.modelId}
@@ -260,6 +256,14 @@ export function CustomAiConnections({
             </select>
           </Field>
         )}
+            <p className="meta">
+              Using LiteLLM? It is optional and runs separately from TownReporter. See the{" "}
+              <a href="https://docs.litellm.ai/docs/proxy/quick_start" target="_blank" rel="noopener noreferrer" className="underline">
+                official setup guide (new tab)
+              </a>.
+            </p>
+          </div>
+        </details>
         <div className="flex flex-wrap gap-2">
           <InkButton disabled={locked} type="submit">
             {busy ? "Saving…" : editingId ? "Save changes" : "Save connection"}

@@ -73,6 +73,8 @@ type PickerControls<T extends StoryModelChoice> = {
   onClear?: () => void;
   disabled?: boolean;
   compact?: boolean;
+  /** Repeat the full selected label where a narrow sidebar clips native select text. */
+  showSelectedValue?: boolean;
   layout?: "stacked" | "inline";
   excludeAutomatic?: boolean;
   effort?: ModelEffort | null;
@@ -508,6 +510,11 @@ export function ModelPicker(props: Props) {
           );
         })}
       </select>
+      {props.showSelectedValue && selected ? (
+        <span className="model-picker-help break-words font-bold" style={{ overflowWrap: "anywhere" }}>
+          Selected model: {optionText(selected)}
+        </span>
+      ) : null}
       <span id={helpId} className="model-picker-help">
         {help}
       </span>

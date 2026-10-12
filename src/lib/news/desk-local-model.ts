@@ -1,8 +1,57 @@
-import type { LocalCatalog, LocalServer } from "./local-models.ts";
+import type { LocalCatalog, LocalServer, LocalModelEntry } from "./local-models.ts";
 
 export const USE_LOADED_RECOMMENDED_LABEL = "Use whatever model is loaded (recommended)";
 
 const isCloud = (id: string) => /[:.-]cloud$/i.test(id);
+
+export type LocalServerReadiness = {
+  state: "unreachable" | "ready" | "no-model-loaded" | "load-state-unknown";
+  loadedModel: LocalModelEntry | null;
+  loadedCount: number;
+  help: string;
+};
+
+/**
+ * One answer for Server and Models: an answering endpoint is not enough to
+ * call a local writer ready. A non-cloud chat model has to be in memory.
+ */
+export function localServerReadiness(server: LocalServer): LocalServerReadiness {
+  if (!server.reachable) {
+    return {
+      state: "unreachable",
+      loadedModel: null,
+      loadedCount: 0,
+      help: "This server did not answer. Check that it is running and that its address is correct.",
+    };
+  }
+  const onDeviceLoaded = server.models
+    .filter((model) => model.kind !== "embedding" && model.loaded === true && !model.cloud && !isCloud(model.id))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const loadedModel = onDeviceLoaded[0] ?? null;
+  if (loadedModel) {
+    return {
+      state: "ready",
+      loadedModel,
+      loadedCount: onDeviceLoaded.length,
+      help: `${loadedModel.label || loadedModel.id} is loaded on this server and ready for a local writing job.`,
+    };
+  }
+  const chatModels = server.models.filter((model) => model.kind !== "embedding" && !model.cloud && !isCloud(model.id));
+  const loadStateUnknown = chatModels.some((model) => model.loaded === null);
+  return loadStateUnknown
+    ? {
+        state: "load-state-unknown",
+        loadedModel: null,
+        loadedCount: 0,
+        help: "This server answers, but does not report whether a model is loaded, so TownReporter cannot confirm that it is ready to write.",
+      }
+    : {
+        state: "no-model-loaded",
+        loadedModel: null,
+        loadedCount: 0,
+        help: "This server answers, but no on-device chat model is loaded. A local writing job will skip it until one is loaded.",
+      };
+}
 
 function serverLabel(server: LocalServer): string {
   if (server.kind === "lmstudio") return "LM Studio";
@@ -52,10 +101,11 @@ export function deskLocalModelSentence(choice: {
 }
 
 export function localServerStatus(server: LocalServer): string {
-  if (!server.reachable) return "Could not reach";
-  const loaded = server.models.find(
-    (m) => m.loaded === true && !m.cloud && !isCloud(m.id) && !isCloud(m.id),
-  );
-  if (loaded) return "Ready";
-  return "Running, no model loaded — load one in LM Studio (Developer tab) or press Use this one";
+  const readiness = localServerReadiness(server);
+  if (readiness.state === "unreachable") return "Could not reach";
+  if (readiness.state === "ready") return "Ready";
+  if (readiness.state === "load-state-unknown") {
+    return "Server reachable; this server does not report whether a model is loaded.";
+  }
+  return "Server reachable; no on-device chat model is loaded. Load one on this server or choose an already loaded model.";
 }

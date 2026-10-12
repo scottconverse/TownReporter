@@ -72,6 +72,10 @@ const names = (list) =>
   inlineModule(list.map((n) => `export function ${n}() { return null; }`).join("\n"));
 
 const paperSettingsStub = names(["getPaperConfigForEditor", "firstRunSetupState", "completeFirstRunSetup"]);
+const modelReadinessModule = moduleUrl(
+  await readFile(new URL("../src/lib/news/model-readiness.ts", import.meta.url), "utf8"),
+  "model-readiness.ts",
+);
 
 /** The build-time address the auditor saw: it must never reach this panel. */
 const SHIPPED_EMAIL = "author.example@gmail.com";
@@ -185,6 +189,7 @@ async function renderPanel({ needsSetup, config, setupCheckFails = false }) {
       "@/components/provider-time-field": inlineModule(`export const ProviderTimeField = () => null;`),
       "@/lib/news/desk-copy": names(["editorActionError", "inviteMessage"]),
       "@/lib/news/model-choice": names(["automaticOrderSentence"]),
+      "@/lib/news/model-readiness": modelReadinessModule,
       "@/lib/news/provider-availability": names(["localModelCatalog", "refreshLocalModelCatalog"]),
       "@/components/provider-status-card": inlineModule(`export const ProviderStatusCard = () => null;`),
       "@/components/status-chip": inlineModule(`export const Chip = () => null;`),

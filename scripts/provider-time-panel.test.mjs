@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { chromium } from "playwright";
 import ts from "typescript";
 
 /**
@@ -37,6 +38,10 @@ const registryUrl = moduleUrl(
   "provider-registry.ts",
 );
 const registry = await import(registryUrl);
+const presentationUrl = moduleUrl(
+  await readFile(new URL("../src/lib/news/provider-time-presentation.ts", import.meta.url), "utf8"),
+  "provider-time-presentation.ts",
+);
 
 /*
   The server function and the desk's button are stubbed: this test is about
@@ -61,6 +66,7 @@ const { ProviderTimeField } = await import(
     "provider-time-field.tsx",
     {
       "@/lib/news/provider-registry": registryUrl,
+      "@/lib/news/provider-time-presentation": presentationUrl,
       "@/lib/news/provider-settings": stubUrl,
       "@/components/desk-chrome": stubUrl,
       "@tanstack/react-query": stubUrl,
@@ -94,10 +100,38 @@ function render(row) {
 test("the field states the model, the number of seconds, and the shipped default", () => {
   const row = rowFor("claude-frontier");
   const html = render(row);
-  assert.match(html, /Time per call, Claude Opus/);
+  assert.match(html, /Time per answer, Claude Opus/);
   assert.match(html, new RegExp(`default ${row.defaultCallSeconds} s`));
   assert.match(html, new RegExp(`value="${row.callSeconds}"`));
   assert.match(html, /seconds/);
+});
+
+test("the two local time limits name the different runtime each one controls", () => {
+  const configured = render(rowFor("local-model"));
+  const loaded = render(rowFor("qwen-local"));
+  assert.match(configured, /Model at a configured server/);
+  assert.match(configured, /server chosen in Models.*LM Studio, Ollama, or llama\.cpp/);
+  assert.match(loaded, /Model already loaded on this computer/);
+  assert.match(loaded, /already in memory/);
+  assert.notEqual(configured.match(/Time per answer, ([^<]+)/)?.[1], loaded.match(/Time per answer, ([^<]+)/)?.[1]);
+});
+
+test("FB17: the two Local model limits remain distinguishable in the Server panel at desktop and phone widths", async () => {
+  const browser = await chromium.launch({ channel: "msedge", headless: true });
+  try {
+    for (const width of [1440, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 900 } });
+      try {
+        await page.setContent(`<main>${render(rowFor("local-model"))}${render(rowFor("qwen-local"))}</main>`);
+        await page.getByLabel("Time per answer, Model at a configured server").waitFor();
+        await page.getByLabel("Time per answer, Model already loaded on this computer").waitFor();
+        const text = await page.locator("main").innerText();
+        assert.match(text, /server chosen in Models.*LM Studio, Ollama, or llama\.cpp/i);
+        assert.match(text, /model already in memory.*TownReporter does not load or unload it/i);
+        assert.equal(await page.locator("[data-provider-time]").count(), 2);
+      } finally { await page.close(); }
+    }
+  } finally { await browser.close(); }
 });
 
 test("it says in plain words what the number does, and why a local model needs more", () => {
