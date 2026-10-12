@@ -282,7 +282,7 @@ function TranscriptPage() {
       {view.lines.length === 0 ? (
         <Notice kind="warn">
           This artifact has no stored caption lines, so there is nothing to read.
-          {originalProblem ? null : " The original file is still available above."}
+          {originalProblem || !view.originalAvailable ? null : " The original file is still available above."}
         </Notice>
       ) : (
         <ol className="transcript-lines">
