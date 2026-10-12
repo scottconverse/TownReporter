@@ -220,6 +220,7 @@ jobs:
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
       TOWNREPORTER_TEST_SHARD_TOTAL: "24"
+      CI: "true"
       GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
       FAKE_GEMINI_SIGNED_OUT: "1"
     steps:

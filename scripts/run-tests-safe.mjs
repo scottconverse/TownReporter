@@ -80,6 +80,9 @@ function run(label, args) {
           timedOut = true;
           console.error(`[test runner] ${label} did not finish within ${timeoutMs / 60000} minutes.`);
           child.kill();
+          const forceKill = setTimeout(() => child.kill("SIGKILL"), 5000);
+          forceKill.unref();
+          child.once("exit", () => clearTimeout(forceKill));
         }, timeoutMs)
       : null;
     timeout?.unref();

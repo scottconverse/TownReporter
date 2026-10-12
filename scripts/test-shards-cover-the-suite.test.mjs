@@ -36,9 +36,11 @@ test("CI shard slices cover the requested total and keep the six-worker cap", ()
   const shardList = unitTests.match(/^\s+shard:\s*\[([0-9,\s]+)\]\s*$/m)?.[1];
   const shardTotal = unitTests.match(/^\s+TOWNREPORTER_TEST_SHARD_TOTAL:\s*"(\d+)"\s*$/m)?.[1];
   const maxParallel = unitTests.match(/^\s+max-parallel:\s*(\d+)\s*$/m)?.[1];
+  const ciValue = unitTests.match(/^\s+CI:\s*"(true)"\s*$/m)?.[1];
   assert.ok(shardList, "could not find the CI shard list");
   assert.ok(shardTotal, "could not find TOWNREPORTER_TEST_SHARD_TOTAL");
   assert.ok(maxParallel, "could not find the CI worker cap");
+  assert.equal(ciValue, "true", "the unit test watchdog must be enabled in CI");
 
   const total = Number(shardTotal);
   const shards = shardList.split(",").map((value) => Number(value.trim()));
