@@ -135,6 +135,13 @@ describe("model-specific thinking effort", () => {
     );
     assert.equal(defaultModelEffort("local-model", "qwen3.8-27b"), "none");
     assert.equal(defaultModelEffort("local-model", "qwen3.5:397b-cloud"), "none");
+    // Test walk 1 (Oct 12): LM Studio names models with a publisher folder in
+    // front. These are the exact loaded names; each must still run thinking off.
+    for (const loaded of ["qwen/qwen3.8-27b", "halo/qwen3.8-27b-q6-fast", "study/qwen3.8-27b-q6"]) {
+      assert.deepEqual(modelEffortsFor("local-model", loaded), ["none"], loaded);
+      assert.equal(defaultModelEffort("local-model", loaded), "none", loaded);
+    }
+    assert.deepEqual(modelEffortsFor("local-model", "halo/qwen3-coder-30b-a3b-q4km"), [], "another Qwen is not Qwen 3.8");
     assert.equal(
       defaultModelEffort(
         "custom:11111111-1111-4111-8111-111111111111",
