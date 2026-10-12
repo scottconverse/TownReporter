@@ -139,6 +139,7 @@ import { resolveJobModel } from "@/lib/news/model-assignments";
 */
 import {
   draftFallbackAttribution,
+  runningWriterSentence,
   lastDraftLine,
   lastDraftWhen,
   requestedModelChoice,
@@ -656,6 +657,26 @@ function StoryPage() {
         pickedModel: storyModelLabel(requestedDraftModelChoice),
         writerModel: storyModelLabel(data.job.model_choice),
         failoverNote: data.job.failover_note,
+      })
+    : undefined;
+  /*
+    FW1: the picker and `requestedDraftModelChoice` name what the editor asked for.
+    While the job runs, the writer is the row's runtime (the same model the progress
+    card shows), so the Writer bar names it next to the pick, and the switch chip
+    says from what and why. Nothing here replaces the pick: both are shown.
+  */
+  const runningWriter = data?.job && (data.job.status === "running" || data.job.status === "queued")
+    ? storyModelLabel(data.job.model_choice)
+    : "";
+  const pickedWriterLabel = storyModelLabel(requestedDraftModelChoice);
+  const runningWriterLine = runningWriter && runningWriter !== pickedWriterLabel
+    ? `Writer: ${runningWriter} · picked: ${pickedWriterLabel}`
+    : "";
+  const runningSwitchSentence = runningWriter
+    ? runningWriterSentence({
+        pickedModel: pickedWriterLabel,
+        writerModel: runningWriter,
+        failoverNote: data?.job?.failover_note,
       })
     : undefined;
 
@@ -3083,7 +3104,7 @@ function StoryPage() {
               aria-controls="story-model-research"
               onClick={() => setModelResearchOpen((open) => !open)}
             >
-              Model & research · {storyModelLabel(modelChoice)}
+              Model & research · {runningWriterLine || storyModelLabel(modelChoice)}
             </button>
             <button
               className="btn quiet"
@@ -3625,7 +3646,7 @@ function StoryPage() {
                 jobState === "recovering"
                   ? "Recovering…"
                   : data.job?.failover_note
-                    ? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
+                    ? runningSwitchSentence ?? `Switched to ${data.job.failover_note.match(/moved to (.+?) because/i)?.[1] ?? "another model"}…`
                     : data.draft?.body
                       ? "Redrafting…"
                       : "Drafting…"
