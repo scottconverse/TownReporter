@@ -862,18 +862,26 @@ function StoryPage() {
         if (pressWasRewrite.current) setRewriteDone(true);
         else setRedraftDone(true);
       }
+      /*
+        A refused press (including Cancel on its warning) created no job. Drop
+        the local working state before refreshing the story: that refresh can
+        take longer than the consent round trip, and must not keep Redraft
+        disabled after the editor has cancelled. A timeout can still mean the
+        server created a job, so it keeps the existing wait-for-job behavior.
+      */
+      const refusedWithoutJob = !answered(res) || (!res.ok && !looksLikeDraftTimeout(res.error));
+      if (refusedWithoutJob) {
+        setWaitingSince(null);
+        setSlowWait(false);
+      }
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (!answered(res)) {
-        setWaitingSince(null);
-        setSlowWait(false);
         setMsg(NO_ANSWER);
         return;
       }
       if (res.ok) return;
       if (looksLikeDraftTimeout(res.error)) return;
-      setWaitingSince(null);
-      setSlowWait(false);
       /*
         A refusal that arrives with a `kind` came from the provider
         preflight, which already knows exactly what is missing and what to
