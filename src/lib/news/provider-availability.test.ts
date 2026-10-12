@@ -84,6 +84,26 @@ describe("provider availability for the picker", () => {
     assert.equal(availability["claude-sonnet"], false);
     assert.equal(availability.reasons?.["claude-sonnet"], "Claude Code is not installed on this server.");
   });
+  it("uses one Codex sign-in probe for every Codex picker choice", async () => {
+    const calls: string[] = [];
+    const availability = await getProviderAvailability(1, {
+      refreshLocalCatalog: async () => undefined,
+      resolveLocal: async () => null,
+      probeProvider: async (choice) => {
+        const id = choice ?? "";
+        calls.push(id);
+        return id.startsWith("codex-")
+          ? { ok: false as const, error: "Codex is not installed. Install the Codex CLI." }
+          : { ok: true as const, choice: "claude-sonnet" as const, label: "Claude Sonnet" };
+      },
+    });
+    const codexIds = PICKER_PROVIDER_IDS.filter((id) => id.startsWith("codex-"));
+    assert.equal(calls.filter((id) => id.startsWith("codex-")).length, 1);
+    for (const id of codexIds) {
+      assert.equal(availability[id], false, `${id} must match the missing Codex CLI`);
+      assert.match(availability.reasons?.[id] ?? "", /Codex is not ready|not installed/);
+    }
+  });
   it("marks Local model unavailable when LLM_BASE_URL is unset", () => {
     withEnv({}, () => {
       const availability = computeProviderAvailability();

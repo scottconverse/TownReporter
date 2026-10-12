@@ -1,5 +1,6 @@
 import { ensureSchemaOnce, getSql, type Sql } from "../db.ts";
 import { getPaperConfig } from "./paper-settings.ts";
+import { gateFrontierRelevance } from "./frontier-relevance.ts";
 import {
   grokChat,
   parseJsonBlockSalvage,
@@ -74,7 +75,6 @@ import {
   type ResearchActionReceipt,
 } from "./research-actions.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
-import { gateFrontierRelevance } from "./frontier-relevance.ts";
 /*
   FB1: `pctFor` only -- the one clamp/divide-by-zero rule the whole app uses for
   a percentage. Imported from jobs.ts rather than re-derived here so a hop that

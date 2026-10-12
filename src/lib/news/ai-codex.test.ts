@@ -13,6 +13,7 @@ import {
   findCodexCli,
   parseCodexJsonl,
   probeCodex,
+  probeCodexStatus,
   runCodexProcessForTest,
 } from "./ai-codex.server.ts";
 
@@ -647,6 +648,17 @@ describe("Codex native drafting launch", { concurrency: false }, () => {
     );
 
     assert.deepEqual(result, { ok: true, label: "Codex Sol 6.1 (balanced)" });
+  });
+
+  it("reports an installed but signed-out Codex CLI separately from a missing install", async () => {
+    const fakeCli = 'process.stderr.write("You are not logged in. Run codex login.");process.exit(1);';
+    const status = await withEnv(
+      { CODEX_CLI_PATH: process.execPath, NODE_OPTIONS: nodeImport(fakeCli) },
+      () => probeCodexStatus(),
+    );
+    assert.equal(status.installed, true);
+    assert.equal(status.signedIn, false);
+    assert.match(status.error ?? "", /authentication has expired|signed out/i);
   });
 
   it("turns an expired Codex OAuth session into actionable sign-in guidance", async () => {

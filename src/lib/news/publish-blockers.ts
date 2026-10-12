@@ -27,7 +27,7 @@ import { draftLooksCutOff, CUT_OFF_WARNING } from "./draft-completeness.ts";
 import { editorActionError } from "./desk-copy.ts";
 import { refusedAnswer } from "./refused-answer.ts";
 import type { StoryReadinessState } from "./story-readiness.ts";
-import { UNCHECKED_STORY_REASON } from "./unchecked-story-gate.ts";
+import { uncheckedStoryReason } from "./unchecked-story-gate.ts";
 
 /**
  * Where a blocker's button goes. The page turns each of these into a real
@@ -152,6 +152,8 @@ export type PublishBlockerState = {
    * clear story -- it is an unchecked one, and this is the flag that says so.
    */
   uncheckedStory?: boolean;
+  /** Current-version uploaded passages shown in the Sources check panel. */
+  documentPassageCount?: number;
   /** Outlets the body names that the draft's sources do not show. */
   namedOutlets: readonly string[];
   /** The story changed after its evidence was checked. */
@@ -421,7 +423,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     blockers.push({
       key: "unchecked",
       kind: "warning",
-      sentence: UNCHECKED_STORY_REASON,
+      sentence: uncheckedStoryReason(state.documentPassageCount),
       action: { label: "Run the evidence check", target: { kind: "evidence-review" } },
       altAction: { label: "I checked this story myself", target: { kind: "acknowledge-unchecked" } },
     });

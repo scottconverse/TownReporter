@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { InkButton } from "@/components/desk-chrome";
 import { saveProviderTimeFn, type ProviderTimeSetting } from "@/lib/news/provider-settings";
+import { providerTimePresentation } from "@/lib/news/provider-time-presentation";
 /*
   The two bounds come from the PURE registry module, not from
   provider-settings.ts: this is a client component, and the registry is the
@@ -52,7 +53,7 @@ export function ProviderTimeField({
         return;
       }
       const now = res.settings.find((s) => s.providerId === row.providerId);
-      onNote(`${row.label} may now take up to ${now?.callSeconds ?? row.callSeconds} seconds per answer.`);
+      onNote(`${providerTimePresentation(row.providerId, row.label).label} may now take up to ${now?.callSeconds ?? row.callSeconds} seconds per answer.`);
       void qc.invalidateQueries({ queryKey: ["provider-times"] });
     },
     onError: (e) => setErr(e instanceof Error ? e.message : "That would not save."),
@@ -60,14 +61,15 @@ export function ProviderTimeField({
 
   const parsed = Number(value);
   const dirty = value.trim() !== "" && parsed !== row.callSeconds;
+  const presentation = providerTimePresentation(row.providerId, row.label);
 
   return (
     <div className="mt-3 border-t border-rule pt-3" data-provider-time={row.providerId}>
       <label htmlFor={fieldId} className="block text-sm">
-        Time per call, {row.label}
+        Time per answer, {presentation.label}
       </label>
       <p className="mt-1 max-w-2xl text-sm text-muted">
-        How long the desk waits for one answer before giving up. Local models need more.
+        {presentation.explanation}
       </p>
       <p className="mt-1 flex flex-wrap items-baseline gap-2">
         <input

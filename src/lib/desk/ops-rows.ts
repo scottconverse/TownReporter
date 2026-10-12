@@ -78,7 +78,7 @@ import { automaticLadder, providerEntry, type ProviderEntry } from "../news/prov
 /* B4: the same "what is in memory there" rule a run uses (`resolveRungLocalModel`,
    `ai.ts`), read from the same catalog, so Server health's Ready chip and the
    Models screen's Connections list cannot answer the loaded question differently. */
-import { pickLoadedLocalModel } from "../news/local-models.ts";
+import { localServerReadiness } from "../news/desk-local-model.ts";
 import { TRASH_DAYS } from "../news/trash-store.ts";
 import { formatAgo } from "../ops/health.ts";
 
@@ -608,13 +608,14 @@ function rungWords(
     memory" are three different facts, and the Models screen's Connections
     list reads the loaded one.
   */
-  const loaded = pickLoadedLocalModel(server);
-  if (needsLoadedModel && !loaded) {
+  const readiness = localServerReadiness(server);
+  if (needsLoadedModel && readiness.state !== "ready") {
+    const label = readiness.state === "load-state-unknown" ? "Load state unknown" : "No model loaded";
     return {
       source: "words",
       tone: "slow",
-      label: "No model loaded",
-      help: `${named} answered at ${where}, but no chat model is loaded in memory there. A run skips this rung until one is.`,
+      label,
+      help: readiness.help,
     };
   }
   return {
@@ -622,7 +623,7 @@ function rungWords(
     tone: "ready",
     label: "Ready",
     help: needsLoadedModel
-      ? `${named} is answering at ${where} with ${loaded?.id ?? "a chat model"} loaded.`
+      ? `${named} is answering at ${where} with ${readiness.loadedModel?.id ?? "a chat model"} loaded.`
       : `${named} is answering at ${where}.`,
   };
 }
@@ -640,14 +641,28 @@ function rungWords(
  * draws no chip rather than inventing one.
  */
 function rungChip(entry: ProviderEntry, read: OpsModelRead): OpsRungChip | undefined {
-  if (read.availability) {
-    const ready = read.availability[entry.id === "qwen-local" ? "local-model" : entry.id] !== false;
-    const reason = read.availability.reasons?.[entry.id === "qwen-local" ? "local-model" : entry.id] ?? "";
-    return {source:"words",tone: ready ? "ready" : "slow",label: ready ? "Ready" : reason.startsWith("Ollama says:") ? "Warning" : "Not ready",help: reason};
-  }
   const login = LOGIN_FOR_KIND[entry.kind];
   const status = login ? read.statuses.find((s) => s.provider === login) : undefined;
   if (status) return { source: "status", status };
+
+  if (read.availability) {
+    const id = entry.id === "qwen-local" ? "local-model" : entry.id;
+    const ready = read.availability[id] !== false;
+    const reason = read.availability.reasons?.[id] ?? "";
+    if (reason.startsWith("Ollama says:")) {
+      return { source: "words", tone: "slow", label: "Warning", help: reason };
+    }
+    if (entry.requiresLoadedLocalModel) {
+      const setting = read.times.find((time) => time.providerId === entry.id);
+      if (setting) return rungWords(setting, true, read.catalog);
+    }
+    return {
+      source: "words",
+      tone: ready ? "ready" : "slow",
+      label: ready ? "Ready" : "Not ready",
+      help: reason,
+    };
+  }
   const setting = read.times.find((t) => t.providerId === entry.id);
   if (!setting) return undefined;
   return rungWords(setting, Boolean(entry.requiresLoadedLocalModel), read.catalog);

@@ -71,6 +71,31 @@ test("a pending readiness response says checking before an explicit draft press"
   assert.match(html, /Checking this model&#x27;s readiness on the server/);
 });
 
+test("FB23: the full selected scan-model name remains visible beside a narrow native picker", async () => {
+  const { chromium } = await import("playwright");
+  const browser = await chromium.launch({ headless: true });
+  try {
+    for (const width of [1440, 390]) {
+      const page = await browser.newPage({ viewport: { width, height: 700 } });
+      try {
+        await page.setContent(`<main style="width:320px">${render({
+          scope: "scan",
+          label: "Model for this scan",
+          showSelectedValue: true,
+        })}</main>`);
+        const select = page.getByLabel("Model for this scan", { exact: true });
+        assert.equal(await select.inputValue(), "auto");
+        const selected = page.getByText(/^Selected model:/);
+        const label = await selected.innerText();
+        assert.match(label, /^Selected model: Automatic.*Recommended ladder/);
+        assert.equal(await selected.evaluate((node) => getComputedStyle(node).overflowWrap), "anywhere");
+        const bounds = await selected.boundingBox();
+        assert.ok(bounds && bounds.width <= 320, `selected model label should fit its ${width}px viewport sidebar`);
+      } finally { await page.close(); }
+    }
+  } finally { await browser.close(); }
+});
+
 test("every story picker exposes keyboard-native setup help and real operator links", () => {
   for (const compact of [false, true]) {
     const html = render({ compact });

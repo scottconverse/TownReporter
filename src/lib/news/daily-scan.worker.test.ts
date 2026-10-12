@@ -200,7 +200,8 @@ it("the scheduled worker persists actual scan outputs when fetched text contains
   assert.deepEqual(savedRun, {
     leads_created: 1,
     execution_origin: "scheduled",
-    summary: "Council has a contract vote. Next week.",
+    summary:
+      "The scan read 1 source across 1 analysis batch. It reviewed 1 lead handoff. It filed 1 lead to the Queue: “Council schedules water contract vote”.",
   });
   const [savedReservation] = await sql.query<{ status: string }>(
     "select status from daily_scan_reservations where id=$1",

@@ -63,6 +63,7 @@ import { providerAvailability, PROVIDER_AVAILABILITY_QUERY_KEY, localModelCatalo
 import { listTrash } from "@/lib/news/trash";
 import { deskAccess, myDesk } from "@/lib/news/claim";
 import { listDarkRuns, type DarkRunRow } from "@/lib/news/dark";
+import { darkRunStopCopy } from "@/lib/news/dark-run-copy";
 
 export const Route = createFileRoute("/desk/ops")({
   head: () => ({ meta: [{ title: "Server — TownReporter" }] }),
@@ -597,7 +598,7 @@ function DarkRunHistory({ runs, loading, error }: { runs: readonly DarkRunRow[];
             <article key={run.id} className="side-item">
               <p><b>{Number.isFinite(started.getTime()) ? started.toLocaleString() : run.started_at}</b>{run.investigation_id == null ? "" : ` · File ${run.investigation_id}`}{run.model_choice ? ` · ${run.model_choice}` : ""}</p>
               {run.summary ? <p>{run.summary}</p> : null}
-              {run.error ? <p className="note err">Stopped: {run.error}</p> : null}
+              {run.error ? <p className="note err">Stopped: {darkRunStopCopy(run.error, run.summary)}</p> : null}
               {run.stopReason ? <p className="meta">Stop reason: {run.stopReason}</p> : null}
               {run.usageRecorded === false ? <p className="meta">Usage not recorded for this older run.</p> : (
                 <details>

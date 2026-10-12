@@ -233,7 +233,10 @@ it(
     assert.equal(receipt.error, null);
     assert.equal(receipt.leads_created, 1);
     assert.equal(receipt.sources_proposed, 1);
-    assert.equal(receipt.summary, "Council has a contract vote. Next week.");
+    assert.equal(
+      receipt.summary,
+      'The scan read 1 source across 1 analysis batch. It reviewed 1 lead handoff. It filed 1 lead to the Queue: “Council schedules water contract vote”.',
+    );
     assert.equal(carriesNul(receipt.summary), false);
 
     const [proposed] = await sql.query<{

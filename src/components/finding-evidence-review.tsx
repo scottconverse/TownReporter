@@ -454,6 +454,8 @@ function JudgmentControls({
 
 export type EvidenceListInputs = {
   readinessReason?: string;
+  manualCheckRecorded?: boolean;
+  documentPassageCount?: number;
   onDraftChanged?: (draft: FindingEvidenceReview["canonicalDraft"]) => void;
   /** When the checks ran, for the drawn "Ran 8:14 a.m." line. */
   checkedAt: string | null;
@@ -1820,8 +1822,9 @@ export function FindingEvidenceReviewPanel({
       {review && listRows.length === 0 && !meetingEvidence ? (
         <div className="mt-4 border border-rule bg-paper-2 p-4" role="status">
           <p className="text-sm text-ink">
-            This draft has no recorded findings and no transcript citations, so there is nothing to
-            review here. This review does not inventory every claim in the story.
+            {list.documentPassageCount
+              ? `The uploaded document has ${list.documentPassageCount} selected passage${list.documentPassageCount === 1 ? "" : "s"} for this draft; they are shown under Names and spellings below. This panel has no automatic evidence judgments or transcript citations for the draft.`
+              : "This draft has no recorded findings and no transcript citations. This review does not inventory every claim in the story."}
           </p>
         </div>
       ) : null}
@@ -1847,6 +1850,8 @@ export function FindingEvidenceReviewPanel({
 
       <EvidenceCheckList
         readinessReason={list.readinessReason}
+        manualCheckRecorded={list.manualCheckRecorded}
+        documentPassageCount={list.documentPassageCount}
         busy={aiDecision.isPending || locked || localDraftChanged || reloadRequired}
         onAcceptSupported={() => aiDecision.mutate({ action: "accept-supported" })}
         onRemoveSentence={(row) => aiDecision.mutate({ action: "remove-sentence", findingKey: row.ref?.id })}

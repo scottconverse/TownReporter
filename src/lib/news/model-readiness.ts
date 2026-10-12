@@ -5,9 +5,15 @@ export type ReadinessFacts = {
     disabledByOperator: boolean;
     installed: boolean;
     signedIn: boolean;
-    lastTest: { ok: boolean } | null;
+    lastTest: { ok: boolean; detail?: string } | null;
+    detail?: string;
   };
-  connection?: { enabled: boolean; hasApiKey: boolean; modelId: string | null };
+  connection?: {
+    enabled: boolean;
+    hasApiKey: boolean;
+    modelId: string | null;
+    lastTest?: { ok: boolean } | null;
+  };
   available?: boolean;
   reason?: string;
 };
@@ -24,6 +30,7 @@ export function modelReadiness({ status, connection, available, reason }: Readin
   }
   if (connection) {
     if (!connection.enabled) return "Turned off";
+    if (connection.lastTest?.ok === false) return "Last test failed";
     return connection.hasApiKey && connection.modelId ? "Ready" : null;
   }
   return available === true ? "Ready" : null;

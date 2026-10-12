@@ -19,5 +19,9 @@ test("names the held item consistently and clears readiness when no items remain
   assert.equal(readinessDot(true, readiness).tone, "warn");
   assert.match(publishGateNote(blockers), /Airport future charges/);
   assert.match(await page.locator("body").innerText(), /Airport future charges/);
+  const heldCopy = await page.locator(".reporting-held").innerText();
+  assert.match(heldCopy, /AI recommends holding these items for now/);
+  assert.match(heldCopy, /does not change the saved lead status in the Queue/);
+  assert.doesNotMatch(heldCopy, /^Held for later\s*$/m);
   assert.equal(storyReadiness({ ...input, held: [], evidenceCheckedCurrentVersion: true }).state, "verified");
 });

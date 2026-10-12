@@ -54,6 +54,7 @@ import { firstRunSetupState, getPaperConfigForEditor } from "@/lib/news/paper-se
 import { opsCard, type OpsCardDoor } from "@/lib/desk/ops-cards";
 import { getDarkCounty, saveDarkCounty } from "@/lib/news/dark";
 import { getProviderStatuses, type ProviderStatus } from "@/lib/news/provider-login";
+import { modelReadiness } from "@/lib/news/model-readiness";
 import { getProviderTimeSettings } from "@/lib/news/provider-settings";
 import { ProviderTimeField } from "@/components/provider-time-field";
 import { editorActionError, inviteMessage } from "@/lib/news/desk-copy";
@@ -683,7 +684,8 @@ export function WritingModelsPanel({
  * uses (`Chip` in components/status-chip.tsx), so the two screens cannot drift.
  */
 export function WritingModelChip({ status }: { status: ProviderStatus }) {
-  if (status.disabledByOperator) {
+  const readiness = modelReadiness({ status });
+  if (readiness === "Turned off") {
     return (
       <Chip
         tone="quiet"
@@ -692,7 +694,7 @@ export function WritingModelChip({ status }: { status: ProviderStatus }) {
       />
     );
   }
-  if (!status.installed) {
+  if (readiness === "Not installed") {
     return (
       <Chip
         tone="quiet"
@@ -701,7 +703,7 @@ export function WritingModelChip({ status }: { status: ProviderStatus }) {
       />
     );
   }
-  if (!status.signedIn) {
+  if (readiness === "Sign in needed") {
     return (
       <Chip
         tone="signin"
@@ -710,12 +712,12 @@ export function WritingModelChip({ status }: { status: ProviderStatus }) {
       />
     );
   }
-  if (status.lastTest && !status.lastTest.ok) {
+  if (readiness === "Last test failed") {
     return (
       <Chip
         tone="slow"
         label="Last test failed"
-        help={status.lastTest.detail || `${status.name} is signed in, but its last test failed.`}
+        help={status.lastTest?.detail || `${status.name} is signed in, but its last test failed.`}
       />
     );
   }

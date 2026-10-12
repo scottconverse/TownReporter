@@ -10,6 +10,7 @@ import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
   COMPARE_PRIOR_LABEL,
+  composeScanHandoffSummary,
   composeZeroLeadSummary,
   duplicateKillReason,
   killedAsDuplicateNote,
@@ -77,6 +78,7 @@ import {
   scanDecisionsSentence,
   resolveDraftJobState,
   recoveringDraftCopy,
+  queuedDraftCopy,
   DRAFT_JOB_STALE_AFTER_SECONDS,
   redditFeedLabel,
   redditFeedStatusLabel,
@@ -721,6 +723,24 @@ describe("Worth a Look presentation", () => {
     assert.match(composeZeroLeadSummary({ fetched: 41, changed: 2 }), /39 pages matched/);
   });
 
+  it("summarizes the batches and only the headlines actually filed (FC18)", () => {
+    const summary = composeScanHandoffSummary({
+      sourcesAnalyzed: 14,
+      analysisBatches: 10,
+      batchesFailed: 1,
+      candidateHandoffs: 14,
+      filedHeadlines: ["Road work begins next week", "County office closes for repairs", "Casey Cooley opens a local fundraiser"],
+    });
+    assert.match(summary, /14 sources across 10 analysis batches; 1 failed/);
+    assert.match(summary, /reviewed 14 lead handoffs/);
+    assert.match(summary, /3 leads to the Queue/);
+    assert.match(summary, /Road work begins next week/);
+    assert.match(summary, /County office closes for repairs/);
+    assert.match(summary, /Casey Cooley opens a local fundraiser/);
+    assert.doesNotMatch(summary, /museum grand reopening/i);
+    assert.match(summary, /\.$/);
+  });
+
   /*
     The Sources rail's "Runs" line (Unit CZ-long-lists).
 
@@ -777,6 +797,41 @@ describe("Worth a Look presentation", () => {
     assert.ok(dup);
     assert.equal(dup!.slug, "bohn-farm-rezoning");
     assert.equal(dup!.headline, "Bohn Farm rezoning heads to planning board with staff blessing");
+  });
+
+  it("does not call an open-house schedule a printed Head Start designation story (B02)", () => {
+    assert.equal(
+      nearDuplicate(
+        { headline: "St. Vrain Valley Schools Schedules 2026 Open House Dates", topic: "schools" },
+        [
+          {
+            slug: "head-start-designation",
+            headline: "Wild Plum Center Holds Head Start Designation for St. Vrain Valley, Serving Low-Income Children Birth to 5",
+            topic: "schools",
+            published_at: new Date().toISOString(),
+          },
+        ],
+        { city: "Longmont", state: "Colorado", county: "Boulder" },
+      ),
+      null,
+    );
+  });
+
+  it("does not send unrelated Bohn Farm headlines to printed-story review (B02)", () => {
+    assert.equal(
+      nearDuplicate(
+        { headline: "Bohn Farm rezoning heads to the planning board in October", topic: "council" },
+        [
+          {
+            slug: "bohn-farm-water-tests",
+            headline: "Bohn Farm well water tests find nitrates near the creek",
+            topic: "council",
+            published_at: new Date().toISOString(),
+          },
+        ],
+      ),
+      null,
+    );
   });
 
   it("does not flag a killed lead as covering an unrelated printed piece on city/month furniture alone (real case 2026-09-02)", () => {
@@ -1150,11 +1205,19 @@ describe("Worth a Look presentation", () => {
     );
   });
 
-  it("resolveDraftJobState: a queued job also reads as drafting", () => {
+  it("resolveDraftJobState: a fresh queued job says it is waiting for a worker", () => {
     assert.equal(
       resolveDraftJobState({ status: "queued", updated_at: new Date().toISOString() }),
-      "drafting",
+      "queued",
     );
+  });
+
+  it("resolveDraftJobState: an old queued job remains queued and never implies an app restart", () => {
+    const now = Date.now();
+    const oldQueuedAt = new Date(now - (STALE_RUNNING_SECONDS + 5) * 1000).toISOString();
+    assert.equal(resolveDraftJobState({ status: "queued", updated_at: oldQueuedAt }, now), "queued");
+    assert.match(queuedDraftCopy(), /Queued, waiting for the writing worker\./);
+    assert.doesNotMatch(queuedDraftCopy(), /checking facts|restarted|recovering/i);
   });
 
   it("resolveDraftJobState: a cold heartbeat on a running job reads as recovering, never as a failure prompting a re-click", () => {

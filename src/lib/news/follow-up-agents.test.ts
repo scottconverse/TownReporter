@@ -226,7 +226,7 @@ describe("search, on the existing research tools", () => {
 
   it("finds something when the judge says a result answers the question", async () => {
     const outcome = await runSearchAgent(input({ what: "Were the September minutes posted?" }), {
-      search: async () => attempt([hit("https://clerk.test/minutes-2026-09")]),
+      search: async () => attempt([hit("https://clerk.test/minutes-2026-09", "September council minutes")]),
       judge: async () => found,
     });
     assert.equal(outcome.state, "found");
@@ -236,7 +236,7 @@ describe("search, on the existing research tools", () => {
 
   it("reports no-change when nothing answers it, and when the answer is the same as last time", async () => {
     const quiet = await runSearchAgent(input(), {
-      search: async () => attempt([hit("https://other.test/old-story")]),
+      search: async () => attempt([hit("https://other.test/old-story", "Older council budget papers")]),
       judge: async () => ({
         ok: true,
         answers: false,
@@ -248,8 +248,8 @@ describe("search, on the existing research tools", () => {
     assert.equal(quiet.state, "no-change");
 
     const same = await runSearchAgent(
-      input({ lastFinding: { ...parseFinding("{}"), url: found.url } }),
-      { search: async () => attempt([hit(found.url)]), judge: async () => found },
+      input({ what: "Were the September minutes posted?", lastFinding: { ...parseFinding("{}"), url: found.url } }),
+      { search: async () => attempt([hit(found.url, "September council minutes")]), judge: async () => found },
     );
     assert.equal(same.state, "no-change", "the same answer as last time is not news");
     assert.match(same.finding.summary ?? "", /Still the same result/);
@@ -298,6 +298,27 @@ describe("search, on the existing research tools", () => {
   it("trims the question into a query a provider will take", () => {
     assert.equal(searchQuestionFor("  Were the minutes posted?  "), "Were the minutes posted");
     assert.equal(searchQuestionFor("x".repeat(400)).length, 180);
+  });
+
+  it("searches the assigned subject and does not call irrelevant results no-change (FC25)", async () => {
+    let searched = "";
+    const outcome = await runSearchAgent(
+      input({ what: "FULL C WALK: Re-check the published Boulder County permit phishing warning. Report what changed or state explicitly that no change was found." }),
+      {
+        search: async (question) => {
+          searched = question;
+          return attempt([
+            hit("https://dictionary.test/full-a", "Full | Definition and meaning"),
+            hit("https://dictionary.test/full-b", "Full meaning, synonyms and usage"),
+          ]);
+        },
+        judge: async () => ({ ok: true, answers: false, url: "", title: "", summary: "Dictionary pages define full." }),
+      },
+    );
+    assert.match(searched, /Boulder County permit phishing warning/i);
+    assert.doesNotMatch(searched, /FULL C WALK|Report what changed|no change was found/i);
+    assert.equal(outcome.state, "could-not-check");
+    assert.match(outcome.finding.reason ?? "", /no result about the subject/i);
   });
 });
 
@@ -543,7 +564,7 @@ describe("the run, end to end with the queue and the notes column", () => {
     const quiet = await makeJob();
     await performFollowUpRun(quiet, {
       agents: {
-        search: async () => attempt([hit("https://ferry.test/times")]),
+        search: async () => attempt([hit("https://ferry.test/times", "Ferry timetable schedule update")]),
         judge: async () => ({ ok: true, answers: false, url: "", title: "", summary: "" }),
       },
     });
@@ -557,7 +578,7 @@ describe("the run, end to end with the queue and the notes column", () => {
     const failed = await makeJob();
     await performFollowUpRun(failed, {
       agents: {
-        search: async () => attempt([hit("https://ferry.test/times")]),
+        search: async () => attempt([hit("https://ferry.test/times", "Ferry timetable schedule update")]),
         judge: async () => ({ ok: false, error: "the model call failed" }),
       },
     });

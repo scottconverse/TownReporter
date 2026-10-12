@@ -789,6 +789,7 @@ function SourcesPage() {
                 scope="scan"
                 label="Model for this scan"
                 value={scanModel}
+                showSelectedValue
                 onChange={setScanModel}
                 effort={scanModelEffort}
                 onEffortChange={setScanModelEffort}

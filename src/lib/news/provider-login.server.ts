@@ -482,10 +482,11 @@ async function findBinary(provider: ProviderId): Promise<BinaryLookup> {
   }
   const { findCodexCli } = await import("./ai-codex.server.ts");
   const lookup = await findCodexCli();
-  // The bare `codex` PATH lookup stays "nothing to spawn here" -- it is not a
-  // path the finder found, and `providerStatuses` below treats it the same.
   if (!lookup.ok) return { ok: false, error: lookup.error };
-  return lookup.bin === "codex" ? { ok: false, error: null } : { ok: true, bin: lookup.bin };
+  if (lookup.bin !== "codex") return { ok: true, bin: lookup.bin };
+  const { probeCodexStatus } = await import("./ai-codex.server.ts");
+  const status = await probeCodexStatus();
+  return status.installed ? { ok: true, bin: lookup.bin } : { ok: false, error: status.error };
 }
 
 function loginArgs(provider: ProviderId): string[] {
@@ -816,7 +817,7 @@ export async function providerStatuses(
   const out: ProviderStatus[] = [];
   for (const provider of ["claude", "codex"] as ProviderId[]) {
     const off = disabled(provider);
-    const found = off ? null : await findBinary(provider);
+    const found = off || provider === "codex" ? null : await findBinary(provider);
     /*
       `findCodexCli()` offers the bare string "codex" when it found no path of
       its own — a PATH lookup, not a file it found — and `findBinary` reports
@@ -825,11 +826,19 @@ export async function providerStatuses(
       agrees.
     */
     const resolved = found?.ok ? found.bin : null;
+    let installed = Boolean(resolved);
     let signedIn = false;
     let account: string | null = null;
     let detail = "";
     if (off) {
       detail = `Turned off with ${provider === "claude" ? "TOWNREPORTER_CLAUDE_CODE" : "TOWNREPORTER_CODEX"}=0.`;
+    } else if (provider === "codex") {
+      const { probeCodexStatus } = await import("./ai-codex.server.ts");
+      const probe = await probeCodexStatus();
+      installed = probe.installed;
+      signedIn = probe.signedIn;
+      account = signedIn ? "signed in" : null;
+      if (!signedIn) detail = probe.error ?? "Codex could not confirm its login.";
     } else if (!found?.ok) {
       // The named-path failure says which path and what to do about it; the
       // generic sentence is only right when there was nothing to find.
@@ -839,17 +848,11 @@ export async function providerStatuses(
       signedIn = seen.signedIn;
       account = seen.account;
       if (!signedIn) detail = "Signed out. Sign in below and the desk can draft again.";
-    } else {
-      const { probeCodex } = await import("./ai-codex.server.ts");
-      const probe = await probeCodex();
-      signedIn = probe.ok;
-      account = probe.ok ? "signed in" : null;
-      if (!probe.ok) detail = probe.error;
     }
     out.push({
       provider,
       name: PROVIDER_LABEL[provider],
-      installed: Boolean(resolved) || signedIn,
+      installed: installed || signedIn,
       path: resolved,
       signedIn,
       account,
