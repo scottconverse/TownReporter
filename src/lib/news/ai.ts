@@ -1121,7 +1121,12 @@ export async function grokChat(
     temperature: 0.2,
     // Gemini shares its output budget with thinking; the 2,200-token writer
     // request measured 85 visible tokens. Reserve room for a complete draft.
-    max_tokens: custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)
+    // DeepSeek v4.1 Flash needs the same room even with thinking off (effort
+    // None): dev walk D1, Oct 12 2026, job 335 -- the 2,200-token writer request
+    // was cut off (finish reason: length) and the draft fell back to Codex Sol.
+    // Codex and Claude never applied this cap, so DeepSeek was the only writer
+    // held to it.
+    max_tokens: (custom?.ok && isGeminiOpenAiEndpoint(llm.baseUrl)) || isDeepSeekFlashModel(model)
       ? Math.max(maxTokens, 16_384) : maxTokens,
     messages: [
       { role: "system", content: system },
@@ -1321,6 +1326,11 @@ const REASONING_EFFORTS = new Set(["none", "off", "low", "medium", "high", "max"
  * OpenAI-compatible disable value `reasoning_effort: "none"`. Omitting the
  * field would select provider default and can re-enable thinking.
  */
+/** DeepSeek v4.1 Flash on Ollama, by its exact model id. */
+function isDeepSeekFlashModel(model: string): boolean {
+  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(model.trim());
+}
+
 function reasoningEffortFor(
   baseUrl: string,
   model: string,

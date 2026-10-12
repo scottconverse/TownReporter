@@ -253,3 +253,26 @@ test("part G: Server health agrees with picker availability and names a cloud lo
 
 });
 
+
+test("walk D1: DeepSeek v4.1 Flash gets the full writer room with thinking off", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: Record<string, unknown>[] = [];
+  globalThis.fetch = async (_url, init) => {
+    requests.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ choices: [{ finish_reason: "stop", message: { content: "ok" } }] }));
+  };
+  try {
+    await grokChat("System", "User", 2200, { choice: "custom:deepseek", newsroomId: 1 }, {
+      resolveCustom: async () => ({
+        name: "DeepSeek",
+        modelId: "deepseek-v4.1-flash:cloud",
+        apiKey: "not-needed",
+        baseUrl: "http://127.0.0.1:11434/v1",
+      }),
+    });
+    assert.ok(Number(requests[0].max_tokens) >= 16384);
+    assert.equal(requests[0].reasoning_effort, "none");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
