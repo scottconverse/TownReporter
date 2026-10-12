@@ -59,6 +59,7 @@ import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
 import { DARK_LIMITS } from "@/lib/news/editor-dialog-logic";
+import { activeFrontierForSubject } from "@/lib/news/frontier-relevance";
 import { getDarkDials } from "@/lib/news/dark";
 import { InvestigationBriefCard, SectionTldr } from "@/components/investigation-brief";
 import { SearchTrailEntry } from "@/components/search-trail-entry";
@@ -1792,7 +1793,13 @@ function InvestigationWorkspace({
   const tests = hyps.map((h) => plainEditorText(h.body)).filter(Boolean);
   // Deferred means "saved for a later run," not rejected. Keep those leads
   // visible so a frontier cap never looks like the desk threw them away.
-  const next = frontier.filter((f) =>
+  const subjectFrontier = activeFrontierForSubject(frontier, {
+    subject: [inv?.title, inv?.ordinary_explanation, inv?.scope_json]
+      .map((value) => String(value ?? ""))
+      .join(" "),
+    town: "",
+  });
+  const next = subjectFrontier.filter((f) =>
     ["open", "investigating", "reopened", "deferred"].includes(f.status),
   );
   // The raw row list can hold the same lead under several labels; dedupe by
@@ -1810,7 +1817,7 @@ function InvestigationWorkspace({
     return out;
   })();
   const leftover = nextDeduped.length;
-  const totalOpen = Math.max(Number(inv?.still_open ?? 0), leftover);
+  const totalOpen = leftover;
   const parentTitle = detailReady ? fullFileQuestion(inv!.title, pasteArt?.excerpt ?? "") : "";
 
   const activityAll = darkScreenData(activityQuery.data ?? []).map((entry) => ({

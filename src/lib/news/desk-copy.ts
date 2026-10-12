@@ -2009,6 +2009,37 @@ export function composeZeroLeadSummary(input: { fetched: number; changed: number
     : "Nothing crossed the filing bar.";
 }
 
+/** A deterministic scan handoff assembled from the rows actually filed. */
+export function composeScanHandoffSummary(input: {
+  sourcesAnalyzed: number;
+  analysisBatches: number;
+  batchesFailed: number;
+  candidateHandoffs: number;
+  filedHeadlines: readonly string[];
+}): string {
+  const batches = `${input.analysisBatches} analysis batch${input.analysisBatches === 1 ? "" : "es"}`;
+  const failure = input.batchesFailed
+    ? `; ${input.batchesFailed} failed`
+    : "";
+  const read = `The scan read ${input.sourcesAnalyzed} source${input.sourcesAnalyzed === 1 ? "" : "s"} across ${batches}${failure}. It reviewed ${input.candidateHandoffs} lead handoff${input.candidateHandoffs === 1 ? "" : "s"}.`;
+  const headlines = [...new Set(input.filedHeadlines.map((value) => value.trim()).filter(Boolean))];
+  if (!headlines.length) return `${read} It filed no leads to the Queue.`;
+
+  const labels: string[] = [];
+  let labelLength = 0;
+  const maxLabels = 620;
+  for (const headline of headlines) {
+    const label = headline.length <= 52 ? headline : `${headline.slice(0, 49).replace(/\s+\S*$/, "").trimEnd()}…`;
+    const nextLength = labelLength + label.length + (labels.length ? 2 : 0);
+    if (nextLength > maxLabels) break;
+    labels.push(label);
+    labelLength = nextLength;
+  }
+  const remaining = headlines.length - labels.length;
+  const filed = `It filed ${headlines.length} lead${headlines.length === 1 ? "" : "s"} to the Queue: ${labels.map((label) => `“${label}”`).join("; ")}${remaining ? `; and ${remaining} more` : ""}.`;
+  return `${read} ${filed}`;
+}
+
 /** Login copy after the newsroom already has an owner. Not a second-editor product. */
 export function deskTakenLoginCopy() {
   return {
@@ -2185,16 +2216,31 @@ export function nearDuplicate(
 ): PrintedDup | null {
   for (const p of published) {
     const recent = Date.parse(p.published_at) >= Date.now() - 60 * 24 * 60 * 60 * 1000;
-    if (recent && leadMatchSignals.titleEntityOverlap?.(lead.headline, p.headline, place))
-      return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     const sameTopic = lead.topic != null && p.topic != null && lead.topic === p.topic;
     const titlesOverlapRaw = titlesOverlap(lead.headline, p.headline);
     // Nothing else can fire, and the Queue calls this once per published
     // story per lead: skip the tokenising work in the common case.
     if (!titlesOverlapRaw && !sameTopic) continue;
     const { subjects, names } = distinguishingOverlap(lead.headline, p.headline, place);
-    const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
-    if (titlesAgree || (names >= 2 && sameTopic)) {
+    // Strong title agreement can identify the same named event even when its
+    // Queue section differs from the section used by the printed story. Keep
+    // the subject gate for ordinary overlap; allow a name-only title only
+    // when three specific names agree. This does not admit same-entity stories
+    // whose titles do not overlap (B02).
+    const titlesAgree =
+      titlesOverlapRaw &&
+      ((subjects >= 1 && subjects + names >= 2) || names >= 3);
+    // A shared organization can publish several different stories in one
+    // section. Recent entity overlap is a review signal, not proof that the
+    // lead covers the printed story (B02). Keep the old Bohn Farm case because
+    // it also shares a subject word; the St. Vrain open-house / Head Start pair
+    // shares only the district name and therefore stays independent.
+    const recentEntityMatch =
+      recent &&
+      leadMatchSignals.titleEntityOverlap?.(lead.headline, p.headline, place) === true &&
+      subjects >= 1 &&
+      subjects + names >= 2;
+    if (recentEntityMatch || titlesAgree || (sameTopic && ((names >= 2 && subjects >= 1) || names >= 3))) {
       return { slug: p.slug, publishedAt: p.published_at, note: p.headline, headline: p.headline };
     }
   }

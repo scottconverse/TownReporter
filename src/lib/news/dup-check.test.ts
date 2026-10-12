@@ -43,12 +43,11 @@ import { queuePrintedMatches } from "./queue-rows.ts";
  * own tests use, and the same one `getPaperPlace` returns for it. */
 const PLACE = { city: "Longmont", state: "Colorado", county: "Boulder" };
 
-/** A candidate the word rule flags against a published story: two shared real
- * names AND the same section is `nearDuplicate`'s second way in (desk-copy.ts).
- * "Bohn Farm" is a name; "well water" against "rezoning" is the part the words
- * cannot tell apart. */
+/** A borderline pair with the same property, section and water-testing terms.
+ * The subject overlap is important: a shared farm name alone is not enough to
+ * ask the model to compare two different stories (B02). */
 const BOHN_LEAD = {
-  headline: "Bohn Farm rezoning heads to the planning board in October",
+  headline: "Bohn Farm rezoning board reviews nearby well water samples",
   why: "The board takes it up Tuesday.",
   topic: "council",
   source_urls: ["https://longmontleader.com/bohn-farm-rezoning"],
@@ -161,8 +160,8 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
   it("makes ONE call for many pairs, and puts both sides of every pair in it", async () => {
     const candidates = [
       BOHN_LEAD,
-      { ...BOHN_LEAD, headline: "Bohn Farm rezoning returns to the planning board", why: "Second reading." },
-      { ...BOHN_LEAD, headline: "Bohn Farm rezoning draws a crowd at the planning board", why: "Many speakers." },
+      { ...BOHN_LEAD, headline: "Bohn Farm rezoning returns to the planning board to review well water samples", why: "Second reading." },
+      { ...BOHN_LEAD, headline: "Bohn Farm rezoning draws a crowd at the planning board over well water samples", why: "Many speakers." },
     ];
     const { pairs } = collectDupPairs({ candidates, existing: [], printed: BOHN_PRINTED, place: PLACE });
     assert.equal(pairs.length, 3);
@@ -188,7 +187,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
   it("stops at the cap and leaves the rest on the word rule, saying how many it dropped", async () => {
     const candidates = Array.from({ length: DUP_CHECK_MAX_PAIRS + 5 }, (_, i) => ({
       ...BOHN_LEAD,
-      headline: `Bohn Farm rezoning hearing number ${i} at the planning board`,
+      headline: `Bohn Farm rezoning hearing number ${i} reviews nearby well water samples`,
     }));
     const { pairs, skipped } = collectDupPairs({
       candidates,
@@ -219,7 +218,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(true, "same rezoning vote, same planning board date");
+    const { chat } = answering(true, "same rezoning hearing, same well-water samples");
     const outcome = await runDupCheck({ pairs, chat });
 
     const decision = outcome.decisions.get(0)!;
@@ -242,7 +241,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
     assert.ok(chip, "the chip the word rule earned is kept");
     assert.equal(
       printedDuplicateLine(chip.headline, chip.aiWhy),
-      "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning vote, same planning board date",
+      "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning hearing, same well-water samples",
     );
   });
 
@@ -253,7 +252,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(false, "one is a rezoning, the other is water testing");
+    const { chat } = answering(false, "one is a rezoning hearing, the other reports completed test findings");
     const outcome = await runDupCheck({ pairs, chat });
 
     const decision = outcome.decisions.get(0)!;
@@ -385,8 +384,8 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
    *
    * The second half is the point of the unit: if a pair of this shape DOES
    * clear the word rule -- and the Bohn Farm pair above is exactly that shape,
-   * two same-section same-region stories sharing two real names and nothing
-   * else -- the desk's own model is what settles it, and a "no" removes the
+   * two same-section stories sharing a property name and water-testing subject
+   * terms -- the desk's own model is what settles it, and a "no" removes the
    * chip instead of leaving the owner's false positive on the Queue.
    */
   it("the owner's Boulder climate-suit pair gets no chip -- and a flagged pair like it is cleared by the check", async () => {
@@ -416,15 +415,15 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
     });
     assert.deepEqual(collected.pairs, [], "the check is not even asked about a pair the words already refuse");
 
-    // The same SHAPE, flagged by the words (two real names, one section) and
-    // settled by the model: a "no" takes the chip away.
+    // The same SHAPE, flagged by the words (property name, subject and section)
+    // and settled by the model: a "no" takes the chip away.
     const { pairs } = collectDupPairs({
       candidates: [BOHN_LEAD],
       existing: [],
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(false, "one is a rezoning, the other is a water test");
+    const { chat } = answering(false, "one is a rezoning hearing, the other reports completed test findings");
     const outcome: DupCheckOutcome = await runDupCheck({ pairs, chat });
     const settled = outcome.decisions.get(0)!.printed!;
     assert.equal(

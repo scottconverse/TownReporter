@@ -5,6 +5,7 @@ const LOW_SIGNAL_WORDS = new Set([
 ]);
 
 const OFF_TOPIC_REASON = "off-topic: no link to the subject or the town";
+const ACTIVE_FRONTIER_STATUSES = new Set(["open", "investigating", "reopened", "deferred"]);
 
 function relevanceWords(value: string): Set<string> {
   return new Set(
@@ -14,7 +15,7 @@ function relevanceWords(value: string): Set<string> {
   );
 }
 
-export function gateFrontierRelevance<T extends { label: string; why: string; status?: string; closed_reason?: string }>(
+export function gateFrontierRelevance<T extends { label: string; why: string; status?: string; closed_reason?: string | null }>(
   item: T,
   context: { subject: string; town: string },
 ): T {
@@ -32,4 +33,13 @@ export function gateFrontierRelevance<T extends { label: string; why: string; st
   const whyMatchesContext = [...whyWords].some((word) => contextWords.has(word));
   if (labelMatchesContext || (isUrl ? whyMatchesSubject : whyMatchesContext)) return item;
   return { ...item, status: "closed", closed_reason: OFF_TOPIC_REASON };
+}
+
+export function activeFrontierForSubject<T extends { label: string; why: string; status?: string; closed_reason?: string | null }>(
+  items: readonly T[],
+  context: { subject: string; town: string },
+): T[] {
+  return items
+    .map((item) => gateFrontierRelevance(item, context))
+    .filter((item) => ACTIVE_FRONTIER_STATUSES.has(item.status ?? "open"));
 }

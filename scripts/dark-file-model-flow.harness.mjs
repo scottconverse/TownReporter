@@ -97,6 +97,7 @@ const imports = {
   }),
   "@/components/first-run-picker-default": stub(`export const useFirstRunPickerSeed = () => {}; export const useFirstRunPickerDefault = () => "claude-haiku";`),
   "@/lib/news/dark-dials": stub(`export const scopeLabelsFor = () => ({ city: "Longmont", county: "Boulder County", region: "Region", adjacent: "Nearby" });`),
+  "@/lib/news/frontier-relevance": await moduleUrl("src/lib/news/frontier-relevance.ts"),
   "@/lib/news/editor-dialog-logic": stub(`export const DARK_LIMITS = [{ key: "quick", label: "Quick", minutes: 20, hops: 5 }, { key: "standard", label: "Standard", minutes: 120, hops: 5 }];`),
   "@/components/investigation-brief": stub(`export const InvestigationBriefCard = () => null; export const SectionTldr = () => null;`),
   "@/components/search-trail-entry": stub(`export const SearchTrailEntry = () => null;`),

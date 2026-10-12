@@ -466,7 +466,11 @@ it("counts successful later batches when an earlier batch fails", async () => {
   assert.equal(result.scanRun.model_batches_used, 2);
   assert.equal(result.scanRun.model_batches_failed, 1);
   assert.equal(result.scanRun.sources_analyzed, 1, "only the final one-source batch succeeded");
-  assert.ok(result.scanRun.summary?.includes("1 of 2 analysis batches failed"));
+  assert.match(
+    result.scanRun.summary ?? "",
+    /across 2 analysis batches; 1 failed\./,
+    "the handoff narrative names the successful and failed model batches",
+  );
 });
 
 it("stores a model-written lead whose headline carries a NUL instead of losing the run", async () => {
@@ -504,7 +508,10 @@ it("stores a model-written lead whose headline carries a NUL instead of losing t
   assert.equal(result.scanRun.sources_failed, 0);
   assert.equal(result.scanRun.sources_analyzed, 1);
   assert.equal(result.scanRun.error, null);
-  assert.equal(result.scanRun.summary, "The council approved the contract.");
+  assert.equal(
+    result.scanRun.summary,
+    "The scan read 1 source across 1 analysis batch. It reviewed 1 lead handoff. It filed 1 lead to the Queue: “Council approves the contract”.",
+  );
   assert.deepEqual(result.lead, {
     headline: "Council approves the contract",
     why: "The vote is Tuesday.",

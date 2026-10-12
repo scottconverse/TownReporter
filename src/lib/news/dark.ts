@@ -101,6 +101,7 @@ import {
 } from "./desk-copy.ts";
 import { officialDomains, pressDomains as pressDomainsOf } from "./absence-gate.ts";
 import { getPaperConfig, paperSetupWarning } from "./paper-settings.ts";
+import { activeFrontierForSubject } from "./frontier-relevance.ts";
 import { DEFAULT_NEWSROOM_ID } from "./membership.ts";
 import { TIP_SUBREDDIT_QUERY_GROUPS } from "../paper.ts";
 import {
@@ -1203,8 +1204,14 @@ export const getInvestigation = createServerFn({ method: "GET" })
       select id, kind, label, why, priority, status, closed_reason, prior_status, reopened_at::text as reopened_at
       from frontier_items
       where investigation_id = ${id} and newsroom_id = ${owned(context)}
-      order by priority desc, id desc limit 40
+      order by priority desc, id desc
     `;
+    const subjectFrontier = activeFrontierForSubject(frontier, {
+      subject: [inv[0].title, inv[0].ordinary_explanation, inv[0].scope_json]
+        .map((value) => String(value ?? ""))
+        .join(" "),
+      town: "",
+    });
     const artifacts = await sql<{
       id: number;
       url: string;
@@ -1477,7 +1484,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       }));
 
     return {
-      investigation: inv[0],
+      investigation: { ...inv[0], still_open: subjectFrontier.length },
       stalled,
       darkJob: job
         ? { id: job.id, status: job.status, stage: job.stage, error: job.error }
@@ -1494,7 +1501,7 @@ export const getInvestigation = createServerFn({ method: "GET" })
       brief,
       investigationFollowUps,
       captureCounts,
-      frontier,
+      frontier: subjectFrontier,
       artifacts,
       entities,
       historicalEntities,

@@ -4,6 +4,7 @@ import {
   actionEvidenceLine,
   claimBadge,
   hasReportingPackage,
+  heldRecommendationCopy,
   heldLine,
   methodLine,
   packageGaps,
@@ -123,6 +124,12 @@ describe("reporting run status wording", () => {
     assert.equal(state.tone, "err");
     assert.match(state.label, /did not finish/i);
   });
+});
+
+it("labels held possibilities as an AI recommendation without changing the saved lead status", () => {
+  const copy = heldRecommendationCopy();
+  assert.match(copy.heading, /AI recommends holding/i);
+  assert.match(copy.detail, /does not change the saved lead status in the Queue/i);
 });
 
 describe("claim badge honesty", () => {

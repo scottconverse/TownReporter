@@ -207,6 +207,8 @@ export async function fileScanLeads(
   /** The first dropped candidate's headline and the one-line reason, so the
    * scan summary can tell the editor what the pass deliberately left out. */
   firstDroppedReason?: { headline: string; reason: string };
+  /** Headlines returned by the rows this call really inserted. */
+  filedHeadlines: string[];
 }> {
   let leadsCreated = 0;
   let resurfacedKilled = 0;
@@ -530,6 +532,7 @@ export async function fileScanLeads(
     standingPageDropped,
     noEventDropped,
     firstDroppedReason,
+    filedHeadlines: insertedThisRun.map((row) => row.headline),
   };
 }
 
