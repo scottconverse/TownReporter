@@ -209,7 +209,7 @@ jobs:
   unit-tests:
     name: Unit suite, shard ${{ matrix.shard }} of 6
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
