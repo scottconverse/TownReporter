@@ -182,6 +182,7 @@ import { assessCheckedDraftResult, assessRefreshedCheckedDraft, draftFieldsMatch
 import { parseDraftCompletionReceipt } from "@/lib/news/draft-completion";
 import type { DraftMeetingEvidence } from "@/lib/news/meeting-draft-transcript-link";
 import type { MeetingAccounting } from "@/lib/news/meeting-ledger.server";
+import { sectionPickerLabel } from "@/lib/news/section-types";
 
 export const Route = createFileRoute("/desk/story/$leadId")({
   component: StoryPage,
@@ -4053,7 +4054,7 @@ function StoryPage() {
                     <option value="" disabled>Choose a section</option>
                     {TOPICS.filter((t) => t !== "about").map((t) => (
                       <option key={t} value={t}>
-                        {sectionName(t)}
+                        {sectionPickerLabel(t, sectionName(t))}
                       </option>
                     ))}
                     {topic && !TOPICS.includes(topic as (typeof TOPICS)[number]) ? (

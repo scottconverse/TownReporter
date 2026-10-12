@@ -7,6 +7,13 @@ export type PublishedStoryDisclosureInput = {
   researchJson?: string | null;
   /** The body that was published; compared with `modelBody` to tell an unchanged AI draft from an edited one. */
   publishedBody?: string | null;
+  /**
+   * The piece went to paper through "Publish anyway" over claims nobody
+   * reviewed (audit action `publish-unreviewed-claims`). The line then says
+   * an editor published it, not that one approved it, and says some claims
+   * were not checked.
+   */
+  publishedWithUnreviewedClaims?: boolean;
 };
 
 const AI_DRAFTED_AND_RESEARCHED_LINE = "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
@@ -16,12 +23,20 @@ const AI_RESEARCHED_LINE = "A person wrote and edited this story. AI tools helpe
 const AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE = "An editor approved this story for publication. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
 const AI_DRAFTED_APPROVED_LINE = "An editor approved this story for publication. AI tools helped write the first draft. The records we used are listed under Sources.";
 
+// THT-17: an override of unreviewed claims is never an approval. These say what happened.
+const AI_DRAFTED_AND_RESEARCHED_UNCHECKED_LINE = "An editor published this story. AI tools helped find records and write the first draft. Some claims in it were not checked against sources. The records we used are listed under Sources.";
+const AI_DRAFTED_UNCHECKED_LINE = "An editor published this story. AI tools helped write the first draft. Some claims in it were not checked against sources. The records we used are listed under Sources.";
+const AI_RESEARCHED_UNCHECKED_LINE = "A person wrote and edited this story. AI tools helped find records. Some claims in it were not checked against sources. The records we used are listed under Sources.";
+
 const DERIVED_LINES = [
   AI_DRAFTED_AND_RESEARCHED_LINE,
   AI_DRAFTED_LINE,
   AI_RESEARCHED_LINE,
   AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE,
   AI_DRAFTED_APPROVED_LINE,
+  AI_DRAFTED_AND_RESEARCHED_UNCHECKED_LINE,
+  AI_DRAFTED_UNCHECKED_LINE,
+  AI_RESEARCHED_UNCHECKED_LINE,
 ];
 
 /** True when a saved line is one this module derives from the receipts, not one an editor typed. */
@@ -51,6 +66,7 @@ export function disclosureForPublishedStory({
   modelBody,
   researchJson,
   publishedBody,
+  publishedWithUnreviewedClaims,
 }: PublishedStoryDisclosureInput): string {
   const chosen = text?.trim();
   if (chosen) return chosen;
@@ -59,6 +75,12 @@ export function disclosureForPublishedStory({
   const aiResearched = completedPublicAiResearch(researchJson);
   // Only a body that is still exactly the model's draft counts as approved; any edit keeps the edited line.
   const approved = aiDrafted && publishedBody?.trim() === modelBody?.trim();
+  if (publishedWithUnreviewedClaims) {
+    if (aiDrafted && aiResearched) return AI_DRAFTED_AND_RESEARCHED_UNCHECKED_LINE;
+    if (aiDrafted) return AI_DRAFTED_UNCHECKED_LINE;
+    if (aiResearched) return AI_RESEARCHED_UNCHECKED_LINE;
+    return "";
+  }
   if (aiDrafted && aiResearched) return approved ? AI_DRAFTED_AND_RESEARCHED_APPROVED_LINE : AI_DRAFTED_AND_RESEARCHED_LINE;
   if (aiDrafted) return approved ? AI_DRAFTED_APPROVED_LINE : AI_DRAFTED_LINE;
   if (aiResearched) return AI_RESEARCHED_LINE;
@@ -76,15 +98,19 @@ export function disclosureForReader({
   modelBody,
   researchJson,
   publishedBody,
+  publishedWithUnreviewedClaims,
   pastedByEditor,
 }: PublishedStoryDisclosureInput & { pastedByEditor?: boolean }): string {
   // A stored derived line (the publish path saved one before D67) is recomputed from the receipts, so the
   // approved-or-edited wording follows the body a reader is actually shown.
   const chosen = isDerivedDisclosureLine(text) ? null : text;
-  if (!pastedByEditor) return disclosureForPublishedStory({ text: chosen, modelBody, researchJson, publishedBody });
+  if (!pastedByEditor) {
+    return disclosureForPublishedStory({ text: chosen, modelBody, researchJson, publishedBody, publishedWithUnreviewedClaims });
+  }
   return disclosureForPublishedStory({
     text: chosen,
     modelBody: null,
     researchJson,
+    publishedWithUnreviewedClaims,
   });
 }

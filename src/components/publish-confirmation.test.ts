@@ -344,7 +344,13 @@ describe("OH: EVERY warning key is enabled, listed above the press, and labelled
         false,
         `"${key}" is a warning and must not disable the press`,
       );
-      assert.equal(confirmLabel(html), "Publish anyway in Council");
+      /* DHI-8: the unreviewed-claims confirm carries the same words as the button above it. */
+      const accept = blockers.find((b) => b.key === key)?.altAction;
+      const expectedLabel =
+        key === "claims-unreviewed" && accept?.target.kind === "accept-unreviewed"
+          ? `Publish anyway in Council${accept.label.replace(/^Publish anyway/, "")}`
+          : "Publish anyway in Council";
+      assert.equal(confirmLabel(html), expectedLabel);
       assert.match(html, sentence);
       assert.match(html, /class="astra-publish-warning"/);
       const pressAt = html.indexOf('class="action-btn btn solid');

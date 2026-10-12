@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { isMiscTopic } from "./section-types.ts";
+import { isMiscTopic, sectionPickerLabel } from "./section-types.ts";
 
 /*
   Unit BX, item 4: readers never see the "misc" section tag.
@@ -57,5 +57,17 @@ describe("isMiscTopic", () => {
     );
     assert.match(readerFn, /!isMiscTopic\(s\.key\)/, "the reader's list still carries a misc row");
     assert.doesNotMatch(editorFn, /isMiscTopic/, "the desk lost the bucket it files into");
+  });
+});
+
+describe("sectionPickerLabel (THT-19)", () => {
+  it("says the opinion section is the opinion pages, whatever case its label was stored in", () => {
+    assert.equal(sectionPickerLabel("opinion", "opinion"), "Opinion (opinion pages)");
+    assert.equal(sectionPickerLabel("opinion", "Opinion"), "Opinion (opinion pages)");
+  });
+
+  it("leaves every other section, Misc included, with its own name", () => {
+    assert.equal(sectionPickerLabel("misc", "Misc"), "Misc");
+    assert.equal(sectionPickerLabel("council", "City Council"), "City Council");
   });
 });

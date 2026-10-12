@@ -6761,6 +6761,8 @@ export const performPublish = createServerOnlyFn(async function performPublish(
           researchJson: row.research_json,
           /* DHF-2: an unchanged model draft is stored as approved, not edited. */
           publishedBody: draft.body,
+          /* THT-17: an override of unreviewed claims is not an approval. */
+          publishedWithUnreviewedClaims: fenced.outstandingClaims > 0,
         }))},
         /* The geography pill this story answers to. NULL is the home town on the
            paper, which is the rule for the whole pre-0098 archive too -- see
