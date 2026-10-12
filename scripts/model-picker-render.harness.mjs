@@ -19,7 +19,11 @@ function moduleUrl(source, fileName, imports = {}) {
   transpiled and injected too: a data: URL cannot resolve a relative import.
 */
 const registryUrl = moduleUrl(
-  await readFile(new URL("../src/lib/news/provider-registry.ts", import.meta.url), "utf8"),
+  await readFile(
+    process.env.FM3C_REGISTRY_SOURCE ??
+      new URL("../src/lib/news/provider-registry.ts", import.meta.url),
+    "utf8",
+  ),
   "provider-registry.ts",
 );
 const registry = await import(registryUrl);
@@ -124,31 +128,42 @@ export function announceOnly() {}`,
   "desk-chrome-utils-stub.ts",
 );
 
-const { ModelPicker, LocalModelSelect } = await import(
-  moduleUrl(
-    await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
-    "model-picker.tsx",
-    {
-      "@/lib/news/desk-local-model": moduleUrl(
-        await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
-        "desk-local-model.ts",
-      ),
-      "@/lib/news/model-choice": choices,
-      "@/lib/news/writer-bar": writerBarUrl,
-      "@/lib/news/provider-registry": registryUrl,
-      "@/lib/news/provider-availability": availabilityStubUrl,
-      "@/lib/news/provider-availability-key": availabilityStubUrl,
-      "@/lib/news/provider-settings": availabilityStubUrl,
-      "@/lib/news/custom-ai-settings": availabilityStubUrl,
-      "@/lib/news/claim": availabilityStubUrl,
-      "@tanstack/react-query": availabilityStubUrl,
+const modelPickerUrl = moduleUrl(
+  await readFile(new URL("../src/components/model-picker.tsx", import.meta.url), "utf8"),
+  "model-picker.tsx",
+  {
+    "@/lib/news/desk-local-model": moduleUrl(
+      await readFile(new URL("../src/lib/news/desk-local-model.ts", import.meta.url), "utf8"),
+      "desk-local-model.ts",
+    ),
+    "@/lib/news/model-choice": choices,
+    "@/lib/news/writer-bar": writerBarUrl,
+    "@/lib/news/provider-registry": registryUrl,
+    "@/lib/news/provider-availability": availabilityStubUrl,
+    "@/lib/news/provider-availability-key": availabilityStubUrl,
+    "@/lib/news/provider-settings": availabilityStubUrl,
+    "@/lib/news/custom-ai-settings": availabilityStubUrl,
+    "@/lib/news/claim": availabilityStubUrl,
+    "@tanstack/react-query": availabilityStubUrl,
 
-      "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
-      react: import.meta.resolve("react"),
-      "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
-    },
-  )
+    "@/components/desk-chrome-utils": deskChromeUtilsStubUrl,
+    react: import.meta.resolve("react"),
+    "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+  },
 );
+const { ModelPicker, LocalModelSelect } = await import(modelPickerUrl);
 
 const writerBar = await import(writerBarUrl);
-export { ModelPicker, LocalModelSelect, availabilityStub, registry, choiceModule, writerBar };
+export {
+  ModelPicker,
+  LocalModelSelect,
+  modelPickerUrl,
+  availabilityStubUrl,
+  registryUrl,
+  choices as modelChoiceUrl,
+  writerBarUrl,
+  availabilityStub,
+  registry,
+  choiceModule,
+  writerBar,
+};

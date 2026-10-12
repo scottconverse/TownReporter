@@ -55,6 +55,7 @@ type RedditScanResult = Extract<Awaited<ReturnType<typeof scanTipSubreddit>>, { 
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { DarkDialsPanel } from "@/components/dark-dials-panel";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { ReadMoreText } from "@/components/read-more-text";
 import { useFirstRunPickerDefault, useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { scopeLabelsFor, type DarkScope } from "@/lib/news/dark-dials";
@@ -279,10 +280,16 @@ function DarkPage() {
   const ocrModelEffort = defaultModelEffort(ocrModelChoice);
   const darkDefaultModel = useFirstRunPickerDefault("dark");
   const modelChoiceTouched = useRef(false);
+  const darkAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "dark",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "dark",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || darkAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -290,6 +297,7 @@ function DarkPage() {
   });
   const pickedFor = useRef<number | null>(null);
   const fileModelTouchedFor = useRef<number | null>(null);
+  const fileModelExplicitFor = useRef<number | null>(null);
   const observedActiveDarkJob = useRef<{ investigationId: number; jobId: number } | null>(null);
   const [briefWaiting, setBriefWaiting] = useState(false);
   const detail = useQuery({
@@ -343,14 +351,21 @@ function DarkPage() {
       pickedFor.current = openId;
       return;
     }
-    if (last == null && darkDefaultModel == null) return;
+    if (last == null && darkAssignment.isPending) return;
+    const assignedDefault = darkAssignment.hasAssignment
+      ? darkAssignment.resolution.providerId as StoryModelChoice
+      : darkDefaultModel;
+    if (last == null && assignedDefault == null) return;
     pickedFor.current = openId;
-    const remembered = darkModelChoice(last ?? darkDefaultModel);
+    const remembered = darkModelChoice(last ?? assignedDefault);
     setFileModelChoice(remembered);
     setFileModelEffort(last == null
-      ? defaultModelEffort(remembered)
+      ? darkAssignment.hasAssignment
+        ? darkAssignment.resolution.effort
+        : defaultModelEffort(remembered)
       : validatedModelEffort(remembered, detail.data.run?.model_effort));
-  }, [openId, detail.data, darkDefaultModel]);
+    fileModelExplicitFor.current = last == null ? null : openId;
+  }, [openId, detail.data, darkDefaultModel, darkAssignment.isPending, darkAssignment.hasAssignment, darkAssignment.resolution.providerId, darkAssignment.resolution.effort]);
 
   /** A queued brief has landed (or failed); say so once and stop polling. */
   useEffect(() => {
@@ -421,7 +436,7 @@ function DarkPage() {
     that ran. An untouched effort arrives as null and resolves to the surface
     default, which is what this round ran at before the select existed.
   */
-  const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null } | null>(null);
+  const firstRoundPick = useRef<{ choice: StoryModelChoice; effort: ModelEffort | null; explicit: boolean } | null>(null);
   /*
     Unit U25, B4: stop a running dig.
 
@@ -464,8 +479,8 @@ function DarkPage() {
       firstRoundPick.current = null;
       return continueInvestigation({
         data: picked
-          ? { id, modelChoice: picked.choice, modelEffort: picked.effort }
-          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort },
+          ? { id, modelChoice: picked.choice, modelEffort: picked.effort, modelChoiceExplicit: picked.explicit }
+          : { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id },
       });
     },
     onSuccess: (res) => {
@@ -568,7 +583,7 @@ function DarkPage() {
   });
 
   const challengeCase = useMutation({
-    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort } }),
+    mutationFn: (id: number) => challengeInvestigation({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (result, id) => {
       if (openId !== id) return;
       if (!result.ok) {
@@ -731,7 +746,7 @@ function DarkPage() {
   }, [reddit.isPending, redditLabel]);
 
   const writeBrief = useMutation({
-    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice, modelEffort } }),
+    mutationFn: (id: number) => refreshBrief({ data: { id, modelChoice: fileModelChoice, modelEffort: fileModelEffort, modelChoiceExplicit: fileModelExplicitFor.current === id } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         showNotice(res?.error ? `No brief: ${editorError(res.error) || "the request did not finish."}` : "No brief written.");
@@ -893,8 +908,21 @@ function DarkPage() {
       <DarkFileDialog
         open={startOpen}
         defaultLimit={darkSettings.data?.defaultLimitKey ?? "standard"}
-        defaultModel={modelChoiceTouched.current ? modelChoice : darkDefaultModel ?? modelChoice}
-        defaultEffort={modelChoiceTouched.current ? modelEffort : defaultModelEffort(darkDefaultModel ?? modelChoice)}
+        defaultModel={
+          modelChoiceTouched.current
+            ? modelChoice
+            : darkAssignment.hasAssignment
+              ? darkAssignment.resolution.providerId as StoryModelChoice
+              : darkDefaultModel ?? modelChoice
+        }
+        defaultEffort={
+          modelChoiceTouched.current
+            ? modelEffort
+            : darkAssignment.hasAssignment
+              ? darkAssignment.resolution.effort
+              : defaultModelEffort(darkDefaultModel ?? modelChoice)
+        }
+        defaultModelExplicit={modelChoiceTouched.current}
         seed={seedFromImport || undefined}
         prefill={startPrefill}
         onClose={() => {
@@ -916,13 +944,15 @@ function DarkPage() {
               round agree on what is running.
             */
             const effort = validatedModelEffort(picked, run.modelEffort) ?? defaultModelEffort(picked);
-            firstRoundPick.current = { choice: picked, effort };
+            firstRoundPick.current = { choice: picked, effort, explicit: run.modelChoiceExplicit === true };
             fileModelTouchedFor.current = id;
+            fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
             setFileModelChoice(picked);
             setFileModelEffort(effort);
           } else {
             const choice = darkDefaultModel ?? modelChoice;
             fileModelTouchedFor.current = id;
+            fileModelExplicitFor.current = run.modelChoiceExplicit ? id : null;
             setFileModelChoice(choice);
             setFileModelEffort(defaultModelEffort(choice));
           }
@@ -1234,6 +1264,7 @@ function DarkPage() {
               modelChoice={fileModelChoice}
               onModelChoice={(choice) => {
                 fileModelTouchedFor.current = openId;
+                fileModelExplicitFor.current = openId;
                 setFileModelChoice(choice);
                 setFileModelEffort(defaultModelEffort(choice));
               }}
@@ -1634,6 +1665,7 @@ function InvestigationWorkspace({
         targets: input.targets,
         leadId: input.leadId,
         modelChoice: input.modelChoice,
+        modelChoiceExplicit: input.modelChoiceExplicit,
           modelEffort: input.modelEffort,
       },
     }),

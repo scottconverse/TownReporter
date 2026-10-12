@@ -18,6 +18,7 @@ import {
 } from "@/lib/news/desk-copy";
 import type { LeadRow } from "@/lib/news/types";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { modelChoiceLabel, type StoryModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -118,7 +119,7 @@ export function LeadRowView({
    * the screen owns because the mutation is the screen's.
    */
   backPending?: boolean;
-  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null) => void;
+  onDraft?: (modelChoice: StoryModelChoice, modelEffort: ModelEffort | null, modelChoiceExplicit?: boolean) => void;
   drafting?: boolean;
   draftNotice?: { kind: "ok" | "err"; text: string } | null;
   batchSelected?: boolean;
@@ -207,10 +208,16 @@ export function LeadRowView({
     (see first-run-picker-default.ts).
   */
   const modelChoiceTouched = useRef(false);
+  const storyDraftAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "story",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || storyDraftAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -373,7 +380,7 @@ export function LeadRowView({
           <InkButton
             small
             disabled={drafting}
-            onClick={() => onDraft(modelChoice, modelEffort)}
+            onClick={() => onDraft(modelChoice, modelEffort, modelChoiceTouched.current)}
             ariaLabel={`${lead.status === "drafted" ? "Redraft" : "Draft"} ${editorTitle(lead.headline)} with ${modelChoiceLabel(modelChoice)}`}
           >
             {drafting ? "Queuing…" : lead.status === "drafted" ? "Redraft with AI" : "Draft with AI"}

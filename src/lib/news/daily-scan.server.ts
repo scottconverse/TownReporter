@@ -1,7 +1,9 @@
+import { resolveRequestedJobModel } from "./job-model-runtime.server.ts";
 import { createServerOnlyFn } from "@tanstack/react-start";
 import { getSql, withTransaction, type Sql } from "../db.ts";
 import { kickJobs, type DeskJob } from "./jobs.ts";
-import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime } from "./daily-scan.ts";
+import { dailyScanRuntime, type DailyScanRuntime, type StoredDailyScanRuntime ,
+} from "./daily-scan.ts";
 import { dailyScanPlan } from "./daily-scan-plan.server.ts";
 import { saveScanSourceCoverage } from "./scan-source-coverage.server.ts";
 import { getPaperConfig, requirePaperSetUp } from "./paper-settings.ts";
@@ -21,7 +23,8 @@ import {
   type PickerProviderId,
   type RetiredProviderId,
 } from "./provider-registry.ts";
-import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
+import { automaticFailoverReason, failoverNoteSentence, failoverReasonPhrase ,
+} from "./automatic-failover.ts";
 import { modelChoiceLabel } from "./model-choice.ts";
 
 export async function validateDailyRuntime(
@@ -30,6 +33,9 @@ export async function validateDailyRuntime(
   effort?: ModelEffort | null,
   validate: typeof validateForcedRuntime = validateForcedRuntime,
 ) {
+  const assignment = await resolveRequestedJobModel(newsroomId, "scan", runtime, effort);
+  runtime = assignment.providerId as DailyScanRuntime;
+  effort = assignment.effort;
   if (runtime === "auto") {
     /*
       Automatic runs the writing ladder itself, and it is resolved HERE rather
@@ -58,7 +64,8 @@ export async function validateDailyRuntime(
   }
   try {
     const snapshot = await validate(newsroomId, runtime, modelEffort(runtime, effort));
-    return { ...snapshot, requestedRuntime: runtime, requestedEffort: modelEffort(runtime, effort), resolvedRuntime: runtime, switchReason: null, switchNote: null };
+    return { ...snapshot, requestedRuntime: runtime, requestedEffort: modelEffort(runtime, effort), resolvedRuntime: runtime, switchReason: null, switchNote: null ,
+    };
   } catch (firstError) {
     const detail = firstError instanceof Error ? firstError.message : String(firstError);
     const reason = automaticFailoverReason(detail);
@@ -256,9 +263,10 @@ export async function tickDailyScans(
               revision: p.revision,
               localTime: p.local_time,
               timezone,
-              sourceCap: (p.source_cap_override ?? p.source_cap),
+              sourceCap: p.source_cap_override ?? p.source_cap,
               everyDaySourceCount: p.every_day_source_count ?? 8,
-              rotatingSourceCount: Math.max(0, (p.source_cap_override ?? p.source_cap) - (p.every_day_source_count ?? 8)),
+              rotatingSourceCount: Math.max(0, (p.source_cap_override ?? p.source_cap) - (p.every_day_source_count ?? 8),
+              ),
             }),
             JSON.stringify(sources),
             JSON.stringify(model),
@@ -280,8 +288,7 @@ export async function tickDailyScans(
           tx,
           p.newsroom_id,
           run.id,
-          plan.coverage,
-        );
+          plan.coverage);
         const [job] = await tx.query<{ id: number }>(
           "insert into desk_jobs(newsroom_id,user_id,kind,subject_id,model_choice,model_choice_source,lane,status,stage,failover_note,result_json) values($1,$2,'scan',$3,$4,'scheduled','default','queued',$5,$6,$7) returning id",
           [
@@ -291,7 +298,8 @@ export async function tickDailyScans(
             model.modelChoice,
             model.switchReason ? `Switched to ${modelChoiceLabel(model.modelChoice)}: ${model.switchReason}` : "Scheduled daily scan queued",
             model.switchNote ?? "",
-            JSON.stringify({ modelEffort: model.modelEffort ?? null, preflightFailover: model.switchReason ? model : null }),
+            JSON.stringify({ modelEffort: model.modelEffort ?? null, preflightFailover: model.switchReason ? model : null ,
+            }),
           ],
         );
         await tx.query(
@@ -449,9 +457,11 @@ export function attachDailyRuntimeReceipt(
     requestedRuntime: current?.requestedRuntime ?? current?.runtime ?? receipt.previousRuntime,
     requestedEffort:
       current && Object.prototype.hasOwnProperty.call(current, "requestedEffort")
-        ? current.requestedEffort ?? null
+        ? (current.requestedEffort ?? null
+        )
         : current && "modelEffort" in current
-          ? current.modelEffort ?? null
+          ? (current.modelEffort ?? null
+          )
           : receipt.previousEffort,
     resolvedRuntime: next.runtime,
     switchReason: receipt.switchReason,
@@ -487,10 +497,11 @@ export async function persistDailyRuntimeSwitch(
       [job.id, job.subject_id, job.newsroom_id, job.claim_token],
     );
     if (!current) {
-      throw new Error("Scheduled scan permission was withdrawn before its model switch could be saved.");
+      throw new Error("Scheduled scan permission was withdrawn before its model switch could be saved.",
+      );
     }
     const stored = attachDailyRuntimeReceipt(current.model_snapshot, next, receipt);
-    const nextEffort = "modelEffort" in next ? next.modelEffort ?? null : null;
+    const nextEffort = "modelEffort" in next ? (next.modelEffort ?? null ) : null;
     const jobRows = await sql.query(
       `update desk_jobs
           set model_choice=$2,
@@ -626,7 +637,7 @@ export async function runDailyScanWork(job: DeskJob, deps: DailyScanWorkDeps = {
         const persist = deps.persistRuntimeSwitch ?? persistDailyRuntimeSwitch;
         model = await persist(job, next, {
           previousRuntime: model.runtime ?? receipt.previousChoice,
-          previousEffort: "modelEffort" in model ? model.modelEffort ?? null : null,
+          previousEffort: "modelEffort" in model ? (model.modelEffort ?? null ) : null,
           switchReason: receipt.switchReason,
           switchNote: receipt.switchNote,
         });

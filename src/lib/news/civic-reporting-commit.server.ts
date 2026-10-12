@@ -1,3 +1,4 @@
+import { resolveRequestedJobModel } from "./job-model-runtime.server.ts";
 /*
   The editor-facing civic-reporting actions, behind the desk.
 
@@ -181,6 +182,7 @@ export type StartReportingInput = {
   seedUrls?: string;
   parentRequestId?: number;
   modelChoice?: string;
+  modelChoiceExplicit?: boolean;
   modelEffort?: ModelEffort | null;
   researchScope?: "public" | "supplied";
 };
@@ -190,7 +192,8 @@ export type StartReportingResult =
   // the sentinel "configured" that `effectiveStoryModelChoice` yields for an
   // org-configured default. Widened to the effective type so the resolved
   // pin flows out to the UI verbatim instead of being narrowed to a literal.
-  | { ok: true; requestId: number; jobId: number; modelChoice: EffectiveStoryModelChoice; modelLabel: string }
+  | { ok: true; requestId: number; jobId: number; modelChoice: EffectiveStoryModelChoice; modelLabel: string ;
+    }
   | {
       ok: false;
       warning?: { key: string; sentence: string };
@@ -219,7 +222,8 @@ type ReportingStartDependencies = {
 
 type FollowUpDependencies = Pick<ReportingStartDependencies, "probe" | "kick">;
 
-async function paperSetupRefusalFor(context: AuthenticatedEditor, action: string, override?: string[]) {
+async function paperSetupRefusalFor(context: AuthenticatedEditor, action: string, override?: string[],
+) {
   const refusal = await paperSetupWarning(context, override, action);
   if (!refusal) return null;
   return { ...refusal, detail: "", retryable: true, kind: undefined };
@@ -288,7 +292,8 @@ function parseStoredModelReceipt(value: unknown): Record<string, unknown> | null
     }
   }
   return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-    ? parsed as Record<string, unknown>
+    ? (parsed as Record<string, unknown>
+    )
     : null;
 }
 
@@ -402,7 +407,8 @@ export async function startReportingForAuthenticatedEditor(
     return { ok: false as const, error: "That reporting action is not one the desk knows." };
   }
   if (anchorsLead && !input.leadId) {
-    return { ok: false as const, error: "This action reports on an existing lead, but no lead was named." };
+    return { ok: false as const, error: "This action reports on an existing lead, but no lead was named." ,
+    };
   }
   if (!anchorsLead && input.leadId) {
     return {
@@ -438,10 +444,21 @@ export async function startReportingForAuthenticatedEditor(
     input.researchScope ?? (leadId ? parseNotes((await sql<{ notes_json: string | null }>`
       select to_jsonb(leads)->>'notes_json' as notes_json from leads
       where id = ${leadId} and newsroom_id = ${context.newsroomId} limit 1
-    `)[0]?.notes_json ?? null).researchScope : undefined) ?? "public";
+    `)[0]?.notes_json ?? null,
+        ).researchScope : undefined) ?? "public";
 
   const inheritedPin = deps.inheritedPin;
-  const requested = inheritedPin?.choice ?? storyModelChoice(input.modelChoice);
+  const assignment = inheritedPin
+    ? null
+    : await resolveRequestedJobModel(
+        context.newsroomId,
+        "story-draft",
+        input.modelChoice,
+        input.modelEffort,
+        input.modelChoiceExplicit,
+      );
+  const requested = inheritedPin?.choice ?? storyModelChoice(assignment?.providerId);
+  if (assignment) input= { ...input, modelEffort: assignment.effort };
   const pinned = inheritedPin
     ? pinInheritedReportingModel(inheritedPin, input.modelEffort)
     : await pinReportingModel({
@@ -467,7 +484,7 @@ export async function startReportingForAuthenticatedEditor(
       .map((u) => u.trim())
       .filter(Boolean),
   ).slice(0, 30);
-  const requestKind = anchorsLead ? (action === "report-meeting" ? "meeting" : "lead") : "assignment";
+  const requestKind = anchorsLead ? action === "report-meeting" ? "meeting" : "lead": "assignment";
   const actionLabel = anchorsLead ? LEAD_ACTION_LABELS[action] : (directLabel as string);
 
   /*
@@ -595,6 +612,7 @@ export async function answerReportingFollowUp(
     assignment: string;
     seedUrls?: string;
     modelChoice?: string;
+    modelChoiceExplicit?: boolean;
     modelEffort?: ModelEffort | null;
     researchScope?: "public" | "supplied";
   },
@@ -615,7 +633,8 @@ export async function answerReportingFollowUp(
     : undefined;
   const researchScope = input.researchScope ?? parentScope;
   if (!researchScope) {
-    return { ok: false as const, error: "This reporting run has no saved research scope to continue." };
+    return { ok: false as const, error: "This reporting run has no saved research scope to continue." ,
+    };
   }
 
   const explicitModelChoice = input.modelChoice?.trim() ? input.modelChoice : undefined;
@@ -638,12 +657,14 @@ export async function answerReportingFollowUp(
     seedUrls,
     parentRequestId: parent.id,
     modelChoice: explicitModelChoice,
-    modelEffort: input.modelEffort,
+    modelChoiceExplicit: input.modelChoiceExplicit,
+      modelEffort: input.modelEffort,
     researchScope,
   }, {
     ...dependencies,
     ...(inheritedPin ? { inheritedPin } : {}),
-  });
+  },
+  );
 }
 
 /**
@@ -732,7 +753,8 @@ export async function storyLeadLinksForRequest(
     const leadId = Number((entry as { leadId?: unknown })?.leadId);
     if (!storyId || !Number.isInteger(leadId) || leadId <= 0) continue;
     const draftId = Number((entry as { draftId?: unknown })?.draftId);
-    out.push({ storyId, leadId, draftId: Number.isInteger(draftId) && draftId > 0 ? draftId : null });
+    out.push({ storyId, leadId, draftId: Number.isInteger(draftId) && draftId > 0 ? draftId : null ,
+    });
   }
   return out;
 }
@@ -795,7 +817,8 @@ export async function loadLeadReportingPackageForEditor(
     requestId: latestRun.requestId, draftId: null, pkg: null, latestRun,
     earlierPackages: [], storyLeads: [], seedUrls: [], currentDocumentChecks: {},
   } : null;
-  const earlierPackages = await loadEarlierLeadReportingPackages(sql, leadId, context.newsroomId, loaded.requestId);
+  const earlierPackages = await loadEarlierLeadReportingPackages(sql, leadId, context.newsroomId, loaded.requestId,
+  );
   const storyLeads = await storyLeadLinksForRequest(sql, loaded.requestId, context.newsroomId);
   /*
     Seeds are stored as a jsonb array of strings on the request. Read them
@@ -808,7 +831,8 @@ export async function loadLeadReportingPackageForEditor(
   `;
   const seedUrls = parseSeedUrls(requestRow?.seed_urls);
   const { loadCurrentReportingDocumentChecks } = await import("./reporting-document-check.server.ts");
-  const currentDocumentChecks = await loadCurrentReportingDocumentChecks(sql, context.newsroomId, loaded.requestId);
+  const currentDocumentChecks = await loadCurrentReportingDocumentChecks(sql, context.newsroomId, loaded.requestId,
+  );
   return { ...loaded, earlierPackages, storyLeads, seedUrls, latestRun, currentDocumentChecks };
 }
 

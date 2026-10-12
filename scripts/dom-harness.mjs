@@ -187,6 +187,19 @@ export function transpileToUrl(code, fileName, imports = {}) {
 }
 
 /**
+ * Legacy flows test unrelated actions with no stored model assignments. Keep
+ * their per-run model state unchanged, explicitly representing that fixture.
+ * Tests of assignment behavior supply their own real hook mapping, which wins.
+ */
+export const noJobModelAssignmentUrl = stubUrl(`
+export function useJobModelAssignment() {
+  return {
+    resolution: { providerId: "auto", effort: null, source: "surface-default", rank: null, notice: null },
+    hasAssignment: false, isPending: false, isError: false,
+  };
+}`);
+
+/**
  * Point every specifier at a URL Node can import.
  *
  * An explicit mapping wins. Anything else is resolved from this repository's own
@@ -203,6 +216,9 @@ function rewriteSpecifiers(output, fileName, imports) {
   const unresolved = [];
   for (const specifier of specifiers) {
     let mapped = imports[specifier];
+    if (!mapped && specifier === "@/components/use-job-model-assignment") {
+      mapped = noJobModelAssignmentUrl;
+    }
     if (!mapped && specifier === "@/components/scoped-actions") {
       // The scoped handles moved transport imports. Keep each existing fixture's
       // original transport stub and fail if it did not supply a required handle.

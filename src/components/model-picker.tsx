@@ -332,11 +332,7 @@ export function ModelPicker(props: Props) {
   const noneOptions: ModelChoiceOption[] = props.noneOption
     ? [{ value: "none" as StoryModelChoice, label: "None", detail: "" }]
     : [];
-  const options = [
-    ...noneOptions,
-    ...builtInOptions,
-    ...customOptions,
-  ];
+  const options = [...noneOptions, ...builtInOptions, ...customOptions];
   if (isCustomModelChoice(props.value) && !options.some((option) => option.value === props.value)) {
     options.push({
       value: props.value,
@@ -360,10 +356,10 @@ export function ModelPicker(props: Props) {
   const shownValue = noFallback
     ? "none"
     : retiredNote
-    ? options.some((option) => option.value === "auto")
-      ? "auto"
-      : options[0]?.value ?? "auto"
-    : props.value;
+      ? options.some((option) => option.value === "auto")
+        ? "auto"
+        : (options[0]?.value ?? "auto")
+      : props.value;
   const selected = options.find((option) => option.value === shownValue) ?? options[0];
   const helpId = useId();
   const effortId = useId();
@@ -413,15 +409,19 @@ export function ModelPicker(props: Props) {
   function unavailableReason(option: ModelChoiceOption): string {
     const entry = providerEntry(option.value);
     if (entry && !entry.offeredFor[pickerScope]) {
+      if (pickerScope === "ocr") return "This model cannot read images for OCR.";
       return "This model is not available for this kind of work.";
     }
-    return writerUnavailableReason({
-      choice: option.value,
-      label: option.label,
-      availability: availability.data,
-      localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
-      customConnection: connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
-    }) ?? "";
+    return (
+      writerUnavailableReason({
+        choice: option.value,
+        label: option.label,
+        availability: availability.data,
+        localModel: selectedLocalChoice.data?.override ?? selectedLocalCatalog.data?.defaultModel,
+        customConnection:
+          connections.data?.find((row) => `custom:${row.id}` === option.value) ?? null,
+      }) ?? ""
+    );
   }
   function optionStatusSuffix(option: ModelChoiceOption): string {
     if (providerEntry(option.value)?.kind === "gemini-cli") {
@@ -437,33 +437,38 @@ export function ModelPicker(props: Props) {
       ? "Could not check this model's readiness. Draft preflight will check it before starting."
       : "Checking this model's readiness on the server…"
     : noFallback
-    ? "No fallback model is set for this rank."
-    : retiredNote
-    ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
-    : isCustomModelChoice(shownValue)
-      ? selectedUnavailable
-        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
-        : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
-      : selectedUnavailable
-        ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
-        : modelChoiceHelp(selected.value, props.scope ?? "story");
+      ? "No fallback model is set for this rank."
+      : retiredNote
+        ? `${retiredNote} ${modelChoiceHelp(selected.value, props.scope ?? "story")}`
+        : isCustomModelChoice(shownValue)
+          ? selectedUnavailable
+            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            : `Prefers ${selected.label} (${selected.detail}) for this run. A technical failure can move the unfinished call to the next ready writing model; a content refusal stops the run. Your provider's usage charges may apply.`
+          : selectedUnavailable
+            ? `${unavailableReason(selected)} If you draft anyway, the desk will use the next ready writing model.`
+            : modelChoiceHelp(selected.value, props.scope ?? "story");
   const customConnection = isCustomModelChoice(shownValue)
     ? connections.data?.find((row) => `custom:${row.id}` === shownValue)
     : null;
-  const exactModel = !noFallback && shownValue === "local-model"
-    ? selectedLocalChoice.data ? selectedLocalChoice.data.override?.id ?? null : selectedLocalCatalog.data?.defaultModel?.id ?? null
-    : customConnection?.modelId ?? null;
+  const exactModel =
+    !noFallback && shownValue === "local-model"
+      ? selectedLocalChoice.data
+        ? (selectedLocalChoice.data.override?.id ?? null)
+        : (selectedLocalCatalog.data?.defaultModel?.id ?? null)
+      : (customConnection?.modelId ?? null);
   const localPick = selectedLocalChoice.data
     ? selectedLocalChoice.data.override
     : selectedLocalCatalog.data?.defaultModel;
   const localBackend = localPick?.id ?? null;
   const localMetadata = selectedLocalCatalog.data?.servers
-    .find(server => server.baseUrl === localPick?.baseUrl)?.models.find(model => model.id === localBackend);
-  const optionText = (option: ModelChoiceOption) => option.value === "local-model"
-    ? localBackend
-      ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
-      : "Local model — backend not checked yet"
-    : pickerOptionText(option);
+    .find((server) => server.baseUrl === localPick?.baseUrl)
+    ?.models.find((model) => model.id === localBackend);
+  const optionText = (option: ModelChoiceOption) =>
+    option.value === "local-model"
+      ? localBackend
+        ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
+        : "Local model — backend not checked yet"
+      : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort =
     props.effort && effortOptions.includes(props.effort)
@@ -472,7 +477,10 @@ export function ModelPicker(props: Props) {
   return (
     <div
       data-model-picker="shared"
-      className={["model-picker", props.compact ? "compact" : "", props.layout].filter(Boolean).join(" ")}
+      data-model-scope={pickerScope}
+      className={["model-picker", props.compact ? "compact" : "", props.layout]
+        .filter(Boolean)
+        .join(" ")}
     >
       <label htmlFor={selectId} className="model-picker-label">
         {props.label ?? (props.scope === "dark" ? "Digging model" : "Writing model")}
@@ -487,7 +495,9 @@ export function ModelPicker(props: Props) {
           pickerOptionText), so the full sentence goes here as a title: a
           select clips its own text and there is no CSS that can recover it.
         */
-        title={selected ? `${pickerOptionTitle(selected)}${optionStatusSuffix(selected)}` : undefined}
+        title={
+          selected ? `${pickerOptionTitle(selected)}${optionStatusSuffix(selected)}` : undefined
+        }
         onChange={(event) => {
           if (props.noneOption && event.target.value === "none") {
             props.onClear?.();
@@ -509,21 +519,38 @@ export function ModelPicker(props: Props) {
           );
         })}
       </select>
+      {pickerScope === "ocr" ? (
+        <span className="model-picker-help">
+          OCR reads images. Models without image support stay listed and are marked as unable to
+          read images for OCR.
+        </span>
+      ) : null}
       <span id={helpId} className="model-picker-help">
         {help}
       </span>
       {props.onEffortChange ? (
-        <div className={["model-picker", props.layout].filter(Boolean).join(" ")} style={{ gridColumn: "1 / -1" }}>
-          <label htmlFor={effortId} className="model-picker-label">Thinking effort</label>
+        <div
+          className={["model-picker", props.layout].filter(Boolean).join(" ")}
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <label htmlFor={effortId} className="model-picker-label">
+            Thinking effort
+          </label>
           <select
             id={effortId}
             value={selectedEffort ?? ""}
             disabled={props.disabled || effortOptions.length === 0}
-            onChange={(event) => props.onEffortChange?.(event.target.value ? event.target.value as ModelEffort : null)}
+            onChange={(event) =>
+              props.onEffortChange?.(
+                event.target.value ? (event.target.value as ModelEffort) : null,
+              )
+            }
           >
             {selectedEffort == null ? <option value="">Provider default</option> : null}
             {effortOptions.map((effort) => (
-              <option key={effort} value={effort}>{modelEffortLabel(effort, exactModel)}</option>
+              <option key={effort} value={effort}>
+                {modelEffortLabel(effort, exactModel)}
+              </option>
             ))}
           </select>
           <span className="model-picker-help">
@@ -533,9 +560,7 @@ export function ModelPicker(props: Props) {
           </span>
         </div>
       ) : null}
-      {props.value === "local-model" ? (
-        <LocalModelSelect scope={props.scope ?? "story"} />
-      ) : null}
+      {props.value === "local-model" ? <LocalModelSelect scope={props.scope ?? "story"} /> : null}
       {connections.isError ? (
         <span className="model-picker-help" role="status">
           Could not load custom API connections. Existing model choices still work.
@@ -589,10 +614,14 @@ export function ModelPicker(props: Props) {
               >
                 Claude Code installation guide
               </a>
-              . For Gemini (Pro plan), install the Gemini program on that computer, run <code>agy</code> and sign in with your Google account. Use <code>GEMINI_CLI_PATH</code> if it is installed elsewhere. No API key is needed. For an on-device model, start llama.cpp, LM Studio, or Ollama on that computer.
-              Ollama Cloud models are hosted and appear separately after Ollama is connected. TownReporter discovers default local addresses automatically. Use{" "}
-              <code>LLM_BASE_URL</code>, <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only
-              for a different address, model or authenticated server -- see{" "}
+              . For Gemini (Pro plan), install the Gemini program on that computer, run{" "}
+              <code>agy</code> and sign in with your Google account. Use{" "}
+              <code>GEMINI_CLI_PATH</code> if it is installed elsewhere. No API key is needed. For
+              an on-device model, start llama.cpp, LM Studio, or Ollama on that computer. Ollama
+              Cloud models are hosted and appear separately after Ollama is connected. TownReporter
+              discovers default local addresses automatically. Use <code>LLM_BASE_URL</code>,{" "}
+              <code>LLM_MODEL</code> and <code>LLM_API_KEY</code> only for a different address,
+              model or authenticated server -- see{" "}
               <a
                 className="inline-link"
                 href="https://github.com/scottconverse/TownReporter/blob/main/docs/local-models.md"

@@ -28,6 +28,7 @@ import { refusedAnswer } from "@/lib/news/refused-answer";
 import { restoreTrashItem } from "@/lib/news/trash";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { DEFAULT_OPINION_MODEL, type OpinionModelChoice } from "@/lib/news/model-choice";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
@@ -107,10 +108,16 @@ function OpinionPage() {
     before (see first-run-picker-default.ts).
   */
   const modelChoiceTouched = useRef(false);
+  const opinionAssignment = useJobModelAssignment<OpinionModelChoice>({
+    jobKey: "opinion",
+    touched: modelChoiceTouched,
+    setChoice: (choice) => setModelChoice(choice as OpinionModelChoice),
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "opinion",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || opinionAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -250,7 +257,7 @@ function OpinionPage() {
   });
 
   const start = useMutation({
-    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
+    mutationFn: (request?: { override?: string[]; voiceMode?: "paper" | "neutral" }) => startEditorial({ data: { subject, askedFor, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current, voiceMode: request?.voiceMode ?? "paper", documentIds: documents.map((d) => d.id), retryRequestId, override: request?.override } }),
     onSuccess: (res) => {
       if (!res?.ok) {
         if (res && "warning" in res) { setStartWarning(res.warning); return; }

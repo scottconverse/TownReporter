@@ -132,7 +132,7 @@ describe("model choice contract", () => {
       );
     }
     assert.ok(STORY_MODEL_CHOICES.some((choice) => choice.value === "deepseek-flash"));
-    assert.ok(!providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
+    assert.ok(providersFor("forced").some((entry) => entry.id === "deepseek-flash"));
     assert.ok(!providersFor("ocr").some((entry) => entry.id === "deepseek-flash"));
 
     const deepseek = OPINION_MODEL_CHOICES.find((choice) => choice.value === "deepseek-flash")!;

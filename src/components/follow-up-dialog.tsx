@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Dialog, ChoiceCard } from "@/components/dialog";
 import { ModelPicker } from "@/components/model-picker";
@@ -7,6 +7,7 @@ import { validateFollowUpDialog } from "@/lib/news/follow-up-dialog-validation";
 import type { ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
 import type { FollowUpAgentKind } from "@/lib/news/types";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 
 /**
  * The "New AI follow-up" dialog, and its edit twin.
@@ -44,6 +45,7 @@ export type FollowUpDialogInput = {
   targets: string[];
   leadId: number | null;
   modelChoice: StoryModelChoice;
+  modelChoiceExplicit?: boolean;
   modelEffort?: ModelEffort | null;
 };
 
@@ -104,8 +106,15 @@ export function FollowUpDialog({
   const [targetsText, setTargetsText] = useState(initial?.targets ?? "");
   const [leadId, setLeadId] = useState<string>(initial?.leadId ? String(initial.leadId) : "");
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>(initial?.modelChoice ?? "auto");
-
   const [effort, setEffort] = useState<ModelEffort | null>(initial?.modelEffort ?? null);
+  const modelChoiceTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "follow-up",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort,
+    preserveCurrent: Boolean(initial?.modelChoice && initial.modelChoice !== "auto"),
+  });
 
   const targets = parseTargets(targetsText);
   const overCap = targets.length > MAX_TARGETS;
@@ -140,6 +149,7 @@ export function FollowUpDialog({
           targets: targets.slice(0, MAX_TARGETS),
           leadId: leadId ? Number(leadId) : null,
           modelChoice,
+          modelChoiceExplicit: modelChoiceTouched.current,
           modelEffort: effort,
         });
       }}
@@ -211,9 +221,9 @@ export function FollowUpDialog({
           scope="follow-up"
           label="Model for this follow-up"
           value={modelChoice}
-          onChange={(choice) => { setModelChoice(choice); setEffort(null); }}
+          onChange={(choice) => { modelChoiceTouched.current = true; setModelChoice(choice); setEffort(null); }}
           effort={effort}
-          onEffortChange={setEffort}
+          onEffortChange={(value) => { modelChoiceTouched.current = true; setEffort(value); }}
         />
 
         <div className="fu-choices" role="radiogroup" aria-label="How">

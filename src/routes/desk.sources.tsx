@@ -1,7 +1,7 @@
 import { dailyScanCounts } from "@/lib/desk/daily-scan-counts";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useDeferredValue, useMemo, useState } from "react";
+import { Fragment, useDeferredValue, useMemo, useRef, useState } from "react";
 import { DeskShell, Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { inkSolid, inputClass } from "@/components/desk-chrome-utils";
 import { ModelPicker } from "@/components/model-picker";
@@ -42,6 +42,7 @@ import { candidateIsWatchedSource } from "@/lib/news/source-replacements";
 import { applySections, editorSections } from "@/lib/news/sections";
 import { usePaperDateFormatters } from "@/lib/paper-context-state";
 import { useDeskMutation } from "@/components/desk-action";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { ActionButton, rowActionPhase } from "@/components/action-button";
 import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
@@ -202,6 +203,13 @@ function SourcesPage() {
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const scanModelTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: scanModelTouched,
+    setChoice: setScanModel,
+    setEffort: setScanModelEffort,
+  });
   /*
     Unit U24: what the last per-row check said, and which row it belongs to.
     The editor pressed a row, so the answer is drawn on that row -- "Read OK
@@ -215,7 +223,7 @@ function SourcesPage() {
     line: string;
   } | null>(null);
   const runScanNow = useMutation({
-    mutationFn: (daily: boolean) => runScan({ data: { daily, modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: (daily: boolean) => runScan({ data: { daily, modelChoice: scanModel, modelEffort: scanModelEffort, modelChoiceExplicit: scanModelTouched.current } }),
     onSuccess: (res) => {
       if (res && "ok" in res && res.ok === false) {
         setScanNotice(res.error);
@@ -789,7 +797,7 @@ function SourcesPage() {
                 scope="scan"
                 label="Model for this scan"
                 value={scanModel}
-                onChange={setScanModel}
+                onChange={(choice) => { scanModelTouched.current = true; setScanModel(choice); setScanModelEffort(defaultModelEffort(choice)); }}
                 effort={scanModelEffort}
                 onEffortChange={setScanModelEffort}
               />
