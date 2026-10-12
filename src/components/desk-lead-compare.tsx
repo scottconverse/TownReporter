@@ -1,10 +1,10 @@
 import { deskWarning } from "../lib/news/desk-warning.ts";
+import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Chip, InkButton } from "@/components/desk-chrome";
 import { Notice } from "@/components/states";
 import { parseUrlList } from "@/lib/paper";
-import { confirmBeforeKillingDuplicate } from "@/lib/news/duplicate-review";
 import {
   COMPARE_CURRENT_LABEL,
   COMPARE_HEADING,
@@ -144,15 +144,19 @@ export function LeadComparePanel({
           <InkButton
             tone="quiet-danger"
             disabled={busy !== ""}
-            onClick={() =>
-              confirmBeforeKillingDuplicate(
+            /* DHG-1: the confirm stays (never remove a feature). A walk in an
+               automated browser dismissed it, so the press sent nothing and the
+               panel said nothing. A closed confirm now says so in the panel. */
+            onClick={() => {
+              const killed = confirmBeforeKillingDuplicate(
                 (message) => window.confirm(message),
                 currentIsKilled
                   ? "Add a duplicate note to “" + current.headline + "”, already killed, as a duplicate of “" + prior.headline + "”?"
                   : "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
                 () => run("kill", onKillThis),
-              )
-            }
+              );
+              if (!killed) setNote({ kind: "err", text: "Nothing was killed: the question was closed without a yes. Press the button again and choose OK to kill it." });
+            }}
             ariaLabel={`${currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}: ${current.headline}`}
           >
             {busy === "kill" ? "Saving…" : currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}

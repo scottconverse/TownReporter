@@ -64,10 +64,10 @@ test("DHF-6/DHF-8: a fixed model's effort control does not borrow the Automatic 
   );
 });
 
-// DHE1-2: the Dark Desk has one dark model. The file dialog and the page-watch
-// picker read the same state, and the page-watch picker no longer borrows the
-// name of the file's "Digging model" job.
-test("DHE1-2: the page-watch picker is named for its own job, not Digging model, and starts from the Dark Desk's one model", async () => {
+// DHE1-2: "Model for page watches" is its own job. Walk H showed a Digging pick
+// moving it, so the page-watch picker keeps its own state: even when the Dark
+// Desk's Digging model is passed in, a new watch starts on Automatic.
+test("DHE1-2: the page-watch picker is named for its own job, not Digging model, and keeps its own state", async () => {
   availabilityStub.__setAvailability(Object.fromEntries(["codex-luna", "auto", "local-model"].map((id) => [id, true])));
   {
     // The page-watch panel's own ModelPicker is mapped to the real picker here;
@@ -94,8 +94,8 @@ test("DHE1-2: the page-watch picker is named for its own job, not Digging model,
     );
     assert.equal(
       watchPicker.querySelector("option[selected]")?.getAttribute("value"),
-      "codex-luna",
-      "the page-watch picker starts from the Dark Desk's one model, not the default",
+      "auto",
+      "walk H (DHE1-2): a new watch starts on its own model, not the Dark Desk's Digging model",
     );
   }
 });

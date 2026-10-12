@@ -168,7 +168,7 @@ import { RedraftDialog } from "@/components/dialogs/RedraftDialog";
 import { CompareVersionsDialog } from "@/components/dialogs/CompareVersionsDialog";
 import { AddToStoryDialog, HeadlineDialog } from "@/components/dialogs";
 import { StoryCheckJobProgress, StoryJobProgress } from "@/components/JobCard";
-import { jobProgressView } from "@/lib/news/job-progress";
+import { cancelStoryJob, jobProgressView } from "@/lib/news/job-progress";
 /*
   Civic reporting (editor UI). `ReportingPackagePanel` draws the structured
   package the runner filed for this lead beside the editable copy, and
@@ -826,7 +826,11 @@ function StoryPage() {
     priorDraftJobWasOpen.current = false;
     setWaitingSince(null);
     setSlowWait(false);
-    setMsg(editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish.");
+    setMsg(
+      /^Cancelled by the editor/i.test(data.job.error ?? "")
+        ? "Stopped. No draft was saved."
+        : (editorDraftError(data.job.error) ?? data.job.error ?? "The draft did not finish."),
+    );
   }, [data?.job, waitingSince]);
 
   /*
@@ -949,6 +953,13 @@ function StoryPage() {
         setWaitingSince(null);
         setSlowWait(false);
       }
+      /*
+        The progress card (and its Cancel) reads the desk-jobs list, which only
+        re-polls every 30 s while nothing is open. A press that just queued a
+        draft must refresh it now, or the editor has no Cancel on screen for
+        the first half minute of a run (Walk H FG2 / DHH-4).
+      */
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
       await qc.invalidateQueries({ queryKey: ["lead", id] });
       await qc.invalidateQueries({ queryKey: ["leads"] });
       if (!answered(res)) {
@@ -992,6 +1003,19 @@ function StoryPage() {
     },
   });
 
+  /*
+    Stop for the draft this page is waiting on. It is the same server call the
+    progress card's Cancel makes; it sits in the writer bar so that a press of
+    "Draft anyway" (which starts the next ready model at once) always has a way
+    out right where it was pressed.
+  */
+  const stopDraft = useMutation({
+    mutationFn: (jobId: number) => cancelStoryJob({ data: { jobId } }),
+    onSettled: async () => {
+      void qc.invalidateQueries({ queryKey: ["desk-jobs"] });
+      await qc.invalidateQueries({ queryKey: ["lead", id] });
+    },
+  });
   const draftMeetingReview = useMutation({
     mutationFn: (input: { confirmedSegmentIndexes: number[]; note: string; override?: string[] }) => {
       if (!data?.draft?.id || !data.evidenceToken || !data.draftMeetingEvidence?.currentArtifactId) {
@@ -3469,17 +3493,26 @@ function StoryPage() {
                   headline, and what a printed story shows is the article's own
                   field, saved by "Save headline" above.
                 */}
-                <ModelPicker
-                  scope="story"
-                  label="Model for suggestions"
-                  layout="stacked"
-                  compact
-                  value={headlineModel}
-                  effort={headlineEffort}
-                  onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
-                  onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
-                  disabled={suggest.isPending || waiting}
-                />
+                {/*
+                  DHG-3 / H06: the headline job has ONE pick. While the Headline
+                  dialog is open it draws its own row from this same state, so
+                  this row steps aside rather than sit behind it as a second
+                  control; it is back, showing the same pick, when the dialog
+                  closes.
+                */}
+                {headlineOpen ? null : (
+                  <ModelPicker
+                    scope="story"
+                    label="Model for suggestions"
+                    layout="stacked"
+                    compact
+                    value={headlineModel}
+                    effort={headlineEffort}
+                    onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
+                    onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
+                    disabled={suggest.isPending || waiting}
+                  />
+                )}
                 <button
                   type="button"
                   className="btn"
@@ -3794,6 +3827,15 @@ function StoryPage() {
               )}
                   </ActionButton>
                 </div>
+                {waiting && (data.job?.status === "queued" || data.job?.status === "running") ? (
+                  <InkButton
+                    tone="quiet"
+                    disabled={stopDraft.isPending || data.job.cancel_requested === true}
+                    onClick={() => data.job && stopDraft.mutate(data.job.id)}
+                  >
+                    {stopDraft.isPending ? "Stopping…" : "Stop"}
+                  </InkButton>
+                ) : null}
                 <PaperSetupGateNote gate={paperGate} />
               </>
             ) : null}
@@ -4430,6 +4472,13 @@ function StoryPage() {
         current={headline}
         defaultModel={headlineModel}
         defaultEffort={headlineEffort}
+        model={headlineModel}
+        effort={headlineEffort}
+        modelPicked={headlinePick !== null}
+        onModelChange={(choice) => setHeadlinePick({ model: choice as StoryModelChoice, effort: defaultModelEffort(choice) })}
+        onEffortChange={(effort) =>
+          setHeadlinePick({ model: headlineModel, effort: (effort as ModelEffort | null) })
+        }
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {

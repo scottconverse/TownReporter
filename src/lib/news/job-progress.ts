@@ -479,6 +479,7 @@ export async function readDeskJobs(newsroomId: number): Promise<JobProgressView[
           order by d.updated_at desc, d.id desc limit 1) as draft_id
       from desk_jobs j
       where j.newsroom_id = ${newsroomId}
+        and j.kind <> 'headlines'
       order by (j.status = 'running') desc, (j.status = 'queued') desc, j.id desc
       limit 30
     `;
