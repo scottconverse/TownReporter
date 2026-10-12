@@ -209,11 +209,11 @@ test("FA10: evidence cards lead with a readable date, passage and review action"
     url: "https://records.example/agenda",
     title: "Council agenda",
     capturedAt: "2026-09-08T10:00:00Z",
+    newerCapture: { versionId: 43, capturedAt: "2026-09-09T11:00:00Z" },
     available: true,
     readable: true,
     takenDown: false,
     excerptState: "found",
-    newerCapture: null,
     viewHref: "/evidence/41",
   };
   const markup = renderToStaticMarkup(
@@ -234,6 +234,10 @@ test("FA10: evidence cards lead with a readable date, passage and review action"
       assert.match(visible, /September 8, 2026 at 10:00 AM UTC/);
       assert.match(visible, /The council approved the playground plan\./);
       assert.match(visible, /Open the saved source copy/);
+      assert.equal(
+        await page.getByRole("button", { name: /Review a newer saved copy from September 9, 2026/ }).count(),
+        1,
+      );
       assert.equal(await page.locator("details").count(), 1);
       assert.equal(await page.locator('section[aria-label="Sources for this finding"] li').count(), 1);
       assert.doesNotMatch(visible, /capture event 92|saved copy 41/);

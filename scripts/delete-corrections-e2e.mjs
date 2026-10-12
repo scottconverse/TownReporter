@@ -976,7 +976,7 @@ async function main() {
   if ((await manualRow.getByLabel("Judgment").inputValue()) !== "unreviewed")
     throw new Error("manual claim judgment did not remain reopened after reload");
   step("an editor-created claim keeps only an explicit owned captured record, refuses a stale open form, and reopens after an edit");
-  const newerCaptureButtons = review.getByRole("button", { name: /Review newer capture/ });
+  const newerCaptureButtons = review.getByRole("button", { name: /Review a newer saved copy/ });
   if ((await newerCaptureButtons.count()) !== 1)
     throw new Error("expected one newer-capture action for the grouped cited record");
   await newerCaptureButtons.first().click();
