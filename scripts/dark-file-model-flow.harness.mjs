@@ -92,6 +92,10 @@ const imports = {
   "@/lib/paper-context-state": stub(`export { formatListDate, formatListDateTime, formatClockTime } from ${JSON.stringify(new URL("../src/lib/paper.ts", import.meta.url).href)}; import { formatListDate, formatListDateTime, formatClockTime } from ${JSON.stringify(new URL("../src/lib/paper.ts", import.meta.url).href)}; export const usePaperDateFormatters = () => ({ formatListDate, formatListDateTime, formatShortDate: () => "Sept. 26", formatClockTime });`),
   "@/components/dark-dials-panel": nullComponents,
   "@/components/model-picker": modelPickerStub,
+  "@/components/dark-model-choice": await moduleUrl("src/components/dark-model-choice.ts", {
+    "@/lib/news/model-choice": await moduleUrl("src/lib/news/model-choice.ts"),
+    "@/lib/news/provider-registry": await moduleUrl("src/lib/news/provider-registry.ts"),
+  }),
   "@/components/read-more-text": await moduleUrl("src/components/read-more-text.tsx", {
     "@/lib/news/pdf-read": await moduleUrl("src/lib/news/pdf-read.ts"),
   }),
