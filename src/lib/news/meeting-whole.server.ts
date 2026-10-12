@@ -1,3 +1,4 @@
+import { existsSync, statSync } from "node:fs";
 import type { Sql } from "../db.ts";
 import type { EffectiveProviderChoice } from "./ai.ts";
 import { ingestDocument, type IngestDocument } from "./ingest.ts";
@@ -84,6 +85,24 @@ export async function loadWholeMeetingInput(
   votes: StructuredVoteRow[];
   meeting: { videoId: string; title: string; date: string | null; artifactId: number; videoUrl: string };
 }> {
+  // The original transcript file must still be on disk and not empty. A missing
+  // or empty file is a failed run at once, before any model call: nothing is
+  // written from a transcript that cannot be read back.
+  const [artifact] = await sql.query<{ storage_path: string | null }>(
+    `select storage_path from meeting_transcript_artifacts where id=$1 and newsroom_id=$2`,
+    [input.artifactId, input.newsroomId],
+  );
+  const transcriptFile = artifact?.storage_path?.trim() ?? "";
+  if (!transcriptFile || !existsSync(transcriptFile)) {
+    throw new Error(
+      "The transcript for this meeting cannot be read (the original file is missing). Pick another transcript or capture it again.",
+    );
+  }
+  if (statSync(transcriptFile).size === 0) {
+    throw new Error(
+      "The transcript for this meeting cannot be read (the original file is empty). Pick another transcript or capture it again.",
+    );
+  }
   const segments = await sql.query<SegmentRow>(
     `select segment_index,start_seconds,excerpt from meeting_transcript_segments
       where artifact_id=$1 order by segment_index`,
