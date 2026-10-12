@@ -114,7 +114,8 @@ test("THT-1/2: with nothing stored, Local model shows 'use whatever is loaded', 
   try {
     const page = await browser.newPage();
     await page.setContent(render({ value: "local-model", effort: null, onEffortChange() {} }));
-    assert.equal(await page.locator('option[value="local-model"]').innerText(), "Local model");
+    // Release H: a reachable server with nothing loaded says so; it never names the cloud default.
+    assert.equal(await page.locator('option[value="local-model"]').innerText(), "Local model (nothing loaded)");
     const sub = page.locator(".local-model-picker select").first();
     assert.equal(await sub.inputValue(), "* *");
     assert.equal(await sub.locator("option:checked").innerText(), "Use whatever model is loaded (recommended)");
