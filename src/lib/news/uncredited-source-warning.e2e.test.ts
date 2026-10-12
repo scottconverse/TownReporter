@@ -203,7 +203,7 @@ async function confirmSection(page: Page) {
   await page.locator("#story-topic").waitFor({ state: "visible", timeout: 45_000 });
   const section = page.locator("#story-topic-select");
   if ((await section.inputValue()) === "") {
-    const choice = await section.locator("option").evaluateAll(options =>
+    const choice = await section.locator("option").evaluateAll((options: HTMLOptionElement[]) =>
       options.find(option => option.value && !option.disabled)?.value,
     );
     if (!choice) throw new Error("The fixture desk has no section to choose.");
