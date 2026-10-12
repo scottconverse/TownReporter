@@ -68,7 +68,13 @@ export type PublishBlockerTarget =
    * printed unchecked can always be traced to the person who read it.
    */
   | { kind: "acknowledge-unchecked" }
-  | { kind: "publish-bar" };
+  | { kind: "publish-bar" }
+  /**
+   * DHD2-2: the held and killed cards' "Publish anyway" press. It publishes in
+   * the same press (the server un-holds or restores the lead inside the publish
+   * transaction), so the page runs the publish rather than scrolling to the bar.
+   */
+  | { kind: "publish-now" };
 
 export type PublishBlockerAction = {
   label: string;
@@ -498,7 +504,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       key: "lead-held",
       kind: "warning",
       sentence: "This draft is on hold. This press un-holds it and publishes it in the same press.",
-      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+      action: { label: "Publish anyway", target: { kind: "publish-now" } },
     });
   }
 
@@ -507,7 +513,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
       key: "lead-killed",
       kind: "warning",
       sentence: "This draft is killed. \"Publish anyway\" restores the lead and publishes this draft.",
-      action: { label: "Publish anyway", target: { kind: "publish-bar" } },
+      action: { label: "Publish anyway", target: { kind: "publish-now" } },
     });
   }
 

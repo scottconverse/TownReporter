@@ -5207,6 +5207,12 @@ export const restoreKilledLead = createServerFn({ method: "POST" })
       where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
     `;
     if (!current) return { ok: false as const, error: "That lead is not killed." };
+    // DHD2-3: Undo puts back the kill reason the lead had before the kill. With
+    // no prior reason recorded (null), the reason the kill wrote stays as it was.
+    await sql`
+      update leads set kill_reason = coalesce(kill_prior_reason, kill_reason), kill_prior_reason = null
+      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
+    `;
     const wanted = data.status ?? (current.prior === "held" || current.prior === "drafted" ? current.prior : "new");
     if (wanted === "drafted") {
       const rows = await sql<{ id: number }>`

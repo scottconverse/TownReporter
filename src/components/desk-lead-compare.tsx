@@ -14,6 +14,7 @@ import {
   comparePressNote,
   KILLED_LEAD_HEADING,
   killRecordLine,
+  ALREADY_KILLED_DUPLICATE_LABEL,
   KILL_THIS_ONE_LABEL,
   MOVE_TO_NEW_LABEL,
   REOPEN_LABEL,
@@ -99,6 +100,8 @@ export function LeadComparePanel({
   };
 
   const priorIsKilled = prior.status === "killed";
+  /* DHD2-8: a killed lead reads "Already killed", so the press no longer claims a kill it cannot make. */
+  const currentIsKilled = current.status === "killed";
   return (
     <section className="lead-compare" aria-labelledby="lead-compare-heading">
       <div className="lead-compare-head">
@@ -135,13 +138,15 @@ export function LeadComparePanel({
             onClick={() =>
               confirmBeforeKillingDuplicate(
                 (message) => window.confirm(message),
-                "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
+                currentIsKilled
+                  ? "Add a duplicate note to “" + current.headline + "”, already killed, as a duplicate of “" + prior.headline + "”?"
+                  : "Kill “" + current.headline + "” as a duplicate of “" + prior.headline + "”?",
                 () => run("kill", onKillThis),
               )
             }
-            ariaLabel={`${KILL_THIS_ONE_LABEL}: ${current.headline}`}
+            ariaLabel={`${currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}: ${current.headline}`}
           >
-            {busy === "kill" ? "Saving…" : KILL_THIS_ONE_LABEL}
+            {busy === "kill" ? "Saving…" : currentIsKilled ? ALREADY_KILLED_DUPLICATE_LABEL : KILL_THIS_ONE_LABEL}
           </InkButton>
         ) : null}
         {onReopenPrior ? (

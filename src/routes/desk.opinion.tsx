@@ -855,15 +855,38 @@ function OpinionPage() {
                       claims as its primary and draws no Publish at all.
                     */}
                     {r.draft_id && r.finished_at && !r.error && !r.published_slug && !claims ? (
-                      <InkButton
-                        tone="solid"
-                        disabled={publish.isPending}
-                        onClick={() => publish.mutate({ draftId: r.draft_id! })}
-                      >
-                        {publish.isPending && publish.variables?.draftId === r.draft_id
-                          ? "Publishing…"
-                          : "Publish"}
-                      </InkButton>
+                      <>
+                        {/*
+                          DHD2-12: the empty summary is said on the row BEFORE any press, the same
+                          words and the same "Publish anyway" as the open piece's panel (DHC11).
+                          The press acknowledges the summary warning, so it publishes at once.
+                        */}
+                        {r.dek?.trim() ? null : (
+                          <span className="meta" role="note">
+                            This piece has no summary for readers.{" "}
+                            <InkButton
+                              tone="quiet"
+                              small
+                              disabled={publish.isPending}
+                              onClick={() => publish.mutate({ draftId: r.draft_id!, acknowledgedWarningKeys: ["dek"] })}
+                            >
+                              {publish.isPending && publish.variables?.draftId === r.draft_id
+                                ? "Publishing…"
+                                : "Publish anyway"}
+                            </InkButton>
+                          </span>
+                        )}
+                        {/* DHD2-13: the row's press is named as it is on the open piece: "Publish to the paper". */}
+                        <InkButton
+                          tone="solid"
+                          disabled={publish.isPending}
+                          onClick={() => publish.mutate({ draftId: r.draft_id! })}
+                        >
+                          {publish.isPending && publish.variables?.draftId === r.draft_id
+                            ? "Publishing…"
+                            : "Publish to the paper"}
+                        </InkButton>
+                      </>
                     ) : null}
                     {r.published_slug ? (
                       <Link
