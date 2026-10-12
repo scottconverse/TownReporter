@@ -6988,7 +6988,7 @@ export const LIVE_STORY_CHANGE_KEY = "published-live-change";
 
 /** The sentence the desk shows before it lets a live change through. */
 export const LIVE_STORY_CHANGE_SENTENCE =
-  "This story is live. Your change will show on the paper.";
+  "This story is live. Your change will show on the public page.";
 
 export type LiveStoryChangeInput = {
   articleId?: number;
