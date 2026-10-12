@@ -4151,13 +4151,13 @@
   gap: 4px;
 }
 .desk-ltr.astra .bulk-start-note {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--fg);
 }
 /* THT-11: the one line that says what the "≈ Printed" count counts. Readable-first: not small or faint. */
 .desk-ltr.astra .queue-tab-note {
   flex: 0 1 auto;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--fg);
   min-width: 0;
 }
