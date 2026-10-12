@@ -197,6 +197,10 @@ export function queueSelect<T extends QueueLead>(
  * first page whether or not it came back. A came-back lead keeps its
  * "seen again" stamp in the row; it no longer pushes new kills off the page.
  * Kills with no `killed_at` sort last.
+ *
+ * On the Killed tab "Newest first" and "Oldest first" are the kill time too,
+ * not the filing time: a lead filed in September and killed today is the
+ * newest kill, and the pile's labels say what the rows are sorted by.
  */
 export function queueSort<T extends QueueLead>(
   leads: readonly T[],
@@ -207,12 +211,16 @@ export function queueSort<T extends QueueLead>(
     sort === "newest"
       ? Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id
       : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
-  if (sort === "best" && filter === "killed") {
+  if (filter === "killed") {
+    const killTime = (lead: T) => (lead.killed_at ? Date.parse(lead.killed_at) : null);
+    const newestFirst = sort !== "oldest";
     return [...leads].sort((a, b) => {
-      const at = a.killed_at ? Date.parse(a.killed_at) : -1;
-      const bt = b.killed_at ? Date.parse(b.killed_at) : -1;
-      if (at !== bt) return bt - at;
-      return b.id - a.id;
+      const at = killTime(a);
+      const bt = killTime(b);
+      // A kill with no time goes last in either direction.
+      if (at === null || bt === null) return (at === null ? 1 : 0) - (bt === null ? 1 : 0) || b.id - a.id;
+      if (at !== bt) return newestFirst ? bt - at : at - bt;
+      return newestFirst ? b.id - a.id : a.id - b.id;
     });
   }
   return [...leads].sort(
