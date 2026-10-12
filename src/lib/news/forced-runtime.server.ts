@@ -17,18 +17,9 @@ import type { OcrOptions } from "./ingest.ts";
 
 type LegacyForcedRuntime = "local" | "claude-cli" | "codex-terra" | "codex-sol";
 export type ForcedRuntime = LegacyForcedRuntime | PickerProviderId | AutomaticRungId | CustomModelChoice;
-/* A retired id is excluded as well as `local-model`: `RetiredProviderId` is a
-   NAME with no entry and no transport behind it (GR-C removed Grok/xAI), so it
-   can never be the choice a CLI-transport snapshot names. Written against the
-   type rather than the string, so this file names no retired provider.
-
-   `AutomaticRungId` is excluded too, and it has to be said rather than
-   inherited: unit U29 put `deepseek-flash` in `PICKER_PROVIDER_IDS` (Opinion's
-   menu offers it by name), so "in the picker list" no longer means "a runtime
-   an editor could have named for a batch". This type is the CLI half of a
-   named snapshot, and a rung is never a CLI runtime -- it is an Ollama
-   endpoint. Rungs keep their own snapshot variant, `AutomaticRungSnapshot`,
-   which only the run path may read. */
+/* CLI snapshots exclude local transports and retired ids. Named DeepSeek
+   keeps the local snapshot shape so its endpoint, model and provider id are
+   preserved rather than being cast to a CLI runtime. */
 type CliProviderChoice = Exclude<
   PickerProviderId,
   "local-model" | RetiredProviderId | AutomaticRungId
@@ -44,12 +35,9 @@ type LadderChoice = Exclude<ProviderId, "configured">;
  * "Local model" snapshot uses; the endpoint is the RUNG's, from the registry,
  * so it is never the editor's local-model pick.
  *
- * This is a separate type rather than a variant typed inline, because
- * `parseForcedRuntimeSnapshot` REFUSES one unless the caller asks for it: a
- * rung is not a model an editor can pick, so a stored row naming one is not
- * runnable by a batch. The split is what lets a reader that did NOT opt in
- * narrow `runtime` to a name an editor could actually have chosen -- without
- * it, that reader has to cast, and the cast is where a rung would slip in.
+ * DeepSeek is also a named forced runtime. The loaded-local rung remains
+ * internal and requires explicit Automatic permission when validating or
+ * reading its snapshot.
  */
 export type AutomaticRungSnapshot = {
   runtime: AutomaticRungId;
@@ -61,6 +49,7 @@ export type AutomaticRungSnapshot = {
 
 /** Every snapshot whose runtime is a model an editor can name. */
 export type NamedForcedRuntimeSnapshot =
+  | (AutomaticRungSnapshot & { runtime: "deepseek-flash"; modelChoice: "deepseek-flash" })
   | {
       runtime: "local";
       modelChoice: "local-model";
@@ -103,12 +92,9 @@ const choiceFor = (
 /**
  * Resolve a runtime to the exact snapshot a run is pinned to.
  *
- * `options.automaticRung` opens the one door a rung needs (0.6.64, Unit AA):
- * Automatic's own rungs are not pickable models -- no picker lists them and
- * `parseForcedRuntimeSnapshot` refuses them by default -- but a scheduled run
- * that Automatic resolved to a rung has to be able to record the endpoint it
- * ran against. Left off, a rung still throws the same sentence the batch
- * picker has always shown.
+ * DeepSeek can be named directly and keeps its own provider transport.
+ * `options.automaticRung` permits the internal loaded-local rung when a run
+ * has already resolved Automatic to its exact endpoint and model.
  */
 export async function validateForcedRuntime(
   newsroomId: number,
@@ -159,7 +145,7 @@ export async function validateForcedRuntime(
     };
   }
   if (isAutomaticRungId(runtime)) {
-    if (!options?.automaticRung) throw new Error("The selected batch model is unavailable in this build.");
+    if (runtime !== "deepseek-flash" && !options?.automaticRung) throw new Error("The selected batch model is unavailable in this build.");
     /*
       A rung, named by the run that resolved to it. The probe is the same one
       the ladder walk used -- so a rung that stopped answering between the walk
@@ -200,7 +186,8 @@ export async function validateForcedRuntime(
     runtime,
     modelChoice: choice as CliProviderChoice,
     model: entry.kind === "gemini-cli"
-      ? (await import("./ai-gemini-cli.server.ts")).geminiModelForEffort(providerModel(entry), modelEffort(choice, effort)) ?? providerModel(entry)
+      ? ((await import("./ai-gemini-cli.server.ts")).geminiModelForEffort(providerModel(entry), modelEffort(choice, effort),
+          ) ?? providerModel(entry))
       : providerModel(entry),
     transport: entry.kind,
     ...(modelEffort(choice, effort) ? { modelEffort: modelEffort(choice, effort)! } : {}),
@@ -236,8 +223,7 @@ export async function resolveAutomaticForcedRuntime(
   const failures: string[] = [];
   const skippedRungs: string[] = [];
   const ladder = AUTOMATIC_LADDER.filter(
-    (id): id is LadderChoice => id !== "configured",
-  );
+    (id): id is LadderChoice => id !== "configured");
   for (const rung of ladder) {
     const ready = await probe(rung);
     if (ready.ok) {
@@ -277,17 +263,15 @@ export function parseForcedRuntimeSnapshot(
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
   /*
-    A rung snapshot (0.6.64, Unit AA), read only where the caller says so. The
-    default is deny, and that is the point: a rung is not a model an editor can
-    pick, so a stored row naming one is a row this build must not run -- the
-    same answer the batch picker gives for it.
+    DeepSeek snapshots are named runtimes as well as Automatic rungs. The
+    loaded-local rung is read only when the caller permits Automatic.
 
     No loopback guard here, unlike the "local" variant above: that guard stops
     an editor pointing a local run at a remote host, while a rung's base URL
     comes from the registry and the rung's own env override -- operator
     configuration, which the transport reads through `rungGateway` anyway.
   */
-  if (options?.automaticRung && isAutomaticRungId(row.runtime)) {
+  if ((row.runtime === "deepseek-flash" || options?.automaticRung ) && isAutomaticRungId(row.runtime)) {
     if (
       row.modelChoice === row.runtime &&
       row.transport === "local" &&
@@ -399,15 +383,18 @@ export type ForcedChatAdapters<T> = {
     noTools?: boolean;
     reasoningEffort?: ModelEffort | null;
   }) => Promise<T>;
-  gemini?: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null }) => Promise<T>;
-  codex: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null }) => Promise<T>;
+  gemini?: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null ;
+  }) => Promise<T>;
+  codex: (input: { system: string; user: string; model: string; timeoutMs: number; reasoningEffort?: ModelEffort | null ;
+  }) => Promise<T>;
   local: (
     system: string,
     user: string,
     maxTokens: number,
     options: {
       timeoutMs?: number;
-      choice: "local-model";
+      choice: "local-model"| AutomaticRungId;
+      rungModel?: string;
       localModel: { baseUrl: string; id: string };
       noTools?: boolean;
       reasoningEffort?: ModelEffort | null;
@@ -442,7 +429,8 @@ export async function runForcedChat<T>(
   if (valid.transport === "local") {
     return adapters.local(system, user, maxTokens, {
       ...options,
-      choice: "local-model",
+      choice: valid.modelChoice,
+      ...(isAutomaticRungId(valid.modelChoice) ? { rungModel: valid.localModel.id } : {}),
       localModel: valid.localModel,
       ...(valid.modelEffort ? { reasoningEffort: valid.modelEffort } : {}),
     });
@@ -471,9 +459,11 @@ export async function runForcedChat<T>(
   }
   if (valid.transport === "gemini-cli") {
     const gemini = adapters.gemini ?? (async (input) => (await import("./ai-gemini-cli.server.ts")).geminiChat(input) as Promise<T>);
-    return gemini({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort });
+    return gemini({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort ,
+    });
   }
-  return adapters.codex({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort });
+  return adapters.codex({ system, user, model: valid.model, timeoutMs, reasoningEffort: valid.modelEffort ,
+  });
 }
 
 export function forcedOcrOptions(

@@ -1464,6 +1464,7 @@ export const runScan = createServerFn({ method: "POST" })
     return commitScanForAuthenticatedEditor({
       context: { userId: context.userId, newsroomId: owned(context) },
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       daily: data.daily,
       sectionKey: data.sectionKey,
@@ -4378,6 +4379,7 @@ export const draftLead = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId,
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: typeof data === "number" ? null : modelEffort(modelChoice, data.modelEffort),
       researchScope: typeof data === "number" ? undefined : data.researchScope,
       meetingArtifactId: typeof data === "number" ? undefined : data.meetingArtifactId,
@@ -4436,6 +4438,7 @@ export const rewriteFromLedger = createServerFn({ method: "POST" })
       context: { userId: context.userId, newsroomId: owned(context) },
       leadId: data.leadId,
       modelChoice,
+      modelChoiceExplicit: typeof data === "number" ? false : data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       researchScope: data.researchScope,
       meetingArtifactId: data.meetingArtifactId,
@@ -4714,6 +4717,7 @@ export const writeStoryFromInput = createServerFn({ method: "POST" })
       documentIds: data.documentIds,
       sectionKey: data.sectionKey,
       modelChoice: data.modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       modelEffort: data.modelEffort,
       researchScope: data.researchScope,
     });
@@ -4732,14 +4736,16 @@ export const structureImportStories = createServerFn({ method: "POST" })
   .validator((input: unknown) => importStructureInput.parse(input))
   .handler(async ({ context, data }) => {
     const { readImportStructure } = await import("./import-stories.server.ts");
-    const localModel = data.modelChoice === "local-model"
+    const { resolveRequestedJobModel } = await import("./job-model-runtime.server.ts");
+    const assignment = await resolveRequestedJobModel(owned(context), "story-draft", data.modelChoice, data.modelEffort, data.modelChoiceExplicit);
+    const localModel = assignment.providerId === "local-model"
       ? (await import("./provider-settings.ts")).resolveLocalModelChoice(owned(context), "story").then((choice) => choice.override ?? undefined)
       : undefined;
     return readImportStructure({
       text: data.text,
       newsroomId: owned(context),
-      modelChoice: data.modelChoice,
-      modelEffort: data.modelEffort,
+      modelChoice: assignment.providerId,
+      modelEffort: assignment.effort,
       localModel: await localModel,
     });
   });
@@ -4830,6 +4836,7 @@ export const startReporting = createServerFn({ method: "POST" })
         seedUrls: data.seedUrls,
         parentRequestId: data.parentRequestId,
         modelChoice: data.modelChoice,
+        modelChoiceExplicit: data.modelChoiceExplicit,
         modelEffort: data.modelEffort ?? null,
         researchScope: data.researchScope,
       },
@@ -4850,6 +4857,7 @@ export const answerReportingFollowUp = createServerFn({ method: "POST" })
         override: data.override,
         seedUrls: data.seedUrls,
         modelChoice: data.modelChoice,
+        modelChoiceExplicit: data.modelChoiceExplicit,
         modelEffort: data.modelEffort ?? null,
         researchScope: data.researchScope,
       },
@@ -7372,7 +7380,7 @@ export async function performSuggestHeadlines(
   context: { userId: string; newsroomId?: number },
   leadId: number,
   currentHeadline?: string,
-  model?: { choice?: string | null; effort?: string | null },
+  model?: { choice?: string | null; effort?: string | null; modelChoiceExplicit?: boolean },
   deps: {
     chat?: typeof grokChat;
     resolveLocalModel?: (newsroomId: number, scope: "story") => Promise<LocalModelOverride | null>;
@@ -7404,8 +7412,10 @@ export async function performSuggestHeadlines(
     is what this call has always done. The pick is the dialog's own row, and
     `grokChat` is still the thing that resolves an "auto".
   */
-  const choice = (model?.choice || "auto") as EffectiveProviderChoice;
   const newsroomId = owned(context);
+  const { resolveRequestedJobModel } = await import("./job-model-runtime.server.ts");
+  const assignment = await resolveRequestedJobModel(newsroomId, "headlines", model?.choice, modelEffort(model?.choice ?? "auto", model?.effort), model?.modelChoiceExplicit);
+  const choice = assignment.providerId as EffectiveProviderChoice;
   const localModel = choice === "local-model"
     ? await (deps.resolveLocalModel
       ? deps.resolveLocalModel(newsroomId, "story")
@@ -7415,7 +7425,7 @@ export async function performSuggestHeadlines(
     choice,
     newsroomId,
     ...(localModel ? { localModel } : {}),
-    reasoningEffort: (model?.effort ?? null) as ModelEffort | null,
+    reasoningEffort: assignment.effort,
   });
   if (!got.ok) {
     return {
@@ -7441,6 +7451,7 @@ export const suggestHeadlines = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     performSuggestHeadlines(context, data.leadId, data.headline, {
       choice: data.modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       effort: data.modelEffort as ModelEffort | null | undefined,
     }),
   );

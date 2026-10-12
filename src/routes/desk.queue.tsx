@@ -5,6 +5,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
 import { DeskJobCard } from "@/components/JobCard";
@@ -121,6 +122,13 @@ function QueuePage() {
   const published = useQuery({ queryKey: ["published-desk"], queryFn: () => listPublishedDesk() });
   const [scanModel, setScanModel] = useState<StoryModelChoice>("auto");
   const [scanModelEffort, setScanModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const scanModelTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: scanModelTouched,
+    setChoice: setScanModel,
+    setEffort: setScanModelEffort,
+  });
   /*
     The drawn Queue header's own "Run scan now" (README "3. Queue", handoff
     Desk Screens.dc.html line 21). It is the same scan Today's button runs --
@@ -137,7 +145,7 @@ function QueuePage() {
     reads.
   */
   const scan = useDeskMutation({
-    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort } }),
+    mutationFn: () => runScan({ data: { modelChoice: scanModel, modelEffort: scanModelEffort, modelChoiceExplicit: scanModelTouched.current } }),
     after: () => {
       void qc.invalidateQueries({ queryKey: ["scans"] });
       void qc.invalidateQueries({ queryKey: ["leads"] });
@@ -564,6 +572,13 @@ function QueuePage() {
   */
   const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("auto");
   const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
+  const batchRuntimeTouched = useRef(false);
+  useJobModelAssignment<DraftBatchRuntime>({
+    jobKey: "story-draft",
+    touched: batchRuntimeTouched,
+    setChoice: setBatchRuntime,
+    setEffort: setBatchEffort,
+  });
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -596,12 +611,14 @@ function QueuePage() {
       leadIds: number[];
       runtime: DraftBatchRuntime;
       modelEffort: ModelEffort | null;
+      modelChoiceExplicit: boolean;
     }) =>
       startDraftBatch({
         data: {
           items: input.leadIds.map((leadId) => ({ leadId })),
           runtime: input.runtime,
           modelEffort: input.modelEffort,
+          modelChoiceExplicit: input.modelChoiceExplicit,
         },
       }),
     onSuccess: (result) => {
@@ -653,6 +670,7 @@ function QueuePage() {
       leadId: number;
       modelChoice: StoryModelChoice;
       modelEffort?: ModelEffort | null;
+      modelChoiceExplicit?: boolean;
       fromBatch?: boolean;
     }) =>
       draftLead({
@@ -660,6 +678,7 @@ function QueuePage() {
           leadId: input.leadId,
           modelChoice: input.modelChoice,
           modelEffort: input.modelEffort,
+          modelChoiceExplicit: input.modelChoiceExplicit,
         },
       }),
     onMutate: ({ leadId }) =>
@@ -1090,7 +1109,11 @@ function QueuePage() {
               scope="scan"
               label="Model for this scan"
               value={scanModel}
-              onChange={setScanModel}
+              onChange={(choice) => {
+                scanModelTouched.current = true;
+                setScanModel(choice);
+                setScanModelEffort(defaultModelEffort(choice));
+              }}
               effort={scanModelEffort}
               onEffortChange={setScanModelEffort}
             />
@@ -1756,13 +1779,13 @@ function QueuePage() {
                         : ids.filter((id) => id !== l.id),
                     );
                   }}
-                  onDraft={(modelChoice, modelEffort) => {
+                  onDraft={(modelChoice, modelEffort, modelChoiceExplicit) => {
                     setDraftNotices((notices) => {
                       const next = { ...notices };
                       delete next[l.id];
                       return next;
                     });
-                    queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort });
+                    queueDraft.mutate({ leadId: l.id, modelChoice, modelEffort, modelChoiceExplicit });
                   }}
                   drafting={draftingIds.includes(l.id)}
                   draftNotice={draftNotices[l.id] ?? null}
@@ -1932,7 +1955,7 @@ function QueuePage() {
           const leadIds = selectedBatchLeads;
           setBatchNotice(null);
           startBatch.mutate(
-            { leadIds, runtime: batchRuntime, modelEffort: batchEffort },
+            { leadIds, runtime: batchRuntime, modelEffort: batchEffort, modelChoiceExplicit: batchRuntimeTouched.current },
             {
               onSuccess: (result) => {
                 if (!result.ok) return;
@@ -1992,6 +2015,7 @@ function QueuePage() {
             value={batchRuntime}
             onChange={(choice) => {
               const runtime = choice as DraftBatchRuntime;
+              batchRuntimeTouched.current = true;
               setBatchRuntime(runtime);
               setBatchEffort(defaultModelEffort(runtime));
             }}
@@ -2080,7 +2104,7 @@ function QueuePage() {
                         pins this exact call, trailing comma and all, as the proof
                         that a redraft sends the runtime the picker is showing.
                       */
-                      queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, fromBatch: true });
+                      queueDraft.mutate({ leadId: item.leadId, modelChoice: batchRuntime, modelEffort: batchEffort, modelChoiceExplicit: batchRuntimeTouched.current, fromBatch: true });
                     }}
                   />
                 );

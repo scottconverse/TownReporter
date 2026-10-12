@@ -19,7 +19,7 @@ import {
 import { readModelAssignments } from "./model-assignments-store.ts";
 import { resolveJobModel, type JobModelResolution } from "./model-assignments.ts";
 import { resolveLocalModelChoice } from "./provider-settings.ts";
-import { followUpModelEffort } from "./follow-up-copy.ts";
+import { followUpModelEffort, followUpModelChoiceExplicit } from "./follow-up-copy.ts";
 import { modelEffort, type ModelEffort } from "./provider-registry.ts";
 import { storyModelChoice } from "./model-choice.ts";
 import {
@@ -676,12 +676,12 @@ export function followUpRunLimits(choice: string) {
  * `resolveJobModel` treats an offered value as a decision, and offering it
  * "auto" would stop it reading the assignment table at all.
  */
-export async function resolveFollowUpModel(row: Pick<FollowUpRow, "newsroom_id" | "model_choice">): Promise<JobModelResolution> {
+export async function resolveFollowUpModel(row: Pick<FollowUpRow, "newsroom_id" | "model_choice"> & Partial<Pick<FollowUpRow, "targets_json">>): Promise<JobModelResolution> {
   const pick = (row.model_choice ?? "").trim();
   const assignments = await readModelAssignments(row.newsroom_id).catch(() => []);
   return resolveJobModel({
     jobKey: FOLLOW_UP_JOB_KEY,
-    explicit: pick && pick !== "auto" ? pick : null,
+    explicit: pick && (pick !== "auto" || followUpModelChoiceExplicit(row.targets_json)) ? pick : null,
     assignments,
   });
 }

@@ -1,3 +1,4 @@
+import { resolveRequestedJobModel } from "./job-model-runtime.server.ts";
 import { editorWarning } from "./editor-override.ts";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { assertRate, checkRate, ensureDeskRateSchema, ensureAuditEventsSchema } from "./ops.ts";
@@ -57,8 +58,18 @@ export async function validateBatchRuntime(
   effort?: ModelEffort | null,
   validate: typeof validateForcedRuntime = validateForcedRuntime,
   resolveAutomatic: typeof resolveAutomaticForcedRuntime = resolveAutomaticForcedRuntime,
+modelChoiceExplicit = false,
 ): Promise<ForcedRuntimeSnapshot & BatchRuntimeReceipt> {
-  const requestedEffort = runtime === "auto" ? effort ?? null : modelEffort(runtime, effort);
+  const assignment = await resolveRequestedJobModel(
+    newsroomId,
+    "story-draft",
+    runtime,
+    effort,
+    modelChoiceExplicit,
+  );
+  runtime = assignment.providerId as typeof runtime;
+  effort = assignment.effort;
+  const requestedEffort = runtime === "auto" ? (effort ?? null ) : modelEffort(runtime, effort);
   if (runtime === "auto") {
     const snapshot = await resolveAutomatic(newsroomId, requestedEffort);
     return attachDraftBatchRuntimeReceipt(snapshot, {
@@ -70,7 +81,8 @@ export async function validateBatchRuntime(
   }
   try {
     const snapshot = await validate(newsroomId, runtime, requestedEffort);
-    return { ...snapshot, requestedRuntime: runtime, requestedEffort, resolvedRuntime: runtime, switchReason: null, switchNote: null };
+    return { ...snapshot, requestedRuntime: runtime, requestedEffort, resolvedRuntime: runtime, switchReason: null, switchNote: null ,
+    };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     if (!automaticFailoverReason(detail)) throw error;
@@ -79,17 +91,19 @@ export async function validateBatchRuntime(
       source: "editor",
       current: runtime,
       error: detail,
-      // The hand-pick ladder, not Automatic's: a batch that fails over has to
-      // land on a provider it can actually name (`deepseek-flash` and
-      // `qwen-local` are refused by `validateForcedRuntime`).
+      // Named batches use the forced-runtime fallback order. DeepSeek can
+      // also be named directly; the call-time local rung remains internal.
       ladder: FORCED_FAILOVER_LADDER,
       probe: async (candidate) => {
         try {
-          const snapshot = await validate(newsroomId, candidate as ForcedRuntime, modelEffort(candidate, effort));
+          const snapshot = await validate(newsroomId, candidate as ForcedRuntime, modelEffort(candidate, effort),
+          );
           snapshots.set(candidate, snapshot);
-          return { ok: true as const, label: modelChoiceLabel(candidate), choice: snapshot.modelChoice };
+          return { ok: true as const, label: modelChoiceLabel(candidate), choice: snapshot.modelChoice ,
+          };
         } catch (candidateError) {
-          return { ok: false as const, error: candidateError instanceof Error ? candidateError.message : String(candidateError) };
+          return { ok: false as const, error: candidateError instanceof Error ? candidateError.message : String(candidateError) ,
+          };
         }
       },
     });
@@ -107,22 +121,23 @@ export async function validateBatchRuntime(
   }
 }
 
-/** Automatic batches may store internal rung snapshots; named batches may not. */
+/** Automatic batches may store internal rungs; named batches also admit DeepSeek. */
 function parseBatchRuntimeSnapshot(value: unknown): ForcedRuntimeSnapshot | null {
   const row = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
+    ? (value as Record<string, unknown>
+    )
+      : null;
   if (!row) return null;
   const parsed = row.requestedRuntime === "auto"
     ? parseForcedRuntimeSnapshot(value, { automaticRung: true })
     : parseForcedRuntimeSnapshot(value);
-  if (!parsed || row.requestedRuntime !== "auto") return parsed;
+  if (!parsed || typeof row.requestedRuntime !== "string") return parsed;
   const requestedEffort = row.requestedEffort === null
     ? null
-    : modelEffort(parsed.modelChoice, row.requestedEffort);
+    : modelEffort(row.requestedRuntime, row.requestedEffort);
   return {
     ...parsed,
-    requestedRuntime: "auto",
+    requestedRuntime: row.requestedRuntime,
     requestedEffort,
     resolvedRuntime: typeof row.resolvedRuntime === "string" ? row.resolvedRuntime : parsed.runtime,
     switchReason: typeof row.switchReason === "string" ? row.switchReason : null,
@@ -204,7 +219,8 @@ type LeadState = { id: number; status: string; notes_json: string | null };
 const isIneligible = (status: string) =>
   status === "held" || status === "killed" || status === "published";
 
-type ResolvedItem = { leadId: number; researchScope: "public" | "supplied"; allowKilledLead?: boolean };
+type ResolvedItem = { leadId: number; researchScope: "public" | "supplied"; allowKilledLead?: boolean ;
+};
 
 async function inspectSelection(
   sql: Sql,
@@ -239,24 +255,28 @@ async function inspectSelection(
     const lead = leadById.get(item.leadId)!;
     if (isIneligible(lead.status)) {
       const key = lead.status === "killed" ? "lead-killed-draft" : `batch-lead-${lead.status}`;
-      const warning = await editorWarning({ ...input.context, sql }, input.override, key, `This selected lead is ${lead.status}. Drafting will keep its saved work.`, { kind: "lead", id: item.leadId });
+      const warning = await editorWarning({ ...input.context, sql }, input.override, key, `This selected lead is ${lead.status}. Drafting will keep its saved work.`, { kind: "lead", id: item.leadId },
+      );
       if (warning) return { ...warning, code: "ineligible", leadId: item.leadId };
 
     }
     const scope = item.researchScope ?? parseNotes(lead.notes_json).researchScope ?? "public";
-    items.push({ leadId: item.leadId, researchScope: scope, allowKilledLead: lead.status === "killed" });
+    items.push({ leadId: item.leadId, researchScope: scope, allowKilledLead: lead.status === "killed" ,
+    });
   }
   const open = await sql.query<{ id: number; subject_id: number; model_choice: string }>(
     "select id,subject_id,model_choice from desk_jobs where newsroom_id=$1 and kind='draft' and subject_id=any($2::int[]) and status in ('queued','running') order by id",
-    [input.context.newsroomId, input.items.map(item => item.leadId)],
+    [input.context.newsroomId, input.items.map((item ) => item.leadId)],
   );
-  const identical = open.find(job => job.model_choice === runtimeSnapshot.modelChoice);
-  if (identical) return { ok: false, code: "already-running", error: "A selected lead is already drafting with this model.", leadId: identical.subject_id, jobId: identical.id };
+  const identical = open.find((job ) => job.model_choice === runtimeSnapshot.modelChoice);
+  if (identical) return { ok: false, code: "already-running", error: "A selected lead is already drafting with this model.", leadId: identical.subject_id, jobId: identical.id ,
+    };
   if (open.length) {
-    const warning = await editorWarning({ ...input.context, sql }, input.override, "model-change-running", `${open.length} selected leads are already drafting. Stop and restart with ${modelChoiceLabel(runtimeSnapshot.modelChoice)}.`, { kind: "job", id: open[0].id });
+    const warning = await editorWarning({ ...input.context, sql }, input.override, "model-change-running", `${open.length} selected leads are already drafting. Stop and restart with ${modelChoiceLabel(runtimeSnapshot.modelChoice)}.`, { kind: "job", id: open[0].id },
+    );
     if (warning) return { ...warning, code: "already-running", jobId: open[0].id, leadId: open[0].subject_id };
   }
-  return { ok: true, items, cancelJobIds: open.map(job => job.id) };
+  return { ok: true, items, cancelJobIds: open.map((job ) => job.id) };
 
 }
 
@@ -309,14 +329,16 @@ async function batchView(
     [context.newsroomId, batch.id],
   );
   const parsed = new Map(jobs.map((job) => [job.id, parseDraftBatchCompletion(job.result_json)]));
-  const candidateDraftIds = [...new Set([...parsed.values()].flatMap((row) => row ? [row.draftId] : []))];
+  const candidateDraftIds = [...new Set([...parsed.values()].flatMap((row) => (row ? [row.draftId] : []))),
+  ];
   const boundDrafts = candidateDraftIds.length
     ? await sql.query<{ id: number; lead_id: number }>(
         "select id,lead_id from drafts where newsroom_id=$1 and id=any($2::int[])",
         [context.newsroomId, candidateDraftIds],
       )
     : [];
-  const validDrafts = new Map(boundDrafts.map((draft) => [Number(draft.id), Number(draft.lead_id)]));
+  const validDrafts = new Map(boundDrafts.map((draft) => [Number(draft.id), Number(draft.lead_id)]),
+  );
   return {
     ok: true,
     batch: {
@@ -328,7 +350,7 @@ async function batchView(
       dismissed: batch.dismissed_at != null,
       runtime: {
         runtime: snapshot.runtime,
-        modelChoice: requestedRuntime === "auto" ? "auto" : snapshot.modelChoice as DraftBatchRuntime,
+        modelChoice: requestedRuntime === "auto" ? "auto" : (snapshot.modelChoice as DraftBatchRuntime),
         modelEffort: snapshot.modelEffort ?? null,
         label: forcedRuntimeLabel(snapshot),
       },
@@ -442,13 +464,29 @@ export async function commitDraftBatchForAuthenticatedEditor(
   if (!runtimeSnapshot) {
     return { ok: false, code: "invalid-input", error: "The selected runtime snapshot is invalid." };
   }
+  const receipt = runtimeSnapshot as ForcedRuntimeSnapshot & Partial<BatchRuntimeReceipt>;
+  if (receipt.switchReason) {
+    const requestedLabel = modelChoiceLabel(
+      receipt.requestedRuntime ?? runtimeSnapshot.modelChoice,
+    );
+    const actualLabel = modelChoiceLabel(runtimeSnapshot.modelChoice);
+    const warning = await editorWarning(
+      input.context,
+      input.override,
+      "writer-not-ready",
+      `${requestedLabel}: ${receipt.switchReason}. If you draft anyway, this batch will use ${actualLabel}.`,
+      { kind: "newsroom", id: input.context.newsroomId },
+    );
+    if (warning) return { ...warning, code: "runtime-unavailable" };
+  }
   const sql = await getSql();
   await ensureDraftBatchSchema(sql);
   await ensureAuditEventsSchema(sql);
   const preflight = await inspectSelection(sql, input, runtimeSnapshot, false);
   if (!preflight.ok) return preflight;
   if (input.items.length < 1 || input.items.length > 5) {
-    const warning = await editorWarning(input.context, input.override, "draft-batch-size", `You selected ${input.items.length} leads; a usual batch has 1 to 5. It may cost more.`, { kind: "newsroom", id: input.context.newsroomId });
+    const warning = await editorWarning(input.context, input.override, "draft-batch-size", `You selected ${input.items.length} leads; a usual batch has 1 to 5. It may cost more.`, { kind: "newsroom", id: input.context.newsroomId },
+    );
     if (warning) return { ...warning, code: "invalid-input" };
   }
   if (deps.accountRate !== false) {
@@ -456,7 +494,8 @@ export async function commitDraftBatchForAuthenticatedEditor(
       try { for (const _item of input.items) await deps.assertRate(input.context.userId, "draft", input.context.newsroomId); }
       catch(error) { return { ok: false, code: "rate-limited", error: String(error) }; }
     } else {
-      const warning = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { amount: input.items.length, record: false });
+      const warning = await checkRate(input.context.userId, "draft", input.context.newsroomId, input.override, { amount: input.items.length, record: false },
+      );
       if (warning) return { ...warning, code: "rate-limited" };
       await ensureDeskRateSchema();
     }
@@ -466,7 +505,8 @@ export async function commitDraftBatchForAuthenticatedEditor(
       const checked = await inspectSelection(tx, input, runtimeSnapshot, true);
       if (!checked.ok) return checked;
       await deps.afterSelectionLocked?.();
-      for (const jobId of checked.cancelJobIds) await tx.query("update desk_jobs set cancel_requested=true,status='failed',stage='Cancelled',error='Stopped by the editor for a model restart.',finished_at=now(),updated_at=now(),claim_token=null where id=$1 and newsroom_id=$2 and status in ('queued','running')", [jobId, input.context.newsroomId]);
+      for (const jobId of checked.cancelJobIds) await tx.query("update desk_jobs set cancel_requested=true,status='failed',stage='Cancelled',error='Stopped by the editor for a model restart.',finished_at=now(),updated_at=now(),claim_token=null where id=$1 and newsroom_id=$2 and status in ('queued','running')", [jobId, input.context.newsroomId],
+        );
       const [batch] = await tx.query<{ id: number }>(
         "insert into draft_batches(newsroom_id,user_id,runtime_snapshot) values($1,$2,$3::jsonb) returning id",
         [input.context.newsroomId, input.context.userId, JSON.stringify(runtimeSnapshot)],
@@ -484,13 +524,15 @@ export async function commitDraftBatchForAuthenticatedEditor(
             item.researchScope,
             receipt.switchReason ? `Switched to ${modelChoiceLabel(runtimeSnapshot.modelChoice)}: ${receipt.switchReason}` : "Queued",
             receipt.switchNote ?? "",
-            JSON.stringify({ ...(item.allowKilledLead ? { allowKilledLead: true } : {}), modelEffort: "modelEffort" in runtimeSnapshot ? runtimeSnapshot.modelEffort ?? null : null, preflightFailover: receipt.switchReason ? receipt : null }),
+            JSON.stringify({ ...(item.allowKilledLead ? { allowKilledLead: true } : {}), requestedRuntime: receipt.requestedRuntime ?? runtimeSnapshot.modelChoice, requestedEffort: receipt.requestedEffort ?? null, actualRuntime: runtimeSnapshot.modelChoice, modelEffort: "modelEffort" in runtimeSnapshot ? (runtimeSnapshot.modelEffort ?? null ) : null, preflightFailover: receipt.switchReason ? receipt : null ,
+            }),
             batch.id,
           ],
         );
       }
       if (deps.accountRate !== false && !deps.assertRate) {
-        for (const _item of checked.items) await tx.query("insert into desk_rate(user_id,action,newsroom_id) values($1,'draft',$2)", [input.context.userId, input.context.newsroomId]);
+        for (const _item of checked.items) await tx.query("insert into desk_rate(user_id,action,newsroom_id) values($1,'draft',$2)", [input.context.userId, input.context.newsroomId],
+          );
       }
       return { ok: true as const, batchId: Number(batch.id) };
     });
@@ -578,19 +620,21 @@ export async function withDraftBatchLease<T>(
 export async function persistDraftBatchRuntimeSwitch(
   job: { id: number; newsroom_id: number; user_id: string; claim_token?: string | null },
   snapshot: ForcedRuntimeSnapshot,
-  receipt: { requestedRuntime: string; requestedEffort: ModelEffort | null; switchReason: string; switchNote: string },
+  receipt: { requestedRuntime: string; requestedEffort: ModelEffort | null; switchReason: string; switchNote: string ;
+  },
 ): Promise<ForcedRuntimeSnapshot & BatchRuntimeReceipt> {
   return withDraftBatchLease(job, async (sql) => {
-    const [row] = await sql<{ draft_batch_id: number }>`select draft_batch_id from desk_jobs where id=${job.id} and newsroom_id=${job.newsroom_id}`;
+    const [row] = await sql<{ draft_batch_id: number ;
+    }>`select draft_batch_id from desk_jobs where id=${job.id} and newsroom_id=${job.newsroom_id}`;
     if (!row?.draft_batch_id) throw new Error("Draft batch permission or job lease was withdrawn.");
     const stored = attachDraftBatchRuntimeReceipt(snapshot, receipt);
     await sql`update draft_batches set runtime_snapshot=${JSON.stringify(stored)}::jsonb where id=${row.draft_batch_id} and newsroom_id=${job.newsroom_id}`;
-    const effort = "modelEffort" in snapshot ? snapshot.modelEffort ?? null : null;
+    const effort = "modelEffort" in snapshot ? (snapshot.modelEffort ?? null ) : null;
     await sql`update desk_jobs
       set model_choice=${snapshot.modelChoice},
           stage=${`Switched to ${modelChoiceLabel(snapshot.modelChoice)}: ${receipt.switchReason}`},
           failover_note=${receipt.switchNote},
-          result_json=jsonb_set(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb),'{modelEffort}',coalesce(to_jsonb(${effort}::text),'null'::jsonb),true)::text,
+          result_json=(coalesce(nullif(result_json,'')::jsonb,'{}'::jsonb) || ${JSON.stringify({ requestedRuntime: receipt.requestedRuntime, requestedEffort: receipt.requestedEffort, actualRuntime: snapshot.modelChoice, modelEffort: effort })}::jsonb)::text,
           updated_at=now()
       where newsroom_id=${job.newsroom_id} and draft_batch_id=${row.draft_batch_id} and status='queued'`;
     return stored;

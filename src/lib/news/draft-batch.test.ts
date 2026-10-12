@@ -143,7 +143,8 @@ describe("draft batch validation", () => {
   drop out, everything else stays.
 */
 describe("draft batch panel filter", () => {
-  const row = (leadId: number, leadStatus: string | null) => ({ leadId, jobId: leadId * 10, leadStatus });
+  const row = (leadId: number, leadStatus: string | null) => ({ leadId, jobId: leadId * 10, leadStatus ,
+  });
 
   it("drops published and killed items and keeps open, drafted and held ones", () => {
     const kept = visibleDraftBatchItems([
@@ -177,6 +178,53 @@ describe("draft batch panel filter", () => {
 });
 
 describe("draft batch transaction and read", () => {
+  it("warns before a named writer fallback, then retains both providers after Draft anyway", async () => {
+    const leadId = await addLead();
+    const snapshot = {
+      ...runtimeSnapshot,
+      requestedRuntime: "deepseek-flash",
+      requestedEffort: "high",
+      resolvedRuntime: "claude-sonnet",
+      switchReason: "DeepSeek v4.1 Flash is unavailable",
+      switchNote: "Using Claude Sonnet after DeepSeek v4.1 Flash became unavailable",
+    };
+    const input = { context, items: [{ leadId }], runtimeSnapshot: snapshot };
+    const warning = await commitDraftBatchForAuthenticatedEditor(input, {
+      accountRate: false,
+      kick: false,
+    });
+    assert.equal(warning.ok, false);
+    assert.match(JSON.stringify(warning), /DeepSeek.*If you draft anyway.*Claude Sonnet/);
+    const sql = await getSql();
+    const [count] = await sql.query<{ count: number }>(
+      "select count(*) as count from desk_jobs where newsroom_id=$1",
+      [newsroomId],
+    );
+    assert.equal(Number(count.count), 0);
+    const result = await commitDraftBatchForAuthenticatedEditor(
+      { ...input, override: ["writer-not-ready"] },
+      { accountRate: false, kick: false },
+    );
+    assert.equal(result.ok, true);
+    if (!result.ok) assert.fail("Acknowledged batch must enqueue");
+    const [stored] = await sql.query<{ runtime_snapshot: unknown }>(
+      "select runtime_snapshot from draft_batches where id=$1",
+      [result.batch.id],
+    );
+    const receipt =
+      typeof stored.runtime_snapshot === "string"
+        ? JSON.parse(stored.runtime_snapshot)
+        : (stored.runtime_snapshot as Record<string, unknown>);
+    assert.equal(receipt.requestedRuntime, "deepseek-flash");
+    assert.equal(receipt.resolvedRuntime, "claude-sonnet");
+    const [job] = await sql.query<{ result_json: string }>(
+      "select result_json from desk_jobs where draft_batch_id=$1",
+      [result.batch.id],
+    );
+    const jobReceipt = JSON.parse(job.result_json);
+    assert.equal(jobReceipt.requestedRuntime, "deepseek-flash");
+    assert.equal(jobReceipt.actualRuntime, "claude-sonnet");
+  });
   it("stores Automatic's exact resolved endpoint and source in the batch and job receipt", async () => {
     const leadId = await addLead();
     const automaticSnapshot = {
@@ -209,7 +257,8 @@ describe("draft batch transaction and read", () => {
     const savedSnapshot = typeof saved!.runtime_snapshot === "string"
       ? JSON.parse(saved!.runtime_snapshot)
       : saved!.runtime_snapshot;
-    assert.equal((savedSnapshot as { localModel: { id: string } }).localModel.id, "loaded-newsroom-model");
+    assert.equal((savedSnapshot as { localModel: { id: string } }).localModel.id, "loaded-newsroom-model",
+    );
     assert.deepEqual(job, { model_choice: "deepseek-flash", model_choice_source: "auto" });
   });
 
@@ -481,14 +530,17 @@ describe("draft batch transaction and read", () => {
       assert.equal(latest.batch?.items[0]?.workbenchHref, "/desk/story/" + leadId);
     }
     const sql = await getSql();
-    await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,body text,topic text,integrity_notes text,created_at timestamptz default now())");
+    await sql.query("create table if not exists drafts(id serial primary key,user_id text,newsroom_id integer,lead_id integer,headline text,body text,topic text,integrity_notes text,created_at timestamptz default now())",
+    );
     const [batchDraft] = await sql.query<{ id: number }>(
       "insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,integrity_notes) values($1,$2,$3,'Batch draft','Original','council','incomplete') returning id",
       [context.userId, newsroomId, leadId],
     );
     await sql.query(
       "update desk_jobs set result_json=$1 where newsroom_id=$2 and draft_batch_id=$3",
-      [JSON.stringify({ untouched: "retained", version: 1, draftId: batchDraft.id, evidenceCheckIncomplete: true }), newsroomId, created.batch.id],
+      [JSON.stringify({ untouched: "retained", version: 1, draftId: batchDraft.id, evidenceCheckIncomplete: true ,
+        }), newsroomId, created.batch.id,
+      ],
     );
     await sql.query(
       "insert into drafts(user_id,newsroom_id,lead_id,headline,body,topic,integrity_notes) values($1,$2,$3,'Newer manual draft','Edited later','council','')",
@@ -498,7 +550,9 @@ describe("draft batch transaction and read", () => {
     assert.equal(bound.ok && bound.batch?.items[0]?.evidenceCheckIncomplete, true);
     assert.equal(bound.ok && bound.batch?.items[0]?.draftId, batchDraft.id);
     assert.deepEqual(
-      parseDraftBatchCompletion(JSON.stringify({ version: 1, draftId: 12345, evidenceCheckIncomplete: true, untouched: "retained" })),
+      parseDraftBatchCompletion(JSON.stringify({ version: 1, draftId: 12345, evidenceCheckIncomplete: true, untouched: "retained" ,
+        }),
+      ),
       { draftId: 12345, evidenceCheckIncomplete: true, reviewRequired: true },
     );
     const foreign = await readDraftBatchForAuthenticatedEditor(

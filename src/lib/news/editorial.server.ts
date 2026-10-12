@@ -206,6 +206,14 @@ export async function writeEditorial(
   input: WriteEditorialInput,
   deps: EditorialWriterDeps = {},
 ): Promise<WriteEditorialResult> {
+  const assignment = await (
+    await import("./job-model-runtime.server.ts")
+  ).resolveRequestedJobModel(input.newsroomId, "opinion", input.modelChoice, input.modelEffort);
+  input = {
+    ...input,
+    modelChoice: opinionModelChoice(assignment.providerId),
+    modelEffort: assignment.effort,
+  };
   const cfg = await getPaperConfig(input.newsroomId);
   input = {
     ...input,
@@ -477,10 +485,10 @@ export async function writeEditorial(
       // resolution `localGateway()` already does, exactly as before this
       // wiring existed.
       const localModel = isLocalPick
-        ? editorialInput.localModel ?? await import("./provider-settings.ts")
+        ? (editorialInput.localModel ?? (await import("./provider-settings.ts")
           .then((m) => m.resolveLocalModelChoice(editorialInput.newsroomId, "opinion"))
           .then((r) => r.override)
-          .catch(() => undefined)
+          .catch(() => undefined)))
         : undefined;
       // The exact model this call is sent to, which is what an effort level
       // is validated against: the resolved local pick, or the rung's own
@@ -594,13 +602,13 @@ export async function writeEditorial(
           // its transport performs the final model-specific validation.
           reasoningEffort: modelEffort(
             editorialInput.modelChoice,
-            editorialInput.modelEffort,
-          ),
+            editorialInput.modelEffort),
         },
       );
     },
     fileEditorial: (workInput, editorial, choice) =>
-      fileEditorial({ ...workInput, suppliedMaterialCap: materialCaps.get(choice) }, editorial, choice),
+      fileEditorial({ ...workInput, suppliedMaterialCap: materialCaps.get(choice) }, editorial, choice,
+      ),
     timeoutMs: editorialTimeoutMs,
     onTechnicalFallback: async ({ previous, next, reason }) => {
       if (!input.completion) return;
@@ -692,8 +700,10 @@ export async function fileEditorial(
         requestedEffort,
         "checker",
       );
-      await setJobStage(input.completion!.jobId, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-      await setJobFailoverNote(input.completion!.jobId, failoverNoteSentence(nextLabel, previousLabel, reason));
+      await setJobStage(input.completion!.jobId, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+      );
+      await setJobFailoverNote(input.completion!.jobId, failoverNoteSentence(nextLabel, previousLabel, reason),
+      );
       // The request's model_choice is author attribution. A checker-only
       // fallback is recorded on runtimeByStage.checker and must not relabel
       // the already-written editorial as the checker provider's work.
@@ -747,8 +757,7 @@ export async function fileEditorial(
         const nextChoice: EffectiveOpinionModelChoice | null = transport === "codex"
           ? "codex-balanced"
           : transport === "anthropic" || transport === "claude-code"
-            ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-            : null;
+            ? /haiku/i.test(model) ? "claude-haiku" : "claude-sonnet": null;
         if (nextChoice) await recordNameSwitch(nextChoice, reason);
       },
       chat: nameChat,
@@ -961,7 +970,8 @@ export async function performEditorialWork(
   // Local jobs are bound to the exact endpoint/model checked before enqueue.
   // Reading uploads and writing the editorial must use the same pinned choice,
   // even if the newsroom preference changes while the job waits in the queue.
-  const queuedLocalModel = pinnedLocalModelForJob(job as Pick<import("./jobs.ts").DeskJob, "model_choice" | "result_json">);
+  const queuedLocalModel = pinnedLocalModelForJob(job as Pick<import("./jobs.ts").DeskJob, "model_choice" | "result_json">,
+  );
   const sql = await getSql();
   const rows = await sql<{
     id: number;
@@ -1126,7 +1136,8 @@ export async function performEditorialWork(
               requestedEffort,
               "documents",
             );
-            await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+            await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+          );
             await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
             await sql`update editorial_requests set model_choice=${nextChoice} where id=${req.id} and newsroom_id=${job.newsroom_id}`;
           },
@@ -1179,7 +1190,8 @@ export async function performEditorialWork(
           newest caller: "Researching with the desk" is an arrival in
           `JOB_STAGE_LISTS.editorial`, and this is what lights it.
         */
-        onStage: progressReporterFor(job as Pick<import("./jobs.ts").DeskJob, "id" | "stages_json">),
+        onStage: progressReporterFor(job as Pick<import("./jobs.ts").DeskJob, "id" | "stages_json">,
+        ),
       }),
   });
 

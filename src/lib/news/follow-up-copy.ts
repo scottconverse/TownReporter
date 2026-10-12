@@ -206,6 +206,11 @@ export function followUpModelEffort(raw: string | null | undefined): ModelEffort
   } catch { return null; }
 }
 
+export function followUpModelChoiceExplicit(raw: string | null | undefined): boolean {
+  try { return JSON.parse(raw || "[]")?.modelChoiceExplicit === true; }
+  catch { return false; }
+}
+
 /**
  * The line a finding adds to the story's reporting notes. Built here, once, so
  * the card's latest-result line and the note in the story cannot describe the
@@ -231,6 +236,7 @@ export type CreateAiFollowUpInput = {
   schedule: FollowUpSchedule;
   targets?: string[];
   modelChoice?: string;
+  modelChoiceExplicit?: boolean;
   modelEffort?: import("./provider-registry.ts").ModelEffort | null;
 };
 

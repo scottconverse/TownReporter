@@ -1,7 +1,7 @@
 import { saveDailyScanPolicy } from "@/components/scoped-actions";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Field, InkButton, SecHead } from "@/components/desk-chrome";
 import { announceToDesk, inputClass } from "@/components/desk-chrome-utils";
 import { ListSkeleton } from "@/components/states";
@@ -11,6 +11,7 @@ import { getDailyScanPolicy, pauseDailyScan, resumeDailyScan, type DailyScanPoli
 import { ModelPicker } from "@/components/model-picker";
 import { modelChoiceLabel } from "@/lib/news/model-choice";
 import { defaultModelEffort } from "@/lib/news/provider-registry";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 
 type Draft = Pick<
   DailyScanPolicy,
@@ -91,6 +92,7 @@ export function DailyScanSettings() {
   const [baseDraft, setBaseDraft] = useState<Draft | null>(null);
   const [baseRevision, setBaseRevision] = useState<number | null>(null);
   const [dirty, setDirty] = useState(false);
+  const modelChoiceTouched = useRef(false);
   const [feedback, setFeedback] = useState<{
     kind: "ok" | "error";
     text: string;
@@ -99,12 +101,20 @@ export function DailyScanSettings() {
 
   useEffect(() => {
     if (policy.data?.ok && !dirty) {
-      const next = policyDraft(policy.data.policy);
-      setDraft(next);
-      setBaseDraft(next);
+      const saved = policyDraft(policy.data.policy);
+      setDraft(saved);
+      setBaseDraft(saved);
       setBaseRevision(policy.data.policy.revision);
     }
   }, [policy.data, dirty]);
+
+  useJobModelAssignment<DailyScanRuntime>({
+    jobKey: "scan",
+    touched: modelChoiceTouched,
+    setChoice: (runtime) => setDraft((current) => current ? { ...current, runtime } : current),
+    setEffort: (modelEffort) => setDraft((current) => current ? { ...current, modelEffort } : current),
+    refreshWhen: policy.data,
+  });
 
   const accepted = useMemo(
     () => (sources.data ?? []).filter((source) => source.status === "accepted"),
@@ -337,15 +347,19 @@ export function DailyScanSettings() {
           <ModelPicker
             scope="scan"
             value={draft.runtime}
-            onChange={(runtime) =>
+            onChange={(runtime) => {
+              modelChoiceTouched.current = true;
               changeDraft({
                 ...draft,
                 runtime: runtime as DailyScanRuntime,
                 modelEffort: defaultModelEffort(runtime),
-              })
-            }
+              });
+            }}
             effort={draft.modelEffort}
-            onEffortChange={(modelEffort) => changeDraft({ ...draft, modelEffort })}
+            onEffortChange={(modelEffort) => {
+              modelChoiceTouched.current = true;
+              changeDraft({ ...draft, modelEffort });
+            }}
             compact
           />
         </div>

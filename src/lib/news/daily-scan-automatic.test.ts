@@ -97,8 +97,7 @@ const LM_STUDIO_CATALOG = {
       baseUrl: "http://127.0.0.1:1234/v1",
       reachable: true,
       models: [
-        { id: "halo/qwen3.6-35b-a3b", label: "Qwen 3.6 35B", loaded: true },
-      ],
+        { id: "halo/qwen3.6-35b-a3b", label: "Qwen 3.6 35B", loaded: true }],
     },
   ],
 };
@@ -187,8 +186,7 @@ describe("daily scan on Automatic", () => {
               baseUrl: "http://127.0.0.1:1234/v1",
               reachable: true,
               models: [
-                { id: "halo/qwen3.6-35b-a3b", label: "Qwen 3.6 35B", loaded: false },
-              ],
+                { id: "halo/qwen3.6-35b-a3b", label: "Qwen 3.6 35B", loaded: false }],
             },
           ],
         };
@@ -371,9 +369,10 @@ describe("daily scan on Automatic", () => {
     const automatic = cleanDailyScanPolicyInput({ ...base, runtime: "auto" });
     assert.equal(automatic.runtime, "auto");
     assert.equal(automatic.invalidError, undefined);
-    // A rung is what Automatic resolved to on the day, never a value an editor
-    // can store on the policy.
-    assert.ok(cleanDailyScanPolicyInput({ ...base, runtime: "deepseek-flash" }).invalidError);
+    // DeepSeek is both a named runtime and Automatic's first rung.
+    assert.equal(cleanDailyScanPolicyInput({ ...base, runtime: "deepseek-flash" }).invalidError,
+      undefined,
+    );
 
     /*
       The hand pick's own failover is unchanged: it walks
@@ -385,8 +384,7 @@ describe("daily scan on Automatic", () => {
     const fakeValidate = async (
       _newsroomId: number,
       runtime: string,
-      _effort?: unknown,
-    ) => {
+      _effort?: unknown) => {
       calls.push(runtime);
       if (runtime === "codex-balanced")
         return {

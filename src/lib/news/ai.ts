@@ -231,8 +231,8 @@ function localGateway(override?: LocalModelOverride | null): LlmConfig | null {
  * Only for entries with a `ladderRank`; everything else keeps the gateway it has
  * always had.
  */
-function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmConfig | null {
-  const baseUrl = providerEndpoint(entry);
+function rungGateway(entry: ProviderEntry, resolvedModel?: string | null, pinnedLocal?: LocalModelOverride): LlmConfig | null {
+  const baseUrl = pinnedLocal?.baseUrl ?? providerEndpoint(entry);
   if (!baseUrl) return null;
   const overrideKey = entry.envOverrides.apiKey ? env(entry.envOverrides.apiKey) : undefined;
   const apiKey = overrideKey ?? env("LLM_API_KEY") ?? env("OPENAI_API_KEY");
@@ -243,7 +243,7 @@ function rungGateway(entry: ProviderEntry, resolvedModel?: string | null): LlmCo
     purpose: no resolved model, no gateway, no call -- which is how "never
     request a model that is not loaded" is enforced rather than remembered.
   */
-  const model = resolvedModel || providerModel(entry);
+  const model = resolvedModel || pinnedLocal?.id || providerModel(entry);
   if (!model) return null;
   return {
     apiKey: apiKey || "not-needed",
@@ -416,7 +416,7 @@ function explicitProvider(
     const llm =
       entry.ladderRank === undefined
         ? localGateway(localOverride)
-        : rungGateway(entry, rungModel);
+        : rungGateway(entry, rungModel, localOverride ?? undefined);
     return llm ? { kind: "openai", ...llm } : null;
   }
 

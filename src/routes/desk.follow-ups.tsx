@@ -282,6 +282,7 @@ function asWireInput(input: FollowUpDialogInput) {
     targets: input.targets,
     leadId: input.leadId,
     modelChoice: input.modelChoice,
+    modelChoiceExplicit: input.modelChoiceExplicit,
           modelEffort: input.modelEffort,
   };
 }

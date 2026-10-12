@@ -15,6 +15,7 @@ import { invalidateDeskJobs, useDeskJobs } from "@/components/job-card-state";
 import { DeskJobCard } from "@/components/JobCard";
 import { ProviderSignInButton } from "@/components/provider-signin-button";
 import { ModelPicker } from "@/components/model-picker";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { useFirstRunPickerSeed } from "@/components/first-run-picker-default";
 import { LocalModelsOnThisComputer } from "@/components/first-run-model";
 import { usePaperSetupGate } from "@/components/paper-setup-gate";
@@ -99,6 +100,7 @@ function ScanPage() {
   } | null>(null);
   // Per click, not persisted -- same as Story's picker (see model-choice.ts).
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
+  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
   /*
     F3b: a fresh install that finished setup with a local model in memory
     opens this picker on Local model, so "Run scan" runs the model that is
@@ -107,10 +109,16 @@ function ScanPage() {
     before (see first-run-picker-default.ts).
   */
   const modelChoiceTouched = useRef(false);
+  const scanAssignment = useJobModelAssignment<StoryModelChoice>({
+    jobKey: "scan",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+  });
   useFirstRunPickerSeed({
     surface: "scan",
     current: modelChoice,
-    touched: () => modelChoiceTouched.current,
+    touched: () => modelChoiceTouched.current || scanAssignment.hasAssignment,
     apply: (choice) => {
       setModelChoice(choice);
       setModelEffort(defaultModelEffort(choice));
@@ -118,7 +126,6 @@ function ScanPage() {
   });
   // SG1 / Option A: the Run scan press is gated on the paper being set up.
   const paperGate = usePaperSetupGate("start the scan");
-  const [modelEffort, setModelEffort] = useState<ModelEffort | null>(null);
 
   const history = loadedRows;
   const totalScans = scans.data?.total ?? history.length;
@@ -157,6 +164,7 @@ function ScanPage() {
           data: {
             modelChoice,
             modelEffort,
+            modelChoiceExplicit: modelChoiceTouched.current,
             sectionKey: scope === "section" ? sectionKey || undefined : undefined,
             customSourceIds: scope === "custom" && !packId ? pickedIds : undefined,
             packId: scope === "custom" && packId ? packId : undefined,

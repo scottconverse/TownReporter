@@ -43,7 +43,7 @@
  * not that it is a different wire format.
  */
 export type ProviderKind =
-  | "claude-code"
+  "claude-code"
   | "codex"
   | "gemini-cli"
   | "openai"
@@ -103,9 +103,9 @@ export const PICKER_PROVIDER_IDS = [
   /*
     `deepseek-flash` is also Automatic's first rung everywhere (unit U29,
     owner decision 2026-09-30). It is a named choice on the shared Story, Scan,
-    Follow-up, Opinion and Dark Desk picker. Forced and OCR jobs keep it out of
-    their runnable provider lists because a rung is not a stand-alone runtime
-    and it does not provide OCR vision support.
+    Follow-up, Opinion, Dark Desk and forced-runtime pickers. Its named forced
+    snapshot preserves the DeepSeek transport. OCR excludes it because this
+    model does not provide vision support.
   */
   "deepseek-flash",
 ] as const;
@@ -138,7 +138,7 @@ export type RetiredProviderId = (typeof RETIRED_PROVIDER_IDS)[number];
 
   These are the ids Automatic may pin on a job (0.6.63, Unit Y item 1: DeepSeek
   v4.1 Flash, then the local model on this computer, then Codex Terra). They are
-  INTERNAL ids -- no menu shows them -- but a job still has to be able to hold
+  ladder ids; DeepSeek is also a named picker choice. A job must hold either
   one, because `planAutomaticFailover` returns `storyModelChoice(rung)` and a
   value this type rejected would silently degrade to "auto" and re-probe the
   ladder from the top. `automaticLadder()` is the runtime source of truth for
@@ -152,10 +152,9 @@ export type AutomaticRungId = (typeof AUTOMATIC_RUNG_IDS)[number];
 
   Unit U29 (owner decision 2026-09-30): an id can now be in this list AND in
   `PICKER_PROVIDER_IDS`. `deepseek-flash` is Automatic's first rung on every
-  surface -- which is what makes it internal, and what keeps it out of a
-  batch's runtime (`validateForcedRuntime` refuses a rung) -- and it is also a
-  name Opinion's model menu offers. Being internal is about who RESOLVES the
-  id, not about whether one menu may print it; `configured` and `qwen-local`
+  surface, and is also a named runtime for ordinary and forced jobs. The
+  internal list records which ids Automatic can resolve; it does not exclude
+  a provider from named pickers. `configured` and `qwen-local`
   are still offered nowhere.
 */
 export const INTERNAL_PROVIDER_IDS = ["configured", ...AUTOMATIC_RUNG_IDS] as const;
@@ -780,8 +779,8 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       Named everywhere the shared chat-model picker runs this provider:
       Story, Scan, Follow-up, Opinion and Dark Desk. It remains an Automatic
       rung as well, so every ordinary work surface can show and run the same
-      exact model by name. OCR requires a vision-capable model, and forced
-      jobs must choose one stand-alone runtime rather than an Automatic rung.
+      exact model by name. Forced jobs pin its own endpoint and model; OCR
+      requires a vision-capable model and does not offer this text provider.
     */
     offeredFor: {
       ...NO_SURFACE,
@@ -790,6 +789,7 @@ export const PROVIDER_REGISTRY: readonly ProviderEntry[] = [
       "follow-up": true,
       opinion: true,
       dark: true,
+      forced: true,
     },
     ladderRank: 1,
     // The one rung both ladders share, and first on each: the desk researches
@@ -885,9 +885,11 @@ const QWEN_3_5_CLOUD_EFFORTS: readonly ModelEffort[] = ["none"];
 
 function defaultsToThinkingOff(model: string | undefined | null): boolean {
   const id = model?.trim() ?? "";
-  return /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
+  return (
+    /^(?:models\/)?deepseek-v4\.1-flash(?::cloud)?$/i.test(id)
     || /^(?:models\/)?qwen3\.8(?:[-:/]|$)/i.test(id)
-    || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id);
+    || /^(?:models\/)?qwen3\.5:397b-cloud$/i.test(id)
+  );
 }
 
 /**
@@ -916,8 +918,7 @@ export function openAiCompatibleModelEfforts(
 
 export function modelEffortLabel(
   effort: ModelEffort,
-  model?: string | null,
-): string {
+  model?: string | null): string {
   if (effort === "none" && defaultsToThinkingOff(model)) {
     return "Off — no extra thinking";
   }
