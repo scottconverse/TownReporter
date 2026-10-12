@@ -1984,7 +1984,7 @@ function DeskHome() {
                 <div className="today-leads-head">
                   <div className="today-leads-title">
                     <h2>New leads</h2>
-                    <span>{todayLeadCaption()}</span>
+                    <span>{todayLeadCaption(last ? formatListDateTime(last.started_at) : null)}</span>
                   </div>
                   {todayScanStatus(scanning) ? (
                     <p className="meta" role="status">{todayScanStatus(scanning)}</p>

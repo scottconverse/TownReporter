@@ -9,6 +9,7 @@ import {
 
 test("Today names its mixed lead pile and separates scan activity from its saved leads", () => {
   assert.equal(todayLeadCaption(), "All open leads · best first");
+  assert.equal(todayLeadCaption("Oct 12, 5:00 AM"), "All open leads · best first · last scan Oct 12, 5:00 AM");
   assert.equal(todayScanStatus(true), "A scan is still reading sources; its new leads will appear when it finishes.");
 });
 

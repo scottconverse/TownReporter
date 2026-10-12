@@ -1,7 +1,10 @@
 import { investigationPileFor } from "../news/desk-copy.ts";
 
-export function todayLeadCaption(): string {
-  return "All open leads · best first";
+/** The pile mixes every open lead, so the last scan's time is named apart from it, never as its source. */
+export function todayLeadCaption(lastScanLabel?: string | null): string {
+  return lastScanLabel
+    ? `All open leads · best first · last scan ${lastScanLabel}`
+    : "All open leads · best first";
 }
 
 export function todayScanStatus(scanning: boolean): string | null {
