@@ -261,13 +261,24 @@ export async function failOverAndRetry(opts: {
   }
 
   const previousLabel = modelChoiceLabel(job.model_choice);
+  // The effort the rung that failed ACTUALLY ran at. The job's requested effort
+  // is not that: DeepSeek v4.1 Flash runs with thinking off whatever the editor
+  // chose, so the note says "none" for it, not the medium the job carried.
+  const failedRungEffort =
+    draftInput.modelEffort == null
+      ? null
+      : validatedModelEffort(job.model_choice, draftInput.modelEffort);
+  const failedRungRan = failedRungEffort ? ` (${previousLabel} ran at effort ${failedRungEffort})` : "";
   await setModelChoice(job.id, plan.next);
   const switchedBecause = failoverReasonPhrase(previousLabel, plan.reason);
   await setStage(job.id, `Switched to ${plan.label}: ${switchedBecause}`);
   // Durable twin of the stage write above: `stage` gets overwritten by
   // "Done" once the job finishes, so without this the editor could see the
   // switch reason mid-run but never again once the draft landed.
-  await setFailoverNote(job.id, failoverNoteSentence(plan.label, previousLabel, plan.reason));
+  await setFailoverNote(
+    job.id,
+    `${failoverNoteSentence(plan.label, previousLabel, plan.reason)}${failedRungRan}`,
+  );
   const retried = await runReport({
     ...draftInput,
     modelChoice: plan.next,

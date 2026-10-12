@@ -21,7 +21,9 @@ import {
   queueCounts,
   queueMatchesSearch,
   queueNeedle,
+  queueRowTick,
   queueSelect,
+  queueSelectAllShown,
   queueSort,
   QUEUE_FILTERS,
   QUEUE_SORTS,
@@ -324,4 +326,17 @@ test("the counts and the tabs cannot disagree: each tab's length is its own coun
     const shown = queueSelect(rows, PRINTED, { filter, section: "all", sort: "best", needle: "" });
     assert.equal(shown.length, counts[filter], `tab ${filter}`);
   }
+});
+
+test("ticking one row picks that row and no other, and unticking drops only it", () => {
+  assert.deepEqual(queueRowTick([], 7, true), [7]);
+  assert.deepEqual(queueRowTick([3, 7], 9, true), [3, 7, 9]);
+  assert.deepEqual(queueRowTick([3, 7, 9], 7, false), [3, 9]);
+  assert.deepEqual(queueRowTick([3, 9], 7, false), [3, 9], "unticking a row that was never picked changes nothing");
+});
+
+test("the header box picks exactly the leads on screen, and clears them all", () => {
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], true), [1, 2, 3]);
+  assert.deepEqual(queueSelectAllShown([1, 2, 3], false), []);
+  assert.deepEqual(queueSelectAllShown([], true), []);
 });

@@ -42,7 +42,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import type { QueueFilter, QueueSort } from "@/lib/news/queue-rows";
+import { queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
@@ -1678,7 +1678,7 @@ function QueuePage() {
                 onChange={(event) => {
                   setConfirmingBulkDelete(false);
                   setBulkDeleteNotice("");
-                  setSelectedDeleteLeadIds(event.target.checked ? shownIds : []);
+                  setSelectedDeleteLeadIds(queueSelectAllShown(shownIds, event.target.checked));
                 }}
               />
               <span className="queue-box" aria-hidden="true">
@@ -1811,11 +1811,7 @@ function QueuePage() {
                     setCursor(index);
                     setConfirmingBulkDelete(false);
                     setBulkDeleteNotice("");
-                    setSelectedDeleteLeadIds((ids) =>
-                      selected
-                        ? [...ids.filter((id) => id !== l.id), l.id]
-                        : ids.filter((id) => id !== l.id),
-                    );
+                    setSelectedDeleteLeadIds((ids) => queueRowTick(ids, l.id, selected));
                   }}
                   onDraft={(modelChoice, modelEffort, modelChoiceExplicit) => {
                     setDraftNotices((notices) => {

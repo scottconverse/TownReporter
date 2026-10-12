@@ -227,3 +227,16 @@ export function queueSort<T extends QueueLead>(
     sort === "best" ? (a, b) => (b.newsworthiness ?? 0) - (a.newsworthiness ?? 0) : byAge,
   );
 }
+
+/*
+  The Queue's checkbox column as one rule (walk D, DHD1-3). A tick on one row
+  adds or removes that row and nothing else. Only the header box sets the
+  whole shown list at once, and it sets exactly the leads on screen.
+*/
+export function queueRowTick(picked: readonly number[], leadId: number, selected: boolean): number[] {
+  return selected ? [...picked.filter((id) => id !== leadId), leadId] : picked.filter((id) => id !== leadId);
+}
+
+export function queueSelectAllShown(shownIds: readonly number[], checked: boolean): number[] {
+  return checked ? [...shownIds] : [];
+}
