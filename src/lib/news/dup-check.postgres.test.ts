@@ -77,10 +77,10 @@ const CANDIDATE = {
   source_urls: ["https://longmontleader.com/agenda/sept-council"],
 };
 
-/** A candidate the word rule chips against a PUBLISHED story: two shared real
- * names and one section is `nearDuplicate`'s second way in. */
+/** A borderline pair with a shared property, section and water-testing terms.
+ * Shared names alone no longer earn duplicate review (B02). */
 const BOHN_CANDIDATE = {
-  headline: "Bohn Farm rezoning heads to the planning board in October",
+  headline: "Bohn Farm rezoning board reviews nearby well water samples",
   why: "The board takes it up Tuesday.",
   topic: "council",
   source_urls: ["https://longmontleader.com/bohn-farm-rezoning"],
@@ -260,7 +260,7 @@ describe("U28: the duplicate check's verdict persists and reaches the Queue read
 
       const yes = await runDupCheck({
         pairs,
-        chat: answering(true, "same rezoning vote, same planning board date"),
+        chat: answering(true, "same rezoning hearing, same well-water samples"),
       });
       await fileScanLeads(sql, { userId: USER_ID }, NEWSROOM_ID, runId, [BOHN_CANDIDATE], [], PLACE, yes);
 
@@ -280,7 +280,7 @@ describe("U28: the duplicate check's verdict persists and reaches the Queue read
       assert.equal(chip.slug, "bohn-farm-water-tests");
       assert.equal(
         printedDuplicateLine(chip.headline, chip.aiWhy),
-        "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning vote, same planning board date",
+        "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning hearing, same well-water samples",
       );
 
       /*
@@ -290,14 +290,14 @@ describe("U28: the duplicate check's verdict persists and reaches the Queue read
       */
       const no = await runDupCheck({
         pairs,
-        chat: answering(false, "one is a rezoning, the other is a water test"),
+        chat: answering(false, "one is a rezoning hearing, the other reports completed test findings"),
       });
       await fileScanLeads(
         sql,
         { userId: USER_ID },
         NEWSROOM_ID,
         runId,
-        [{ ...BOHN_CANDIDATE, headline: "Bohn Farm rezoning returns to the planning board" }],
+        [{ ...BOHN_CANDIDATE, headline: "Bohn Farm rezoning returns to the planning board to review well water samples" }],
         [],
         PLACE,
         no,
@@ -308,10 +308,10 @@ describe("U28: the duplicate check's verdict persists and reaches the Queue read
                dup_ai_printed_same, dup_ai_printed_why, dup_ai_printed_slug,
                dup_ai_model, dup_ai_checked_at
         from leads where scan_run_id = ${runId} and newsroom_id = ${NEWSROOM_ID}
-          and headline = ${"Bohn Farm rezoning returns to the planning board"}
+          and headline = ${"Bohn Farm rezoning returns to the planning board to review well water samples"}
       `;
       assert.equal(printedDupChip(second[0]!, BOHN_PRINTED, PLACE), null, "a 'no' leaves no chip to explain");
-      assert.equal(second[0]!.dup_ai_printed_why, "one is a rezoning, the other is a water test");
+      assert.equal(second[0]!.dup_ai_printed_why, "one is a rezoning hearing, the other reports completed test findings");
     },
   );
 

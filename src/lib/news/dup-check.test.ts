@@ -218,7 +218,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(true, "same rezoning vote, same planning board date");
+    const { chat } = answering(true, "same rezoning hearing, same well-water samples");
     const outcome = await runDupCheck({ pairs, chat });
 
     const decision = outcome.decisions.get(0)!;
@@ -241,7 +241,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
     assert.ok(chip, "the chip the word rule earned is kept");
     assert.equal(
       printedDuplicateLine(chip.headline, chip.aiWhy),
-      "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning vote, same planning board date",
+      "Looks already printed: Bohn Farm well water tests find nitrates near the creek — AI: same rezoning hearing, same well-water samples",
     );
   });
 
@@ -252,7 +252,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(false, "one is a rezoning, the other is water testing");
+    const { chat } = answering(false, "one is a rezoning hearing, the other reports completed test findings");
     const outcome = await runDupCheck({ pairs, chat });
 
     const decision = outcome.decisions.get(0)!;
@@ -423,7 +423,7 @@ describe("U28: the duplicate check reads the words the desk could not", () => {
       printed: BOHN_PRINTED,
       place: PLACE,
     });
-    const { chat } = answering(false, "one is a rezoning, the other is a water test");
+    const { chat } = answering(false, "one is a rezoning hearing, the other reports completed test findings");
     const outcome: DupCheckOutcome = await runDupCheck({ pairs, chat });
     const settled = outcome.decisions.get(0)!.printed!;
     assert.equal(
