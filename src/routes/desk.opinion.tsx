@@ -876,7 +876,11 @@ function OpinionPage() {
                             </InkButton>
                           </span>
                         )}
-                        {/* DHD2-13: the row's press is named as it is on the open piece: "Publish to the paper". */}
+                        {/*
+                          DHD2-13: the row's press is still "Publish" (its words are kept); the
+                          note in front says where it goes, the same words the open piece uses.
+                        */}
+                        <span className="meta">Publish to the paper:</span>{" "}
                         <InkButton
                           tone="solid"
                           disabled={publish.isPending}
@@ -884,7 +888,7 @@ function OpinionPage() {
                         >
                           {publish.isPending && publish.variables?.draftId === r.draft_id
                             ? "Publishing…"
-                            : "Publish to the paper"}
+                            : "Publish"}
                         </InkButton>
                       </>
                     ) : null}
