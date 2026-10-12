@@ -817,6 +817,23 @@ describe("Worth a Look presentation", () => {
     );
   });
 
+  it("does not send unrelated Bohn Farm headlines to printed-story review (B02)", () => {
+    assert.equal(
+      nearDuplicate(
+        { headline: "Bohn Farm rezoning heads to the planning board in October", topic: "council" },
+        [
+          {
+            slug: "bohn-farm-water-tests",
+            headline: "Bohn Farm well water tests find nitrates near the creek",
+            topic: "council",
+            published_at: new Date().toISOString(),
+          },
+        ],
+      ),
+      null,
+    );
+  });
+
   it("does not flag a killed lead as covering an unrelated printed piece on city/month furniture alone (real case 2026-09-02)", () => {
     const printed = [
       {

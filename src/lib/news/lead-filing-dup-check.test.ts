@@ -71,10 +71,10 @@ const CANDIDATE = {
   source_urls: ["https://longmontleader.com/agenda/sept-council"],
 };
 
-/** A candidate the word rule flags against a PUBLISHED story: two shared real
- * names and the same section (see nearDuplicate in desk-copy.ts). */
+/** A borderline candidate with a shared subject and property name (see
+ * nearDuplicate in desk-copy.ts); shared names alone are not enough (B02). */
 const BOHN_CANDIDATE = {
-  headline: "Bohn Farm rezoning heads to the planning board in October",
+  headline: "Bohn Farm water testing reports nitrate levels near the creek",
   why: "The board takes it up Tuesday.",
   topic: "council",
   source_urls: ["https://longmontleader.com/bohn-farm-rezoning"],
@@ -426,7 +426,7 @@ describe("U28: the duplicate check settles the link the matcher only guessed at"
       assert.equal(pairs.length, 1);
       assert.equal(pairs[0]!.kind, "printed");
 
-      const no = await runDupCheck({ pairs, chat: answering(false, "one is a rezoning, the other is a water test") });
+      const no = await runDupCheck({ pairs, chat: answering(false, "these are separate sampling rounds") });
       await fileScanLeads(sql, { userId: "u" }, 1, 905, [BOHN_CANDIDATE], [], PLACE, no);
 
       const [filed] = await filedRows(sql);

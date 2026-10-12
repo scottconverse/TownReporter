@@ -2222,7 +2222,14 @@ export function nearDuplicate(
     // story per lead: skip the tokenising work in the common case.
     if (!titlesOverlapRaw && !sameTopic) continue;
     const { subjects, names } = distinguishingOverlap(lead.headline, p.headline, place);
-    const titlesAgree = titlesOverlapRaw && subjects >= 1 && subjects + names >= 2;
+    // Strong title agreement can identify the same named event even when its
+    // Queue section differs from the section used by the printed story. Keep
+    // the subject gate for ordinary overlap; allow a name-only title only
+    // when three specific names agree. This does not admit same-entity stories
+    // whose titles do not overlap (B02).
+    const titlesAgree =
+      titlesOverlapRaw &&
+      ((subjects >= 1 && subjects + names >= 2) || names >= 3);
     // A shared organization can publish several different stories in one
     // section. Recent entity overlap is a review signal, not proof that the
     // lead covers the printed story (B02). Keep the old Bohn Farm case because
