@@ -15,7 +15,10 @@ import {
   killedAsDuplicateNote,
   killRecordLine,
   KILL_THIS_ONE_LABEL,
+  BULK_START_NOTE,
   MOVE_TO_NEW_LABEL,
+  PRINTED_TAB_NOTE,
+  queueTabCountText,
   movedToNewNote,
   printedDuplicateLine,
   REOPEN_PRIOR_LABEL,
@@ -2033,6 +2036,21 @@ describe("Unit AK: duplicate and kill wording", () => {
       killRecordLine({ reopened: true }),
       "Reopened — no record of when or why it was killed",
     );
+  });
+
+  it("THT-10: a Queue tab that is still loading says so, never 0", () => {
+    assert.equal(queueTabCountText(null), "loading");
+    assert.equal(queueTabCountText(0), "0");
+    assert.equal(queueTabCountText(301), "301");
+  });
+
+  it("THT-11: the Printed count says it is a duplicate-match count, not every published story", () => {
+    assert.match(PRINTED_TAB_NOTE, /counts leads that match a story already in print/);
+    assert.match(PRINTED_TAB_NOTE, /not every published story/);
+  });
+
+  it("THT-21: the Start line says it starts AI drafts for the ticked leads", () => {
+    assert.equal(BULK_START_NOTE, "Starts AI drafts for the ticked leads.");
   });
 
   it("names the Compare view's three presses in plain words", () => {

@@ -1342,6 +1342,8 @@ export const leadStatusRestoreInput = z.object({
   id: rowId,
   // Omitted = back to the status the lead held before its kill (DHC06).
   status: z.enum(["new", "held", "drafted"]).optional(),
+  // Bring back (the Killed pile) keeps the kill record; an Undo leaves it off (release-h THT-14, DHI-2).
+  keepRecord: z.boolean().optional(),
 });
 
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */

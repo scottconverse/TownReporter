@@ -36,9 +36,12 @@ import { draftLead, fileLead, runScan } from "@/components/scoped-actions";
 import { restoreTrashItem } from "@/lib/news/trash";
 import {
   duplicateKillReason,
+  BULK_START_NOTE,
   editorActionError,
   mergeFocusSelection,
+  PRINTED_TAB_NOTE,
   printedDupChip,
+  queueTabCountText,
   suggestFocusLeads,
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
@@ -66,6 +69,7 @@ import {
   KillReasonChips,
   killPress,
   killUndoPress,
+  bringBackPress,
   restoreStatus,
   type KillReasonRequest,
   type KillUndoPress,
@@ -111,6 +115,7 @@ function darkPrefill(lead: LeadRow) {
   const source = parseUrlList(lead.source_urls)[0];
   return darkLeadPrefill(lead.headline, source ?? null);
 }
+
 
 function QueuePage() {
   const { sections } = useEditorSections();
@@ -209,9 +214,16 @@ function QueuePage() {
     `new`, which is where it put every lead before this fix.
   */
   const killedFrom = useRef(new Map<number, RestoreStatus>());
+  /*
+    THT-7, THT-9: the last kill this screen pressed. A killed lead leaves the
+    Open list at once, so the cursor is on the next lead by the time U is
+    pressed; U reads this instead, so the hint's own promise holds.
+  */
+  const lastKill = useRef<{ id: number; restore: RestoreStatus } | null>(null);
   const killLead = (lead: { id: number; status: string }) => {
     const restore = restoreStatus(lead.status);
     killedFrom.current.set(lead.id, restore);
+    lastKill.current = { id: lead.id, restore };
     return killPress(lead.id, restore);
   };
   /*
@@ -232,8 +244,11 @@ function QueuePage() {
   const undoOptimistic = leadStatusOptimistic(qc);
   const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
-    mutationFn: (press: KillUndoPress) =>
-      restoreKilledLead({ data: { id: press.id, status: press.status } }),
+    mutationFn: (press: KillUndoPress) => {
+      // The lead is being put back, so U must not aim at it again.
+      if (lastKill.current?.id === press.id) lastKill.current = null;
+      return restoreKilledLead({ data: { id: press.id, status: press.status, keepRecord: press.keepRecord } });
+    },
     optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
     rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
@@ -846,7 +861,11 @@ function QueuePage() {
           once, with the Undo and the reason chips on the toast. The dialog is
           still there for a written reason, in the row's More ▾ menu.
         */
-        if (lead) setStatus.mutate(killLead(lead));
+        // THT-8: X on a focused row Kill button kills that row (`rowId`), not the cursor row.
+        {
+          const target = action.rowId == null ? lead : shown.find((l) => String(l.id) === action.rowId);
+          if (target) setStatus.mutate(killLead(target));
+        }
         break;
       case "undo":
         if (lead && lead.status === "held") {
@@ -857,6 +876,10 @@ function QueuePage() {
             this Undo has always had.
           */
           setStatus.mutate({ id: lead.id, status: "new", release: true });
+        } else if (lastKill.current) {
+          // THT-7, THT-9: the kill just pressed, even though its lead has left the list.
+          const last = lastKill.current;
+          void undoKill.mutate(killUndoPress(last.id, last.restore));
         } else if (lead && lead.status === "killed") {
           /*
             A kill's way back, through the same write the row's own Undo uses --
@@ -930,12 +953,12 @@ function QueuePage() {
   */
   const tabCounts = leadsQuery.data?.counts;
   const publishedCount = tabCounts?.publishedLeads ?? 0;
-  const queueFilters: { key: QueueFilter; label: string; count: number }[] = [
-    { key: "open", label: "Open", count: tabCounts?.open ?? 0 },
-    { key: "held", label: "Held", count: tabCounts?.held ?? 0 },
-    { key: "killed", label: "Killed", count: tabCounts?.killed ?? 0 },
-    { key: "printed", label: "≈ Printed", count: tabCounts?.printed ?? 0 },
-    { key: "all", label: "All", count: tabCounts?.all ?? 0 },
+  const queueFilters: { key: QueueFilter; label: string; count: number | null }[] = [
+    { key: "open", label: "Open", count: tabCounts?.open ?? null },
+    { key: "held", label: "Held", count: tabCounts?.held ?? null },
+    { key: "killed", label: "Killed", count: tabCounts?.killed ?? null },
+    { key: "printed", label: "≈ Printed", count: tabCounts?.printed ?? null },
+    { key: "all", label: "All", count: tabCounts?.all ?? null },
   ];
   const printed = published.data ?? [];
   /*
@@ -1198,9 +1221,11 @@ function QueuePage() {
               className={filter === f.key ? "on" : ""}
               aria-pressed={filter === f.key}
               title={
-                f.key === "held" && f.count > 0
+                f.key === "held" && (f.count ?? 0) > 0
                   ? `${f.count} lead${f.count === 1 ? "" : "s"} waiting on you under Held`
-                  : undefined
+                  : f.key === "printed"
+                    ? PRINTED_TAB_NOTE
+                    : undefined
               }
               onClick={() => {
                 setFilter(f.key);
@@ -1218,9 +1243,9 @@ function QueuePage() {
                 words is unchanged.
               */}
               <span
-                className={"filter-badge" + (f.key === "held" && f.count > 0 ? " waiting" : "")}
+                className={"filter-badge" + (f.key === "held" && (f.count ?? 0) > 0 ? " waiting" : "")}
               >
-                {f.count}
+                {queueTabCountText(f.count)}
               </span>
             </button>
           ))}
@@ -1272,6 +1297,8 @@ function QueuePage() {
           </div>
         </div>
       </div>
+      {/* THT-11: the Printed count is a duplicate-match count, so the tab says what it counts. */}
+      <span className="queue-tab-note">{PRINTED_TAB_NOTE}</span>
 
       {/*
         FB6, item 3: the scan's own card, in place, under the press that started
@@ -1358,6 +1385,8 @@ function QueuePage() {
                   count, the button stands down, and the line below the bar
                   (which was already there) says why.
                 */}
+                {/* THT-21: the line under the button says what it does -- it starts AI drafts. */}
+                <span className="bulk-start-stack">
                 <InkButton
                   disabled={
                     startBatch.isPending || bulkDraftable.length === 0
@@ -1381,6 +1410,8 @@ function QueuePage() {
                       ? "Start stories"
                       : `Start ${bulkDraftable.length} ${bulkDraftable.length === 1 ? "story" : "stories"}`}
                 </InkButton>
+                <span className="bulk-start-note">{BULK_START_NOTE}</span>
+                </span>
                 <ActionButton
                   tone="quiet"
                   /*
@@ -1741,7 +1772,7 @@ function QueuePage() {
                     reason" below.
                   */
                   onBack={() => (l.status === "killed"
-                    ? undoKill.mutate(killUndoPress(l.id))
+                    ? undoKill.mutate(bringBackPress(l.id))
                     : setStatus.mutate({ id: l.id, status: "new", release: l.status === "held" }))}
                   /*
                     FB6, item 5: the row's own Release / Bring back says what it

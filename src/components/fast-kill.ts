@@ -51,8 +51,12 @@ export type RestoreStatus = "new" | "held" | "drafted";
 /** The kill, as the write the screen's status mutation takes. */
 export type KillPress = { id: number; status: "killed"; restore: RestoreStatus };
 
-/** The way back, as the same shape. */
-export type KillUndoPress = { id: number; status?: RestoreStatus };
+/**
+ * The way back, as the same shape. `keepRecord` is set only by Bring back (the
+ * Killed pile), which keeps the kill's time and reason on the lead; an Undo
+ * leaves it unset and takes the kill off the lead.
+ */
+export type KillUndoPress = { id: number; status?: RestoreStatus; keepRecord?: boolean };
 
 /**
  * Where a lead of this status goes when a kill of it is undone.
@@ -91,6 +95,14 @@ export function killPress(id: number, restore: RestoreStatus = "new"): KillPress
  */
 export function killUndoPress(id: number, restore?: RestoreStatus): KillUndoPress {
   return { id, status: restore };
+}
+
+/**
+ * Bring back from the Killed pile: the same way back, but the lead keeps its
+ * kill record (when it was killed and why), so its history line can say so.
+ */
+export function bringBackPress(id: number, restore?: RestoreStatus): KillUndoPress {
+  return { id, status: restore, keepRecord: true };
 }
 
 /**

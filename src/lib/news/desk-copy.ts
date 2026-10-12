@@ -2430,6 +2430,28 @@ export function killRecordLine(input: {
     : "Killed before the desk started recording why — no reason was kept";
 }
 
+/**
+ * THT-11: the Queue's "≈ Printed" count is the leads the duplicate check matched
+ * to a story already in print. It is not the number of published stories, so
+ * the tab (as a tooltip and as visible text) says what it counts.
+ */
+export const PRINTED_TAB_NOTE =
+  "≈ Printed counts leads that match a story already in print. It is not every published story.";
+
+/**
+ * THT-21: the line under the bulk Start button. Start runs AI drafts for every
+ * ticked lead, so the line says so in the same words the button uses.
+ */
+export const BULK_START_NOTE = "Starts AI drafts for the ticked leads.";
+
+/**
+ * THT-10: a Queue tab's count while its numbers are still loading. A tab that has
+ * not heard back says "loading", never "0", which an editor would read as empty.
+ */
+export function queueTabCountText(count: number | null): string {
+  return count == null ? "loading" : String(count);
+}
+
 // News and event hosts in the owner's October 9 source research. Subdomains inherit the host label.
 export const LOCAL_NEWS_HOSTS = ["timescall.com","times-call.com","dailycamera.com","longmontleader.com","denverpost.com","bizwest.com","coloradopolitics.com","substack.com","sentineltm.com","lefthandvalley.com","lhvc.com","boulderreportinglab.org","boulderweekly.com","yellowscene.com","kgnu.org","kunc.org","9news.com","denver7.com","coloradonewsline.com","berthoudsurveyor.com","lyonsrecorder.org","thefrontpagefrcc.com","schsnews.org","axios.com","mavnewspaper.com","joshuaberman.net","longmontpublicmedia.org"];
 export const LOCAL_EVENT_HOSTS = ["visitlongmont.org","downtownlongmont.com","longmontchamber.org","bouldercountyfair.org","bcfm.org","lefthandbrewing.com","wibbybrewing.com","300sunsbrewing.com","bootstrapbrewing.com","firehouseart.org","longmonttheatre.org","jesterstheatre.com","dickensoperahouse.co","longmontsymphony.org","lexlocalevents.com","heartoflongmont.org","longmonthumane.org","ourcenter.org","eventbrite.com","meetup.com","bouldercoloradousa.com","teamsideline.com","kiwanis.org","stvrainhistory.org","soundpostsessions.com","tinkermill.org","abetterstandarddirection.com","rmequality.org","colorado.com","boulderoperacompany.com"];
