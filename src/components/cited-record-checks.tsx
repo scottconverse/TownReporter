@@ -54,6 +54,7 @@ export function CitedRecordChecks({
             const capture = group.capture;
             const savedAt = formatCaptureTimestamp(capture.capturedAt);
             const passageIsActionable = capture.available && capture.readable && !capture.takenDown;
+            const stateShownBeforeDetails = !passage || !passageIsActionable;
             return (
               <li
                 key={`${capture.versionId ?? "missing"}-${capture.captureEventId ?? captureIndex}`}
@@ -110,7 +111,7 @@ export function CitedRecordChecks({
                 <details className="mt-2 text-sm text-muted">
                   <summary className="cursor-pointer">Details for support</summary>
                   <div className="mt-1 space-y-1">
-                    <p>{captureStateSentence(capture)}</p>
+                    {!stateShownBeforeDetails ? <p>{captureStateSentence(capture)}</p> : null}
                     {capture.url ? <p className="break-all">Source link: {capture.url}</p> : null}
                     {group.artifactVersionReference || group.captureEventIds.length ? (
                       <p>{captureSupportLine(group)}</p>

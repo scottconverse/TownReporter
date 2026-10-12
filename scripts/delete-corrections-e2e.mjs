@@ -844,7 +844,8 @@ async function main() {
   await review.locator("article").first()
     .getByText("TEST FIXTURE: The library board approved the recreation room update")
     .waitFor();
-  const recordedPassages = review.getByText("Recorded excerpt found in cited version");
+  // FA10 leads with the passage and keeps this status in Details for support.
+  const recordedPassages = review.getByText("The passage appears in this copy.", { exact: true });
   if ((await recordedPassages.count()) !== 1)
     throw new Error("expected the direct citation and captured-event citation to share one displayed record");
   await recordedPassages.first().waitFor();
@@ -856,7 +857,7 @@ async function main() {
       `Saved copy number ${findingFixture.citedVersionId} of the page · capture event ${findingFixture.captureEventId} (saved copy ${findingFixture.citedVersionId})`,
     )
     .waitFor();
-  const unavailablePassages = review.getByText("Cited capture unavailable", { exact: true });
+  const unavailablePassages = review.getByText("Saved copy is unavailable.", { exact: true });
   if ((await unavailablePassages.count()) !== 1)
     throw new Error("expected exactly one unavailable cited-capture passage");
   await unavailablePassages.first().waitFor();

@@ -219,7 +219,7 @@ test("FA10: evidence cards lead with a readable date, passage and review action"
   const markup = renderToStaticMarkup(
     React.createElement(CitedRecordChecks, {
       variant: "finding",
-      captures: [capture],
+      captures: [capture, { ...capture, captureEventId: 93 }],
       passage: "The council approved the playground plan.",
       onOpen: () => {},
       pending: false,
@@ -235,11 +235,30 @@ test("FA10: evidence cards lead with a readable date, passage and review action"
       assert.match(visible, /The council approved the playground plan\./);
       assert.match(visible, /Open the saved source copy/);
       assert.equal(await page.locator("details").count(), 1);
+      assert.equal(await page.locator('section[aria-label="Sources for this finding"] li').count(), 1);
       assert.doesNotMatch(visible, /capture event 92|saved copy 41/);
       await page.getByText("Details for support").click();
-      assert.match(await page.locator("main").innerText(), /capture event 92.*saved copy 41/);
+      const details = await page.locator("main").innerText();
+      assert.match(details, /capture event 92 \(saved copy 41\).*capture event 93 \(saved copy 41\)/);
       await page.close();
     }
+
+    const unavailableMarkup = renderToStaticMarkup(
+      React.createElement(CitedRecordChecks, {
+        variant: "finding",
+        captures: [{ ...capture, versionId: 42, captureEventId: null, available: false, readable: false, viewHref: null }],
+        passage: "The council approved the playground plan.",
+        onOpen: () => {},
+        pending: false,
+      }),
+    );
+    const unavailablePage = await browser.newPage({ viewport: { width: 390, height: 900 } });
+    await unavailablePage.setContent(`<main>${unavailableMarkup}</main>`);
+    const unavailableState = unavailablePage.getByText("Saved copy is unavailable.", { exact: true });
+    assert.equal(await unavailableState.count(), 1);
+    await unavailablePage.getByText("Details for support").click();
+    assert.equal(await unavailableState.count(), 1);
+    await unavailablePage.close();
   } finally {
     await browser.close();
   }
