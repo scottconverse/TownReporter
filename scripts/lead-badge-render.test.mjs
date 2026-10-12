@@ -1174,6 +1174,20 @@ test("a reopened lead's record says the kill was undone instead of forgetting it
   assert.doesNotMatch(html, />Reopen</);
 });
 
+// FA04: a reopened lead that was never drafted has no draft headline to show,
+// so its Story page must open on the lead's own title, not the killed heading.
+test("a reopened undrafted lead's Story page headline is the lead's own title, never 'This lead was killed'", () => {
+  const html = renderToStaticMarkup(
+    createElement(KilledLeadRecord, {
+      lead: { ...compareSides().prior, status: "new", headline: "Police investigate a fight reported in northwest Longmont" },
+      reopened: true,
+      formatDate: fixedDate,
+    }),
+  );
+  const heading = html.match(/<h2 id="lead-killed-heading"[^>]*>([^<]*)<\/h2>/);
+  assert.equal(heading?.[1], "Police investigate a fight reported in northwest Longmont");
+});
+
 // A stub that disagrees with the real parser would make every source
 // assertion above a statement about the stub. The real function is lifted out
 // of src/lib/paper.ts here and run against both the examples the desk actually
