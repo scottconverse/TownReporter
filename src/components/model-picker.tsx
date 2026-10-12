@@ -15,9 +15,9 @@ import {
   type StoryModelChoice,
 } from "@/lib/news/model-choice";
 import {
-  defaultModelEffort,
   modelEffortLabel,
   modelEffortsFor,
+  pickerShownEffort,
   providerEntry,
   type ModelEffort,
 } from "@/lib/news/provider-registry";
@@ -470,10 +470,7 @@ export function ModelPicker(props: Props) {
         : "Local model — backend not checked yet"
       : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
-  const selectedEffort =
-    props.effort && effortOptions.includes(props.effort)
-      ? props.effort
-      : defaultModelEffort(shownValue, exactModel);
+  const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);
   return (
     <div
       data-model-picker="shared"

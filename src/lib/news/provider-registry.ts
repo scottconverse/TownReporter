@@ -964,9 +964,11 @@ export function defaultModelEffort(
   if (!choices.length) return null;
   // DeepSeek V4.1 Flash defaults to an explicit Off. Its Ollama transport
   // distinguishes that from an omitted effort, which means provider default.
+  // The entry's own declared list is DeepSeek's, so its own model id counts
+  // even when no exact model was passed or the server reports another id.
   if (
     choices.includes("none") &&
-    defaultsToThinkingOff(exactModel)
+    (defaultsToThinkingOff(exactModel) || (entry?.efforts?.includes("none") ?? false))
   ) {
     return "none";
   }
@@ -976,6 +978,17 @@ export function defaultModelEffort(
   return entry?.defaultEffort && choices.includes(entry.defaultEffort)
     ? entry.defaultEffort
     : "medium";
+}
+
+/** The effort a picker shows: the editor's pick when this model offers it,
+ * otherwise the model's own default (DeepSeek: None). */
+export function pickerShownEffort(
+  id: string | undefined | null,
+  exactModel: string | null | undefined,
+  effort: ModelEffort | null | undefined,
+  options: readonly ModelEffort[] = modelEffortsFor(id, exactModel),
+): ModelEffort | null {
+  return effort && options.includes(effort) ? effort : defaultModelEffort(id, exactModel);
 }
 
 export function modelEffort(
