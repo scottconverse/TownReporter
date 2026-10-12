@@ -264,12 +264,12 @@ describe("the provider registry is the one description of a writing model", () =
         "deepseek-flash",
       ],
     );
-    // Every ordinary chat surface can name the same DeepSeek rung. OCR needs
-    // vision support and forced work requires a stand-alone provider.
+    // Every chat surface can name DeepSeek, including its forced runtime.
+    // OCR still requires vision support.
     const deepseek = providerEntry("deepseek-flash")!;
     assert.deepEqual(
       SURFACES.filter((surface) => deepseek.offeredFor[surface]),
-      ["story", "scan", "follow-up", "opinion", "dark"],
+      ["story", "scan", "follow-up", "opinion", "dark", "forced"],
       "the shared picker offers DeepSeek anywhere ordinary chat work can run",
     );
     assert.ok(automaticLadder().includes("deepseek-flash"), "and it is the desk's first rung too");

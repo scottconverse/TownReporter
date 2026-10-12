@@ -220,7 +220,7 @@ export const getEditorial = createServerFn({ method: "GET" })
 export const startEditorial = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator(
-    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; researchScope?: "public" | "supplied"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
+    (input: { subject: string; askedFor?: string; articleSlug?: string; modelChoice?: string; modelChoiceExplicit?: boolean; modelEffort?: ModelEffort | null; voiceMode?: "paper" | "neutral"; researchScope?: "public" | "supplied"; documentIds?: string[]; retryRequestId?: number; override?: string[] }) =>
       editorialStartInput.parse(input),
   )
   .handler(async ({ context, data }) => {
@@ -233,6 +233,7 @@ export const startEditorial = createServerFn({ method: "POST" })
       askedFor: data.askedFor,
       articleSlug: data.articleSlug,
       modelChoice,
+      modelChoiceExplicit: data.modelChoiceExplicit,
       modelEffort: modelEffort(modelChoice, data.modelEffort),
       voiceMode: data.voiceMode,
       researchScope: data.researchScope,

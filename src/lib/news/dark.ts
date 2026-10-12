@@ -15,7 +15,8 @@ import {
   rowId,
 } from "./request-input.ts";
 import { subredditFromSources } from "./dark-place.ts";
-import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot } from './dark-preferences.ts';
+import { describeResearchWindow, validateResearchPreferences, type ResearchPreferences, type ResearchSnapshot ,
+} from "./dark-preferences.ts";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
 import { ensureSchemaOnce, getSql, withTransaction, type Sql } from "../db.ts";
 import { deskMiddleware } from "./desk-auth.ts";
@@ -26,9 +27,11 @@ import {
   probeProvider,
   type EffectiveProviderChoice,
 } from "./ai.ts";
-import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice } from "./model-choice.ts";
+import { DARK_AUTOMATIC_LADDER, effectiveStoryModelChoice, modelChoiceLabel, storyModelChoice ,
+} from "./model-choice.ts";
 import { isOfferedForJob } from "./model-assignments.ts";
-import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase } from "./automatic-failover.ts";
+import { planAutomaticFailover, failoverNoteSentence, failoverReasonPhrase ,
+} from "./automatic-failover.ts";
 import { runPinnedCallWithFailover } from "./desk-model-run.ts";
 import { readProviderOverrides, resolveLocalModelChoice } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot } from "./job-local-model.ts";
@@ -62,7 +65,8 @@ import {
   resurfaceDeadEnds,
   runDueMonitors,
 } from "./investigate.ts";
-import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows } from "./dark-counters.ts";
+import { DIG_CAPTURE_COUNT_SQL, digCaptureCounts, digCaptureCountsFromRows ,
+} from "./dark-counters.ts";
 import { dedupeFactLines } from "./dark-fact-lines.ts";
 import {
   groundedHeadline,
@@ -89,7 +93,8 @@ import { queryTokens } from "./retrieve.ts";
 import { sanitizePublicUrls } from "./schema.ts";
 import { usableLeadSources, type CapturedPage } from "./result-quality.ts";
 import type { ArticleRow, MemoryRow, SourceRow } from "./types.ts";
-import { rankWorthItems, presentWorthItems, signalReviewItems, type WorthSeed } from "./worth-a-look.ts";
+import { rankWorthItems, presentWorthItems, signalReviewItems, type WorthSeed ,
+} from "./worth-a-look.ts";
 import { openInvestigationForEditor } from "./dark-open.ts";
 import { ensureFollowUpsSchema, parseFinding, performListFollowUps } from "./follow-ups.ts";
 import { DARK_LIMITS, hopsForLimit, type DarkLimitKey } from "./editor-dialog-logic.ts";
@@ -153,9 +158,11 @@ const DARK_ARTIFACT_CAP = 12_000;
 const DARK_ARTIFACT_COUNT = 8;
 const SECTION_BUDGET_MARKER = "\n[section budget reached]";
 
-type DarkFileRunLimits = { key: DarkLimitKey; minutes: number; dollars: number | null; scope: DarkScope };
+type DarkFileRunLimits = { key: DarkLimitKey; minutes: number; dollars: number | null; scope: DarkScope ;
+};
 
-async function darkFileRunLimits(investigationId: number, newsroomId: number): Promise<DarkFileRunLimits> {
+async function darkFileRunLimits(investigationId: number, newsroomId: number,
+): Promise<DarkFileRunLimits> {
   const sql = await getSql();
   const rows = await sql<{
     limit_key: string;
@@ -295,7 +302,8 @@ async function relevantDarkArtifactEvidence(
   const sql = await getSql();
   const questionTerms = [...new Set(queryTokens(`${focus.title} ${focus.paste}`))];
   const frontierTerms = [
-    ...new Set(queryTokens(focus.frontier.join(" ")).filter((term) => !questionTerms.includes(term))),
+    ...new Set(queryTokens(focus.frontier.join(" ")).filter((term) => !questionTerms.includes(term)),
+    ),
   ];
   // Score all stored captures in SQL, but transfer full bodies only after the
   // readable, version-aware candidates have been ranked. A large mature file
@@ -345,7 +353,8 @@ async function relevantDarkArtifactEvidence(
   const selectedById = new Map(selectedRows.map((artifact) => [artifact.id, artifact]));
   const selected = candidates
     .map((candidate) => selectedById.get(candidate.id))
-    .filter((artifact): artifact is DarkArtifactEvidence => Boolean(artifact && artifactReadable(artifact)));
+    .filter((artifact): artifact is DarkArtifactEvidence => Boolean(artifact && artifactReadable(artifact)),
+    );
 
   if (!selected.length) return { text: "(none)", artifacts: [] };
 
@@ -380,10 +389,12 @@ async function relevantDarkArtifactEvidence(
     const chunksForArtifact = persistedChunks
       .filter((chunk) => chunk.version_id === artifact.version_id)
       .sort((a, b) => a.chunk_index - b.chunk_index);
-    const rankedPages = [...new Set(exactHits.flatMap((hit) => (hit.page_number == null ? [] : [hit.page_number])))]
+    const rankedPages = [...new Set(exactHits.flatMap((hit) => (hit.page_number == null ? [] : [hit.page_number]))),
+    ]
       .map((pageNumber) => ({
         pageNumber,
-        score: Math.max(...exactHits.filter((hit) => hit.page_number === pageNumber).map((hit) => hit.score)),
+        score: Math.max(...exactHits.filter((hit) => hit.page_number === pageNumber).map((hit) => hit.score),
+        ),
         chunks: chunksForArtifact.filter((chunk) => chunk.page_number === pageNumber),
       }))
       .sort((a, b) => b.score - a.score || a.chunks[0]!.chunk_index - b.chunks[0]!.chunk_index);
@@ -402,7 +413,8 @@ async function relevantDarkArtifactEvidence(
       // manufacturing a record parser or silently clipping an arbitrary head.
       const center = exactHits.find((hit) => hit.page_number === page.pageNumber);
       if (!center) continue;
-      const neighborhood = page.chunks.filter((chunk) => Math.abs(chunk.chunk_index - center.chunk_index) <= 1);
+      const neighborhood = page.chunks.filter((chunk) => Math.abs(chunk.chunk_index - center.chunk_index) <= 1,
+      );
       const bounded = neighborhood.map(formatChunk).join("\n");
       if (bounded.length + separatorForPage + exactUsed <= availableEvidence) {
         exact.push(bounded);
@@ -434,7 +446,8 @@ async function relevantDarkArtifactEvidence(
         (chunk) =>
           `[${chunk.locator}${chunk.page_number == null ? "" : ` page:${chunk.page_number}`}] ${chunk.excerpt}`,
       );
-    const evidence = [...exact, ...fallback.filter((excerpt) => !exact.includes(excerpt))].join("\n");
+    const evidence = [...exact, ...fallback.filter((excerpt) => !exact.includes(excerpt))].join("\n",
+    );
     const entry = `${header}\n${evidence || "[no matching excerpt retained]"}`;
     const remaining = budgetChars - used - separator;
     if (remaining <= header.length) break;
@@ -442,7 +455,8 @@ async function relevantDarkArtifactEvidence(
     used += separator + boundedEntry.length;
     rendered.push({ title: artifact.title, url: artifact.url, evidence: boundedEntry });
   }
-  return { text: rendered.map((artifact) => artifact.evidence).join("\n\n") || "(none)", artifacts: rendered };
+  return { text: rendered.map((artifact) => artifact.evidence).join("\n\n") || "(none)", artifacts: rendered ,
+  };
 }
 
 function owned(context: { newsroomId?: number }) {
@@ -454,8 +468,10 @@ const readDarkSettingsFor = createServerOnlyFn(async (newsroomId: number) =>
 );
 const saveDarkSettingsFor = createServerOnlyFn(async (
   newsroomId: number,
-  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences; defaultLimitKey?: DarkLimitKey },
-) => (await import("./dark-preferences.server.ts")).saveDarkSettingsFor(newsroomId, input));
+  input: { dials?: Partial<DarkDials>; preferences?: ResearchPreferences; defaultLimitKey?: DarkLimitKey ;
+    },
+) => (await import("./dark-preferences.server.ts")).saveDarkSettingsFor(newsroomId, input),
+);
 const snapshotDarkSettingsFor = createServerOnlyFn(async (newsroomId: number, runId: number) =>
   (await import("./dark-preferences.server.ts")).snapshotDarkSettingsFor(newsroomId, runId),
 );
@@ -484,7 +500,8 @@ const proposePassSourcesFor = createServerOnlyFn(async (
     section?: string | null;
     pages: { url: string; title?: string; reason?: string }[];
   },
-) => (await import("./source-seeds.server.ts")).proposePassSources(sql, input));
+) => (await import("./source-seeds.server.ts")).proposePassSources(sql, input),
+);
 
 /**
  * Same question Scan asks before it spends anything: is a model actually
@@ -575,7 +592,7 @@ async function darkPreflightRefusal(
   retryable: boolean;
 } | null> {
   const { scanPreflight } = await import("./preflight.ts");
-  const ready = scanPreflight(probed ?? await probeDarkProvider(choice, newsroomId), choice);
+  const ready = scanPreflight(probed ?? (await probeDarkProvider(choice, newsroomId)), choice);
   if (ready.ok) return null;
   return {
     ok: false as const,
@@ -800,7 +817,8 @@ export function isGroundedDarkPromise(p: CandidateDarkPromise, evidencePack: str
   const commitment = /\b(?:will|shall|promis(?:e|es|ed)|commit(?:s|ted)?|pledge(?:s|d)?|agree(?:s|d)?|scheduled to|plans? to|intends? to|by \d{4}-\d{2}-\d{2})\b/i;
   let from = evidence.indexOf(who);
   while (from >= 0) {
-    const nearby = evidence.slice(Math.max(0, from - 500), Math.min(evidence.length, from + who.length + 700));
+    const nearby = evidence.slice(Math.max(0, from - 500), Math.min(evidence.length, from + who.length + 700),
+    );
     if (commitment.test(nearby)) return true;
     from = evidence.indexOf(who, from + who.length);
   }
@@ -824,7 +842,8 @@ export function groundedDarkWindow(preferences?: ResearchSnapshot): string {
 export function preserveBoundedAbsenceLanguage(value: unknown, evidencePack: string): string {
   const text = String(value ?? "");
   const asObject = (subject: string) => subject.trim().replace(/^(The|A|An)\b/, (article) => article.toLowerCase());
-  const boundedPack = /(?:not established|no [^.\n]{2,180}? (?:was|were) established) in (?:the )?(?:captured|provided|bounded|current|available)?\s*(?:material|file|record|evidence)|absence of (?:those|these|the) records[^.]{0,120}does not prove/i.test(evidencePack);
+  const boundedPack = /(?:not established|no [^.\n]{2,180}? (?:was|were) established) in (?:the )?(?:captured|provided|bounded|current|available)?\s*(?:material|file|record|evidence)|absence of (?:those|these|the) records[^.]{0,120}does not prove/i.test(evidencePack,
+    );
   if (!boundedPack) return text;
 
   const narrowed = text.replace(
@@ -1410,8 +1429,10 @@ export const getInvestigation = createServerFn({ method: "GET" })
     }
     const sourceCaptureIds = [...new Set([
       ...claims.map((claim) => claim.capture_event_id).filter((captureId): captureId is number => captureId != null),
-      ...(brief?.contradictions ?? []).flatMap((pair) => [pair.first.captureId, pair.second.captureId]),
-    ])];
+      ...(brief?.contradictions ?? []).flatMap((pair) => [pair.first.captureId, pair.second.captureId,
+        ]),
+    ]),
+    ];
     const sourceCaptures = sourceCaptureIds.length
       ? await sql<{ id: number; title: string; url: string }>`
           select ce.id, coalesce(a.title, '') as title, ce.source_url as url
@@ -1487,7 +1508,8 @@ export const getInvestigation = createServerFn({ method: "GET" })
         ? { id: brief_job.id, status: brief_job.status, error: brief_job.error }
         : null,
       challengeJob: challenge_job
-        ? { id: challenge_job.id, status: challenge_job.status, stage: challenge_job.stage, error: challenge_job.error }
+        ? { id: challenge_job.id, status: challenge_job.status, stage: challenge_job.stage, error: challenge_job.error ,
+          }
         : null,
       latestChallenge: challengeRows[0] ?? null,
       sourceCaptures,
@@ -1519,14 +1541,17 @@ export const investigationActivity = createServerFn({ method: "GET" })
     const sql = await getSql();
     const newsroomId = owned(context);
     const [captures, searches, findings, deadEnds, runs, followUps, watchedPages] = await Promise.all([
-      sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }>`
+      sql<{ id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean ;
+        }>`
         select ce.id, ce.observed_at::text as at, coalesce(a.title, '') as title, ce.source_url as url,
           ce.fetch_outcome as outcome, ce.http_status as "httpStatus", ce.disappearance as removed
         from capture_events ce
         left join artifacts a on a.capture_event_id = ce.id and a.newsroom_id = ce.newsroom_id
         where ce.investigation_id = ${id} and ce.newsroom_id = ${newsroomId}
         order by ce.observed_at desc limit 120
-      `.catch(() => [] as { id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean }[]),
+      `.catch(() => [] as { id: number; at: string; title: string; url: string; outcome: string; httpStatus: number | null; removed: boolean ;
+            }[],
+        ),
       sql<{ id: number; at: string; state: string | null; resultsJson: string }>`
         select id, created_at::text as at, state, results_json as "resultsJson"
         from search_log where investigation_id = ${id} and newsroom_id = ${newsroomId}
@@ -1543,15 +1568,19 @@ export const investigationActivity = createServerFn({ method: "GET" })
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
         order by created_at desc limit 60
       `.catch(() => [] as { id: number; at: string; hypothesis: string }[]),
-      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }>`
+      sql<{ id: number; at: string; stopReason: string | null; failed: boolean; error: string | null ;
+        }>`
         select id, coalesce(finished_at, started_at)::text as at, stop_reason as "stopReason",
           (error is not null) as failed, error
         from dark_runs
         where investigation_id = ${id} and newsroom_id = ${newsroomId}
           and (finished_at is not null or error is not null or stop_reason is not null)
         order by started_at desc limit 30
-      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null }[]),
-      performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => []),
+      `.catch(() => [] as { id: number; at: string; stopReason: string | null; failed: boolean; error: string | null ;
+            }[],
+        ),
+      performListFollowUps({ userId: context.userId, newsroomId }, { limit: 200 }).catch(() => [],
+        ),
       sql<{ id: number; at: string; title: string; url: string; state: string }>`
         select c.id, c.created_at::text as at, m.title, m.url, c.state
         from manual_watch_checks c
@@ -1562,11 +1591,16 @@ export const investigationActivity = createServerFn({ method: "GET" })
       `.catch(() => [] as { id: number; at: string; title: string; url: string; state: string }[]),
     ]);
     const events: InvestigationActivityInput[] = [
-      ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed })),
-      ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson })),
-      ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body })),
-      ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis })),
-      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed, failureReason: row.error })),
+      ...captures.map((row) => ({ id: `capture-${row.id}`, at: row.at, kind: "capture" as const, title: row.title, url: row.url, outcome: row.outcome, httpStatus: row.httpStatus, removed: row.removed ,
+      })),
+      ...searches.map((row) => ({ id: `search-${row.id}`, at: row.at, kind: "search" as const, outcome: row.state, resultsJson: row.resultsJson ,
+      })),
+      ...findings.map((row) => ({ id: `finding-${row.id}`, at: row.at, kind: "finding" as const, body: row.body ,
+      })),
+      ...deadEnds.map((row) => ({ id: `dead-end-${row.id}`, at: row.at, kind: "dead-end" as const, body: row.hypothesis ,
+      })),
+      ...runs.map((row) => ({ id: `run-${row.id}`, at: row.at, kind: "run-stop" as const, stopReason: row.stopReason, failed: row.failed, failureReason: row.error ,
+      })),
       ...watchedPages.map((row) => ({
         id: `watch-${row.id}`,
         at: row.at,
@@ -1577,7 +1611,8 @@ export const investigationActivity = createServerFn({ method: "GET" })
         removed: row.state === "unavailable",
       })),
       ...followUps
-        .filter((row) => row.investigation_id === id && (["active", "paused"].includes(row.status) || row.last_state === "found"))
+        .filter((row) => row.investigation_id === id && (["active", "paused"].includes(row.status) || row.last_state === "found"),
+        )
         .map((row) => {
           const finding = parseFinding(row.finding_json);
           const found = row.last_state === "found";
@@ -1593,7 +1628,8 @@ export const investigationActivity = createServerFn({ method: "GET" })
     return buildInvestigationActivity(events);
   });
 
-export async function readArtifactForEditor(sql: Sql, id: number, newsroomId: number, offset: number) {
+export async function readArtifactForEditor(sql: Sql, id: number, newsroomId: number, offset: number,
+) {
   const rows = await sql<{
     id: number;
     url: string;
@@ -1640,7 +1676,7 @@ export async function readArtifactForEditor(sql: Sql, id: number, newsroomId: nu
 export const getArtifact = createServerFn({ method: "GET" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => {
-    const input = typeof raw === "number" ? { id: raw, offset: 0 } : raw as { id?: unknown; offset?: unknown };
+    const input = typeof raw === "number" ? { id: raw, offset: 0 } : (raw as { id?: unknown; offset?: unknown });
     const id = rowId.parse(input?.id);
     const offset = input?.offset ?? 0;
     if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0 || offset > PDF_READ_MAX_OFFSET)
@@ -1722,7 +1758,8 @@ export const queueArtifactOcr = createServerFn({ method: "POST" })
         and b.mime ilike '%pdf%' and b.body_b64<>''
       limit 1
     `;
-    if (!retained[0]) return { ok: false as const, error: "The original PDF bytes were not retained; this read will not refetch the live URL." };
+    if (!retained[0]) return { ok: false as const, error: "The original PDF bytes were not retained; this read will not refetch the live URL." ,
+      };
     const job = await enqueueJob({
       userId: context.userId,
       newsroomId: owned(context),
@@ -1739,7 +1776,8 @@ export const getArtifactOcrJob = createServerFn({ method: "GET" })
   .validator((artifactId: unknown) => artifactIdInput.parse(artifactId))
   .handler(async ({ context, data: artifactId }) => {
     const sql = await getSql();
-    const rows = await sql<{ id: number; status: string; stage: string; error: string | null; result_json: string }>`
+    const rows = await sql<{ id: number; status: string; stage: string; error: string | null; result_json: string ;
+    }>`
       select j.id, j.status, j.stage, j.error, j.result_json
       from desk_jobs j join artifacts a on a.id = j.subject_id and a.newsroom_id = j.newsroom_id
       where j.kind = ${"artifact-ocr"} and j.subject_id = ${artifactId} and j.newsroom_id = ${owned(context)}
@@ -1814,10 +1852,16 @@ export async function buildDarkSynthesisPack(
   const context = [
     `INVESTIGATION QUESTION:\n${capText(investigation[0]?.title ?? "(unknown)", 600)}${paste ? `\nEDITOR PASTE:\n${capText(paste, 4_000)}` : ""}`,
     ...(investigation[0]?.ordinary_explanation?.trim()
-      ? [`ORDINARY EXPLANATION TO RULE OUT FIRST:\n${capText(investigation[0].ordinary_explanation, 1_600)}`]
+      ? [`ORDINARY EXPLANATION TO RULE OUT FIRST:\n${capText(investigation[0].ordinary_explanation, 1_600)}`,
+        ]
       : []),
     `CITY: ${place.city}, ${place.state}. Investigation ${investigationId}. Watch list is a start, not a boundary.`,
-    `WATCH LIST:\n${sources.slice(0, 30).map((s) => `${s.tier} ${s.status} ${capText(s.title, 180)} ${capText(s.url, 300)}`).join("\n") || "(empty)"}`,
+    `WATCH LIST:\n${
+      sources
+        .slice(0, 30)
+        .map((s) => `${s.tier} ${s.status} ${capText(s.title, 180)} ${capText(s.url, 300)}`)
+        .join("\n") || "(empty)"
+    }`,
     `SEARCHES RUN:\n${searches.map((s) => capText(s.query, 360)).join("\n") || "(none)"}`,
     `FRONTIER:\n${frontier.map((f) => `${f.kind}: ${capText(f.label, 240)} — ${capText(f.why, 500)}`).join("\n") || "(none)"}`,
     `RELATIONSHIPS:\n${rels.map((r) => `${capText(r.from_name, 180)} -[${capText(r.kind, 80)}]-> ${capText(r.to_name, 180)}`).join("\n") || "(none)"}`,
@@ -1838,8 +1882,10 @@ export async function buildDarkSynthesisPack(
     `PUBLISHED:\n${articles.map((a) => `${capText(a.topic, 100)}: ${capText(a.headline, 420)}`).join("\n") || "(none)"}`,
     `BEAT MEMORY:\n${memory.map((m) => `${capText(m.entity, 160)}: ${capText(m.last_angle, 420)}`).join("\n") || "(none)"}`,
   ];
-  const contextText = capText(context.join("\n\n"), Math.min(DARK_SYNTHESIS_CONTEXT_CAP, packCap - 2_000));
-  const artifactBudget = Math.min(DARK_ARTIFACT_CAP, Math.max(2_000, packCap - contextText.length - 24));
+  const contextText = capText(context.join("\n\n"), Math.min(DARK_SYNTHESIS_CONTEXT_CAP, packCap - 2_000),
+  );
+  const artifactBudget = Math.min(DARK_ARTIFACT_CAP, Math.max(2_000, packCap - contextText.length - 24),
+  );
   const artifactEvidence = await relevantDarkArtifactEvidence(
     investigationId,
     newsroomId,
@@ -1913,7 +1959,8 @@ export async function synthesizeSignals(
     model: choice ?? "provider-default",
   });
   if (runBudget && !call) {
-    return { stored: 0, summary: "", error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` };
+    return { stored: 0, summary: "", error: `Run stopped: ${runBudget.stopReason ?? "budget-limit"}` ,
+    };
   }
   if (call) await onUsage?.(runBudget!.snapshot());
   const callMs = providerBudget(choice, overrides).callMs;
@@ -1941,7 +1988,7 @@ export async function synthesizeSignals(
   if (call) {
     const error = ai && !ai.ok ? ai.error : "";
     call.finish({
-      result: ai?.ok ? "ok" : (/timed out|timeout/i.test(error) ? "timeout" : "error"),
+      result: ai?.ok ? "ok" : /timed out|timeout/i.test(error) ? "timeout" : "error",
       durationMs: ai?.meta?.durationMs,
       timedOut: ai?.meta?.timedOut ?? (!ai?.ok && /timed out|timeout/i.test(error)),
       provider: ai?.meta?.provider,
@@ -1992,7 +2039,8 @@ export async function synthesizeSignals(
     preserveBoundedAbsenceLanguage(parsed.editor_summary, pack),
     corpus,
   ).slice(0, 2000);
-  const gaps = markUngroundedSpecifics((parsed.inventory_gaps ?? []).join("; "), corpus).slice(0, 800);
+  const gaps = markUngroundedSpecifics((parsed.inventory_gaps ?? []).join("; "), corpus).slice(0, 800,
+  );
   const header = [
     summary,
     gaps ? `Gaps: ${gaps}` : "",
@@ -2117,7 +2165,8 @@ export async function synthesizeSignals(
  * Pure and exported so a test can pin that (see dark-place.test.ts): an
  * unconfigured paper yields no city and no state at all.
  */
-export function darkPlaceFromConfig(cfg: { city: string; state: string }): Pick<Place, "city" | "state"> {
+export function darkPlaceFromConfig(cfg: { city: string; state: string ;
+}): Pick<Place, "city" | "state"> {
   return { city: cfg.city.trim(), state: cfg.state.trim() };
 }
 
@@ -2183,7 +2232,7 @@ async function runVerificationStage(
 ): Promise<string> {
   const { place, official, press } = await readDarkPlace(newsroomId);
   let active = {
-    modelChoice: choice ?? "codex-balanced" as EffectiveProviderChoice,
+    modelChoice: choice ?? ("codex-balanced" as EffectiveProviderChoice),
     modelEffort: effortForChoice(choice ?? "codex-balanced", reasoningEffort ?? null),
   };
   const verifyModel = async (system: string, pack: string) => {
@@ -2208,7 +2257,8 @@ async function runVerificationStage(
           const resolvedChoice = effectiveStoryModelChoice(nextChoice);
           const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
           await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
-          await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+          await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+          );
           await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
         }
       },
@@ -2347,7 +2397,8 @@ function savedJobEffort(job: Pick<DeskJob, "model_choice" | "result_json">): Mod
   }
 }
 
-function effortForChoice(choice: EffectiveProviderChoice, saved: ModelEffort | null): ModelEffort | null {
+function effortForChoice(choice: EffectiveProviderChoice, saved: ModelEffort | null,
+): ModelEffort | null {
   return saved == null ? null : validatedModelEffort(choice, saved);
 }
 
@@ -2420,7 +2471,8 @@ async function executeDarkRun(
     const fileLimits = await darkFileRunLimits(investigationId, newsroomId);
     const dials = { ...snapshot.dials, scope: fileLimits.scope };
     const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
-    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
+    const runBudget = darkRunBudget(dials, choice!, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits,
+    );
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
@@ -2596,7 +2648,8 @@ export const runDarkDesk = createServerFn({ method: "POST" })
       this paper's behalf. An install nobody has set up has no town and no
       county to look in, so the run is refused in one plain sentence first.
     */
-    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "start a Dark Desk run");
+    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "start a Dark Desk run",
+    );
     if (setup) return setup;
     /*
       The editor's pick decides which provider is probed, and an unresolvable
@@ -2604,6 +2657,16 @@ export const runDarkDesk = createServerFn({ method: "POST" })
       have. `storyModelChoice` narrows anything else to Automatic rather than
       trusting a string off the wire.
     */
+    const assignment = await (
+      await import("./job-model-runtime.server.ts")
+    ).resolveRequestedJobModel(
+      owned(context),
+      "dark",
+      data.modelChoice,
+      data.modelEffort,
+      data.modelChoiceExplicit,
+    );
+    data = { ...data, modelChoice: assignment.providerId, modelEffort: assignment.effort };
     const asked = storyModelChoice(data.modelChoice);
     const probe = await probeDarkProvider(asked, owned(context));
     const refusal = await darkPreflightRefusal(asked, owned(context), probe);
@@ -2638,7 +2701,8 @@ export const openDarkInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     try {
       // SG1 / Option A: opening a file is step one of a Dark Desk run.
-      const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "open an investigation");
+      const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "open an investigation",
+      );
     if (notSetUp) return notSetUp;
       await ensureDarkSchema();
       const opened = await openInvestigationForEditor(context.userId, data, owned(context));
@@ -2656,7 +2720,8 @@ export const findSomethingToDigInto = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: "Find something to dig into" opens an investigation,
     // which is the start of a Dark Desk run.
-    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "start a Dark Desk run");
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "start a Dark Desk run",
+    );
     if (notSetUp) return notSetUp;
     await ensureDarkSchema();
     const items = await gatherWorthALook(owned(context));
@@ -2705,7 +2770,13 @@ export async function startDarkRound(
   effortValue?: unknown,
   override?: string[],
   deps: { probe?: typeof probeDarkProvider; kick?: boolean } = {},
+modelChoiceExplicit = false,
 ) {
+  const assignment = await (
+    await import("./job-model-runtime.server.ts")
+  ).resolveRequestedJobModel(owned(context), "dark", modelChoice, undefined, modelChoiceExplicit);
+  modelChoice = assignment.providerId;
+  effortValue = assignment.source === "assignment" ? assignment.effort : effortValue;
   const asked = storyModelChoice(modelChoice);
   /*
     Probe the model the editor picked BEFORE anything is written or spent,
@@ -2739,8 +2810,10 @@ export async function startDarkRound(
     const persisted = effectiveStoryModelChoice(open.model_choice);
     const persistedEffort = savedJobEffort(open);
     if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
-      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
-      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id };
+      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id },
+      );
+      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id ,
+        };
 
     }
     if (persisted === effectiveChoice && persistedEffort === modelEffort) return {
@@ -2783,7 +2856,8 @@ export async function startDarkRound(
         report reads exactly as it did before.
       */
       skippedRungs: probe.skippedRungs,
-    })),
+    }),
+    ),
   });
   await recordDeskRun(context.userId, "dark", owned(context));
   if ("switchReceipt" in probe) {
@@ -2805,11 +2879,15 @@ export const continueInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: "Keep digging" starts a Dark Desk round, which searches
     // and spends. Refused in one sentence until the paper is set up.
-    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "keep digging");
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "keep digging",
+    );
     if (notSetUp) return notSetUp;
     return typeof data === "number"
       ? startDarkRound(context, data)
-      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort, data.override);
+      : startDarkRound(context, data.id, data.modelChoice, data.modelEffort, data.override,
+          {},
+          data.modelChoiceExplicit,
+        );
   });
 
 export type DarkRoundRetryDeps = {
@@ -2848,14 +2926,17 @@ export async function retryDarkRoundFor(
       : "the previous model timed out with no output";
     const planned = deps.nextModel
       ? await deps.nextModel(job, failure)
-      : (await planDarkRoundFailover(job, failure, {
+      : ((
+          await planDarkRoundFailover(job, failure, {
           setModelChoice: async () => undefined,
           setStage: async () => undefined,
-        }))?.next ?? null;
-    if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." };
+        }))?.next ?? null);
+    if (!planned) return { ok: false as const, error: "No other model is ready. Choose one in Settings, then retry." ,
+      };
     choice = planned;
   }
-  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job), override);
+  const result = await (deps.start ?? startDarkRound)(context, job.subject_id, choice, savedJobEffort(job), override,
+  );
   if (!result.ok) return result;
   return { ok: true as const, model: modelChoiceLabel(choice), jobId: result.jobId };
 }
@@ -2864,7 +2945,8 @@ export const retryDarkRound = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => darkRetryInput.parse(raw))
   .handler(async ({ context, data }) => {
-    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "retry this research round");
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "retry this research round",
+    );
     if (notSetUp) return notSetUp;
     return retryDarkRoundFor(context, data.jobId, data.nextModel, {}, data.override);
   });
@@ -2876,6 +2958,7 @@ export async function queueInvestigationChallengeFor(
   effortValue?: unknown,
   kick = true,
   override?: string[],
+  modelChoiceExplicit = false,
 ) {
   await ensureDarkSchema();
   const newsroomId = owned(context);
@@ -2900,8 +2983,14 @@ export async function queueInvestigationChallengeFor(
       brief = null;
     }
     if (!brief || (!brief.supports.length && !brief.contradictions.length))
-      return { ok: false as const, error: "Save a brief with findings before challenging the case." };
+      return { ok: false as const, error: "Save a brief with findings before challenging the case." ,
+      };
   }
+  const assignment = await (
+    await import("./job-model-runtime.server.ts")
+  ).resolveRequestedJobModel(owned(context), "dark", modelChoice, undefined, modelChoiceExplicit);
+  modelChoice = assignment.providerId;
+  effortValue = assignment.source === "assignment" ? assignment.effort : effortValue;
   const asked = storyModelChoice(modelChoice);
   const modelEffort = validatedModelEffort(asked, effortValue);
   const open = await findOpenJob({ newsroomId, kind: "challenge", subjectId: id });
@@ -2925,17 +3014,22 @@ export async function queueInvestigationChallengeFor(
 export const challengeInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((raw: unknown) => {
-    const input = raw as { id?: unknown; modelChoice?: unknown; modelEffort?: unknown; override?: unknown };
+    const input = raw as { id?: unknown; modelChoice?: unknown; modelChoiceExplicit?: unknown;
+      modelEffort?: unknown; override?: unknown ;
+    };
     const modelChoice = storyModelChoice(input?.modelChoice);
     return {
       override: z.array(z.string()).optional().parse(input?.override),
+      modelChoiceExplicit: z.boolean().optional().parse(input?.modelChoiceExplicit),
       id: rowId.parse(input?.id),
       modelChoice,
       modelEffort: validatedModelEffort(modelChoice, input?.modelEffort),
     };
   })
   .handler(async ({ context, data }) =>
-    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort, true, data.override),
+    queueInvestigationChallengeFor(context, data.id, data.modelChoice, data.modelEffort, true, data.override,
+      data.modelChoiceExplicit,
+    ),
   );
 
 /** Injectable seam for `planDarkRoundFailover`, the same pattern
@@ -3061,7 +3155,8 @@ export async function performArtifactOcrWork(
   deps: {
     ocr?: typeof productionOcr;
     pageCount?: typeof pdfPageCount;
-    resolveLocalModel?: (newsroomId: number, scope: "ocr") => Promise<{ baseUrl: string; id: string } | null>;
+    resolveLocalModel?: (newsroomId: number, scope: "ocr",
+    ) => Promise<{ baseUrl: string; id: string } | null>;
     /** Test seam for replacing a claim immediately before the checkpoint transaction. */
     beforeCheckpoint?: () => Promise<void>;
   } = {},
@@ -3088,7 +3183,8 @@ export async function performArtifactOcrWork(
   `;
   const retained = source[0];
   if (!retained?.version_id || !retained.body_b64 || !/pdf/i.test(retained.mime)) {
-    throw new Error("The original retained PDF is unavailable; this read will not refetch the live URL.");
+    throw new Error("The original retained PDF is unavailable; this read will not refetch the live URL.",
+    );
   }
   const assertClaim = async () => {
     const owns = await sql<{ id: number }>`
@@ -3097,7 +3193,8 @@ export async function performArtifactOcrWork(
         and status = ${"running"} and claim_token = ${job.claim_token}
       limit 1
     `;
-    if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
+    if (!owns[0]) throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.",
+      );
   };
   /*
     FB1: this helper used to write `stage` and `updated_at` and nothing else, so
@@ -3186,7 +3283,8 @@ export async function performArtifactOcrWork(
         for update
       `;
       if (!owns[0])
-        throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.");
+        throw new Error("This PDF read was replaced by a newer worker; stopping without changing retained evidence.",
+        );
       /*
         Unit U11b2: never write an OCR passage back onto a capture the owner has
         taken down.
@@ -3324,15 +3422,16 @@ export async function performArtifactOcrWork(
             const nextChoice: EffectiveProviderChoice | null = transport === "codex"
               ? "codex-balanced"
               : transport === "anthropic" || transport === "claude-code"
-                ? (/haiku/i.test(model) ? "claude-haiku" : "claude-sonnet")
-                : null;
+                ? /haiku/i.test(model) ? "claude-haiku" : "claude-sonnet": null;
             if (!nextChoice || nextChoice === ocrChoice) return;
             const previousLabel = modelChoiceLabel(ocrChoice);
             const nextLabel = modelChoiceLabel(nextChoice);
             const nextEffort = validatedModelEffort(nextChoice, ocrEffort);
             await setJobModelRuntime(job.id, nextChoice, nextEffort);
-            await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
-            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
+            await setOwnedStage(`Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+            );
+            await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason),
+            );
             ocrChoice = nextChoice;
             ocrEffort = nextEffort;
           },
@@ -3351,15 +3450,15 @@ export async function performArtifactOcrWork(
     }
     lastProvider = read.provider ?? lastProvider;
     await setOwnedStage("Saving the pages", ocrPct(index));
-    await setOwnedStage(`Saving PDF pages ${batch.start}-${batch.end} before continuing…`, ocrPct(index));
+    await setOwnedStage(`Saving PDF pages ${batch.start}-${batch.end} before continuing…`, ocrPct(index),
+    );
     await deps.beforeCheckpoint?.();
     await saveBatch(
       batch,
       pages,
       lastProvider,
       accumulatedReason,
-      index + 1,
-    );
+      index + 1);
     if (budgetPaused) break;
   }
 
@@ -3415,7 +3514,8 @@ export async function performDarkRound(job: DeskJob) {
     const fileLimits = await darkFileRunLimits(id, owned(context));
     const dials = { ...snapshot.dials, scope: fileLimits.scope };
     const budget = { ...budgetFor(dials), hops: hopsForLimit(fileLimits.key) };
-    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits);
+    const runBudget = darkRunBudget(dials, choice, overrides, snapshot.preferences.verificationLimit ?? 6, fileLimits,
+    );
     /*
       Synthesis, the four-question review and the editor brief all draw on the
       same meter as research, so the hop loop stops while the provider's own
@@ -3604,7 +3704,8 @@ export async function performDarkRound(job: DeskJob) {
     }
 
     const stopReason = runBudget.stopReason ?? loop.stopReason ?? (synth.error ? "synthesis-failed" : loop.paused ? "hop-limit" : "completed");
-    await persistDarkRunUsage(runId, owned(context), runBudget.snapshot(), stopReason as DarkRunStopReason);
+    await persistDarkRunUsage(runId, owned(context), runBudget.snapshot(), stopReason as DarkRunStopReason,
+    );
     const finishedSummary = briefError ? `${header}\nBrief: ${briefError}` : header;
     await sql`
       update dark_runs
@@ -3640,7 +3741,8 @@ export async function performDarkRound(job: DeskJob) {
             )}
         where id = ${runId} and newsroom_id = ${owned(context)}
       `.catch(() => undefined);
-      await markInvestigationPaused(context.userId, id, JOB_CANCELLED_REASON).catch(() => undefined);
+      await markInvestigationPaused(context.userId, id, JOB_CANCELLED_REASON).catch(() => undefined,
+      );
       throw err;
     }
     await sql`
@@ -3862,11 +3964,14 @@ export async function queuePacketFor(newsroomId: number, id: number) {
         and (capture_event_id is not null or source_url is not null)
       order by id desc limit 8
     `.catch(() => [] as { body: string; source_url: string | null }[]),
-    sql<{ name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }>`
+    sql<{ name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string ;
+    }>`
       select name, verification_status, gate_missing_context, what_would_kill
       from dark_signals where investigation_id = ${id} and newsroom_id = ${newsroomId}
       order by id desc limit 5
-    `.catch(() => [] as { name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string }[]),
+    `.catch(() => [] as { name: string; verification_status: string; gate_missing_context: string | null; what_would_kill: string ;
+        }[],
+    ),
     sql<{ brief_json: string }>`
       select brief_json from investigation_briefs
       where investigation_id = ${id} and newsroom_id = ${newsroomId} limit 1
@@ -3886,7 +3991,8 @@ export async function queuePacketFor(newsroomId: number, id: number) {
     brief?.kills_it ?? "",
     ...signalRows
       .filter((signal) => signal.verification_status !== "verified")
-      .map((signal) => `${signal.name}: ${signal.gate_missing_context || "This signal has not completed verification."}`),
+      .map((signal) => `${signal.name}: ${signal.gate_missing_context || "This signal has not completed verification."}`,
+      ),
   ]);
   return {
     investigationId: id,
@@ -3944,9 +4050,11 @@ export const closeInvestigation = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => {
     const value = input as { id?: unknown; note?: unknown };
-    return { id: rowId.parse(value?.id), note: typeof value?.note === "string" ? value.note : null };
+    return { id: rowId.parse(value?.id), note: typeof value?.note === "string" ? value.note : null ,
+    };
   })
-  .handler(async ({ context, data }) => closeInvestigationFor(context.userId, owned(context), data.id, data.note));
+  .handler(async ({ context, data }) => closeInvestigationFor(context.userId, owned(context), data.id, data.note),
+  );
 
 /**
  * Create-or-find the story lead for an investigation. Research completeness
@@ -3976,7 +4084,8 @@ export async function queueInvestigationFor(
   const packet = await queuePacketFor(newsroomId, id);
   if (!packet) return { ok: false as const, error: "Investigation not found" };
   if (opts.preview !== undefined && JSON.stringify(opts.preview) !== JSON.stringify(packet))
-    return { ok: false as const, error: "The file packet changed. Open the preview again before sending it." };
+    return { ok: false as const, error: "The file packet changed. Open the preview again before sending it." ,
+    };
 
   const gate = await sql<{ total: number; verified: number }>`
     select count(*)::int as total,
@@ -4119,12 +4228,14 @@ export async function queueInvestigationFor(
     the model's: `topicFromText` answers with a key from the newsroom's own
     section list.
   */
-  const packetEvidence = packet.evidence.map(row => `${row.text}${row.source ? ` (${row.source})` : ""}`).join("\n");
+  const packetEvidence = packet.evidence.map((row ) => `${row.text}${row.source ? ` (${row.source})` : ""}`).join("\n");
   const evidence = stripUngroundedNotes(storableText([
     packetEvidence ? `Previewed evidence:\n${packetEvidence}` : "",
     handoff,
     `File summary: ${plain(inv[0].summary)}`,
-  ].filter(Boolean).join("\n\n"))).slice(0, 4000);
+  ].filter(Boolean).join("\n\n"),
+    ),
+  ).slice(0, 4000);
   // Preserve the full approved packet even when the lead's readable excerpt is shortened.
   const notes = JSON.stringify({ darkPacket: packet });
   const created = await sql<{ id: number }>`
@@ -4194,7 +4305,8 @@ export const queueInvestigation = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     // SG1 / Option A: sending an investigation to the Queue is how a Dark Desk
     // finding becomes a spent draft, so it is refused until setup is done.
-    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "send this to the Queue");
+    const notSetUp = await paperSetupWarning({ ...context, newsroomId: owned(context) }, typeof data === "number" ? undefined : data.override, "send this to the Queue",
+    );
     if (notSetUp) return notSetUp;
     return queueInvestigationFor(context.userId, owned(context), data.id, {
       asTip: data.asTip === true,
@@ -4251,8 +4363,9 @@ export const reopenParkedInvestigation = createServerFn({ method: "POST" })
  */
 export async function readTipSubreddit(newsroomId: number): Promise<string | null> {
   const sql = await getSql();
-  const rows = await sql<{url:string}>`select url from sources where newsroom_id=${newsroomId} and status='accepted'`;
-  return subredditFromSources(rows.map(row=>row.url));
+  const rows = await sql<{url:string;
+  }>`select url from sources where newsroom_id=${newsroomId} and status='accepted'`;
+  return subredditFromSources(rows.map((row) =>row.url));
 }
 export const getTipSubreddit = createServerFn({method:"GET"})
   .middleware([deskMiddleware])
@@ -4269,7 +4382,8 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       (this handler always threw before), and the refusal reaches the editor
       through the same error path with the same one sentence.
     */
-    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "check the tip subreddit");
+    const setup = await paperSetupWarning({ ...context, newsroomId: owned(context) }, data.override, "check the tip subreddit",
+    );
     if (setup) return setup;
     await ensureDarkSchema();
     await assertRate(context.userId, "reddit", owned(context));
@@ -4284,7 +4398,8 @@ export const scanTipSubreddit = createServerFn({ method: "POST" })
       selectRotatingQueryGroups,
     } = await import("./reddit.ts");
     const sub = await readTipSubreddit(owned(context));
-    if (!sub) throw new Error("Reddit check unavailable: add one unambiguous subreddit URL to Sources. No subreddit was guessed from the town name.");
+    if (!sub) throw new Error("Reddit check unavailable: add one unambiguous subreddit URL to Sources. No subreddit was guessed from the town name.",
+      );
 
     // Rotate by hour so successive checks sweep different ground instead of
     // asking the same three questions of the subreddit every time.
@@ -4403,7 +4518,8 @@ export async function fileRedditTipFor(
   }
   const { redditAnomaly } = await import("./reddit.ts");
   const a = redditAnomaly(
-    { title: data.title, url: data.url, updated: data.updated ?? "", author: data.author ?? "", excerpt: data.excerpt ?? "" },
+    { title: data.title, url: data.url, updated: data.updated ?? "", author: data.author ?? "", excerpt: data.excerpt ?? "" ,
+    },
     subredditFromSources([data.url]) ?? "reddit",
   );
   await sql`
@@ -4460,7 +4576,10 @@ export const getDarkCounty = createServerFn({ method: "GET" })
 
 export const saveDarkDials = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
-  .validator((input: { dig?: number; nerve?: number; scope?: string; preferences?: ResearchPreferences; defaultLimitKey?: string }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences)}))
+  .validator((input: { dig?: number; nerve?: number; scope?: string; preferences?: ResearchPreferences; defaultLimitKey?: string ;
+    }) => ({...input, preferences: input.preferences === undefined ? undefined : validateResearchPreferences(input.preferences),
+    }),
+  )
   .handler(async ({ context, data }) => {
     await ensureDarkSchema();
     // Clamped on the way in as well as on the way out: a stored 40 would be a
@@ -4469,9 +4588,11 @@ export const saveDarkDials = createServerFn({ method: "POST" })
       ? clampDials(data as Partial<DarkDials>)
       : null;
     const defaultLimitKey = DARK_LIMITS.some((limit) => limit.key === data.defaultLimitKey)
-      ? data.defaultLimitKey as DarkLimitKey
+      ? (data.defaultLimitKey as DarkLimitKey
+      )
       : undefined;
-    const saved = await saveDarkSettingsFor(owned(context), {dials:d ?? undefined,preferences:data.preferences,defaultLimitKey});
+    const saved = await saveDarkSettingsFor(owned(context), {dials:d ?? undefined,preferences:data.preferences,defaultLimitKey,
+    });
     if (d || defaultLimitKey) {
       await audit(
         context.userId,
@@ -4538,7 +4659,8 @@ export const saveDarkCounty = createServerFn({ method: "POST" })
  * never stop the file opening.
  */
 /** The exact bounded evidence pack sent to the brief model. */
-export async function buildDarkBriefPromptPack(newsroomId: number, id: number): Promise<string | null> {
+export async function buildDarkBriefPromptPack(newsroomId: number, id: number,
+): Promise<string | null> {
   const sql = await getSql();
   const inv = await sql<{ title: string }>`
     select title from investigations where id = ${id} and newsroom_id = ${newsroomId} limit 1
@@ -4627,7 +4749,8 @@ export async function buildDarkBriefPromptPack(newsroomId: number, id: number): 
  * closed vocabularies (`verdict`, `evidence_status`) are not prose and cannot
  * carry an invented specific.
  */
-export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus): InvestigationBrief {
+export function groundBrief(brief: InvestigationBrief, corpus: GroundingCorpus,
+): InvestigationBrief {
   const prepared = typeof corpus === "string" ? prepareCorpus(corpus) : corpus;
   const text = (value: string) => markUngroundedSpecifics(value, prepared);
   const list = (values: string[]) => values.map(text);
@@ -4702,8 +4825,9 @@ export async function buildBrief(
   const verification = verificationRows[0] ?? { eligible: 0, complete: 0 };
   const evidenceStatus =
     verification.eligible > 0 && verification.complete === verification.eligible
-      ? "protocol-complete" as const
-      : "unverified" as const;
+      ? ("protocol-complete" as const
+      )
+      : ("unverified" as const);
 
   await run?.onStage?.("Writing editor brief");
   const modelCall = run?.budget.startModelCall({
@@ -4713,7 +4837,8 @@ export async function buildBrief(
   });
   if (run?.budget && !modelCall) {
     await run.onUsage?.(run.budget.snapshot());
-    return { ok: false as const, error: `run stopped: ${run.budget.stopReason ?? "model-call-limit"}` };
+    return { ok: false as const, error: `run stopped: ${run.budget.stopReason ?? "model-call-limit"}` ,
+    };
   }
   if (modelCall) await run?.onUsage?.(run.budget.snapshot());
   const callMs = providerBudget(choice, overrides).callMs;
@@ -4740,7 +4865,7 @@ export async function buildBrief(
   if (modelCall) {
     const meta = "meta" in ai ? ai.meta : undefined;
     modelCall.finish({
-      result: ai.ok ? "ok" : (/timed out|timeout/i.test(ai.error) ? "timeout" : "error"),
+      result: ai.ok ? "ok" : /timed out|timeout/i.test(ai.error) ? "timeout" : "error",
       timedOut: meta?.timedOut ?? (!ai.ok && /timed out|timeout/i.test(ai.error)),
       provider: meta?.provider,
       model: meta?.model,
@@ -4806,7 +4931,13 @@ export async function startBriefJob(
   effortValue?: unknown,
   override?: string[],
   deps: { probe?: typeof probeDarkProvider; kick?: boolean } = {},
+modelChoiceExplicit = false,
 ) {
+  const assignment = await (
+    await import("./job-model-runtime.server.ts")
+  ).resolveRequestedJobModel(owned(context), "dark", modelChoice, undefined, modelChoiceExplicit);
+  modelChoice = assignment.providerId;
+  effortValue = assignment.source === "assignment" ? assignment.effort : effortValue;
   const asked = storyModelChoice(modelChoice);
   const probe = await (deps.probe ?? probeDarkProvider)(asked, owned(context));
   const refusal = await darkPreflightRefusal(asked, owned(context), probe);
@@ -4822,14 +4953,17 @@ export async function startBriefJob(
     const persisted = effectiveStoryModelChoice(open.model_choice);
     const persistedEffort = savedJobEffort(open);
     if (persisted !== effectiveChoice || persistedEffort !== modelEffort) {
-      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id });
-      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id };
+      const warning = await editorWarning({ ...context, newsroomId: owned(context) }, override, "model-change-running", `This run is using ${modelChoiceLabel(persisted)}. Stop and restart with ${modelChoiceLabel(effectiveChoice)}.`, { kind: "job", id: open.id },
+      );
+      if (warning) return { ...warning, kind: "model-conflict" as const, modelChoice: persisted, jobId: open.id ,
+        };
 
     }
     if (persisted === effectiveChoice && persistedEffort === modelEffort) return { ok: true as const, pending: true as const, jobId: open.id, modelChoice: persisted };
   }
 
-  const rate = await checkRate(context.userId, "brief", owned(context), override, { record: false });
+  const rate = await checkRate(context.userId, "brief", owned(context), override, { record: false ,
+  });
   if (rate) return rate;
   if (open) await requestJobCancel(open.id);
   const job = await enqueueJob({
@@ -4854,7 +4988,8 @@ export async function startBriefJob(
         report reads exactly as it did before.
       */
       skippedRungs: probe.skippedRungs,
-    })),
+    }),
+    ),
   });
   await recordDeskRun(context.userId, "brief", owned(context));
   if ("switchReceipt" in probe) {
@@ -4916,7 +5051,8 @@ export async function performBriefWork(job: DeskJob) {
         const nextEffort = effortForChoice(resolvedChoice, active.modelEffort);
         briefLabel = nextLabel;
         await setJobModelRuntime(job.id, resolvedChoice, nextEffort);
-        await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`);
+        await setJobStage(job.id, `Switched to ${nextLabel}: ${failoverReasonPhrase(previousLabel, reason)}`,
+        );
         await setJobFailoverNote(job.id, failoverNoteSentence(nextLabel, previousLabel, reason));
       },
     });
@@ -4968,5 +5104,8 @@ export const refreshBrief = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) =>
     typeof data === "number"
       ? startBriefJob(context, data)
-      : startBriefJob(context, data.id, data.modelChoice, data.modelEffort, data.override),
+      : startBriefJob(context, data.id, data.modelChoice, data.modelEffort, data.override,
+          {},
+          data.modelChoiceExplicit,
+        ),
   );

@@ -149,6 +149,21 @@ describe("the agent seam", () => {
     assert.notEqual(auto.source, "explicit");
   });
 
+  it("retains a deliberately selected Automatic through saving and scheduled resolution", async () => {
+    const context = { userId: "followup-explicit-auto", newsroomId: 97001 };
+    const created = await performCreateAiFollowUp(context, {
+      what: "Check the next council agenda", agentKind: "search", schedule: "daily",
+      modelChoice: "auto", modelChoiceExplicit: true,
+    });
+    assert.equal(created.ok, true);
+    if (!created.ok) assert.fail("The follow-up must save");
+    const sql = await getSql();
+    const [row] = await sql<{ newsroom_id: number; model_choice: string; targets_json: string }>`select newsroom_id,model_choice,targets_json from follow_ups where id=${created.id}`;
+    const resolved = await resolveFollowUpModel(row);
+    assert.equal(resolved.providerId, "auto");
+    assert.equal(resolved.source, "explicit");
+  });
+
   it("routes a method name to its agent, and an unknown one to nothing", () => {
     assert.equal(agentFor("recheck"), runRecheckAgent);
     assert.equal(agentFor("search"), runSearchAgent);

@@ -87,8 +87,10 @@ export type EditorDialogDeps = {
   getSql: () => Promise<Sql>;
   chat: typeof grokChat;
   readAssignments: (newsroomId?: number) => Promise<ModelAssignmentRow[]>;
-  resolveLocalModel: (newsroomId: number, scope: "story" | "scan") => Promise<LocalModelOverride | null>;
-  saveDraft: (context: { userId: string; newsroomId: number }, data: DraftEditInput) => Promise<{ ok: true }>;
+  resolveLocalModel: (newsroomId: number, scope: "story" | "scan",
+  ) => Promise<LocalModelOverride | null>;
+  saveDraft: (context: { userId: string; newsroomId: number }, data: DraftEditInput,
+  ) => Promise<{ ok: true }>;
   proposeSource: typeof insertProposedNewsroomSource;
   linkDocuments: typeof linkStoryDocuments;
   insertLead: InsertLead;
@@ -122,8 +124,10 @@ export function jobModelFor(
   explicit: string | null | undefined,
   effort: string | null | undefined,
   assignments: readonly ModelAssignmentRow[],
+modelChoiceExplicit = false,
 ): JobModelResolution {
-  const resolved = resolveJobModel({ jobKey, explicit, assignments, exactModel: null });
+  const resolved = resolveJobModel({ jobKey, explicit: explicit === "auto" && !modelChoiceExplicit ? null : explicit, assignments, exactModel: null ,
+  });
   if (resolved.source !== "explicit") return resolved;
   return { ...resolved, effort: cleanJobEffort(resolved.providerId, effort ?? null, null) };
 }
@@ -144,9 +148,10 @@ async function resolveFor(
   explicit: string | null | undefined,
   effort: string | null | undefined,
   newsroomId: number,
+modelChoiceExplicit = false,
 ): Promise<JobModelResolution> {
   const assignments = await deps.readAssignments(newsroomId).catch(() => []);
-  return jobModelFor(jobKey, explicit, effort, assignments);
+  return jobModelFor(jobKey, explicit, effort, assignments, modelChoiceExplicit);
 }
 
 /** The one sentence a dialog prints when the desk could not use a saved pick. */
@@ -200,6 +205,7 @@ export async function performAddLead(
     why?: string;
     then: "score" | "draft" | "as-is";
     modelChoice?: string;
+    modelChoiceExplicit?: boolean;
     modelEffort?: string | null;
   },
   deps: EditorDialogDeps,
@@ -224,19 +230,24 @@ export async function performAddLead(
   const headline = (derived.length >= 8 ? derived : isLink ? firstLine : firstLine || paste.slice(0, 120))
     .trim();
   if (headline.length < 8) {
-    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId });
+    const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override, "lead-short-headline", "This headline is shorter than 8 characters.", { kind: "newsroom", id: context.newsroomId },
+    );
     if (warning) return warning;
   }
 
   const why = (data.why ?? "").trim();
   for (const [key, exceeded, sentence] of [
-    ["lead-paste-length", paste.length > 20_000, "This pasted lead is longer than the usual 20,000 characters."],
-    ["lead-headline-length", headline.length > 180, "This lead headline is longer than the usual 180 characters."],
-    ["lead-note-length", why.length > 800, "This lead note is longer than the usual 800 characters."],
+    ["lead-paste-length", paste.length > 20_000, "This pasted lead is longer than the usual 20,000 characters.",
+    ],
+    ["lead-headline-length", headline.length > 180, "This lead headline is longer than the usual 180 characters.",
+    ],
+    ["lead-note-length", why.length > 800, "This lead note is longer than the usual 800 characters.",
+    ],
   ] as const) {
     if (!exceeded) continue;
     const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
-      key, sentence, {kind: "newsroom", id: context.newsroomId});
+      key, sentence, {kind: "newsroom", id: context.newsroomId},
+    );
     if (warning) return warning;
   }
   /*
@@ -247,9 +258,11 @@ export async function performAddLead(
   */
   const urls = parseSourceLines(paste).map((row) => row.url);
   if (data.then === "draft") {
-    const setup = await (deps.paperSetupWarning ?? paperSetupWarning)(context, data.override, "draft this story");
+    const setup = await (deps.paperSetupWarning ?? paperSetupWarning)(context, data.override, "draft this story",
+    );
     if (setup) return setup;
-    const rate = await (deps.checkRate ?? checkRate)(context.userId, "draft", context.newsroomId, data.override, { record: false });
+    const rate = await (deps.checkRate ?? checkRate)(context.userId, "draft", context.newsroomId, data.override, { record: false },
+    );
     if (rate) return rate;
   }
   const filed = await deps.insertLead(
@@ -267,11 +280,13 @@ export async function performAddLead(
     data.modelChoice,
     data.modelEffort,
     context.newsroomId,
+  data.modelChoiceExplicit,
   );
   const notice = noticeLine(resolution);
 
   if (data.then === "score") {
-    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
+    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan",
+    );
     const prompt = scorePrompt({ headline, text: paste });
     const got = await deps.chat(prompt.system, prompt.user, 700, {
       choice: resolution.providerId as EffectiveProviderChoice,
@@ -312,7 +327,8 @@ export async function performAddLead(
       update leads set newsworthiness = ${scored.score}, evidence = ${storableText(scored.reason) || null}
       where id = ${leadId} and newsroom_id = ${context.newsroomId}
     `;
-    return { ok: true as const, leadId, then: "score" as const, score: scored.score, reason: scored.reason, notice };
+    return { ok: true as const, leadId, then: "score" as const, score: scored.score, reason: scored.reason, notice ,
+    };
   }
 
   const started = await deps
@@ -322,11 +338,13 @@ export async function performAddLead(
         leadId,
         override: data.override,
         modelChoice: resolution.providerId as StoryModelChoice,
+        modelChoiceExplicit: resolution.source === "explicit",
         modelEffort: resolution.effort,
       },
       { ratePreflight: true },
     )
-    .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Could not start the draft." }));
+    .catch((err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Could not start the draft." ,
+    }));
   if (!started.ok) {
     return {
       ok: true as const,
@@ -341,7 +359,7 @@ export async function performAddLead(
 /* --------------------------------------------------------------------- hold -- */
 
 export type HoldLeadResult =
-  | { ok: true; held: true; key: string; notice: string | null }
+  { ok: true; held: true; key: string; notice: string | null }
   | { ok: false; error: string };
 
 /**
@@ -381,7 +399,8 @@ export async function performHoldLead(
 
   if ((data.note ?? "").trim().length > 1000) {
     const warning = await editorWarning({ ...context, sql }, data.override, "hold-note-length",
-      "This hold note is longer than the usual 1,000 characters.", { kind: "lead", id: data.id });
+      "This hold note is longer than the usual 1,000 characters.", { kind: "lead", id: data.id },
+    );
     if (warning) return warning;
   }
   const notes = parseNotes(lead.notes_json);
@@ -391,7 +410,8 @@ export async function performHoldLead(
     note: (data.note ?? "").trim(),
     at: deps.now().toISOString(),
   };
-  const held = await setLeadStatusForEditor(sql, context, { id: data.id, status: "held", override: data.override }, packNotes(notes));
+  const held = await setLeadStatusForEditor(sql, context, { id: data.id, status: "held", override: data.override }, packNotes(notes),
+  );
   if (!held.ok) return held;
   const notice =
     chosen?.key === "follow-up"
@@ -446,7 +466,8 @@ export async function performSourceKillPattern(
     return { ok: false as const, error: "That source's URL cannot be matched to a lead." };
   }
 
-  const killed = await sql<{ id: number; headline: string; kill_reason: string | null; source_urls: string | null }>`
+  const killed = await sql<{ id: number; headline: string; kill_reason: string | null; source_urls: string | null ;
+  }>`
     select id, headline, kill_reason, source_urls from leads
     where newsroom_id = ${context.newsroomId} and status = ${"killed"}
     order by killed_at desc nulls last, id desc
@@ -488,19 +509,25 @@ export type FindSourcesResult =
  */
 export async function performFindSources(
   context: EditorDialogContext,
-  data: { topic: string; scope: string; modelChoice?: string; modelEffort?: string | null; override?: string[] },
+  data: { topic: string; scope: string; modelChoice?: string; modelChoiceExplicit?: boolean;
+    modelEffort?: string | null; override?: string[] ;
+  },
   deps: EditorDialogDeps,
 ): Promise<FindSourcesResult> {
   const topic = data.topic.trim();
   if (!topic) return { ok: false as const, error: "Say what the paper should cover." };
   if (topic.length < 4 || topic.length > 800) {
     const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
-      "source-search-topic", "This search topic is outside the usual 4 to 800 characters.", { kind: "newsroom", id: context.newsroomId });
+      "source-search-topic", "This search topic is outside the usual 4 to 800 characters.", { kind: "newsroom", id: context.newsroomId },
+    );
     if (warning) return warning;
   }
 
-  const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
-  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
+  const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId,
+    data.modelChoiceExplicit,
+  );
+  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan",
+  );
   const prompt = findSourcesPrompt(topic, data.scope);
   const got = await deps.chat(prompt.system, prompt.user, 1400, {
     choice: resolution.providerId as EffectiveProviderChoice,
@@ -538,8 +565,9 @@ export async function performFindSources(
     });
     if (added) proposed += 1;
     else {
-      const stored = await sql<{url: string}>`select url from sources where newsroom_id=${context.newsroomId}`;
-      if (stored.some(source => sourceIdentity(source.url) === sourceIdentity(row.url))) alreadyExisted += 1;
+      const stored = await sql<{url: string;
+      }>`select url from sources where newsroom_id=${context.newsroomId}`;
+      if (stored.some((source ) => sourceIdentity(source.url) === sourceIdentity(row.url))) alreadyExisted += 1;
     }
   }
   return {
@@ -609,6 +637,7 @@ export async function performFindReplacement(
     url?: string;
     title?: string;
     modelChoice?: string;
+    modelChoiceExplicit?: boolean;
     modelEffort?: string | null;
   },
   deps: EditorDialogDeps,
@@ -684,8 +713,11 @@ export async function performFindReplacement(
     };
   }
 
-  const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId);
-  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan");
+  const resolution = await resolveFor(deps, "scan", data.modelChoice, data.modelEffort, context.newsroomId,
+    data.modelChoiceExplicit,
+  );
+  const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "scan",
+  );
   const prompt = findSourcesPrompt(topic, "records");
   const got = await deps.chat(prompt.system, prompt.user, 1400, {
     choice: resolution.providerId as EffectiveProviderChoice,
@@ -793,6 +825,7 @@ export async function performWeaveIntoStory(
     documentIds?: string[];
     saveText?: string;
     modelChoice?: string;
+    modelChoiceExplicit?: boolean;
     modelEffort?: string | null;
   },
   deps: EditorDialogDeps,
@@ -842,8 +875,11 @@ export async function performWeaveIntoStory(
   } else if (data.mode === "update") {
     after = insertUpdateAtTop(draft.body, material, deps.now());
   } else {
-    const resolution = await resolveFor(deps, "story-draft", data.modelChoice, data.modelEffort, context.newsroomId);
-    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "story");
+    const resolution = await resolveFor(deps, "story-draft", data.modelChoice, data.modelEffort, context.newsroomId,
+      data.modelChoiceExplicit,
+    );
+    const localModel = await localOverrideFor(deps, context.newsroomId, resolution.providerId, "story",
+    );
     notice = noticeLine(resolution);
     const prompt = weavePrompt({ headline: draft.headline, body: draft.body, material });
     const got = await deps.chat(prompt.system, prompt.user, 2400, {
@@ -909,7 +945,8 @@ export async function performChooseHeadline(
   if (!headline) return { ok: false as const, error: "The headline is empty." };
   if (headline.length < 8 || headline.length > 180) {
     const warning = await editorWarning({ ...context, sql: await deps.getSql() }, data.override,
-      "headline-length", "This headline is outside the usual 8 to 180 characters.", { kind: "lead", id: data.id });
+      "headline-length", "This headline is outside the usual 8 to 180 characters.", { kind: "lead", id: data.id },
+    );
     if (warning) return warning;
   }
 
@@ -930,7 +967,8 @@ export async function performChooseHeadline(
 }
 
 /** The defaults, with the two injected modules still injected. */
-export function editorDialogDeps(overrides: Partial<EditorDialogDeps> & Pick<EditorDialogDeps, "insertLead" | "commitDraft">): EditorDialogDeps {
+export function editorDialogDeps(overrides: Partial<EditorDialogDeps> & Pick<EditorDialogDeps, "insertLead" | "commitDraft">,
+): EditorDialogDeps {
   return {
     getSql,
     paperSetupWarning,

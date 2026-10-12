@@ -23,7 +23,7 @@ test("the file model choice runs when the editor keeps investigating", async () 
     assert.ok(keep);
     await React.act(async () => keep.dispatchEvent(new window.Event("click", { bubbles: true })));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(calls.keep, [{ id: 1, modelChoice: "claude-sonnet", modelEffort: null }]);
+    assert.deepEqual(calls.keep, [{ id: 1, modelChoice: "claude-sonnet", modelEffort: null, modelChoiceExplicit: true }]);
   } finally {
     await React.act(async () => root.unmount());
     container.remove();

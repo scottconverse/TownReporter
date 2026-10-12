@@ -329,7 +329,7 @@ function ModelsPage() {
           "which models could I run here at all".
         */}
         <LocalModelsOnThisComputer headingLevel={2} />
-        <AssignmentsTab isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
+        <ModelAssignmentsPanel isOwner={isOwner} connections={custom.data ?? []} onNote={setNote} />
       </div>
       <div
         id="models-panel-conn"
@@ -378,7 +378,7 @@ function ModelsPage() {
    "Who does what"
    -------------------------------------------------------------------------- */
 
-function AssignmentsTab({
+export function ModelAssignmentsPanel({
   isOwner,
   connections,
   onNote,

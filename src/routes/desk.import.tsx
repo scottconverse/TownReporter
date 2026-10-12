@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DeskShell, InkButton, SecHead } from "@/components/desk-chrome";
 import { announceToDesk, areaClass, inputClass } from "@/components/desk-chrome-utils";
@@ -40,6 +40,7 @@ import { DARK_SEED_KEY, darkSeedFromCard } from "@/lib/news/dark-seed";
 import { editorActionError } from "@/lib/news/desk-copy";
 import { defaultModelEffort, type ModelEffort } from "@/lib/news/provider-registry";
 import type { StoryModelChoice } from "@/lib/news/model-choice";
+import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 
 export const Route = createFileRoute("/desk/import")({
   head: () => ({ meta: [{ title: "Import finished stories — TownReporter" }] }),
@@ -74,6 +75,13 @@ function ImportPage() {
   const [needsModel, setNeedsModel] = useState(false);
   const [modelChoice, setModelChoice] = useState<StoryModelChoice>("auto");
   const [modelEffort, setModelEffort] = useState<ModelEffort | null>(defaultModelEffort("auto"));
+  const modelChoiceTouched = useRef(false);
+  useJobModelAssignment<StoryModelChoice>({
+    jobKey: "story-draft",
+    touched: modelChoiceTouched,
+    setChoice: setModelChoice,
+    setEffort: setModelEffort,
+  });
   const [notice, setNotice] = useState<{ text: string; kind: "info" | "error" } | null>(null);
   const [done, setDone] = useState<{
     imported: { headline: string; kind: ImportKind }[];
@@ -174,7 +182,7 @@ function ImportPage() {
 
   const structure = useMutation({
     mutationFn: () =>
-      structureImportStories({ data: { text, modelChoice, modelEffort } }),
+      structureImportStories({ data: { text, modelChoice, modelEffort, modelChoiceExplicit: modelChoiceTouched.current } }),
     onSuccess: (result) => {
       if (result.error) {
         setNotice({ text: result.error, kind: "error" });
@@ -437,11 +445,12 @@ function ImportPage() {
               scope="story"
               value={modelChoice}
               onChange={(choice) => {
+                modelChoiceTouched.current = true;
                 setModelChoice(choice);
                 setModelEffort(defaultModelEffort(choice));
               }}
               effort={modelEffort}
-              onEffortChange={setModelEffort}
+              onEffortChange={(effort) => { modelChoiceTouched.current = true; setModelEffort(effort); }}
               disabled={structure.isPending}
             />
             <InkButton tone="solid" onClick={() => structure.mutate()} disabled={structure.isPending}>
