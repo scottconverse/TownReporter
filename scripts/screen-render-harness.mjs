@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
-import { stubUrl, transpileToUrl } from "./dom-harness.mjs";
+import { stubUrl, transpileToUrl, noJobModelAssignmentUrl } from "./dom-harness.mjs";
 
 const runtimeCache = new Map();
 async function runtimeModule(file) {
@@ -47,6 +47,10 @@ export async function screenModuleUrl(path, overrides = {}, real = [], fixture =
     const name = node.moduleSpecifier.text;
     if (fixture.imports?.[name]) {
       imports[name] = fixture.imports[name];
+      continue;
+    }
+    if (name === "@/components/use-job-model-assignment" && !real.includes(name)) {
+      imports[name] = noJobModelAssignmentUrl;
       continue;
     }
     if (name === "react") continue;

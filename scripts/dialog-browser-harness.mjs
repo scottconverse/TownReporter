@@ -7,17 +7,31 @@ import { chromium } from "playwright";
 // Bundle only the dialog UI. The chrome button and model service picker are
 // fixtures; no app, database, model, or network service is started.
 export async function dialogBrowser() {
+  // Keep the production assignment hook, but terminate its transport imports
+  // here. These layout fixtures have no saved assignments or React Query host.
+  const services = {
+    "@/lib/news/model-assignments-settings": `
+      export const MODEL_ASSIGNMENTS_QUERY_KEY=["model-assignments"];
+      export const getModelAssignmentsFn=async()=>({ok:true,assignments:[]});`,
+    "@tanstack/react-query": `
+      const data={ok:true,assignments:[]};
+      export const useQuery=()=>({data,isPending:false,isError:false});`,
+    "dialog-ai-transport": `export const AUTOMATIC_LADDER=[];`,
+  };
   const bundle = await rolldown({
     input: "dialog-fixture",
     cwd: resolve(import.meta.dirname, ".."),
     transform: { jsx: "react-jsx" },
     plugins: [{
       name: "dialog-fixture",
-      resolveId(id) {
+      resolveId(id, importer) {
+        if (id === "./ai.ts" && importer?.endsWith("automatic-failover.ts")) return "\0dialog-ai-transport";
+        if (Object.hasOwn(services, id)) return "\0" + id;
         if (["dialog-fixture", "./desk-chrome", "@/components/model-picker"].includes(id)) return "\0" + id;
         if (id.startsWith("@/")) return resolve(import.meta.dirname, "../src", id.slice(2) + (id === "@/components/dialog" ? ".tsx" : ".ts"));
       },
       load(id) {
+        if (Object.hasOwn(services, id.slice(1))) return services[id.slice(1)];
         if (id === "\0./desk-chrome") return `import React from 'react'; export function InkButton({children,onClick,disabled,ariaLabel}) { return React.createElement('button',{className:'btn',onClick,disabled,'aria-label':ariaLabel},children); }`;
         if (id === "\0@/components/model-picker") return `import React from 'react'; export function ModelPicker(){return React.createElement('select',{className:'fu-input'},React.createElement('option',null,'Fixture model'));}`;
         if (id === "\0dialog-fixture") return `

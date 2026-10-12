@@ -32,6 +32,12 @@ import ts from "typescript";
 */
 
 function moduleUrl(source, fileName, imports = {}) {
+  // Model assignment editing is another Server panel; Paper setup never mounts it.
+  imports = {
+    "@/routes/desk.models": `data:text/javascript;base64,${Buffer.from("export const ModelAssignmentsPanel=()=>null;").toString("base64")}`,
+    "@/lib/news/custom-ai-settings": `data:text/javascript;base64,${Buffer.from("export const getCustomAiConnectionsFn=()=>[];").toString("base64")}`,
+    ...imports,
+  };
   let output = ts.transpileModule(source, {
     fileName,
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
