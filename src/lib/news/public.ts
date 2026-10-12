@@ -3,7 +3,7 @@ import { resolveSectionKey } from "./sections.server.ts";
 import { getSql } from "../db.ts";
 import type { ArticleRow, CorrectionRow } from "./types.ts";
 import { unpackStoredDraft } from "./coerce-draft.ts";
-import { stripReporterNotebook } from "./strip-draft.ts";
+import { cleanMissingFactNotes, stripReporterNotebook } from "./strip-draft.ts";
 import { parseUrlList } from "../paper.ts";
 import { provenanceFromUrls, parseFindings, resolvePublicFindings, type ProvenanceItem, type StoryFinding } from "./findings.ts";
 import { collapsePrintedDuplicates } from "./desk-copy.ts";
@@ -40,7 +40,7 @@ function samePublicUrl(left: string, right: string): boolean {
 export async function publicArticleForReaders<T extends ArticleRow>(
   row: T,
 ): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
-  const article = publicArticle(row);
+  const article = await publicArticleWithEditorChecks(row);
   const removed = await removedCapturesFor(article.provenance.map((item) => item.version_id));
   const provenance = markRemovedCaptures(article.provenance, removed);
   return { ...article, provenance, provenance_json: JSON.stringify(provenance) };
@@ -51,13 +51,7 @@ export async function publicArticleForReaders<T extends ArticleRow>(
 export function publicArticle<T extends ArticleRow>(
   row: T,
 ): T & { provenance: ProvenanceItem[]; findings: StoryFinding[] } {
-  const u = unpackStoredDraft({
-    headline: row.headline,
-    dek: row.dek,
-    body: row.body,
-    topic: row.topic,
-  });
-  u.body = stripReporterNotebook(u.body);
+  const { u } = readerText(row);
   const publicUrls = parseUrlList(row.source_urls);
   let provenance: ProvenanceItem[] = [];
   try {
@@ -97,6 +91,65 @@ export function publicArticle<T extends ArticleRow>(
     provenance,
     findings,
   };
+}
+
+function readerText<T extends ArticleRow>(row: T) {
+  const u = unpackStoredDraft({
+    headline: row.headline,
+    dek: row.dek,
+    body: row.body,
+    topic: row.topic,
+  });
+  const summary = cleanMissingFactNotes(u.headline, u.dek);
+  u.headline = summary.headline;
+  u.dek = summary.dek;
+  u.body = stripReporterNotebook(u.body);
+  return { u, missingFactNotes: summary.notes };
+}
+
+/** Keep a print-time cleanup visible in the private editor checks, without delaying readers on a failed write. */
+export async function rememberMissingFactNotesForArticle(
+  articleId: number,
+  notes: readonly string[],
+  newsroomId = DEFAULT_NEWSROOM_ID,
+): Promise<void> {
+  const uniqueNotes = [...new Set(notes.map((note) => note.trim()).filter(Boolean))];
+  if (!Number.isSafeInteger(articleId) || articleId <= 0 || !uniqueNotes.length) return;
+  try {
+    const sql = await getSql();
+    for (const note of uniqueNotes) {
+      await sql`
+        update drafts as d
+        set integrity_notes = case
+          when btrim(coalesce(d.integrity_notes, '')) = '' then ${note}
+          else btrim(d.integrity_notes) || E'\\n' || ${note}
+        end
+        where d.id = (
+          select editor_draft.id
+          from drafts as editor_draft
+          join articles as article on article.lead_id = editor_draft.lead_id
+          where article.id = ${articleId}
+            and article.newsroom_id = ${newsroomId}
+            and editor_draft.newsroom_id = ${newsroomId}
+          order by editor_draft.updated_at desc, editor_draft.id desc
+          limit 1
+        )
+        and position(lower(${note}) in lower(coalesce(d.integrity_notes, ''))) = 0
+      `;
+    }
+  } catch (err) {
+    console.error("[paper] summary editor check note failed", err);
+  }
+}
+
+async function publicArticleWithEditorChecks<T extends ArticleRow>(
+  row: T,
+): Promise<T & { provenance: ProvenanceItem[]; findings: StoryFinding[] }> {
+  const { missingFactNotes } = readerText(row);
+  const rowRoom = (row as T & { newsroom_id?: number }).newsroom_id;
+  const newsroomId = Number.isSafeInteger(rowRoom) && Number(rowRoom) > 0 ? Number(rowRoom) : DEFAULT_NEWSROOM_ID;
+  await rememberMissingFactNotesForArticle(row.id, missingFactNotes, newsroomId);
+  return publicArticle(row);
 }
 
 /**
@@ -148,8 +201,8 @@ export const listPublishedArticles = createServerFn({ method: "GET" }).handler(
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
       order by published_at desc
       limit 30
-    `.then((rows) =>
-      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    `.then(async (rows) =>
+      collapsePrintedDuplicates(await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance),
     );
     } catch (err) {
       console.error("[paper] listPublishedArticles failed", err);
@@ -235,8 +288,8 @@ export const listPublishedByTopic = createServerFn({ method: "GET" })
       where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID} and topic = ${topic}
       order by published_at desc
       limit 30
-    `.then((rows) =>
-      collapsePrintedDuplicates(rows.map(publicArticle)).map(withoutProvenance),
+    `.then(async (rows) =>
+      collapsePrintedDuplicates(await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance),
     );
     } catch (err) {
       console.error("[paper] listPublishedByTopic failed", err);
@@ -286,7 +339,7 @@ export const searchPublished = createServerFn({ method: "GET" })
              or (${wide} and body ilike ${like}))
       order by published_at desc
       limit 30
-    `.then((rows) => rows.map(publicArticle).map(withoutProvenance));
+    `.then(async (rows) => (await Promise.all(rows.map(publicArticleWithEditorChecks))).map(withoutProvenance));
     } catch (err) {
       console.error("[paper] searchPublished failed", err);
       return [] as PublicListArticle[];

@@ -125,6 +125,9 @@ it("supplies the configured topic key to writing and reconciliation as authorita
   assert.ok(!("error" in result));
   const modelPackets = packets.filter((packet) => !packet.system.includes('"fetch_urls"'));
   assert.equal(modelPackets.length, 2);
+  assert.match(modelPackets[0]!.system, /headline and dek are for readers only/i);
+  assert.match(modelPackets[0]!.system, /Put that note in integrity_notes or unanswered/i);
+  assert.match(modelPackets[1]!.system, /headline and dek are for readers only/i);
   for (const packet of modelPackets) {
     assert.match(packet.user, /EDITORIAL METADATA \(authoritative, not evidence\)/);
     assert.match(packet.user, /Topic key: "schools"/);

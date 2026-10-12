@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { getSql } from "@/lib/db";
 import { collapsePrintedDuplicates } from "@/lib/news/desk-copy";
+import { cleanMissingFactNotes } from "@/lib/news/strip-draft";
+import { rememberMissingFactNotesForArticle } from "@/lib/news/public";
 import { DEFAULT_NEWSROOM_ID } from "@/lib/news/membership";
 import { getPublicPaperConfig, isOnboarded } from "@/lib/news/paper-settings";
 
@@ -51,6 +53,7 @@ export const Route = createFileRoute("/feed")({
         const paper = await getPublicPaperConfig();
         const origin = siteOrigin(request);
         let rows: {
+          id: number;
           slug: string;
           headline: string;
           dek: string;
@@ -63,12 +66,13 @@ export const Route = createFileRoute("/feed")({
           try {
             const sql = await getSql();
             rows = await sql<{
+              id: number;
               slug: string;
               headline: string;
               dek: string;
               published_at: string;
             }>`
-              select slug, headline, dek, published_at
+              select id, slug, headline, dek, published_at
               from articles
               where status = 'published' and newsroom_id = ${DEFAULT_NEWSROOM_ID}
               order by published_at desc
@@ -81,19 +85,20 @@ export const Route = createFileRoute("/feed")({
             rows = [];
           }
         }
-        const items = collapsePrintedDuplicates(rows)
-          .map((r) => {
+        const items = (await Promise.all(collapsePrintedDuplicates(rows)
+          .map(async (r) => {
+            const readerSummary = cleanMissingFactNotes(r.headline, r.dek);
+            await rememberMissingFactNotesForArticle(r.id, readerSummary.notes);
             const link = `${origin}/articles/${encodeURIComponent(r.slug)}`;
             const at = new Date(r.published_at);
             const pubDate = Number.isNaN(at.getTime()) ? "" : at.toUTCString();
             return `<item>
-  <title>${xmlText(r.headline)}</title>
+  <title>${xmlText(readerSummary.headline)}</title>
   <link>${xmlEscape(link)}</link>
   <guid isPermaLink="true">${xmlEscape(link)}</guid>${pubDate ? `\n  <pubDate>${pubDate}</pubDate>` : ""}
-  <description>${xmlText(r.dek)}</description>
+  <description>${xmlText(readerSummary.dek)}</description>
 </item>`;
-          })
-          .join("\n");
+          }))).join("\n");
         const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
 <channel>

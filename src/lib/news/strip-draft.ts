@@ -33,6 +33,61 @@ function splitSentences(text: string): string[] {
     .filter(Boolean);
 }
 
+/*
+  These phrases are editor checks when they describe what a notice or record
+  leaves unstated. They can help the editor, but they are not reader-facing
+  headline or dek copy. Keep the patterns tied to source material or an
+  explicitly missing date/time/schedule; ordinary reporting about what a city
+  did or did not decide is still news.
+*/
+const MISSING_FACT_NOTE = [
+  /\b(?:notice|announcement|document|materials?|record|source)\b[^.!?]{0,100}\b(?:(?:does not|doesn't|did not|didn't|has not|have not|had not)\s+(?:state|say|specify|identify|list|provide|give|include|name|confirm|mention)|fails?\s+to\s+(?:state|say|specify|identify|list|provide|give|include|name|confirm|mention))\b/i,
+  /\b(?:does not|doesn't|did not|didn't|has not|have not|had not)\s+(?:state|say|specify)\b/i,
+  /\b(?:year|date|time|schedule|start date|end date|deadline|duration|location)\b[^.!?]{0,60}\b(?:(?:is|are|was|were|remains?)\s+)?(?:not\s+(?:stated|specified|identified|listed|given|provided|included|named|confirmed)|unstated|unspecified|unidentified|unlisted)\b/i,
+  /\bno\s+(?:year|date|time|schedule|start date|end date|deadline|duration|location)\b[^.!?]{0,60}\b(?:is|are|was|were)?\s*(?:stated|specified|identified|listed|given|provided|included|named|confirmed)\b/i,
+  /^\s*not\s+(?:specified|stated|identified|listed|given|provided|included|confirmed)(?:\s+(?:in|from)\s+(?:the\s+)?(?:notice|announcement|document|materials?|record|source|schedule))?\s*[.!?]*$/i,
+  /\b(?:unclear|not clear)\s+from\s+(?:the\s+)?(?:notice|announcement|document|materials?|record|source|schedule)\b/i,
+];
+
+function cleanSummaryField(text: string): { text: string; notes: string[] } {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (!normalized) return { text, notes: [] };
+  const sentences = splitSentences(normalized);
+  const notes = sentences.filter((sentence) => MISSING_FACT_NOTE.some((pattern) => pattern.test(sentence)));
+  if (!notes.length) return { text, notes: [] };
+  const noteSet = new Set(notes);
+  return {
+    text: sentences.filter((sentence) => !noteSet.has(sentence)).join(" "),
+    notes,
+  };
+}
+
+/** Remove missing-fact editor notes from reader-facing fields and retain them for editor checks. */
+export function cleanMissingFactNotes(headline: string, dek: string): {
+  headline: string;
+  dek: string;
+  notes: string[];
+} {
+  const cleanHeadline = cleanSummaryField(headline);
+  const cleanDek = cleanSummaryField(dek);
+  return {
+    headline: cleanHeadline.notes.length ? cleanHeadline.text.replace(/[.!?]+$/, "") : cleanHeadline.text,
+    dek: cleanDek.text,
+    notes: [...new Set([...cleanHeadline.notes, ...cleanDek.notes])],
+  };
+}
+
+/** Add removed summary notes to integrity checks without repeating existing notes. */
+export function appendEditorChecks(existing: string | null | undefined, additions: readonly string[]): string {
+  const current = String(existing ?? "").trim();
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
+  const known = normalize(current);
+  const missing = [...new Set(additions.map((note) => note.trim()).filter(Boolean))].filter(
+    (note) => !known.includes(normalize(note)),
+  );
+  return [current, ...missing].filter(Boolean).join("\n");
+}
+
 /**
  * Drop the paper's own backlog from a paragraph. A paragraph that opens on it is
  * homework top to bottom and goes. Inside a sentence, the backlog is either the whole
