@@ -1226,7 +1226,7 @@ function ApiKeyConnections({
     onSuccess: (res, row) => {
       onNote(
         res.ok
-          ? `${row.name} answered in ${(res.latencyMs / 1000).toFixed(1)} seconds.`
+          ? `${row.name}: ${res.message} (${(res.latencyMs / 1000).toFixed(1)} seconds.)`
           : `${row.name} did not answer: ${res.message}`,
       );
       refresh();

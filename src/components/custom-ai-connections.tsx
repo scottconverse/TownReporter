@@ -137,10 +137,12 @@ export function CustomAiConnections({
         sentence that makes the form safe to use.
       */}
       {showHeading ? <h2 id="custom-ai-heading">Add your own AI API</h2> : null}
-      <p className="meta">
-        Connect an OpenAI-compatible endpoint, including LiteLLM. Saving does not call a model,
-        spend provider credit, or change the desk default.
-      </p>
+      {showHeading ? (
+        <p className="meta">
+          Connect an OpenAI-compatible endpoint, including LiteLLM. Saving does not call a model,
+          spend provider credit, or change the desk default.
+        </p>
+      ) : null}
       <div>
         <InkButton
           tone="ghost"
@@ -346,7 +348,7 @@ export function CustomAiConnections({
                 void act(`test-${row.id}`, async () => {
                   const r = await onTest(row.id);
                   setResult(
-                    `${r.ok ? "Success" : "Test failed"}: ${r.message} Chat completions: ${capabilityStatus(r.capabilities.chatCompletions)}; responses: ${capabilityStatus(r.capabilities.responses)}; model discovery: ${capabilityStatus(r.capabilities.modelDiscovery)}. (${r.latencyMs} ms)`,
+                    `${r.ok ? "Endpoint answered" : "Test failed"}: ${r.message} Chat completions: ${capabilityStatus(r.capabilities.chatCompletions)}; responses: ${capabilityStatus(r.capabilities.responses)}; model discovery: ${capabilityStatus(r.capabilities.modelDiscovery)}. (${r.latencyMs} ms)`,
                   );
                 });
               }}
