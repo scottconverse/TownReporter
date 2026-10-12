@@ -8,6 +8,8 @@ import {
   readinessDot,
   readinessFailureMessage,
   requestedModelChoice,
+  runningWriterSentence,
+  switchReasonFromNote,
   saveState,
   writerIsReady,
   writerUnavailableReason,
@@ -245,4 +247,50 @@ it("names the picked model, actual writer, and first failure after a fallback ch
     }),
     undefined,
   );
+});
+
+describe("running writer and switch reason", () => {
+  it("reads the sentence form of the durable failover note", () => {
+    assert.equal(
+      switchReasonFromNote("This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out"),
+      "Gemini timed out",
+    );
+  });
+
+  it("reads the last hop of a trail note", () => {
+    assert.equal(
+      switchReasonFromNote("Gemini timed out -> Codex Sol 6.1 (balanced) timed out -> DeepSeek v4.1 Flash"),
+      "Codex Sol 6.1 (balanced) timed out",
+    );
+  });
+
+  it("invents no reason when the job recorded none", () => {
+    assert.equal(switchReasonFromNote(""), undefined);
+    assert.equal(switchReasonFromNote(null), undefined);
+  });
+
+  it("says what was picked, who is writing, and why", () => {
+    assert.equal(
+      runningWriterSentence({
+        pickedModel: "Automatic",
+        writerModel: "Codex Sol 6.1 (balanced)",
+        failoverNote: "This draft moved to Codex Sol 6.1 (balanced) because Gemini timed out.",
+      }),
+      "You picked Automatic. Codex Sol 6.1 (balanced) is writing because Gemini timed out.",
+    );
+  });
+
+  it("omits the reason when the job recorded none", () => {
+    assert.equal(
+      runningWriterSentence({ pickedModel: "Automatic", writerModel: "Codex Sol 6.1 (balanced)", failoverNote: "" }),
+      "You picked Automatic. Codex Sol 6.1 (balanced) is writing.",
+    );
+  });
+
+  it("says nothing when the writer is the pick", () => {
+    assert.equal(
+      runningWriterSentence({ pickedModel: "Automatic", writerModel: "Automatic", failoverNote: "" }),
+      undefined,
+    );
+  });
 });

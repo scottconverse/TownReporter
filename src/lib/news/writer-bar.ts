@@ -182,6 +182,39 @@ export function draftFallbackAttribution(input: {
 }
 
 /**
+ * The reason the job itself recorded for its latest switch. `failover_note` holds
+ * either the sentence "This draft moved to <X> because <Y>" or the trail
+ * "<Y> -> <X>" that `appendStoryFailoverNote` builds; the last hop's reason is
+ * the part before the final " -> ". Nothing is invented: no note, no reason.
+ */
+export function switchReasonFromNote(failoverNote: string | null | undefined): string | undefined {
+  const note = (failoverNote ?? "").trim();
+  if (!note) return undefined;
+  const sentence = /^This draft moved to .+? because (.+)$/i.exec(note);
+  if (sentence) return sentence[1].replace(/\.$/, "");
+  const hops = note.split(" -> ");
+  return hops.length > 1 ? hops[hops.length - 2] : undefined;
+}
+
+/**
+ * While a draft runs on a different model than the editor picked, say so in
+ * words: which model is writing and the reason the job recorded for the switch.
+ */
+export function runningWriterSentence(input: {
+  pickedModel: string;
+  writerModel: string;
+  failoverNote: string | null | undefined;
+}): string | undefined {
+  const picked = input.pickedModel.trim();
+  const writer = input.writerModel.trim();
+  if (!picked || !writer || picked === writer) return undefined;
+  const reason = switchReasonFromNote(input.failoverNote);
+  return reason
+    ? `You picked ${picked}. ${writer} is writing because ${reason}.`
+    : `You picked ${picked}. ${writer} is writing.`;
+}
+
+/**
  * Show an unavailable writer's reason before story readiness so a checked
  * story cannot mask a model that cannot run.
  */
