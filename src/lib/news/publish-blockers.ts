@@ -229,12 +229,9 @@ function empty(text: string): boolean {
  * get the old behaviour back silently, which is exactly the bug.
  */
 export function showsPublishPrep(status: string, hasDraft: boolean): boolean {
-  /* `status` is kept in the signature on purpose: the argument is still asked
-     for at every call site, so a future rule that reads it does not have to
-     change every caller, and the desk never decides this on the draft alone by
-     accident. */
-  void status;
-  return hasDraft;
+  /* Walk E2, DHE2-1: a published story is already in print. Its Story page
+     must not count down to a press that cannot happen again. */
+  return hasDraft && status !== "published";
 }
 
 /**

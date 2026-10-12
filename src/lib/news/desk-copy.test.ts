@@ -22,6 +22,7 @@ import {
   reopenedPriorNote,
   DEVELOPING_LABEL,
   storyLeadSectionLabel,
+  storyHeaderSectionLabel,
   editorError,
   editorActionError,
   editorDraftError,
@@ -2067,6 +2068,32 @@ describe("Unit AK: duplicate and kill wording", () => {
   it("names the Story section only after the editor has chosen it", () => {
     assert.equal(storyLeadSectionLabel(false, "Council"), "Section not chosen");
     assert.equal(storyLeadSectionLabel(true, "Infrastructure"), "Infrastructure");
+  });
+
+  it("names the section a published story printed in, not 'Section not chosen' (DHE2-1)", () => {
+    /*
+      Walk E2, DHE2-1: lead 468 printed under COUNCIL and the Story header still
+      read "Section not chosen". Once the article exists, its topic is the answer.
+    */
+    assert.equal(
+      storyHeaderSectionLabel({ published: true, publishedSection: "Council", sectionChosen: false, sectionName: "Council" }),
+      "Council",
+    );
+    assert.equal(
+      storyHeaderSectionLabel({ published: true, publishedSection: "County Region", sectionChosen: true, sectionName: "Infrastructure" }),
+      "County Region",
+    );
+  });
+
+  it("keeps the unpublished header exactly as it was (DHE2-1)", () => {
+    assert.equal(
+      storyHeaderSectionLabel({ published: false, publishedSection: null, sectionChosen: false, sectionName: "Council" }),
+      "Section not chosen",
+    );
+    assert.equal(
+      storyHeaderSectionLabel({ published: false, publishedSection: null, sectionChosen: true, sectionName: "Infrastructure" }),
+      "Infrastructure",
+    );
   });
 
   it("keeps the two presses that settle a duplicate saying the same thing", () => {

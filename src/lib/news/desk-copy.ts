@@ -2358,6 +2358,21 @@ export function storyLeadSectionLabel(sectionChosen: boolean, sectionName: strin
   return sectionChosen ? sectionName : "Section not chosen";
 }
 
+/**
+ * Walk E2, DHE2-1: a lead that is already printed names the section it printed
+ * in (the article's topic), not "Section not chosen". Unpublished stories keep
+ * the label they always had.
+ */
+export function storyHeaderSectionLabel(input: {
+  published: boolean;
+  publishedSection: string | null;
+  sectionChosen: boolean;
+  sectionName: string;
+}): string {
+  if (input.published && input.publishedSection?.trim()) return input.publishedSection.trim();
+  return storyLeadSectionLabel(input.sectionChosen, input.sectionName);
+}
+
 /** Unit AK item 2: the plain-words label on a finding filed HELD against a
  * killed lead because it carries facts the killed lead did not have. */
 export const DEVELOPING_LABEL = "Developing: new facts on a story you killed";

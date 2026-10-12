@@ -109,7 +109,7 @@ import {
   recoverExpectedDraftJobId,
   resolveDraftJobState,
   recoveringDraftCopy,
-  storyLeadSectionLabel,
+  storyHeaderSectionLabel,
 } from "@/lib/news/desk-copy";
 import { stripReporterNotebook } from "@/lib/news/strip-draft";
 import { describeExtractionMethod } from "@/lib/news/extraction-label";
@@ -2209,7 +2209,13 @@ function StoryPage() {
     Boolean(data.topicConfirmed) && data.topicConfirmed === topic && !hasUnsavedDraftEdits;
   const sectionReady = sectionChosenByModel || topicTouched || sectionAlreadyConfirmed;
   const sectionNameNow = sectionName(topic);
-  const storyHeaderSection = storyLeadSectionLabel(sectionReady, sectionNameNow);
+  /* Walk E2, DHE2-1: a printed lead names the section it printed in. */
+  const storyHeaderSection = storyHeaderSectionLabel({
+    published: onPaper,
+    publishedSection: data.articleTopic ? sectionName(data.articleTopic) : null,
+    sectionChosen: sectionReady,
+    sectionName: sectionNameNow,
+  });
   /*
     ── ONE STATE ABOUT THE EVIDENCE CHECK (UNIT U24) ─────────────────────────
 
