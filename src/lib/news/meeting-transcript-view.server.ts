@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import type { Sql } from "../db.ts";
 import {
+  TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
   TranscriptViewRefused,
   type TranscriptView,
   type TranscriptViewLine,
@@ -164,9 +165,8 @@ export async function readTranscriptOriginal(
     // not accept. The hash below is over these same bytes either way.
     bytes = new Uint8Array(readFileSync(artifact.storage_path));
   } catch {
-    throw new Error(
-      `The stored transcript file is not readable at the recorded path for artifact ${artifact.id}.`,
-    );
+    // A 404 with the words the editor sees: the text transcript is still in the row.
+    throw new TranscriptViewRefused("original-missing", TRANSCRIPT_ORIGINAL_MISSING_MESSAGE);
   }
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (sha256 !== artifact.sha256) {

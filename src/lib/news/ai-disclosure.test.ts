@@ -84,3 +84,27 @@ describe("the reader's line on a story an editor pasted in (FC04)", () => {
     );
   });
 });
+
+// DHF-2 (D67): an AI draft published unchanged reads as approved; an edited one keeps today's line.
+describe("publishedBody decides approved versus edited wording", () => {
+  const modelBody = "The model's original body.";
+  const researchJson = JSON.stringify({ publicAiResearchCompleted: true });
+  const edited = "A person reviewed and edited this story. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
+  const approved = "An editor approved this story for publication. AI tools helped find records and write the first draft. The records we used are listed under Sources.";
+
+  it("an unchanged AI draft says an editor approved it", () => {
+    assert.equal(disclosureForReader({ text: "", modelBody, researchJson, publishedBody: modelBody }), approved);
+  });
+
+  it("an edited AI draft keeps the reviewed-and-edited line exactly", () => {
+    assert.equal(disclosureForReader({ text: "", modelBody, researchJson, publishedBody: "Edited body." }), edited);
+  });
+
+  it("a stored derived line is recomputed from the published body", () => {
+    assert.equal(disclosureForReader({ text: edited, modelBody, researchJson, publishedBody: modelBody }), approved);
+  });
+
+  it("a story with no AI keeps no AI line", () => {
+    assert.equal(disclosureForReader({ text: "", modelBody: null, researchJson: "{}", publishedBody: "Typed by hand." }), "");
+  });
+});

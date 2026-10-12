@@ -359,3 +359,33 @@ test("a batch runtime pick sets the model and the effort that model carries, the
   assert.equal(pick.runtime, "deepseek-flash");
   assert.equal(pick.effort, "none");
 });
+
+test("DHE1-6: on the Killed tab, Newest and Oldest give opposite orders by kill day", () => {
+  // Filed in the opposite order to the kills, so a sort by filing time would
+  // come out the same as a sort by kill time only by accident.
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-20T10:00:00.000Z", killed_at: "2026-10-10T10:00:00.000Z" }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-10T10:00:00.000Z", killed_at: "2026-10-12T10:00:00.000Z" }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-15T10:00:00.000Z", killed_at: "2026-10-11T10:00:00.000Z" }),
+  ];
+  assert.deepEqual(
+    queueSort(rows, "newest", "killed").map((l) => l.id),
+    [2, 3, 1],
+  );
+  assert.deepEqual(
+    queueSort(rows, "oldest", "killed").map((l) => l.id),
+    [1, 3, 2],
+  );
+});
+
+test("DHE1-6: kills with no kill time still differ between Newest and Oldest, and sort last", () => {
+  const rows = [
+    lead({ id: 1, status: "killed", created_at: "2026-09-01T10:00:00.000Z", killed_at: null }),
+    lead({ id: 2, status: "killed", created_at: "2026-09-05T10:00:00.000Z", killed_at: null }),
+    lead({ id: 3, status: "killed", created_at: "2026-09-03T10:00:00.000Z", killed_at: "2026-10-01T10:00:00.000Z" }),
+  ];
+  const newest = queueSort(rows, "newest", "killed").map((l) => l.id);
+  const oldest = queueSort(rows, "oldest", "killed").map((l) => l.id);
+  assert.deepEqual(newest, [3, 2, 1]);
+  assert.deepEqual(oldest, [3, 1, 2]);
+});

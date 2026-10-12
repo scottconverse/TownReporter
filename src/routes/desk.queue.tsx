@@ -5,6 +5,7 @@ import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { DraftBatchResult } from "@/components/draft-batch-result";
 import { sectionDisplayName } from "@/components/sections-setup-copy";
 import { ModelPicker } from "@/components/model-picker";
+import { useBatchModelChoice } from "@/components/batch-model-choice";
 import { useJobModelAssignment } from "@/components/use-job-model-assignment";
 import { Dialog } from "@/components/dialog";
 import { DeskShell, Field, InkButton } from "@/components/desk-chrome";
@@ -42,7 +43,7 @@ import {
   workingQueueEmptyCopy,
 } from "@/lib/news/desk-copy";
 import { PAGE_SIZE, showingLine } from "@/lib/news/list-window";
-import { batchRuntimePick, queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
+import { queueRowTick, queueSelectAllShown, type QueueFilter, type QueueSort } from "@/lib/news/queue-rows";
 import {
   BULK_STATUS_TOAST_ID,
   BULK_STATUS_UNDO_LABEL,
@@ -575,23 +576,15 @@ function QueuePage() {
     panel's progress and its "started with X" line (below); it no longer writes
     the picker's state, which is the editor's alone until they submit.
   */
-  const [batchRuntime, setBatchRuntime] = useState<DraftBatchRuntime>("auto");
-  const [batchEffort, setBatchEffort] = useState<ModelEffort | null>(null);
-  const batchRuntimeTouched = useRef(false);
-  useJobModelAssignment<DraftBatchRuntime>({
-    jobKey: "story-draft",
-    touched: batchRuntimeTouched,
-    setChoice: setBatchRuntime,
+  // DHE1-10 / DHD1-2: the strip and the dialog read and write this one state, so
+  // the model and effort shown in either are the ones Start runs.
+  const {
+    runtime: batchRuntime,
+    effort: batchEffort,
     setEffort: setBatchEffort,
-  });
-  // DHE1-10: one pick path for the strip and the dialog, so both show it and the
-  // editor's pick counts as theirs (a late job default cannot overwrite it).
-  const pickBatchRuntime = (choice: string) => {
-    batchRuntimeTouched.current = true;
-    const pick = batchRuntimePick(choice);
-    setBatchRuntime(pick.runtime);
-    setBatchEffort(pick.effort);
-  };
+    pick: pickBatchRuntime,
+    touched: batchRuntimeTouched,
+  } = useBatchModelChoice();
   const [activeBatchId, setActiveBatchId] = useState<number | null>(null);
   const [batchNotice, setBatchNotice] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const leadRefreshAfterTerminalBatch = useRef<number | null>(null);
@@ -2059,6 +2052,11 @@ function QueuePage() {
             compact
           />
           <p className="meta">{selectedBatchLeads.length} selected; usual batch: 1 to 5</p>
+          {/*
+            DHD1-2: the strip behind has the same "Model for these stories"
+            choice. Both read one state, so this line says so on screen.
+          */}
+          <p className="meta">Same choice as the strip behind: changing either one changes both, and Start runs the model shown here.</p>
           {/*
             BF5: name the leads the press below will draft. Until the batch
             moved into this dialog the panel's own checkboxes showed which

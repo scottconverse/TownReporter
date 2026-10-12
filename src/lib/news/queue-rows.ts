@@ -219,8 +219,16 @@ export function queueSort<T extends QueueLead>(
     return [...leads].sort((a, b) => {
       const at = killTime(a);
       const bt = killTime(b);
-      // A kill with no time goes last in either direction.
-      if (at === null || bt === null) return (at === null ? 1 : 0) - (bt === null ? 1 : 0) || b.id - a.id;
+      // A kill with no time goes last in either direction. Among those, the
+      // filing time follows the chosen direction, so the two orders still differ
+      // instead of falling back to one fixed order.
+      if (at === null || bt === null) {
+        if (at !== null) return -1;
+        if (bt !== null) return 1;
+        const ac = Date.parse(a.created_at);
+        const bc = Date.parse(b.created_at);
+        return newestFirst ? bc - ac || b.id - a.id : ac - bc || a.id - b.id;
+      }
       if (at !== bt) return newestFirst ? bt - at : at - bt;
       return newestFirst ? b.id - a.id : a.id - b.id;
     });

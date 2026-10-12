@@ -5,6 +5,7 @@ import { draftLead, pullTodo, continuePullJob, resolveLeadDuplicate, rewriteFrom
 import { NativeDialog } from "@/components/dialog";
 import { StoryReadinessChip } from "@/components/story-readiness-chip";
 import { acceptedClaimsPublishState, liveClaimsOwnReadiness, readinessWithAcceptedClaims, readinessWithUncheckedStory, savedStoryReadiness } from "@/lib/news/story-readiness";
+import { publishPrimaryLabel } from "@/lib/news/publish-section-words";
 import { UNCHECKED_STORY_REASON, uncheckedStoryNeedsCheck } from "@/lib/news/unchecked-story-gate";
 import { StoryBody } from "@/components/story-body";
 import { CheckGates } from "@/components/check-gates";
@@ -4241,7 +4242,7 @@ function StoryPage() {
                       setConfirmingPublish(true);
                     }}
                   >
-                    {sectionReady ? `Publish in ${sectionNameNow}` : "Choose a section to publish"}
+                    {publishPrimaryLabel({ sectionReady, sectionName: sectionNameNow })}
                   </ActionButton>
                   {/*
                     Warn, never block (Scott, Oct 10): with no section chosen the

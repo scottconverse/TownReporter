@@ -69,7 +69,11 @@ test("DHE1-11: the Local option is named by its model, and the backend status is
   __setLocalChoice({ override: local, catalog: catalog(false) });
   const doc = renderPicker({ value: "local-model" });
   const localOption = doc.querySelector('select option[value="local-model"]');
-  assert.equal(localOption.textContent, local.id, "the option label is the model name");
+  assert.equal(
+    localOption.textContent,
+    `Local model (${local.id})`,
+    "the option label names the Local model and its model, so it never reads as a second bare DeepSeek entry",
+  );
   assert.doesNotMatch(localOption.textContent, /spends credits|not checked/, "the option list carries no backend status");
   const status = [...doc.querySelectorAll("span.model-picker-help")].map((span) => span.textContent);
   assert.ok(

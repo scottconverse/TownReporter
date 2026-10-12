@@ -476,9 +476,13 @@ export function ModelPicker(props: Props) {
   const localOption = options.find((option) => option.value === "local-model");
   const localReason =
     localOption && !isAvailable("local-model") ? unavailableReason(localOption) : null;
+  /*
+    DHF-10: the Local entry names itself as Local, with its model in brackets,
+    so it never reads as a bare model name that looks like a second DeepSeek.
+  */
   const optionText = (option: ModelChoiceOption) =>
     option.value === "local-model"
-      ? (localBackend ?? "Local model")
+      ? (localBackend ? `Local model (${localBackend})` : "Local model")
       : pickerOptionText(option);
   const effortOptions = noFallback ? [] : modelEffortsFor(shownValue, exactModel);
   const selectedEffort = pickerShownEffort(shownValue, exactModel, props.effort, effortOptions);

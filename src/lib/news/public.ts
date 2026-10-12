@@ -264,6 +264,7 @@ export const getPublishedArticle = createServerFn({ method: "GET" })
           text: articleRow.disclosure_text,
           modelBody: origin_model_body,
           researchJson: origin_research_json,
+          publishedBody: articleRow.body,
           pastedByEditor: origin_pasted,
         }),
       });

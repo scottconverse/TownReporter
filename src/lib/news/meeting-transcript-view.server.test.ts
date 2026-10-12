@@ -13,7 +13,11 @@ import {
   resolveTranscriptArtifact,
 } from "./meeting-transcript-view.server.ts";
 import * as transcriptDownloadModule from "./meeting-transcript-view.server.ts";
-import { TranscriptViewRefused, transcriptPlainText } from "./meeting-transcript-view.ts";
+import {
+  TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
+  TranscriptViewRefused,
+  transcriptPlainText,
+} from "./meeting-transcript-view.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "co-transcript-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
@@ -166,6 +170,27 @@ describe("meeting transcript view", () => {
     );
     assert.equal(attachmentFilename('odd"name\\here.srv3'), "oddnamehere.srv3");
     assert.equal(attachmentFilename(""), "transcript");
+  });
+
+  it("DHF-4 says a missing original is missing with a 404 and the words the editor reads", async () => {
+    const { sql } = fakeSql([
+      {
+        id: 6,
+        video_id: "gone-1",
+        storage_path: join(scratch, "never-written.srv3"),
+        sha256: "d".repeat(64),
+        format: "srv3",
+        byte_size: 100,
+        captured_at: "2026-09-22 03:10:00+00",
+      },
+    ]);
+    await assert.rejects(
+      () => readTranscriptOriginal(sql, { newsroomId: 1, artifactId: 6 }),
+      (error: unknown) =>
+        error instanceof TranscriptViewRefused &&
+        error.status === 404 &&
+        error.message === TRANSCRIPT_ORIGINAL_MISSING_MESSAGE,
+    );
   });
 
   it("prints every stored segment in order, with the artifact facts", async () => {

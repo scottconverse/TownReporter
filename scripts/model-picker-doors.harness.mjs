@@ -98,6 +98,12 @@ export async function doorModule(path, exports = [], extra = {}) {
   if (cache.has(key)) return cache.get(key);
   const imports = {
     "@/components/model-picker": modelPickerUrl,
+    "@/components/batch-model-choice": stubUrl(`
+      export function useBatchModelChoice() {
+        const runtime = globalThis.pickerDoorState?.batchRuntime ?? "auto";
+        return { runtime, effort: null, setEffort() {}, pick() {}, touched: { current: false } };
+      }
+    `),
     "@/lib/news/provider-registry": registryUrl,
     "@/lib/news/model-choice": modelChoiceUrl,
     "@/lib/news/writer-bar": writerBarUrl,
@@ -149,6 +155,12 @@ async function doorModuleChild(path) {
   // route-only dependencies when making their transport stubs.
   const imports = {
     "@/components/model-picker": modelPickerUrl,
+    "@/components/batch-model-choice": stubUrl(`
+      export function useBatchModelChoice() {
+        const runtime = globalThis.pickerDoorState?.batchRuntime ?? "auto";
+        return { runtime, effort: null, setEffort() {}, pick() {}, touched: { current: false } };
+      }
+    `),
     "@/lib/news/provider-registry": registryUrl,
     "@/lib/news/model-choice": modelChoiceUrl,
   };
