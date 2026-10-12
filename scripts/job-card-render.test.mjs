@@ -190,16 +190,17 @@ test("a compact card drops the chip row and keeps the state", () => {
   assert.match(html, />Cancel</);
 });
 
-test("queued is a running job that has not started yet", () => {
-  assert.equal(jobCardState({ status: "queued" }), "running");
+test("a queued job stays queued until it actually starts", () => {
+  assert.equal(jobCardState({ status: "queued" }), "queued");
   assert.equal(jobCardState({ status: "running" }), "running");
   assert.equal(jobCardState({ status: "completed" }), "done");
   assert.equal(jobCardState({ status: "failed" }), "failed");
   const html = render({
     job: job({ status: "queued", startedAt: null, beatAt: null, pct: null, stageIndex: 0, step: "Waiting to start…" }),
   });
-  assert.match(html, /Now: Waiting to start…/);
-  assert.match(html, /0:00/);
+  assert.match(html, /job-card state-queued/);
+  assert.match(html, /Waiting · position \? of \?/);
+  assert.doesNotMatch(html, /Now: Waiting to start…|0:00/);
 });
 
 test("a model switch on the way past is reported, not hidden", () => {

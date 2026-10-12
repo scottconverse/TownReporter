@@ -209,7 +209,8 @@ jobs:
   unit-tests:
     name: Unit suite, shard ${{ matrix.shard }} of 6
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    # One serial shard exceeded 50 minutes; keep room for the full test slice to finish.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
