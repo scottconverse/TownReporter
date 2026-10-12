@@ -249,3 +249,57 @@ it("sends the exact saved local model to headline suggestions", async () => {
   assert.deepEqual(call?.localModel, selected);
   await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);
 });
+
+it("DHH-3: every headline suggestion call leaves a receipt row saying what was asked, what ran and the effort", async () => {
+  /*
+    Walk H found "3 suggestions from deepseek-v4.1-flash" on screen and no
+    desk_jobs row behind it, so the model and effort could not be audited. A
+    draft leaves one; a headline call has to as well, whether it answered or not.
+  */
+  await reset();
+  const sql = await getSql();
+  await sql.query("delete from desk_jobs where newsroom_id=$1 and kind='headlines'", [NEWSROOM]);
+  const [lead] = await sql.query<{ id: number }>(
+    "insert into leads(user_id, newsroom_id, headline, why, topic) values($1,$2,$3,'','council') returning id",
+    [USER, NEWSROOM, "Council approves the plan"],
+  );
+  assert.ok(lead);
+  const answer = {
+    ok: true as const,
+    text: "1. Council approves plan after Tuesday vote\n2. Officials approve the revised city plan\n3. Council approves changes to city proposal",
+    meta: { provider: "deepseek", model: "deepseek-v4.1-flash", durationMs: 12, timedOut: false },
+  };
+  const refusal = { ok: false as const, error: "provider said no", meta: { provider: "deepseek", model: "deepseek-v4.1-flash", durationMs: 3, timedOut: false } };
+  type Chat = NonNullable<Parameters<typeof performSuggestHeadlines>[4]>["chat"];
+  const run = (chat: Chat) =>
+    performSuggestHeadlines(
+      { userId: USER, newsroomId: NEWSROOM },
+      lead.id,
+      "Council approves the plan",
+      { choice: "deepseek-flash", effort: "high" },
+      { chat },
+    );
+
+  const good = await run((async () => answer) as unknown as Chat);
+  assert.equal(good.ok, true);
+  const bad = await run((async () => refusal) as unknown as Chat);
+  assert.equal(bad.ok, false);
+
+  const rows = await sql.query<{ status: string; model_choice: string; error: string | null; result_json: string }>(
+    "select status, model_choice, error, result_json from desk_jobs where newsroom_id=$1 and kind='headlines' and subject_id=$2 order by id asc",
+    [NEWSROOM, lead.id],
+  );
+  assert.equal(rows.length, 2, "one receipt per call, answered or refused");
+  assert.equal(rows[0]!.status, "completed");
+  assert.equal(rows[0]!.model_choice, "deepseek-flash");
+  const receipt = JSON.parse(rows[0]!.result_json);
+  assert.equal(receipt.ranModel, "deepseek-v4.1-flash");
+  assert.equal(receipt.suggestions, 3);
+  assert.equal(receipt.modelEffort, "none", "DeepSeek runs with effort none, whatever the screen sent");
+  assert.equal(receipt.requestedEffort, "none");
+  assert.equal(rows[1]!.status, "failed");
+  assert.match(rows[1]!.error ?? "", /provider said no/);
+
+  await sql.query("delete from desk_jobs where newsroom_id=$1 and kind='headlines'", [NEWSROOM]);
+  await sql.query("delete from leads where id=$1 and newsroom_id=$2", [lead.id, NEWSROOM]);
+});

@@ -283,6 +283,7 @@ import { styleAuditSummary, styleRecordFromRepair } from "./draft-audit-record.t
 export type { PerformDraftWorkDeps };
 import { readProviderOverrides } from "./provider-settings.ts";
 import { applyJobLocalModelSnapshot, pinnedLocalModelForJob } from "./job-local-model.ts";
+import { initialModelRuntimeReceipt } from "./model-runtime-receipt.ts";
 import {
   FORCED_FAILOVER_LADDER,
   isAutomaticRungId,
@@ -7492,7 +7493,51 @@ export async function performSuggestHeadlines(
     ...(localModel ? { localModel } : {}),
     reasoningEffort: assignment.effort,
   });
+  /*
+    DHG-3 / DHH-3: every headline call leaves a receipt row, the way a draft
+    does -- what the editor asked for, what ran, and the effort it ran with --
+    so "Suggested by <model>" can be audited afterwards. The row is written
+    whether the call answered or not; a call that cannot be audited is the
+    defect this closes. `kind = 'headlines'` is a receipt, never a queued job:
+    it is born finished, so no worker claims it and the one-open-job index
+    (queued / running only) cannot collide with it.
+  */
+  const ranModel = got.meta?.model?.trim() || null;
+  const receipt = initialModelRuntimeReceipt({
+    requestedRuntime: model?.choice ?? "auto",
+    requestedEffort: modelEffort(model?.choice ?? "auto", model?.effort),
+    actualRuntime: choice,
+    actualEffort: modelEffort(choice, assignment.effort, ranModel ?? undefined),
+    localModel: localModel ?? null,
+  });
+  const recordReceipt = async (status: "completed" | "failed", error: string | null, count: number) => {
+    try {
+      await sql.query(
+        `insert into desk_jobs (newsroom_id, user_id, kind, subject_id, model_choice, model_choice_source, lane, status, stage, error, result_json, started_at, finished_at)
+         values ($1, $2, 'headlines', $3, $4, $5, 'default', $6, $7, $8, $9, now(), now())`,
+        [
+          newsroomId,
+          context.userId,
+          leadId,
+          choice,
+          assignment.source === "explicit" ? "editor" : "assignment",
+          status,
+          status === "completed" ? "Headline suggestions ready" : "Headline suggestions failed",
+          error,
+          JSON.stringify({
+            ...receipt,
+            ranModel,
+            ranProvider: got.meta?.provider ?? null,
+            suggestions: count,
+          }),
+        ],
+      );
+    } catch {
+      // The receipt is a record of the call, never a reason to lose the answer.
+    }
+  };
   if (!got.ok) {
+    await recordReceipt("failed", got.error.slice(0, 800), 0);
     return {
       ok: false as const,
       error:
@@ -7501,13 +7546,15 @@ export async function performSuggestHeadlines(
   }
   const options = parseHeadlineSuggestions(got.text);
   if (!options.length) {
+    await recordReceipt("failed", "The model answered with nothing that would print as a headline.", 0);
     return {
       ok: false as const,
       error:
         "The story model did not come back with anything that would print as a headline. Your headline is exactly as you left it.",
     };
   }
-  return { ok: true as const, options, model: got.meta?.model?.trim() || null };
+  await recordReceipt("completed", null, options.length);
+  return { ok: true as const, options, model: ranModel };
 }
 
 export const suggestHeadlines = createServerFn({ method: "POST" })

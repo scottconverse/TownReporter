@@ -211,7 +211,7 @@ return createElement("button",{type,onClick,disabled,className:cls,"aria-label":
 const modelPickerStub = stub(
   `import{createElement}from${JSON.stringify(import.meta.resolve("react"))};
 export function ModelPicker({label,value,onChange}){
-return createElement("label",null,label||"Model",createElement("select",{value,onChange:onChange||(()=>{}),"aria-label":"Model"},createElement("option",{value},value)));}`,
+return createElement("label",null,label||"Model",createElement("select",{value,onChange:(event)=>onChange&&onChange(event.target.value),"aria-label":"Model"},createElement("option",{value},value)));}`,
 );
 
 /* The live region. Real behaviour is `desk-chrome-utils.ts`'s, and the dialogs
@@ -265,7 +265,7 @@ const deskStubSrc = `
 export const calls = [];
 export const suggestHeadlines = async ({ data }) => {
   calls.push({ fn: "suggestHeadlines", data });
-  return { ok: true, options: ["A", "B", "C"] };
+  return { ok: true, options: ["A", "B", "C"], model: "deepseek-v4.1-flash" };
 };
 export const requestDraftReconciliationFn = async () => ({ ok: true });
 export const addLead = async () => ({ ok: true });
@@ -602,5 +602,77 @@ test("an empty headline stays disabled while a short headline can request the wa
   await page.typeInto(field("input"), "Long enough to print");
   assert.equal(button("Use this headline").disabled, false);
   assert.deepEqual(actions.calls, [], "no call was made while the dialog was refusing");
+  await page.close();
+});
+
+/*
+  Walk H repeat (DHG-3 / H06): the Suggest headlines area has ONE picker for the
+  headline job. The story screen keeps the pick and hands it to the dialog; the
+  dialog's own row reads and writes that state, so what the row shows is what
+  "Suggest 3 more" sends, and a pick made in the dialog is the screen's pick.
+*/
+const deskCalls = (await import(deskUrl)).calls;
+const dialogModelRow = () => lastLayer().querySelector('select[aria-label="Model"]');
+/* What the row shows: the value React last gave the <select>. */
+const rowShows = () => propsOf(dialogModelRow()).value;
+
+function ScreenWithHeadlineDialog({ initial = "auto", onPick }) {
+  const [pick, setPick] = React.useState(initial === "auto" ? null : { model: initial, effort: null });
+  return React.createElement(HeadlineDialog, {
+    leadId: 7,
+    current: "Council approves the fee rise",
+    open: true,
+    onClose: () => {},
+    onDone: () => {},
+    defaultModel: "auto",
+    model: pick?.model ?? "auto",
+    effort: pick ? pick.effort : null,
+    modelPicked: pick !== null,
+    onModelChange: (model) => {
+      onPick?.(model);
+      setPick({ model, effort: model === "deepseek-flash" ? "none" : null });
+    },
+    onEffortChange: (effort) => setPick({ model: pick?.model ?? "auto", effort }),
+  });
+}
+
+test("DHG-3: the dialog's model row shows the screen's pick and Suggest 3 more sends exactly that", async () => {
+  actions.__reset();
+  deskCalls.length = 0;
+  const page = await mount(React.createElement(ScreenWithHeadlineDialog, { initial: "deepseek-flash" }));
+  assert.equal(rowShows(), "deepseek-flash", "the row reads the pick made on the screen");
+  await page.click(button("Suggest 3 more"));
+  const asked = deskCalls.filter((c) => c.fn === "suggestHeadlines");
+  assert.equal(asked.length, 1);
+  assert.equal(asked[0].data.modelChoice, "deepseek-flash");
+  assert.equal(asked[0].data.modelChoiceExplicit, true, "a pick made on the screen is a real pick");
+  await page.close();
+});
+
+test("DHG-3: a pick made in the dialog is the screen's pick, and is the model the press sends", async () => {
+  actions.__reset();
+  deskCalls.length = 0;
+  const seen = [];
+  const page = await mount(React.createElement(ScreenWithHeadlineDialog, { onPick: (m) => seen.push(m) }));
+  await React.act(async () => {
+    propsOf(dialogModelRow()).onChange({ target: { value: "deepseek-flash" } });
+  });
+  assert.deepEqual(seen, ["deepseek-flash"], "the pick reached the screen's own state");
+  assert.equal(rowShows(), "deepseek-flash");
+  await page.click(button("Suggest 3 more"));
+  const asked = deskCalls.filter((c) => c.fn === "suggestHeadlines");
+  assert.equal(asked.at(-1).data.modelChoice, "deepseek-flash");
+  assert.equal(asked.at(-1).data.modelEffort, "none", "DeepSeek runs with effort none");
+  await page.close();
+});
+
+test("H06 / DHH-3: after Suggest 3 more the panel says which model ran, and keeps the count words", async () => {
+  actions.__reset();
+  deskCalls.length = 0;
+  const page = await mount(React.createElement(ScreenWithHeadlineDialog, { initial: "deepseek-flash" }));
+  await page.click(button("Suggest 3 more"));
+  const said = lastLayer().textContent;
+  assert.match(said, /Suggested by deepseek-v4\.1-flash\./);
+  assert.match(said, /3 suggestions from deepseek-v4\.1-flash\. Pick one, or type your own\./);
   await page.close();
 });

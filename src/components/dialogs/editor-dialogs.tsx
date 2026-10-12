@@ -1193,6 +1193,22 @@ export type HeadlineDialogProps = {
   /** First choice and effort from Models > Who does what for headlines. */
   defaultModel?: string;
   defaultEffort?: string | null;
+  /**
+   * DHG-3 / H06: the screen's own headline pick, when it has one.
+   *
+   * The story screen draws a "Model for suggestions" row beside its "Suggest
+   * headlines" press and this dialog draws "Model for headline suggestions".
+   * Both are the one headline job, so when the screen hands its state over the
+   * dialog reads and writes THAT state instead of keeping a second copy that
+   * can disagree. Without `onModelChange` the dialog keeps its own pick, as it
+   * always has.
+   */
+  model?: string;
+  effort?: string | null;
+  /** True once the editor picked on the screen, so "Automatic" is a real pick. */
+  modelPicked?: boolean;
+  onModelChange?: (model: string) => void;
+  onEffortChange?: (effort: string | null) => void;
   open: boolean;
   onClose: () => void;
   onDone?: (note: string) => void;
@@ -1225,6 +1241,11 @@ export function HeadlineDialog({
   current,
   defaultModel = "auto",
   defaultEffort = null,
+  model: screenModel,
+  effort: screenEffort = null,
+  modelPicked = false,
+  onModelChange,
+  onEffortChange,
   open,
   onClose,
   onDone,
@@ -1235,7 +1256,13 @@ export function HeadlineDialog({
     () => headlineInitial(current, defaultModel, defaultEffort),
     [current, defaultModel, defaultEffort],
   );
-  const [state, set] = useDialogState<HeadlineState>(factory, open, press.clear);
+  const [ownState, set] = useDialogState<HeadlineState>(factory, open, press.clear);
+  const shared = typeof onModelChange === "function";
+  // One headline job, one pick: on the story screen the row below is the
+  // screen's own row, so the press reads the same value the row shows.
+  const state: HeadlineState = shared
+    ? { ...ownState, model: screenModel ?? ownState.model, effort: screenEffort }
+    : ownState;
   const modelTouched = React.useRef(false);
   React.useEffect(() => {
     if (open) modelTouched.current = false;
@@ -1251,8 +1278,15 @@ export function HeadlineDialog({
     if (Object.prototype.hasOwnProperty.call(patch, "model") || Object.prototype.hasOwnProperty.call(patch, "effort")) {
       modelTouched.current = true;
     }
+    if (onModelChange) {
+      const { model: pickedModel, effort: pickedEffort, ...rest } = patch;
+      if (typeof pickedModel === "string") onModelChange(pickedModel);
+      else if (Object.prototype.hasOwnProperty.call(patch, "effort")) onEffortChange?.(pickedEffort ?? null);
+      if (Object.keys(rest).length) set(rest);
+      return;
+    }
     set(patch);
-  }, [set]);
+  }, [set, onModelChange, onEffortChange]);
 
   const done = (text: string): PressAnswer => {
     announceToDesk(text);
@@ -1267,7 +1301,11 @@ export function HeadlineDialog({
   const onSuggested = () =>
     press.run(async () => {
       const asked = await suggestHeadlines({
-        data: { leadId, ...headlineSuggestRequest(state), modelChoiceExplicit: modelTouched.current },
+        data: {
+          leadId,
+          ...headlineSuggestRequest(state),
+          modelChoiceExplicit: modelTouched.current || modelPicked,
+        },
       });
       if (!asked.ok) return { problem: asked.error };
       if (!asked.options.length) return { problem: "The AI offered no headlines. Your own line still works." };
@@ -1275,7 +1313,7 @@ export function HeadlineDialog({
       const runtime = asked.model?.trim();
       return {
         note: runtime
-          ? `${asked.options.length} suggestions from ${runtime}. Pick one, or type your own.`
+          ? `Suggested by ${runtime}. ${asked.options.length} suggestions from ${runtime}. Pick one, or type your own.`
           : `${asked.options.length} suggestions. The provider did not report which model ran. Pick one, or type your own.`,
       };
     });

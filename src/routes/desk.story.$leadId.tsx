@@ -3469,17 +3469,26 @@ function StoryPage() {
                   headline, and what a printed story shows is the article's own
                   field, saved by "Save headline" above.
                 */}
-                <ModelPicker
-                  scope="story"
-                  label="Model for suggestions"
-                  layout="stacked"
-                  compact
-                  value={headlineModel}
-                  effort={headlineEffort}
-                  onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
-                  onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
-                  disabled={suggest.isPending || waiting}
-                />
+                {/*
+                  DHG-3 / H06: the headline job has ONE pick. While the Headline
+                  dialog is open it draws its own row from this same state, so
+                  this row steps aside rather than sit behind it as a second
+                  control; it is back, showing the same pick, when the dialog
+                  closes.
+                */}
+                {headlineOpen ? null : (
+                  <ModelPicker
+                    scope="story"
+                    label="Model for suggestions"
+                    layout="stacked"
+                    compact
+                    value={headlineModel}
+                    effort={headlineEffort}
+                    onChange={(choice) => setHeadlinePick({ model: choice, effort: defaultModelEffort(choice) })}
+                    onEffortChange={(effort) => setHeadlinePick({ model: headlineModel, effort })}
+                    disabled={suggest.isPending || waiting}
+                  />
+                )}
                 <button
                   type="button"
                   className="btn"
@@ -4430,6 +4439,13 @@ function StoryPage() {
         current={headline}
         defaultModel={headlineModel}
         defaultEffort={headlineEffort}
+        model={headlineModel}
+        effort={headlineEffort}
+        modelPicked={headlinePick !== null}
+        onModelChange={(choice) => setHeadlinePick({ model: choice as StoryModelChoice, effort: defaultModelEffort(choice) })}
+        onEffortChange={(effort) =>
+          setHeadlinePick({ model: headlineModel, effort: (effort as ModelEffort | null) })
+        }
         open={headlineOpen}
         onClose={() => setHeadlineOpen(false)}
         onSaved={(saved) => {
