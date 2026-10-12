@@ -687,16 +687,19 @@ export function LeadRowView({
               Release; nothing the held row showed is taken away.
             */}
             {onKillNow ? (
-              <InkButton
-                tone="quiet-danger"
-                small
-                pending={killPending}
-                pendingLabel="Killing…"
-                onClick={onKillNow}
-                ariaLabel={`Kill the lead: ${lead.headline}`}
-              >
-                Kill
-              </InkButton>
+              // THT-8: the wrapper names the row, so X on this focused button kills this row.
+              <span data-triage-kill={lead.id} style={{ display: "contents" }}>
+                <InkButton
+                  tone="quiet-danger"
+                  small
+                  pending={killPending}
+                  pendingLabel="Killing…"
+                  onClick={onKillNow}
+                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                >
+                  Kill
+                </InkButton>
+              </span>
             ) : null}
           </>
         ) : closed ? null : (
@@ -727,16 +730,19 @@ export function LeadRowView({
               using the dialog (Today) shows exactly what it showed before.
             */}
             {onKillNow ? (
-              <InkButton
-                tone="quiet-danger"
-                small
-                pending={killPending}
-                pendingLabel="Killing…"
-                onClick={onKillNow}
-                ariaLabel={`Kill the lead: ${lead.headline}`}
-              >
-                Kill
-              </InkButton>
+              // THT-8: the wrapper names the row, so X on this focused button kills this row.
+              <span data-triage-kill={lead.id} style={{ display: "contents" }}>
+                <InkButton
+                  tone="quiet-danger"
+                  small
+                  pending={killPending}
+                  pendingLabel="Killing…"
+                  onClick={onKillNow}
+                  ariaLabel={`Kill the lead: ${lead.headline}`}
+                >
+                  Kill
+                </InkButton>
+              </span>
             ) : null}
           </>
         )}

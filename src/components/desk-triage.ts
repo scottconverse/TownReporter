@@ -64,7 +64,8 @@ export type TriageAction =
   | { kind: "move"; delta: -1 | 1 }
   | { kind: "start" }
   | { kind: "hold" }
-  | { kind: "kill" }
+  /* `rowId` is set when X was pressed on a row's own Kill button (THT-8): that row is the one to kill. */
+  | { kind: "kill"; rowId?: string }
   | { kind: "undo" }
   | { kind: "open" }
   | { kind: "new" }
@@ -127,6 +128,20 @@ export function isInteractiveTarget(target: unknown): boolean {
 }
 
 /**
+ * The row a focused Kill button belongs to (THT-8), or null when the target is
+ * not a row's Kill button. A row's Kill is the one control whose X is the kill
+ * the button names, so the stand-down lets that one X through.
+ */
+export function rowKillIdOf(target: unknown): string | null {
+  const el = target as Element | null;
+  if (!el) return null;
+  const closest = (el as Element).closest;
+  if (typeof closest !== "function") return null;
+  const owner = closest.call(el, "[data-triage-kill]");
+  return owner ? owner.getAttribute("data-triage-kill") : null;
+}
+
+/**
  * A surface standing over the list, in the shapes this desk draws them.
  *
  * The two dialog shapes are deliberately the same ones `desk-action.ts` names
@@ -182,7 +197,9 @@ export function triageAction(
   if (event.metaKey || event.ctrlKey || event.altKey) return null;
   // H remains available after selecting a row; text fields and overlays own their keys.
   if (isTypingTarget(event.target)) return null;
-  if (isInteractiveTarget(event.target) && event.key.toLowerCase() !== "h") return null;
+  // THT-8: X on a focused row Kill button is the row's kill, not a stray press on a control.
+  const rowKill = event.key.toLowerCase() === "x" ? rowKillIdOf(event.target) : null;
+  if (isInteractiveTarget(event.target) && event.key.toLowerCase() !== "h" && rowKill === null) return null;
   switch (event.key.toLowerCase()) {
     case "j":
       return { kind: "move", delta: 1 };
@@ -193,7 +210,7 @@ export function triageAction(
     case "h":
       return { kind: "hold" };
     case "x":
-      return { kind: "kill" };
+      return rowKill === null ? { kind: "kill" } : { kind: "kill", rowId: rowKill };
     case "u":
       return { kind: "undo" };
     case "enter":

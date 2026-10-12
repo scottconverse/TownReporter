@@ -4143,6 +4143,24 @@
 .desk-ltr.astra .queue-tabs {
   flex: 0 0 auto;
 }
+/* THT-21: the bulk Start button with its line under it, so the words say the press starts AI drafts. */
+.desk-ltr.astra .bulk-start-stack {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.desk-ltr.astra .bulk-start-note {
+  font-size: 13px;
+  color: var(--fg);
+}
+/* THT-11: the one line that says what the "≈ Printed" count counts. Readable-first: not small or faint. */
+.desk-ltr.astra .queue-tab-note {
+  flex: 0 1 auto;
+  font-size: 13px;
+  color: var(--fg);
+  min-width: 0;
+}
 .desk-ltr.astra .queue-filters {
   display: flex;
   align-items: center;

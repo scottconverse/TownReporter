@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import type { SqlTag } from "./lead-filing.ts";
-import { resolveLeadDuplicateForEditor, setLeadStatusForEditor } from "./lead-lifecycle.ts";
+import { resolveLeadDuplicateForEditor, restoreKilledLeadForEditor, setLeadStatusForEditor } from "./lead-lifecycle.ts";
 
 function makeSql(db: PGlite): SqlTag {
   return async <T>(parts: TemplateStringsArray, ...values: unknown[]) => {
@@ -220,5 +220,62 @@ test("a held lead with no draft is killed as a duplicate and remembers that it w
     assert.equal(lead.kill_reason, duplicateReason);
   } finally {
     await db.close();
+  }
+});
+
+test("an Undo of a kill leaves the lead as it was before the kill; a Bring back keeps the kill record", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_prior_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      insert into leads(id,newsroom_id,status) values (1,7,'held'),(2,7,'new');`);
+    const sql = makeSql(db);
+    // Lead 1: held, no reason. Kill it with a reason, then Undo the kill.
+    assert.equal((await setLeadStatusForEditor(sql, 7, { id: 1, status: "killed", killReason: "Not news" })).ok, true);
+    assert.deepEqual(
+      await restoreKilledLeadForEditor(sql, 7, { id: 1, keepRecord: false }),
+      { ok: true, status: "held" },
+    );
+    const [undone] = await sql<{ status: string; killed_at: string | null; kill_reason: string | null; kill_prior_status: string | null; kill_prior_reason: string | null }>`
+      select status, killed_at::text, kill_reason, kill_prior_status, kill_prior_reason from leads where id = 1
+    `;
+    assert.deepEqual(undone, { status: "held", killed_at: null, kill_reason: null, kill_prior_status: null, kill_prior_reason: null });
+
+    // Lead 2: new, killed with a reason, then brought back from the Killed pile.
+    assert.equal((await setLeadStatusForEditor(sql, 7, { id: 2, status: "killed", killReason: "Duplicate of Council" })).ok, true);
+    const [killedAt] = await sql<{ killed_at: string }>`select killed_at::text from leads where id = 2`;
+    assert.deepEqual(await restoreKilledLeadForEditor(sql, 7, { id: 2, keepRecord: true }), { ok: true, status: "new" });
+    const [kept] = await sql<{ status: string; killed_at: string | null; kill_reason: string | null }>`
+      select status, killed_at::text, kill_reason from leads where id = 2
+    `;
+    assert.deepEqual(kept, { status: "new", killed_at: killedAt.killed_at, kill_reason: "Duplicate of Council" });
+    await db.close();
+  } catch (error) {
+    await db.close();
+    throw error;
+  }
+});
+
+test("an Undo refuses to put a lead back to drafted when the draft is gone, and writes nothing", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_prior_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      insert into leads(id,newsroom_id,status,kill_prior_status,killed_at,kill_reason) values (1,7,'killed','drafted',now(),'Not news');`);
+    const sql = makeSql(db);
+    assert.deepEqual(
+      await restoreKilledLeadForEditor(sql, 7, { id: 1, status: "drafted" }),
+      { ok: false, error: "That lead has no draft to go back to." },
+    );
+    const [still] = await sql<{ status: string; killed_at: string | null }>`select status, killed_at::text from leads where id = 1`;
+    assert.equal(still.status, "killed");
+    assert.notEqual(still.killed_at, null, "a refused Undo must not clear the kill record");
+    // Remembered as drafted with no draft left: the Undo comes back as new, not an error.
+    assert.deepEqual(await restoreKilledLeadForEditor(sql, 7, { id: 1 }), { ok: true, status: "new" });
+    await db.close();
+  } catch (error) {
+    await db.close();
+    throw error;
   }
 });

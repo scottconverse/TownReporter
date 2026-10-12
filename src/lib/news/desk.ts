@@ -5223,44 +5223,8 @@ export const restoreKilledLead = createServerFn({ method: "POST" })
   .middleware([deskMiddleware])
   .validator((input: unknown) => leadStatusRestoreInput.parse(input))
   .handler(async ({ context, data }) => {
-    const sql = await getSql();
-    const room = owned(context);
-    // DHC06: with no status asked for, the lead goes back to the status it held
-    // when the kill was pressed (`kill_prior_status`, set by the kill itself).
-    // A lead killed before that was recorded comes back as `new`, as before.
-    const [current] = await sql<{ prior: string | null }>`
-      select kill_prior_status as prior from leads
-      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-    `;
-    if (!current) return { ok: false as const, error: "That lead is not killed." };
-    // DHD2-3: Undo puts back the kill reason the lead had before the kill. With
-    // no prior reason recorded (null), the reason the kill wrote stays as it was.
-    await sql`
-      update leads set kill_reason = coalesce(kill_prior_reason, kill_reason), kill_prior_reason = null
-      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-    `;
-    const wanted = data.status ?? (current.prior === "held" || current.prior === "drafted" ? current.prior : "new");
-    if (wanted === "drafted") {
-      const rows = await sql<{ id: number }>`
-        update leads set status = 'drafted'
-        where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-          and exists (
-            select 1 from drafts
-            where drafts.lead_id = leads.id and drafts.newsroom_id = ${room}
-          )
-        returning id
-      `;
-      if (rows.length) return { ok: true as const, status: "drafted" as const };
-      // Asked for drafted and there is no draft: refuse. Remembered as drafted
-      // but the draft is gone: there is nothing to go back to, so it is `new`.
-      if (data.status === "drafted") return { ok: false as const, error: "That lead has no draft to go back to." };
-    }
-    const back = wanted === "drafted" ? "new" : wanted;
-    await sql`
-      update leads set status = ${back}
-      where id = ${data.id} and newsroom_id = ${room} and status = 'killed'
-    `;
-    return { ok: true as const, status: back };
+    const { restoreKilledLeadForEditor } = await import("./lead-lifecycle.ts");
+    return restoreKilledLeadForEditor(await getSql(), { userId: context.userId, newsroomId: owned(context) }, data);
   });
 
 /**
