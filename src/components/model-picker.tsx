@@ -424,6 +424,8 @@ export function ModelPicker(props: Props) {
     );
   }
   function optionStatusSuffix(option: ModelChoiceOption): string {
+    // DHE1-11: the Local status is printed once beside the picker, not in the list.
+    if (option.value === "local-model") return "";
     if (providerEntry(option.value)?.kind === "gemini-cli") {
       const status = geminiReadinessWord(availability.data);
       return status ? ` · ${status}` : "";
@@ -469,8 +471,11 @@ export function ModelPicker(props: Props) {
     the select below, not repeated inside the option list.
   */
   const localStatus = localBackend
-    ? localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })
-    : "backend not checked yet";
+    ? `Local model — ${localModelOptionText({ id: localBackend, loaded: localMetadata?.loaded ?? null, cloud: localMetadata?.cloud })}`
+    : "Local model — backend not checked yet";
+  const localOption = options.find((option) => option.value === "local-model");
+  const localReason =
+    localOption && !isAvailable("local-model") ? unavailableReason(localOption) : null;
   const optionText = (option: ModelChoiceOption) =>
     option.value === "local-model"
       ? (localBackend ?? "Local model")
@@ -532,8 +537,11 @@ export function ModelPicker(props: Props) {
           </option>
         ) : null}
       </select>
-      {shownValue === "local-model" ? (
-        <span className="model-picker-help">Local model — {localStatus}</span>
+      {shownValue === "local-model" || localReason ? (
+        <span className="model-picker-help">
+          {localStatus}
+          {localReason ? ` — ${localReason}` : ""}
+        </span>
       ) : null}
       {pickerScope === "ocr" ? (
         <span className="model-picker-help">
