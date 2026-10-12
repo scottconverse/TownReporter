@@ -28,7 +28,7 @@ import {
   leadOrigin,
 } from "@/components/desk-chrome-utils";
 import { useDeskMutation } from "@/components/desk-action";
-import { killPress, killUndoPress, restoreStatus, KillReasonChips, KILL_TOAST_MS, type RestoreStatus } from "@/components/fast-kill";
+import { killPress, killUndoPress, restoreStatus, KillReasonChips, KILL_TOAST_MS, type KillUndoPress, type RestoreStatus } from "@/components/fast-kill";
 import { leadStatusOptimistic, moveLeadStatusNow } from "@/components/desk-lead-status";
 import { movedIndex, TRIAGE_LEGEND, useTriageKeys } from "@/components/desk-triage";
 import { LeadFlags, LeadSourceEvidenceCount } from "@/components/desk-leads";
@@ -347,9 +347,13 @@ function DeskHome() {
     now, so a failure carries whatever the server said and a refusal
     (`{ok:false}`) is reported rather than passing as a success.
   */
+  /* An Undo press may carry no status: the server then puts the lead back where it was before the kill. */
+  const undoOptimistic = leadStatusOptimistic(qc);
+  const undoMove = (press: KillUndoPress) => ({ id: press.id, status: press.status ?? "new" as const });
   const undoKill = useDeskMutation({
-    mutationFn: (input: { id: number; status: RestoreStatus }) => restoreKilledLead({ data: input }),
-    ...leadStatusOptimistic(qc),
+    mutationFn: (input: KillUndoPress) => restoreKilledLead({ data: input }),
+    optimistic: (press: KillUndoPress) => undoOptimistic.optimistic(undoMove(press)),
+    rollback: (context: unknown, press?: KillUndoPress) => undoOptimistic.rollback(context, press && undoMove(press)),
     after: () => qc.invalidateQueries({ queryKey: ["leads"] }),
     pending: "Undoing…", done: () => "Undone: the lead is back on the Queue.",
   });
@@ -387,7 +391,7 @@ function DeskHome() {
         : {
             label: "Undo",
             run: async (): Promise<void> => {
-              if (input.status === "killed") await undoKill.mutateAsync(killUndoPress(input.id, input.restore ?? "new"));
+              if (input.status === "killed") await undoKill.mutateAsync(killUndoPress(input.id, input.restore));
               else await setStatus.mutateAsync({ id: input.id, status: input.release ? "held" : "new", override: input.override });
             },
           },

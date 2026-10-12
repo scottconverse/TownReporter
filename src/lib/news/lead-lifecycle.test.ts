@@ -82,3 +82,35 @@ test("Not a duplicate moves a killed lead to New and clears its duplicate link",
     await db.close();
   }
 });
+
+// guards: DHC06 -- Undo and "Bring back" must return a killed lead to the status it held before the kill, and DHC09 -- a second kill must keep the first kill record and add the duplicate note.
+test("a kill remembers the prior status, and a second kill keeps the first record and appends the note", async () => {
+  const db = new PGlite();
+  try {
+    await db.exec(`create table leads(id integer primary key, newsroom_id integer, status text, kill_prior_status text, possible_duplicate_of integer, dup_kind text, killed_at timestamptz, kill_reason text, kill_reason_url text, notes_json text);
+      create table drafts(id integer primary key, lead_id integer, newsroom_id integer, body text default '', research_json text default '{}');
+      create table articles(id integer primary key, lead_id integer, newsroom_id integer, status text);
+      insert into leads(id,newsroom_id,status) values (1,7,'held'),(2,7,'new');`);
+    const sql = makeSql(db);
+    assert.equal((await setLeadStatusForEditor(sql, 7, { id: 1, status: "killed", killReason: "Not news" })).ok, true);
+    const [first] = await sql<{ status: string; kill_prior_status: string; killed_at: string; kill_reason: string }>`
+      select status, kill_prior_status, killed_at::text, kill_reason from leads where id = 1
+    `;
+    assert.equal(first.status, "killed");
+    assert.equal(first.kill_prior_status, "held");
+    assert.equal(first.kill_reason, "Not news");
+    await db.query("select pg_sleep(0.01)");
+    assert.equal((await setLeadStatusForEditor(sql, 7, { id: 1, status: "killed", killReason: "Same story as lead 9" })).ok, true);
+    const [second] = await sql<{ kill_prior_status: string; killed_at: string; kill_reason: string }>`
+      select kill_prior_status, killed_at::text, kill_reason from leads where id = 1
+    `;
+    assert.equal(second.kill_prior_status, "held", "the second kill must not overwrite the status before the first kill");
+    assert.equal(second.killed_at, first.killed_at, "the first kill time is kept");
+    assert.equal(second.kill_reason, "Not news Killed again: Same story as lead 9");
+    await setLeadStatusForEditor(sql, 7, { id: 2, status: "killed" });
+    const [untouched] = await sql<{ kill_prior_status: string }>`select kill_prior_status from leads where id = 2`;
+    assert.equal(untouched.kill_prior_status, "new");
+  } finally {
+    await db.close();
+  }
+});

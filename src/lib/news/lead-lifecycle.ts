@@ -91,10 +91,24 @@ export async function setLeadStatusForEditor(
   if (draftedWarning) return draftedWarning;
 
   if (data.status === "killed") {
+    // DHC06: the first kill remembers the status the lead held before it, so
+    // Undo and "Bring back" put it back. DHC09: a kill on a lead that is already
+    // killed keeps the first kill record (its time, its status, its reason) and
+    // only adds the new note to the reason.
     await sql`
-      update leads set status = 'killed', killed_at = now(),
-              kill_reason = ${reason || null},
-              kill_reason_url = ${data.killReasonUrl?.trim() || null}
+      update leads set status = 'killed',
+              kill_prior_status = case when status = 'killed' then kill_prior_status else status end,
+              killed_at = case when status = 'killed' then killed_at else now() end,
+              kill_reason = case
+                when status <> 'killed' then ${reason || null}::text
+                when ${reason || null}::text is null then kill_reason
+                when coalesce(btrim(kill_reason), '') = '' then ${reason || null}::text
+                else kill_reason || ' Killed again: ' || ${reason || null}::text
+              end,
+              kill_reason_url = case
+                when status = 'killed' then coalesce(kill_reason_url, ${data.killReasonUrl?.trim() || null}::text)
+                else ${data.killReasonUrl?.trim() || null}::text
+              end
       where id = ${data.id} and newsroom_id = ${newsroomId}
     `;
     return { ok: true as const };

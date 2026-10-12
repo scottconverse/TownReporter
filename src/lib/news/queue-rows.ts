@@ -59,6 +59,7 @@ export type QueueLead = {
   newsworthiness: number | null;
   created_at: string;
   last_resurfaced_at?: string | null;
+  killed_at?: string | null;
 } & DupAiVerdictFields;
 
 /** A printed story, as `nearDuplicate` reads it. */
@@ -192,10 +193,10 @@ export function queueSelect<T extends QueueLead>(
  * The Queue's three orders.
  *
  * "Best" is the score the scanner gave, and on the Killed tab it means
- * something else: what keeps coming back belongs on top there, which is the
- * whole point of stamping a resurfaced lead instead of quietly hiding it.
- * Leads never resurfaced (`last_resurfaced_at` null) sort after ones that
- * have, oldest kill first within that group.
+ * something else: the newest kill first, so a lead killed today is on the
+ * first page whether or not it came back. A came-back lead keeps its
+ * "seen again" stamp in the row; it no longer pushes new kills off the page.
+ * Kills with no `killed_at` sort last.
  */
 export function queueSort<T extends QueueLead>(
   leads: readonly T[],
@@ -208,8 +209,8 @@ export function queueSort<T extends QueueLead>(
       : Date.parse(a.created_at) - Date.parse(b.created_at) || a.id - b.id;
   if (sort === "best" && filter === "killed") {
     return [...leads].sort((a, b) => {
-      const at = a.last_resurfaced_at ? Date.parse(a.last_resurfaced_at) : -1;
-      const bt = b.last_resurfaced_at ? Date.parse(b.last_resurfaced_at) : -1;
+      const at = a.killed_at ? Date.parse(a.killed_at) : -1;
+      const bt = b.killed_at ? Date.parse(b.killed_at) : -1;
       if (at !== bt) return bt - at;
       return b.id - a.id;
     });

@@ -52,7 +52,7 @@ export type RestoreStatus = "new" | "held" | "drafted";
 export type KillPress = { id: number; status: "killed"; restore: RestoreStatus };
 
 /** The way back, as the same shape. */
-export type KillUndoPress = { id: number; status: RestoreStatus };
+export type KillUndoPress = { id: number; status?: RestoreStatus };
 
 /**
  * Where a lead of this status goes when a kill of it is undone.
@@ -89,7 +89,7 @@ export function killPress(id: number, restore: RestoreStatus = "new"): KillPress
  * guess. Named here rather than spelled inline so the round trip has one
  * spelling and one test.
  */
-export function killUndoPress(id: number, restore: RestoreStatus = "new"): KillUndoPress {
+export function killUndoPress(id: number, restore?: RestoreStatus): KillUndoPress {
   return { id, status: restore };
 }
 

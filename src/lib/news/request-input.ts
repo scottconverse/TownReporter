@@ -1340,7 +1340,8 @@ export const leadStatusInput = z.object({
  */
 export const leadStatusRestoreInput = z.object({
   id: rowId,
-  status: z.enum(["new", "held", "drafted"]),
+  // Omitted = back to the status the lead held before its kill (DHC06).
+  status: z.enum(["new", "held", "drafted"]).optional(),
 });
 
 /** Unit AK item 5: the two Compare-view presses that are not a kill. */

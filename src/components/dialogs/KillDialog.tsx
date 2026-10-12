@@ -105,8 +105,19 @@ export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, o
           killReason: withReason && trimmed ? trimmed : undefined,
           killReasonUrl: withReason && url.trim() ? url.trim() : undefined,
       };
+      /*
+        DHC04: this dialog already says the draft is kept, so the server's
+        "unprinted draft" warning is answered here, in the same press, rather
+        than as a second card that asks the same question again.
+      */
       const res = await withEditorWarningAction(
-        override => setLeadStatus({ data: { ...captured, status: "killed", override } }),
+        override => setLeadStatus({
+          data: {
+            ...captured,
+            status: "killed",
+            override: leadStatus === "drafted" ? ["lead-status-drafted", ...(override ?? [])] : override,
+          },
+        }),
         { action: "Kill" }, warning => { onOpenChange(false); return askDeskToastOverride(warning); },
       );
       if (!res || typeof res !== "object" || !("ok" in res)) {
@@ -167,6 +178,11 @@ export function KillDialog({ leadId, leadStatus, open, onOpenChange, onKilled, o
       */
       {...dialogPressProps(busy, "Killing…")}
     >
+      {leadStatus === "drafted" ? (
+        <p className="astra-modal-alert" role="note">
+          This lead has a written draft that is not printed. Killing keeps the draft.
+        </p>
+      ) : null}
       <div className="astra-field">
         <span className="astra-field-label" id="kill-quick-fill">
           Quick fill <span className="astra-field-opt">optional</span>

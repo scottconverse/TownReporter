@@ -506,7 +506,7 @@ export function publishBlockers(state: PublishBlockerState): PublishBlocker[] {
     blockers.push({
       key: "lead-killed",
       kind: "warning",
-      sentence: "This draft is killed. This press restores it and publishes it in the same press.",
+      sentence: "This draft is killed. \"Publish anyway\" restores the lead and publishes this draft.",
       action: { label: "Publish anyway", target: { kind: "publish-bar" } },
     });
   }
