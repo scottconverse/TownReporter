@@ -74,7 +74,8 @@ it("Automatic drafting honors the saved Story assignment before readiness and re
     const receipt = JSON.parse(job.result_json);
     assert.equal(receipt.requestedRuntime, "deepseek-flash");
     assert.equal(receipt.actualRuntime, "deepseek-flash");
-    assert.equal(receipt.modelEffort, "high");
+    // The saved High pick is not what DeepSeek runs at: its rung always records none (Release H).
+    assert.equal(receipt.modelEffort, "none");
     const [explicitLead] = await sql<{
       id: number;
     }>`insert into leads(newsroom_id,user_id,headline,why) values(1,'fm1-explicit-auto','Explicit Automatic','Why') returning id`;

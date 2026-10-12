@@ -583,3 +583,42 @@ it("a Cancel that lands during the report stops the repair and the write", async
   );
   assert.equal(drafts?.n, 0, "and no draft was written for a run the editor stopped");
 });
+
+it("an Automatic writer that answers on its first rung records that rung on the job, never the pick", async () => {
+  const { sql, job } = await fixture(99215);
+  const automatic = {
+    runtime: "claude-sonnet",
+    modelChoice: "claude-sonnet",
+    requestedRuntime: "auto",
+    transport: "claude-code",
+    model: "selected-claude",
+  };
+  await sql.query("update draft_batches set runtime_snapshot=$1::jsonb where id=$2", [
+    JSON.stringify(automatic),
+    job.draft_batch_id,
+  ]);
+  await sql.query("update desk_jobs set model_choice='auto' where id=$1", [job.id]);
+  job.model_choice = "auto";
+  await performDraftWork(job, {
+    reportAndDraft: async (_input, deps) => {
+      const answer = await deps!.chat?.("system", "user", 100, "auto");
+      assert.equal(answer?.ok, true);
+      return { ...reported };
+    },
+    batchChatAdapters: {
+      claude: async () => ({ ok: true, text: "answer" }),
+      codex: async () => ({ ok: true, text: "wrong" }),
+      local: async () => ({ ok: true, text: "wrong" }),
+    },
+    probe: async () => {
+      throw new Error("the first rung answered, so no rung was probed");
+    },
+    setJobStage: async () => undefined,
+  });
+  const [row] = await sql.query<{ status: string; model_choice: string }>(
+    "select status,model_choice from desk_jobs where id=$1",
+    [job.id],
+  );
+  assert.equal(row.status, "completed");
+  assert.equal(row.model_choice, "claude-sonnet", "Last draft must name the model that wrote the draft");
+});

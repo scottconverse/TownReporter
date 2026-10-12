@@ -7,6 +7,7 @@ import {
 } from "./editorial.ts";
 import {
   isCustomModelChoice,
+  modelChoiceLabel,
   opinionModelChoice,
   OPINION_AUTOMATIC_LADDER,
   type OpinionModelChoice,
@@ -158,12 +159,23 @@ function isProviderRefusal(error: string): boolean {
   );
 }
 
+/** The provider's own name on a refusal or failure, so the job says who
+ * declined. An adapter that already named its provider is left as written. */
+function providerNamedError(candidate: EffectiveOpinionModelChoice, error: string, verb: "declined" | "failed"): string {
+  const label = modelChoiceLabel(candidate, "opinion");
+  return error.includes(label) ? error : `${label} ${verb}: ${error}`;
+}
+
 /**
  * Transport success is not editorial success. This gate is deliberately
  * provider-neutral: a refusal or assistant note from any model must never be
  * normalized into the newspaper's headline and offered for publication.
  */
-export function validateEditorialDelivery(raw: string, editorial: Editorial): string | null {
+export function validateEditorialDelivery(
+  raw: string,
+  editorial: Editorial,
+  providerLabel = "The selected model",
+): string | null {
   // Refusing to generate the requested article is not the same as the
   // article refusing to endorse a proposal. Inspect delivery starts only;
   // quoted speech and ordinary disagreement inside the piece are content.
@@ -187,19 +199,19 @@ export function validateEditorialDelivery(raw: string, editorial: Editorial): st
     const reason = String(raw)
       .match(/EDITORIAL_REFUSAL\s*:\s*([^\r\n]{1,500})/i)?.[1]
       ?.trim();
-    return `The selected model declined to produce the requested editorial${reason ? `: ${reason}` : ""}. Nothing was filed.`;
+    return `${providerLabel} declined to produce the requested editorial${reason ? `: ${reason}` : ""}. Nothing was filed.`;
   }
   const headline = editorial.headline.trim();
-  if (!headline) return "The selected model returned no usable headline. Nothing was filed.";
+  if (!headline) return `${providerLabel} returned no usable headline. Nothing was filed.`;
   if (headline.length > 180) {
-    return "The selected model returned an invalid editorial headline. Nothing was filed.";
+    return `${providerLabel} returned an invalid editorial headline. Nothing was filed.`;
   }
   if (DELIVERY_META.test(headline)) {
-    return "The selected model returned an assistant note instead of an editorial. Nothing was filed.";
+    return `${providerLabel} returned an assistant note instead of an editorial. Nothing was filed.`;
   }
   const words = editorial.body.split(/\s+/).filter(Boolean).length;
   if (words < 80) {
-    return "The selected model returned an incomplete editorial. Nothing was filed.";
+    return `${providerLabel} returned an incomplete editorial. Nothing was filed.`;
   }
   return null;
 }
@@ -268,16 +280,16 @@ export async function orchestrateEditorial(
     }
     const out = await runPair(candidate);
     if (!out.ok) {
-      if (isProviderRefusal(out.error)) return { ok: false, error: out.error };
-      failures.push(out.error);
+      if (isProviderRefusal(out.error)) return { ok: false, error: providerNamedError(candidate, out.error, "declined") };
+      failures.push(providerNamedError(candidate, out.error, "failed"));
       const reason = automaticFailoverReason(out.error);
-      if (requested !== "auto" && !reason) return { ok: false, error: out.error };
+      if (requested !== "auto" && !reason) return { ok: false, error: providerNamedError(candidate, out.error, "failed") };
       if (reason) pendingFallback = { previous: candidate, reason };
       continue;
     }
 
     const editorial = parseEditorial(out.text);
-    const invalid = validateEditorialDelivery(out.text, editorial);
+    const invalid = validateEditorialDelivery(out.text, editorial, modelChoiceLabel(candidate, "opinion"));
     if (invalid) {
       if (/declined to produce the requested editorial/i.test(invalid)) {
         return { ok: false, error: invalid };

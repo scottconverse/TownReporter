@@ -962,6 +962,22 @@ export function modelEffortsForModel(model: string | undefined | null): readonly
   return [];
 }
 
+/*
+  DeepSeek V4.1 Flash always runs with thinking off. Every rung that reaches
+  it -- Automatic's first rung, a fallback, or an explicit pick -- gets "none",
+  whatever effort the editor picked. Its Ollama transport distinguishes an
+  explicit Off from an omitted effort, which means provider default. The
+  entry's own declared list is DeepSeek's, so its own model id counts even
+  when no exact model was passed or the server reports another id.
+*/
+function forcesThinkingOff(id: string | undefined | null, exactModel?: string | null): boolean {
+  const entry = providerEntry(id);
+  return (
+    modelEffortsFor(id, exactModel).includes("none") &&
+    (defaultsToThinkingOff(exactModel) || (entry?.efforts?.includes("none") ?? false))
+  );
+}
+
 export function defaultModelEffort(
   id: string | undefined | null,
   exactModel?: string | null,
@@ -969,17 +985,11 @@ export function defaultModelEffort(
   const entry = providerEntry(id);
   const choices = modelEffortsFor(id, exactModel);
   if (!choices.length) return null;
-  // DeepSeek V4.1 Flash defaults to an explicit Off. Its Ollama transport
-  // distinguishes that from an omitted effort, which means provider default.
-  // The entry's own declared list is DeepSeek's, so its own model id counts
-  // even when no exact model was passed or the server reports another id.
-  if (
-    choices.includes("none") &&
-    (defaultsToThinkingOff(exactModel) || (entry?.efforts?.includes("none") ?? false))
-  ) {
-    return "none";
-  }
-  if (id !== "auto" && (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli"))) {
+  if (forcesThinkingOff(id, exactModel)) return "none";
+  // Automatic has no single effort: each rung runs at its own default (DeepSeek:
+  // none, Codex/Claude: their provider default). Saying "Medium" here was false,
+  // so Automatic (no registry entry) returns null like any unknown choice.
+  if (!entry || (entry.kind !== "codex" && entry.kind !== "claude-code" && entry.kind !== "gemini-cli")) {
     return null;
   }
   return entry?.defaultEffort && choices.includes(entry.defaultEffort)
@@ -995,7 +1005,30 @@ export function pickerShownEffort(
   effort: ModelEffort | null | undefined,
   options: readonly ModelEffort[] = modelEffortsFor(id, exactModel),
 ): ModelEffort | null {
+  // DeepSeek always runs at none, so the picker must show none, not the pick.
+  if (forcesThinkingOff(id, exactModel)) return "none";
   return effort && options.includes(effort) ? effort : defaultModelEffort(id, exactModel);
+}
+
+/** What an Automatic run does with thinking, named per model. Automatic has no
+ * single effort (see defaultModelEffort), so the control says what each model
+ * does instead of printing one false "Medium". DeepSeek ignores the pick. */
+export function automaticEffortNote(pick: ModelEffort | null | undefined): string {
+  const rest = pick
+    ? `${modelEffortLabel(pick, null)} where a model offers it`
+    : "each model's own default";
+  return `Thinking effort: ${rest} (DeepSeek v4.1 Flash always runs with thinking off)`;
+}
+
+/** An effort a saved snapshot may still carry. A DeepSeek snapshot saved before
+ * its effort was forced to none holds its old pick, which the model still lists:
+ * that value is legal, and modelEffort canonicalizes it to none. */
+export function storedEffortIsLegal(
+  id: string | undefined | null,
+  stored: unknown,
+  exactModel?: string | null,
+): boolean {
+  return typeof stored === "string" && modelEffortsFor(id, exactModel).includes(stored as ModelEffort);
 }
 
 export function modelEffort(
@@ -1015,6 +1048,7 @@ export function modelEffort(
       ? (value as ModelEffort)
       : null;
   }
+  if (forcesThinkingOff(id, exactModel)) return "none";
   const choices = modelEffortsFor(id, exactModel);
   return typeof value === "string" && choices.includes(value as ModelEffort)
     ? (value as ModelEffort)

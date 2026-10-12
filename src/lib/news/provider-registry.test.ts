@@ -17,6 +17,8 @@ import {
   modelEffort,
   modelEffortLabel,
   modelEffortsFor,
+  automaticEffortNote,
+  pickerShownEffort,
   recordedModelEffort,
   opinionAutomaticLadder,
   plannerModelFor,
@@ -142,7 +144,8 @@ describe("model-specific thinking effort", () => {
     );
     assert.equal(defaultModelEffort("custom:11111111-1111-4111-8111-111111111111"), null);
     assert.equal(defaultModelEffort("grok-oauth"), null);
-    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "max");
+    // Release H decision 1: DeepSeek v4.1 Flash runs at none even when Max is picked.
+    assert.equal(modelEffort("local-model", "max", "deepseek-v4.1-flash:cloud"), "none");
     assert.equal(
       modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"),
       "none",
@@ -685,5 +688,42 @@ describe("DeepSeek v4.1 Flash runs with effort none, and the receipt says so", (
 
   it("Qwen models that default to thinking off keep their own wording", () => {
     assert.equal(modelEffortLabel("none", "qwen3.8"), "Off — no extra thinking");
+  });
+});
+
+describe("Automatic never shows a false Medium (Release H)", () => {
+  it("Automatic with no pick shows no single effort, so the picker cannot print Medium", () => {
+    assert.equal(defaultModelEffort("auto"), null);
+    assert.equal(pickerShownEffort("auto", null, null), null);
+  });
+
+  it("a DeepSeek rung reached through Automatic records none even when the editor picked medium", () => {
+    assert.equal(modelEffort("local-model", "medium", "deepseek-v4.1-flash:cloud"), "none");
+  });
+});
+
+describe("Automatic's effort line names each model, not one Medium (Release H)", () => {
+  it("with no pick it names each model's default and DeepSeek's always-off rule", () => {
+    const note = automaticEffortNote(null);
+    assert.match(note, /each model's own default/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+    assert.doesNotMatch(note, /Medium/);
+  });
+
+  it("with a pick it names the pick and still says DeepSeek ignores it", () => {
+    const note = automaticEffortNote("medium");
+    assert.match(note, /^Thinking effort: Medium — balanced where a model offers it/);
+    assert.match(note, /DeepSeek v4\.1 Flash always runs with thinking off/);
+  });
+});
+
+describe("DeepSeek v4.1 Flash always runs with thinking off", () => {
+  // Decision 1 (Release H): a DeepSeek rung runs at "none" even when the
+  // editor picked another effort, so the receipt never says otherwise.
+  it("a picked High or Max still runs at none on the DeepSeek rung", () => {
+    assert.equal(modelEffort("deepseek-flash", "high"), "none");
+    assert.equal(modelEffort("deepseek-flash", "max"), "none");
+    assert.equal(modelEffort("deepseek-flash", "medium"), "none");
+    assert.equal(modelEffort("local-model", "high", "deepseek-v4.1-flash:cloud"), "none");
   });
 });

@@ -674,6 +674,27 @@ describe("Opinion routes the exact selected cloud model", () => {
     assert.deepEqual(events, ["voice:locate", "local", "file"]);
   });
 
+  it("a DeepSeek refusal names the provider that declined, so the job says who refused", async () => {
+    const orchestrateEditorial = await loadEditorialOrchestrator();
+    const events: string[] = [];
+    const runtime = claudeRuntime(events, { ok: true, text: DELIVERED });
+    runtime.runLocalPair = async () => {
+      events.push("local");
+      return { ok: false, error: "EDITORIAL_REFUSAL: the requested piece asks for an invented quote" };
+    };
+    const result = await orchestrateEditorial(
+      { ...ORCHESTRATION_INPUT, modelChoice: "deepseek-flash" },
+      runtime,
+    );
+    assert.equal(result.ok, false);
+    if (result.ok) assert.fail("a refusal must not file");
+    assert.match(
+      (result as { error: string }).error,
+      /^DeepSeek v4\.1 Flash declined: EDITORIAL_REFUSAL: the requested piece asks for an invented quote$/,
+    );
+    assert.deepEqual(events, ["voice:locate", "local"]);
+  });
+
   it("an explicit Claude choice does the same", async () => {
     const orchestrateEditorial = await loadEditorialOrchestrator();
     const events: string[] = [];

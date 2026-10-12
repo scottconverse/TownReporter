@@ -29,7 +29,9 @@ describe("forced runtime snapshots", () => {
       localModel: { baseUrl: "http://127.0.0.1:11434/v1", id: "deepseek-v4.1-flash:cloud" },
       modelEffort: "high",
     } as const;
-    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), snapshot);
+    // A snapshot saved with an old High pick still parses, and it runs at none:
+    // DeepSeek v4.1 Flash always runs with thinking off (Release H).
+    assert.deepEqual(parseForcedRuntimeSnapshot(snapshot), { ...snapshot, modelEffort: "none" });
     let received: unknown;
     const result = await runForcedChat(snapshot, "system", "user", 100, undefined, {
       claude: async () => assert.fail("DeepSeek must use its own transport"),
@@ -42,7 +44,7 @@ describe("forced runtime snapshots", () => {
     assert.equal(result, "deepseek response");
     assert.equal((received as { choice: string }).choice, "deepseek-flash");
     assert.deepEqual((received as { localModel: unknown }).localModel, snapshot.localModel);
-    assert.equal((received as { reasoningEffort: string }).reasoningEffort, "high");
+    assert.equal((received as { reasoningEffort: string }).reasoningEffort, "none");
     const {resolveProvider}=await import("./ai.ts");
     const pinned={baseUrl:"http://127.0.0.1:11999/v1",id:"pinned-deepseek"};
     const provider=resolveProvider("deepseek-flash",pinned,pinned.id);
