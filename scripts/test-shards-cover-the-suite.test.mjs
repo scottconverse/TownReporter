@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,12 +22,29 @@ import { parseShard, shardArgs, shardNotice } from "./test-shard.mjs";
  *    runner over a temporary directory of fixture files and collecting which
  *    files each shard actually executed -- not by reimplementing node's
  *    arithmetic here and comparing it with itself.
- * 3. CI asks for as many slices as it has machines. `matrix.shard` and
- *    `TOWNREPORTER_TEST_SHARD_TOTAL` disagreeing by one is the whole failure:
- *    with six machines and a total of seven, a seventh of the suite runs
- *    nowhere and nothing says so.
+ * 3. CI's shard list and `TOWNREPORTER_TEST_SHARD_TOTAL` agree exactly, so no
+ *    files fall between slices. Active machine count is capped separately from
+ *    the number of slices to keep the worker load bounded.
  */
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+test("CI shard slices cover the requested total and keep the six-worker cap", () => {
+  const workflow = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");
+  const unitTests = workflow.match(/^ {2}unit-tests:\r?\n([\s\S]*?)^ {2}test:/m)?.[1];
+  assert.ok(unitTests, "could not find the unit-tests workflow job");
+
+  const shardList = unitTests.match(/^\s+shard:\s*\[([0-9,\s]+)\]\s*$/m)?.[1];
+  const shardTotal = unitTests.match(/^\s+TOWNREPORTER_TEST_SHARD_TOTAL:\s*"(\d+)"\s*$/m)?.[1];
+  const maxParallel = unitTests.match(/^\s+max-parallel:\s*(\d+)\s*$/m)?.[1];
+  assert.ok(shardList, "could not find the CI shard list");
+  assert.ok(shardTotal, "could not find TOWNREPORTER_TEST_SHARD_TOTAL");
+  assert.ok(maxParallel, "could not find the CI worker cap");
+
+  const total = Number(shardTotal);
+  const shards = shardList.split(",").map((value) => Number(value.trim()));
+  assert.deepEqual(shards, Array.from({ length: total }, (_, index) => index + 1));
+  assert.equal(Number(maxParallel), 6, "do not increase simultaneous unit workers");
+});
 
 test("no shard variables means the complete suite", () => {
   assert.equal(parseShard({}), null);

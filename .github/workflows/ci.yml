@@ -203,21 +203,23 @@ jobs:
   #
   # `TOWNREPORTER_TEST_SHARD_TOTAL` must equal the number of entries in
   # `matrix.shard`, or the files in the missing slices would never run anywhere.
-  # scripts/test-shards-cover-the-suite.test.mjs fails the build if they ever
-  # disagree, and `fail-fast: false` keeps one shard's failure from cancelling
-  # the others, so a red run still reports every failure it found.
+  # scripts/test-shards-cover-the-suite.test.mjs checks the count, and
+  # `max-parallel: 6` keeps active workers at the prior limit while the 12 slices
+  # divide the suite's uneven workload more evenly. `fail-fast: false` keeps one
+  # shard's failure from cancelling the others, so a red run still reports all failures.
   unit-tests:
-    name: Unit suite, shard ${{ matrix.shard }} of 6
+    name: Unit suite, shard ${{ matrix.shard }} of 12
     runs-on: ubuntu-latest
-    # One serial shard exceeded 50 minutes; keep room for the full test slice to finish.
+    # Twelve slices divide the uneven serial suite; keep room for a full slice to finish.
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 6
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     env:
       TOWNREPORTER_TEST_SHARD: ${{ matrix.shard }}
-      TOWNREPORTER_TEST_SHARD_TOTAL: "6"
+      TOWNREPORTER_TEST_SHARD_TOTAL: "12"
       GEMINI_CLI_PATH: scripts/fakes/fake-gemini-cli.mjs
       FAKE_GEMINI_SIGNED_OUT: "1"
     steps:
